@@ -1,0 +1,32 @@
+# Self-host Muster as a web service: `docker compose up -d --build`
+# then open http://localhost:8799 (or http://YOUR_SERVER:8799).
+#
+# The harness + web UI run in one container. Bots, transcripts, config and
+# keys persist in the `muster-data` volume. See docs/self-host.md for the
+# full picture, including model/CLI setup and hardening notes.
+
+services:
+  muster:
+    build: .
+    container_name: muster
+    ports:
+      - "8799:8799"
+    environment:
+      # Bind/listen host is already 0.0.0.0 inside the image (self-hosted).
+      # OMB_PUBLIC_HOST: set to your public hostname (e.g. muster.example.com)
+      # when serving to remote browsers over a domain.
+      # OMB_ALLOWED_ORIGINS: comma-separated extra origins for cross-origin
+      # clients (e.g. "https://app.example.com").
+      OMB_PORT: "8799"
+      # Optional: provide credentials via env instead of the in-app settings.
+      # XAI_API_KEY: ""
+      # COMPOSIO_API_KEY: ""
+      # BOX_TOKEN: ""
+      # OPENCODE_API_KEY: ""
+      # OMB_TTS_KEY: ""
+    volumes:
+      - muster-data:/data
+    restart: unless-stopped
+
+volumes:
+  muster-data:

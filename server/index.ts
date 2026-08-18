@@ -84,15 +84,36 @@ import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
+
+// Self-hosting: bind to 0.0.0.0 to serve the web UI beyond loopback. The
+// loopback host/origin gate below stays in force unless OMB_ALLOWED_ORIGINS
+// is set — so remote access is an explicit, opt-in choice, never accidental.
+const HOST = process.env.OMB_HOST ?? "127.0.0.1";
+const ALLOWED_ORIGINS = (process.env.OMB_ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 const MIME: Record<string, string> = {
   ".html": "text/html",
   ".js": "text/javascript",
+  ".mjs": "text/javascript",
   ".css": "text/css",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
   ".ico": "image/x-icon",
   ".json": "application/json",
+  ".map": "application/json",
+  ".txt": "text/plain",
+  ".woff": "font/woff",
   ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".lottie": "application/zip",
+  ".wasm": "application/wasm",
+  ".webmanifest": "application/manifest+json",
 };
 
 ensureDirs();
@@ -2009,14 +2030,37 @@ function isLoopbackHost(host: string | undefined): boolean {
   return hostname === "::1" || hostname === "0:0:0:0:0:0:0:1";
 }
 
-function isAllowedOrigin(origin: string | undefined | null): boolean {
+/**
+ * Self-hosting is opt-in: binding the main listener to a non-loopback address
+ * (OMB_HOST=0.0.0.0) or naming a public host (OMB_PUBLIC_HOST) is the signal
+ * that this deployment is meant to be reached beyond loopback. The default
+ * stays strict-loopback — exact behaviour below.
+ */
+const SELF_HOSTED = HOST !== "127.0.0.1" || Boolean(process.env.OMB_PUBLIC_HOST);
+
+function isAllowedOrigin(origin: string | undefined | null, host: string | undefined): boolean {
   if (!origin) return true; // non-browser clients (CLIs, curl, tests) send none
   try {
     const o = new URL(origin);
-    return isLoopbackHost(o.hostname) && (o.protocol === "http:" || o.protocol === "https:");
+    if (o.protocol !== "http:" && o.protocol !== "https:") return false;
+    if (isLoopbackHost(o.hostname)) return true;
+    // Self-hosted web: the deployment owner opts in to remote origins via
+    // OMB_ALLOWED_ORIGINS (comma-separated, exact origins like
+    // "https://muster.example.com"). The request's own host always counts, so
+    // same-origin browser traffic works without extra configuration.
+    if (ALLOWED_ORIGINS.includes(origin)) return true;
+    return Boolean(host && o.host === host);
   } catch {
     return false;
   }
+}
+
+/** Whether the request Host header is permitted. Loopback is always allowed;
+ * within a self-hosted deployment any Host is permitted (the owner opted in).
+ * Otherwise non-loopback Hosts are rejected, defeating DNS rebinding. */
+function isAllowedHost(host: string | undefined): boolean {
+  if (isLoopbackHost(host)) return true;
+  return SELF_HOSTED;
 }
 
 const server = createServer(async (req, res) => {
@@ -2026,18 +2070,26 @@ const server = createServer(async (req, res) => {
   /** scratch for route matches, shared by every `path.match` below */
   let m: RegExpMatchArray | null = null;
   try {
-    // loopback-host + loopback-origin gate before any route (DNS rebinding / CSRF)
-    if (!isLoopbackHost(req.headers.host)) {
-      return json(res, 403, { error: "forbidden: loopback host required" });
+    // host + origin gate before any route (DNS rebinding / CSRF). Loopback is
+    // always allowed; a public host is allowed only when self-hosting is
+    // explicitly configured (OMB_PUBLIC_HOST matching the Host header).
+    if (!isAllowedHost(req.headers.host)) {
+      return json(res, 403, { error: "forbidden: host not allowed" });
     }
     const origin = req.headers.origin;
-    if (origin && !isAllowedOrigin(origin)) {
+    if (origin && !isAllowedOrigin(origin, req.headers.host)) {
       return json(res, 403, { error: "forbidden: cross-origin request" });
     }
     // ── internal peer-agent comms (localhost + shared token only) ──────
     // The agents-proxy (spawned inside a bot's agent process) calls these to
     // discover peers and hand a message to one. Not part of the public API.
+    // Even when the main listener binds 0.0.0.0 for self-hosting, peer-agent
+    // comms stay loopback-only: a remote socket is rejected outright before
+    // the token check.
     if (path.startsWith("/api/internal/")) {
+      if (req.socket.remoteAddress && !isLoopbackHost(req.socket.remoteAddress)) {
+        return json(res, 403, { error: "forbidden: internal comms are loopback-only" });
+      }
       if (!authorizedComms(req.headers.authorization)) {
         return json(res, 401, { error: "unauthorized" });
       }
@@ -3474,8 +3526,8 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`muster server on http://127.0.0.1:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`muster server on http://${HOST}:${PORT}`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

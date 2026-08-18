@@ -272,6 +272,20 @@ Unavailable native features fail closed on Ubuntu without blocking chat or cloud
 control, Wayland capture/automation, dictation, and ARM64 are tracked in
 [#29](https://github.com/tharunramagiri/Muster/issues/29) and are not claimed by the baseline package.
 
+### Self-host (web)
+
+Muster is local-first, but the same web UI and harness can run as a single-user
+web service in any browser via Docker — no Electron, no macOS requirement:
+
+```sh
+docker compose up -d --build   # then open http://localhost:8799
+```
+
+Bring your own agent CLIs (or engine keys), and reverse-proxy with TLS if you
+expose it beyond your machine. There are **no accounts** — see
+[docs/self-host.md](docs/self-host.md) for configuration, security, and model
+setup.
+
 ### Optional credentials
 
 These credentials are optional — local chat works without them. Paste a key once in **App Settings** (gear
@@ -302,8 +316,9 @@ pnpm package:linux  # Ubuntu x64 .deb + AppImage → release/
 
 Early but real — the loop works end to end: message → agent → streamed reply → tools → approvals →
 computer use. macOS and Windows have released builds; Ubuntu 24.04 x64 packages are in beta with the
-capability limits above. Rough edges to expect: hosted/mobile connectivity is still being built, and webhook
-triggers currently use the local receiver rather than an always-on hosted relay.
+capability limits above. Self-hosting is supported via Docker (single-user, see above); a hosted multi-user
+service and mobile connectivity are still being built, and webhook triggers currently
+use the local receiver rather than an always-on hosted relay.
 Voice needs an ElevenLabs key, and calls are macOS-only for now (they ride the same on-device dictation as
 the composer mic) — see [`docs/voice-mode.md`](docs/voice-mode.md) for the design and the known gaps.
 
