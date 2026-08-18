@@ -11,7 +11,7 @@ ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY tsconfig.json tsconfig.server.json tsconfig.server.build.json vite.config.ts index.html ./
 COPY src src
 COPY server server
