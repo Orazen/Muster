@@ -6,9 +6,9 @@
 
 **Muster your agents.**
 
-<sub>A local-first roster of AI agents you actually own — bring your own Claude, Codex, or Grok CLI, give each one a body, and run your team from a chat app, not a subscription.</sub>
+<sub>A local-first roster of AI agents you actually own — bring your own Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, or OpenCode Go CLI, give each one a body, and run your team from a chat app, not a subscription.</sub>
 
-Every bot in the sidebar is a real agent — Claude or Codex running locally under the hood — with its own
+Every bot in the sidebar is a real agent — a model running locally under the hood — with its own
 personality, its own model, its own cloud computer, and its own connected apps.
 Talk to them like contacts. Watch them work. Approve what matters.
 
@@ -17,7 +17,8 @@ Talk to them like contacts. Watch them work. Approve what matters.
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Electron](https://img.shields.io/badge/Electron-macOS%20%C2%B7%20Windows%20%C2%B7%20Ubuntu-2B2E3A?logo=electron&logoColor=9FEAF9)
-![Agents](https://img.shields.io/badge/agents-Claude%20·%20Codex-d97757)
+![Agents](https://img.shields.io/badge/agents-10%2B%20engines-d97757)
+![License](https://img.shields.io/badge/license-MIT-38d591)
 ![PRs](https://img.shields.io/badge/PRs-welcome-38d591)
 
 <br>
@@ -47,13 +48,14 @@ One assistant in one box is the wrong shape for agents. Muster treats AI the way
 *roster* of agents you chat with like contacts, each with its own personality, memory of its own thread,
 model, computer, and connected apps — open, local-first, and running on the agents you already pay for:
 
-- **Bring your own agents.** Bots run on the `claude`, `codex`, and `grok` CLIs installed on your own machine
-  — your existing logins and subscriptions, no new accounts, no proxy in the middle. Point any engine at a
-  custom CLI binary (a versioned build or wrapper) in **Settings → Engines**.
+- **Bring your own agents.** Bots run on the CLIs installed on your own machine — `claude`, `codex`, `grok`,
+  `gemini`, `kimi`, `qwen`, `hermes`, `droid`, `agy` (Antigravity), or `opencode` — your existing logins and
+  subscriptions, no new accounts, no proxy in the middle. Point any engine at a custom CLI binary (a
+  versioned build or wrapper) in **Settings → Engines**.
 - **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
   events live in `~/.muster`, not a cloud.
 - **Agents with hands.** Each bot can get a real computer — a cloud Linux desktop it drives while you watch
-  live, or your own Mac — plus 500+ apps through Composio.
+  live, or your own Mac — plus 500+ connected apps through Composio.
 
 ## Features
 
@@ -63,7 +65,7 @@ model, computer, and connected apps — open, local-first, and running on the ag
 
 ### 🧠 Pick a brain per bot
 
-A model picker with a provider rail — Claude and Codex models side by side, defaults marked, unavailable
+A model picker with a provider rail — engine families side by side, defaults marked, unavailable
 providers dimmed with the reason. Switch a bot's model mid-conversation.
 
 <img src="docs/screenshots/model-picker.png" alt="Model picker with provider rail" width="100%">
@@ -139,6 +141,50 @@ Give a bot its own voice and a room stops sounding like one person.
 composer mic (on-device Apple speech recognition — desktop app) · Muster agent avatars with role-aware
 expressions · screenshots of the bot's work folded into the transcript.
 
+### 🤝 Bots that work together
+
+Agents aren't silos. Groups put several bots in one room with multi-agent routing, and a **group call**
+arranges a live panel. Bots hand work to peers with **delegation** (`delegate_bot`), and messages sent to a
+busy bot queue and drain into one turn instead of bouncing. A **chief-of-staff** composite can front a set
+of members, and the **team library** lets you import a whole roster — its own `muster.team` manifest with
+members, titles, skills, and required apps — from a catalog or a file, in one click.
+
+### ⏱ Routines, tasks, and webhooks
+
+Schedule a **routine** to run once or on selected weekdays on a bot's model/computer or cloud runner.
+Attach a **webhook trigger** to run a queued task when an external service posts to it — the webhook-only
+receiver on `127.0.0.1:8800` (or `OMB_WEBHOOK_PORT`) exposes just `/health` and secret `/hooks/...`
+endpoints, never the app's broader API. One-time delivery secrets rotate; bearer auth is recommended.
+
+### 🧰 Plugins (MCP) and local computer use
+
+The Plugins panel toggles which MCP servers get injected into each bot's `--mcp-config` — same pattern as
+Claude Desktop. Local computer use ships a bundled `cua-driver` (Rust) behind a single named TCC prompt, so
+bots can drive *this Mac* with no separate installs.
+
+## Engines
+
+Muster ships drivers for a dozen engines. Any CLI on your PATH that speaks the right protocol can be added
+as a custom engine in **Settings → Engines**. Engines split into a subscription rail (first-party catalog
+models) and a custom rail (bring a CLI, inject a model).
+
+| Engine | Driver kind | CLI | Notes |
+|---|---|---|---|
+| Claude | `claudeAgent` | `claude` | Claude Code; stream-JSON, full per-action approvals. |
+| Codex | `codex` | `codex` | OpenAI Codex CLI. |
+| Grok | `grok` | `grok` | xAI Grok CLI (API and Build over ACP stdio). |
+| Gemini | `geminiAgent` | `gemini` | Google Gemini CLI over ACP; **retired from the default fleet** — enable in config. |
+| Kimi | `kimiAgent` | `kimi` | Moonshot Kimi over ACP stdio. |
+| Qwen | `qwenAgent` | `qwen` | Qwen Code over ACP stdio. |
+| Hermes | `hermesAgent` | `hermes` | Nous Research Hermes over ACP stdio. |
+| Droid | `droidAgent` | `droid` | Factory Droid over ACP stdio. |
+| Antigravity | `antigravityAgent` | `agy` | Google Antigravity (`agy --print`); no per-action broker yet. |
+| OpenCode Go | `opencodeGo` | `opencode` | OpenCode CLI over ACP stdio; key injected as `OPENCODE_API_KEY`. |
+| Computer | `boxAgent` | cloud | Cloud Linux computer agent — runs the turn on the bot's own Box (box.ascii.dev), no local CLI. |
+
+Unknown drivers degrade to "unavailable" shadows — a config from a newer build round-trips safely and
+never crashes the fleet.
+
 ## How it works
 
 Two processes. The app holds no transports of its own — it sends typed commands over HTTP and folds one SSE
@@ -158,20 +204,21 @@ flowchart LR
         CL[claude CLI]
         CX[codex CLI]
         GR[grok CLI]
+        OTH[gemini · kimi · qwen · hermes · droid · agy · opencode]
     end
     UI -- "HTTP commands" --> server
     BUS -- "one SSE stream" --> UI
-    REG --> CL & CX & GR
-    CL & CX & GR -- "permission requests" --> BROKER
+    REG --> CL & CX & GR & OTH
+    CL & CX & GR & OTH -- "permission requests" --> BROKER
     server -- "Box API" --> BOX[("Cloud computer<br/>box.ascii.dev")]
     server -- "Composio Session" --> APPS[("Gmail · Slack · GitHub · …")]
 ```
 
 | Layer | Where | What it does |
 |---|---|---|
-| Drivers | `server/drivers/` | One per provider: Claude, Codex, and Grok Build over their local CLIs (stream-JSON / JSON-RPC / ACP), plus a cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
+| Drivers | `server/drivers/` | One per provider: Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, OpenCode Go over their local CLIs (stream-JSON / JSON-RPC / ACP stdio), plus a cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
 | Harness | `server/harness/` | Registry (configs → live instances) and the fan-in event bus every client folds. |
-| API | `server/index.ts` | Bots, turns, approvals, model catalog, computer lifecycle, connectors, config — HTTP + SSE. |
+| API | `server/index.ts` | Bots, turns, approvals, model catalog, computer lifecycle, connectors, routines, webhooks, teams, config — HTTP + SSE. |
 | Voice | `server/tts/` | ElevenLabs, bring your own key. Runs on the harness so the key never reaches the UI; markdown is rewritten into something worth hearing before it is spoken. |
 | App | `src/` | The chat shell. Server-backed store, one reducer, zero client-side transports. |
 | Desktop | `electron/` | macOS, Windows, and Ubuntu shells with an embedded harness and explicit platform capabilities; Apple speech, local screen capture, and the current CUA bridge remain macOS-only. |
@@ -200,9 +247,9 @@ pnpm dev           # app → http://127.0.0.1:5199
 pnpm dev:desktop   # Electron shell; keep the two commands above running
 ```
 
-Requirements: **macOS, Windows, or Ubuntu 24.04 x64**, **Node 24+**, **pnpm**, and at least one agent CLI — [`claude`](https://claude.com/claude-code),
-[`codex`](https://github.com/openai/codex), or [`grok`](https://x.ai/cli) — installed and logged in. They appear
-in the model picker automatically.
+Requirements: **macOS, Windows, or Ubuntu 24.04 x64**, **Node 24+**, **pnpm**, and at least one agent CLI
+(e.g. [`claude`](https://claude.com/claude-code), [`codex`](https://github.com/openai/codex), or
+[`grok`](https://x.ai/cli)) installed and logged in. They appear in the model picker automatically.
 
 Package the desktop application:
 
@@ -225,6 +272,8 @@ Unavailable native features fail closed on Ubuntu without blocking chat or cloud
 control, Wayland capture/automation, dictation, and ARM64 are tracked in
 [#29](https://github.com/tharunramagiri/Muster/issues/29) and are not claimed by the baseline package.
 
+### Optional credentials
+
 These credentials are optional — local chat works without them. Paste a key once in **App Settings** (gear
 in the sidebar footer) when you want to enable its integration:
 
@@ -233,32 +282,21 @@ in the sidebar footer) when you want to enable its integration:
 | Composio project key (`ak_…`) | Connect Gmail, GitHub, Slack, Notion, and other apps to your bots | [Muster Composio setup](docs/composio.md) |
 | Box API key | Give bots an isolated remote Linux computer with a desktop and terminal | [Box API key guide](https://docs.ascii.dev/box/api-keys) |
 | ElevenLabs key | Read replies aloud, and call your bots | [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys) |
+| OpenCode Go key | Run the OpenCode Go engine | [OpenCode Go docs](https://opencode.ai/docs/go/) |
 
 Composio and Box are third-party services with their own accounts and terms. Box is a paid service after
 its trial, and using a cloud computer may incur charges.
 
+### Development commands
+
 ```sh
-pnpm typecheck     # app + server
-pnpm test          # unit, driver, API, and desktop capability tests
-pnpm build         # typecheck + production build
+pnpm typecheck      # app + server
+pnpm test           # unit, driver, API, and desktop capability tests
+pnpm build          # typecheck + production build
 pnpm check:electron # syntax-check Electron main/preload files
-pnpm package:win   # Windows installer + zip → release/
-pnpm package:linux # Ubuntu x64 .deb + AppImage → release/
+pnpm package:win    # Windows installer + zip → release/
+pnpm package:linux  # Ubuntu x64 .deb + AppImage → release/
 ```
-
-### Routines and webhook triggers
-
-Routines can run once or on selected weekdays, using either a AGENT's configured model/computer or the
-Cloud VM runner. Webhook triggers are independent from schedules but reuse the same queued task executor
-and calendar receipts.
-
-Muster starts a webhook-only receiver on `127.0.0.1:8800` by default (or one port above `OMB_PORT`).
-Set `OMB_WEBHOOK_PORT` to choose another port. A webhook secret is shown once when the trigger is created
-or rotated. Bearer authentication is recommended so the secret stays out of request URLs and most access
-logs; a single capability URL remains available for senders that cannot configure headers. The receiver
-exposes only `/health` and secret `/hooks/...` endpoints; it never exposes the app's broader API.
-Muster must remain running to accept a delivery. For public internet delivery, proxy only this
-dedicated receiver through a hosted relay or a tool such as Tailscale Funnel.
 
 ## Status
 
@@ -274,8 +312,8 @@ small; adding a provider is one file in [`server/drivers/`](server/drivers/) plu
 
 ## License
 
-[MIT](LICENSE) © 2026 Ramagiritharun / Orazen and contributors.
+[MIT](LICENSE) © 2026 Ramagiritharun (Tharun Ramagiri) / Orazen and contributors.
 
-Muster is an independent, open-source project inspired by Grok Bot. It is
-not affiliated with, endorsed by, or associated with xAI; "Grok" is a trademark
-of its respective owner.
+Muster is an independent, open-source project. It is not affiliated with, endorsed by, or associated with
+xAI, Google, OpenAI, Moonshot AI, Alibaba, Nous Research, Factory, or OpenCode; all engine names are
+trademarks of their respective owners.
