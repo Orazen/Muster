@@ -11,10 +11,10 @@
 //     and the rounded clip are dropped here.
 //   - **No alpha.** The App Store rejects an icon with an alpha channel.
 //
-// Everything is drawn by hand — bezier flattening, scanline fill, the PNG
-// encoder — because the alternative is an image-processing dependency in a
-// project that has none, for a file that changes about never. The numbers
-// below mirror build/icon.svg; if that changes, change these.
+// Everything is drawn by hand — scanline fill, the PNG encoder — because the
+// alternative is an image-processing dependency in a project that has none,
+// for a file that changes about never. The numbers below mirror
+// build/icon.svg; if that changes, change these.
 import { deflateSync } from "node:zlib";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -25,130 +25,78 @@ const OUT_DIR = join(ROOT, "ios", "App", "Assets.xcassets", "AppIcon.appiconset"
 const SIZE = 1024;
 const SS = 4; // supersampling; 4 is plenty at this size
 
-// ── the artwork, from build/icon.svg ───────────────────────────────────
+// ── the artwork, from build/icon.svg (full-bleed 1024x1024 coordinates) ──
 const TILE_STOPS = [
   { at: 0, color: [0x20, 0x22, 0x27] },
   { at: 0.56, color: [0x13, 0x14, 0x19] },
   { at: 1, color: [0x09, 0x0a, 0x0d] },
 ];
-const MASCOT_STOPS = [
-  { at: 0, color: [0xff, 0xff, 0xff] },
-  { at: 0.28, color: [0xe6, 0xe8, 0xeb] },
-  { at: 0.58, color: [0xb7, 0xbb, 0xc2] },
-  { at: 0.82, color: [0x84, 0x8a, 0x94] },
-  { at: 1, color: [0x5b, 0x61, 0x6b] },
+const RALLY_ACCENT_STOPS = [
+  { at: 0, color: [0xff, 0x7a, 0x45] },
+  { at: 0.5, color: [0xf0, 0x46, 0x0e] },
+  { at: 1, color: [0xc9, 0x3a, 0x0b] },
 ];
-const FACE = [0x10, 0x11, 0x14];
+const MARKER_COLOR = [0xf5, 0xf5, 0xf5];
+const SPOKE_COLOR = [0xf0, 0x46, 0x0e];
 
-const MASCOT =
-  "M93.4 40.6 L43 151.1 Q38 162 48.4 156 L91.4 131 Q100 126 108.7 131 " +
-  "L151.6 156 Q162 162 157 151.1 L106.6 40.6 Q100 26 93.4 40.6 Z";
-const SMILE = "M86 106 Q101 124 117 105";
-const SMILE_WIDTH = 7;
-const EYES = [
-  { x: 84.5, y: 75, w: 9, h: 24, r: 4.5, spin: -15, about: [89, 87] },
-  { x: 108.5, y: 75, w: 9, h: 24, r: 4.5, spin: -7, about: [113, 87] },
+const CENTER = [512, 512];
+const RALLY_RADIUS = 108;
+const MARKER_RADIUS = 94;
+const MARKERS = [
+  [512, 188],
+  [836, 512],
+  [512, 836],
+  [188, 512],
 ];
+const SPOKES = [
+  [
+    [512, 282],
+    [512, 404],
+  ],
+  [
+    [742, 512],
+    [620, 512],
+  ],
+  [
+    [512, 742],
+    [512, 620],
+  ],
+  [
+    [282, 512],
+    [404, 512],
+  ],
+];
+const SPOKE_WIDTH = 16;
 
-// `<svg x="-260" y="-140" width="1300" height="1300" viewBox="10 10 180 180">`
-// maps the artwork's own coordinates onto the canvas; the group inside is
-// rotated 25° about (100,100) first.
-const VIEW_SCALE = 1300 / 180;
-const artToCanvas = ([x, y]) => [(x - 10) * VIEW_SCALE - 260, (y - 10) * VIEW_SCALE - 140];
-const rotate = ([x, y], degrees, [cx, cy]) => {
-  const a = (degrees * Math.PI) / 180;
-  const dx = x - cx;
-  const dy = y - cy;
-  return [cx + dx * Math.cos(a) - dy * Math.sin(a), cy + dx * Math.sin(a) + dy * Math.cos(a)];
-};
-/** Artwork point → canvas, through the 25° group rotation. */
-const place = (point) => artToCanvas(rotate(point, 25, [100, 100]));
-
-// ── path handling ──────────────────────────────────────────────────────
-/** M/L/Q/Z absolute, which is all build/icon.svg uses. */
-function flatten(d, steps = 32) {
-  const tokens = d.match(/[MLQZmlqz]|-?\d*\.?\d+/g) ?? [];
+// ── shape helpers ─────────────────────────────────────────────────────
+function circlePolygon([cx, cy], r, steps = 64) {
   const points = [];
-  let cursor = [0, 0];
-  let i = 0;
-  while (i < tokens.length) {
-    const command = tokens[i];
-    if (command === "M" || command === "L") {
-      cursor = [+tokens[i + 1], +tokens[i + 2]];
-      points.push(cursor);
-      i += 3;
-    } else if (command === "Q") {
-      const control = [+tokens[i + 1], +tokens[i + 2]];
-      const end = [+tokens[i + 3], +tokens[i + 4]];
-      for (let s = 1; s <= steps; s++) {
-        const t = s / steps;
-        const u = 1 - t;
-        points.push([
-          u * u * cursor[0] + 2 * u * t * control[0] + t * t * end[0],
-          u * u * cursor[1] + 2 * u * t * control[1] + t * t * end[1],
-        ]);
-      }
-      cursor = end;
-      i += 5;
-    } else {
-      i += 1;
-    }
+  for (let i = 0; i < steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    points.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
   }
   return points;
 }
 
-/** A rounded rect as a polygon, in its own coordinates. */
-function roundedRect({ x, y, w, h, r }, steps = 10) {
-  const points = [];
-  const corners = [
-    [x + w - r, y + r, -90, 0],
-    [x + w - r, y + h - r, 0, 90],
-    [x + r, y + h - r, 90, 180],
-    [x + r, y + r, 180, 270],
-  ];
-  for (const [cx, cy, from, to] of corners) {
-    for (let s = 0; s <= steps; s++) {
-      const a = ((from + ((to - from) * s) / steps) * Math.PI) / 180;
-      points.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
-    }
-  }
-  return points;
-}
-
-/** A stroked polyline as a fillable polygon: one side up, the other back,
- *  with round caps approximated by the joint circles below. */
-function strokeToPolygons(points, width) {
+/** A stroked line segment as a fillable polygon, with round caps. */
+function strokeSegment([x0, y0], [x1, y1], width) {
   const half = width / 2;
-  const polys = [];
-  for (let i = 0; i < points.length - 1; i++) {
-    const [x0, y0] = points[i];
-    const [x1, y1] = points[i + 1];
-    const dx = x1 - x0;
-    const dy = y1 - y0;
-    const len = Math.hypot(dx, dy);
-    if (len === 0) continue;
-    const nx = (-dy / len) * half;
-    const ny = (dx / len) * half;
-    polys.push([
-      [x0 + nx, y0 + ny],
-      [x1 + nx, y1 + ny],
-      [x1 - nx, y1 - ny],
-      [x0 - nx, y0 - ny],
-    ]);
-  }
-  // round joins and caps
-  for (const [x, y] of points) {
-    const circle = [];
-    for (let a = 0; a < 24; a++) {
-      const t = (a / 24) * Math.PI * 2;
-      circle.push([x + Math.cos(t) * half, y + Math.sin(t) * half]);
-    }
-    polys.push(circle);
-  }
-  return polys;
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = (-dy / len) * half;
+  const ny = (dx / len) * half;
+  const body = [
+    [x0 + nx, y0 + ny],
+    [x1 + nx, y1 + ny],
+    [x1 - nx, y1 - ny],
+    [x0 - nx, y0 - ny],
+  ];
+  const capA = circlePolygon([x0, y0], half, 24);
+  const capB = circlePolygon([x1, y1], half, 24);
+  return [body, capA, capB];
 }
 
-/** Even-odd would hole out overlapping stroke quads, so: coverage by union. */
 function rasterise(polygons, width) {
   const mask = new Uint8Array(width * width);
   for (const poly of polygons) {
@@ -193,34 +141,32 @@ const sample = (stops, t) => {
 const big = SIZE * SS;
 const toBig = ([x, y]) => [(x / 1024) * big, (y / 1024) * big];
 
-const bodyPoly = flatten(MASCOT).map(place).map(toBig);
-const eyePolys = EYES.map((eye) =>
-  roundedRect(eye)
-    .map((p) => rotate(p, eye.spin, eye.about))
-    .map(place)
-    .map(toBig),
+const rallyMask = rasterise([circlePolygon(CENTER, RALLY_RADIUS).map(toBig)], big);
+const markerMask = rasterise(
+  MARKERS.map((m) => circlePolygon(m, MARKER_RADIUS).map(toBig)),
+  big,
 );
-const smilePolys = strokeToPolygons(
-  flatten(SMILE).map(place).map(toBig),
-  // stroke width travels through the same scale the artwork does
-  (SMILE_WIDTH * VIEW_SCALE * big) / 1024,
+const spokeMask = rasterise(
+  SPOKES.flatMap(([a, b]) => strokeSegment(a, b, SPOKE_WIDTH).map((poly) => poly.map(toBig))),
+  big,
 );
 
-const bodyMask = rasterise([bodyPoly], big);
-const faceMask = rasterise([...eyePolys, ...smilePolys], big);
-
-// the mascot's linear gradient runs 18%,10% → 84%,94% of its own bounding box
-const bx = bodyPoly.map((p) => p[0]);
-const by = bodyPoly.map((p) => p[1]);
-const bounds = { x0: Math.min(...bx), x1: Math.max(...bx), y0: Math.min(...by), y1: Math.max(...by) };
-const gradFrom = [bounds.x0 + (bounds.x1 - bounds.x0) * 0.18, bounds.y0 + (bounds.y1 - bounds.y0) * 0.1];
-const gradTo = [bounds.x0 + (bounds.x1 - bounds.x0) * 0.84, bounds.y0 + (bounds.y1 - bounds.y0) * 0.94];
+// the accent's linear gradient runs 10%,0% → 95%,100% of the rally circle's
+// own bounding box
+const rallyBounds = {
+  x0: (CENTER[0] - RALLY_RADIUS / 1024) * (big / 1024),
+  x1: (CENTER[0] + RALLY_RADIUS / 1024) * (big / 1024),
+};
+const [rcx, rcy] = toBig(CENTER);
+const rr = (RALLY_RADIUS / 1024) * big;
+const gradFrom = [rcx - rr + (rr * 2) * 0.1, rcy - rr];
+const gradTo = [rcx - rr + (rr * 2) * 0.95, rcy + rr];
 const gradVec = [gradTo[0] - gradFrom[0], gradTo[1] - gradFrom[1]];
 const gradLenSq = gradVec[0] ** 2 + gradVec[1] ** 2;
 
-// the tile's radial gradient: 68%,36% of the canvas, radius 92%
-const tileCentre = [big * 0.68, big * 0.36];
-const tileRadius = big * 0.92;
+// the tile's radial background: centred, radius ~75% of the canvas
+const tileCentre = [big * 0.5, big * 0.5];
+const tileRadius = big * 0.75;
 
 const rgb = Buffer.alloc(SIZE * SIZE * 3);
 for (let y = 0; y < SIZE; y++) {
@@ -232,12 +178,14 @@ for (let y = 0; y < SIZE; y++) {
         const py = y * SS + sy;
         const index = py * big + px;
         let colour;
-        if (faceMask[index] && bodyMask[index]) {
-          colour = FACE;
-        } else if (bodyMask[index]) {
+        if (spokeMask[index]) {
+          colour = SPOKE_COLOR;
+        } else if (markerMask[index]) {
+          colour = MARKER_COLOR;
+        } else if (rallyMask[index]) {
           const t =
             ((px - gradFrom[0]) * gradVec[0] + (py - gradFrom[1]) * gradVec[1]) / (gradLenSq || 1);
-          colour = sample(MASCOT_STOPS, t);
+          colour = sample(RALLY_ACCENT_STOPS, t);
         } else {
           const d = Math.hypot(px - tileCentre[0], py - tileCentre[1]) / tileRadius;
           colour = sample(TILE_STOPS, d);
@@ -309,4 +257,4 @@ writeFileSync(
     2,
   ) + "\n",
 );
-console.log(`wrote ${SIZE}×${SIZE} icon to ios/App/Assets.xcassets/AppIcon.appiconset/`);
+console.log(`wrote ${SIZE}\u00d7${SIZE} icon to ios/App/Assets.xcassets/AppIcon.appiconset/`);
