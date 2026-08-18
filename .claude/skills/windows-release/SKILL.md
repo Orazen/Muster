@@ -1,12 +1,12 @@
 ---
 name: windows-release
-description: Build, verify, and publish the Windows desktop build (NSIS installer + latest.yml) to the muster-releases repo. Use when cutting a release, shipping a new version to Windows users, or when a Windows user reports they are stuck on an old version. Windows only — does not cover the macOS dmg/notarization flow.
+description: Build, verify, and publish the Windows desktop build (NSIS installer + latest.yml) to the Muster repo's GitHub Releases. Use when cutting a release, shipping a new version to Windows users, or when a Windows user reports they are stuck on an old version. Windows only — does not cover the macOS dmg/notarization flow.
 ---
 
 # Windows release
 
 Ships `Muster-<version>-setup.exe` and its update feed to
-[Orazen-Studio/muster-releases](https://github.com/Orazen-Studio/muster-releases).
+[tharunramagiri/Muster](https://github.com/tharunramagiri/Muster).
 
 **Scope: Windows only.** The macOS build is a separate flow (dmg + notarytool +
 staple) that must run on a Mac. This skill never touches mac artifacts — but see
@@ -59,7 +59,7 @@ Get-Content release\win-unpacked\resources\app-update.yml  # feed config
 - Missing `server/index.js` → `utilityProcess.fork` fails → the 🐭 "Couldn't start
   the bot server" page.
 - Missing `ui/index.html` → server has nothing to serve → black window.
-- `app-update.yml` must point at `Orazen-Studio/muster-releases` and, while the
+- `app-update.yml` must point at `tharunramagiri/Muster` and, while the
   build is unsigned, **must not contain `publisherName`** — electron-updater would
   reject every update as untrusted.
 
@@ -80,7 +80,7 @@ carries both platforms.
 
 ```powershell
 Copy-Item release/Muster-<version>-setup.exe release/Muster-setup.exe
-gh release upload v<version> --repo Orazen-Studio/muster-releases `
+gh release upload v<version> --repo tharunramagiri/Muster `
   release/Muster-<version>-setup.exe `
   release/Muster-setup.exe `
   release/Muster-<version>-setup.exe.blockmap `

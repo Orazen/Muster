@@ -20,4 +20,4 @@ Unpairing removes the connection and pairing token from the phone. Revoking the 
 
 ## Support
 
-Questions or privacy requests can be opened at [Muster Support](https://github.com/Orazen-Studio/Muster/issues).
+Questions or privacy requests can be opened at [Muster Support](https://github.com/tharunramagiri/Muster/issues).

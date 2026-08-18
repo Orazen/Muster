@@ -22,15 +22,15 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 <br>
 
-<a href="https://github.com/Orazen-Studio/muster-releases/releases/latest/download/Muster.dmg">
-  <img src="https://img.shields.io/github/v/release/Orazen-Studio/muster-releases?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe&cacheSeconds=300" alt="Download the latest Muster for macOS (.dmg)" height="40">
+<a href="https://github.com/tharunramagiri/Muster/releases/latest/download/Muster.dmg">
+  <img src="https://img.shields.io/github/v/release/tharunramagiri/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe&cacheSeconds=300" alt="Download the latest Muster for macOS (.dmg)" height="40">
 </a>
 &nbsp;
-<a href="https://github.com/Orazen-Studio/muster-releases/releases/latest/download/Muster-setup.exe">
-  <img src="https://img.shields.io/github/v/release/Orazen-Studio/muster-releases?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Windows&labelColor=070707&color=4cc2ff&cacheSeconds=300" alt="Download the latest Muster for Windows (.exe)" height="40">
+<a href="https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-setup.exe">
+  <img src="https://img.shields.io/github/v/release/tharunramagiri/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Windows&labelColor=070707&color=4cc2ff&cacheSeconds=300" alt="Download the latest Muster for Windows (.exe)" height="40">
 </a>
 
-<sub>macOS: Apple silicon · signed & notarized · one-click .dmg &nbsp;·&nbsp; Windows: 64-bit · one-click installer, no admin rights &nbsp;·&nbsp; both always the latest · [all releases](https://github.com/Orazen-Studio/muster-releases/releases)</sub>
+<sub>macOS: Apple silicon · signed & notarized · one-click .dmg &nbsp;·&nbsp; Windows: 64-bit · one-click installer, no admin rights &nbsp;·&nbsp; both always the latest · [all releases](https://github.com/tharunramagiri/Muster/releases)</sub>
 
 <br>
 <br>
@@ -182,8 +182,8 @@ flowchart LR
 
 | | Download | Install |
 |---|---|---|
-| **macOS** (Apple silicon) | [Muster.dmg](https://github.com/Orazen-Studio/muster-releases/releases/latest/download/Muster.dmg) | Drag it to Applications, open it. Signed & notarized. |
-| **Windows** (x64) | [Muster-setup.exe](https://github.com/Orazen-Studio/muster-releases/releases/latest/download/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
+| **macOS** (Apple silicon) | [Muster.dmg](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster.dmg) | Drag it to Applications, open it. Signed & notarized. |
+| **Windows** (x64) | [Muster-setup.exe](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
 
 **Ubuntu Desktop beta:** build the `.deb` or AppImage from source using the commands below. Release downloads
 will be linked here once Linux publishing is enabled. See [the Ubuntu Desktop guide](docs/linux-desktop.md) for
@@ -192,7 +192,7 @@ installation, capabilities, and troubleshooting.
 **From source:**
 
 ```sh
-git clone https://github.com/Orazen-Studio/Muster && cd Muster
+git clone https://github.com/tharunramagiri/Muster && cd Muster
 pnpm install
 
 pnpm dev:server    # harness server → 127.0.0.1:8799
@@ -223,7 +223,7 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage; no Swift required
 
 Unavailable native features fail closed on Ubuntu without blocking chat or cloud features. Linux local computer
 control, Wayland capture/automation, dictation, and ARM64 are tracked in
-[#29](https://github.com/Orazen-Studio/Muster/issues/29) and are not claimed by the baseline package.
+[#29](https://github.com/tharunramagiri/Muster/issues/29) and are not claimed by the baseline package.
 
 These credentials are optional — local chat works without them. Paste a key once in **App Settings** (gear
 in the sidebar footer) when you want to enable its integration:

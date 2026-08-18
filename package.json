@@ -3,10 +3,10 @@
   "private": true,
   "version": "0.1.24",
   "description": "A local-first chat app for running a team of AI agents.",
-  "homepage": "https://github.com/Orazen-Studio/Muster",
+  "homepage": "https://github.com/tharunramagiri/Muster",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Orazen-Studio/Muster.git"
+    "url": "https://github.com/tharunramagiri/Muster.git"
   },
   "author": {
     "name": "Ramagiritharun",

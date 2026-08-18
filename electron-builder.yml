@@ -11,8 +11,8 @@ artifactName: Muster-${version}-${arch}.${ext}
 # stranded on its installed version.
 publish:
   - provider: github
-    owner: Orazen-Studio
-    repo: muster-releases
+    owner: tharunramagiri
+    repo: Muster
 
 directories:
   buildResources: build

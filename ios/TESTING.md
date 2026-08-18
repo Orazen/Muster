@@ -30,7 +30,7 @@ Use current `main` after the companion lands. While reviewing the feature PR,
 GitHub CLI can create the correct local branch:
 
 ```sh
-git clone https://github.com/Orazen-Studio/Muster
+git clone https://github.com/tharunramagiri/Muster
 cd Muster
 gh pr checkout 161        # omit after the PR is merged
 ```

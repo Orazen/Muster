@@ -1,8 +1,8 @@
 import { parseJson, type JsonValue } from "./schema.ts";
 import { parseTeamManifest, type ParsedTeamManifest } from "./team-manifest.ts";
 
-export const TEAM_LIBRARY_REPOSITORY = "https://github.com/Orazen-Studio/muster-teams";
-export const TEAM_LIBRARY_RAW_ROOT = "https://raw.githubusercontent.com/Orazen-Studio/muster-teams/main";
+export const TEAM_LIBRARY_REPOSITORY = "https://github.com/tharunramagiri/muster-teams";
+export const TEAM_LIBRARY_RAW_ROOT = "https://raw.githubusercontent.com/tharunramagiri/muster-teams/main";
 export const TEAM_LIBRARY_CATALOG_URL = `${TEAM_LIBRARY_RAW_ROOT}/catalog.json`;
 
 const MAX_CATALOG_BYTES = 256_000;
