@@ -425,6 +425,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
                 )}
               >
                 <AgentAvatar
+                  character={member.character}
                   color={member.color}
                   state={state}
                   size={94}

@@ -164,7 +164,7 @@ function StackedAgents({ members }: { members: Bot[] }) {
     const b = members[0];
     return (
       <div className="flex size-14 shrink-0 items-center justify-center">
-        {b ? <AgentAvatar color={b.color} state="happy" size={56} /> : <Users size={24} className="text-ink-secondary" />}
+        {b ? <AgentAvatar color={b.color} character={b.character} state="happy" size={56} /> : <Users size={24} className="text-ink-secondary" />}
       </div>
     );
   }
@@ -174,7 +174,7 @@ function StackedAgents({ members }: { members: Bot[] }) {
     <div className="flex size-14 shrink-0 items-center justify-center">
       <div className="flex items-center -space-x-3">
         {shown.map((b) => (
-          <AgentAvatar key={b.id} color={b.color} state="happy" size={30} />
+          <AgentAvatar key={b.id} color={b.color} character={b.character} state="happy" size={30} />
         ))}
         {extra > 0 && (
           <span className="z-10 flex size-[22px] items-center justify-center rounded-full border border-hairline/40 bg-raised text-[10px] font-medium text-ink-secondary">
@@ -326,7 +326,7 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
               onClick={() => toggle(b.id)}
               className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-raised/50"
             >
-              <AgentAvatar color={b.color} state="happy" size={28} />
+              <AgentAvatar color={b.color} character={b.character} state="happy" size={28} />
               <span className="min-w-0 flex-1 truncate text-[14px] text-ink">{b.name}</span>
               <span
                 className={cn(
@@ -507,6 +507,7 @@ function BotListItem({
   const body = (
     <>
       <AgentAvatar
+        character={bot.character}
         color={bot.color}
         state={stateForBot({ ...bot, messages: visible })}
         size={56}
@@ -711,7 +712,7 @@ function ArchivedBotsPanel({
           <div className="grid grid-cols-1 gap-x-8 md:grid-cols-2">
             {bots.map((bot) => (
               <div key={bot.id} className="flex min-h-[82px] items-center gap-3 border-b border-hairline/35 px-1 py-3">
-                <AgentAvatar color={bot.color} state="happy" size={42} />
+                <AgentAvatar color={bot.color} character={bot.character} state="happy" size={42} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[14px] font-medium text-ink">{bot.name}</div>
                   <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{bot.title || "Bot"}</div>

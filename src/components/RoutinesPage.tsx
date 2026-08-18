@@ -202,6 +202,7 @@ function RoutineCard({ item, bot, compact, onOpen }: { item: CalendarItem; bot: 
     >
       <div className={cn("flex min-w-0 items-center", compact ? "gap-1.5" : "gap-2")}>
         <AgentAvatar
+          character={bot.character}
           color={bot.color}
           state={status ? statusState(status) : "idle"}
           size={compact ? 32 : 38}
@@ -417,7 +418,7 @@ export function RoutineEditor({
             <div className={cn("grid gap-2", lockedBotId ? "grid-cols-1" : "grid-cols-2 sm:grid-cols-3")}>
               {bots.map((bot) => (
                 <button key={bot.id} type="button" disabled={Boolean(lockedBotId)} onClick={() => setBotId(bot.id)} className={cn("flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left", botId === bot.id ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised/60")}>
-                  <AgentAvatar color={bot.color} state={botId === bot.id ? "happy" : "idle"} size={38} animated={false} />
+                  <AgentAvatar character={bot.character} color={bot.color} state={botId === bot.id ? "happy" : "idle"} size={38} animated={false} />
                   <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{bot.name}</span>
                   {lockedBotId && <span className="text-[11px] text-ink-secondary">Assigned from Computer</span>}
                 </button>
@@ -497,7 +498,7 @@ function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bo
         <div className="relative overflow-hidden border-b border-hairline/40 px-5 py-5" style={{ background: `linear-gradient(135deg, color-mix(in srgb, ${AGENT_COLORS[bot.color]} 28%, #111), #111)` }}>
           <button onClick={onClose} className="absolute right-3 top-3 rounded-lg p-2 text-white/60 hover:bg-white/10 hover:text-white"><X size={18} /></button>
           <div className="flex items-center gap-4 pr-10">
-            <AgentAvatar color={bot.color} state={run ? statusState(run.status) : "idle"} size={72} animated={run?.status === "running" || run?.status === "waiting"} label={bot.name} />
+            <AgentAvatar character={bot.character} color={bot.color} state={run ? statusState(run.status) : "idle"} size={72} animated={run?.status === "running" || run?.status === "waiting"} label={bot.name} />
             <div className="min-w-0">
               <div className="truncate text-[20px] font-semibold text-white">{title}</div>
               <div className="mt-1 flex items-center gap-2 text-[13px] text-white/65"><span>{bot.name}</span><span>·</span><span>{niceDate(item.at)}, {niceTime(item.at)}</span></div>
@@ -559,7 +560,7 @@ function PausedRoutines({ routines, bots, onClose, onEdit }: { routines: Routine
             const bot = bots.find((candidate) => candidate.id === routine.botId);
             return (
               <div key={routine.id} className="flex items-center gap-3 rounded-xl border border-hairline/40 bg-inset p-3">
-                {bot ? <AgentAvatar color={bot.color} state="sleeping" size={44} animated={false} label={bot.name} /> : <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><CalendarClock size={20} /></div>}
+                {bot ? <AgentAvatar character={bot.character} color={bot.color} state="sleeping" size={44} animated={false} label={bot.name} /> : <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><CalendarClock size={20} /></div>}
                 <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-semibold text-ink">{routine.name}</div><div className="mt-0.5 truncate text-[11.5px] text-ink-secondary">{bot?.name ?? "Deleted AGENT"} · {scheduleLabel(routine)}</div></div>
                 {bot && <button onClick={() => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: true } })} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110"><Play size={12} />Resume</button>}
                 <button onClick={() => onEdit(routine)} className="rounded-lg px-2 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">Edit</button>
@@ -665,7 +666,7 @@ export function RoutinesPage() {
         <div className="flex min-h-0 flex-1 items-center justify-center p-8">
           <div className="max-w-[430px] text-center">
             <div className="relative mx-auto mb-5 flex h-28 w-44 items-end justify-center">
-              {visibleBots.slice(0, 3).map((bot, index) => <div key={bot.id} className="-ml-3 first:ml-0" style={{ transform: `translateY(${Math.abs(index - 1) * 9}px) rotate(${(index - 1) * 5}deg)` }}><AgentAvatar color={bot.color} state={index === 1 ? "excited" : "idle"} size={84} /></div>)}
+              {visibleBots.slice(0, 3).map((bot, index) => <div key={bot.id} className="-ml-3 first:ml-0" style={{ transform: `translateY(${Math.abs(index - 1) * 9}px) rotate(${(index - 1) * 5}deg)` }}><AgentAvatar character={bot.character} color={bot.color} state={index === 1 ? "excited" : "idle"} size={84} /></div>)}
               {visibleBots.length === 0 && <CalendarClock size={58} className="text-ink-secondary/40" />}
             </div>
             <h2 className="text-[18px] font-semibold text-ink">Put your AGENT team on a rhythm</h2>

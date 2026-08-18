@@ -248,6 +248,7 @@ export function Composer({
               >
                 {peer.bot ? (
                   <AgentAvatar
+                    character={peer.bot.character}
                     color={peer.bot.color}
                     state={normalizeState(peer.bot.mascotExpression) ?? "happy"}
                     size={24}

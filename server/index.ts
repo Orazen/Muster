@@ -2788,7 +2788,7 @@ const server = createServer(async (req, res) => {
         if (field === "name" && !value.trim()) return json(res, 400, { error: "name must not be empty" });
       }
       const patch: Record<string, unknown> = {};
-      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "mascotExpression", "pinned", "hidden", "speakReplies", "voice"] as const) {
+      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "character", "mascotExpression", "pinned", "hidden", "speakReplies", "voice"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
       // per-bot gate on the workspace's connected apps (Composio)
@@ -2801,6 +2801,9 @@ const server = createServer(async (req, res) => {
         !["cloud", "vm", "local", "off"].includes(String(body.computer))
       ) {
         return json(res, 400, { error: "computer must be cloud, vm, local, or off" });
+      }
+      if (body.character !== undefined && !["cursor", "lottie"].includes(String(body.character))) {
+        return json(res, 400, { error: "character must be cursor or lottie" });
       }
       if (body.chiefOfStaff !== undefined && typeof body.chiefOfStaff !== "boolean") {
         return json(res, 400, { error: "chiefOfStaff must be true or false" });

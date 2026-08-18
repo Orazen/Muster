@@ -14,7 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import type { EffortLevel } from "../../server/contracts.ts";
-import type { AgentColor, AgentMotion } from "@/lib/mascot";
+import type { AgentCharacter, AgentColor, AgentMotion } from "@/lib/mascot";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
@@ -145,6 +145,7 @@ export interface Bot {
   description: string;
   notifications: boolean;
   color: AgentColor;
+  character?: AgentCharacter;
   mascotExpression?: string | null;
   unread: boolean;
   busy?: boolean;
@@ -395,6 +396,7 @@ export type Action =
           | "notifications"
           | "computer"
           | "color"
+          | "character"
           | "mascotExpression"
           | "autoApprove"
           | "speakReplies"
@@ -760,6 +762,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "updateBot": {
       const mascotChanged =
         Object.prototype.hasOwnProperty.call(action.patch, "color") ||
+        Object.prototype.hasOwnProperty.call(action.patch, "character") ||
         Object.prototype.hasOwnProperty.call(action.patch, "mascotExpression");
       const animated = mascotChanged
         ? withMascotMotion(state, action.botId, "customize")

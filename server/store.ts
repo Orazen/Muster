@@ -33,6 +33,9 @@ export type AgentColor =
  */
 export type AgentExpression = string;
 
+/** Which mascot body a bot uses: the procedural cursor or the .lottie character. */
+export type AgentCharacter = "cursor" | "lottie";
+
 export interface OptionCardData {
   title: string;
   subtitle: string;
@@ -238,6 +241,7 @@ export interface BotRecord {
   description: string;
   notifications: boolean;
   color: AgentColor;
+  character?: AgentCharacter;
   mascotExpression?: AgentExpression | null;
   unread: boolean;
   modelSelection: ModelSelection;
@@ -731,7 +735,7 @@ export class Store {
 
   createBot(
     profile: Partial<
-      Pick<BotRecord, "name" | "title" | "description" | "color" | "mascotExpression" | "modelSelection">
+      Pick<BotRecord, "name" | "title" | "description" | "color" | "character" | "mascotExpression" | "modelSelection">
     > = {},
     opts: {
       /** false = no greeting/onboarding seed. Imported bots must not open
@@ -748,6 +752,7 @@ export class Store {
       description: profile.description ?? "",
       notifications: true,
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
+      ...(profile.character ? { character: profile.character } : {}),
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),

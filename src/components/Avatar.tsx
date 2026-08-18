@@ -13,7 +13,8 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { AGENT_COLORS, type AgentColor, type AgentMotion, type AgentState } from "@/lib/mascot";
+import { AGENT_COLORS, type AgentCharacter, type AgentColor, type AgentMotion, type AgentState } from "@/lib/mascot";
+import { LottieCharacter } from "./LottieCharacter";
 import {
   CursorAvatar,
   DEFAULT_SILHOUETTE,
@@ -104,6 +105,8 @@ export type AgentAvatarHandle = CursorAvatarHandle;
 
 export type AgentAvatarProps = {
   color: AgentColor;
+  /** Which mascot body renders: the procedural cursor or the .lottie character. */
+  character?: AgentCharacter;
   /** Named behaviour — drives the expression pool, its cadence and blinking. */
   state?: AgentState;
   /** Pin one of the 25 faces and stop the state's own drift. */
@@ -138,6 +141,7 @@ export type AgentAvatarProps = {
 function AgentAvatarComponent(
   {
     color,
+    character = "cursor",
     state = "idle",
     expression,
     size = 44,
@@ -189,6 +193,17 @@ function AgentAvatarComponent(
     });
   };
   const onPointerLeave = () => setPointer({ x: 0, y: 0 });
+
+  if (character === "lottie") {
+    return (
+      <LottieCharacter
+        state={motionState ?? state}
+        size={size}
+        animated={animated}
+        label={label}
+      />
+    );
+  }
 
   return (
     <span

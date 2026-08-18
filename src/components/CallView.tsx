@@ -478,7 +478,7 @@ function Call({ bot }: { bot: Bot }) {
         <X size={18} />
       </button>
 
-      <AgentAvatar color={bot.color} state={mascotState} size={220} animated trackPointer />
+      <AgentAvatar character={bot.character} color={bot.color} state={mascotState} size={220} animated trackPointer />
 
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{bot.name}</div>

@@ -557,7 +557,7 @@ const MessagesList = memo(function MessagesList({
     <>
       {messages.length === 0 && !bot.busy && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
-          <AgentAvatar color={bot.color} state="idle" size={64} motion="none" motionKey={0} />
+          <AgentAvatar character={bot.character} color={bot.color} state="idle" size={64} motion="none" motionKey={0} />
           <RenameTitle
             value={bot.name}
             onCommit={(name) => dispatch({ type: "updateBot", botId: bot.id, patch: { name } })}
@@ -817,6 +817,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             title="Bot settings"
           >
             <AgentAvatar
+              character={bot.character}
               color={bot.color}
               state={stateForBot({ ...bot, messages })}
               size={28}

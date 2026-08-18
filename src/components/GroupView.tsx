@@ -52,6 +52,7 @@ function ClusterLabel({ bot, name, color }: { bot?: Bot; name: string; color: st
   return (
     <div className="mt-1 flex items-center gap-1.5 pl-0.5">
       <AgentAvatar
+        character={bot?.character}
         color={(bot?.color ?? color) as Bot["color"]}
         state={normalizeState(bot?.mascotExpression) ?? "happy"}
         size={16}
@@ -473,6 +474,7 @@ export function GroupView({ group }: { group: Group }) {
               )}
             >
               <AgentAvatar
+                character={b.character}
                 color={b.color}
                 state={normalizeState(b.mascotExpression) ?? "happy"}
                 size={24}
@@ -570,6 +572,7 @@ export function GroupView({ group }: { group: Group }) {
                 {members.slice(0, 3).map((b) => (
                   <AgentAvatar
                     key={b.id}
+                    character={b.character}
                     color={b.color}
                     state="happy"
                     size={44}

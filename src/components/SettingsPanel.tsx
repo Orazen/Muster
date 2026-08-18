@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "./Avatar";
 import {
+  AGENT_CHARACTERS,
   PICKABLE_STATES,
   stateForBot,
   AGENT_COLORS,
@@ -328,6 +329,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "notifications"
         | "computer"
         | "color"
+        | "character"
         | "mascotExpression"
         | "autoApprove"
         | "speakReplies"
@@ -387,6 +389,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         <div className="flex justify-center py-5">
           <AgentAvatar
             color={bot.color}
+            character={bot.character}
             state={activeState}
             size={112}
             motion={mascotMotion?.kind ?? "none"}
@@ -401,7 +404,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 Bot
               </span>
               <button
-                onClick={() => patch({ color: "green", mascotExpression: null })}
+                onClick={() => patch({ color: "green", character: "cursor", mascotExpression: null })}
                 className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
               >
                 Reset
@@ -409,6 +412,32 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             </div>
 
             <div className="p-3">
+              <div className="mb-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+                Character
+              </div>
+              <div className="mb-4 grid grid-cols-2 gap-2">
+                {AGENT_CHARACTERS.map((character) => (
+                  <button
+                    key={character}
+                    onClick={() => patch({ character })}
+                    className={cn(
+                      "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-raised",
+                      (bot.character ?? "cursor") === character && "ring-2 ring-accent-border",
+                    )}
+                    title={character === "cursor" ? "Cursor mascot" : "Lottie bot"}
+                    aria-label={`Use the ${character} character`}
+                  >
+                    <AgentAvatar
+                      color={bot.color}
+                      character={character}
+                      state={activeState}
+                      size={42}
+                      animated={character === "cursor" ? false : true}
+                    />
+                  </button>
+                ))}
+              </div>
+
               <div className="mb-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
                 Expression
               </div>
