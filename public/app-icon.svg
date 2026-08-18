@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Muster</title>
+  <desc id="desc">Four rounded agent markers arranged in formation around a rally point, on a black app tile — the Muster mark.</desc>
+
+  <defs>
+    <clipPath id="tile"><rect width="1024" height="1024" rx="224" /></clipPath>
+
+    <linearGradient id="muster-accent" x1="10%" y1="0%" x2="95%" y2="100%">
+      <stop offset="0"   stop-color="#FF7A45" />
+      <stop offset="0.5" stop-color="#F0460E" />
+      <stop offset="1"   stop-color="#C93A0B" />
+    </linearGradient>
+
+    <radialGradient id="rally-glow" cx="50%" cy="50%" r="60%">
+      <stop offset="0"   stop-color="#F0460E" stop-opacity="0.35" />
+      <stop offset="1"   stop-color="#F0460E" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <g clip-path="url(#tile)">
+    <rect width="1024" height="1024" fill="#0A0A0A" />
+
+    <!-- rally-point glow behind the formation -->
+    <circle cx="512" cy="512" r="360" fill="url(#rally-glow)" />
+
+    <!-- center rally marker: the point every agent musters toward -->
+    <circle cx="512" cy="512" r="54" fill="url(#muster-accent)" />
+
+    <!-- four agent markers in formation, each oriented toward center,
+         evenly spaced at N / E / S / W to read as an assembled roster
+         rather than a single character -->
+    <g fill="#F5F5F5">
+      <circle cx="512" cy="248" r="72" />
+      <circle cx="776" cy="512" r="72" />
+      <circle cx="512" cy="776" r="72" />
+      <circle cx="248" cy="512" r="72" />
+    </g>
+
+    <!-- thin connecting lines: each agent reporting to the rally point -->
+    <g stroke="#F0460E" stroke-width="10" stroke-linecap="round" opacity="0.9">
+      <line x1="512" y1="320" x2="512" y2="458" />
+      <line x1="704" y1="512" x2="566" y2="512" />
+      <line x1="512" y1="704" x2="512" y2="566" />
+      <line x1="320" y1="512" x2="458" y2="512" />
+    </g>
+  </g>
+</svg>

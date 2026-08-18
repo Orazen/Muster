@@ -1,0 +1,501 @@
+// Claude driver contract tests, run against the scripted fake CLI in
+// server/testing/fake-claude-cli.ts — the driver must normalize the
+// stream-json protocol into canonical events, keep argv hygiene (prompt
+// over stdin, secrets stripped), and broker permission asks.
+//
+// These used to be POSIX-only: the fake CLI is a shebang script Windows
+// cannot exec, and the broker is a unix socket. Both now go through
+// resolveCliSpawn / permissionSocketPath, so they run everywhere.
+import { chmodSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { connect } from "node:net";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { ensureDirs } from "../config.ts";
+import type { ProviderInstance } from "../contracts.ts";
+import { recordEvents, type EventRecorder } from "../testing/events.ts";
+import { ClaudeDriver, permissionSocketPath } from "./claude.ts";
+import { removeTempDir } from "../testing/cleanup.ts";
+
+const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
+
+describe("ClaudeDriver.decodeConfig", () => {
+  it("defaults to the claude binary with acceptEdits", () => {
+    expect(ClaudeDriver.decodeConfig({})).toEqual({ cli: "claude", permissionMode: "acceptEdits" });
+    expect(ClaudeDriver.decodeConfig(undefined)).toEqual({ cli: "claude", permissionMode: "acceptEdits" });
+  });
+
+  it("accepts the three known permission modes", () => {
+    for (const permissionMode of ["acceptEdits", "auto", "bypassPermissions"] as const) {
+      expect(ClaudeDriver.decodeConfig({ permissionMode }).permissionMode).toBe(permissionMode);
+    }
+  });
+
+  it("throws on an invalid permissionMode (registry downgrades this to a shadow)", () => {
+    expect(() => ClaudeDriver.decodeConfig({ permissionMode: "yolo" })).toThrow(/permissionMode/);
+  });
+
+  it.skipIf(process.platform !== "win32")("names permission pipes per harness process", () => {
+    expect(permissionSocketPath("thread-abc")).toBe(`\\\\.\\pipe\\muster-perm-${process.pid}-thread-a`);
+  });
+});
+
+describe("ClaudeDriver turns (fake CLI)", () => {
+  let instance: ProviderInstance;
+  let recorder: EventRecorder;
+  let scratch: string;
+
+  const create = async (mode?: string, environment: Record<string, string> = {}) => {
+    if (mode) process.env.FAKE_CLAUDE_MODE = mode;
+    instance = await ClaudeDriver.create({
+      instanceId: "claude-test",
+      displayName: "Claude Test",
+      environment,
+      enabled: true,
+      config: { cli: FAKE_CLI, permissionMode: "acceptEdits" },
+    });
+    recorder = recordEvents(instance.adapter);
+  };
+
+  beforeEach(() => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    scratch = mkdtempSync(join(tmpdir(), "omb-claude-test-"));
+  });
+
+  afterEach(async () => {
+    delete process.env.FAKE_CLAUDE_MODE;
+    delete process.env.FAKE_CLAUDE_DUMP;
+    delete process.env.ANTHROPIC_API_KEY;
+    recorder?.stop();
+    await instance?.dispose();
+    await removeTempDir(scratch);
+  });
+
+  it("normalizes a full turn into the canonical event sequence", async () => {
+    await create();
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-happy", text: "hi", model: "claude-sonnet-5" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const types = recorder.events.map((e) => e.type);
+    expect(types).toEqual([
+      "turn.started",
+      "session.started",
+      "content.delta",
+      "item.completed", // assistant_text
+      "item.started", // tool tu-1
+      "thread.token-usage.updated",
+      "item.completed", // tool tu-1 result
+      "turn.completed",
+    ]);
+    expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "claudeAgent")).toBe(true);
+
+    const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated")!;
+    expect(usage).toMatchObject({ input: 12, output: 5 }); // input + cache_read
+    const done = recorder.events.at(-1)!;
+    // usage on the settle is the turn total from the result message, so
+    // the harness has one figure to bank per turn
+    expect(done).toMatchObject({ type: "turn.completed", ok: true, cost: 0.01, usage: { input: 12, output: 5 } });
+    expect(instance.adapter.hasSession("t-happy")).toBe(false);
+  });
+
+  it("streams partial-message text deltas without re-emitting the whole message", async () => {
+    await create("stream");
+    await instance.adapter.sendTurn({ threadId: "t-stream", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const deltas = recorder.events.filter((e) => e.type === "content.delta");
+    const text = deltas.filter((d: any) => d.streamKind === "assistant_text");
+    // two streamed chunks, and NO third full-text fallback delta after them
+    expect(text.map((d: any) => d.delta)).toEqual(["hello from ", "fake claude"]);
+    // subagent narration (parent_tool_use_id) never surfaces
+    expect(text.some((d: any) => d.delta.includes("SUBAGENT"))).toBe(false);
+    // reasoning streams on its own kind
+    expect(deltas.some((d: any) => d.streamKind === "reasoning_text" && d.delta === "hmm")).toBe(true);
+    // the settled message still lands exactly once
+    const settled = recorder.events.filter((e: any) => e.type === "item.completed" && e.itemType === "assistant_text");
+    expect(settled).toHaveLength(1);
+    expect((settled[0] as any).text).toBe("hello from fake claude");
+  });
+
+  it("sends the prompt over stdin, never argv, and strips identity env vars", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    process.env.ANTHROPIC_API_KEY = "sk-should-not-leak";
+
+    await instance.adapter.sendTurn({ threadId: "t-hygiene", text: "the secret prompt", system: "You are Testy." });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(JSON.stringify(seen.argv)).not.toContain("the secret prompt");
+    expect(seen.prompt).toMatchObject({ type: "user", message: { role: "user", content: "the secret prompt" } });
+    expect(seen.argv).toContain("--append-system-prompt");
+    expect(seen.argv).toContain("--session-id");
+    expect(seen.env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(seen.env.CLAUDECODE).toBeUndefined();
+    expect(seen.env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+  });
+
+  it("uses instance credentials when launching an injected local model", async () => {
+    await create(undefined, { UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret" });
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-local-model",
+      text: "hi",
+      model: "unsloth::local-model",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--model") + 1]).toBe("local-model");
+    expect(seen.env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:8888");
+    expect(seen.env.ANTHROPIC_AUTH_TOKEN).toBe("unsloth-secret");
+  });
+
+  it("mounts the agents comms proxy as an MCP server and pre-allows its tools", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-agents",
+      text: "hi",
+      integrations: {
+        agents: {
+          command: process.execPath,
+          args: ["/fake/agents-proxy.js"],
+          env: { OMB_HARNESS_URL: "http://127.0.0.1:1", OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok", OMB_TURN_DEPTH: "0" },
+        },
+      },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.agents).toMatchObject({
+      args: ["/fake/agents-proxy.js"],
+      env: { OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok" },
+    });
+    // the config goes in a private file, never on argv, where `ps` would
+    // show the comms token to every other user on the machine
+    expect(JSON.stringify(seen.argv)).not.toContain("tok");
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
+    expect(allowed).toContain("mcp__agents");
+  });
+
+  it("mounts the dweb proxy from the drivers directory and pre-allows its tools", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-dweb",
+      text: "hi",
+      integrations: { dweb: { url: "http://127.0.0.1:49737" } },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.dweb.args[0]).toMatch(/[\\/]drivers[\\/]dweb-proxy\.(?:ts|js)$/);
+    expect(seen.mcpConfig.mcpServers.dweb.env.DWEB_URL).toBe("http://127.0.0.1:49737");
+    expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).toContain("mcp__dweb");
+  });
+
+  // the harness gates both the integration and the prompt hint on
+  // capabilities.composioMcp, so the flag and the mount must agree — a bot
+  // told about tools its driver never mounted burns the turn hunting
+  it("mounts the user's connected apps and claims the capability that gates them", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    expect(instance.adapter.capabilities.composioMcp).toBe(true);
+    await instance.adapter.sendTurn({
+      threadId: "t-composio",
+      text: "hi",
+      integrations: {
+        composio: {
+          command: process.execPath,
+          args: ["/tmp/connector-proxy.js"],
+          env: { OMB_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
+        },
+      },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.composio).toMatchObject({
+      command: process.execPath,
+      args: ["/tmp/connector-proxy.js"],
+      env: { OMB_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
+    });
+    // the user's Composio key must not be readable via `ps`
+    expect(JSON.stringify(seen.argv)).not.toContain("ak_test");
+    expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).toContain("mcp__composio");
+  });
+
+  // the config file holds live credentials, so it must not outlive the turn —
+  // including when the CLI dies mid-turn, which is the path that leaks if
+  // cleanup is hung off the happy-path result instead of settle()
+  it.each([
+    ["a completed turn", "happy"],
+    ["a crashed turn", "exit-early"],
+  ])("deletes the mcp config file after %s", async (_label, mode) => {
+    await create(mode);
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-cleanup",
+      text: "hi",
+      integrations: {
+        composio: {
+          command: process.execPath,
+          args: ["/tmp/connector-proxy.js"],
+          env: { OMB_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
+        },
+      },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const configPath = (() => {
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      return seen.argv[seen.argv.indexOf("--mcp-config") + 1] as string;
+    })();
+    expect(configPath).toMatch(/omb-mcp-/);
+    expect(existsSync(configPath)).toBe(false);
+    expect(existsSync(dirname(configPath))).toBe(false);
+  });
+
+  it("resumes with --resume when a cursor exists and reports that session id", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-resume", text: "again", resumeCursor: "sess-123" });
+    const started = await recorder.until((e) => e.type === "session.started");
+    expect(started).toMatchObject({ sessionId: "sess-123" });
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain("--resume");
+    expect(seen.argv).not.toContain("--session-id");
+  });
+
+  it("rejects a second turn while one is in flight", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-busy", text: "one" });
+    await expect(instance.adapter.sendTurn({ threadId: "t-busy", text: "two" })).rejects.toThrow(/already running/);
+    expect(instance.adapter.hasSession("t-busy")).toBe(true);
+    await instance.adapter.interruptTurn("t-busy");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("interrupt kills the turn and settles it as failed, not hung", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-int", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    await instance.adapter.interruptTurn("t-int");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "exit_before_result" });
+  });
+
+  it("an exit before result becomes runtime.error + failed turn", async () => {
+    await create("exit-early");
+    await instance.adapter.sendTurn({ threadId: "t-crash", text: "go" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(done).toMatchObject({ ok: false, stopReason: "exit_before_result" });
+    const error = recorder.events.find((e) => e.type === "runtime.error")!;
+    expect(error.message).toContain("simulated crash");
+  });
+
+  it("skips malformed protocol lines without losing the turn", async () => {
+    await create("malformed");
+    await instance.adapter.sendTurn({ threadId: "t-noise", text: "go" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: true });
+  });
+
+  it("a missing binary surfaces as spawn_error, and snapshot says unavailable", async () => {
+    instance = await ClaudeDriver.create({
+      instanceId: "claude-missing",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: join(scratch, "does-not-exist"), permissionMode: "acceptEdits" },
+    });
+    recorder = recordEvents(instance.adapter);
+
+    await instance.adapter.sendTurn({ threadId: "t-missing", text: "go" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "spawn_error" });
+
+    expect(await instance.snapshot()).toMatchObject({ state: "unavailable" });
+  });
+
+  it("brokers a permission ask into request.opened and answers over the socket", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-abc", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    // connect as the MCP proxy would and raise an ask — unix socket on
+    // POSIX, named pipe on Windows, same one the driver handed the proxy
+    const conn = connect(permissionSocketPath("t-perm-abc"));
+    const answered = new Promise<{ behavior: string }>((resolve) => {
+      let buf = "";
+      conn.on("data", (c) => {
+        buf += c;
+        const nl = buf.indexOf("\n");
+        if (nl !== -1) resolve(JSON.parse(buf.slice(0, nl)));
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      conn.on("connect", resolve);
+      conn.on("error", reject);
+    });
+    conn.write(JSON.stringify({ t: "ask", id: "ask-1", tool: "Bash", input: { command: "rm -rf scratch" } }) + "\n");
+
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({
+      requestType: "permission",
+      tool: "Bash",
+      summary: "rm -rf scratch",
+      requestId: "ask-1",
+    });
+
+    // the outcome names exactly what was granted: this action, once
+    await expect(instance.adapter.respondToRequest("t-perm-abc", "ask-1", { behavior: "allow" })).resolves.toBe("allowed-once");
+    expect(await answered).toMatchObject({ behavior: "allow" });
+    const resolved = await recorder.until((e) => e.type === "request.resolved");
+    expect(resolved).toMatchObject({ behavior: "allow", source: "user" });
+
+    conn.end();
+    await instance.adapter.interruptTurn("t-perm-abc");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("answers to unknown or already-resolved asks resolve `unavailable` — typed, never a throw", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-2", text: "go" });
+    await expect(instance.adapter.respondToRequest("t-perm-2", "never-asked", { behavior: "allow" })).resolves.toBe("unavailable");
+    // and a thread with no turn at all is the same answer
+    await expect(instance.adapter.respondToRequest("no-such-thread", "x", { behavior: "deny" })).resolves.toBe("unavailable");
+    await instance.adapter.interruptTurn("t-perm-2");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("resolves a pending ask as a system denial when the turn is interrupted", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-stop", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = connect(permissionSocketPath("t-perm-stop"));
+    await new Promise<void>((resolve, reject) => {
+      conn.on("connect", resolve);
+      conn.on("error", reject);
+    });
+    conn.write(JSON.stringify({ t: "ask", id: "ask-stop", tool: "Bash", input: { command: "sleep 60" } }) + "\n");
+    await recorder.until((e) => e.type === "request.opened" && e.requestId === "ask-stop");
+
+    await instance.adapter.interruptTurn("t-perm-stop");
+    const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === "ask-stop");
+    expect(resolved).toMatchObject({ behavior: "deny", source: "system" });
+    await recorder.until((e) => e.type === "turn.completed");
+    conn.end();
+  });
+
+  it("passes effort to the CLI, and omits the flag when unset", async () => {
+    await create();
+    const dump = join(scratch, "effort.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-effort", text: "hi", effort: "xhigh" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain("--effort");
+    expect(seen.argv[seen.argv.indexOf("--effort") + 1]).toBe("xhigh");
+    expect(seen.argv.filter((a: string) => a === "--effort")).toHaveLength(1);
+  });
+
+  it("adds no effort flag when the turn has none", async () => {
+    await create();
+    const dump = join(scratch, "no-effort.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-no-effort", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--effort");
+  });
+
+  it("declares the effort levels the CLI accepts", async () => {
+    await create();
+    expect(instance.adapter.capabilities.effortLevels).toEqual([
+      "low", "medium", "high", "xhigh", "max",
+    ]);
+  });
+});
+
+// Auth state must come from the CLI, not from probing its credential store:
+// on macOS the OAuth tokens live in the login Keychain, so the old
+// ~/.claude/.credentials.json check reported signed-in users as signed out
+// and disabled the model picker with them (#108).
+describe("ClaudeDriver snapshot auth (fake CLI)", () => {
+  let instance: ProviderInstance;
+
+  const create = async () => {
+    instance = await ClaudeDriver.create({
+      instanceId: "claude-auth-test",
+      displayName: "Claude Auth Test",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, permissionMode: "acceptEdits" },
+    });
+  };
+
+  beforeEach(() => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+  });
+
+  afterEach(async () => {
+    delete process.env.FAKE_CLAUDE_AUTH;
+    delete process.env.ANTHROPIC_API_KEY;
+    await instance?.dispose();
+  });
+
+  it("reports authenticated when `auth status` says loggedIn", async () => {
+    process.env.FAKE_CLAUDE_AUTH = "in";
+    await create();
+    expect(await instance.snapshot()).toMatchObject({ state: "available", authenticated: true });
+  });
+
+  it("reports signed out when `auth status` says loggedIn:false", async () => {
+    process.env.FAKE_CLAUDE_AUTH = "out";
+    await create();
+    expect(await instance.snapshot()).toMatchObject({ state: "available", authenticated: false });
+  });
+
+  it("fails closed instead of trusting stale credential storage", async () => {
+    await create();
+
+    process.env.FAKE_CLAUDE_AUTH = "unsupported";
+    expect(await instance.snapshot()).toMatchObject({ state: "available", authenticated: false });
+
+    process.env.FAKE_CLAUDE_AUTH = "malformed";
+    expect(await instance.snapshot()).toMatchObject({ state: "available", authenticated: false });
+
+    // The real turn removes inherited API keys, so the auth probe must do the
+    // same or setup can report a login the turn cannot use.
+    process.env.FAKE_CLAUDE_AUTH = "inherited-api-key";
+    process.env.ANTHROPIC_API_KEY = "sk-should-not-leak";
+    expect(await instance.snapshot()).toMatchObject({ state: "available", authenticated: false });
+  });
+});

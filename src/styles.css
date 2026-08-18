@@ -1,0 +1,610 @@
+@import "tailwindcss";
+
+/* Grok Bot dark palette (pixel-sampled from the real app) */
+@theme {
+  --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-caret: caret-blink 1s step-end infinite;
+  --animate-msg-in: msg-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-shimmer: shimmer 2s linear infinite;
+
+  --color-app: #070707;
+  --color-panel: #111111;
+  --color-raised: #2f2f2f;
+  --color-raised-hover: #3d3d3d;
+  --color-card: #262626;
+  --color-inset: #191919;
+  --color-hairline: #333333;
+  --color-ink: #fcfcfc;
+  --color-ink-secondary: #fcfcfc99;
+  --color-accent: #1084fe;
+  --color-accent-border: #459ffe;
+  /* the ring a keyboard user follows; sits on the accent so focus reads as
+     "the app is talking to you", not as a browser default */
+  --color-focus: #459ffe;
+  --color-bubble-user: #5a5a5a;
+  --color-success: #38d591;
+  --color-danger: #ff5667;
+  --color-warning: #ff9800;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+
+  --radius-lg: 6px;
+  --radius-xl: 10px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-app);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* Keep focus visible after components clear the browser outline. These
+   unlayered rules outrank Tailwind utilities without needing !important. */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* Chromium intentionally matches :focus-visible on text controls after a
+   pointer click too. Make that behavior explicit: every focused editor has
+   a clear inset ring, while retaining each control's own border radius. */
+:is(input, textarea, select):focus {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 45%, transparent);
+  color: var(--color-ink);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #3d3d3d;
+  border-radius: 4px;
+}
+/* the thumb was inert — it never acknowledged the pointer */
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-raised-hover);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@keyframes panel-in {
+  from { transform: translateX(28px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes pop-in {
+  from { transform: scale(0.96) translateY(6px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
+/* streaming caret: a true typing blink (step, not fade) */
+@keyframes caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+/* new message settle-in: subtle, fast, GPU-only */
+@keyframes msg-in {
+  from { transform: translateY(4px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+/* "Thinking…" label sheen while the model reasons */
+@keyframes shimmer {
+  from { background-position: 200% 50%; }
+  to { background-position: -200% 50%; }
+}
+@keyframes reduced-loader-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+.thinking-shimmer {
+  background: linear-gradient(90deg, var(--color-ink-secondary) 40%, var(--color-ink) 50%, var(--color-ink-secondary) 60%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-caret, .animate-msg-in, .animate-shimmer { animation: none; }
+  .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
+  /* The drawer still moves, it just arrives instantly. */
+  aside { transition: none; }
+}
+
+/* Muster vector motion. The fast horizontal compression is the edge-on
+   moment of a turn; face parallax, surface lighting, and orbiting vector marks
+   sell the 3D rotation without duplicate silhouettes, raster frames, or WebGL. */
+.agent-character,
+.agent-orbit,
+.agent-face,
+.agent-solid,
+.agent-eyes,
+.agent-fx {
+  transform-box: view-box;
+  transform-origin: 100px 100px;
+}
+
+.agent-orbit,
+.agent-fx {
+  opacity: 0;
+}
+
+.agent-character {
+  transform-style: preserve-3d;
+}
+
+.agent-bevel,
+.agent-rim-light {
+  pointer-events: none;
+}
+
+.agent-specular {
+  opacity: 0.3;
+}
+
+.agent-eyes {
+  transform: translate(var(--agent-eye-x), var(--agent-eye-y));
+  transition: transform 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.agent-fx {
+  pointer-events: none;
+}
+
+.agent-ribbon,
+.agent-burst-ray {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.agent-ribbon {
+  stroke-width: 4;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+
+.agent-ribbon--two { stroke-width: 2.4; }
+.agent-ribbon--three { stroke-width: 3; }
+
+.agent-burst-dot,
+.agent-burst-ray,
+.agent-ellipsis-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.agent-burst-ray {
+  stroke-width: 3;
+}
+
+.agent-speed-line {
+  fill: none;
+  stroke: var(--agent-color);
+  stroke-linecap: round;
+  stroke-width: 3.5px;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+
+.agent-speed-line--two {
+  stroke: #fcfcfc;
+  stroke-width: 2.5px;
+}
+
+.agent-motion--arrive .agent-character {
+  animation: agent-arrive 940ms cubic-bezier(0.2, 0.82, 0.22, 1) both;
+}
+
+.agent-motion--switch .agent-character {
+  animation: agent-switch 760ms cubic-bezier(0.2, 0.74, 0.16, 1) both;
+}
+
+.agent-motion--customize .agent-character {
+  animation: agent-customize 720ms cubic-bezier(0.18, 0.78, 0.2, 1) both;
+}
+
+.agent-motion--switch .agent-face,
+.agent-motion--customize .agent-face {
+  animation: agent-face-parallax 760ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.agent-motion--arrive .agent-face {
+  animation-name: agent-face-arrive;
+  animation-duration: 940ms;
+}
+
+.agent-motion--arrive .agent-specular,
+.agent-motion--switch .agent-specular,
+.agent-motion--customize .agent-specular,
+.agent-motion--success .agent-specular,
+.agent-motion--celebrate .agent-specular {
+  animation: agent-specular-sweep 760ms ease-out both;
+}
+
+.agent-motion--arrive .agent-specular { animation-duration: 940ms; }
+
+.agent-motion--arrive .agent-orbit,
+.agent-motion--switch .agent-orbit,
+.agent-motion--customize .agent-orbit {
+  animation: agent-orbit-turn 760ms cubic-bezier(0.24, 0.76, 0.3, 1) both;
+}
+
+.agent-motion--arrive .agent-orbit {
+  animation-duration: 940ms;
+}
+
+.agent-motion--arrive .agent-speed-line,
+.agent-motion--switch .agent-speed-line,
+.agent-motion--customize .agent-speed-line {
+  animation: agent-line-draw 760ms ease-out both;
+}
+
+.agent-motion--arrive .agent-speed-line {
+  animation-duration: 940ms;
+}
+
+.agent-motion--arrive .agent-orbit-dot,
+.agent-motion--switch .agent-orbit-dot,
+.agent-motion--customize .agent-orbit-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: agent-dot-pop 760ms ease-out both;
+}
+
+.agent-motion--arrive .agent-orbit-dot {
+  animation-duration: 940ms;
+}
+
+.agent-orbit-dot--two { animation-delay: 45ms !important; }
+.agent-orbit-dot--three { animation-delay: 85ms !important; }
+
+.agent-motion--alert .agent-character {
+  animation: agent-alert-body 1050ms cubic-bezier(0.18, 0.78, 0.18, 1) both;
+}
+
+.agent-motion--alert .agent-fx--alert {
+  animation: agent-alert-symbol 1050ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.agent-motion--thinking .agent-character {
+  animation: agent-thinking-body 1300ms cubic-bezier(0.2, 0.76, 0.18, 1) both;
+}
+
+.agent-motion--thinking .agent-fx--ellipsis {
+  animation: agent-ellipsis-stage 1300ms ease-in-out both;
+}
+
+.agent-motion--thinking .agent-ellipsis-dot {
+  animation: agent-ellipsis-dot 1300ms ease-in-out both;
+}
+
+.agent-motion--thinking .agent-ellipsis-dot--two { animation-delay: 70ms; }
+.agent-motion--thinking .agent-ellipsis-dot--three { animation-delay: 140ms; }
+
+.agent-motion--working .agent-character {
+  animation: agent-working-body 1150ms ease-in-out infinite;
+}
+
+.agent-motion--working .agent-orbit {
+  animation: agent-working-orbit 1150ms linear infinite;
+}
+
+.agent-motion--working .agent-orbit-dot {
+  animation: agent-working-dot 1150ms ease-in-out infinite;
+}
+
+.agent-motion--launch .agent-character {
+  animation: agent-launch-body 1180ms cubic-bezier(0.2, 0.8, 0.18, 1) both;
+}
+
+.agent-motion--launch .agent-fx--ribbons {
+  animation: agent-ribbon-stage 1180ms ease-out both;
+}
+
+.agent-motion--launch .agent-ribbon {
+  animation: agent-ribbon-draw 1180ms ease-out both;
+}
+
+.agent-motion--success .agent-character {
+  animation: agent-success-body 900ms cubic-bezier(0.18, 0.8, 0.2, 1) both;
+}
+
+.agent-motion--celebrate .agent-character {
+  animation: agent-celebrate-body 1250ms cubic-bezier(0.2, 0.82, 0.18, 1) both;
+}
+
+.agent-motion--celebrate .agent-fx--burst {
+  animation: agent-burst-stage 1250ms ease-out both;
+}
+
+.agent-motion--celebrate .agent-burst-dot,
+.agent-motion--celebrate .agent-burst-ray {
+  animation: agent-burst-piece 1250ms ease-out both;
+}
+
+.agent-motion--celebrate .agent-burst-dot--one { --agent-burst-x: -34px; --agent-burst-y: -27px; }
+.agent-motion--celebrate .agent-burst-dot--two { --agent-burst-x: 38px; --agent-burst-y: -19px; }
+.agent-motion--celebrate .agent-burst-dot--three { --agent-burst-x: 33px; --agent-burst-y: 31px; }
+.agent-motion--celebrate .agent-burst-dot--four { --agent-burst-x: -39px; --agent-burst-y: 22px; }
+
+.agent-motion--blink .agent-eyes {
+  animation: agent-blink-eyes 720ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.agent-motion--surprise .agent-character {
+  animation: agent-surprise-body 820ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.agent-motion--surprise .agent-eyes {
+  animation: agent-surprise-eyes 820ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.agent-motion--failure .agent-character {
+  animation: agent-failure-body 980ms cubic-bezier(0.22, 0.76, 0.2, 1) both;
+}
+
+.agent-motion--failure .agent-fx--alert {
+  animation: agent-failure-mark 980ms ease-out both;
+}
+
+@keyframes agent-arrive {
+  0% {
+    opacity: 0;
+    transform: perspective(180px) translate3d(34px, 5px, 0) rotateY(78deg) rotateZ(42deg) scale(0.28, 0.68);
+  }
+  18% {
+    opacity: 1;
+    transform: perspective(180px) translate3d(15px, -3px, 8px) rotateY(58deg) rotateZ(24deg) scale(0.58, 1.1);
+  }
+  46% {
+    transform: perspective(180px) translate3d(-4px, -3px, 13px) rotateY(-13deg) rotateZ(-8deg) scale(1.09, 0.91);
+  }
+  68% {
+    transform: perspective(180px) translate3d(2px, 1px, -3px) rotateY(7deg) rotateZ(3deg) scale(0.96, 1.04);
+  }
+  84% {
+    transform: perspective(180px) translate3d(-1px, 0, 1px) rotateY(-3deg) rotateZ(-1deg) scale(1.02, 0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(180px) translate3d(0, 0, 0) rotateY(0) rotateZ(0) scale(1);
+  }
+}
+
+@keyframes agent-switch {
+  0% { transform: perspective(180px) translate3d(0, 0, 0) rotateY(0) rotateZ(0) scale(1); }
+  13% { transform: perspective(180px) translate3d(-3px, 1px, 4px) rotateY(-12deg) rotateZ(-5deg) scale(1.08, 0.91); }
+  35% { transform: perspective(180px) translate3d(8px, -2px, 10px) rotateY(76deg) rotateZ(13deg) scale(0.42, 1.06); }
+  53% { transform: perspective(180px) translate3d(-4px, -2px, 7px) rotateY(-24deg) rotateZ(-7deg) scale(0.82, 0.96); }
+  70% { transform: perspective(180px) translate3d(2px, 1px, -3px) rotateY(10deg) rotateZ(3deg) scale(1.07, 0.93); }
+  86% { transform: perspective(180px) translate3d(-1px, 0, 1px) rotateY(-4deg) rotateZ(-1deg) scale(0.975, 1.025); }
+  100% { transform: perspective(180px) translate3d(0, 0, 0) rotateY(0) rotateZ(0) scale(1); }
+}
+
+@keyframes agent-customize {
+  0% { transform: perspective(180px) translate3d(0, 0, 0) rotateY(0) rotateZ(0) scale(1); }
+  18% { transform: perspective(180px) translate3d(-4px, 1px, 5px) rotateY(-16deg) rotateZ(-7deg) scale(1.12, 0.88); }
+  38% { transform: perspective(180px) translate3d(7px, -3px, 11px) rotateY(74deg) rotateZ(12deg) scale(0.44, 1.08); }
+  57% { transform: perspective(180px) translate3d(-3px, -1px, 7px) rotateY(-23deg) rotateZ(-5deg) scale(1.08, 0.92); }
+  77% { transform: perspective(180px) translate3d(1px, 1px, -2px) rotateY(8deg) rotateZ(2deg) scale(0.97, 1.03); }
+  100% { transform: perspective(180px) translate3d(0, 0, 0) rotateY(0) rotateZ(0) scale(1); }
+}
+
+@keyframes agent-face-parallax {
+  0%, 12% { opacity: 1; transform: translateX(0); }
+  31% { opacity: 0.35; transform: translateX(-11px) scaleX(0.45); }
+  41% { opacity: 0; transform: translateX(-16px) scaleX(0.1); }
+  50% { opacity: 0; transform: translateX(14px) scaleX(0.12); }
+  62% { opacity: 1; transform: translateX(5px) scaleX(0.82); }
+  100% { opacity: 1; transform: translateX(0) scaleX(1); }
+}
+
+@keyframes agent-face-arrive {
+  0%, 19% { opacity: 0; transform: translateX(12px) scaleX(0.2); }
+  38% { opacity: 0.72; transform: translateX(5px) scaleX(0.7); }
+  58%, 100% { opacity: 1; transform: translateX(0) scaleX(1); }
+}
+
+@keyframes agent-specular-sweep {
+  0%, 100% { opacity: 0.3; translate: 0 0; }
+  18% { opacity: 0.54; translate: -5px -2px; }
+  38% { opacity: 0.92; translate: 34px 12px; }
+  57% { opacity: 0.2; translate: -18px 7px; }
+  78% { opacity: 0.38; translate: 4px 0; }
+}
+
+@keyframes agent-orbit-turn {
+  0%, 8% { opacity: 0; transform: rotate(-46deg) scale(0.62); }
+  25% { opacity: 0.9; }
+  66% { opacity: 0.72; transform: rotate(34deg) scale(1.04); }
+  100% { opacity: 0; transform: rotate(74deg) scale(1.18); }
+}
+
+@keyframes agent-line-draw {
+  0%, 12% { stroke-dashoffset: 1; opacity: 0; }
+  36% { stroke-dashoffset: 0.38; opacity: 0.9; }
+  68% { stroke-dashoffset: 0; opacity: 0.48; }
+  100% { stroke-dashoffset: -1; opacity: 0; }
+}
+
+@keyframes agent-dot-pop {
+  0%, 10% { opacity: 0; transform: scale(0.15); }
+  35% { opacity: 1; transform: scale(1.15); }
+  65% { opacity: 0.75; transform: scale(0.82); }
+  100% { opacity: 0; transform: scale(0.1); }
+}
+
+@keyframes agent-alert-body {
+  0%, 100% { opacity: 1; transform: perspective(180px) scale(1) rotateZ(0); }
+  16% { transform: perspective(180px) scale(1.12, 0.86) rotateZ(-6deg); }
+  34%, 57% { opacity: 0.08; transform: perspective(180px) scale(0.09, 0.82) rotateZ(2deg); }
+  72% { opacity: 1; transform: perspective(180px) scale(1.1, 0.9) rotateZ(5deg); }
+  86% { transform: perspective(180px) scale(0.96, 1.04) rotateZ(-2deg); }
+}
+
+@keyframes agent-alert-symbol {
+  0%, 22%, 66%, 100% { opacity: 0; transform: translateY(8px) scale(0.3); }
+  37% { opacity: 1; transform: translateY(-3px) scale(1.08); }
+  51% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes agent-thinking-body {
+  0%, 100% { opacity: 1; transform: scale(1) rotateZ(0); }
+  16% { transform: scale(1.08, 0.9) rotateZ(-5deg); }
+  31%, 65% { opacity: 0.2; transform: translateY(2px) scale(0.13); }
+  78% { opacity: 1; transform: scale(1.08, 0.92) rotateZ(4deg); }
+  90% { transform: scale(0.97, 1.03) rotateZ(-1deg); }
+}
+
+@keyframes agent-ellipsis-stage {
+  0%, 19%, 73%, 100% { opacity: 0; }
+  32%, 63% { opacity: 1; }
+}
+
+@keyframes agent-ellipsis-dot {
+  0%, 18%, 74%, 100% { opacity: 0; transform: translateY(8px) scale(0.25); }
+  35% { opacity: 1; transform: translateY(-3px) scale(1.12); }
+  48%, 62% { opacity: 0.78; transform: translateY(0) scale(0.88); }
+}
+
+@keyframes agent-working-body {
+  0%, 100% { transform: perspective(180px) translateY(0) rotateY(-8deg) rotateZ(-2deg) scale(0.98); }
+  50% { transform: perspective(180px) translateY(-3px) rotateY(12deg) rotateZ(3deg) scale(1.03); }
+}
+
+@keyframes agent-working-orbit {
+  0% { opacity: 0.18; transform: rotate(0deg) scale(0.78); }
+  45% { opacity: 0.9; }
+  100% { opacity: 0.18; transform: rotate(360deg) scale(1.08); }
+}
+
+@keyframes agent-working-dot {
+  0%, 100% { opacity: 0.32; transform: scale(0.65); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes agent-launch-body {
+  0%, 100% { opacity: 1; transform: translate(0, 0) rotateZ(0) scale(1); }
+  16% { transform: translate(-5px, 2px) rotateZ(-9deg) scale(1.13, 0.86); }
+  31% { opacity: 0.72; transform: translate(-7px, 5px) rotateZ(-16deg) scale(0.16); }
+  48% { opacity: 0.95; transform: translate(24px, -12px) rotateZ(18deg) scale(0.45); }
+  66% { transform: translate(-3px, -2px) rotateZ(-6deg) scale(1.13, 0.9); }
+  84% { transform: translate(1px, 1px) rotateZ(2deg) scale(0.97, 1.03); }
+}
+
+@keyframes agent-ribbon-stage {
+  0%, 16%, 72%, 100% { opacity: 0; transform: rotate(-15deg) scale(0.65); }
+  32%, 58% { opacity: 0.92; transform: rotate(3deg) scale(1); }
+}
+
+@keyframes agent-ribbon-draw {
+  0%, 14% { opacity: 0; stroke-dashoffset: 1; }
+  45% { opacity: 1; stroke-dashoffset: 0; }
+  70%, 100% { opacity: 0; stroke-dashoffset: -1; }
+}
+
+@keyframes agent-success-body {
+  0%, 100% { transform: translateY(0) rotateZ(0) scale(1); }
+  20% { transform: translateY(4px) rotateZ(-5deg) scale(1.12, 0.82); }
+  46% { transform: translateY(-8px) rotateZ(5deg) scale(0.91, 1.13); }
+  68% { transform: translateY(1px) rotateZ(-2deg) scale(1.05, 0.95); }
+  84% { transform: translateY(-1px) scale(0.98, 1.02); }
+}
+
+@keyframes agent-celebrate-body {
+  0%, 100% { transform: perspective(180px) translateY(0) rotateY(0) rotateZ(0) scale(1); }
+  17% { transform: perspective(180px) translateY(5px) rotateY(-13deg) rotateZ(-8deg) scale(1.14, 0.84); }
+  42% { transform: perspective(180px) translateY(-10px) rotateY(22deg) rotateZ(13deg) scale(0.88, 1.15); }
+  66% { transform: perspective(180px) translateY(0) rotateY(-8deg) rotateZ(-4deg) scale(1.08, 0.94); }
+  84% { transform: perspective(180px) translateY(-2px) rotateY(3deg) rotateZ(2deg) scale(0.98, 1.02); }
+}
+
+@keyframes agent-burst-stage {
+  0%, 16%, 82%, 100% { opacity: 0; transform: scale(0.4) rotate(-16deg); }
+  34% { opacity: 1; transform: scale(1.12) rotate(4deg); }
+  64% { opacity: 0.68; transform: scale(1.28) rotate(12deg); }
+}
+
+@keyframes agent-burst-piece {
+  0%, 18% { opacity: 0; transform: translate(0, 0) scale(0.25); }
+  42% { opacity: 1; transform: translate(var(--agent-burst-x, 0), var(--agent-burst-y, 0)) scale(1.12); }
+  72%, 100% { opacity: 0; transform: translate(var(--agent-burst-x, 0), var(--agent-burst-y, 0)) scale(0.4); }
+}
+
+@keyframes agent-blink-eyes {
+  0%, 20%, 48%, 72%, 100% { transform: translate(var(--agent-eye-x), var(--agent-eye-y)) scaleY(1); }
+  34%, 60% { transform: translate(var(--agent-eye-x), var(--agent-eye-y)) scaleY(0.08); }
+}
+
+@keyframes agent-surprise-body {
+  0%, 100% { transform: translateY(0) scale(1); }
+  24% { transform: translateY(3px) scale(1.12, 0.86); }
+  48% { transform: translateY(-5px) scale(0.92, 1.16); }
+  72% { transform: translateY(1px) scale(1.05, 0.96); }
+}
+
+@keyframes agent-surprise-eyes {
+  0%, 100% { transform: translate(var(--agent-eye-x), var(--agent-eye-y)) scale(1); }
+  32%, 60% { transform: translate(var(--agent-eye-x), calc(var(--agent-eye-y) - 4px)) scale(1.24, 1.62); }
+  78% { transform: translate(var(--agent-eye-x), var(--agent-eye-y)) scale(0.94, 0.88); }
+}
+
+@keyframes agent-failure-body {
+  0%, 100% { opacity: 1; transform: translate(0, 0) rotateZ(0) scale(1); }
+  18% { transform: translate(-4px, 2px) rotateZ(-8deg) scale(1.08, 0.88); }
+  38% { opacity: 0.82; transform: translate(5px, 3px) rotateZ(19deg) scale(0.42, 1.08); }
+  55% { transform: translate(-7px, 1px) rotateZ(-13deg) scale(0.78, 0.94); }
+  72% { transform: translate(4px, 0) rotateZ(7deg) scale(1.08, 0.92); }
+  86% { transform: translate(-1px, 0) rotateZ(-2deg) scale(0.98, 1.02); }
+}
+
+@keyframes agent-failure-mark {
+  0%, 26%, 72%, 100% { opacity: 0; transform: translate(18px, -15px) scale(0.2); }
+  43%, 58% { opacity: 1; transform: translate(18px, -15px) scale(0.42); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-motion *,
+  .agent-motion {
+    animation: none !important;
+  }
+
+  .agent-orbit {
+    display: none;
+  }
+
+  .agent-eyes { transform: none; }
+
+  /* Stop spatial motion instead of accelerating infinite animations. Loading
+     icons keep a slow opacity pulse, so progress remains visible without
+     rotation, bounce, or flicker. */
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-spin {
+    animation: reduced-loader-pulse 1.6s ease-in-out infinite !important;
+  }
+}
