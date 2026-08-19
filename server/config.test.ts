@@ -47,6 +47,23 @@ describe("default fleet", () => {
     const map = instanceConfigs({ instances: { ghost: { driver: "not-a-real-driver" } } });
     expect(Object.keys(map)).toEqual(["ghost"]);
   });
+
+  it("adds a Grok (API) engine when an xAI key is present", () => {
+    const map = instanceConfigs({ xai: { key: "xai-secret" } });
+    expect(map.grokApi).toEqual({
+      driver: "grok",
+      displayName: "Grok (API)",
+      environment: { XAI_API_KEY: "xai-secret" },
+    });
+    // the CLI Grok stays the default "grok" instance
+    expect(map.grok.driver).toBe("grokAgent");
+  });
+
+  it("does not add a Grok (API) engine without an xAI key", () => {
+    const map = instanceConfigs({});
+    expect(map.grokApi).toBeUndefined();
+    expect(map.grok.driver).toBe("grokAgent");
+  });
 });
 
 describe("Instance CLI override", () => {

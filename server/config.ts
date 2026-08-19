@@ -219,6 +219,10 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     computer: { driver: "boxAgent" },
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
+    // The API-key Grok engine appears as a second Grok option once an xAI
+    // key is saved — no CLI install required. It rides the `grok` (API)
+    // driver, which bills via XAI_API_KEY over plain HTTPS.
+    ...(cfg.xai?.key ? { grokApi: { driver: "grok", displayName: "Grok (API)" } } : {}),
   };
   const CUSTOM_ONLY = {
     qwen: { driver: "qwenAgent" },

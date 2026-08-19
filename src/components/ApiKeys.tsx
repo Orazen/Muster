@@ -6,7 +6,7 @@ import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "xai";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -18,6 +18,7 @@ const SECTIONS: Record<
   },
   box: { body: (v) => ({ box: { token: v } }), flag: (c) => c.box.configured },
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
+  xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
 };
 
 const CREDENTIALS: Record<
@@ -55,6 +56,14 @@ const CREDENTIALS: Record<
     description: "Run OpenCode Go models through the maintained OpenCode CLI and ACP.",
     href: "https://opencode.ai/docs/go/",
     linkLabel: "Open OpenCode Go setup guide",
+    optional: true,
+  },
+  xai: {
+    label: "xAI (Grok) API key",
+    placeholder: "xai-…",
+    description: "Adds a Grok (API) engine backed by your xAI key — no CLI install required. Bills via the xAI API.",
+    href: "https://console.x.ai",
+    linkLabel: "Get an xAI API key",
     optional: true,
   },
 };

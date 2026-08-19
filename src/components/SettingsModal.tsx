@@ -218,7 +218,6 @@ export function SettingsModal() {
                     </div>
                   ) : null}
                   <ApiKeyRow section="box" />
-                  <ApiKeyRow section="opencodeGo" />
                   <details className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
                     <summary className="cursor-pointer text-[13px] text-ink-secondary">Self-host connected apps</summary>
                     <div className="mt-3">
@@ -230,9 +229,20 @@ export function SettingsModal() {
             )}
 
             {section === "engines" && (
-              <Card title="Engine CLIs" subtitle="Which binary each engine runs. Saved as you go.">
-                <EnginesSettings />
-              </Card>
+              <>
+                <Card
+                  title="Engine API keys"
+                  subtitle="Enable a cloud engine by pasting its API key — no CLI install needed."
+                >
+                  <div className="flex flex-col gap-4">
+                    <ApiKeyRow section="xai" />
+                    <ApiKeyRow section="opencodeGo" />
+                  </div>
+                </Card>
+                <Card title="Engine CLIs" subtitle="Which binary each engine runs. Saved as you go.">
+                  <EnginesSettings />
+                </Card>
+              </>
             )}
 
             {section === "companion" && <CompanionSection />}
