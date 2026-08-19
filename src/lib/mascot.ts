@@ -6,9 +6,10 @@ export type AgentState = CursorState;
 export const AGENT_STATES = CURSOR_STATES;
 
 /** Which mascot body a bot uses. `cursor` is the procedural mascot;
- * `lottie` is the bundled .lottie bot character. */
-export type AgentCharacter = "cursor" | "lottie";
-export const AGENT_CHARACTERS: AgentCharacter[] = ["cursor", "lottie"];
+ * `lottie` is the bundled .lottie bot character. `star` is the
+ * musterbot star: every teammate is a star. */
+export type AgentCharacter = "cursor" | "lottie" | "star";
+export const AGENT_CHARACTERS: AgentCharacter[] = ["cursor", "lottie", "star"];
 
 /** CursorAvatar ships French group labels; the app shows these instead. The
  * memberships mirror its STATE_GROUPS exactly. */

@@ -15,6 +15,7 @@ import {
 } from "react";
 import { AGENT_COLORS, type AgentCharacter, type AgentColor, type AgentMotion, type AgentState } from "@/lib/mascot";
 import { LottieCharacter } from "./LottieCharacter";
+import { StarTeammate } from "./StarTeammate";
 import {
   CursorAvatar,
   DEFAULT_SILHOUETTE,
@@ -201,6 +202,18 @@ function AgentAvatarComponent(
         size={size}
         animated={animated}
         label={label}
+      />
+    );
+  }
+
+  if (character === "star") {
+    return (
+      <StarTeammate
+        color={color}
+        state={motionState ?? state}
+        size={size}
+        label={label}
+        animated={animated}
       />
     );
   }

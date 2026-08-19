@@ -1,20 +1,10 @@
-// Generates the iOS app icon, matching the desktop one in build/icon.svg.
+// Generates the iOS app icon, matching the star logo in public/app-icon.svg.
 //
 //   node scripts/make-app-icon.mjs
 //
-// Same artwork, two differences that iOS requires:
-//
-//   - **Full bleed.** The macOS icon grid puts an 824-unit tile inside a
-//     1024 canvas with its own rounded corners, because a full-bleed tile
-//     renders noticeably larger than everything else in the Dock. iOS masks
-//     the corners itself and expects art to reach the edge, so the grid inset
-//     and the rounded clip are dropped here.
+// Same artwork as the SVG, two differences that iOS requires:
+//   - **Full bleed.** iOS masks the corners itself; no rounded clip.
 //   - **No alpha.** The App Store rejects an icon with an alpha channel.
-//
-// Everything is drawn by hand — scanline fill, the PNG encoder — because the
-// alternative is an image-processing dependency in a project that has none,
-// for a file that changes about never. The numbers below mirror
-// build/icon.svg; if that changes, change these.
 import { deflateSync } from "node:zlib";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -23,13 +13,18 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = join(ROOT, "ios", "App", "Assets.xcassets", "AppIcon.appiconset");
 const SIZE = 1024;
-const SS = 4; // supersampling; 4 is plenty at this size
+const SS = 4;
+const STEPS = 128;
 
-// ── the artwork, from build/icon.svg (full-bleed 1024x1024 coordinates) ──
+// ── colours ──────────────────────────────────────────────────────────
+const STAR_STOPS = [
+  { at: 0, color: [0xff, 0x9a, 0x73] },
+  { at: 0.45, color: [0xf0, 0x46, 0x0e] },
+  { at: 1, color: [0x8f, 0x2a, 0x08] },
+];
 const TILE_STOPS = [
-  { at: 0, color: [0x20, 0x22, 0x27] },
-  { at: 0.56, color: [0x13, 0x14, 0x19] },
-  { at: 1, color: [0x09, 0x0a, 0x0d] },
+  { at: 0, color: [0x0a, 0x0a, 0x0a] },
+  { at: 1, color: [0x0a, 0x0a, 0x0a] },
 ];
 const RALLY_ACCENT_STOPS = [
   { at: 0, color: [0xff, 0x7a, 0x45] },
@@ -37,36 +32,42 @@ const RALLY_ACCENT_STOPS = [
   { at: 1, color: [0xc9, 0x3a, 0x0b] },
 ];
 const MARKER_COLOR = [0xf5, 0xf5, 0xf5];
-const SPOKE_COLOR = [0xf0, 0x46, 0x0e];
 
+// ── geometry ──────────────────────────────────────────────────────────
 const CENTER = [512, 512];
-const RALLY_RADIUS = 108;
-const MARKER_RADIUS = 94;
-const MARKERS = [
-  [512, 188],
-  [836, 512],
-  [512, 836],
-  [188, 512],
+const STAR_MAX_RADIUS = 330;
+
+const starProfile = (theta) =>
+  0.62 + 0.38 * Math.pow(Math.abs(Math.cos(2.5 * theta + Math.PI / 4)), 0.6);
+
+function starPolygon(steps = STEPS) {
+  const raw = Array.from({ length: steps }, (_, i) => {
+    const a = (i / steps) * Math.PI * 2;
+    const r = starProfile(a);
+    return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+  });
+  const maxR = Math.max(...raw.map((p) => Math.hypot(p.x, p.y)));
+  return raw.map((p) => [
+    CENTER[0] + (p.x / maxR) * STAR_MAX_RADIUS,
+    CENTER[1] + (p.y / maxR) * STAR_MAX_RADIUS,
+  ]);
+}
+
+const RALLY_RADIUS = 40;
+const INNER_MARKER_RADIUS = 46;
+const INNER_MARKERS = [
+  [512, 380],
+  [644, 512],
+  [512, 644],
+  [380, 512],
 ];
-const SPOKES = [
-  [
-    [512, 282],
-    [512, 404],
-  ],
-  [
-    [742, 512],
-    [620, 512],
-  ],
-  [
-    [512, 742],
-    [512, 620],
-  ],
-  [
-    [282, 512],
-    [404, 512],
-  ],
+const INNER_SPOKES = [
+  [[512, 426], [512, 472]],
+  [[598, 512], [552, 512]],
+  [[512, 598], [512, 552]],
+  [[426, 512], [472, 512]],
 ];
-const SPOKE_WIDTH = 16;
+const SPOKE_WIDTH = 8;
 
 // ── shape helpers ─────────────────────────────────────────────────────
 function circlePolygon([cx, cy], r, steps = 64) {
@@ -78,7 +79,6 @@ function circlePolygon([cx, cy], r, steps = 64) {
   return points;
 }
 
-/** A stroked line segment as a fillable polygon, with round caps. */
 function strokeSegment([x0, y0], [x1, y1], width) {
   const half = width / 2;
   const dx = x1 - x0;
@@ -92,9 +92,7 @@ function strokeSegment([x0, y0], [x1, y1], width) {
     [x1 - nx, y1 - ny],
     [x0 - nx, y0 - ny],
   ];
-  const capA = circlePolygon([x0, y0], half, 24);
-  const capB = circlePolygon([x1, y1], half, 24);
-  return [body, capA, capB];
+  return [body, circlePolygon([x0, y0], half, 24), circlePolygon([x1, y1], half, 24)];
 }
 
 function rasterise(polygons, width) {
@@ -141,32 +139,23 @@ const sample = (stops, t) => {
 const big = SIZE * SS;
 const toBig = ([x, y]) => [(x / 1024) * big, (y / 1024) * big];
 
+const starMask = rasterise([starPolygon(STEPS).map(toBig)], big);
 const rallyMask = rasterise([circlePolygon(CENTER, RALLY_RADIUS).map(toBig)], big);
 const markerMask = rasterise(
-  MARKERS.map((m) => circlePolygon(m, MARKER_RADIUS).map(toBig)),
+  INNER_MARKERS.map((m) => circlePolygon(m, INNER_MARKER_RADIUS).map(toBig)),
   big,
 );
 const spokeMask = rasterise(
-  SPOKES.flatMap(([a, b]) => strokeSegment(a, b, SPOKE_WIDTH).map((poly) => poly.map(toBig))),
+  INNER_SPOKES.flatMap(([a, b]) => strokeSegment(a, b, SPOKE_WIDTH).map((poly) => poly.map(toBig))),
   big,
 );
 
-// the accent's linear gradient runs 10%,0% → 95%,100% of the rally circle's
-// own bounding box
-const rallyBounds = {
-  x0: (CENTER[0] - RALLY_RADIUS / 1024) * (big / 1024),
-  x1: (CENTER[0] + RALLY_RADIUS / 1024) * (big / 1024),
-};
-const [rcx, rcy] = toBig(CENTER);
-const rr = (RALLY_RADIUS / 1024) * big;
-const gradFrom = [rcx - rr + (rr * 2) * 0.1, rcy - rr];
-const gradTo = [rcx - rr + (rr * 2) * 0.95, rcy + rr];
+const [scx, scy] = toBig(CENTER);
+const sr = (STAR_MAX_RADIUS / 1024) * big;
+const gradFrom = [scx - sr, scy - sr];
+const gradTo = [scx + sr, scy + sr];
 const gradVec = [gradTo[0] - gradFrom[0], gradTo[1] - gradFrom[1]];
 const gradLenSq = gradVec[0] ** 2 + gradVec[1] ** 2;
-
-// the tile's radial background: centred, radius ~75% of the canvas
-const tileCentre = [big * 0.5, big * 0.5];
-const tileRadius = big * 0.75;
 
 const rgb = Buffer.alloc(SIZE * SIZE * 3);
 for (let y = 0; y < SIZE; y++) {
@@ -179,16 +168,19 @@ for (let y = 0; y < SIZE; y++) {
         const index = py * big + px;
         let colour;
         if (spokeMask[index]) {
-          colour = SPOKE_COLOR;
+          colour = MARKER_COLOR;
         } else if (markerMask[index]) {
           colour = MARKER_COLOR;
         } else if (rallyMask[index]) {
           const t =
             ((px - gradFrom[0]) * gradVec[0] + (py - gradFrom[1]) * gradVec[1]) / (gradLenSq || 1);
           colour = sample(RALLY_ACCENT_STOPS, t);
+        } else if (starMask[index]) {
+          const t =
+            ((px - gradFrom[0]) * gradVec[0] + (py - gradFrom[1]) * gradVec[1]) / (gradLenSq || 1);
+          colour = sample(STAR_STOPS, t);
         } else {
-          const d = Math.hypot(px - tileCentre[0], py - tileCentre[1]) / tileRadius;
-          colour = sample(TILE_STOPS, d);
+          colour = sample(TILE_STOPS, 0);
         }
         acc = acc.map((c, i) => c + colour[i]);
       }
@@ -220,7 +212,7 @@ function crc32(buf) {
 function encodePng(pixels, size) {
   const raw = Buffer.alloc((size * 3 + 1) * size);
   for (let y = 0; y < size; y++) {
-    raw[y * (size * 3 + 1)] = 0; // filter: none
+    raw[y * (size * 3 + 1)] = 0;
     pixels.copy(raw, y * (size * 3 + 1) + 1, y * size * 3, (y + 1) * size * 3);
   }
   const chunk = (type, data) => {
@@ -234,8 +226,8 @@ function encodePng(pixels, size) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(size, 0);
   ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // truecolour, no alpha
+  ihdr[8] = 8;
+  ihdr[9] = 2;
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", ihdr),

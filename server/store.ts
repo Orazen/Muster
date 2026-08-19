@@ -33,8 +33,8 @@ export type AgentColor =
  */
 export type AgentExpression = string;
 
-/** Which mascot body a bot uses: the procedural cursor or the .lottie character. */
-export type AgentCharacter = "cursor" | "lottie";
+/** Which mascot body a bot uses: the procedural cursor, the .lottie character, or the star teammate. */
+export type AgentCharacter = "cursor" | "lottie" | "star";
 
 export interface OptionCardData {
   title: string;

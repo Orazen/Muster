@@ -32,6 +32,8 @@ const appConfigSchema = z.object({
   tts: z.object({ key: optionalText, voice: optionalText }).optional(),
   /** Non-secret profile details shown in the sidebar. */
   profile: z.object({ name: optionalText, email: optionalText }).optional(),
+  /** Per-provider API keys — write-only, only configured-or-not flags exposed. */
+  providers: z.record(z.string(), z.object({ apiKey: optionalText })).optional(),
   instances: instanceConfigMapSchema.optional(),
 });
 const appConfigPatchSchema = appConfigSchema.omit({ instances: true });
@@ -44,6 +46,7 @@ export interface AppConfig {
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; voice?: string };
   profile?: { name?: string; email?: string };
+  providers?: Record<string, { apiKey?: string }>;
   instances?: InstanceConfigMap;
 }
 export type ConfigPatch = z.output<typeof appConfigPatchSchema>;
@@ -127,6 +130,17 @@ export function saveConfig(patch: Partial<AppConfig>): void {
       diskInstances[instanceId] = merged;
     }
     disk.instances = diskInstances;
+  }
+  if (checkedPatch.providers) {
+    const currentProviders = jsonObjectSchema.safeParse(disk.providers);
+    const diskProviders: JsonObject = currentProviders.success ? currentProviders.data : {};
+    for (const [providerId, entry] of Object.entries(checkedPatch.providers)) {
+      const current = jsonObjectSchema.safeParse(diskProviders[providerId]);
+      const merged: JsonObject = current.success ? { ...current.data } : {};
+      Object.assign(merged, entry);
+      diskProviders[providerId] = merged;
+    }
+    disk.providers = diskProviders;
   }
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });

@@ -55,6 +55,7 @@ import {
   type TaskRecord,
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
+import { PROVIDERS } from "./providers.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { buildTurnContext, engineIsFresh } from "./turn-context.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
@@ -1902,6 +1903,12 @@ function stderrOf(err: unknown): string {
 }
 
 function configStatus() {
+  const providerFlags: Record<string, { configured: boolean }> = {};
+  if (cfg.providers) {
+    for (const [id, entry] of Object.entries(cfg.providers)) {
+      providerFlags[id] = { configured: Boolean(entry.apiKey) };
+    }
+  }
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
     composio: {
@@ -1910,6 +1917,7 @@ function configStatus() {
     },
     box: { configured: Boolean(cfg.box?.token) },
     opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey) },
+    providers: providerFlags,
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
     tts: tts.describeVoice(cfg),
@@ -2854,8 +2862,8 @@ const server = createServer(async (req, res) => {
       ) {
         return json(res, 400, { error: "computer must be cloud, vm, local, or off" });
       }
-      if (body.character !== undefined && !["cursor", "lottie"].includes(String(body.character))) {
-        return json(res, 400, { error: "character must be cursor or lottie" });
+      if (body.character !== undefined && !["cursor", "lottie", "star"].includes(String(body.character))) {
+        return json(res, 400, { error: "character must be cursor, lottie, or star" });
       }
       if (body.chiefOfStaff !== undefined && typeof body.chiefOfStaff !== "boolean") {
         return json(res, 400, { error: "chiefOfStaff must be true or false" });
@@ -3298,6 +3306,15 @@ const server = createServer(async (req, res) => {
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configStatus());
+    }
+    if (method === "GET" && path === "/api/providers") {
+      const flags: Record<string, { configured: boolean }> = {};
+      if (cfg.providers) {
+        for (const [id, entry] of Object.entries(cfg.providers)) {
+          flags[id] = { configured: Boolean(entry.apiKey) };
+        }
+      }
+      return json(res, 200, { providers: PROVIDERS.map((p) => ({ ...p, configured: flags[p.id]?.configured ?? false })) });
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
