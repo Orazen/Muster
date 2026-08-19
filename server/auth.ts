@@ -192,10 +192,17 @@ export function toWebRequest(req: import("node:http").IncomingMessage): Request 
       headers.set(key, Array.isArray(value) ? value.join(", ") : value);
     }
   }
+  const method = req.method ?? "GET";
+  // GET/HEAD must not carry a body (the Fetch API rejects it). Every other
+  // method needs the raw request stream forwarded, or Better Auth sees an
+  // empty body and rejects every sign-up/sign-in with a validation error —
+  // this was previously dropped entirely, silently breaking every POST.
+  const hasBody = method !== "GET" && method !== "HEAD";
   return new Request(url, {
-    method: req.method ?? "GET",
+    method,
     headers,
-  });
+    ...(hasBody ? { body: req as unknown as ReadableStream, duplex: "half" } : {}),
+  } as RequestInit);
 }
 
 /** Resolved session for a request, or null when unauthenticated. */
