@@ -18,6 +18,7 @@ COPY server server
 COPY companion companion
 COPY scripts scripts
 COPY public public
+COPY www www
 
 RUN pnpm install --frozen-lockfile
 
@@ -32,11 +33,14 @@ ENV NODE_ENV=production \
     OMB_HOST=0.0.0.0 \
     OMB_PORT=8799 \
     OMB_DATA_DIR=/data \
-    OMB_STATIC_DIR=/app/dist
+    OMB_STATIC_DIR=/app/dist \
+    OMB_MARKETING_DIR=/app/www
 
-# Self-hosted web UI and harness server (both fully self-contained).
+# Self-hosted web UI and harness server (both fully self-contained), plus the
+# marketing landing page served at "/" for the public domain.
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./dist-server
+COPY --from=build /app/www ./www
 
 # Persist bots, transcripts, config and keys outside the container.
 VOLUME ["/data"]

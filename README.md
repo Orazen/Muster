@@ -32,7 +32,7 @@ Talk to them like contacts. Watch them work. Approve what matters.
   <img src="https://img.shields.io/github/v/release/tharunramagiri/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Windows&labelColor=070707&color=4cc2ff&cacheSeconds=300" alt="Download the latest Muster for Windows (.exe)" height="40">
 </a>
 
-<sub>macOS: Apple silicon · signed & notarized · one-click .dmg &nbsp;·&nbsp; Windows: 64-bit · one-click installer, no admin rights &nbsp;·&nbsp; both always the latest · [all releases](https://github.com/tharunramagiri/Muster/releases)</sub>
+<sub>macOS: Apple silicon · unsigned build (see note below) &nbsp;·&nbsp; Windows: 64-bit · one-click installer, no admin rights &nbsp;·&nbsp; both always the latest · [all releases](https://github.com/tharunramagiri/Muster/releases)</sub>
 
 <br>
 <br>
@@ -230,7 +230,7 @@ flowchart LR
 
 | | Download | Install |
 |---|---|---|
-| **macOS** (Apple silicon) | [Muster.dmg](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster.dmg) | Drag it to Applications, open it. Signed & notarized. |
+| **macOS** (Apple silicon) | [Muster.dmg](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster.dmg) | Drag it to Applications, open it. **Not yet signed/notarized** — macOS Gatekeeper will say *"Muster is damaged and can't be opened. You should move it to the Bin."* This is not real damage, it's an unsigned-app quarantine flag. Fix: open Terminal and run `xattr -cr /Applications/Muster.app`, then open it again. (Proper Developer ID signing + notarization is tracked, see below.) |
 | **Windows** (x64) | [Muster-setup.exe](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
 | **Linux** (x64) | [Muster-x86_64.deb](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-x86_64.deb) · [Muster-x86_64.AppImage](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-x86_64.AppImage) | `.deb`: `sudo dpkg -i Muster-x86_64.deb` · AppImage: `chmod +x Muster*.AppImage && ./Muster*.AppImage` |
 | **Android** | [Play Store](https://play.google.com/store/apps/details?id=com.muster.companion) (coming soon) | Pair with your computer's companion service |
