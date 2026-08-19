@@ -174,6 +174,10 @@ export const auth = betterAuth({
     "http://localhost:5199",
     "http://127.0.0.1:8799",
     "http://localhost:8799",
+    // Self-hosted deployments must trust their own public origin, or every
+    // same-origin browser request gets rejected as untrusted — this was
+    // previously only reachable by manually setting OMB_ALLOWED_ORIGINS.
+    PUBLIC_BASE_URL,
     ...EXTRA_TRUSTED_ORIGINS,
   ],
 });

@@ -1,8 +1,12 @@
 import { createAuthClient } from "better-auth/client";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
+// The server always serves the API from the same origin/port as the UI
+// (both dev proxy and the packaged/hosted server put them together), so
+// same-origin is correct here. Hardcoding a port breaks any deployment
+// that isn't literally on :8799 (custom OMB_PORT, reverse proxies, etc.).
 export const authClient = createAuthClient({
-  baseURL: `${window.location.protocol}//${window.location.hostname}:8799`,
+  baseURL: window.location.origin,
 });
 
 interface AuthUser {
@@ -71,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    *  the mail is worse than no link. */
   async function fetchCapabilities() {
     try {
-      const base = `${window.location.protocol}//${window.location.hostname}:8799`;
+      const base = window.location.origin;
       const res = await fetch(`${base}/api/auth-capabilities`, { credentials: "include" });
       if (!res.ok) return;
       const data = (await res.json()) as Partial<AuthCapabilities>;
@@ -87,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function fetchSession() {
     try {
-      const base = `${window.location.protocol}//${window.location.hostname}:8799`;
+      const base = window.location.origin;
       const res = await fetch(`${base}/api/auth/session`, { credentials: "include" });
       const data = await res.json();
       if (data?.user) {
