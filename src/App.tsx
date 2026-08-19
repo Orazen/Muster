@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Loader2, Menu, LogOut } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
-import { Onboarding } from "@/components/Onboarding";
-import { emailGateDone, initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
@@ -143,15 +141,10 @@ function Shell() {
 }
 
 function AppShell() {
-  const [gated, setGated] = useState(() => !emailGateDone());
-  useEffect(() => {
-    initAnalytics();
-  }, []);
   return (
     <DesktopCapabilitiesProvider>
       <StoreProvider>
         <Shell />
-        {gated && <Onboarding onDone={() => setGated(false)} />}
       </StoreProvider>
     </DesktopCapabilitiesProvider>
   );
