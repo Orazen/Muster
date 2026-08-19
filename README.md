@@ -20,6 +20,7 @@ Talk to them like contacts. Watch them work. Approve what matters.
 ![Agents](https://img.shields.io/badge/agents-10%2B%20engines-d97757)
 ![License](https://img.shields.io/badge/license-MIT-38d591)
 ![PRs](https://img.shields.io/badge/PRs-welcome-38d591)
+![Source](https://img.shields.io/badge/source-available-d97757)
 
 <br>
 
@@ -362,8 +363,9 @@ small; adding a provider is one file in [`server/drivers/`](server/drivers/) plu
 
 ## License
 
-[MIT](LICENSE) © 2026 Ramagiritharun (Tharun Ramagiri) / Orazen and contributors.
+[Business Source License 1.1](LICENSE) © 2026 Ramagiritharun (Tharun Ramagiri) / Orazen and contributors.
 
-Muster is an independent, open-source project. It is not affiliated with, endorsed by, or associated with
-xAI, Google, OpenAI, Moonshot AI, Alibaba, Nous Research, Factory, or OpenCode; all engine names are
-trademarks of their respective owners.
+Source-available. You may use, modify, and redistribute for personal, internal,
+and non-commercial purposes. You may **not** offer Muster (or a substantially
+similar product) as a managed service. After 2030-08-19 the license converts
+to [Apache 2.0](LICENSE).

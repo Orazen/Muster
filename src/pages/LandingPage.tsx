@@ -187,7 +187,7 @@ export function LandingPage() {
           <span>© 2026 Muster — built and maintained by <a href="https://orazen.online" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">Orazen</a>.</span>
           <span className="flex gap-4">
             <a href="https://github.com/tharunramagiri/Muster" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">GitHub</a>
-            <a href="https://github.com/tharunramagiri/Muster/blob/main/LICENSE" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">MIT License</a>
+            <a href="https://github.com/tharunramagiri/Muster/blob/main/LICENSE" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">BSL 1.1</a>
           </span>
         </div>
       </footer>
