@@ -53,4 +53,12 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # Self-hosting note: the listen socket is 0.0.0.0 (set above), which opts this
 # deployment out of the strict loopback gate. For a named public hostname, also
 # set OMB_PUBLIC_HOST (e.g. muster.example.com).
+#
+# BETTER_AUTH_SECRET must be set or better-auth refuses to start. Some
+# hosting panels' "set an env var" API doesn't reliably propagate to the
+# running service, so this entrypoint self-generates and persists one to
+# the /data volume on first boot instead of depending on that path.
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist-server/index.js"]
