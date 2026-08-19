@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Menu } from "lucide-react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Loader2, Menu, LogOut } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, initAnalytics } from "@/lib/analytics";
@@ -16,30 +17,39 @@ import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
+import { AuthProvider, useAuth } from "@/lib/auth";
+import { AuthGate } from "@/components/AuthGate";
+import { LandingPage } from "@/pages/LandingPage";
+import { LoginPage } from "@/pages/LoginPage";
+import { SignupPage } from "@/pages/SignupPage";
+
+function SignOutButton() {
+  const { signOut } = useAuth();
+  return (
+    <button
+      type="button"
+      onClick={() => signOut()}
+      className="fixed bottom-4 right-4 z-50 flex items-center gap-1.5 rounded-lg border border-hairline bg-panel px-3 py-1.5 text-xs text-ink-secondary transition-colors hover:bg-raised hover:text-ink md:hidden"
+      aria-label="Sign out"
+    >
+      <LogOut size={14} />
+      Sign out
+    </button>
+  );
+}
 
 function Shell() {
   const { state, dispatch } = useStore();
-  // Mobile-only drawer state. Above md, none of these properties are emitted
-  // at all — Sidebar scopes every mobile class with max-md: rather than
-  // cancelling them with md:, which would still emit a translate value and
-  // turn the aside into a containing block for its fixed descendants (see
-  // Sidebar.tsx's className comment).
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
 
-  // Nothing on this machine can run a bot. A missing cloud login does not
-  // count — that CLI can still host a local model. Wait for the first
-  // /api/instances response before deciding: an empty list means "not asked
-  // yet", and flashing the setup screen at every launch would be worse.
   const noEngines =
     state.connected &&
     state.instances.length > 0 &&
     !state.instances.some((i) => i.snapshot.state === "available");
 
-  // App-wide shortcuts: ⌘N new bot · ⌘1–9 jump to bot · ⌘⇧[ / ⌘⇧] prev/next.
-  // Kept deliberately small; every panel already closes on Esc.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -67,19 +77,12 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [state.bots, state.selectedId, dispatch]);
 
-  // Picking a conversation closes the drawer: on a phone the chat is what you
-  // asked for, and leaving the list up would hide it. Watching activeView too
-  // catches re-selecting the bot that is already current from another view —
-  // the reducer switches the view without changing selectedId. pluginsOpen
-  // and settingsOpen cover the same idea from a different trigger: close the
-  // drawer whenever an action opens something over the chat.
   useEffect(() => {
     setDrawerOpen(false);
   }, [state.selectedId, state.activeView, state.pluginsOpen, state.settingsOpen]);
 
   return (
     <div className="flex h-full flex-col">
-      {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
       <div className="relative flex min-h-0 flex-1">
       <button
@@ -132,15 +135,14 @@ function Shell() {
       {state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
       {state.appSettingsOpen && <SettingsModal />}
       {state.pluginsOpen && <PluginsPanel />}
-      {/* mounted after the modals: same z-50 tier, so DOM order keeps the
-          palette on top when one of them is open underneath */}
       <CommandPalette />
       </div>
+      <SignOutButton />
     </div>
   );
 }
 
-export default function App() {
+function AppShell() {
   const [gated, setGated] = useState(() => !emailGateDone());
   useEffect(() => {
     initAnalytics();
@@ -152,5 +154,21 @@ export default function App() {
         {gated && <Onboarding onDone={() => setGated(false)} />}
       </StoreProvider>
     </DesktopCapabilitiesProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/sign-in" element={<LoginPage />} />
+          <Route path="/sign-up" element={<SignupPage />} />
+          <Route path="/app/*" element={<AuthGate><AppShell /></AuthGate>} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }

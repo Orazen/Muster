@@ -55,6 +55,7 @@ import {
   type TaskRecord,
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
+import { auth, toWebRequest } from "./auth.ts";
 import { PROVIDERS } from "./providers.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { buildTurnContext, engineIsFresh } from "./turn-context.ts";
@@ -2088,6 +2089,17 @@ const server = createServer(async (req, res) => {
     if (origin && !isAllowedOrigin(origin, req.headers.host)) {
       return json(res, 403, { error: "forbidden: cross-origin request" });
     }
+    // ── auth routes (Better Auth) ────────────────────────────────────────
+    if (path.startsWith("/api/auth/")) {
+      const webReq = toWebRequest(req);
+      const authRes = await auth.handler(webReq);
+      const headers: Record<string, string> = {};
+      authRes.headers.forEach((value, key) => { headers[key] = value; });
+      res.writeHead(authRes.status, headers);
+      const body = await authRes.text();
+      return res.end(body);
+    }
+
     // ── internal peer-agent comms (localhost + shared token only) ──────
     // The agents-proxy (spawned inside a bot's agent process) calls these to
     // discover peers and hand a message to one. Not part of the public API.
