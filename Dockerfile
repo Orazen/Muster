@@ -18,6 +18,7 @@ COPY server server
 COPY companion companion
 COPY scripts scripts
 COPY public public
+COPY www www
 
 RUN pnpm install --frozen-lockfile
 
@@ -32,11 +33,14 @@ ENV NODE_ENV=production \
     OMB_HOST=0.0.0.0 \
     OMB_PORT=8799 \
     OMB_DATA_DIR=/data \
-    OMB_STATIC_DIR=/app/dist
+    OMB_STATIC_DIR=/app/dist \
+    OMB_MARKETING_DIR=/app/www
 
-# Self-hosted web UI and harness server (both fully self-contained).
+# Self-hosted web UI and harness server (both fully self-contained), plus the
+# marketing landing page served at "/" for the public domain.
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./dist-server
+COPY --from=build /app/www ./www
 
 # Persist bots, transcripts, config and keys outside the container.
 VOLUME ["/data"]
@@ -49,4 +53,12 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # Self-hosting note: the listen socket is 0.0.0.0 (set above), which opts this
 # deployment out of the strict loopback gate. For a named public hostname, also
 # set OMB_PUBLIC_HOST (e.g. muster.example.com).
+#
+# BETTER_AUTH_SECRET must be set or better-auth refuses to start. Some
+# hosting panels' "set an env var" API doesn't reliably propagate to the
+# running service, so this entrypoint self-generates and persists one to
+# the /data volume on first boot instead of depending on that path.
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist-server/index.js"]

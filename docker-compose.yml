@@ -18,11 +18,14 @@ services:
       # OMB_ALLOWED_ORIGINS: comma-separated extra origins for cross-origin
       # clients (e.g. "https://app.example.com").
       OMB_PORT: "8799"
-      # REQUIRED. Signs session tokens — the image binds 0.0.0.0, so the
-      # server refuses to boot without it. Generate once and keep it stable:
+      # Signs session tokens — the image binds 0.0.0.0, so the server refuses
+      # to boot without it. Set it explicitly and keep it stable:
       #   openssl rand -base64 32
       # Changing it signs everyone out; leaking it lets sessions be forged.
-      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET, e.g. in a .env file next to this compose file}"
+      # If left empty, the entrypoint generates one on first boot and persists
+      # it to the muster-data volume, so hosting panels that cannot inject
+      # runtime env vars still come up.
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-}"
       # Optional: provide credentials via env instead of the in-app settings.
       # XAI_API_KEY: ""
       # COMPOSIO_API_KEY: ""

@@ -24,15 +24,15 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 <br>
 
-<a href="https://github.com/tharunramagiri/Muster/releases/latest/download/Muster.dmg">
-  <img src="https://img.shields.io/github/v/release/tharunramagiri/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe&cacheSeconds=300" alt="Download the latest Muster for macOS (.dmg)" height="40">
+<a href="https://github.com/Orazen/Muster/releases/latest/download/Muster.dmg">
+  <img src="https://img.shields.io/github/v/release/Orazen/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe&cacheSeconds=300" alt="Download the latest Muster for macOS (.dmg)" height="40">
 </a>
 &nbsp;
-<a href="https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-setup.exe">
-  <img src="https://img.shields.io/github/v/release/tharunramagiri/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Windows&labelColor=070707&color=4cc2ff&cacheSeconds=300" alt="Download the latest Muster for Windows (.exe)" height="40">
+<a href="https://github.com/Orazen/Muster/releases/latest/download/Muster-setup.exe">
+  <img src="https://img.shields.io/github/v/release/Orazen/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Windows&labelColor=070707&color=4cc2ff&cacheSeconds=300" alt="Download the latest Muster for Windows (.exe)" height="40">
 </a>
 
-<sub>macOS: Apple silicon · signed & notarized · one-click .dmg &nbsp;·&nbsp; Windows: 64-bit · one-click installer, no admin rights &nbsp;·&nbsp; both always the latest · [all releases](https://github.com/tharunramagiri/Muster/releases)</sub>
+<sub>macOS: Apple silicon · unsigned build (see note below) &nbsp;·&nbsp; Windows: 64-bit · one-click installer, no admin rights &nbsp;·&nbsp; both always the latest · [all releases](https://github.com/Orazen/Muster/releases)</sub>
 
 <br>
 <br>
@@ -230,15 +230,17 @@ flowchart LR
 
 | | Download | Install |
 |---|---|---|
-| **macOS** (Apple silicon) | [Muster.dmg](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster.dmg) | Drag it to Applications, open it. Signed & notarized. |
-| **Windows** (x64) | [Muster-setup.exe](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
-| **Linux** (x64) | [Muster-x86_64.deb](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-x86_64.deb) · [Muster-x86_64.AppImage](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-x86_64.AppImage) | `.deb`: `sudo dpkg -i Muster-x86_64.deb` · AppImage: `chmod +x Muster*.AppImage && ./Muster*.AppImage` |
+| **macOS** (Apple silicon) — **recommended: Homebrew** | `brew tap orazen/muster && brew install --cask muster` | Homebrew clears the quarantine flag automatically on install, so it just works — no Gatekeeper "damaged" message. |
+| **macOS** (Apple silicon) — direct download | [Muster.dmg](https://github.com/Orazen/Muster/releases/latest/download/Muster.dmg) | Drag it to Applications, open it. **Not yet signed/notarized** — macOS Gatekeeper will say *"Muster is damaged and can't be opened. You should move it to the Bin."* This is not real damage, it's an unsigned-app quarantine flag. Fix: open Terminal and run `xattr -cr /Applications/Muster.app`, then open it again — or just use Homebrew above, which avoids this entirely. (Proper Developer ID signing + notarization is tracked, see below.) |
+| **Windows** (x64) | [Muster-setup.exe](https://github.com/Orazen/Muster/releases/latest/download/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
+| **Linux** (x64) | [Muster.deb](https://github.com/Orazen/Muster/releases/latest/download/Muster.deb) · [Muster.AppImage](https://github.com/Orazen/Muster/releases/latest/download/Muster.AppImage) | `.deb`: `sudo dpkg -i Muster.deb` · AppImage: `chmod +x Muster.AppImage && ./Muster.AppImage` |
 | **Android** | [Play Store](https://play.google.com/store/apps/details?id=com.muster.companion) (coming soon) | Pair with your computer's companion service |
 | **iOS** | [App Store](https://apps.apple.com/app/muster-mobile/id1234567890) (coming soon) | Pair with your computer's companion service |
 
 **Homebrew (macOS):**
 
 ```sh
+brew tap orazen/muster
 brew install --cask muster
 ```
 
@@ -247,7 +249,7 @@ Requires [Homebrew](https://brew.sh). Auto-updates via `brew upgrade --cask must
 **From source:**
 
 ```sh
-git clone https://github.com/tharunramagiri/Muster && cd Muster
+git clone https://github.com/Orazen/Muster && cd Muster
 pnpm install
 
 pnpm dev:server    # harness server → 127.0.0.1:8799
@@ -278,7 +280,7 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage; no Swift required
 
 Unavailable native features fail closed on Ubuntu without blocking chat or cloud features. Linux local computer
 control, Wayland capture/automation, dictation, and ARM64 are tracked in
-[#29](https://github.com/tharunramagiri/Muster/issues/29) and are not claimed by the baseline package.
+[#29](https://github.com/Orazen/Muster/issues/29) and are not claimed by the baseline package.
 
 ### Self-host (web)
 

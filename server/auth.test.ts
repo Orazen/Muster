@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 /**
  * These cover the decision logic of the session gate without booting the whole
@@ -44,11 +44,16 @@ describe("isPublicApiPath", () => {
 describe("SELF_HOSTED", () => {
   const withEnv = async (env: Record<string, string | undefined>) => {
     const saved = { ...process.env };
-    Object.assign(process.env, env);
-    // Fresh module instance so the top-level const re-evaluates.
-    const mod = await import(`./auth.ts?t=${Math.random()}`);
+    for (const [key, value] of Object.entries(env)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    // Fresh module instance so the top-level const re-evaluates. A query-string
+    // specifier would be a variable dynamic import, which Vite cannot resolve.
+    vi.resetModules();
+    const mod = await import("./auth.ts");
     process.env = saved;
-    return mod as typeof import("./auth.ts");
+    return mod;
   };
 
   it("is false for the default loopback desktop install", async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createHmac } from "node:crypto";
 
 /**
@@ -56,13 +56,19 @@ describe("verifyWebhookSignature", () => {
   const sign = (body: string, timestamp: number, withSecret = secret) =>
     `t=${timestamp},v1=${createHmac("sha256", withSecret).update(`${timestamp}.${body}`, "utf8").digest("hex")}`;
 
-  const load = async () => {
-    const saved = process.env.STRIPE_WEBHOOK_SECRET;
+  // verifyWebhookSignature reads the secret at call time, so setting the env
+  // var around each test is enough — no module cache to defeat.
+  let saved: string | undefined;
+  beforeEach(() => {
+    saved = process.env.STRIPE_WEBHOOK_SECRET;
     process.env.STRIPE_WEBHOOK_SECRET = secret;
-    const mod = await import(`./billing.ts?sig=${Math.random()}`);
-    process.env.STRIPE_WEBHOOK_SECRET = saved;
-    return mod as typeof import("./billing.ts");
-  };
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.STRIPE_WEBHOOK_SECRET;
+    else process.env.STRIPE_WEBHOOK_SECRET = saved;
+  });
+
+  const load = async () => import("./billing.ts");
 
   it("accepts a correctly signed, recent payload", async () => {
     const { verifyWebhookSignature } = await load();
@@ -104,8 +110,11 @@ describe("verifyWebhookSignature", () => {
 
   it("rejects everything when no webhook secret is configured", async () => {
     const { verifyWebhookSignature } = await import("./billing.ts");
+    // Signed correctly, but with no secret configured there is nothing to
+    // verify against — an unconfigured deployment must not accept webhooks.
     const body = "{}";
     const now = Math.floor(Date.now() / 1000);
+    delete process.env.STRIPE_WEBHOOK_SECRET;
     expect(verifyWebhookSignature(body, sign(body, now))).toBe(false);
   });
 });

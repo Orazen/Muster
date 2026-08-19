@@ -103,6 +103,10 @@ import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
+// Public marketing landing page (www/), served at "/" only — everything
+// else (the app itself, /api/*, /assets/*) is untouched. Not set for the
+// packaged Electron app, only the self-hosted Docker deployment.
+const MARKETING_DIR = process.env.OMB_MARKETING_DIR || null;
 
 // Self-hosting: bind to 0.0.0.0 to serve the web UI beyond loopback. The
 // loopback host/origin gate below stays in force unless OMB_ALLOWED_ORIGINS
@@ -3674,6 +3678,19 @@ const server = createServer(async (req, res) => {
         }
         case "screenshot":
           return json(res, 200, await box.screenshotBox(cfg, botId));
+      }
+    }
+
+    // public marketing landing page at "/" — only exact "/" (and its two
+    // small local assets), never intercepts the app itself or deep links.
+    if (method === "GET" && MARKETING_DIR && (path === "/" || path === "/hero.png")) {
+      try {
+        const file = join(MARKETING_DIR, path === "/" ? "index.html" : path.slice(1));
+        const data = readFileSync(file);
+        res.writeHead(200, { "content-type": MIME[extname(file)] ?? "text/html" });
+        return res.end(data);
+      } catch {
+        /* fall through to the app SPA below */
       }
     }
 

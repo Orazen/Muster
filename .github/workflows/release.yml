@@ -124,6 +124,17 @@ jobs:
           # Ensure the stable download name the README points at exists
           [ -f "release/Muster.dmg" ] || { echo "::error::missing Muster.dmg"; exit 1; }
 
+      - name: Add stable-filename copy for the /latest/download/ badge
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          src="release/Muster-${VERSION}.dmg"
+          if [ -f "$src" ]; then
+            cp "$src" release/Muster.dmg
+          else
+            echo "::error::expected $src (from electron-builder.yml dmg.artifactName) — README/Homebrew cask 'latest' link will 404"
+            exit 1
+          fi
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos-artifacts
@@ -192,8 +203,17 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
-          cp "release/Muster-${VERSION}-setup.exe" release/Muster-setup.exe
-          [ -f "release/Muster-setup.exe" ] || { echo "::error::missing Muster-setup.exe"; exit 1; }
+          # electron-builder.yml's win.nsis.artifactName is
+          # "Muster-${version}-setup.${ext}" (no "-x64" — do not add one here,
+          # a previous version of this step silently no-op'd on a wrong glob).
+          src="release/Muster-${VERSION}-setup.exe"
+          if [ -f "$src" ]; then
+            cp "$src" release/Muster-setup.exe
+          else
+            echo "::error::expected $src (from electron-builder.yml nsis.artifactName) — README's 'latest' download badge will 404"
+            ls -lh release/*.exe 2>/dev/null || true
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -228,6 +248,13 @@ jobs:
         run: |
           echo "=== Linux artifacts ==="
           ls -lh release/*.AppImage release/*.deb 2>/dev/null
+
+      - name: Add stable-filename copies for the /latest/download/ links
+        run: |
+          deb=$(ls release/*.deb | head -1)
+          appimage=$(ls release/*.AppImage | head -1)
+          [ -f "$deb" ] && cp "$deb" release/Muster.deb
+          [ -f "$appimage" ] && cp "$appimage" release/Muster.AppImage
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

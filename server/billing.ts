@@ -29,7 +29,12 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 export const IS_CLOUD = process.env.MUSTER_CLOUD === "true";
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY?.trim();
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET?.trim();
+/**
+ * Read at call time, not module load: the Docker entrypoint and some hosting
+ * panels populate the environment after this module is first imported, and a
+ * value captured at load time would be permanently empty.
+ */
+const webhookSecret = () => process.env.STRIPE_WEBHOOK_SECRET?.trim();
 const STRIPE_PRICE_MONTHLY = process.env.STRIPE_PRICE_MONTHLY?.trim();
 const STRIPE_PRICE_ANNUAL = process.env.STRIPE_PRICE_ANNUAL?.trim();
 
@@ -252,7 +257,8 @@ export async function createPortalSession(opts: {
  * five-minute window so a captured payload cannot be replayed later.
  */
 export function verifyWebhookSignature(rawBody: string, signatureHeader: string | undefined): boolean {
-  if (!STRIPE_WEBHOOK_SECRET || !signatureHeader) return false;
+  const secret = webhookSecret();
+  if (!secret || !signatureHeader) return false;
 
   const parts = new Map(
     signatureHeader.split(",").map((pair) => {
@@ -268,7 +274,7 @@ export function verifyWebhookSignature(rawBody: string, signatureHeader: string 
   const age = Math.abs(Date.now() / 1000 - Number(timestamp));
   if (!Number.isFinite(age) || age > 300) return false;
 
-  const expected = createHmac("sha256", STRIPE_WEBHOOK_SECRET)
+  const expected = createHmac("sha256", secret)
     .update(`${timestamp}.${rawBody}`, "utf8")
     .digest("hex");
 
