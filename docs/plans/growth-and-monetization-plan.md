@@ -100,3 +100,26 @@ come from **layers around it**, mirroring how rakazo/Cursor/other open-core AI t
 - Expo/EAS account + token for Android builds?
 - Do you want me to open the botdirectory.ai PR(s) now (I can do this immediately, no blockers)?
 - Go/no-go and rough budget appetite for a hosted "Muster Cloud" tier?
+
+
+## Addendum: stablyai/orca competitive intel (audited 2026-08-19)
+
+`stablyai/orca` — **48,884⭐, MIT, YC-backed** (by far the largest project in this space we've
+looked at). Different core positioning than Muster/rakazo/OpenMausBot/Sub8: Orca is an
+**"AI Orchestrator for 100x builders"** — a developer IDE for running multiple coding-agent CLIs
+(Claude Code, Codex, Grok, Cursor, Copilot, OpenCode) **in parallel git worktrees**, not a
+"personal team of bots for any task" like Muster.
+
+Key validated patterns worth noting (not code to copy — different product shape, but proof of
+what scales in this market):
+- **Mobile companion is a first-class feature**, not an afterthought — Orca has both a published
+  iOS App Store app and a public Android APK download straight from GitHub Releases (exactly what
+  we can do for Muster's Android companion right now without a Play Console account).
+- **SSH/remote worktrees** — run agents on a remote box, not just local Docker — same idea as
+  Muster's "cloud computer" but framed for coding workflows.
+- **CLI-first**: `orca worktree create`, `snapshot`, `click`, `fill` — agents can drive Orca itself.
+  Useful pattern for Muster: exposing a companion CLI for scripting bot lifecycle.
+- 48k stars proves the "bring your own agent CLI, orchestrate many at once" category has enormous
+  demand — reinforces the sequencing plan above (mobile ship + botdirectory.ai distribution) rather
+  than changing Muster's core positioning, since Orca and Muster don't fully overlap (dev-worktree
+  orchestration vs. general-purpose bot roster with computer-use).
