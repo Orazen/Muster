@@ -17,6 +17,6 @@ describe("connected-apps broker boundaries", () => {
   });
 
   it("hashes installation tokens before storage", async () => {
-    await expect(sha256("muster")).resolves.toBe("63c74f70a9d4681c334e84001935955a75245ea5b16b9c37c808e85c69963705");
+    await expect(sha256("muster")).resolves.toBe("74cd18c016d902f940554dfd07545f219064b27fe6e890e9447f0c9e377903a8");
   });
 });

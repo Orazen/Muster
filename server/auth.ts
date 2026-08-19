@@ -1,15 +1,17 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { betterAuth } from "better-auth";
 import { join } from "node:path";
+import { mkdirSync } from "node:fs";
 import { DATA_DIR } from "./config.ts";
 
-let _db: InstanceType<typeof Database> | null = null;
+let _db: DatabaseSync | null = null;
 
-function getDb(): InstanceType<typeof Database> {
+function getDb(): DatabaseSync {
   if (!_db) {
-    _db = new Database(join(DATA_DIR, "auth.db"));
-    _db.pragma("journal_mode = WAL");
-    _db.pragma("foreign_keys = ON");
+    mkdirSync(DATA_DIR, { recursive: true });
+    _db = new DatabaseSync(join(DATA_DIR, "auth.db"));
+    _db.exec("PRAGMA journal_mode = WAL");
+    _db.exec("PRAGMA foreign_keys = ON");
   }
   return _db;
 }
