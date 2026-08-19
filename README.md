@@ -240,6 +240,7 @@ flowchart LR
 **Homebrew (macOS):**
 
 ```sh
+brew tap orazen/muster
 brew install --cask muster
 ```
 
