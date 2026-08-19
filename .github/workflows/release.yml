@@ -204,6 +204,7 @@ jobs:
   publish:
     name: Create Release
     needs: [macos, windows, linux]
+    if: ${{ !cancelled() && (needs.macos.result == 'success' || needs.linux.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
