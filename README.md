@@ -232,6 +232,8 @@ flowchart LR
 | **macOS** (Apple silicon) | [Muster.dmg](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster.dmg) | Drag it to Applications, open it. Signed & notarized. |
 | **Windows** (x64) | [Muster-setup.exe](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
 | **Linux** (x64) | [Muster-x86_64.deb](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-x86_64.deb) · [Muster-x86_64.AppImage](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-x86_64.AppImage) | `.deb`: `sudo dpkg -i Muster-x86_64.deb` · AppImage: `chmod +x Muster*.AppImage && ./Muster*.AppImage` |
+| **Android** | [Play Store](https://play.google.com/store/apps/details?id=com.muster.companion) (coming soon) | Pair with your computer's companion service |
+| **iOS** | [App Store](https://apps.apple.com/app/muster-mobile/id1234567890) (coming soon) | Pair with your computer's companion service |
 
 **Homebrew (macOS):**
 
@@ -305,6 +307,25 @@ in the sidebar footer) when you want to enable its integration:
 
 Composio and Box are third-party services with their own accounts and terms. Box is a paid service after
 its trial, and using a cloud computer may incur charges.
+
+### Mobile companions
+
+The iOS and Android apps are thin clients that connect to the same companion
+service on your computer. They let you:
+
+- Answer approvals and questions on the go
+- Follow replies as they stream
+- Send messages to bots and rooms
+- Search transcripts and share as Markdown/JSON
+
+The phone owns nothing — your computer is the source of truth for all bot
+data, credentials, and transcripts. See [`ios/README.md`](ios/README.md) and
+[`android-companion/README.md`](android-companion/README.md) for details.
+
+| Platform | Status | Notes |
+|---|---|---|
+| iOS | Built, ready for App Store submission | Needs Apple Developer account |
+| Android | Built (React Native + Expo) | Needs Play Store developer account |
 
 ### Development commands
 
