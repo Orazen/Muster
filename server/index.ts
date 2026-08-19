@@ -55,7 +55,24 @@ import {
   type TaskRecord,
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
-import { auth, toWebRequest } from "./auth.ts";
+import {
+  auth,
+  toWebRequest,
+  getSession,
+  isPublicApiPath,
+  authCapabilities,
+  SELF_HOSTED,
+  PUBLIC_BASE_URL,
+} from "./auth.ts";
+import {
+  IS_CLOUD,
+  isBillingConfigured,
+  getSubscription,
+  createCheckoutSession,
+  createPortalSession,
+  verifyWebhookSignature,
+  handleWebhookEvent,
+} from "./billing.ts";
 import { PROVIDERS } from "./providers.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { buildTurnContext, engineIsFresh } from "./turn-context.ts";
@@ -1974,6 +1991,40 @@ function json(res: ServerResponse, status: number, body: unknown) {
   res.end(data);
 }
 
+/**
+ * Read the body as raw text, without parsing.
+ *
+ * Stripe signs the exact bytes it sent, so the webhook signature has to be
+ * checked against them — JSON.parse + re-serialise reorders keys and drops
+ * whitespace, and the HMAC no longer matches.
+ */
+function readRawBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    let bytes = 0;
+    let done = false;
+    req.on("data", (c) => {
+      if (done) return;
+      bytes += typeof c === "string" ? Buffer.byteLength(c) : c.length;
+      if (bytes > 1_000_000) {
+        done = true;
+        return reject(Object.assign(new Error("body too large"), { status: 413 }));
+      }
+      data += c;
+    });
+    req.on("end", () => {
+      if (done) return;
+      done = true;
+      resolve(data);
+    });
+    req.on("error", (e) => {
+      if (done) return;
+      done = true;
+      reject(e instanceof Error ? e : new Error(String(e)));
+    });
+  });
+}
+
 function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -2045,7 +2096,8 @@ function isLoopbackHost(host: string | undefined): boolean {
  * that this deployment is meant to be reached beyond loopback. The default
  * stays strict-loopback — exact behaviour below.
  */
-const SELF_HOSTED = HOST !== "127.0.0.1" || Boolean(process.env.OMB_PUBLIC_HOST);
+// SELF_HOSTED is imported from auth.ts — single source of truth, since auth.ts
+// needs the same signal to decide whether BETTER_AUTH_SECRET is mandatory.
 
 function isAllowedOrigin(origin: string | undefined | null, host: string | undefined): boolean {
   if (!origin) return true; // non-browser clients (CLIs, curl, tests) send none
@@ -2098,6 +2150,55 @@ const server = createServer(async (req, res) => {
       res.writeHead(authRes.status, headers);
       const body = await authRes.text();
       return res.end(body);
+    }
+
+    // ── auth capabilities ──────────────────────────────────────────────
+    // Read by the sign-in screen before a session exists, so it knows which
+    // social buttons to render and whether "forgot password" can work.
+    if (method === "GET" && path === "/api/auth-capabilities") {
+      return json(res, 200, authCapabilities());
+    }
+
+    // ── Stripe webhook ─────────────────────────────────────────────────
+    // Before the session gate: Stripe authenticates with a signature over the
+    // raw body, not a cookie. Must also run before any body parsing.
+    if (method === "POST" && path === "/api/billing/webhook") {
+      if (!IS_CLOUD) return json(res, 404, { error: "billing is not enabled" });
+      const raw = await readRawBody(req);
+      const signature = req.headers["stripe-signature"];
+      if (!verifyWebhookSignature(raw, Array.isArray(signature) ? signature[0] : signature)) {
+        return json(res, 400, { error: "invalid signature" });
+      }
+      try {
+        handleWebhookEvent(JSON.parse(raw));
+      } catch {
+        return json(res, 400, { error: "invalid payload" });
+      }
+      // 200 regardless of what we did with it, or Stripe retries forever.
+      return json(res, 200, { received: true });
+    }
+
+    // ── session gate ───────────────────────────────────────────────────
+    // Everything below this line is privileged: config writes, container
+    // lifecycle, and `/api/bots/:id/computer/exec` (arbitrary commands on the
+    // host). The React <AuthGate> only guards the UI, so the check has to
+    // happen here or a self-hosted deployment is an open remote shell.
+    //
+    // Loopback keeps its historical implicit trust: on a single-user desktop
+    // install the OS boundary is the credential, and demanding a login there
+    // would break every existing install and the packaged-server smoke test.
+    // Once the operator opts into self-hosting (OMB_HOST / OMB_PUBLIC_HOST),
+    // a real session is mandatory for every non-public route.
+    if (
+      SELF_HOSTED &&
+      path.startsWith("/api/") &&
+      !isPublicApiPath(path) &&
+      !path.startsWith("/api/internal/")
+    ) {
+      const session = await getSession(req);
+      if (!session) {
+        return json(res, 401, { error: "unauthorized: sign in required" });
+      }
     }
 
     // ── internal peer-agent comms (localhost + shared token only) ──────
@@ -3218,6 +3319,55 @@ const server = createServer(async (req, res) => {
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
       return json(res, 200, { app: "muster", pid: process.pid, static: Boolean(STATIC_DIR) });
+    }
+
+    // ── billing (cloud only) ───────────────────────────────────────────
+    // Inert when self-hosting: MUSTER_CLOUD is unset, so these 404 and the
+    // Settings panel that calls them never renders. Self-hosters are never
+    // asked for a licence key and nothing is withheld from them.
+    if (path.startsWith("/api/billing/")) {
+      if (!IS_CLOUD) return json(res, 404, { error: "billing is not enabled" });
+
+      const session = await getSession(req);
+      if (!session) return json(res, 401, { error: "unauthorized: sign in required" });
+
+      const account = await auth.api
+        .getSession({ headers: toWebRequest(req).headers })
+        .catch(() => null);
+      const email = account?.user?.email;
+      if (!email) return json(res, 401, { error: "unauthorized: sign in required" });
+
+      if (method === "GET" && path === "/api/billing/subscription") {
+        return json(res, 200, {
+          configured: isBillingConfigured(),
+          subscription: await getSubscription(session.userId, email),
+        });
+      }
+
+      if (method === "POST" && path === "/api/billing/checkout") {
+        const body = await readBody(req);
+        const interval = body.interval === "year" ? "year" : "month";
+        const quantity = Number.isFinite(body.quantity) ? Number(body.quantity) : 1;
+        const url = await createCheckoutSession({
+          userId: session.userId,
+          email,
+          interval,
+          quantity,
+          returnUrl: `${PUBLIC_BASE_URL}/app/settings/billing`,
+        });
+        if (!url) return json(res, 503, { error: "billing is not configured" });
+        return json(res, 200, { url });
+      }
+
+      if (method === "POST" && path === "/api/billing/portal") {
+        const url = await createPortalSession({
+          userId: session.userId,
+          email,
+          returnUrl: `${PUBLIC_BASE_URL}/app/settings/billing`,
+        });
+        if (!url) return json(res, 503, { error: "billing is not configured" });
+        return json(res, 200, { url });
+      }
     }
 
     // ── inspector: a thread's runtime events + native protocol tee ──
