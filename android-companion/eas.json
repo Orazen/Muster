@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Muster Mobile",
+    "slug": "muster-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.muster.companion"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0a0a"
+      },
+      "package": "com.muster.companion"
+    }
+  }
+}
