@@ -18,7 +18,7 @@ Talk to them like contacts. Watch them work. Approve what matters.
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Electron](https://img.shields.io/badge/Electron-macOS%20%C2%B7%20Windows%20%C2%B7%20Ubuntu-2B2E3A?logo=electron&logoColor=9FEAF9)
 ![Agents](https://img.shields.io/badge/agents-10%2B%20engines-d97757)
-![License](https://img.shields.io/badge/license-MIT-38d591)
+![License](https://img.shields.io/badge/license-BSL%201.1-38d591)
 ![PRs](https://img.shields.io/badge/PRs-welcome-38d591)
 ![Source](https://img.shields.io/badge/source-available-d97757)
 
