@@ -72,12 +72,83 @@ function resolveSecret(): string {
 
 let _db: DatabaseSync | null = null;
 
+/**
+ * Better Auth's schema, applied idempotently on every boot. There is no
+ * separate migration step anywhere in the deploy pipeline (no CLI run in
+ * Docker, no init container), so a fresh `auth.db` had zero tables and every
+ * sign-up/sign-in failed with "no such table: user" until an operator ran
+ * this by hand. CREATE TABLE IF NOT EXISTS makes re-running safe on every
+ * restart; ALTER TABLE additions are individually guarded since SQLite has
+ * no "ADD COLUMN IF NOT EXISTS".
+ */
+function migrate(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS "user" (
+      "id" text not null primary key,
+      "name" text not null,
+      "email" text not null unique,
+      "emailVerified" integer not null,
+      "image" text,
+      "createdAt" date not null,
+      "updatedAt" date not null
+    );
+    CREATE TABLE IF NOT EXISTS "session" (
+      "id" text not null primary key,
+      "expiresAt" date not null,
+      "token" text not null unique,
+      "createdAt" date not null,
+      "updatedAt" date not null,
+      "ipAddress" text,
+      "userAgent" text,
+      "userId" text not null references "user" ("id") on delete cascade
+    );
+    CREATE TABLE IF NOT EXISTS "account" (
+      "id" text not null primary key,
+      "accountId" text not null,
+      "providerId" text not null,
+      "userId" text not null references "user" ("id") on delete cascade,
+      "accessToken" text,
+      "refreshToken" text,
+      "idToken" text,
+      "accessTokenExpiresAt" date,
+      "refreshTokenExpiresAt" date,
+      "scope" text,
+      "password" text,
+      "createdAt" date not null,
+      "updatedAt" date not null
+    );
+    CREATE TABLE IF NOT EXISTS "verification" (
+      "id" text not null primary key,
+      "identifier" text not null,
+      "value" text not null,
+      "expiresAt" date not null,
+      "createdAt" date not null,
+      "updatedAt" date not null
+    );
+    CREATE INDEX IF NOT EXISTS "session_userId_idx" on "session" ("userId");
+    CREATE INDEX IF NOT EXISTS "account_userId_idx" on "account" ("userId");
+    CREATE INDEX IF NOT EXISTS "verification_identifier_idx" on "verification" ("identifier");
+  `);
+
+  // Columns added after the tables above first shipped. Each ALTER is
+  // guarded individually because SQLite has no IF NOT EXISTS for columns,
+  // and a fresh CREATE TABLE above already includes them going forward.
+  const columnAdditions: Array<[table: string, column: string, ddl: string]> = [
+    ["account", "issuer", 'ALTER TABLE "account" ADD COLUMN "issuer" text'],
+  ];
+  for (const [table, column, ddl] of columnAdditions) {
+    const cols = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === column)) db.exec(ddl);
+  }
+}
+
 function getDb(): DatabaseSync {
   if (!_db) {
     mkdirSync(DATA_DIR, { recursive: true });
     _db = new DatabaseSync(join(DATA_DIR, "auth.db"));
     _db.exec("PRAGMA journal_mode = WAL");
     _db.exec("PRAGMA foreign_keys = ON");
+    migrate(_db);
   }
   return _db;
 }
