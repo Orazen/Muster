@@ -142,7 +142,10 @@ export type AgentAvatarProps = {
 function AgentAvatarComponent(
   {
     color,
-    character = "cursor",
+    // The musterbot star is the default teammate body — every bot is a
+    // star unless the user explicitly picks the cursor mascot or a lottie
+    // character in settings.
+    character = "star",
     state = "idle",
     expression,
     size = 44,

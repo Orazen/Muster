@@ -404,7 +404,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 Bot
               </span>
               <button
-                onClick={() => patch({ color: "green", character: "cursor", mascotExpression: null })}
+                onClick={() => patch({ color: "orange", character: "star", mascotExpression: null })}
                 className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
               >
                 Reset
@@ -422,7 +422,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                     onClick={() => patch({ character })}
                     className={cn(
                       "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-raised",
-                      (bot.character ?? "cursor") === character && "ring-2 ring-accent-border",
+                      (bot.character ?? "star") === character && "ring-2 ring-accent-border",
                     )}
                     title={character === "cursor" ? "Cursor mascot" : character === "star" ? "Star teammate" : "Lottie bot"}
                     aria-label={`Use the ${character} character`}

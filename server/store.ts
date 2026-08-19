@@ -301,10 +301,10 @@ const GROUPS_FILE = join(DATA_DIR, "groups.json");
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
 
 const COLORS: AgentColor[] = [
+  "orange",
   "green",
   "blue",
   "red",
-  "orange",
   "purple",
   "cyan",
   "pink",
