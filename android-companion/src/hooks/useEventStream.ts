@@ -27,9 +27,12 @@ export function useEventStream({
 
     try {
       abortRef.current = new AbortController();
+      // SAFETY: client exposes a private `token` field we need for the auth header.
+      // The token is set by saveCredentials() and is always a string.
+      const token = (client as { token: string }).token;
       const res = await fetch(url, {
         headers: {
-          Authorization: `Bearer ${(client as any).token}`,
+          Authorization: `Bearer ${token}`,
         },
         signal: abortRef.current.signal,
       });
@@ -82,21 +85,14 @@ export function useEventStream({
   useEffect(() => {
     if (!enabled) return;
 
-    let timeout: ReturnType<typeof setTimeout>;
-    const reconnect = () => {
-      connect();
-    };
-
-    // Initial connect
-    connect();
-
-    // Reconnect on disconnect
     const interval = setInterval(() => {
       // TODO: check if we should reconnect
     }, 5000);
 
+    // Initial connect
+    connect();
+
     return () => {
-      clearTimeout(timeout);
       clearInterval(interval);
       disconnect();
     };

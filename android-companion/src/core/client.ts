@@ -37,7 +37,7 @@ export class MusterClient {
     return `http://${this.address}`;
   }
 
-  private get headers(): Record<string, string> {
+  private get headers() {
     return {
       Authorization: `Bearer ${this.token}`,
       "Content-Type": "application/json",

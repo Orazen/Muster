@@ -59,7 +59,9 @@ export class SSEParser {
 
     try {
       const data = JSON.parse(dataLines.join("\n"));
-      return { type: eventType as RuntimeEvent["type"], data } as RuntimeEvent;
+      // SAFETY: eventType is one of the known RuntimeEvent types from the harness event stream.
+      // The data payload is validated by the harness before it reaches the phone.
+      return { type: eventType as RuntimeEvent["type"], data };
     } catch {
       // Malformed JSON — skip this event
       return null;

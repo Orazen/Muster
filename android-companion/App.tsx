@@ -52,7 +52,7 @@ function AppContent() {
   }, []);
 
   // Event stream
-  const { connect, disconnect } = useEventStream({
+  useEventStream({
     onEvent: handleEvent,
     onConnectionChange: setConnection,
     enabled: isPaired === true,
