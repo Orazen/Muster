@@ -18,8 +18,9 @@ on:
     tags:
       - "v*"
 
+# Least privilege: only the publish job writes back. Build jobs read.
 permissions:
-  contents: write
+  contents: read
 
 env:
   NODE_VERSION: "24"
@@ -30,10 +31,21 @@ jobs:
     name: macOS (arm64)
     runs-on: macos-latest
     timeout-minutes: 45
+    # Job-level env, NOT step-level: a step's own `env:` block is out of scope
+    # for that step's `if:` expression, so testing it there silently skipped
+    # signing and notarization on every run.
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -42,9 +54,6 @@ jobs:
       # Code signing (optional — skipped if secrets are not set)
       - name: Import Apple certificate
         if: ${{ env.APPLE_CERTIFICATE != '' }}
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           # Create a temporary keychain
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
@@ -70,33 +79,52 @@ jobs:
       # Notarization (optional — skipped if secrets are not set)
       - name: Notarize
         if: ${{ env.APPLE_ID != '' }}
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          set -euo pipefail
           DMG=$(ls release/*.dmg | head -1)
-          notarytool submit "$DMG" \
+          # `notarytool` is an xcrun subcommand, not a bare executable.
+          xcrun notarytool submit "$DMG" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait
-          staple=$(ls release/*.dmg | head -1)
-          xcrun stapler staple "$staple"
+          xcrun stapler staple "$DMG"
+
+      # Fail loudly if signing was configured but did not take, rather than
+      # shipping a build that Gatekeeper rejects and auto-update cannot apply.
+      - name: Verify signature
+        if: ${{ env.APPLE_CERTIFICATE != '' }}
+        run: |
+          set -euo pipefail
+          APP=$(ls -d release/mac*/Muster.app | head -1)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          spctl --assess --type exec -vv "$APP"
 
       # Clean up keychain
       - name: Clean up keychain
         if: always() && env.KEYCHAIN_PATH != ''
         run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
 
+      # electron-builder emits Muster-${version}.dmg, but the README and the
+      # landing page link to /releases/latest/download/Muster.dmg — a STABLE
+      # name. Without this copy that button is a 404.
+      - name: Copy to stable download name
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          cp "release/Muster-${VERSION}.dmg" release/Muster.dmg
+
       - name: Verify artifacts
         run: |
+          set -euo pipefail
           echo "=== macOS artifacts ==="
           ls -lh release/*.dmg release/*.zip release/*.yml 2>/dev/null
           # Ensure latest-mac.yml exists (required for auto-update)
           [ -f "release/latest-mac.yml" ] || { echo "::error::missing latest-mac.yml"; exit 1; }
+          # Ensure the stable download name the README points at exists
+          [ -f "release/Muster.dmg" ] || { echo "::error::missing Muster.dmg"; exit 1; }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos-artifacts
           path: |
@@ -112,9 +140,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -153,13 +183,19 @@ jobs:
           kill $pid 2>/dev/null || true
           exit 1
 
-      - name: Rename installer for stable download URL
+      # nsis.artifactName is Muster-${version}-setup.exe — there is no "-x64-"
+      # segment. The old copy referenced one, failed every run, and `|| true`
+      # hid it, so Muster-setup.exe was never published and the README's
+      # download button 404'd. No error suppression here: a mismatch must fail.
+      - name: Copy to stable download name
         shell: bash
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
-          cp release/Muster-${VERSION}-x64-setup.exe release/Muster-setup.exe 2>/dev/null || true
+          cp "release/Muster-${VERSION}-setup.exe" release/Muster-setup.exe
+          [ -f "release/Muster-setup.exe" ] || { echo "::error::missing Muster-setup.exe"; exit 1; }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-artifacts
           path: |
@@ -175,9 +211,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -191,7 +229,7 @@ jobs:
           echo "=== Linux artifacts ==="
           ls -lh release/*.AppImage release/*.deb 2>/dev/null
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-artifacts
           path: |
@@ -207,20 +245,49 @@ jobs:
     if: ${{ !cancelled() && (needs.macos.result == 'success' || needs.linux.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The only job that needs write access.
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
 
       - name: List all artifacts
         run: find artifacts -type f | sort
 
+      # A partial release is allowed, but installed clients on the missing
+      # platform would poll a release with no latest*.yml manifest and fail
+      # their update check. Publish those as a draft so a human confirms.
+      - name: Decide draft state
+        id: draft
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.macos.result }}" != "success" ] \
+            || [ "${{ needs.windows.result }}" != "success" ] \
+            || [ "${{ needs.linux.result }}" != "success" ]; then
+            echo "::warning::not every platform built — publishing as a draft"
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify stable download names are present
+        if: ${{ steps.draft.outputs.value == 'false' }}
+        run: |
+          set -euo pipefail
+          # These exact filenames are what README.md and www/index.html link to.
+          [ -f artifacts/macos-artifacts/Muster.dmg ] \
+            || { echo "::error::Muster.dmg missing — the README download button would 404"; exit 1; }
+          [ -f artifacts/windows-artifacts/Muster-setup.exe ] \
+            || { echo "::error::Muster-setup.exe missing — the README download button would 404"; exit 1; }
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2.3.2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          draft: false
+          draft: ${{ steps.draft.outputs.value }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: |
