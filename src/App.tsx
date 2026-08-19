@@ -20,6 +20,8 @@ import { AuthGate } from "@/components/AuthGate";
 import { LandingPage } from "@/pages/LandingPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { SignupPage } from "@/pages/SignupPage";
+import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 
 function SignOutButton() {
   const { signOut } = useAuth();
@@ -158,6 +160,8 @@ export default function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/sign-in" element={<LoginPage />} />
           <Route path="/sign-up" element={<SignupPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/app/*" element={<AuthGate><AppShell /></AuthGate>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

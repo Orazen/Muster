@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
+import { SocialSignIn } from "@/components/SocialSignIn";
 import { Star } from "lucide-react";
 
 export function LoginPage() {
-  const { signIn } = useAuth();
+  const { signIn, capabilities } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const justReset = params.get("reset") === "done";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -39,9 +42,16 @@ export function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-hairline bg-panel p-6">
+          {justReset && (
+            <div className="rounded-lg bg-accent/10 px-4 py-3 text-sm text-ink">
+              Password updated. Sign in with your new one.
+            </div>
+          )}
           {error && (
             <div className="rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>
           )}
+
+          <SocialSignIn action="Sign in" />
 
           <div>
             <label htmlFor="email" className="mb-1 block text-sm font-medium text-ink-secondary">
@@ -59,9 +69,19 @@ export function LoginPage() {
           </div>
 
           <div>
-            <label htmlFor="password" className="mb-1 block text-sm font-medium text-ink-secondary">
-              Password
-            </label>
+            <div className="mb-1 flex items-baseline justify-between">
+              <label htmlFor="password" className="block text-sm font-medium text-ink-secondary">
+                Password
+              </label>
+              {capabilities.passwordReset && (
+                <Link
+                  to="/forgot-password"
+                  className="text-xs font-medium text-accent hover:text-accent/80"
+                >
+                  Forgot?
+                </Link>
+              )}
+            </div>
             <input
               id="password"
               type="password"

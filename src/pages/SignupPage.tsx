@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
+import { SocialSignIn } from "@/components/SocialSignIn";
 import { Star } from "lucide-react";
 
 export function SignupPage() {
@@ -47,6 +48,8 @@ export function SignupPage() {
           {error && (
             <div className="rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>
           )}
+
+          <SocialSignIn action="Sign up" />
 
           <div>
             <label htmlFor="name" className="mb-1 block text-sm font-medium text-ink-secondary">
