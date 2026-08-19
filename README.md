@@ -231,10 +231,15 @@ flowchart LR
 |---|---|---|
 | **macOS** (Apple silicon) | [Muster.dmg](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster.dmg) | Drag it to Applications, open it. Signed & notarized. |
 | **Windows** (x64) | [Muster-setup.exe](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
+| **Linux** (x64) | [Muster-x86_64.deb](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-x86_64.deb) · [Muster-x86_64.AppImage](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-x86_64.AppImage) | `.deb`: `sudo dpkg -i Muster-x86_64.deb` · AppImage: `chmod +x Muster*.AppImage && ./Muster*.AppImage` |
 
-**Ubuntu Desktop beta:** build the `.deb` or AppImage from source using the commands below. Release downloads
-will be linked here once Linux publishing is enabled. See [the Ubuntu Desktop guide](docs/linux-desktop.md) for
-installation, capabilities, and troubleshooting.
+**Homebrew (macOS):**
+
+```sh
+brew install --cask muster
+```
+
+Requires [Homebrew](https://brew.sh). Auto-updates via `brew upgrade --cask muster`.
 
 **From source:**
 
@@ -311,6 +316,15 @@ pnpm check:electron # syntax-check Electron main/preload files
 pnpm package:win    # Windows installer + zip → release/
 pnpm package:linux  # Ubuntu x64 .deb + AppImage → release/
 ```
+
+### Releasing
+
+```sh
+pnpm bump patch          # 0.1.27 → 0.1.28 (also: minor, major, or explicit 0.2.0)
+pnpm bump patch --push   # same, but also pushes the tag → triggers release.yml
+```
+
+The `release.yml` workflow builds macOS, Windows, and Linux in parallel, then creates a GitHub Release with all artifacts and the auto-update YML files.
 
 ## Status
 

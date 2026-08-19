@@ -1,0 +1,228 @@
+# Release workflow — triggered by v* tags, builds all platforms, creates
+# a GitHub Release with every artifact and the auto-update YML files.
+#
+# macOS code signing: set these repository secrets if you have an Apple
+# Developer certificate. The build still works without them (unsigned),
+# but auto-update on macOS requires a signed+notarized build.
+#
+# Required secrets (Settings → Secrets → Actions):
+#   APPLE_CERTIFICATE          — Base64-encoded .p12 certificate
+#   APPLE_CERTIFICATE_PASSWORD — Password for the .p12
+#   APPLE_ID                   — Apple ID email for notarization
+#   APPLE_APP_PASSWORD         — App-specific password for notarization
+#   APPLE_TEAM_ID              — 10-char team identifier
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  # ── macOS ──────────────────────────────────────────────────────────────
+  macos:
+    name: macOS (arm64)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Code signing (optional — skipped if secrets are not set)
+      - name: Import Apple certificate
+        if: ${{ env.APPLE_CERTIFICATE != '' }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          # Create a temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import the certificate
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - run: pnpm package:mac
+
+      # Notarization (optional — skipped if secrets are not set)
+      - name: Notarize
+        if: ${{ env.APPLE_ID != '' }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          DMG=$(ls release/*.dmg | head -1)
+          notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          staple=$(ls release/*.dmg | head -1)
+          xcrun stapler staple "$staple"
+
+      # Clean up keychain
+      - name: Clean up keychain
+        if: always() && env.KEYCHAIN_PATH != ''
+        run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
+
+      - name: Verify artifacts
+        run: |
+          echo "=== macOS artifacts ==="
+          ls -lh release/*.dmg release/*.zip release/*.yml 2>/dev/null
+          # Ensure latest-mac.yml exists (required for auto-update)
+          [ -f "release/latest-mac.yml" ] || { echo "::error::missing latest-mac.yml"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/latest-mac.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── Windows ────────────────────────────────────────────────────────────
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: clean build outputs
+        shell: bash
+        run: rm -rf dist dist-server release
+      - run: pnpm package:win
+
+      - name: Verify packaged tree
+        shell: bash
+        run: |
+          res=release/win-unpacked/resources
+          [ -f "$res/server/index.js" ] || { echo "::error::missing server/index.js"; exit 1; }
+          [ -f "$res/ui/index.html" ] || { echo "::error::missing ui/index.html"; exit 1; }
+          [ -f "$res/app-update.yml" ] || { echo "::error::missing app-update.yml"; exit 1; }
+
+      - name: Start packaged server
+        shell: bash
+        run: |
+          res=release/win-unpacked/resources
+          HOME="$RUNNER_TEMP/omb-smoke" USERPROFILE="$RUNNER_TEMP/omb-smoke" \
+            OMB_PORT=21987 node "$res/server/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 2 http://127.0.0.1:21987/api/health >/dev/null 2>&1; then
+              echo "packaged server answered /api/health ✓"
+              kill $pid 2>/dev/null || true
+              exit 0
+            fi
+            kill -0 $pid 2>/dev/null || break
+            sleep 1
+          done
+          echo "::error::packaged server never served /api/health"
+          cat "$RUNNER_TEMP/server.log" || true
+          kill $pid 2>/dev/null || true
+          exit 1
+
+      - name: Rename installer for stable download URL
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          cp release/Muster-${VERSION}-x64-setup.exe release/Muster-setup.exe 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── Linux ──────────────────────────────────────────────────────────────
+  linux:
+    name: Linux (x64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install desktop utilities
+        run: sudo apt-get update && sudo apt-get install -y desktop-file-utils
+      - run: pnpm package:linux
+
+      - name: Verify artifacts
+        run: |
+          echo "=== Linux artifacts ==="
+          ls -lh release/*.AppImage release/*.deb 2>/dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── Create GitHub Release ──────────────────────────────────────────────
+  publish:
+    name: Create Release
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List all artifacts
+        run: find artifacts -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: |
+            artifacts/macos-artifacts/*
+            artifacts/windows-artifacts/*
+            artifacts/linux-artifacts/*
