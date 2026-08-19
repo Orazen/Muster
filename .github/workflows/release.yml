@@ -212,6 +212,13 @@ jobs:
           echo "=== Linux artifacts ==="
           ls -lh release/*.AppImage release/*.deb 2>/dev/null
 
+      - name: Add stable-filename copies for the /latest/download/ links
+        run: |
+          deb=$(ls release/*.deb | head -1)
+          appimage=$(ls release/*.AppImage | head -1)
+          [ -f "$deb" ] && cp "$deb" release/Muster.deb
+          [ -f "$appimage" ] && cp "$appimage" release/Muster.AppImage
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux-artifacts
