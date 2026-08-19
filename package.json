@@ -1,7 +1,7 @@
 {
   "name": "muster",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/tharunramagiri/Muster",
   "repository": {
