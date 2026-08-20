@@ -186,6 +186,30 @@ models) and a custom rail (bring a CLI, inject a model).
 Unknown drivers degrade to "unavailable" shadows — a config from a newer build round-trips safely and
 never crashes the fleet.
 
+### Providers (no CLI required)
+
+Paste an API key in **Settings → Providers** and a matching engine appears automatically, no CLI install
+needed — the same fleet a bot picks from, just credential-driven instead of CLI-driven. Useful if you
+already have a key and don't want to install/auth a separate CLI for it.
+
+| Provider | Driver kind | Env var | Notes |
+|---|---|---|---|
+| OpenAI | `openai` | `OPENAI_API_KEY` | GPT-4o, GPT-4.1, o3, and family. |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | Claude Opus/Sonnet/Haiku via the Messages API. |
+| Google | `google` | `GOOGLE_API_KEY` | Gemini 2.5 Pro/Flash via `generateContent`. |
+| xAI (Grok) | `grok` | `XAI_API_KEY` | Same driver as the Grok engine above, API-key mode. |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | DeepSeek V3/R1, OpenAI-compatible API. |
+| Mistral | `mistral` | `MISTRAL_API_KEY` | Mistral Large/Medium/Codestral. |
+| Cohere | `cohere` | `COHERE_API_KEY` | Command R/R+ via the v2 Chat API. |
+| Groq | `groq` | `GROQ_API_KEY` | Llama/Mixtral/Gemma at high inference speed. |
+| Together AI | `together` | `TOGETHER_API_KEY` | Open-source models via Together's API. |
+| Fireworks AI | `fireworks` | `FIREWORKS_API_KEY` | Fast inference for open-source models. |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | 200+ models (GPT, Claude, Gemini, open-source) through one key. |
+| OpenCode Zen | `opencodeZen` | `OPENCODE_API_KEY` | Free and paid models via OpenCode's hosted gateway — same key as OpenCode Go above. |
+
+All twelve share one architecture: streaming SSE, transcript-replay, token-level `content.delta` events,
+same as every CLI-driven engine — a bot can't tell the difference between a CLI and an API-key provider.
+
 ## How it works
 
 Two processes. The app holds no transports of its own — it sends typed commands over HTTP and folds one SSE
