@@ -245,6 +245,41 @@ async function defaultSelection() {
 let bootSelection = { instanceId: "", model: "" };
 const store = new Store(() => bootSelection);
 bootSelection = await defaultSelection();
+
+/**
+ * Resolve the live provider instance for a bot's stored model selection,
+ * self-healing a stale/never-set one. A bot created before any provider was
+ * configured (e.g. the onboarding bot on a fresh install, or any bot made
+ * while bootSelection was still "") stays permanently stuck with an empty
+ * instanceId otherwise — "provider instance \"\" is unavailable" forever,
+ * even minutes after the operator adds a real key, because bootSelection is
+ * computed once at process boot and createBot()'s default only ever reads
+ * that stale snapshot.
+ *
+ * Only adopts an instance the registry currently reports as genuinely
+ * available (same rule defaultSelection() uses for brand-new bots), so this
+ * cannot reintroduce the "engine looks ready, then ENOENTs on send" problem
+ * that function's own comment is about — the fallback here only fires once
+ * something is actually confirmed available, not speculatively.
+ */
+async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bot>>) {
+  const direct = registry.get(bot.modelSelection.instanceId);
+  if (direct) return direct;
+  // Only heal a genuinely never-set selection ("") — the boot-time race
+  // this function exists to fix. A non-empty instanceId that fails to
+  // resolve (removed instance, typo, or a deliberately invalid one, as
+  // comms.test.ts's "could not start" delegation test sets up on purpose)
+  // means something specific broke and must keep failing loudly, not get
+  // silently redirected to a different engine than what was actually
+  // configured.
+  if (bot.modelSelection.instanceId !== "") return null;
+  const selection = await defaultSelection();
+  if (!selection.instanceId) return null;
+  const healed = registry.get(selection.instanceId);
+  if (!healed) return null;
+  store.patchBot(bot.id, { modelSelection: selection });
+  return healed;
+}
 store.seedIfEmpty();
 
 /** A bot as a client may see it: no provider session bookkeeping.
@@ -1144,7 +1179,7 @@ async function startTurn(
 
   const instance = opts?.runOn === "cloud"
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
-    : registry.get(bot.modelSelection.instanceId);
+    : await resolveInstanceForBot(bot);
   if (!instance) {
     throw Object.assign(
       new Error(
@@ -1955,6 +1990,14 @@ async function reloadProviders() {
   await registry.disposeAll();
   await registry.load(instanceConfigs(cfg));
   bus.attach(registry.instances());
+  // Otherwise bootSelection stays whatever it was at process boot forever —
+  // any bot created after this reload (e.g. right after saving the very
+  // first provider key) would still inherit the stale empty selection from
+  // when zero engines existed, immediately hitting the same
+  // "provider instance \"\" is unavailable" error resolveInstanceForBot()
+  // exists to heal for *existing* bots. New bots deserve the correct
+  // default straight away instead of relying on that lazy heal.
+  bootSelection = await defaultSelection();
   // A killed turn's terminal events can die with the old fleet (dispose is
   // async under the hood), stranding the bot busy — and its screen poller —
   // forever. Settle anything still marked busy.
@@ -3192,7 +3235,7 @@ const server = createServer(async (req, res) => {
       if (!source || source.role !== "user" || source.kind !== "text") {
         return json(res, 404, { error: "only user messages can be edited" });
       }
-      if (!registry.get(bot.modelSelection.instanceId)) {
+      if (!(await resolveInstanceForBot(bot))) {
         return json(res, 409, {
           error: `provider instance "${bot.modelSelection.instanceId}" is unavailable — pick another model in settings`,
         });
