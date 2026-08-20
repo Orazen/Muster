@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { betterAuth } from "better-auth";
+import { organization } from "better-auth/plugins";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
 import { randomBytes } from "node:crypto";
@@ -128,6 +129,41 @@ function migrate(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS "session_userId_idx" on "session" ("userId");
     CREATE INDEX IF NOT EXISTS "account_userId_idx" on "account" ("userId");
     CREATE INDEX IF NOT EXISTS "verification_identifier_idx" on "verification" ("identifier");
+
+    -- organization plugin (docs/plans/multi-tenancy-design.md's identity
+    -- foundation) — schema confirmed via @better-auth/cli migrate against
+    -- this exact auth config, same verification method as every table
+    -- above.
+    CREATE TABLE IF NOT EXISTS "organization" (
+      "id" text not null primary key,
+      "name" text not null,
+      "slug" text not null unique,
+      "logo" text,
+      "createdAt" date not null,
+      "metadata" text
+    );
+    CREATE TABLE IF NOT EXISTS "member" (
+      "id" text not null primary key,
+      "organizationId" text not null references "organization" ("id") on delete cascade,
+      "userId" text not null references "user" ("id") on delete cascade,
+      "role" text not null,
+      "createdAt" date not null
+    );
+    CREATE TABLE IF NOT EXISTS "invitation" (
+      "id" text not null primary key,
+      "organizationId" text not null references "organization" ("id") on delete cascade,
+      "email" text not null,
+      "role" text,
+      "status" text not null,
+      "expiresAt" date not null,
+      "createdAt" date not null,
+      "inviterId" text not null references "user" ("id") on delete cascade
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "organization_slug_uidx" on "organization" ("slug");
+    CREATE INDEX IF NOT EXISTS "member_organizationId_idx" on "member" ("organizationId");
+    CREATE INDEX IF NOT EXISTS "member_userId_idx" on "member" ("userId");
+    CREATE INDEX IF NOT EXISTS "invitation_organizationId_idx" on "invitation" ("organizationId");
+    CREATE INDEX IF NOT EXISTS "invitation_email_idx" on "invitation" ("email");
   `);
 
   // Columns added after the tables above first shipped. Each ALTER is
@@ -135,6 +171,7 @@ function migrate(db: DatabaseSync): void {
   // and a fresh CREATE TABLE above already includes them going forward.
   const columnAdditions: Array<[table: string, column: string, ddl: string]> = [
     ["account", "issuer", 'ALTER TABLE "account" ADD COLUMN "issuer" text'],
+    ["session", "activeOrganizationId", 'ALTER TABLE "session" ADD COLUMN "activeOrganizationId" text'],
   ];
   for (const [table, column, ddl] of columnAdditions) {
     const cols = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>;
@@ -251,6 +288,14 @@ export const auth = betterAuth({
     PUBLIC_BASE_URL,
     ...EXTRA_TRUSTED_ORIGINS,
   ],
+  // First concrete step toward per-tenant data isolation (see
+  // docs/plans/multi-tenancy-design.md): the organization/member/invitation
+  // primitives, additive only. Nothing downstream reads
+  // session.activeOrganizationId yet — cfg/store/registry/bus stay the
+  // module-level singletons they already are. This deliberately does NOT
+  // claim to fix the tenant-isolation bug that design doc documents; it's
+  // the identity foundation the real scoping work builds on next.
+  plugins: [organization()],
 });
 
 /** Convert a Node.js IncomingMessage to a Web Request for Better Auth. */
