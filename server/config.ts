@@ -196,13 +196,34 @@ interface InstanceCliUpdate {
 }
 
 /** The credential env instanceConfigs() injects — same keys, same rule. */
+// driver kind -> env var name, for every server/providers.ts catalog entry
+// that rides a direct-API driver (no local CLI). Single source of truth for
+// both instanceConfigs() (which injects these) and injectedEnvironment()
+// (which withInstanceCli() uses to strip them back out before persisting an
+// override) — defined once at module scope so the two can never drift out
+// of sync with each other.
+const PROVIDER_DRIVER_ENV: Record<string, string> = {
+  openai: "OPENAI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  google: "GOOGLE_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+  mistral: "MISTRAL_API_KEY",
+  cohere: "COHERE_API_KEY",
+  groq: "GROQ_API_KEY",
+  together: "TOGETHER_API_KEY",
+  fireworks: "FIREWORKS_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+};
+
 function injectedEnvironment(cfg: AppConfig): Map<string, string> {
   const environment = new Map<string, string>();
   if (cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
   if (cfg.box?.token) environment.set("BOX_TOKEN", cfg.box.token);
   if (cfg.opencodeGo?.apiKey) environment.set("OPENCODE_API_KEY", cfg.opencodeGo.apiKey);
-  if (cfg.providers?.openai?.apiKey) environment.set("OPENAI_API_KEY", cfg.providers.openai.apiKey);
-  if (cfg.providers?.anthropic?.apiKey) environment.set("ANTHROPIC_API_KEY", cfg.providers.anthropic.apiKey);
+  for (const [driver, envVar] of Object.entries(PROVIDER_DRIVER_ENV)) {
+    const key = cfg.providers?.[driver]?.apiKey;
+    if (key) environment.set(envVar, key);
+  }
   return environment;
 }
 
@@ -247,6 +268,24 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     ...(cfg.providers?.anthropic?.apiKey
       ? { anthropicApi: { driver: "anthropic", displayName: "Anthropic (API)" } }
       : {}),
+    // Remaining server/providers.ts catalog entries: same bring-your-own-key,
+    // no-CLI-required pattern, one instance per configured provider.
+    ...(cfg.providers?.google?.apiKey ? { googleApi: { driver: "google", displayName: "Google (API)" } } : {}),
+    ...(cfg.providers?.deepseek?.apiKey
+      ? { deepseekApi: { driver: "deepseek", displayName: "DeepSeek (API)" } }
+      : {}),
+    ...(cfg.providers?.mistral?.apiKey ? { mistralApi: { driver: "mistral", displayName: "Mistral (API)" } } : {}),
+    ...(cfg.providers?.cohere?.apiKey ? { cohereApi: { driver: "cohere", displayName: "Cohere (API)" } } : {}),
+    ...(cfg.providers?.groq?.apiKey ? { groqApi: { driver: "groq", displayName: "Groq (API)" } } : {}),
+    ...(cfg.providers?.together?.apiKey
+      ? { togetherApi: { driver: "together", displayName: "Together AI (API)" } }
+      : {}),
+    ...(cfg.providers?.fireworks?.apiKey
+      ? { fireworksApi: { driver: "fireworks", displayName: "Fireworks AI (API)" } }
+      : {}),
+    ...(cfg.providers?.openrouter?.apiKey
+      ? { openrouterApi: { driver: "openrouter", displayName: "OpenRouter (API)" } }
+      : {}),
   };
   const CUSTOM_ONLY = {
     qwen: { driver: "qwenAgent" },
@@ -271,12 +310,9 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     if (entry.driver === "opencodeGo" && cfg.opencodeGo?.apiKey) {
       environment.OPENCODE_API_KEY = cfg.opencodeGo.apiKey;
     }
-    if (entry.driver === "openai" && cfg.providers?.openai?.apiKey) {
-      environment.OPENAI_API_KEY = cfg.providers.openai.apiKey;
-    }
-    if (entry.driver === "anthropic" && cfg.providers?.anthropic?.apiKey) {
-      environment.ANTHROPIC_API_KEY = cfg.providers.anthropic.apiKey;
-    }
+    const envVar = PROVIDER_DRIVER_ENV[entry.driver];
+    const providerKey = cfg.providers?.[entry.driver]?.apiKey;
+    if (envVar && providerKey) environment[envVar] = providerKey;
     entry.environment = environment;
   }
   return map;
