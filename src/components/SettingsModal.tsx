@@ -36,11 +36,14 @@ const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User
 function ProfileFields() {
   const { state, dispatch } = useStore();
   const { user: authUser } = useAuth();
-  const [name, setName] = useState(state.config?.profile?.name ?? authUser?.name ?? "");
-  const [email, setEmail] = useState(state.config?.profile?.email ?? authUser?.email ?? "");
+  // /api/config's profile.name/email are always strings, never omitted
+  // (server/index.ts's configStatus() sends "" when unset) — so this must
+  // be `||`, not `??`: nullish coalescing never falls through on "".
+  const [name, setName] = useState(state.config?.profile?.name || authUser?.name || "");
+  const [email, setEmail] = useState(state.config?.profile?.email || authUser?.email || "");
   useEffect(() => {
-    setName(state.config?.profile?.name ?? authUser?.name ?? "");
-    setEmail(state.config?.profile?.email ?? authUser?.email ?? "");
+    setName(state.config?.profile?.name || authUser?.name || "");
+    setEmail(state.config?.profile?.email || authUser?.email || "");
   }, [state.config?.profile?.name, state.config?.profile?.email, authUser?.name, authUser?.email]);
 
   const save = () => {
