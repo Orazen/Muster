@@ -201,6 +201,8 @@ function injectedEnvironment(cfg: AppConfig): Map<string, string> {
   if (cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
   if (cfg.box?.token) environment.set("BOX_TOKEN", cfg.box.token);
   if (cfg.opencodeGo?.apiKey) environment.set("OPENCODE_API_KEY", cfg.opencodeGo.apiKey);
+  if (cfg.providers?.openai?.apiKey) environment.set("OPENAI_API_KEY", cfg.providers.openai.apiKey);
+  if (cfg.providers?.anthropic?.apiKey) environment.set("ANTHROPIC_API_KEY", cfg.providers.anthropic.apiKey);
   return environment;
 }
 
@@ -237,6 +239,14 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     // key is saved — no CLI install required. It rides the `grok` (API)
     // driver, which bills via XAI_API_KEY over plain HTTPS.
     ...(cfg.xai?.key ? { grokApi: { driver: "grok", displayName: "Grok (API)" } } : {}),
+    // Same pattern for OpenAI/Anthropic: saving a key in Settings → Providers
+    // (server/providers.ts's PROVIDERS catalog) is enough to bring the bot
+    // online with no CLI install, alongside claude/codex's CLI-driven
+    // instances above.
+    ...(cfg.providers?.openai?.apiKey ? { openaiApi: { driver: "openai", displayName: "OpenAI (API)" } } : {}),
+    ...(cfg.providers?.anthropic?.apiKey
+      ? { anthropicApi: { driver: "anthropic", displayName: "Anthropic (API)" } }
+      : {}),
   };
   const CUSTOM_ONLY = {
     qwen: { driver: "qwenAgent" },
@@ -260,6 +270,12 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     if (cfg.box?.token) environment.BOX_TOKEN = cfg.box.token;
     if (entry.driver === "opencodeGo" && cfg.opencodeGo?.apiKey) {
       environment.OPENCODE_API_KEY = cfg.opencodeGo.apiKey;
+    }
+    if (entry.driver === "openai" && cfg.providers?.openai?.apiKey) {
+      environment.OPENAI_API_KEY = cfg.providers.openai.apiKey;
+    }
+    if (entry.driver === "anthropic" && cfg.providers?.anthropic?.apiKey) {
+      environment.ANTHROPIC_API_KEY = cfg.providers.anthropic.apiKey;
     }
     entry.environment = environment;
   }
