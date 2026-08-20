@@ -2147,6 +2147,51 @@ const server = createServer(async (req, res) => {
     }
     // ── auth routes (Better Auth) ────────────────────────────────────────
     if (path.startsWith("/api/auth/")) {
+      // Emergency stopgap: server-side state (config, bots, threads) has no
+      // per-user isolation yet — every signed-in account currently shares
+      // one global fleet. Until real multi-tenancy exists, new sign-ups are
+      // closed by default on any self-hosted/public deployment. Set
+      // OMB_SIGNUP_ALLOWLIST to a comma-separated list of emails to let
+      // specific people through (e.g. your own, while testing), or
+      // OMB_ALLOW_SIGNUPS=true to reopen it once real isolation lands.
+      if (method === "POST" && path === "/api/auth/sign-up/email") {
+        const allowAll = process.env.OMB_ALLOW_SIGNUPS === "true";
+        const allowlist = (process.env.OMB_SIGNUP_ALLOWLIST ?? "")
+          .split(",")
+          .map((e) => e.trim().toLowerCase())
+          .filter(Boolean);
+        if (!allowAll) {
+          let bodyForGate: any;
+          try {
+            bodyForGate = await readBody(req);
+          } catch (e) {
+            const status = (e as { status?: number }).status ?? 400;
+            return json(res, status, { error: e instanceof Error ? e.message : String(e) });
+          }
+          const requestedEmail = typeof bodyForGate?.email === "string" ? bodyForGate.email.trim().toLowerCase() : "";
+          if (!requestedEmail || !allowlist.includes(requestedEmail)) {
+            return json(res, 403, {
+              message: "Sign-ups are closed on this deployment while account data isolation is being fixed.",
+              code: "SIGNUPS_CLOSED",
+            });
+          }
+          // Allowed: re-inject the already-consumed body as a fresh Request
+          // for Better Auth's own handler, since the original stream can
+          // only be read once and readBody() above already drained it.
+          const host = req.headers.host ?? "localhost";
+          const url = `http://${host}${req.url ?? "/"}`;
+          const headers = new Headers();
+          for (const [key, value] of Object.entries(req.headers)) {
+            if (value !== undefined) headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+          }
+          const webReq = new Request(url, { method: "POST", headers, body: JSON.stringify(bodyForGate) });
+          const authRes = await auth.handler(webReq);
+          const resHeaders: Record<string, string> = {};
+          authRes.headers.forEach((value, key) => { resHeaders[key] = value; });
+          res.writeHead(authRes.status, resHeaders);
+          return res.end(await authRes.text());
+        }
+      }
       const webReq = toWebRequest(req);
       const authRes = await auth.handler(webReq);
       const headers: Record<string, string> = {};
