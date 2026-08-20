@@ -42,7 +42,24 @@ describe("opensandbox config wiring", () => {
     delete process.env.OPEN_SANDBOX_API_KEY;
     delete process.env.OMB_OPENSANDBOX_URL;
     const cc = connectionConfig({});
-    expect(cc).toEqual({});
+    expect(cc).toEqual({ useServerProxy: true });
+  });
+
+  it("defaults useServerProxy to true — required for the common Docker bridge-mode self-host setup", () => {
+    // Found via a real live test against an actual self-hosted OpenSandbox
+    // server (Docker bridge mode, the mode the project's own
+    // docker-compose.example.yaml ships): without this, sandbox creation
+    // fails with SandboxReadyTimeoutException because the SDK's health
+    // check tries to reach the sandbox directly instead of proxying
+    // through the server, which the SDK's own error message names as the
+    // fix. Regression-guards that default.
+    const cc = connectionConfig({ opensandbox: { apiKey: "sk-test" } });
+    expect(cc.useServerProxy).toBe(true);
+  });
+
+  it("lets a deployment opt out of the server proxy if its network topology allows direct access", () => {
+    const cc = connectionConfig({ opensandbox: { apiKey: "sk-test", useServerProxy: false } });
+    expect(cc.useServerProxy).toBe(false);
   });
 
   it("refuses to create a sandbox with no key configured, without ever calling the SDK", async () => {

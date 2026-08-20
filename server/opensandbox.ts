@@ -25,6 +25,16 @@ export function connectionConfig(cfg: AppConfig): ConnectionConfigOptions {
   return {
     ...(domain ? { domain } : {}),
     ...(apiKey ? { apiKey } : {}),
+    // Live-tested finding: the common self-host setup (Docker bridge mode,
+    // the mode docker-compose.example.yaml in the OpenSandbox repo itself
+    // ships) puts sandboxes on a network this Node process can't reach
+    // directly — the SDK's own health check fails with READY_TIMEOUT and
+    // explicitly suggests this fix in its error message. Routing exec
+    // through the sandbox server instead of dialing the sandbox directly
+    // is the correct default for a self-hosted deployment; set
+    // useServerProxy: false explicitly if a deployment's network topology
+    // genuinely allows direct sandbox access (e.g. host networking mode).
+    useServerProxy: cfg.opensandbox?.useServerProxy ?? true,
   };
 }
 
