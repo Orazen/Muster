@@ -69,25 +69,59 @@ Ranked by "users most likely to have a key already, lowest integration effort":
 5. Kimi, Droid, Antigravity, Qwen, Hermes — lower priority, add once the gateway plumbing above
    is proven on the first four.
 
-## 5. Self-host "Pro" licensing (Dokploy-style), concretely
+## 5. Self-host licensing — exactly how Dokploy does it, verified from source, plus OpenMausBot
 
-Dokploy's actual model, confirmed by reading its own shipped source during this session:
-- Core product: **fully open-source, self-hostable, no gate** (Dokploy itself has no license-key
-  check anywhere in the code paths audited).
-- Revenue comes from **Dokploy Cloud** (hosted, they run the infra) — not from gating self-host
-  features behind a key.
+### Dokploy's actual mechanism (read directly from `dokploy/dokploy`'s own `LICENSE.MD` /
+`LICENSE_PROPRIETARY.md`, not secondhand — confirmed this session)
 
-Recommendation: **mirror this exactly rather than inventing a license-key gate for self-host.**
-A license-key system self-hosters can crack (it's their own server) is a support burden for
-negative revenue — Dokploy, Plausible, Uptime Kuma, and most successful open-core self-host tools
-all converged on "self-host is 100% free and open, cloud is the paid product" for exactly this
-reason. Muster's `IS_CLOUD` flag in `server/billing.ts` already encodes this split correctly.
+- The **entire codebase is Apache-2.0**, with one carve-out: anything under a `/proprietary`
+  directory (if it exists) is licensed under the **Dokploy Source Available License (DSAL) v1.0**
+  instead — free to copy/modify for dev and testing, but **production use requires a paid
+  commercial agreement**.
+- As of this audit, **no `/proprietary` folder exists in the public repo** — it's a reserved legal
+  scaffold, not a populated feature set. Every line of code Dokploy actually ships today is fully
+  Apache-2.0, no gate, no license key anywhere.
+- Separately, `Dockerfile.cloud` is just an alternate build target for **Dokploy's own hosted
+  product** — same codebase, packaged for their multi-tenant infrastructure. Not proprietary code,
+  just a different deployment shape (this is exactly the "process-per-tenant" direction recommended
+  in `docs/plans/multi-tenancy-design.md` for a hypothetical Muster Cloud).
+- **Net effect: self-host is unconditionally free today; the paid product is entirely the hosted
+  Cloud offering; the `/proprietary` scaffold exists so they *can* add a paid self-host add-on later
+  without relicensing the whole project, but haven't needed to yet.**
 
-**Where a paid self-host add-on does make sense** (opt-in, not a feature gate):
-- **Managed updates/support contract** — a paid Slack/email support SKU for self-hosters running
-  Muster in production (like Dokploy also sells separately from Cloud).
-- **Priority bot-template packs** — ties into the marketplace idea in the monetization plan (§4.2),
-  works identically for self-host and cloud since it's content, not a code feature gate.
+### OpenMausBot (`milind-soni/OpenMausBot`, 1,319★, Apache-2.0) — the closest direct competitor
+
+Audited its full source tree this session: **zero monetization code whatsoever.** No `billing.ts`,
+no Stripe, no license file, no proprietary carve-out. `server/cloud-backend.ts` (the only file that
+sounded billing-related) is a 10-line guard against changing VM backend mid-turn — unrelated to
+money. Their only "self-host" doc is `docs/byo-vps.md` (bring-your-own-VPS). This is the purest
+form of "fully open, no monetization built in at all" among everything audited this session.
+
+### Where Muster already stands, and what actually changed after reading Muster's own LICENSE
+
+**Correction to the earlier draft of this doc and to `growth-and-monetization-plan.md`: Muster is
+not MIT.** It's already **BSL 1.1** (`Change Date: 2030-08-19`, converts to Apache-2.0 then), with
+an explicit clause: licensees **may not offer Muster as a managed SaaS on infrastructure they
+control**. That's the exact protection Dokploy's `/proprietary` carve-out and OpenMausBot's plain
+Apache-2.0 don't give their authors — a third party cannot legally clone Muster and stand up a
+competing hosted "Muster Cloud" without permission, full stop, no extra scaffolding required. (This
+restricts *licensees*, not the Licensor — running `muster.orazen.online` yourselves is unaffected.)
+
+### Recommendation
+
+1. **Self-host stays 100% free, unconditionally, exactly like Dokploy and OpenMausBot** — no
+   license-key gate. A key a self-hoster can bypass on their own server is a support cost for
+   negative revenue; every successful example audited this session (Dokploy, OpenMausBot, and the
+   earlier-cited Plausible/Uptime Kuma pattern) converged on the same answer.
+2. **Adopt Dokploy's `/proprietary`-folder legal scaffold now, populate it later.** Concretely: add
+   an empty `/proprietary` directory placeholder and a matching `LICENSE_PROPRIETARY.md` (DSAL-style
+   terms, adapted) to Muster's LICENSE structure, so that if/when a genuinely paid self-host add-on
+   is decided (see below), it can ship without relicensing anything else. This is legal scaffolding
+   only — no feature should move into it until there's an actual paid feature to put there.
+3. **Revenue is the Cloud offering** (`IS_CLOUD` flag in `server/billing.ts` already encodes this
+   split correctly) plus the non-code revenue ideas already in `growth-and-monetization-plan.md`
+   §4 (bot template marketplace, managed support contract) — none of which require gating
+   self-host code.
 
 ## 6. What's needed from you before any of this is code
 

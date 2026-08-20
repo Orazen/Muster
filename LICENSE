@@ -1,4 +1,14 @@
-Business Source License 1.1
+Copyright 2026-present Ramagiritharun (Tharun Ramagiri)
+
+Portions of this software are licensed as follows:
+
+* All content that resides under a "/proprietary" directory of this repository, if that
+  directory exists and contains licensed content, is licensed under the terms in
+  "LICENSE_PROPRIETARY.md" instead of the terms below.
+* Content outside of the above-mentioned directory is available under the Business Source
+  License 1.1 as defined below.
+
+## Business Source License 1.1
 
 Licensor: Ramagiritharun (Tharun Ramagiri)
 Licensed Work: Muster

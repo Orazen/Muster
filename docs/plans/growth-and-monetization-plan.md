@@ -9,7 +9,7 @@ alternative — bring-your-own-model roster of persistent AI teammates."**
 
 | Repo | Stars | License | Core idea | Platforms |
 |---|---|---|---|---|
-| **Muster** (ours) | new | MIT | BYO-CLI roster (Claude/Codex/Grok/Gemini/Kimi/Qwen/Hermes/Droid/Antigravity/OpenCode), local harness on `127.0.0.1`, cloud/local computer per bot, Composio apps | macOS + Windows (Electron), **native Swift iOS app + AppStore assets already in repo**, Expo Android companion |
+| **Muster** (ours) | new | **BSL 1.1** (converts to Apache-2.0 in 2030; SaaS-resale by others prohibited until then) | BYO-CLI roster (Claude/Codex/Grok/Gemini/Kimi/Qwen/Hermes/Droid/Antigravity/OpenCode), local harness on `127.0.0.1`, cloud/local computer per bot, Composio apps | macOS + Windows (Electron), **native Swift iOS app + AppStore assets already in repo**, Expo Android companion |
 | rakazo | 875⭐ | Apache-2.0 | Persistent bots, shared/private "Team Computers", Docker/E2B/Daytona sandboxes, Composio, Pi for BYO model | Web, Electron, Expo mobile |
 | OpenMausBot | 1264⭐ | MIT | BYO-agent chat app, VM per bot | Electron (mac/win/ubuntu) |
 | Sub8 | 23⭐ | MIT | One isolated Linux Docker desktop per bot, octopus mascot/branding, screenshot+mouse+keyboard automation | Electron (mac/win/linux), signed+notarized builds |
@@ -60,8 +60,16 @@ isn't code, it's **distribution and packaging steps that require human-owned acc
 
 ## 4. Monetization strategy (this is the actual "make money" plan)
 
-Muster is MIT-licensed and local-first — you can't paywall the open-source core, so revenue has to
-come from **layers around it**, mirroring how rakazo/Cursor/other open-core AI tools monetize:
+Muster is BSL 1.1-licensed and local-first. Correction from an earlier draft of this doc: Muster
+is **not** MIT — BSL 1.1 already prohibits anyone else from offering Muster (or a substantially
+similar product) as a managed SaaS on infrastructure they control, until the Change Date
+(2030-08-19, when it converts to Apache-2.0). That's a real, already-in-place moat against a
+competitor cloning the repo and reselling it as their own hosted service — you don't need to build
+anything for that protection, it's already in the LICENSE file. It does **not** mean the core can be
+paywalled for the Licensor's own use (BSL restricts licensees, not the copyright holder — Muster's
+own team can run/sell `muster.orazen.online` however they like). Revenue still has to come from
+**layers around the free-to-self-host core**, mirroring how rakazo/Cursor/other open-core AI tools
+monetize, but the SaaS-competition risk that MIT would have left wide open is already closed:
 
 1. **Hosted "Muster Cloud" tier** (highest-leverage, matches rakazo's Docker/E2B/Daytona idea):
    sell managed cloud computers per bot (pre-warmed sandboxes) as a subscription, so non-technical
