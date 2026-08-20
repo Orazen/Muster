@@ -6,7 +6,7 @@ description: Build, verify, and publish the Windows desktop build (NSIS installe
 # Windows release
 
 Ships `Muster-<version>-setup.exe` and its update feed to
-[tharunramagiri/Muster](https://github.com/tharunramagiri/Muster).
+[Orazen/Muster](https://github.com/Orazen/Muster).
 
 **Scope: Windows only.** The macOS build is a separate flow (dmg + notarytool +
 staple) that must run on a Mac. This skill never touches mac artifacts — but see
@@ -59,7 +59,7 @@ Get-Content release\win-unpacked\resources\app-update.yml  # feed config
 - Missing `server/index.js` → `utilityProcess.fork` fails → the 🐭 "Couldn't start
   the bot server" page.
 - Missing `ui/index.html` → server has nothing to serve → black window.
-- `app-update.yml` must point at `tharunramagiri/Muster` and, while the
+- `app-update.yml` must point at `Orazen/Muster` and, while the
   build is unsigned, **must not contain `publisherName`** — electron-updater would
   reject every update as untrusted.
 
@@ -80,7 +80,7 @@ carries both platforms.
 
 ```powershell
 Copy-Item release/Muster-<version>-setup.exe release/Muster-setup.exe
-gh release upload v<version> --repo tharunramagiri/Muster `
+gh release upload v<version> --repo Orazen/Muster `
   release/Muster-<version>-setup.exe `
   release/Muster-setup.exe `
   release/Muster-<version>-setup.exe.blockmap `

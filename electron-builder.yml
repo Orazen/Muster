@@ -10,7 +10,7 @@ artifactName: Muster-${version}-${arch}.${ext}
 # leaves every Windows install stranded on its installed version.
 publish:
   - provider: github
-    owner: tharunramagiri
+    owner: Orazen
     repo: Muster
 
 directories:

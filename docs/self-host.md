@@ -117,7 +117,7 @@ show as unavailable until you provide one:
 - **Use engine credentials** where a driver only needs a key (OpenCode Go,
   Compose/Box), or
 - **Run the container on a machine** where the CLIs are already on `PATH` via a
-  bind mount (see [`engines`](https://github.com/tharunramagiri/Muster#engines)).
+  bind mount (see [`engines`](https://github.com/Orazen/Muster#engines)).
 
 Cloud computers (Box) work out of the box with a `BOX_TOKEN`. "This Mac" local
 computer control is **not** available in a container — it requires the desktop

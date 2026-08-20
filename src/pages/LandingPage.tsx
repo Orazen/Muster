@@ -47,10 +47,10 @@ const FEATURES = [
 ];
 
 const DOWNLOADS = [
-  { os: "macOS", meta: "Apple silicon · signed & notarized · one-click .dmg", href: "https://github.com/tharunramagiri/Muster/releases/latest/download/Muster.dmg", label: "Download .dmg" },
-  { os: "Windows", meta: "64-bit · one-click installer, no admin rights", href: "https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-setup.exe", label: "Download .exe" },
-  { os: "Ubuntu", meta: "24.04 x64 · build .deb / AppImage from source", href: "https://github.com/tharunramagiri/Muster#quick-start", label: "Build from source" },
-  { os: "Self-host (web)", meta: "Run the web UI + harness in Docker", href: "https://github.com/tharunramagiri/Muster/blob/main/docs/self-host.md", label: "Docker guide" },
+  { os: "macOS", meta: "Apple silicon · unsigned build · one-click .dmg", href: "https://github.com/Orazen/Muster/releases/latest/download/Muster.dmg", label: "Download .dmg" },
+  { os: "Windows", meta: "64-bit · one-click installer, no admin rights", href: "https://github.com/Orazen/Muster/releases/latest/download/Muster-setup.exe", label: "Download .exe" },
+  { os: "Ubuntu", meta: "24.04 x64 · .deb or AppImage", href: "https://github.com/Orazen/Muster/releases/latest/download/Muster.deb", label: "Download .deb" },
+  { os: "Self-host (web)", meta: "Run the web UI + harness in Docker", href: "https://github.com/Orazen/Muster/blob/main/docs/self-host.md", label: "Docker guide" },
 ];
 
 export function LandingPage() {
@@ -69,7 +69,7 @@ export function LandingPage() {
             <a href="#features" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">Features</a>
             <a href="#engines" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">Engines</a>
             <a href="#download" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">Download</a>
-            <a href="https://github.com/tharunramagiri/Muster" target="_blank" rel="noopener" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">GitHub</a>
+            <a href="https://github.com/Orazen/Muster" target="_blank" rel="noopener" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">GitHub</a>
             {user ? (
               <Link to="/app" className="rounded-[10px] bg-[#f0460e] px-4 py-2 text-[13px] font-semibold text-white shadow-[0_0_0_1px_rgba(255,255,255,.06),0_8px_24px_rgba(240,70,14,.28)] transition-all hover:-translate-y-px hover:shadow-[0_0_0_1px_rgba(255,255,255,.1),0_12px_28px_rgba(240,70,14,.38)]">Open Muster</Link>
             ) : (
@@ -99,10 +99,10 @@ export function LandingPage() {
               <Link to={user ? "/app" : "/sign-up"} className="inline-flex items-center gap-2 rounded-xl bg-[#f0460e] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(240,70,14,.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(240,70,14,.42)]">
                 {user ? "Open Muster →" : "Get Started →"}
               </Link>
-              <a href="https://github.com/tharunramagiri/Muster/releases/latest" target="_blank" rel="noopener" className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-7 py-3.5 text-[15px] font-semibold text-[#f5f5f5] transition-all hover:-translate-y-0.5 hover:border-white/20">
+              <a href="https://github.com/Orazen/Muster/releases/latest" target="_blank" rel="noopener" className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-7 py-3.5 text-[15px] font-semibold text-[#f5f5f5] transition-all hover:-translate-y-0.5 hover:border-white/20">
                 Download for macOS
               </a>
-              <a href="https://github.com/tharunramagiri/Muster" target="_blank" rel="noopener" className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-7 py-3.5 text-[15px] font-semibold text-[#f5f5f5] transition-all hover:-translate-y-0.5 hover:border-white/20">
+              <a href="https://github.com/Orazen/Muster" target="_blank" rel="noopener" className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-7 py-3.5 text-[15px] font-semibold text-[#f5f5f5] transition-all hover:-translate-y-0.5 hover:border-white/20">
                 View on GitHub
               </a>
             </div>
@@ -186,8 +186,8 @@ export function LandingPage() {
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-5 text-[13px] text-[#a1a1a6]">
           <span>© 2026 Muster — built and maintained by <a href="https://orazen.online" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">Orazen</a>.</span>
           <span className="flex gap-4">
-            <a href="https://github.com/tharunramagiri/Muster" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">GitHub</a>
-            <a href="https://github.com/tharunramagiri/Muster/blob/main/LICENSE" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">BSL 1.1</a>
+            <a href="https://github.com/Orazen/Muster" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">GitHub</a>
+            <a href="https://github.com/Orazen/Muster/blob/main/LICENSE" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">BSL 1.1</a>
           </span>
         </div>
       </footer>
