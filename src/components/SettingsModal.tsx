@@ -71,6 +71,38 @@ function ProfileFields() {
   );
 }
 
+/** Sign-out — only rendered when there's an actual authenticated session
+ * (cloud/self-hosted auth). The desktop-local no-auth mode has no session
+ * to sign out of, so this stays hidden there rather than showing a button
+ * that does nothing useful. Previously there was no sign-out control
+ * anywhere in the UI at all, even though useAuth().signOut() already
+ * existed and worked — this was a real, reachable dead end for anyone who
+ * signed in and wanted to sign out or switch accounts. */
+function AccountSection() {
+  const { user, signOut } = useAuth();
+  const [busy, setBusy] = useState(false);
+  if (!user) return null;
+
+  return (
+    <Card title="Account" subtitle={user.email}>
+      <button
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await signOut();
+          } finally {
+            setBusy(false);
+          }
+        }}
+        disabled={busy}
+        className="w-fit rounded-lg border border-hairline/40 bg-inset px-3.5 py-2 text-[13.5px] text-ink transition-colors hover:bg-raised disabled:opacity-60"
+      >
+        {busy ? "Signing out…" : "Sign out"}
+      </button>
+    </Card>
+  );
+}
+
 function UpdatesRow() {
   const s = useUpdaterState();
   if (!window.ogb?.updater) return null;
@@ -210,6 +242,7 @@ export function SettingsModal() {
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
                   <ProfileFields />
                 </Card>
+                <AccountSection />
                 <UpdatesRow />
               </>
             )}
