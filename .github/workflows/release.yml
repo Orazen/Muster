@@ -74,7 +74,19 @@ jobs:
 
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
-      - run: pnpm package:mac
+      # electron-builder auto-discovers keychain identities by default. On a
+      # bare runner (no APPLE_CERTIFICATE imported) that still produces a
+      # broken partial/ad-hoc signature — hardenedRuntime+entitlements in
+      # electron-builder.yml need a real identity to apply correctly, and
+      # without one the result is a *worse* state than fully unsigned: macOS
+      # reports "code has no resources but signature indicates they must be
+      # present" and Gatekeeper's "damaged" message, even after xattr -cr.
+      # Force a clean, fully unsigned build when there's no real cert, so
+      # users hit the one well-understood "unsigned app" flow instead.
+      - name: Build (macOS)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.APPLE_CERTIFICATE != '' && 'true' || 'false' }}
+        run: pnpm package:mac
 
       # Notarization (optional — skipped if secrets are not set)
       - name: Notarize
