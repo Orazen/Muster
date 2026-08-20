@@ -14,6 +14,7 @@ import { GrokDriver } from "./grok.ts";
 import { GroqDriver } from "./groq.ts";
 import { MistralDriver } from "./mistral.ts";
 import { OpenAIDriver } from "./openai.ts";
+import { OpenCodeZenDriver } from "./opencode-zen.ts";
 import { OpenRouterDriver } from "./openrouter.ts";
 import { TogetherDriver } from "./together.ts";
 import { GrokAgentDriver } from "./acp/grok.ts";
@@ -36,6 +37,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   TogetherDriver,
   FireworksDriver,
   OpenRouterDriver,
+  OpenCodeZenDriver,
   GrokAgentDriver,
   GeminiAgentDriver,
   KimiAgentDriver,

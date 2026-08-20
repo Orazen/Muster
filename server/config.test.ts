@@ -106,6 +106,7 @@ describe("default fleet", () => {
     ["together", "togetherApi", "together", "TOGETHER_API_KEY"],
     ["fireworks", "fireworksApi", "fireworks", "FIREWORKS_API_KEY"],
     ["openrouter", "openrouterApi", "openrouter", "OPENROUTER_API_KEY"],
+    ["opencodeZen", "opencodeZenApi", "opencodeZen", "OPENCODE_API_KEY"],
   ])("adds a %s (API) engine only when its provider key is present, injecting %s", (providerKey, instanceKey, driverKind, envVar) => {
     const without = instanceConfigs({});
     expect(without[instanceKey]).toBeUndefined();

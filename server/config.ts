@@ -213,6 +213,11 @@ const PROVIDER_DRIVER_ENV: Record<string, string> = {
   together: "TOGETHER_API_KEY",
   fireworks: "FIREWORKS_API_KEY",
   openrouter: "OPENROUTER_API_KEY",
+  // Same OPENCODE_API_KEY the CLI-driven opencodeGo instance already reads
+  // (see injectedEnvironment above) — Zen and Go share one key, so a saved
+  // providers.opencodeZen.apiKey lights up both the API-key engine here and
+  // the CLI engine there.
+  opencodeZen: "OPENCODE_API_KEY",
 };
 
 function injectedEnvironment(cfg: AppConfig): Map<string, string> {
@@ -285,6 +290,9 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
       : {}),
     ...(cfg.providers?.openrouter?.apiKey
       ? { openrouterApi: { driver: "openrouter", displayName: "OpenRouter (API)" } }
+      : {}),
+    ...(cfg.providers?.opencodeZen?.apiKey
+      ? { opencodeZenApi: { driver: "opencodeZen", displayName: "OpenCode Zen (API)" } }
       : {}),
   };
   const CUSTOM_ONLY = {
