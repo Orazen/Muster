@@ -6,7 +6,7 @@ import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "xai";
+export type ConfigSection = "composio" | "box" | "opensandbox" | "opencodeGo" | "xai";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -17,6 +17,10 @@ const SECTIONS: Record<
     flag: (c) => c.composio.configured,
   },
   box: { body: (v) => ({ box: { token: v } }), flag: (c) => c.box.configured },
+  opensandbox: {
+    body: (v) => ({ opensandbox: { apiKey: v } }),
+    flag: (c) => c.opensandbox?.configured ?? false,
+  },
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
 };
@@ -49,6 +53,15 @@ const CREDENTIALS: Record<
     linkLabel: "Open Box API key guide",
     optional: true,
     warning: "Box is a paid service after its trial. Usage may incur charges.",
+  },
+  opensandbox: {
+    label: "OpenSandbox API key",
+    placeholder: "Paste your OpenSandbox server API key",
+    description:
+      "Self-hostable sandbox alternative to Box. Saving a key here stores it for future use — bot computer use doesn't run on it yet.",
+    href: "https://github.com/opensandbox-group/OpenSandbox",
+    linkLabel: "OpenSandbox on GitHub",
+    optional: true,
   },
   opencodeGo: {
     label: "OpenCode Go API key",

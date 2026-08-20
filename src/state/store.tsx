@@ -211,6 +211,7 @@ export interface ConfigStatus {
   xai?: { configured: boolean };
   composio: { configured: boolean; mode?: "managed" | "self-hosted" | "unavailable" };
   box: { configured: boolean };
+  opensandbox?: { configured: boolean };
   opencodeGo?: { configured: boolean };
   providers?: Record<string, { configured: boolean }>;
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
