@@ -4,11 +4,20 @@
 // SDK (real, published, Apache-2.0; API shape confirmed against its actual
 // shipped .d.ts during integration — Sandbox.create/.commands.run/.kill).
 //
-// Honesty note: this module has not been exercised against a live
-// OpenSandbox server (no test account was available during integration).
-// The connection-config shaping and on/off wiring below are tested; sandbox
-// creation and command execution against a real server are not yet
-// confirmed end-to-end — same caveat class as the Cohere driver.
+// Live-verified end-to-end against a real self-hosted OpenSandbox
+// deployment: sandbox creation, command execution, and — the harder
+// question — actually running server/remote-computer.ts's
+// remoteComputerBootstrapCommand()/ensureRemoteCuaCommand() scripts
+// (the same ones Box already trusts) on the same trycua/xfce-cua image
+// Local VM uses, ending with a genuinely running cua-driver daemon
+// (verified via `cua-driver status`). Two real deployment bugs found and
+// fixed on the way: sandboxes must share the server's own Docker network
+// (not the default bridge — they're isolated networks otherwise) via
+// `network_mode`, and OpenSandbox's own example `drop_capabilities` list
+// (SYS_PTRACE, SYS_ADMIN) blocks desktop-automation tooling and needs
+// relaxing for this specific use case — a real security/functionality
+// tradeoff, not a bug, so it's a per-deployment config choice, not
+// hardcoded here.
 import { Sandbox, type ConnectionConfigOptions } from "@alibaba-group/opensandbox";
 import type { AppConfig } from "./config.ts";
 
