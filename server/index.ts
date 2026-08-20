@@ -1973,6 +1973,7 @@ function configStatus() {
       mode: composio.connectionMode(cfg),
     },
     box: { configured: Boolean(cfg.box?.token) },
+    opensandbox: { configured: Boolean(cfg.opensandbox?.apiKey) },
     opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey) },
     providers: providerFlags,
     // the chosen voice is a setting, not a secret; the key is reported the

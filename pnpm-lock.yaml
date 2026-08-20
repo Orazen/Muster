@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@alibaba-group/opensandbox':
+        specifier: ^0.1.11
+        version: 0.1.11
       '@lottiefiles/dotlottie-react':
         specifier: ^0.19.15
         version: 0.19.15(react@19.2.8)
@@ -107,6 +110,10 @@ importers:
         version: 4.123.0(@cloudflare/workers-types@5.20260818.1)
 
 packages:
+
+  '@alibaba-group/opensandbox@0.1.11':
+    resolution: {integrity: sha512-xDJzs+5yYAPrje+z3GKUmXezpVq3kO/NyP8BM9JwzCbfuSr5vQyHJI3/Pu4FBGdb/xQnxMcWFlsKqC4/80OeiQ==}
+    engines: {node: '>=20'}
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -2719,6 +2726,12 @@ packages:
   oniguruma-to-es@4.3.6:
     resolution: {integrity: sha512-csuQ9x3Yr0cEIs/Zgx/OEt9iBw9vqIunAPQkx19R/fiMq2oGVTgcMqO/V3Ybqefr1TBvosI6jU539ksaBULJyA==}
 
+  openapi-fetch@0.14.1:
+    resolution: {integrity: sha512-l7RarRHxlEZYjMLd/PR0slfMVse2/vvIAGm75/F7J6MlQ8/b9uUQmUF2kCPrQhJqMXSxmYWObVgeYXbFYzZR+A==}
+
+  openapi-typescript-helpers@0.0.15:
+    resolution: {integrity: sha512-opyTPaunsklCBpTK8JGef6mfPhLSnyy5a0IN9vKtx3+4aExf+KxEqYwIy3hqkedXIB97u357uLMJsOnm3GVjsw==}
+
   oxlint@1.78.0:
     resolution: {integrity: sha512-QgQePuxIqKOzo1KSjG2EnITEeWvWnKAm77eq8nrMtf6AGoA+zyGc4PFYtDNJSD25g/ibOwfQ851hZ4/SPkMVoA==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -3426,6 +3439,11 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@alibaba-group/opensandbox@0.1.11':
+    dependencies:
+      openapi-fetch: 0.14.1
+      undici: 7.29.0
 
   '@babel/code-frame@7.29.7':
     dependencies:
@@ -6028,6 +6046,12 @@ snapshots:
       oniguruma-parser: 0.12.2
       regex: 6.1.0
       regex-recursion: 6.0.2
+
+  openapi-fetch@0.14.1:
+    dependencies:
+      openapi-typescript-helpers: 0.0.15
+
+  openapi-typescript-helpers@0.0.15: {}
 
   oxlint@1.78.0:
     optionalDependencies:

@@ -26,6 +26,11 @@ const appConfigSchema = z.object({
    * are non-secret local identifiers used to reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
   box: z.object({ token: optionalText }).optional(),
+  /** Self-hosted OpenSandbox server: an alternative to box.ascii.dev for the
+   * cloud computer feature, running on infrastructure the operator controls
+   * instead of a third-party vendor. url defaults to the SDK's own default
+   * (its own connectionConfig) when unset. */
+  opensandbox: z.object({ url: optionalText, apiKey: optionalText }).optional(),
   /** OpenCode Go key; persisted write-only and passed only to its child. */
   opencodeGo: z.object({ apiKey: optionalText }).optional(),
   /** Voice credentials and the selected voice id. */
@@ -43,6 +48,7 @@ export interface AppConfig {
   xai?: { key?: string; url?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   box?: { token?: string };
+  opensandbox?: { url?: string; apiKey?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; voice?: string };
   profile?: { name?: string; email?: string };
@@ -112,7 +118,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
-  for (const key of ["xai", "composio", "box", "opencodeGo", "tts", "profile"] as const) {
+  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
