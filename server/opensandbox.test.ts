@@ -50,3 +50,64 @@ describe("opensandbox config wiring", () => {
     await expect(createSandbox({} as AppConfig)).rejects.toThrow(/no OpenSandbox API key/);
   });
 });
+
+describe("opensandbox runCommand — matches server/box.ts's runCommand() shape exactly", () => {
+  // Sandbox has a private constructor (SDK design, can't be instantiated
+  // directly in a test) — a minimal duck-typed fake exercises the wrapper
+  // logic (result shaping, ok-from-exitCode derivation) without needing a
+  // live sandbox or the SDK's internal HTTP machinery.
+  function fakeSandbox(execution: {
+    logs: { stdout: Array<{ text: string; timestamp: number }>; stderr: Array<{ text: string; timestamp: number }> };
+    exitCode?: number | null;
+  }) {
+    return {
+      commands: {
+        run: async () => execution,
+      },
+    } as unknown as import("@alibaba-group/opensandbox").Sandbox;
+  }
+
+  it("reports ok:true only when exitCode is exactly 0, same as box.ts", async () => {
+    const { runCommand } = await import("./opensandbox.ts");
+    const sandbox = fakeSandbox({
+      logs: { stdout: [{ text: "hello", timestamp: 1 }], stderr: [] },
+      exitCode: 0,
+    });
+    const result = await runCommand(sandbox, "echo hello");
+    expect(result).toEqual({ ok: true, exitCode: 0, stdout: "hello", stderr: "" });
+  });
+
+  it("reports ok:false for a nonzero exit code", async () => {
+    const { runCommand } = await import("./opensandbox.ts");
+    const sandbox = fakeSandbox({
+      logs: { stdout: [], stderr: [{ text: "not found", timestamp: 1 }] },
+      exitCode: 127,
+    });
+    const result = await runCommand(sandbox, "nope");
+    expect(result).toEqual({ ok: false, exitCode: 127, stdout: "", stderr: "not found" });
+  });
+
+  it("joins multiple timestamped output chunks in order", async () => {
+    const { runCommand } = await import("./opensandbox.ts");
+    const sandbox = fakeSandbox({
+      logs: {
+        stdout: [
+          { text: "line 1\n", timestamp: 1 },
+          { text: "line 2\n", timestamp: 2 },
+        ],
+        stderr: [],
+      },
+      exitCode: 0,
+    });
+    const result = await runCommand(sandbox, "printf 'line 1\\nline 2\\n'");
+    expect(result.stdout).toBe("line 1\nline 2\n");
+  });
+
+  it("treats a missing exitCode as null, not 0 (never silently 'succeeds')", async () => {
+    const { runCommand } = await import("./opensandbox.ts");
+    const sandbox = fakeSandbox({ logs: { stdout: [], stderr: [] } });
+    const result = await runCommand(sandbox, "echo");
+    expect(result.exitCode).toBeNull();
+    expect(result.ok).toBe(false);
+  });
+});

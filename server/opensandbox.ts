@@ -56,21 +56,51 @@ export async function createSandbox(
   return {
     sandbox,
     async run(command, runOpts) {
-      const result = await sandbox.commands.run(command, {
-        workingDirectory: runOpts?.workingDirectory,
-        timeoutSeconds: runOpts?.timeoutSeconds,
-      });
-      // Execution.logs is a list of timestamped OutputMessage chunks, not a
-      // flat string — join them in order, same as every other driver in
-      // this codebase accumulates streamed text.
-      return {
-        stdout: result.logs.stdout.map((m) => m.text).join(""),
-        stderr: result.logs.stderr.map((m) => m.text).join(""),
-        exitCode: result.exitCode ?? null,
-      };
+      return runOn(sandbox, command, runOpts);
     },
     async kill() {
       await sandbox.kill();
     },
   };
+}
+
+async function runOn(
+  sandbox: Sandbox,
+  command: string,
+  runOpts?: { workingDirectory?: string; timeoutSeconds?: number },
+): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+  const result = await sandbox.commands.run(command, {
+    workingDirectory: runOpts?.workingDirectory,
+    timeoutSeconds: runOpts?.timeoutSeconds,
+  });
+  // Execution.logs is a list of timestamped OutputMessage chunks, not a
+  // flat string — join them in order, same as every other driver in this
+  // codebase accumulates streamed text.
+  return {
+    stdout: result.logs.stdout.map((m) => m.text).join(""),
+    stderr: result.logs.stderr.map((m) => m.text).join(""),
+    exitCode: result.exitCode ?? null,
+  };
+}
+
+/**
+ * Same shape as server/box.ts's runCommand(cfg, boxId, command) —
+ * {ok, exitCode, stdout, stderr} — deliberately, so the exact same
+ * backend-agnostic bootstrap scripts remoteComputerBootstrapCommand() and
+ * ensureRemoteCuaCommand() already generate (server/remote-computer.ts) can
+ * run unmodified against an OpenSandbox sandbox instead of a Box VM. This is
+ * the concrete seam a future "computer" backend switch would use — creating
+ * the sandbox once, then calling this repeatedly, is the caller's job (not
+ * this function's), same division of responsibility server/box.ts already
+ * has between box creation and runCommand.
+ */
+export async function runCommand(
+  sandbox: Sandbox,
+  command: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<{ ok: boolean; exitCode: number | null; stdout: string; stderr: string }> {
+  const { stdout, stderr, exitCode } = await runOn(sandbox, command, {
+    timeoutSeconds: opts.timeoutMs ? Math.ceil(opts.timeoutMs / 1000) : undefined,
+  });
+  return { ok: exitCode === 0, exitCode, stdout, stderr };
 }
