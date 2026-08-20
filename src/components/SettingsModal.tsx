@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Coins, CreditCard, KeyRound, Monitor, Smartphone, Terminal, User, Volume2, X, Cloud } from "lucide-react";
 import { useStore, type AppSettingsSection } from "@/state/store";
+import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
@@ -29,15 +30,18 @@ const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User
   { id: "billing", label: "Billing", icon: CreditCard },
 ];
 
-/** Name + email, persisted to /api/config {profile} on blur. */
+/** Name + email, persisted to /api/config {profile} on blur. Pre-fills from
+ * the signed-in account when the local profile override hasn't been set
+ * yet, so a freshly created account doesn't show a blank name/email box. */
 function ProfileFields() {
   const { state, dispatch } = useStore();
-  const [name, setName] = useState(state.config?.profile?.name ?? "");
-  const [email, setEmail] = useState(state.config?.profile?.email ?? "");
+  const { user: authUser } = useAuth();
+  const [name, setName] = useState(state.config?.profile?.name ?? authUser?.name ?? "");
+  const [email, setEmail] = useState(state.config?.profile?.email ?? authUser?.email ?? "");
   useEffect(() => {
-    setName(state.config?.profile?.name ?? "");
-    setEmail(state.config?.profile?.email ?? "");
-  }, [state.config?.profile?.name, state.config?.profile?.email]);
+    setName(state.config?.profile?.name ?? authUser?.name ?? "");
+    setEmail(state.config?.profile?.email ?? authUser?.email ?? "");
+  }, [state.config?.profile?.name, state.config?.profile?.email, authUser?.name, authUser?.email]);
 
   const save = () => {
     void fetch("/api/config", {
