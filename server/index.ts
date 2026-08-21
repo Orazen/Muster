@@ -3496,7 +3496,7 @@ const server = createServer(async (req, res) => {
       const status = await containerComputerStatus();
       return json(res, 200, { ...status, commands: setupCommands(status.runtime), idle_timeout_ms: LOCAL_VM_IDLE_MS });
     }
-    m = path.match(/^\/api\/local-computer\/(pull|run|start|stop|remove)$/);
+    m = path.match(/^\/api\/local-computer\/(pull|run|start|stop|remove|runtimeStart)$/);
     if (m && method === "POST") {
       // Requiring JSON makes these localhost lifecycle mutations non-simple
       // browser requests. A hostile web page cannot submit them with a form,

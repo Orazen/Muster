@@ -49,7 +49,7 @@ export const CUA_EXECUTABLE = "/usr/local/libexec/muster/cua-driver";
 
 const RUNTIMES = ["docker", "podman", "container"] as const;
 export type Runtime = (typeof RUNTIMES)[number];
-export type LifecycleAction = "pull" | "run" | "start" | "stop" | "remove";
+export type LifecycleAction = "pull" | "run" | "start" | "stop" | "remove" | "runtimeStart";
 
 const INTERNAL_VIEWER_PORT = 6901;
 const HOST_VIEWER_PORT = 6080;
@@ -672,6 +672,16 @@ export async function containerComputerAction(
   const before = await containerComputerStatus(runner, platform);
   const runtime = before.runtime;
   if (!runtime) throw Object.assign(new Error(before.problem ?? "No container runtime is installed"), { status: 409 });
+
+  // The one action that runs BEFORE the daemon is up — that is the whole
+  // point of it, so it has to be checked ahead of the daemonUp gate below,
+  // not after it.
+  if (action === "runtimeStart") {
+    if (before.daemonUp) return before;
+    await startContainerRuntime(runtime, platform);
+    return containerComputerStatus(runner, platform);
+  }
+
   if (!before.daemonUp) throw Object.assign(new Error(before.problem ?? `${runtime} is not running`), { status: 409 });
 
   if (action === "run" && before.container !== "missing") {
@@ -835,6 +845,48 @@ export function setupCommands(
     remove: command(["rm", runtime === "container" ? "--force" : "-f", CONTAINER]),
     view: `http://127.0.0.1:${HOST_VIEWER_PORT}/vnc.html`,
   };
+}
+
+/** Whether runtimeStart's command can be run by Muster itself: every case
+ * except docker-on-linux, which needs sudo — a password prompt Muster has
+ * no way to satisfy programmatically, and running anything as root without
+ * the user watching it happen isn't a line to cross quietly. */
+export function canAutoStartRuntime(runtime: Runtime | null, platform: NodeJS.Platform): boolean {
+  return runtime !== null && !(runtime === "docker" && platform === "linux");
+}
+
+/** Actually run the runtime-start command — only ever called after
+ * canAutoStartRuntime() confirmed it doesn't need sudo. Uses a real shell
+ * (not CommandRunner, which is scoped to "runtime <args>" invocations) since
+ * these are heterogeneous commands: launching a GUI app, a VM manager, or a
+ * system service, not the container runtime CLI itself. */
+export async function startContainerRuntime(
+  runtime: Runtime,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  if (!canAutoStartRuntime(runtime, platform)) {
+    throw Object.assign(new Error(`Starting ${runtime} on Linux needs sudo — run the command shown below yourself.`), {
+      status: 409,
+    });
+  }
+  const command =
+    runtime === "container"
+      ? "container system start"
+      : runtime === "podman"
+        ? "podman machine init 2>/dev/null; podman machine start"
+        : "colima start || open -a Docker";
+  const shellRun = promisify(execFile);
+  // Starting a VM/daemon can genuinely take a while on first run — same
+  // generous timeout the image-prepare and container actions already use.
+  await shellRun("/bin/sh", ["-c", command], { timeout: 2 * 60_000, env: { ...process.env, PATH: augmentedPath() } }).catch(
+    (e) => {
+      // "colima start || open -a Docker" exits 0 either way it succeeds, so
+      // a real failure here means neither worked.
+      throw Object.assign(new Error(`Could not start ${runtime}: ${e instanceof Error ? e.message : String(e)}`), {
+        status: 500,
+      });
+    },
+  );
 }
 
 /** Cloud boxes still use Muster's high-latency REST adapter. Local VMs

@@ -14,7 +14,7 @@ import {
 import { Card, CommandLine } from "./SettingsPrimitives";
 import { cn } from "@/lib/cn";
 
-type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
+type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate" | "runtimeStart";
 
 interface Status {
   platform: string;
@@ -180,6 +180,45 @@ export function LocalComputerSection() {
     }
   };
 
+  const [autoSetupRunning, setAutoSetupRunning] = useState(false);
+
+  // Steps 2-4 chained into one click, in order, stopping and reporting
+  // exactly where it failed if any step does. Step 1 (installing the
+  // runtime itself) is never included here — that's new software on the
+  // user's machine, the one thing this can't quietly do on their behalf,
+  // same category as the Apple/Google developer-account limitations
+  // elsewhere in this app.
+  const runAutoSetup = async () => {
+    setAutoSetupRunning(true);
+    setError(null);
+    try {
+      let current = status;
+      if (current?.runtime && !current.daemonUp) {
+        if (current.runtime === "docker" && current.platform === "linux") {
+          throw new Error("Starting docker on Linux needs sudo — run the command shown below yourself, then continue.");
+        }
+        await post("runtimeStart");
+        current = await (await fetch("/api/local-computer")).json();
+        setStatus(current);
+      }
+      if (current && !current.image) {
+        await post("pull");
+        current = await (await fetch("/api/local-computer")).json();
+        setStatus(current);
+      }
+      if (current && current.container === "missing" && current.image) {
+        await post("run");
+        current = await (await fetch("/api/local-computer")).json();
+        setStatus(current);
+      }
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAutoSetupRunning(false);
+    }
+  };
+
   const c = status?.commands;
   const ready = status?.ready === true;
   const existing = status?.container !== "missing";
@@ -237,6 +276,21 @@ export function LocalComputerSection() {
 
       <Card title="Setup" subtitle="Once a container runtime is open, Muster prepares Cua and the VM for you.">
         <div className="flex flex-col gap-4">
+          {status?.runtime && !status.ready && !needsRecreate && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-accent/25 bg-accent/5 px-3.5 py-3">
+              <div className="text-[13px] text-ink-secondary">
+                Runtime installed — start it, prepare the desktop, and create the VM in one step.
+              </div>
+              <button
+                onClick={() => void runAutoSetup()}
+                disabled={autoSetupRunning || pending !== null}
+                className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+              >
+                {autoSetupRunning && <Loader2 size={13} className="animate-spin" />}
+                Set up automatically
+              </button>
+            </div>
+          )}
           <Step n={1} title="Install a container runtime" done={Boolean(status?.runtime)}>
             <div className="text-[13px] leading-relaxed text-ink-secondary">
               Podman and Colima are free. Docker Desktop may require a paid licence for larger companies and government use.
@@ -255,10 +309,31 @@ export function LocalComputerSection() {
             title={status?.runtime && !status.daemonUp ? `Open and start ${status.runtime}` : "Start the container runtime"}
             done={Boolean(status?.daemonUp)}
           >
-            {!status?.runtime ? null : c?.runtimeStart ? (
-              <CommandLine command={c.runtimeStart} />
-            ) : (
-              <div className="text-[13px] text-ink-secondary">Open the installed runtime and start its engine, then re-check.</div>
+            {!status?.runtime ? null : (
+              <>
+                {
+                  // Every case except docker-on-linux is a plain user-level
+                  // command (launch a GUI app, start a VM manager) — Muster
+                  // can just run it. docker-on-linux needs sudo, a password
+                  // prompt Muster has no way to satisfy programmatically, so
+                  // that one case still shows the command to run by hand.
+                  !(status?.runtime === "docker" && status?.platform === "linux") ? (
+                    <ActionButton action="runtimeStart" pending={pending} onClick={() => void act("runtimeStart")}>
+                      Start {status?.runtime}
+                    </ActionButton>
+                  ) : c?.runtimeStart ? (
+                    <CommandLine command={c.runtimeStart} />
+                  ) : (
+                    <div className="text-[13px] text-ink-secondary">Open the installed runtime and start its engine, then re-check.</div>
+                  )
+                }
+                {c?.runtimeStart && !(status?.runtime === "docker" && status?.platform === "linux") && (
+                  <details className="text-[12px] text-ink-secondary">
+                    <summary className="cursor-pointer">Show command</summary>
+                    <div className="mt-2"><CommandLine command={c.runtimeStart} /></div>
+                  </details>
+                )}
+              </>
             )}
           </Step>
 

@@ -21,6 +21,7 @@ import {
   containerComputerMcp,
   containerComputerScreenshot,
   containerComputerStatus,
+  canAutoStartRuntime,
   managedImageDockerfile,
   setupCommands,
   type CommandRunner,
@@ -450,6 +451,37 @@ describe("containerComputerAction", () => {
 
     await expect(containerComputerAction("start", fake.run, "linux")).rejects.toThrow("cannot safely resume");
     expect(fake.calls).not.toContain(`docker start ${CONTAINER}`);
+  });
+
+  it("runtimeStart no-ops without touching the runner when the daemon is already up", async () => {
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: new Error("missing image"),
+      [`docker inspect ${CONTAINER}`]: new Error("missing container"),
+    });
+
+    const status = await containerComputerAction("runtimeStart", fake.run, "darwin");
+    expect(status.daemonUp).toBe(true);
+    // Nothing beyond the status probes docker info/inspect already needs —
+    // no attempt to (re-)start a daemon that's already answering.
+    expect(fake.calls.every((call) => call.startsWith("docker info") || call.includes("inspect") || call.startsWith("/usr/bin/which"))).toBe(true);
+  });
+});
+
+describe("canAutoStartRuntime", () => {
+  it("is true for every runtime except docker on Linux, which needs sudo", () => {
+    expect(canAutoStartRuntime("docker", "darwin")).toBe(true);
+    expect(canAutoStartRuntime("docker", "win32")).toBe(true);
+    expect(canAutoStartRuntime("podman", "linux")).toBe(true);
+    expect(canAutoStartRuntime("podman", "darwin")).toBe(true);
+    expect(canAutoStartRuntime("container", "darwin")).toBe(true);
+    expect(canAutoStartRuntime("docker", "linux")).toBe(false);
+  });
+
+  it("is false with no runtime at all", () => {
+    expect(canAutoStartRuntime(null, "darwin")).toBe(false);
   });
 });
 
