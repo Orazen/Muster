@@ -6,7 +6,7 @@ import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "composio" | "box" | "opensandbox" | "opencodeGo" | "xai";
+export type ConfigSection = "composio" | "box" | "opensandbox" | "opencodeGo" | "xai" | "musterCloud";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -23,6 +23,7 @@ const SECTIONS: Record<
   },
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
+  musterCloud: { body: (v) => ({ musterCloud: { url: v } }), flag: (c) => c.musterCloud?.configured ?? false },
 };
 
 const CREDENTIALS: Record<
@@ -78,6 +79,16 @@ const CREDENTIALS: Record<
     href: "https://console.x.ai",
     linkLabel: "Get an xAI API key",
     optional: true,
+  },
+  musterCloud: {
+    label: "Muster Cloud account",
+    placeholder: "https://muster.orazen.online",
+    description:
+      "Opt in to one shared identity: the same email and password sign in here and on the Muster Cloud server you point this at. Bots, threads, and messages stay local to this install — only the account itself is shared, nothing syncs.",
+    href: "https://github.com/Orazen/Muster",
+    linkLabel: "How it works",
+    optional: true,
+    warning: "This install will need internet access to sign in once this is set, and trusts that server with your login.",
   },
 };
 

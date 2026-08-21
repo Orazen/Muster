@@ -12,7 +12,7 @@ Every bot in the sidebar is a real agent — a model running locally under the h
 personality, its own model, its own cloud computer, and its own connected apps.
 Talk to them like contacts. Watch them work. Approve what matters.
 
-<sub>Built and maintained by [Ramagiritharun (Tharun Ramagiri)](https://ramagiritharun.in) at [Orazen](https://orazen.online) — AI, Web, Automation & Digital Agency. · [LinkedIn](https://www.linkedin.com/in/ramagiritharun)</sub>
+<sub>Muster was built by [Tharun Ramagiri](https://ramagiritharun.in) at [Orazen](https://orazen.online) — an AI, Web, Automation & Digital Agency. · [LinkedIn](https://www.linkedin.com/in/ramagiritharun)</sub>
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
@@ -389,7 +389,7 @@ small; adding a provider is one file in [`server/drivers/`](server/drivers/) plu
 
 ## License
 
-[Business Source License 1.1](LICENSE) © 2026 Ramagiritharun (Tharun Ramagiri) / Orazen and contributors.
+[Business Source License 1.1](LICENSE) © 2026 Tharun Ramagiri / Orazen and contributors.
 
 Source-available. You may use, modify, and redistribute for personal, internal,
 and non-commercial purposes. You may **not** offer Muster (or a substantially

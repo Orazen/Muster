@@ -123,7 +123,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
-  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile"] as const) {
+  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

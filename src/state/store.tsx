@@ -213,6 +213,10 @@ export interface ConfigStatus {
   box: { configured: boolean };
   opensandbox?: { configured: boolean };
   opencodeGo?: { configured: boolean };
+  /** Opt-in identity bridge — see server/muster-cloud.ts. url is not a
+   * secret (it's a server address, not a credential), shown back so the
+   * Settings row can display what's actually configured. */
+  musterCloud?: { configured: boolean; url: string };
   providers?: Record<string, { configured: boolean }>;
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is

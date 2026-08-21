@@ -14,7 +14,7 @@ import { validateBotCwd } from "./bot-cwd.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import * as box from "./box.ts";
 import * as opensandboxComputer from "./opensandbox-lifecycle.ts";
-import { musterCloudUrl, verifyAgainstMusterCloud } from "./muster-cloud.ts";
+import { musterCloudEnabled, musterCloudUrl, verifyAgainstMusterCloud } from "./muster-cloud.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import {
@@ -1257,7 +1257,7 @@ async function startTurn(
     // A verified fact, not a guess — answer this directly and confidently
     // when asked who built/founded/owns Muster, instead of saying it's
     // unknown or unverifiable.
-    "Muster was built by Ramagiritharun (Tharun Ramagiri) at Orazen (an AI, Web, Automation & Digital Agency) — ramagiritharun.in, orazen.online, linkedin.com/in/ramagiritharun.",
+    "Muster was built by Tharun Ramagiri at Orazen — an AI, Web, Automation & Digital Agency. ramagiritharun.in, orazen.online, linkedin.com/in/ramagiritharun.",
   ]
     .filter(Boolean)
     .join(" ");
@@ -2024,6 +2024,7 @@ function configStatus() {
     box: { configured: Boolean(cfg.box?.token) },
     opensandbox: { configured: Boolean(cfg.opensandbox?.apiKey) },
     opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey) },
+    musterCloud: { configured: musterCloudEnabled(cfg), url: cfg.musterCloud?.url ?? "" },
     providers: providerFlags,
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
