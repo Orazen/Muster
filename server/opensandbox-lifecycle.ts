@@ -54,6 +54,34 @@ export async function findSandbox(cfg: AppConfig, botId: string): Promise<Sandbo
  * configured OpenSandbox deployment (network_mode matching the server's
  * own Docker network, drop_capabilities without SYS_PTRACE/SYS_ADMIN).
  */
+/** trycua/xfce-cua ships its whole desktop (dbus, a VNC X server, noVNC)
+ * behind /etc/supervisor/supervisord.conf — but OpenSandbox's own
+ * container entrypoint is "tail -f /dev/null", which never runs it. Live-
+ * tested finding this session: without this, there is no X11 socket at
+ * all, so both cua-driver (its X11 overlay fails to connect) and the
+ * plain-X11 screenshot fallback silently produce zero bytes. This is an
+ * OpenSandbox-specific step, deliberately NOT folded into
+ * server/remote-computer.ts's shared bootstrap scripts — Box's VMs boot
+ * their desktop through Box's own infrastructure and must not be touched
+ * by this. Idempotent: a no-op once supervisord is already running. */
+const SUPERVISORD_PGREP = "supervisord -c /etc/supervisor/supervisord.conf";
+
+// Two things live testing found the hard way:
+//   1. the nohup'd process needs to actually finish detaching before
+//      this command's own exec session closes — closing that session
+//      immediately after backgrounding it tears the child down too, so
+//      the trailing sleep has to run in the SAME statement as the "&".
+//   2. folding a leading "pgrep || "/"pgrep && exit 0" idempotency guard
+//      into the same one-liner (with or without a "{ ... }" group)
+//      silently no-ops the whole thing or hangs it — confirmed by A/B
+//      testing the exact same start command with and without a guard
+//      prefix against the live deployment; only the bare start command on
+//      its own ever actually launched the process. So idempotency is a
+//      separate exec call first, not a shell-level guard clause.
+function startDesktopServicesCommand(): string {
+  return "sudo nohup /usr/bin/supervisord -c /etc/supervisor/supervisord.conf > /tmp/ogb-supervisord.log 2>&1 & disown; sleep 5";
+}
+
 export async function provisionSandbox(cfg: AppConfig, botId: string, botName: string) {
   if (!configured(cfg)) {
     throw new Error('OpenSandbox not enabled — add {"opensandbox":{"url":"…","apiKey":"…"}} to ~/.muster/config.json');
@@ -68,6 +96,15 @@ export async function provisionSandbox(cfg: AppConfig, botId: string, botName: s
       // createSandbox() doesn't take metadata (kept minimal for the
       // generic case); tag it now so findSandbox() can locate it later.
       await sandbox.patchMetadata({ [BOT_ID_KEY]: botId }).catch(() => null);
+    }
+
+    // Desktop services first — cua-driver's install (kicked off by the
+    // bootstrap below) tries to connect to X11 immediately, so this has
+    // to be up before that, not after. The command's own trailing sleep
+    // already covers supervisord's startsecs, so no extra wait here.
+    const desktopUp = await runOnSandbox(sandbox, `pgrep -f '${SUPERVISORD_PGREP}'`, { timeoutMs: 10_000 }).catch(() => null);
+    if (!desktopUp?.ok) {
+      await runOnSandbox(sandbox, startDesktopServicesCommand(), { timeoutMs: 20_000 }).catch(() => null);
     }
 
     const bootstrap = remoteComputerBootstrapCommand(botName);
