@@ -95,6 +95,10 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   );
   const computerToolSupported = selectedInstance?.capabilities?.computerMcp === true;
   const cloudSupported = computerToolSupported || selectedInstance?.driverKind === "boxAgent";
+  // Same tool surface as Cloud box (server/computer-proxy.ts dispatches to
+  // whichever backend), so the same engine-capability gate applies — there
+  // is no boxAgent-equivalent driver for OpenSandbox, so no carve-out.
+  const opensandboxSupported = computerToolSupported;
   const botRoutines = state.routines
     .filter((routine) => routine.botId === bot.id)
     .sort((a, b) => Number(b.enabled) - Number(a.enabled) || (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity));
@@ -165,12 +169,21 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       setPhase("error");
       return;
     }
-    if (bot.computer !== "cloud" && !capabilitiesReady) return;
-    // cloud, or auto (cloud box wins when one exists, else local in-app)
+    if (bot.computer === "opensandbox" && !opensandboxSupported) {
+      setError("This model engine cannot use cloud computer tools. Choose Claude, an ACP engine, or the Computer engine.");
+      setPhase("error");
+      return;
+    }
+    // "auto" (bot.computer unset) is the only mode allowed to fall back to
+    // local — an explicit "cloud" or "opensandbox" selection commits to
+    // that backend and must not silently substitute another one.
+    const isAuto = bot.computer !== "cloud" && bot.computer !== "opensandbox";
+    if (isAuto && !capabilitiesReady) return;
+    // cloud/opensandbox, or auto (cloud box wins when one exists, else local in-app)
     api(`/api/bots/${bot.id}/computer`)
       .then((status) => {
         if (!alive) return;
-        const autoLocal = bot.computer !== "cloud" && capabilitiesReady && localAvailable && computerToolSupported;
+        const autoLocal = isAuto && capabilitiesReady && localAvailable && computerToolSupported;
         if (!status.configured) {
           setPhase(autoLocal ? "local" : "unconfigured");
           return;
@@ -409,8 +422,11 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           </div>
         )}
 
-        {/* Cloud-only actions */}
-        {phase === "ready" && (
+        {/* Cloud-only actions — join/sleep are Box's desktop-viewer and
+         * archive-resume surface, not yet built for OpenSandbox (see
+         * docs/plans/opensandbox-integration-and-pricing-decision.md).
+         * Hidden rather than shown-and-always-erroring. */}
+        {phase === "ready" && bot.computer !== "opensandbox" && (
           <div className="mt-3 flex gap-2">
             <button
               onClick={() => run("join")}
@@ -433,6 +449,12 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             )}
           </div>
         )}
+        {phase === "ready" && bot.computer === "opensandbox" && (
+          <div className="mt-3 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12px] text-ink-secondary">
+            Ready — this bot can use shell and desktop-automation tools on its OpenSandbox computer. There is no live
+            screen preview or sleep/resume for this backend yet.
+          </div>
+        )}
 
         {/* Computer source */}
           <div className="mt-4 rounded-xl bg-card p-4">
@@ -450,6 +472,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             {(
               [
                 ["cloud", "Cloud box"],
+                ["opensandbox", "OpenSandbox"],
                 ["vm", "Local VM"],
                 ["local", "This computer"],
                 ["off", "Off"],
@@ -458,6 +481,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               (() => {
                 const disabled =
                   (mode === "cloud" && !cloudSupported) ||
+                  (mode === "opensandbox" && !opensandboxSupported) ||
                   (mode === "vm" && !vmSupported) ||
                   (mode === "local" && (!localAvailable || !computerToolSupported));
                 const unavailableTitle =
@@ -465,7 +489,9 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                     ? "This model engine cannot use the Local VM"
                     : mode === "cloud" && !cloudSupported
                       ? "This model engine cannot use cloud computer tools"
-                      : mode === "local" && !computerToolSupported
+                      : mode === "opensandbox" && !opensandboxSupported
+                        ? "This model engine cannot use cloud computer tools"
+                        : mode === "local" && !computerToolSupported
                         ? "This model engine cannot control this computer"
                         : mode === "local" && !localAvailable
                           ? capabilities.host.platform === "linux"

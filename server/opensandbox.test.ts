@@ -42,7 +42,7 @@ describe("opensandbox config wiring", () => {
     delete process.env.OPEN_SANDBOX_API_KEY;
     delete process.env.OMB_OPENSANDBOX_URL;
     const cc = connectionConfig({});
-    expect(cc).toEqual({ useServerProxy: true });
+    expect(cc).toEqual({ useServerProxy: true, requestTimeoutSeconds: 180 });
   });
 
   it("defaults useServerProxy to true — required for the common Docker bridge-mode self-host setup", () => {

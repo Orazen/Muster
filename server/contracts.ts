@@ -152,8 +152,13 @@ export interface SendTurnInput {
      * bridge harness-controlled lets it turn connection requests into trusted
      * chat cards consistently across provider CLIs. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
-    /** Cloud computer, reached through Muster's REST-to-MCP adapter. */
-    computer?: { kind?: "box"; boxId: string; token: string };
+    /** Cloud computer, reached through Muster's REST-to-MCP adapter. Two
+     * backends share this one adapter (server/computer-proxy.ts dispatches
+     * internally) — "box" is box.ascii.dev, "opensandbox" is a self-hosted
+     * OpenSandbox deployment (server/opensandbox-lifecycle.ts). */
+    computer?:
+      | { kind?: "box"; boxId: string; token: string }
+      | { kind: "opensandbox"; sandboxId: string; url: string; apiKey: string };
     /** Direct stdio connection to a Cua Driver MCP server (host or sandbox). */
     localComputer?: { command: string; args: string[]; env: Record<string, string> };
     /** Peer-agent comms: an MCP proxy (list_bots / ask_bot) that routes back

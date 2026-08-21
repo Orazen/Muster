@@ -48,6 +48,29 @@ const BOX_API = process.env.OGB_BOX_API ?? "https://ascii.dev/api/box/v1";
 const boxId = process.env.OGB_BOX_ID ?? "";
 const token = process.env.OGB_BOX_TOKEN ?? "";
 
+// OpenSandbox is a second, self-hostable backend for this same tool
+// surface (see docs/plans/opensandbox-integration-and-pricing-decision.md
+// and server/opensandbox-lifecycle.ts). Detected by presence, not an
+// explicit mode flag: index.ts only ever sets one backend's env vars when
+// it spawns this process, matching how boxId/token above already work.
+const opensandboxUrl = process.env.OGB_OPENSANDBOX_URL ?? "";
+const opensandboxApiKey = process.env.OGB_OPENSANDBOX_API_KEY ?? "";
+const opensandboxSandboxId = process.env.OGB_OPENSANDBOX_SANDBOX_ID ?? "";
+const usingOpenSandbox = Boolean(opensandboxUrl && opensandboxApiKey && opensandboxSandboxId);
+
+/** Lazily connected — avoids paying SDK/network setup cost on every Box-
+ * backend process that never touches this path. */
+let openSandboxHandle: Awaited<ReturnType<typeof connectOpenSandbox>> | null = null;
+async function connectOpenSandbox() {
+  const { Sandbox } = await import("@alibaba-group/opensandbox");
+  const { runCommand } = await import("./opensandbox.ts");
+  const sandbox = await Sandbox.connect({
+    connectionConfig: { domain: opensandboxUrl, apiKey: opensandboxApiKey, useServerProxy: true },
+    sandboxId: opensandboxSandboxId,
+  });
+  return { sandbox, runCommand };
+}
+
 /** The coordinate space the model sees: frames are downscaled to this
  * width, and clicks are scaled back up to the real display box-side. */
 const SHOT_WIDTH = 1280;
@@ -109,11 +132,12 @@ async function resumeBox(): Promise<boolean> {
   return false;
 }
 
-async function runOnBox(command: string, timeoutMs = 60_000, allowWake = true): Promise<RunOut> {
-  // Old boxes may predate noEnv:true. Run every agent-issued command with an
-  // explicit desktop-only environment so provider/account credentials cannot
-  // leak through `computer_exec` or a child GUI process.
-  const isolatedCommand = [
+/** Every agent-issued command runs inside this explicit desktop-only
+ * environment, on either backend, so provider/account credentials cannot
+ * leak through `computer_exec` or a child GUI process. Pure bash — the one
+ * piece of runOnBox that was already backend-agnostic before this split. */
+function isolate(command: string): string {
+  return [
     "exec env -i",
     'HOME="$HOME"',
     'USER="${USER:-$(id -un)}"',
@@ -126,10 +150,27 @@ async function runOnBox(command: string, timeoutMs = 60_000, allowWake = true): 
     "/bin/bash -c",
     shellQuote(command),
   ].join(" ");
+}
+
+async function runOnOpenSandbox(command: string, timeoutMs: number): Promise<RunOut> {
+  const { sandbox, runCommand } = (openSandboxHandle ??= await connectOpenSandbox());
+  try {
+    return await runCommand(sandbox, isolate(command), { timeoutMs });
+  } catch (e) {
+    // A stale connection (sandbox paused/restarted underneath this
+    // long-lived process) reconnects once rather than wedging every call
+    // after the first failure for the rest of the process's life.
+    openSandboxHandle = null;
+    const message = e instanceof Error ? e.message : String(e);
+    return { ok: false, exitCode: null, stdout: "", stderr: message };
+  }
+}
+
+async function runOnBoxBackend(command: string, timeoutMs: number, allowWake: boolean): Promise<RunOut> {
   const res = await fetch(`${BOX_API}/boxes/${boxId}/commands`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ command: isolatedCommand }),
+    body: JSON.stringify({ command: isolate(command) }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   const body: any = await res.json().catch(() => null);
@@ -137,7 +178,7 @@ async function runOnBox(command: string, timeoutMs = 60_000, allowWake = true): 
     const code = body?.code ?? body?.error?.code ?? "";
     if (/machine_not_running|box_starting|not_running|starting/i.test(String(code))) {
       const woke = await resumeBox();
-      if (woke) return runOnBox(command, timeoutMs, false);
+      if (woke) return runOnBoxBackend(command, timeoutMs, false);
       return { ok: false, exitCode: null, stdout: "", stderr: "the computer is asleep and did not wake in time" };
     }
   }
@@ -147,6 +188,16 @@ async function runOnBox(command: string, timeoutMs = 60_000, allowWake = true): 
     stdout: body?.stdout ?? "",
     stderr: body?.stderr ?? String(body?.message ?? (res.ok ? "" : `HTTP ${res.status}`)),
   };
+}
+
+/** Dispatch to whichever computer backend this process was spawned for.
+ * Every tool below (click, type_text, screenshot capture, ...) calls only
+ * this function and never knows which backend actually ran the command —
+ * that split is the entire point: none of the ~900 lines of tool schemas
+ * and action composition below needed to change for OpenSandbox support. */
+async function runOnBox(command: string, timeoutMs = 60_000, allowWake = true): Promise<RunOut> {
+  if (usingOpenSandbox) return runOnOpenSandbox(command, timeoutMs);
+  return runOnBoxBackend(command, timeoutMs, allowWake);
 }
 
 const observations = new ObservationCoordinator();
@@ -280,10 +331,27 @@ function wholeImage(bytes: Buffer, expectedBytes?: number): boolean {
 }
 
 /** Big frames (and any inline read that came back malformed) are fetched
- * over HTTP: raw artifact bytes first, the files API's base64-in-JSON
- * envelope second. Both are validated — an error page served with a 200
- * must fall through, not reach the model as an "image". */
+ * out-of-band. Both backends are validated the same way — an error page
+ * served with a 200 must fall through, not reach the model as an "image". */
 async function fetchFrame(expectedBytes?: number): Promise<string | null> {
+  if (usingOpenSandbox) return fetchFrameOpenSandbox(expectedBytes);
+  return fetchFrameBox(expectedBytes);
+}
+
+async function fetchFrameOpenSandbox(expectedBytes?: number): Promise<string | null> {
+  try {
+    const { sandbox } = (openSandboxHandle ??= await connectOpenSandbox());
+    const bytes = Buffer.from(await sandbox.files.readBytes(SHOT_PATH));
+    return wholeImage(bytes, expectedBytes) ? bytes.toString("base64") : null;
+  } catch {
+    openSandboxHandle = null;
+    return null;
+  }
+}
+
+/** Raw artifact bytes first, the files API's base64-in-JSON envelope
+ * second. */
+async function fetchFrameBox(expectedBytes?: number): Promise<string | null> {
   const auth = { authorization: `Bearer ${token}` };
   try {
     const res = await fetch(

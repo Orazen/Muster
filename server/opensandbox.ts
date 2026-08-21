@@ -44,6 +44,15 @@ export function connectionConfig(cfg: AppConfig): ConnectionConfigOptions {
     // useServerProxy: false explicitly if a deployment's network topology
     // genuinely allows direct sandbox access (e.g. host networking mode).
     useServerProxy: cfg.opensandbox?.useServerProxy ?? true,
+    // Same live-tested reasoning as createSandbox()'s readyTimeoutSeconds:
+    // the SDK's own default (30s) is real-world too short for this class
+    // of deployment (proxied through the server, real image pulls, a
+    // shared VPS with variable docker-socket latency observed directly
+    // this session). 90s matches what's actually been reliable.
+    // 140s was observed for a genuinely cold create() this session
+    // (opensandbox-lifecycle.ts's own live verification); give real
+    // margin above that rather than re-tuning on every flake.
+    requestTimeoutSeconds: 180,
   };
 }
 
@@ -63,7 +72,7 @@ export interface OpenSandboxHandle {
  * which stays available on .sandbox for anything that needs it directly. */
 export async function createSandbox(
   cfg: AppConfig,
-  opts?: { image?: string },
+  opts?: { image?: string; readyTimeoutSeconds?: number },
 ): Promise<OpenSandboxHandle> {
   if (!configured(cfg)) {
     throw new Error("no OpenSandbox API key — add it in Settings, or set OPEN_SANDBOX_API_KEY");
@@ -71,6 +80,11 @@ export async function createSandbox(
   const sandbox = await Sandbox.create({
     connectionConfig: connectionConfig(cfg),
     ...(opts?.image ? { image: opts.image } : {}),
+    // The SDK's own default (30s) is real-world too short for a first-ever
+    // sandbox with an uncached or large image — live-tested this session:
+    // a real image pull + first-boot health check routinely takes 60-140s.
+    // 120s is the value already proven reliable end to end.
+    readyTimeoutSeconds: opts?.readyTimeoutSeconds ?? 170,
   });
   return {
     sandbox,

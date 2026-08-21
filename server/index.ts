@@ -13,6 +13,7 @@ import { approvalKey, autoDecision } from "./auto-approve.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import * as box from "./box.ts";
+import * as opensandboxComputer from "./opensandbox-lifecycle.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import {
@@ -1296,7 +1297,7 @@ async function startTurn(
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       const mountsCloudComputer = mountsComputerMcp || instance.driverKind === "boxAgent";
       let previewBoxId: string | null = null;
-      let computerKind: "box" | "vm" | "local" | null = null;
+      let computerKind: "box" | "vm" | "local" | "opensandbox" | null = null;
 
       // Explicit destinations are strict. In particular, Local VM must never
       // fall through to host CUA and accidentally click on the user's Mac.
@@ -1368,6 +1369,36 @@ async function startTurn(
         throw new Error("the cloud computer could not be created or reached");
       }
 
+      // OpenSandbox — a self-hostable alternative to Box, same
+      // find-or-create-and-bootstrap shape (see
+      // server/opensandbox-lifecycle.ts), same computer-proxy.ts REST-
+      // style adapter Box already uses (it dispatches internally, so none
+      // of that 900-line tool surface needed to change for this).
+      if (wants === "opensandbox" && opensandboxComputer.opensandboxConfigured(cfg)) {
+        if (!mountsCloudComputer) {
+          throw new Error("this model engine cannot use computer tools — choose Claude, an ACP engine, or the Computer engine");
+        }
+        broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
+        const provisioned = await opensandboxComputer
+          .provisionSandbox(cfg, bot.id, bot.name)
+          .catch((e) => {
+            throw e instanceof Error ? e : new Error(String(e));
+          });
+        integrations.computer = {
+          kind: "opensandbox",
+          sandboxId: provisioned.sandboxId,
+          url: cfg.opensandbox!.url!,
+          apiKey: cfg.opensandbox!.apiKey!,
+        };
+        computerKind = "opensandbox";
+      }
+      if (wants === "opensandbox" && !opensandboxComputer.opensandboxConfigured(cfg)) {
+        throw new Error("OpenSandbox is not configured — add a server URL and API key, or choose Local VM");
+      }
+      if (wants === "opensandbox" && !integrations.computer) {
+        throw new Error("the OpenSandbox computer could not be created or reached");
+      }
+
       // Auto-only host fallback. Electron owns cua-driver/TCC attribution;
       // the harness only reads its already-running connection descriptor.
       if (!integrations.computer && !integrations.localComputer && wants === undefined && mountsComputerMcp) {
@@ -1421,7 +1452,7 @@ async function startTurn(
           persona +
           (computerKind === "vm"
             ? " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Use the computer tools for desktop, accessibility, window, and shell work. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully."
-            : computerKind === "box" && instance.driverKind !== "boxAgent"
+            : (computerKind === "box" && instance.driverKind !== "boxAgent") || computerKind === "opensandbox"
             ? " You have your own cloud computer. In Chrome, prefer browser_snapshot with browser_click/browser_fill for semantic, trusted actions; use screenshot/click/type_text for visual or non-browser UI, open_url for navigation, and computer_exec for Linux tasks. Every action already returns the resulting screen, so don't follow it with screenshot; batch predictable pixel actions with computer_batch."
               : computerKind === "local"
               ? " You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
@@ -3064,9 +3095,9 @@ const server = createServer(async (req, res) => {
       }
       if (
         body.computer !== undefined &&
-        !["cloud", "vm", "local", "off"].includes(String(body.computer))
+        !["cloud", "vm", "local", "opensandbox", "off"].includes(String(body.computer))
       ) {
-        return json(res, 400, { error: "computer must be cloud, vm, local, or off" });
+        return json(res, 400, { error: "computer must be cloud, vm, local, opensandbox, or off" });
       }
       if (body.character !== undefined && !["cursor", "lottie", "star"].includes(String(body.character))) {
         return json(res, 400, { error: "character must be cursor, lottie, or star" });
@@ -3748,12 +3779,33 @@ const server = createServer(async (req, res) => {
 
     // ── the bot's cloud computer (Box) ──
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer$/);
-    if (m && method === "GET") return json(res, 200, await box.boxStatus(cfg, m[1]));
+    if (m && method === "GET") {
+      const botForStatus = store.bot(m[1]);
+      if (botForStatus?.computer === "opensandbox") {
+        const configuredFlag = opensandboxComputer.opensandboxConfigured(cfg);
+        const sandbox = configuredFlag ? await opensandboxComputer.findSandbox(cfg, m[1]).catch(() => null) : null;
+        return json(res, 200, {
+          configured: configuredFlag,
+          box: sandbox ? { boxId: sandbox.id, state: "running", desktopAvailable: false } : null,
+        });
+      }
+      return json(res, 200, await box.boxStatus(cfg, m[1]));
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/(provision|join|sleep|exec|screenshot)$/);
     if (m && method === "POST") {
       const botId = m[1];
       const bot = store.bot(botId);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (bot.computer === "opensandbox") {
+        if (m[2] !== "provision") {
+          // join/sleep/screenshot are the Box desktop-viewer/archive-resume
+          // surface — not built for OpenSandbox yet (see
+          // docs/plans/opensandbox-integration-and-pricing-decision.md).
+          return json(res, 501, { error: `${m[2]} is not supported for OpenSandbox yet` });
+        }
+        const provisioned = await opensandboxComputer.provisionSandbox(cfg, botId, bot.name);
+        return json(res, 200, { boxId: provisioned.sandboxId, reused: provisioned.reused, state: "running" });
+      }
       switch (m[2]) {
         case "provision":
           return json(res, 200, await box.provisionBox(cfg, botId, bot.name));

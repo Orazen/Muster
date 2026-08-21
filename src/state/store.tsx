@@ -153,7 +153,7 @@ export interface Bot {
   activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
   modelSelection: ModelSelection;
   /** Where this bot's computer runs; unset = auto (cloud box if one exists, else local). */
-  computer?: "cloud" | "vm" | "local" | "off";
+  computer?: "cloud" | "vm" | "local" | "opensandbox" | "off";
   /** where new tasks run their shell tools; absent = the private bot workspace */
   cwd?: string;
   /** auto mode: the bot approves its own tool permissions */

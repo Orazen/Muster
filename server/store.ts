@@ -249,7 +249,7 @@ export interface BotRecord {
   resumeCursors: Record<string, unknown>;
   /** which computer the bot acts on: its cloud box, this Mac (local CUA),
    * or none. Unset = auto (box when it exists, else local when available). */
-  computer?: "cloud" | "vm" | "local" | "off";
+  computer?: "cloud" | "vm" | "local" | "opensandbox" | "off";
   /** where NEW tasks run their shell tools; each task pins its own copy
    * on its first turn (TaskRecord.cwd). Absent = the home folder. */
   cwd?: string;

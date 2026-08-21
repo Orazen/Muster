@@ -72,9 +72,14 @@ export async function provisionSandbox(cfg: AppConfig, botId: string, botName: s
 
     const bootstrap = remoteComputerBootstrapCommand(botName);
     let boot;
+    // Retry on ANY failure, not just "no response" — a freshly created
+    // sandbox's sudo/filesystem/capability setup can genuinely race with
+    // the very first command run against it (live-observed this session:
+    // "sudo: unable to send audit message" preceded a real nonzero exit on
+    // a cold sandbox, then succeeded immediately on a warm one).
     for (let attempt = 0; attempt < 5; attempt++) {
       boot = await runOnSandbox(sandbox, bootstrap, { timeoutMs: 120_000 });
-      if (boot.ok || boot.exitCode !== null) break;
+      if (boot.ok) break;
       await new Promise((r) => setTimeout(r, 3000));
     }
     if (!boot?.ok) {

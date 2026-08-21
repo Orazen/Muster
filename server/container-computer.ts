@@ -839,9 +839,20 @@ export function setupCommands(
 
 /** Cloud boxes still use Muster's high-latency REST adapter. Local VMs
  * bypass it and mount Cua Driver's official MCP server through
- * containerComputerMcp(). */
+ * containerComputerMcp(). OpenSandbox rides the same REST-style adapter
+ * as Box — server/computer-proxy.ts dispatches to whichever backend's env
+ * vars are actually present. */
 export function computerProxyEnv(
-  computer: { boxId?: string; token?: string },
+  computer:
+    | { kind?: "box"; boxId?: string; token?: string }
+    | { kind: "opensandbox"; sandboxId?: string; url?: string; apiKey?: string },
 ): NodeJS.ProcessEnv {
+  if (computer.kind === "opensandbox") {
+    return {
+      OGB_OPENSANDBOX_SANDBOX_ID: computer.sandboxId ?? "",
+      OGB_OPENSANDBOX_URL: computer.url ?? "",
+      OGB_OPENSANDBOX_API_KEY: computer.apiKey ?? "",
+    };
+  }
   return { OGB_BOX_ID: computer.boxId ?? "", OGB_BOX_TOKEN: computer.token ?? "" };
 }
