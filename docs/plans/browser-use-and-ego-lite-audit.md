@@ -61,3 +61,36 @@ third-party orchestration tooling (gstack/ruflo) as Muster's own.
 3. Once that lands, mounting browser-use's MCP server is a small, high-value addition on top —
    plan it as a follow-on, not a prerequisite.
 4. Do not adopt ego-lite as a dependency; it's not shaped for that.
+
+## Follow-up audit — 8 more repos checked, license flag found
+
+Fast triage (license + description via GitHub API, not full code reads — that's the
+honest depth given the volume asked for in one pass):
+
+| Repo | License | Notes |
+|---|---|---|
+| trycua/cua | MIT | **Already a dependency** — this is the upstream project cua-driver (Local VM) comes from. Nothing new to add. |
+| simular-ai/Agent-S | Apache-2.0 | Real computer-use agentic framework, worth studying for OpenSandbox/Local VM parity ideas — not done this pass. |
+| CopilotKit/OpenBot | MIT | Very close to Muster's own positioning (a computer per agent, every action pre-decided/recorded). Worth a deeper competitive read later, not code to adopt. |
+| sub8bot/Sub8 | MIT | Already covered in `growth-and-monetization-plan.md` (octopus mascot idea). |
+| elie222/rakazo | Apache-2.0 | Already deeply audited in `growth-and-monetization-plan.md`. |
+| uzairansaruzi/hermex | MIT | Native iPhone app for an agent — directly relevant to Muster's own iOS companion (already has App Store assets in-repo per the growth plan). Worth a real look when iOS work resumes. |
+| madebywelch/guaca | **AGPL-3.0** | ⚠️ Copyleft — do not copy code directly into Muster (BSL 1.1). Any AGPL code linked/networked would obligate releasing Muster's own source under AGPL terms. Study the *ideas* only, never the code. |
+| mikesteroonie/open-grokbot | MIT | 0 stars, minimal activity — low priority. |
+
+## tharunramagiri/musterbot — the actual avatar engine, real integration candidate
+
+Found while checking the requested character swap: this is the source of the
+animated star SVG shared earlier this session, a rebrand of `bloub` by Jérémy
+Perret (MIT, attribution preserved). It's a genuinely substantial, well-tested
+engine (~4,500 lines across `src/bot/`) — 8 body shapes, 12 colors, 16 rest
+expressions, morphing state transitions, all **framework-free, clock-free, pure
+TypeScript** (`engine.sample(t)` is a pure function of time — no Vue coupling in
+the core engine, only its own customizer UI is Vue).
+
+That framework-independence is exactly what makes this a real, technically low-
+risk integration candidate for `src/components/StarTeammate.tsx` (currently
+~184 lines, one shape, limited expressions) — but "port a 4,500-line measured-
+and-tested animation engine into a different app's render pipeline without
+regressing every place the avatar renders (sidebar, chat, dock icon generation)"
+is its own project, not a swap-in. Scoped, not done this pass.

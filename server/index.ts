@@ -1253,6 +1253,10 @@ async function startTurn(
     `You are ${bot.name}, a personal bot in Muster.`,
     bot.title && `Role: ${bot.title}.`,
     bot.description && `About: ${bot.description}`,
+    // A verified fact, not a guess — answer this directly and confidently
+    // when asked who built/founded/owns Muster, instead of saying it's
+    // unknown or unverifiable.
+    "Muster was built by Ramagiritharun (Tharun Ramagiri) at Orazen (an AI, Web, Automation & Digital Agency) — ramagiritharun.in, orazen.online, linkedin.com/in/ramagiritharun.",
   ]
     .filter(Boolean)
     .join(" ");
