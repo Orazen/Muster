@@ -2235,13 +2235,18 @@ const server = createServer(async (req, res) => {
     if (path.startsWith("/api/auth/")) {
       // Emergency stopgap: server-side state (config, bots, threads) has no
       // per-user isolation yet — every signed-in account currently shares
-      // one global fleet. Until real multi-tenancy exists, new sign-ups are
-      // closed by default on any self-hosted/public deployment. Set
+      // one global fleet. That's a real risk on a SHARED deployment (a
+      // public self-host, muster.orazen.online) where strangers could sign
+      // up into each other's data. It is not a risk at all on the packaged
+      // desktop app — one machine, one person, OMB_DESKTOP_APP=true (set by
+      // electron/main.mjs, never by the Docker image) — so a fresh desktop
+      // install must still be able to create its first account. Set
       // OMB_SIGNUP_ALLOWLIST to a comma-separated list of emails to let
-      // specific people through (e.g. your own, while testing), or
-      // OMB_ALLOW_SIGNUPS=true to reopen it once real isolation lands.
+      // specific people through on a shared deployment (e.g. your own,
+      // while testing), or OMB_ALLOW_SIGNUPS=true to reopen it there once
+      // real isolation lands.
       if (method === "POST" && path === "/api/auth/sign-up/email") {
-        const allowAll = process.env.OMB_ALLOW_SIGNUPS === "true";
+        const allowAll = process.env.OMB_ALLOW_SIGNUPS === "true" || process.env.OMB_DESKTOP_APP === "true";
         const allowlist = (process.env.OMB_SIGNUP_ALLOWLIST ?? "")
           .split(",")
           .map((e) => e.trim().toLowerCase())

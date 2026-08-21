@@ -178,6 +178,13 @@ async function startServerOn(port) {
       OMB_STATIC_DIR: path.join(process.resourcesPath, "ui"),
       OMB_PORT: String(port),
       OMB_USER_DATA: app.getPath("userData"),
+      // The emergency sign-ups-closed stopgap (server/index.ts) exists
+      // because a SHARED deployment's server state has no per-user
+      // isolation yet. That risk doesn't exist here: this is a single
+      // machine's own local server, one person, their own data — the
+      // whole point of "local-first." Without this flag, a fresh install
+      // of the desktop app couldn't create its first account at all.
+      OMB_DESKTOP_APP: "true",
       ...(secureCredentials.composioApiKey
         ? { COMPOSIO_API_KEY: secureCredentials.composioApiKey }
         : {}),
