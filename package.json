@@ -45,7 +45,9 @@
     "build:cua": "node scripts/prepare-cua.mjs",
     "build:updater": "node scripts/bundle-updater.mjs",
     "package:prepare": "pnpm build && pnpm build:server && pnpm build:companion && pnpm build:updater",
-    "package:mac": "pnpm package:prepare && pnpm build:speech && pnpm build:cua && electron-builder --mac --publish never",
+    "package:mac": "pnpm package:mac:arm64",
+    "package:mac:arm64": "pnpm package:prepare && pnpm build:speech && CUA_TARGET_ARCH=arm64 pnpm build:cua && electron-builder --mac --arm64 --publish never",
+    "package:mac:x64": "pnpm package:prepare && pnpm build:speech && CUA_TARGET_ARCH=x64 pnpm build:cua && electron-builder --mac --x64 --publish never -c.dmg.artifactName=Muster-\\${version}-intel.dmg",
     "package:win": "pnpm package:prepare && electron-builder --win --publish never",
     "package:linux": "pnpm package:prepare && electron-builder --linux --x64 --publish never",
     "package:linux:dir": "pnpm package:prepare && electron-builder --linux dir --x64 --publish never",
@@ -77,6 +79,7 @@
   "devDependencies": {
     "@oxlint/plugins": "1.78.0",
     "@tailwindcss/vite": "^4.1.11",
+    "@trycua/cua-driver-darwin-x64": "0.20.0",
     "@types/node": "^26.2.0",
     "@types/react": "^19.1.9",
     "@types/react-dom": "^19.1.7",

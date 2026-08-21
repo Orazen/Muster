@@ -157,6 +157,57 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # ── macOS (Intel / x64) ──────────────────────────────────────────────────
+  # Same afterPack ad-hoc re-sign as arm64 (build/after-pack-mac.mjs); no
+  # Developer ID cert here either, so this deliberately skips notarization
+  # and does NOT merge into latest-mac.yml — that file drives in-app auto-
+  # update, and merging a second architecture into it needs its own
+  # verification pass so it can't silently break arm64's auto-update, which
+  # already works. This ships x64 as a real, direct download only; wiring it
+  # into auto-update is a separate, scoped follow-up.
+  macos-x64:
+    name: macOS (x64 / Intel)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install the x64 CUA native package
+        run: pnpm add -D @trycua/cua-driver-darwin-x64@0.20.0
+      - name: Build (macOS x64)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: pnpm package:mac:x64
+
+      - name: Verify artifacts
+        run: |
+          set -euo pipefail
+          echo "=== macOS x64 artifacts ==="
+          ls -lh release/*.dmg release/*.zip 2>/dev/null
+          VERSION=$(node -p "require('./package.json').version")
+          [ -f "release/Muster-${VERSION}-intel.dmg" ] || { echo "::error::missing Muster-${VERSION}-intel.dmg"; exit 1; }
+
+      - name: Add stable-filename copy
+        run: |
+          set -euo pipefail
+          cp "release/Muster-$(node -p "require('./package.json').version")-intel.dmg" release/Muster-intel.dmg
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos-x64-artifacts
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
   # ── Windows ────────────────────────────────────────────────────────────
   windows:
     name: Windows (x64)
@@ -280,7 +331,7 @@ jobs:
   # ── Create GitHub Release ──────────────────────────────────────────────
   publish:
     name: Create Release
-    needs: [macos, windows, linux]
+    needs: [macos, macos-x64, windows, linux]
     if: ${{ !cancelled() && (needs.macos.result == 'success' || needs.linux.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -298,6 +349,13 @@ jobs:
       # A partial release is allowed, but installed clients on the missing
       # platform would poll a release with no latest*.yml manifest and fail
       # their update check. Publish those as a draft so a human confirms.
+      # macos-x64 is deliberately NOT one of the required platforms here —
+      # it's the newest, least-proven leg of this workflow, and a failure
+      # in it alone shouldn't turn every release into a draft the way a
+      # failure in the three platforms every release has always needed
+      # would. It's still fetched below and included in the release when
+      # it succeeded; when it didn't, the release just ships without an
+      # Intel build that checkpoint, same as any other best-effort artifact.
       - name: Decide draft state
         id: draft
         run: |
@@ -309,6 +367,9 @@ jobs:
             echo "value=true" >> "$GITHUB_OUTPUT"
           else
             echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "${{ needs.macos-x64.result }}" != "success" ]; then
+            echo "::warning::macOS x64 build did not succeed — releasing without it"
           fi
 
       - name: Verify stable download names are present
@@ -331,5 +392,6 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/macos-artifacts/*
+            artifacts/macos-x64-artifacts/*
             artifacts/windows-artifacts/*
             artifacts/linux-artifacts/*

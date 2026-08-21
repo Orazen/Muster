@@ -110,8 +110,21 @@ await run("/usr/bin/codesign", [
 // files staged beside the bundle.
 const cuaSdkDir = join(stage, "cua-sdk");
 const nativeDir = join(cuaSdkDir, "native");
-const nativePackage = join(dependencyRoot, "@trycua", "cua-driver-darwin-arm64");
-if (!existsSync(nativePackage)) throw new Error("required CUA darwin-arm64 native package is missing");
+// electron-builder's --arm64/--x64 flags choose the shipped Electron and
+// the app's Info.plist architecture, but this script runs once per build
+// invocation on Node's own arch — for a cross-arch build (e.g. building
+// the x64 DMG on an Apple Silicon CI runner) that's the wrong signal.
+// CUA_TARGET_ARCH is the same override the release workflow's x64 leg
+// sets; process.arch is the correct default for every other case
+// (a plain local `pnpm package:mac` build).
+const targetArch = process.env.CUA_TARGET_ARCH === "x64" ? "x64" : process.env.CUA_TARGET_ARCH === "arm64" ? "arm64" : process.arch;
+const nativePackage = join(dependencyRoot, "@trycua", `cua-driver-darwin-${targetArch}`);
+if (!existsSync(nativePackage)) {
+  throw new Error(
+    `required CUA darwin-${targetArch} native package is missing — run ` +
+      `\`pnpm add -D @trycua/cua-driver-darwin-${targetArch}@${expectedVersion}\` first`,
+  );
+}
 await mkdir(nativeDir, { recursive: true });
 await Promise.all([
   copyFile(join(realpathSync(nativePackage), "libcua_driver_sdk.dylib"), join(nativeDir, "libcua_driver_sdk.dylib")),

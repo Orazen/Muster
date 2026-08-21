@@ -48,6 +48,7 @@ const FEATURES = [
 
 const DOWNLOADS = [
   { os: "macOS", meta: "Apple silicon · unsigned build · one-click .dmg", href: "https://github.com/Orazen/Muster/releases/latest/download/Muster.dmg", label: "Download .dmg" },
+  { os: "macOS (Intel)", meta: "x64 · unsigned build · one-click .dmg", href: "https://github.com/Orazen/Muster/releases/latest/download/Muster-intel.dmg", label: "Download .dmg" },
   { os: "Windows", meta: "64-bit · one-click installer, no admin rights", href: "https://github.com/Orazen/Muster/releases/latest/download/Muster-setup.exe", label: "Download .exe" },
   { os: "Ubuntu", meta: "24.04 x64 · .deb or AppImage", href: "https://github.com/Orazen/Muster/releases/latest/download/Muster.deb", label: "Download .deb" },
   { os: "Self-host (web)", meta: "Run the web UI + harness in Docker", href: "https://github.com/Orazen/Muster/blob/main/docs/self-host.md", label: "Docker guide" },

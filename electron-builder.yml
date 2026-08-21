@@ -53,11 +53,19 @@ extraResources:
     to: companion
 
 mac:
+  # No arch here on purpose — the CLI's --arm64/--x64 flag (see package.json's
+  # package:mac:arm64 / package:mac:x64 scripts) decides which one builds.
+  # An explicit arch list here, tested live, made electron-builder build
+  # BOTH regardless of the CLI flag, and both landed on the exact same
+  # Muster-${version}.dmg filename (artifactName has no arch placeholder)
+  # — the second build silently overwrote the first. Leaving arch unset
+  # here and letting the CLI flag be the only source of truth avoids both
+  # problems; each arch still needs its own scripts/prepare-cua.mjs run
+  # first to stage the matching native binary, so the two are never
+  # invoked together as a bare --mac.
   target:
     - target: dmg
-      arch: arm64
     - target: zip
-      arch: arm64
   icon: build/icon.icns
   category: public.app-category.productivity
   hardenedRuntime: true
