@@ -219,7 +219,11 @@ function RoutineCard({ item, bot, compact, onOpen }: { item: CalendarItem; bot: 
             {item.run?.triggerSource === "webhook" && <><Webhook size={10} /><span>Webhook</span><span>·</span></>}
             <span className="truncate">
               {status ? status.replace("waiting", "needs you") : bot.name}
-              {(item.routine?.runOn ?? item.run?.runOn) === "cloud" ? " · VM" : ""}
+              {(item.routine?.runOn ?? item.run?.runOn) === "cloud"
+                ? " · VM"
+                : (item.routine?.runOn ?? item.run?.runOn) === "opensandbox"
+                  ? " · OpenSandbox"
+                  : ""}
             </span>
           </div>
         </div>
@@ -333,6 +337,16 @@ export function RoutineEditor({
   const [error, setError] = useState("");
   const cloudInstance = state.instances.find((instance) => instance.driverKind === "boxAgent");
   const cloudReady = Boolean(state.config?.box.configured && cloudInstance?.snapshot.state === "available");
+  // OpenSandbox has no boxAgent-equivalent embedded driver — it rides the
+  // selected bot's own model engine, same as "This computer", so readiness
+  // depends on that engine supporting computer tools at all, same gate
+  // ComputerPanel.tsx uses for its own "Runs on: OpenSandbox" option.
+  const selectedBotInstance = state.instances.find(
+    (instance) => instance.instanceId === bots.find((b) => b.id === botId)?.modelSelection.instanceId,
+  );
+  const opensandboxReady = Boolean(
+    state.config?.opensandbox?.configured && selectedBotInstance?.capabilities?.computerMcp === true,
+  );
 
   const save = async () => {
     const input: RoutineInput = {
@@ -380,7 +394,7 @@ export function RoutineEditor({
           </label>
           <div>
             <div className="mb-2 text-[12px] font-medium text-ink-secondary">Where does it run?</div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => setRunOn("agent")}
@@ -404,12 +418,31 @@ export function RoutineEditor({
                 <div className="flex items-center gap-2 text-[13px] font-medium text-ink"><Cloud size={15} />Cloud VM</div>
                 <div className="mt-1 text-[11px] leading-relaxed text-ink-secondary">Runs the AGENT and its tools inside its Box virtual machine.</div>
               </button>
+              <button
+                type="button"
+                disabled={!opensandboxReady && runOn !== "opensandbox"}
+                onClick={() => setRunOn("opensandbox")}
+                className={cn(
+                  "rounded-xl border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-45",
+                  runOn === "opensandbox" ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised/60",
+                )}
+              >
+                <div className="flex items-center gap-2 text-[13px] font-medium text-ink"><Cloud size={15} />OpenSandbox</div>
+                <div className="mt-1 text-[11px] leading-relaxed text-ink-secondary">Runs on its OpenSandbox computer, whatever the bot's own Computer setting is.</div>
+              </button>
             </div>
             {runOn === "cloud" && (
               <div className={cn("mt-2 rounded-lg px-3 py-2 text-[11.5px] leading-relaxed", cloudReady ? "bg-accent/10 text-ink-secondary" : "border border-warning/25 bg-warning/10 text-warning")}>
                 {cloudReady
                   ? "The VM wakes automatically for each run. Keep Muster running so its scheduler can launch the job."
                   : "Cloud VM needs a working Box API key in App Settings before this routine can run."}
+              </div>
+            )}
+            {runOn === "opensandbox" && (
+              <div className={cn("mt-2 rounded-lg px-3 py-2 text-[11.5px] leading-relaxed", opensandboxReady ? "bg-accent/10 text-ink-secondary" : "border border-warning/25 bg-warning/10 text-warning")}>
+                {opensandboxReady
+                  ? "Keep Muster running so its scheduler can reach OpenSandbox and launch the job."
+                  : "OpenSandbox needs a configured server URL/API key and a model engine that supports computer tools."}
               </div>
             )}
           </div>
@@ -514,14 +547,14 @@ function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bo
           {routine && (
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Schedule</div><div className="mt-1 text-[13px] text-ink">{scheduleLabel(routine)}</div></div>
-              <div className="rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Runs on</div><div className="mt-1 flex items-center gap-1.5 text-[13px] text-ink">{routine.runOn === "cloud" ? <Cloud size={13} /> : <Laptop size={13} />}{routine.runOn === "cloud" ? "Cloud VM" : "AGENT setup"}</div></div>
+              <div className="rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Runs on</div><div className="mt-1 flex items-center gap-1.5 text-[13px] text-ink">{routine.runOn === "cloud" || routine.runOn === "opensandbox" ? <Cloud size={13} /> : <Laptop size={13} />}{routine.runOn === "cloud" ? "Cloud VM" : routine.runOn === "opensandbox" ? "OpenSandbox" : "AGENT setup"}</div></div>
               <div className="rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Duration</div><div className="mt-1 text-[13px] text-ink">{routine.durationMinutes} minutes</div></div>
             </div>
           )}
           {run?.triggerSource === "webhook" && (
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Triggered by</div><div className="mt-1 flex items-center gap-1.5 text-[13px] text-ink"><Webhook size={13} />Webhook</div></div>
-              <div className="rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Runs on</div><div className="mt-1 flex items-center gap-1.5 text-[13px] text-ink">{run.runOn === "cloud" ? <Cloud size={13} /> : <Laptop size={13} />}{run.runOn === "cloud" ? "Cloud VM" : "AGENT setup"}</div></div>
+              <div className="rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Runs on</div><div className="mt-1 flex items-center gap-1.5 text-[13px] text-ink">{run.runOn === "cloud" || run.runOn === "opensandbox" ? <Cloud size={13} /> : <Laptop size={13} />}{run.runOn === "cloud" ? "Cloud VM" : run.runOn === "opensandbox" ? "OpenSandbox" : "AGENT setup"}</div></div>
               {run.deliveryId && <div className="col-span-2 rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Delivery ID</div><div className="mt-1 truncate font-mono text-[11.5px] text-ink">{run.deliveryId}</div></div>}
             </div>
           )}

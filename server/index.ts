@@ -1178,6 +1178,11 @@ async function startTurn(
   // a task takes its name from the first thing you asked it to do
   if (text.trim() && !opts?.connectorContinuation) store.titleTaskFromFirstMessage(bot.id, text, threadId);
 
+  // "cloud" is Box's special embedded-agent driver (the whole turn runs
+  // inside the Box VM, not just its computer tools mounted on the bot's
+  // own model) — OpenSandbox has no equivalent driver, so "opensandbox"
+  // resolves the instance the same way "agent" does and only overrides
+  // which computer backend gets mounted (below), not which model runs.
   const instance = opts?.runOn === "cloud"
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
     : await resolveInstanceForBot(bot);
@@ -1293,7 +1298,13 @@ async function startTurn(
       // tools that would fail on every call or spawn an unnecessary proxy.
       const dwebUrl = process.env.DWEB_URL?.trim();
       if (dwebUrl) integrations.dweb = { url: dwebUrl };
-      const wants = opts?.runOn === "cloud" ? "cloud" : bot.computer; // cloud routine overrides the AGENT default
+      // A routine's explicit runOn overrides the AGENT's own computer
+      // setting for that run — same override "cloud" already did, now
+      // also true for "opensandbox" (a scheduled task set to run on
+      // OpenSandbox must actually use it, regardless of what the bot's
+      // own Computer panel happens to be set to).
+      const wants =
+        opts?.runOn === "cloud" ? "cloud" : opts?.runOn === "opensandbox" ? "opensandbox" : bot.computer;
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       const mountsCloudComputer = mountsComputerMcp || instance.driverKind === "boxAgent";
       let previewBoxId: string | null = null;

@@ -12,7 +12,7 @@ export type RoutineSchedule =
 /** `cloud` runs the agent itself inside the bot's Box VM. `agent` keeps
  * using the provider selected on the AGENT and only borrows its configured
  * computer tools, if any. */
-export type RoutineRunOn = "agent" | "cloud";
+export type RoutineRunOn = "agent" | "cloud" | "opensandbox";
 
 export type RoutineRunTrigger = "schedule" | "manual" | "webhook";
 
@@ -147,7 +147,7 @@ function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | 
   if (!prompt) throw new Error("Tell the bot what to do");
   if (!botId) throw new Error("Choose a bot");
   const runOn = input.runOn ?? "agent";
-  if (runOn !== "agent" && runOn !== "cloud") throw new Error("Choose where this routine runs");
+  if (runOn !== "agent" && runOn !== "cloud" && runOn !== "opensandbox") throw new Error("Choose where this routine runs");
   return {
     name,
     prompt,

@@ -142,7 +142,7 @@ const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 10;
 const MAX_PENDING_RUNS = 3;
 
-const runOnSchema = z.enum(["agent", "cloud"]);
+const runOnSchema = z.enum(["agent", "cloud", "opensandbox"]);
 const eventTypesSchema = z.array(z.string()).max(20).optional();
 const triggerInputSchema = z.object({
   name: z.string(),
@@ -239,7 +239,7 @@ function cleanInput(input: WebhookTriggerInput): CleanWebhookInput {
   const runOn = input.runOn ?? "agent";
   if (!name) fail(400, "Give the webhook a name");
   if (!botId) fail(400, "Choose a AGENT");
-  if (runOn !== "agent" && runOn !== "cloud") fail(400, "Choose where this webhook runs");
+  if (runOn !== "agent" && runOn !== "cloud" && runOn !== "opensandbox") fail(400, "Choose where this webhook runs");
   const eventTypes = Array.from(new Set(
     (input.eventTypes ?? [])
       .map((value) => value.trim().slice(0, 200))
