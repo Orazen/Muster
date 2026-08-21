@@ -309,7 +309,12 @@ function createWindow() {
             return { capabilities, health, location: window.location.href, title: document.title };
           })()
         `);
-        const expectedLocation = `http://127.0.0.1:${SERVER_PORT}/`;
+        // The desktop app's own root route now redirects straight to
+        // /sign-in when signed out (src/App.tsx's RootRoute — the packaged
+        // app skips the marketing landing page a browser visitor sees at
+        // bare "/"). This smoke run starts with no session, so /sign-in is
+        // the one correct destination, not a race to tolerate both.
+        const expectedLocation = `http://127.0.0.1:${SERVER_PORT}/sign-in`;
         if (result.location !== expectedLocation) {
           throw new Error(
             `unexpected packaged renderer URL: ${result.location} (expected ${expectedLocation})`,
