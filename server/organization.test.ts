@@ -83,7 +83,40 @@ describe("organization plugin migration", () => {
         headers: { cookie },
       });
       expect(list.status).toBe(200);
-      expect(await list.json()).toEqual([]);
+      // Was `[]` before the auto-provisioning hooks in server/auth.ts
+      // (docs/plans/multi-tenancy-design.md's first real foundation step)
+      // — every new sign-up now gets its own organization automatically,
+      // so a fresh account has exactly one, not zero. The point of this
+      // test stays the same either way: organization/list must not 500 on
+      // a fresh database.
+      const orgs = (await list.json()) as Array<{ name: string }>;
+      expect(orgs).toHaveLength(1);
+      expect(orgs[0].name).toBe("Org Mig's workspace");
+    } finally {
+      await server.stop();
+      removeTempDir(server.home);
+    }
+  });
+
+  it("a fresh session's activeOrganizationId already points at the auto-provisioned org", async () => {
+    const server = await bootServer();
+    try {
+      const signup = await fetch(`${server.base}/api/auth/sign-up/email`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: server.base },
+        body: JSON.stringify({ email: "org-active@example.com", password: "testpassword12345", name: "Org Active" }),
+      });
+      expect(signup.status).toBe(200);
+      const cookie = signup.headers.get("set-cookie")?.split(";")[0] ?? "";
+
+      const session = await fetch(`${server.base}/api/auth/get-session`, { headers: { cookie } });
+      expect(session.status).toBe(200);
+      const body = (await session.json()) as { session: { activeOrganizationId: string | null } };
+      expect(body.session.activeOrganizationId).toBeTruthy();
+
+      const list = await fetch(`${server.base}/api/auth/organization/list`, { headers: { cookie } });
+      const orgs = (await list.json()) as Array<{ id: string }>;
+      expect(orgs.map((o) => o.id)).toContain(body.session.activeOrganizationId);
     } finally {
       await server.stop();
       removeTempDir(server.home);

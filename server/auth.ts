@@ -237,10 +237,99 @@ export function authCapabilities(): {
   };
 }
 
+/** Create this user's own organization + owner membership, directly
+ * against the same tables server/auth.ts's own migration SQL defines
+ * above — not through the organization plugin's HTTP-route-style API
+ * functions (auth.api.createOrganization / setActiveOrganization), which
+ * turned out to require an authenticated session in the request context
+ * (found reading routes/crud-org.mjs: requestOnlySessionMiddleware reads
+ * ctx.context.session.user.id). That session doesn't exist yet inside a
+ * user.create.after hook — a brand-new user has no session at the point
+ * their own account row is being created — so the route handlers can't
+ * be called from here at all, only the tables they read/write. */
+function provisionOrganizationFor(userId: string, displayName: string): string {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const orgId = `org_${randomBytes(12).toString("base64url")}`;
+  const slug = `org-${userId}`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  db.prepare('INSERT INTO "organization" ("id", "name", "slug", "createdAt") VALUES (?, ?, ?, ?)').run(
+    orgId,
+    `${displayName}'s workspace`,
+    slug,
+    now,
+  );
+  db.prepare('INSERT INTO "member" ("id", "organizationId", "userId", "role", "createdAt") VALUES (?, ?, ?, ?, ?)').run(
+    `mem_${randomBytes(12).toString("base64url")}`,
+    orgId,
+    userId,
+    "owner",
+    now,
+  );
+  return orgId;
+}
+
 export const auth = betterAuth({
   database: getDb(),
   secret: resolveSecret(),
   socialProviders: socialProviders(),
+  // First real piece of the multi-tenancy foundation
+  // (docs/plans/multi-tenancy-design.md), not the full fix: every new user
+  // — through any auth method, this hook fires for all of them — gets their
+  // own organization automatically. The active session created right after
+  // (session.create.before, below) picks it up as activeOrganizationId.
+  // Nothing reads activeOrganizationId to actually scope
+  // cfg/store/registry/bus yet (that's the real rewrite the design doc
+  // describes and deliberately does not rush); this is what makes a tenant
+  // ID exist to resolve in the first place, which every later step needs
+  // before it can do anything. Additive and inert on its own — an org a
+  // tenant ID is never read from doesn't change any current behavior.
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (user) => {
+          try {
+            provisionOrganizationFor(user.id, user.name || user.email);
+          } catch {
+            // Never block sign-up over this — an org-less account is
+            // exactly today's status quo (this hook is what changes that
+            // going forward for new accounts), not a broken one.
+          }
+        },
+      },
+    },
+    session: {
+      create: {
+        before: async (session) => {
+          try {
+            const db = getDb();
+            const existing = db
+              .prepare('SELECT "organizationId" FROM "member" WHERE "userId" = ? ORDER BY "createdAt" ASC LIMIT 1')
+              .get(session.userId) as { organizationId?: string } | undefined;
+            if (existing?.organizationId) return { data: { ...session, activeOrganizationId: existing.organizationId } };
+            // Live-tested finding: a brand-new user's very first session is
+            // sometimes created before user.create.after's org-provisioning
+            // has finished — a real race, not hypothetical (reproduced: the
+            // first session after sign-up had no activeOrganizationId, a
+            // second session from a subsequent sign-in did). Provisioning
+            // right here too closes that race without needing hook
+            // ordering guarantees: provisionOrganizationFor()'s slug is
+            // deterministic per user, so if user.create.after's own
+            // attempt is still in flight or already succeeded, the
+            // redundant insert here just hits the same unique constraint
+            // and is swallowed — never a duplicate organization.
+            const user = db.prepare('SELECT "name", "email" FROM "user" WHERE "id" = ?').get(session.userId) as
+              | { name?: string; email?: string }
+              | undefined;
+            const orgId = provisionOrganizationFor(session.userId, user?.name || user?.email || session.userId);
+            return { data: { ...session, activeOrganizationId: orgId } };
+          } catch {
+            /* fall through — a session without an org is today's status quo */
+          }
+          return undefined;
+        },
+      },
+    },
+  },
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 12,
