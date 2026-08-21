@@ -214,7 +214,9 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   const sseFlowing = Boolean(bot.busy && live);
   const inFlight = useRef(false);
   useEffect(() => {
-    if (phase !== "ready" || sseFlowing) return;
+    // OpenSandbox has no screenshot endpoint yet (server 501s it) — don't
+    // poll a route that can never succeed.
+    if (phase !== "ready" || sseFlowing || bot.computer === "opensandbox") return;
     let alive = true;
     const shoot = async () => {
       if (inFlight.current) return;
@@ -234,7 +236,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       alive = false;
       clearInterval(timer);
     };
-  }, [phase, sseFlowing, bot.id]);
+  }, [phase, sseFlowing, bot.id, bot.computer]);
 
   // Local VM preview comes directly from Cua Driver through the harness. It
   // does not use the password-protected noVNC viewer or cloud endpoints.
@@ -375,7 +377,9 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 <Monitor size={22} />
               )}
               <span className="text-[12px]">
-                {phase === "ready"
+                {phase === "ready" && bot.computer === "opensandbox"
+                  ? "This bot can use shell and desktop-automation tools on its OpenSandbox computer. There is no live screen preview for this backend yet."
+                  : phase === "ready"
                   ? "Waiting for the first frame…"
                   : phase === "vm"
                     ? "Capturing the Local VM screen…"
@@ -447,12 +451,6 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 Sleep
               </button>
             )}
-          </div>
-        )}
-        {phase === "ready" && bot.computer === "opensandbox" && (
-          <div className="mt-3 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12px] text-ink-secondary">
-            Ready — this bot can use shell and desktop-automation tools on its OpenSandbox computer. There is no live
-            screen preview or sleep/resume for this backend yet.
           </div>
         )}
 
