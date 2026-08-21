@@ -98,6 +98,13 @@ export async function provisionSandbox(cfg: AppConfig, botId: string, botName: s
       await sandbox.patchMetadata({ [BOT_ID_KEY]: botId }).catch(() => null);
     }
 
+    // Live-tested finding: this deployment's default sandbox TTL is short
+    // (single-digit minutes of inactivity) — long enough for the create+
+    // bootstrap round trip, not for an actual agent task after that. Renew
+    // on every provision call (both fresh and reused), not just at create
+    // time, so an idle-then-resumed bot's sandbox is still there.
+    await sandbox.renew(3600).catch(() => null);
+
     // Desktop services first — cua-driver's install (kicked off by the
     // bootstrap below) tries to connect to X11 immediately, so this has
     // to be up before that, not after. The command's own trailing sleep
