@@ -306,14 +306,22 @@ function createWindow() {
               throw new Error(\`health request failed: \${healthResponse.status} \${healthResponse.statusText}\`);
             }
             const health = await healthResponse.json();
+            // The desktop app's own root route redirects straight to
+            // /sign-in when signed out (src/App.tsx's RootRoute) — but
+            // that's a client-side <Navigate>, not a document navigation,
+            // so it hasn't necessarily run yet the instant did-finish-load
+            // fires (found live in CI: this raced both ways, landing on
+            // "/sign-in" once and bare "/" the next run). Poll for the
+            // real settled URL instead of reading it once immediately.
+            const deadline = Date.now() + 5000;
+            while (window.location.pathname === "/" && Date.now() < deadline) {
+              await new Promise((r) => setTimeout(r, 50));
+            }
             return { capabilities, health, location: window.location.href, title: document.title };
           })()
         `);
-        // The desktop app's own root route now redirects straight to
-        // /sign-in when signed out (src/App.tsx's RootRoute — the packaged
-        // app skips the marketing landing page a browser visitor sees at
-        // bare "/"). This smoke run starts with no session, so /sign-in is
-        // the one correct destination, not a race to tolerate both.
+        // This smoke run starts with no session, so /sign-in is the one
+        // correct settled destination for a signed-out desktop launch.
         const expectedLocation = `http://127.0.0.1:${SERVER_PORT}/sign-in`;
         if (result.location !== expectedLocation) {
           throw new Error(
