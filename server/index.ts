@@ -14,6 +14,7 @@ import { validateBotCwd } from "./bot-cwd.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import * as box from "./box.ts";
 import * as opensandboxComputer from "./opensandbox-lifecycle.ts";
+import { musterCloudUrl, verifyAgainstMusterCloud } from "./muster-cloud.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import {
@@ -2239,6 +2240,63 @@ const server = createServer(async (req, res) => {
     }
     // ── auth routes (Better Auth) ────────────────────────────────────────
     if (path.startsWith("/api/auth/")) {
+      // Muster Cloud identity bridge — opt-in (server/muster-cloud.ts).
+      // When configured, sign-up AND sign-in both verify against the
+      // central server first — that's what makes the exact same
+      // email+password work everywhere, without syncing any bot/thread
+      // data. Verifying centrally here also correctly bypasses the
+      // sign-ups-closed stopgap below: a cloud-verified identity is
+      // exactly the isolation guarantee that stopgap exists to protect,
+      // met a different way.
+      const cloudUrl = musterCloudUrl(cfg);
+      if (cloudUrl && method === "POST" && (path === "/api/auth/sign-up/email" || path === "/api/auth/sign-in/email")) {
+        let bodyForCloud: any;
+        try {
+          bodyForCloud = await readBody(req);
+        } catch (e) {
+          const status = (e as { status?: number }).status ?? 400;
+          return json(res, status, { error: e instanceof Error ? e.message : String(e) });
+        }
+        const email = typeof bodyForCloud?.email === "string" ? bodyForCloud.email.trim() : "";
+        const password = typeof bodyForCloud?.password === "string" ? bodyForCloud.password : "";
+        const name = typeof bodyForCloud?.name === "string" ? bodyForCloud.name : email;
+        if (!email || !password) return json(res, 400, { error: "email and password are required" });
+        const verified = await verifyAgainstMusterCloud(cloudUrl, email, password, name);
+        if (!verified.ok) return json(res, 401, { error: verified.reason, code: "MUSTER_CLOUD_REJECTED" });
+        // Cloud-verified — now ensure a LOCAL account exists with the same
+        // credentials (idempotent: sign-up 4xxing because it already
+        // exists locally is expected and fine), then do the real local
+        // sign-in that actually establishes this request's session.
+        const host = req.headers.host ?? "localhost";
+        const baseUrl = `http://${host}`;
+        // Same "Missing or null Origin" trap the cloud-verification calls
+        // hit — Better Auth's own CSRF check requires it, treats absent as
+        // untrusted rather than same-origin.
+        const jsonHeaders = new Headers({ "content-type": "application/json", origin: baseUrl });
+        await auth.handler(
+          new Request(`${baseUrl}/api/auth/sign-up/email`, {
+            method: "POST",
+            headers: jsonHeaders,
+            body: JSON.stringify({ email, password, name }),
+          }),
+        ).catch(() => null);
+        const localHeaders = new Headers();
+        for (const [key, value] of Object.entries(req.headers)) {
+          if (value !== undefined) localHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
+        }
+        localHeaders.set("content-type", "application/json");
+        const signInRes = await auth.handler(
+          new Request(`${baseUrl}/api/auth/sign-in/email`, {
+            method: "POST",
+            headers: localHeaders,
+            body: JSON.stringify({ email, password }),
+          }),
+        );
+        const signInHeaders: Record<string, string> = {};
+        signInRes.headers.forEach((value, key) => { signInHeaders[key] = value; });
+        res.writeHead(signInRes.status, signInHeaders);
+        return res.end(await signInRes.text());
+      }
       // Emergency stopgap: server-side state (config, bots, threads) has no
       // per-user isolation yet — every signed-in account currently shares
       // one global fleet. That's a real risk on a SHARED deployment (a

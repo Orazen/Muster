@@ -31,6 +31,8 @@ const appConfigSchema = z.object({
    * instead of a third-party vendor. url defaults to the SDK's own default
    * (its own connectionConfig) when unset. */
   opensandbox: z.object({ url: optionalText, apiKey: optionalText, useServerProxy: z.boolean().optional() }).optional(),
+  /** Opt-in identity bridge — see server/muster-cloud.ts. */
+  musterCloud: z.object({ url: optionalText }).optional(),
   /** OpenCode Go key; persisted write-only and passed only to its child. */
   opencodeGo: z.object({ apiKey: optionalText }).optional(),
   /** Voice credentials and the selected voice id. */
@@ -49,6 +51,9 @@ export interface AppConfig {
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   box?: { token?: string };
   opensandbox?: { url?: string; apiKey?: string; useServerProxy?: boolean };
+  /** Opt-in identity bridge — see server/muster-cloud.ts. Off by default;
+   * an unset url means fully local, no network dependency, unchanged. */
+  musterCloud?: { url?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; voice?: string };
   profile?: { name?: string; email?: string };
