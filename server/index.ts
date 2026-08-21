@@ -1475,7 +1475,9 @@ async function startTurn(
           // bot whose driver actually mounted the tools
           (integrations.composio
             ? " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service."
-            : "") +
+            : bot.composio !== false && composio.configured(cfg)
+              ? " The user has connected apps (Gmail, GitHub, and others) at the account level, but this specific model engine's driver doesn't mount those tools yet — do not claim nothing is connected; say the apps are connected but not reachable from this engine, and suggest switching to Claude or an ACP engine (Codex, Gemini CLI) to use them."
+              : "") +
           (coordinationPrompt ? ` ${coordinationPrompt}` : "") +
           (privateWorkspace ? memorySystemPrompt(bot.id) : "") +
           (opts?.automationSource === "webhook"

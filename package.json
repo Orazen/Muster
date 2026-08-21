@@ -9,10 +9,11 @@
     "url": "https://github.com/Orazen/Muster.git"
   },
   "author": {
-    "name": "Ramagiritharun",
-    "email": "ramagiritharun.in@gmail.com"
+    "name": "Ramagiritharun (Tharun Ramagiri)",
+    "email": "ramagiritharun.in@gmail.com",
+    "url": "https://ramagiritharun.in"
   },
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "desktopName": "com.muster.app.desktop",
   "type": "module",
   "main": "electron/main.mjs",

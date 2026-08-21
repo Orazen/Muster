@@ -12,7 +12,7 @@ Every bot in the sidebar is a real agent — a model running locally under the h
 personality, its own model, its own cloud computer, and its own connected apps.
 Talk to them like contacts. Watch them work. Approve what matters.
 
-<sub>Built and maintained by [Orazen](https://orazen.online) — AI, Web, Automation & Digital Agency.</sub>
+<sub>Built and maintained by [Ramagiritharun (Tharun Ramagiri)](https://ramagiritharun.in) at [Orazen](https://orazen.online) — AI, Web, Automation & Digital Agency. · [LinkedIn](https://www.linkedin.com/in/ramagiritharun)</sub>
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
