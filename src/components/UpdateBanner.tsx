@@ -162,22 +162,38 @@ export function UpdateBanner() {
             </button>
           )}
           {s.status === "error" && (
-            <button
-              onClick={() => {
-                setPending("check");
-                void updater.check();
-              }}
-              disabled={pending !== null}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:text-ink-secondary disabled:hover:bg-raised"
-            >
-              {pending === "check" ? (
-                <>
-                  <Loader2 size={13} className="animate-spin" /> Checking…
-                </>
-              ) : (
-                "Try again"
-              )}
-            </button>
+            <>
+              <button
+                onClick={() => {
+                  setPending("check");
+                  void updater.check();
+                }}
+                disabled={pending !== null}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:text-ink-secondary disabled:hover:bg-raised"
+              >
+                {pending === "check" ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" /> Checking…
+                  </>
+                ) : (
+                  "Try again"
+                )}
+              </button>
+              {/* Muster's builds aren't Developer ID signed yet — macOS's
+               * own updater can fail to apply an update it already found
+               * and downloaded for exactly that reason. "Try again" alone
+               * leaves someone stuck with no way out of that specific
+               * failure, so always offer the one path that reliably works:
+               * grab the new build directly. */}
+              <a
+                href="https://github.com/Orazen/Muster/releases/latest"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-hairline/50 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+              >
+                Download manually
+              </a>
+            </>
           )}
           <button
             onClick={() => setDismissed(key)}

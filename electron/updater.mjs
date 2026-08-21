@@ -3,8 +3,17 @@
 // user's "Restart to update" click. One state object is broadcast to the
 // renderer on every transition; the renderer just renders it.
 //
-// Only runs in the packaged, signed+notarized app (mac auto-update requires
-// signing). In dev it's a no-op so the browser/dev shell is unaffected.
+// Only runs in a packaged app; in dev it's a no-op so the browser/dev shell
+// is unaffected. This comment used to say "signed+notarized" as if that were
+// already true and guarded for — it isn't, Muster's current builds are only
+// ad-hoc signed (no paid Apple Developer certificate; see
+// build/after-pack-mac.mjs). macOS's own update mechanism (Squirrel.Mac,
+// underneath electron-updater) can legitimately fail to APPLY an update it
+// already found and downloaded when the running app isn't Developer ID
+// signed — the check/download/apply pipeline itself is correct and doesn't
+// need special-casing here, but src/components/UpdateBanner.tsx's error
+// state offers a direct link to the release page as the fallback for
+// exactly this, since "Try again" alone can't fix a signing problem.
 // electron-updater is vendored (electron/vendor/electron-updater.cjs) because
 // the packaged app ships no node_modules.
 import { app, ipcMain } from "electron";

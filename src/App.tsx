@@ -152,12 +152,31 @@ function AppShell() {
   );
 }
 
+// The marketing landing page ("/") is meant for a browser visitor who has
+// never used Muster — feature copy, download buttons for every platform,
+// GitHub links. The packaged desktop app is a completely different
+// audience: someone who already downloaded and opened Muster, on a window
+// that only ever shows this one app. Rendering the same marketing page
+// there (as this route did unconditionally before) meant every desktop
+// launch needed an extra click through content the user had already acted
+// on just by opening the app. window.ogb only exists inside Electron's
+// preload bridge — that's the same signal every other desktop-vs-browser
+// check in this codebase already uses (src/lib/desktop.ts).
+function RootRoute() {
+  const { user, loading } = useAuth();
+  if (typeof window !== "undefined" && window.ogb) {
+    if (loading) return null;
+    return <Navigate to={user ? "/app" : "/sign-in"} replace />;
+  }
+  return <LandingPage />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<RootRoute />} />
           <Route path="/sign-in" element={<LoginPage />} />
           <Route path="/sign-up" element={<SignupPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
