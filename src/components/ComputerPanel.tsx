@@ -484,15 +484,25 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                   (mode === "opensandbox" && !opensandboxSupported) ||
                   (mode === "vm" && !vmSupported) ||
                   (mode === "local" && (!localAvailable || !computerToolSupported));
+                // Only Claude's own driver and ACP-protocol engines (Codex,
+                // Gemini CLI, and similar) mount MCP tools today — the direct-
+                // API drivers (OpenAI, DeepSeek, OpenCode Zen, and the rest)
+                // don't wire tool-calling at all yet, so every computer option
+                // is correctly disabled for them. Naming that explicitly here
+                // instead of a generic "cannot use" message, since that
+                // generic wording reads as a bug rather than a model-choice
+                // limitation (real user confusion this session's own testing
+                // ran into).
+                const switchEngineHint = " — switch to Claude or an ACP engine (Codex, Gemini CLI) to use it";
                 const unavailableTitle =
                   mode === "vm" && !vmSupported
-                    ? "This model engine cannot use the Local VM"
+                    ? "This model engine's driver doesn't mount computer tools yet" + switchEngineHint
                     : mode === "cloud" && !cloudSupported
-                      ? "This model engine cannot use cloud computer tools"
+                      ? "This model engine's driver doesn't mount computer tools yet" + switchEngineHint
                       : mode === "opensandbox" && !opensandboxSupported
-                        ? "This model engine cannot use cloud computer tools"
+                        ? "This model engine's driver doesn't mount computer tools yet" + switchEngineHint
                         : mode === "local" && !computerToolSupported
-                        ? "This model engine cannot control this computer"
+                        ? "This model engine's driver doesn't mount computer tools yet" + switchEngineHint
                         : mode === "local" && !localAvailable
                           ? capabilities.host.platform === "linux"
                             ? "Local computer control isn't available on Linux yet"
