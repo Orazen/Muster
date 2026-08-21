@@ -86,6 +86,22 @@ mac:
 dmg:
   sign: true
   artifactName: Muster-${version}.dmg
+  # electron-builder's bare default (no window size, no icon layout) opens
+  # as a near-empty Finder window — nothing wrong with it technically, but
+  # it doesn't read as a normal macOS app installer at first glance. This
+  # is the standard "drag the app onto the Applications shortcut" layout
+  # every other macOS installer uses.
+  window:
+    width: 540
+    height: 380
+  contents:
+    - x: 140
+      y: 190
+      type: file
+    - x: 400
+      y: 190
+      type: link
+      path: /Applications
 
 win:
   target:
