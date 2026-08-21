@@ -36,12 +36,16 @@ export interface AuthCapabilities {
   passwordReset: boolean;
   /** Configured social providers, e.g. ["github", "google"]. */
   socialProviders: string[];
+  /** Manual sign-UP is off — new accounts must use a social provider.
+   * Existing accounts still sign in with a password unaffected. */
+  googleOnlySignup: boolean;
 }
 
 const NO_CAPABILITIES: AuthCapabilities = {
   emailVerification: false,
   passwordReset: false,
   socialProviders: [],
+  googleOnlySignup: false,
 };
 
 interface AuthContextType {
@@ -83,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         emailVerification: Boolean(data.emailVerification),
         passwordReset: Boolean(data.passwordReset),
         socialProviders: Array.isArray(data.socialProviders) ? data.socialProviders : [],
+        googleOnlySignup: Boolean(data.googleOnlySignup),
       });
     } catch {
       // Server too old or unreachable — leave every optional flow hidden.

@@ -224,11 +224,16 @@ export function authCapabilities(): {
   emailVerification: boolean;
   passwordReset: boolean;
   socialProviders: string[];
+  googleOnlySignup: boolean;
 } {
   return {
     emailVerification: isEmailConfigured() && SELF_HOSTED,
     passwordReset: isEmailConfigured(),
     socialProviders: Object.keys(socialProviders()),
+    // Manual sign-UP is off; existing accounts still sign in with a
+    // password exactly as before — see the /api/auth/sign-up/email gate
+    // in server/index.ts for the enforcement, this is only the UI signal.
+    googleOnlySignup: process.env.OMB_GOOGLE_ONLY_SIGNUP === "true",
   };
 }
 

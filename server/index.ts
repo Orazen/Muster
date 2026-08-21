@@ -2298,6 +2298,19 @@ const server = createServer(async (req, res) => {
         res.writeHead(signInRes.status, signInHeaders);
         return res.end(await signInRes.text());
       }
+      // Deliberate product decision, not the isolation stopgap below:
+      // OMB_GOOGLE_ONLY_SIGNUP=true turns off manual email/password sign-UP
+      // entirely — new accounts must come through Google. Existing accounts
+      // (including ones created with a password before this was turned on)
+      // keep signing IN with their password exactly as before; this only
+      // closes the door on NEW manual accounts, it doesn't touch existing
+      // ones or invalidate anyone's current password.
+      if (method === "POST" && path === "/api/auth/sign-up/email" && process.env.OMB_GOOGLE_ONLY_SIGNUP === "true") {
+        return json(res, 403, {
+          message: "Sign up with Google — manual sign-up is turned off on this deployment.",
+          code: "GOOGLE_ONLY_SIGNUP",
+        });
+      }
       // Emergency stopgap: server-side state (config, bots, threads) has no
       // per-user isolation yet — every signed-in account currently shares
       // one global fleet. That's a real risk on a SHARED deployment (a

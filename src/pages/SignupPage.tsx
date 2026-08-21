@@ -5,7 +5,7 @@ import { SocialSignIn } from "@/components/SocialSignIn";
 import { Star } from "lucide-react";
 
 export function SignupPage() {
-  const { signUp } = useAuth();
+  const { signUp, capabilities } = useAuth();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -44,6 +44,14 @@ export function SignupPage() {
           </p>
         </div>
 
+        {capabilities.googleOnlySignup ? (
+          <div className="space-y-4 rounded-xl border border-hairline bg-panel p-6">
+            <SocialSignIn action="Sign up" />
+            <p className="text-center text-[13px] text-ink-secondary">
+              New accounts on this deployment sign up with Google.
+            </p>
+          </div>
+        ) : (
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-hairline bg-panel p-6">
           {error && (
             <div className="rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>
@@ -105,6 +113,7 @@ export function SignupPage() {
             {loading ? "Creating account…" : "Create account"}
           </button>
         </form>
+        )}
 
         <p className="mt-6 text-center text-sm text-ink-secondary">
           Already have an account?{" "}

@@ -38,13 +38,33 @@ export function UpdateBanner() {
   const status = s?.status;
   useEffect(() => setPending(null), [status]);
 
+  // A successful quitAndInstall tears down this whole renderer within
+  // seconds — the OS replaces the running app. If this component is still
+  // mounted and still showing "installing" after a real one would have
+  // already relaunched, the install genuinely hung (this session found the
+  // likely cause: macOS's Squirrel.Mac updater can fail to actually apply
+  // an update whose signature isn't a real Developer ID one, which Muster's
+  // builds currently aren't — see electron/updater.mjs). Only client-side
+  // state, not asking the main process anything new — the point is exactly
+  // that "still here after N seconds" is itself the proof of a hang.
+  const [stuckInstalling, setStuckInstalling] = useState(false);
+  useEffect(() => {
+    if (status !== "installing") {
+      setStuckInstalling(false);
+      return;
+    }
+    const timer = setTimeout(() => setStuckInstalling(true), 15_000);
+    return () => clearTimeout(timer);
+  }, [status]);
+
   if (!s || s.status === "idle" || s.status === "checking") return null;
   const key = `${s.status}:${s.version ?? ""}`;
   if (dismissed === key) return null;
   const updater = window.ogb!.updater!;
 
-  // while busy the card owns the moment: no dismissing, no second click
-  const installing = s.status === "installing";
+  // while busy the card owns the moment: no dismissing, no second click —
+  // unless it's stuck, in which case the user needs a way out
+  const installing = s.status === "installing" && !stuckInstalling;
   const busy = s.status === "downloading" || installing;
 
   const title =
@@ -56,7 +76,9 @@ export function UpdateBanner() {
           ? `${s.version} is ready`
           : installing
             ? "Restarting to update…"
-            : "Update check failed";
+            : stuckInstalling
+              ? "Restart didn't finish"
+              : "Update check failed";
   const subtitle =
     s.status === "available"
       ? "A newer version is ready to download."
@@ -69,7 +91,9 @@ export function UpdateBanner() {
           ? "Restart to finish updating."
           : installing
             ? "Muster will reopen in a moment."
-            : friendlyError(s.message);
+            : stuckInstalling
+              ? "This can happen on an unsigned build. Download the update directly instead."
+              : friendlyError(s.message);
 
   return (
     <div className="animate-panel-in fixed bottom-4 left-4 z-50 w-[300px] rounded-xl border border-hairline/40 bg-panel p-3.5 shadow-2xl shadow-black/50">
@@ -194,6 +218,16 @@ export function UpdateBanner() {
                 Download manually
               </a>
             </>
+          )}
+          {stuckInstalling && (
+            <a
+              href="https://github.com/Orazen/Muster/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] text-ink hover:bg-raised-hover"
+            >
+              <ArrowDownToLine size={13} /> Download manually
+            </a>
           )}
           <button
             onClick={() => setDismissed(key)}
