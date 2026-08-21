@@ -34,6 +34,14 @@ files:
 
 asar: true
 
+# Re-seals the .app with a clean, internally consistent ad-hoc signature
+# when there is no real Apple Developer identity — fixes the packaged
+# build going from Gatekeeper's hard-block "is damaged and can't be
+# opened" to the normal, resolvable "unidentified developer" prompt.
+# See build/after-pack-mac.mjs for the full diagnosis. Root-level, not
+# under mac: — electron-builder's schema rejects it there.
+afterPack: build/after-pack-mac.mjs
+
 extraResources:
   - from: dist
     to: ui
