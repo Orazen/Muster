@@ -334,6 +334,16 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   if (!decided) return null;
 
   // dense array indexed by step — steps are 0..5 by construction
+  // Vellum-style progress indicator
+  const dots = Array.from({ length: 6 }, (_, i) => (
+    <span
+      key={i}
+      className={`h-1.5 rounded-full transition-all duration-300 ${
+        i === step ? "w-6 bg-accent" : i < step ? "w-1.5 bg-accent/40" : "w-1.5 bg-raised-hover"
+      }`}
+    />
+  ));
+
   const stepContent = [
     (
       <div className="flex flex-col items-center">
@@ -442,85 +452,102 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
     (
       <div className="flex min-h-0 flex-col">
-        {/* musterbot scene: avatar LEFT full-height, shape+form panel RIGHT */}
-        <div className="flex min-h-0 flex-1 gap-5 max-sm:flex-col">
-          {/* LEFT: the teammate itself, as large as fits */}
-          <div className="flex min-w-0 flex-1 items-center justify-center rounded-2xl border border-hairline/30 bg-inset p-4">
+        {/* Vellum-style: centered column, avatar front-and-center, scroll strips below */}
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4">
+          <div className="flex items-center justify-center py-2">
             <AgentAvatar
               color={botColor}
               character={botCharacter}
-              size={180}
+              size={160}
               state={botName.trim() ? "happy" : "idle"}
               animated
             />
           </div>
 
-          {/* RIGHT: musterbot-style control panel */}
-          <div className="flex w-full max-w-[260px] shrink-0 flex-col overflow-y-auto pr-0.5 [scrollbar-width:thin] max-sm:max-w-none">
-            <h2 className="text-[13px] font-semibold text-ink">Shape</h2>
-            <div className="mt-1.5 grid grid-cols-3 gap-1">
+          {(botName.trim() || botRole.trim()) && (
+            <p className="-mt-1 text-center">
+              <span className="text-[16px] font-semibold text-ink">{botName.trim() || "Your teammate"}</span>
+              {botRole.trim() && <span className="ml-1.5 text-[13px] text-ink-secondary">· {botRole.trim()}</span>}
+            </p>
+          )}
+
+          {/* Shape strip — horizontal scroll, musterbot shapes */}
+          <div className="w-full max-w-md overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex gap-2">
               {AGENT_CHARACTERS.filter((c) => !["cursor", "lottie", "star", "capsule"].includes(c)).map((sh) => (
                 <button
                   key={sh}
                   onClick={() => setBotCharacter(sh)}
+                  aria-label={sh}
                   aria-pressed={botCharacter === sh}
-                  className={`flex flex-col items-center gap-0.5 rounded-lg border p-1 transition ${
+                  className={`flex size-[52px] shrink-0 items-center justify-center rounded-xl border transition ${
                     botCharacter === sh ? "border-accent bg-raised" : "border-hairline/30 hover:bg-raised"
                   }`}
                 >
-                  <AgentAvatar color={botColor} character={sh} size={36} state="idle" animated={false} />
-                  <span className="text-[9px] capitalize leading-tight text-ink-secondary">{sh}</span>
+                  <AgentAvatar color={botColor} character={sh} size={38} state="idle" animated={false} />
                 </button>
               ))}
+              <button
+                onClick={() => setBotCharacter("star")}
+                aria-label="Star"
+                aria-pressed={botCharacter === "star"}
+                className={`flex size-[52px] shrink-0 items-center justify-center rounded-xl border transition ${
+                  botCharacter === "star" ? "border-accent bg-raised" : "border-hairline/30 hover:bg-raised"
+                }`}
+              >
+                <AgentAvatar color={botColor} character="star" size={38} state="idle" animated={false} />
+              </button>
             </div>
+          </div>
 
-            <h2 className="mt-4 text-[13px] font-semibold text-ink">Colour</h2>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {/* Colour strip — horizontal scroll */}
+          <div className="w-full max-w-md overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex gap-1.5">
               {AGENT_COLOR_NAMES.map((c) => (
                 <button
                   key={c}
                   onClick={() => setBotColor(c)}
                   aria-label={c}
                   aria-pressed={botColor === c}
-                  className={`size-[22px] rounded-full transition ${
+                  className={`size-7 shrink-0 rounded-full transition ${
                     botColor === c ? "ring-2 ring-accent ring-offset-1 ring-offset-app" : "hover:brightness-110"
                   }`}
                   style={{ background: AGENT_COLORS[c] }}
                 />
               ))}
             </div>
+          </div>
 
-            <h2 className="mt-4 text-[13px] font-semibold text-ink">Identity</h2>
-            <input
-              autoFocus
-              type="text"
-              value={botName}
-              onChange={(e) => setBotName(e.target.value)}
-              placeholder="Name (e.g. Scout)"
-              className="mt-1.5 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-            />
-            <input
-              type="text"
-              value={botRole}
-              onChange={(e) => setBotRole(e.target.value)}
-              placeholder="Role — research, writing, ops…"
-              className="mt-2 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12.5px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-            />
+          {/* Identity */}
+          <input
+            autoFocus
+            type="text"
+            value={botName}
+            onChange={(e) => setBotName(e.target.value)}
+            placeholder="Name your teammate (e.g. Scout)"
+            className="mt-1 w-full max-w-sm rounded-lg border border-hairline/40 bg-inset px-3.5 py-2.5 text-center text-[15px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+          />
+          <input
+            type="text"
+            value={botRole}
+            onChange={(e) => setBotRole(e.target.value)}
+            placeholder="Role — research, writing, ops… (optional)"
+            className="w-full max-w-sm rounded-lg border border-hairline/40 bg-inset px-3.5 py-2 text-center text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+          />
 
-            <div className="mt-auto flex gap-2 pt-4">
-              <button
-                onClick={() => setStep(1)}
-                className="rounded-lg border border-hairline/40 px-3 py-2 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink"
-              >
-                Back to Engines
-              </button>
-              <button
-                onClick={() => (botName.trim() ? setStep(3) : finish())}
-                className="flex-1 rounded-lg bg-accent py-2 text-[13px] font-medium text-white"
-              >
-                {botName.trim() ? "Continue" : "Skip"}
-              </button>
-            </div>
+          <div className="mt-2 flex w-full max-w-sm gap-3">
+            <button
+              onClick={() => setStep(1)}
+              className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[14px] text-ink-secondary hover:bg-raised hover:text-ink"
+            >
+              Back to Engines
+            </button>
+            <button
+              onClick={() => (botName.trim() ? setStep(3) : finish())}
+              className="flex-1 rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white"
+            >
+              {botName.trim() ? "Continue" : "Skip — no teammate yet"}
+            </button>
           </div>
         </div>
       </div>
@@ -710,7 +737,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-app p-8">
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-app px-4">
+      <div className="flex items-center justify-center gap-2 pb-5">{dots}</div>
       <div
         className={`flex max-h-full w-full flex-col rounded-2xl border border-hairline/40 bg-panel p-8 ${
           step === 1 ? "max-w-[680px]" : "max-w-[460px]"
