@@ -2219,7 +2219,14 @@ async function reloadUserInstances(userId: string): Promise<void> {
   await registry.load(userConfigs);
   // Broadcast the refreshed fleet so connected clients (model picker,
   // composer) see the new vault engines without a page reload.
-  bus.publish({ type: "instances", instances: registry.describe() });
+  // Broadcast the refreshed instance list so connected clients refresh.
+  // Uses the raw SSE frame, not the typed bus event (which has no
+  // "instances" variant).
+  for (const client of bus.clients ?? []) {
+    try {
+      client.write(`data: ${JSON.stringify({ kind: "instances" })}\n\n`);
+    } catch { /* disconnected */ }
+  }
 }
 
 /** Register every user's vault instances (boot path). */
