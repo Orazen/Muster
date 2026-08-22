@@ -6,7 +6,7 @@ import { identifyEmail, setEmailGateDone, emailGateDone, track } from "@/lib/ana
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
 import { ProviderMark } from "./ProviderIcons";
-import { AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor } from "@/lib/mascot";
+import { AGENT_COLORS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor } from "@/lib/mascot";
 import { useStore } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import type { InstanceInfo } from "@/state/store";
