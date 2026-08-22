@@ -44,7 +44,7 @@ export function SignupPage() {
             if (result.error) setError(result.error);
             else navigate("/app");
           }}
-          className="flex w-full items-center justify-center gap-2.5 rounded-lg bg-white py-3 text-sm font-semibold text-[#1f1f1f] shadow-[0_1px_2px_rgba(255,255,255,.1)] transition-transform hover:-translate-y-px hover:bg-white/90 disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-gray-200 bg-white py-2.5 text-sm font-semibold text-[#1f1f1f] shadow-sm transition-all hover:bg-gray-50 disabled:opacity-50"
         >
           <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
             <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z" />
