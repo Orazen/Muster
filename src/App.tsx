@@ -22,6 +22,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { SignupPage } from "@/pages/SignupPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
+import { Onboarding } from "@/components/Onboarding";
 
 function SignOutButton() {
   const { signOut } = useAuth();
@@ -41,6 +42,7 @@ function SignOutButton() {
 function Shell() {
   const { state, dispatch } = useStore();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [firstRun, setFirstRun] = useState(true);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
@@ -136,6 +138,7 @@ function Shell() {
       {state.appSettingsOpen && <SettingsModal />}
       {state.pluginsOpen && <PluginsPanel />}
       <CommandPalette />
+      {firstRun && <Onboarding onDone={() => setFirstRun(false)} />}
       </div>
       <SignOutButton />
     </div>
