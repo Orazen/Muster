@@ -39,7 +39,7 @@ export type AgentExpression = string;
 export type AgentCharacter = "cursor" | "lottie" | "star" | "hexagon" | "triangle" | "egg" | "drop" | "heart" | "pebble" | "squircle" | "capsule" | "cloud" | "ball" | "sparkle";
 export const AGENT_CHARACTERS: readonly AgentCharacter[] = [
   "star", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
-  "pebble", "squircle", "capsule", "cloud", "ball", "sparkle",
+  "pebble", "squircle", "capsule", "cloud", "ball", "sparkle", "circle",
 ];
 
 export interface OptionCardData {

@@ -7,7 +7,7 @@ import { identifyEmail, setEmailGateDone, emailGateDone, track } from "@/lib/ana
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
 import { ProviderMark } from "./ProviderIcons";
-import type { AgentCharacter, AgentColor } from "@/lib/mascot";
+import { AGENT_CHARACTERS, AGENT_COLORS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor } from "@/lib/mascot";
 import { useStore } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import type { InstanceInfo } from "@/state/store";
@@ -162,24 +162,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [botColor, setBotColor] = useState<AgentColor>("orange");
   const [botCharacter, setBotCharacter] = useState<AgentCharacter>("star");
 
-  /** Default teammate templates (botdirectory-style starters) — tap one and
-   * the form fills itself. Indian names, per product direction. */
-  const TEAMMATE_TEMPLATES: Array<{
-    name: string;
-    role: string;
-    color: AgentColor;
-    character: AgentCharacter;
-  }> = [
-    { name: "Arya", role: "Research", color: "orange", character: "star" },
-    { name: "Rohan", role: "Ops", color: "blue", character: "squircle" },
-    { name: "Priya", role: "Writing", color: "pink", character: "drop" },
-    { name: "Arjun", role: "Engineering", color: "teal", character: "triangle" },
-    { name: "Kiran", role: "Support", color: "purple", character: "cloud" },
-    { name: "Devi", role: "Review", color: "coral", character: "sparkle" },
-    { name: "Vikram", role: "Data", color: "green", character: "pebble" },
-    { name: "Meera", role: "Design", color: "cyan", character: "capsule" },
-    { name: "Ravi", role: "Security", color: "red", character: "ball" },
-  ];
 
   // personality state
   const [axes, setAxes] = useState<Axes>(NEUTRAL_AXES);
@@ -460,75 +442,83 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
     (
       <div className="flex min-h-0 flex-col">
-        {/* musterbot layout: big animated avatar LEFT, form panel RIGHT */}
-        <div className="flex min-h-0 flex-1 items-center gap-6 max-sm:flex-col">
-          <div className="flex flex-1 items-center justify-center">
+        {/* musterbot scene: avatar LEFT full-height, shape+form panel RIGHT */}
+        <div className="flex min-h-0 flex-1 gap-5 max-sm:flex-col">
+          {/* LEFT: the teammate itself, as large as fits */}
+          <div className="flex min-w-0 flex-1 items-center justify-center rounded-2xl border border-hairline/30 bg-inset p-4">
             <AgentAvatar
               color={botColor}
               character={botCharacter}
-              size={220}
+              size={180}
               state={botName.trim() ? "happy" : "idle"}
               animated
             />
           </div>
-          <div className="w-full max-w-[300px] shrink-0">
-            <h2 className="text-[15px] font-bold text-ink">Your teammate</h2>
-            {(botName.trim() || botRole.trim()) && (
-              <p className="mt-0.5 text-[12.5px] text-ink-secondary">
-                {botName.trim() || "Unnamed"}
-                {botRole.trim() ? ` · ${botRole.trim()}` : ""}
-              </p>
-            )}
 
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {TEAMMATE_TEMPLATES.map((t) => (
+          {/* RIGHT: musterbot-style control panel */}
+          <div className="flex w-full max-w-[260px] shrink-0 flex-col overflow-y-auto pr-0.5 [scrollbar-width:thin] max-sm:max-w-none">
+            <h2 className="text-[13px] font-semibold text-ink">Shape</h2>
+            <div className="mt-1.5 grid grid-cols-3 gap-1">
+              {AGENT_CHARACTERS.filter((c) => c !== "cursor" && c !== "lottie").map((sh) => (
                 <button
-                  key={t.name}
-                  onClick={() => {
-                    setBotName(t.name);
-                    setBotRole(t.role);
-                    setBotColor(t.color);
-                    setBotCharacter(t.character);
-                  }}
-                  className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
-                    botName === t.name
-                      ? "border-accent bg-raised font-medium text-ink"
-                      : "border-hairline/40 text-ink-secondary hover:bg-raised hover:text-ink"
+                  key={sh}
+                  onClick={() => setBotCharacter(sh)}
+                  aria-pressed={botCharacter === sh}
+                  className={`flex flex-col items-center gap-0.5 rounded-lg border p-1 transition ${
+                    botCharacter === sh ? "border-accent bg-raised" : "border-hairline/30 hover:bg-raised"
                   }`}
                 >
-                  {t.name}
+                  <AgentAvatar color={botColor} character={sh} size={36} state="idle" animated={false} />
+                  <span className="text-[9px] capitalize leading-tight text-ink-secondary">{sh}</span>
                 </button>
               ))}
             </div>
 
+            <h2 className="mt-4 text-[13px] font-semibold text-ink">Colour</h2>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {AGENT_COLOR_NAMES.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setBotColor(c)}
+                  aria-label={c}
+                  aria-pressed={botColor === c}
+                  className={`size-[22px] rounded-full transition ${
+                    botColor === c ? "ring-2 ring-accent ring-offset-1 ring-offset-app" : "hover:brightness-110"
+                  }`}
+                  style={{ background: AGENT_COLORS[c] }}
+                />
+              ))}
+            </div>
+
+            <h2 className="mt-4 text-[13px] font-semibold text-ink">Identity</h2>
             <input
               autoFocus
               type="text"
               value={botName}
               onChange={(e) => setBotName(e.target.value)}
-              placeholder="Name your teammate (e.g. Scout)"
-              className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+              placeholder="Name (e.g. Scout)"
+              className="mt-1.5 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
             />
             <input
               type="text"
               value={botRole}
               onChange={(e) => setBotRole(e.target.value)}
               placeholder="Role — research, writing, ops…"
-              className="mt-2 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+              className="mt-2 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12.5px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
             />
 
-            <div className="mt-4 flex gap-2">
+            <div className="mt-auto flex gap-2 pt-4">
               <button
                 onClick={() => setStep(1)}
-                className="rounded-lg border border-hairline/40 px-3.5 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+                className="rounded-lg border border-hairline/40 px-3 py-2 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink"
               >
-                Back
+                Back to Engines
               </button>
               <button
                 onClick={() => (botName.trim() ? setStep(3) : finish())}
-                className="flex-1 rounded-lg bg-accent py-2 text-[13.5px] font-medium text-white"
+                className="flex-1 rounded-lg bg-accent py-2 text-[13px] font-medium text-white"
               >
-                {botName.trim() ? "Continue" : "Skip — no teammate yet"}
+                {botName.trim() ? "Continue" : "Skip"}
               </button>
             </div>
           </div>

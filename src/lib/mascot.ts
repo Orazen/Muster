@@ -11,10 +11,10 @@ export const AGENT_STATES = CURSOR_STATES;
 export type AgentCharacter =
   | "cursor" | "lottie" | "star"
   | "hexagon" | "triangle" | "egg" | "drop" | "heart"
-  | "pebble" | "squircle" | "capsule" | "cloud" | "ball" | "sparkle";
+  | "pebble" | "squircle" | "capsule" | "cloud" | "ball" | "sparkle" | "circle";
 export const AGENT_CHARACTERS: AgentCharacter[] = [
   "star", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
-  "pebble", "squircle", "capsule", "cloud", "ball", "sparkle",
+  "pebble", "squircle", "capsule", "cloud", "ball", "sparkle", "circle",
 ];
 
 /** CursorAvatar ships French group labels; the app shows these instead. The

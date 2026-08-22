@@ -145,4 +145,5 @@ export const TEAMMATE_BODY_SILHOUETTES = {
   cloud: silhouette("cloud", profilePath(CLOUD_PROFILE, CENTRE, RADIUS)),
   ball: silhouette("ball", profilePath(Array.from({ length: SAMPLES }, () => 0.98), CENTRE, RADIUS)),
   sparkle: silhouette("sparkle", profilePath(SPARKLE_PROFILE, CENTRE, RADIUS)),
+  circle: silhouette("circle", profilePath(Array.from({ length: SAMPLES }, () => 0.98), CENTRE, RADIUS)),
 } satisfies Record<Exclude<AgentCharacter, "cursor" | "lottie" | "star">, CursorSilhouette>;
