@@ -15,6 +15,7 @@ import { cn } from "@/lib/cn";
 import { requestNotificationPermission } from "@/lib/notify";
 import { botUsage, costCaption, formatTokens, formatUsd } from "@/lib/usage";
 import { shortPath } from "@/lib/short-path";
+import { MemoryTab } from "./bot-profile/MemoryTab";
 
 function Field({
   label,
@@ -161,8 +162,6 @@ interface MemoryTopic {
   bytes: number;
 }
 
-const formatBytes = (bytes: number) => (bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 102.4) / 10} KB`);
-
 /** MEMORY.md + memory/ topic files, surfaced so the user can read and fix
  * what the bot believes. Fetched on expand, not on mount: settings opens for
  * every bot and most visits never look at memory — and an expand also
@@ -289,23 +288,10 @@ function MemoryCard({ bot }: { bot: Bot }) {
             )}
           </div>
           {topics.length > 0 && (
-            <div className="mt-3">
-              <div className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-                Topic files
-              </div>
-              <div className="overflow-hidden rounded-lg border border-hairline/40">
-                {topics.map((entry) => (
-                  <button
-                    key={entry.name}
-                    onClick={() => void openTopic(entry.name)}
-                    className="flex w-full items-center justify-between gap-2 border-b border-hairline/40 px-3 py-2 text-left last:border-b-0 hover:bg-raised/60"
-                  >
-                    <span className="truncate font-mono text-[12.5px] text-ink">{entry.name}</span>
-                    <span className="shrink-0 text-[11.5px] text-ink-secondary">{formatBytes(entry.bytes)}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            <MemoryTab
+              topics={topics.map((t) => ({ name: t.name, bytes: t.bytes }))}
+              onOpen={(name) => void openTopic(name)}
+            />
           )}
         </div>
       )}

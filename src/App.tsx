@@ -15,6 +15,7 @@ import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
+import { NotificationStack } from "@/components/NotificationStack";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AuthGate } from "@/components/AuthGate";
 import { LandingPage } from "@/pages/LandingPage";
@@ -139,6 +140,7 @@ function Shell() {
       {state.appSettingsOpen && <SettingsModal />}
       {state.pluginsOpen && <PluginsPanel />}
       <CommandPalette />
+      <NotificationStack />
       {firstRun && <Onboarding onDone={() => setFirstRun(false)} />}
       </div>
       <SignOutButton />
