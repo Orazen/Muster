@@ -2217,9 +2217,6 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
 async function reloadUserInstances(userId: string): Promise<void> {
   const userConfigs = userInstanceConfigs(DATA_DIR, userId, PROVIDER_DRIVER_ENV);
   await registry.load(userConfigs);
-  // Broadcast the refreshed fleet so connected clients (model picker,
-  // composer) see the new vault engines without a page reload.
-    }
 }
 
 /** Register every user's vault instances (boot path). */
