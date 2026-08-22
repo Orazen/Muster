@@ -69,7 +69,6 @@ import {
   userProviderFlags,
 } from "./user-keys.ts";
 import { PROVIDER_DRIVER_ENV, DATA_DIR } from "./config.ts";
-import { getDb } from "./auth.ts";
 import * as tts from "./tts/index.ts";
 import {
   auth,
@@ -2165,7 +2164,7 @@ function stderrOf(err: { stderr?: unknown }): string {
   return isText(s) ? s : Buffer.isBuffer(s) ? s.toString("utf8") : "";
 }
 
-function configStatus(userId?: string) {
+function configStatus(userId?: string, userName?: string, userEmail?: string) {
   // Per-user scoping: non-operators read their own vault flags and their own
   // auth profile. The operator (first account / desktop user) keeps global
   // config — self-host is always the operator.
@@ -2182,19 +2181,12 @@ function configStatus(userId?: string) {
   // Profile: non-operators read their Better Auth record directly by userId
   // — no reliance on a separate getSession call that may not have fired.
   let profile = { name: "", email: "" };
-  // Always read from Better Auth when a userId exists — the global
-  // cfg.profile is the operator's legacy field, not per-account identity.
-  if (userId) {
-    try {
-      // SAFETY: the SELECT projects only the user table's name and email
-      // columns; a missing row or DB error falls to the empty default.
-      const row = getDb().prepare(
-        'SELECT name, email FROM "user" WHERE id = ?',
-      ).get(userId) as { name: string; email: string } | undefined;
-      if (row) profile = { name: row.name, email: row.email };
-    } catch {
-      // DB unavailable — leave the empty default
-    }
+  // Desktop / self-host operator: read from global config as before.
+  // Cloud non-operator: use their own auth session identity.
+  if (!userId) {
+    profile = { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" };
+  } else if (userName) {
+    profile = { name: userName, email: userEmail ?? "" };
   }
 
   return {
@@ -2432,6 +2424,8 @@ const server = createServer(async (req, res) => {
   /** the signed-in user for this request, once the auth gate resolves it;
    * undefined on desktop installs (no sessions there) and public paths */
   let requestUserId: string | undefined;
+let requestUserName = "";
+let requestUserEmail = "";
   try {
     // host + origin gate before any route (DNS rebinding / CSRF). Loopback is
     // always allowed; a public host is allowed only when self-hosting is
@@ -2698,6 +2692,9 @@ const server = createServer(async (req, res) => {
       // ownership (see ownsBot below). Desktop installs have no sessions —
       // everything is the one local user's.
       requestUserId = session.userId;
+      const sessAcct = await auth.api.getSession({ headers: toWebRequest(req).headers }).catch(() => null);
+      requestUserName = sessAcct?.user?.name ?? "";
+      requestUserEmail = sessAcct?.user?.email ?? "";
     }
 
     // ── multi-tenant guard (SELF_HOSTED only) ──────────────────────────
@@ -4085,7 +4082,7 @@ const server = createServer(async (req, res) => {
 
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
-      return json(res, 200, configStatus(requestUserId));
+      return json(res, 200, configStatus(requestUserId, requestUserName, requestUserEmail));
     }
     if (method === "GET" && path === "/api/providers") {
       const flags: Record<string, { configured: boolean }> = {};
