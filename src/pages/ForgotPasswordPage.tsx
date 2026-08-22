@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { Star } from "lucide-react";
+import { AuthShell, authInputCls, authButtonCls, authCardBox } from "@/components/AuthShell";
 
 export function ForgotPasswordPage() {
   const { requestPasswordReset, capabilities } = useAuth();
@@ -23,44 +23,42 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-app px-4">
-      <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <Link to="/" className="inline-flex items-center gap-2 text-ink">
-            <Star size={28} className="text-accent fill-accent" />
-            <span className="text-xl font-semibold tracking-tight">Muster</span>
+    <AuthShell
+      title="Reset your password"
+      subtitle="We'll email you a link to choose a new one."
+      footer={
+        <>
+          Remembered it?{" "}
+          <Link to="/sign-in" className="font-medium text-[#ff7a45] hover:text-[#f0460e]">
+            Sign in
           </Link>
-          <h1 className="mt-6 text-2xl font-bold text-ink">Reset your password</h1>
-          <p className="mt-2 text-sm text-ink-secondary">
-            We'll email you a link to choose a new one.
-          </p>
-        </div>
-
+        </>
+      }
+    >
         {!capabilities.passwordReset ? (
-          <div className="rounded-xl border border-hairline bg-panel p-6 text-sm text-ink-secondary">
+          <div className={authCardBox}>
             Password reset isn't available on this deployment — no email transport is configured.
-            Ask whoever runs this instance to set <code className="text-ink">RESEND_API_KEY</code>,
+            Ask whoever runs this instance to set <code className="text-[#f5f5f5]">RESEND_API_KEY</code>,
             or sign in with a provider instead.
           </div>
         ) : sent ? (
-          <div className="rounded-xl border border-hairline bg-panel p-6">
-            <p className="text-sm text-ink">Check your inbox.</p>
-            <p className="mt-2 text-sm text-ink-secondary">
-              If an account exists for <span className="text-ink">{email}</span>, a reset link is on
-              its way. It expires in an hour.
+          <div className={authCardBox}>
+            <p className="text-[#f5f5f5]">Check your inbox.</p>
+            <p className="mt-2">
+              If an account exists for <span className="text-[#f5f5f5]">{email}</span>, a reset link
+              is on its way. It expires in an hour.
             </p>
           </div>
         ) : (
-          <form
-            onSubmit={handleSubmit}
-            className="space-y-4 rounded-xl border border-hairline bg-panel p-6"
-          >
+          <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>
+              <div className={authCardBox} role="alert">
+                <span className="text-[#ff8f6b]">{error}</span>
+              </div>
             )}
 
             <div>
-              <label htmlFor="email" className="mb-1 block text-sm font-medium text-ink-secondary">
+              <label htmlFor="email" className="mb-1 block text-[13px] font-medium text-[#a1a1a6]">
                 Email
               </label>
               <input
@@ -69,28 +67,16 @@ export function ForgotPasswordPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-ink placeholder-ink-secondary/50 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                className={authInputCls}
                 placeholder="you@example.com"
               />
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-lg bg-accent py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className={authButtonCls}>
               {loading ? "Sending…" : "Send reset link"}
             </button>
           </form>
         )}
-
-        <p className="mt-6 text-center text-sm text-ink-secondary">
-          Remembered it?{" "}
-          <Link to="/sign-in" className="font-medium text-accent hover:text-accent/80">
-            Sign in
-          </Link>
-        </p>
-      </div>
-    </div>
+    </AuthShell>
   );
 }

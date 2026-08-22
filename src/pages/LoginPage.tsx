@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { SocialSignIn } from "@/components/SocialSignIn";
-import { Star } from "lucide-react";
+import { AuthShell, authInputCls, authButtonCls, authCardBox } from "@/components/AuthShell";
 
 export function LoginPage() {
   const { signIn, capabilities, user, loading: authLoading, signOut } = useAuth();
@@ -55,30 +55,29 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-app px-4">
-      <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <Link to="/" className="inline-flex items-center gap-2 text-ink">
-            <Star size={28} className="text-accent fill-accent" />
-            <span className="text-xl font-semibold tracking-tight">Muster</span>
+    <AuthShell
+      title="Welcome back"
+      subtitle="Sign in to muster your team of agents."
+      footer={
+        <>
+          Don't have an account?{" "}
+          <Link to="/sign-up" className="font-medium text-[#ff7a45] hover:text-[#f0460e]">
+            Sign up
           </Link>
-          <h1 className="mt-6 text-2xl font-bold text-ink">Sign in to your account</h1>
-          <p className="mt-2 text-sm text-ink-secondary">
-            Welcome back. Sign in to access your agents.
-          </p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-hairline bg-panel p-6">
+        </>
+      }
+    >
+        <form onSubmit={handleSubmit} className="space-y-4">
           {!authLoading && user && (
-            <div className="flex flex-col gap-2.5 rounded-lg bg-accent/10 px-4 py-3 text-sm text-ink">
+            <div className={`flex flex-col gap-2.5 ${authCardBox}`}>
               <span>
-                Already signed in as <span className="font-semibold">{user.email}</span>.
+                Already signed in as <span className="font-semibold text-[#f5f5f5]">{user.email}</span>.
               </span>
               <span className="flex gap-3 text-xs">
                 <button
                   type="button"
                   onClick={() => navigate("/app")}
-                  className="font-semibold text-accent hover:text-accent/80"
+                  className="font-semibold text-[#ff7a45] hover:text-[#f0460e]"
                 >
                   Continue as {user.name?.split(" ")[0] || "this user"}
                 </button>
@@ -88,7 +87,7 @@ export function LoginPage() {
                     await signOut();
                     setEmail("");
                   }}
-                  className="text-ink-secondary hover:text-ink"
+                  className="text-[#a1a1a6] hover:text-[#f5f5f5]"
                 >
                   Use another account
                 </button>
@@ -96,12 +95,12 @@ export function LoginPage() {
             </div>
           )}
           {justReset && (
-            <div className="rounded-lg bg-accent/10 px-4 py-3 text-sm text-ink">
-              Password updated. Sign in with your new one.
-            </div>
+            <div className={authCardBox}>Password updated. Sign in with your new one.</div>
           )}
           {error && (
-            <div className="rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>
+            <div className={authCardBox} role="alert">
+              <span className="text-[#ff8f6b]">{error}</span>
+            </div>
           )}
 
           <SocialSignIn action="Sign in" />
@@ -109,7 +108,7 @@ export function LoginPage() {
           {capabilities.cloudPairing && (
             // deliberately NOT a <form>: this sits inside the sign-in form,
             // and nested forms are illegal HTML that break the outer submit
-            <div className="space-y-2.5 rounded-xl border border-hairline bg-inset p-4">
+            <div className="space-y-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
               <button
                 type="button"
                 onClick={() => {
@@ -117,7 +116,7 @@ export function LoginPage() {
                   if (window.ogb?.openExternal) window.ogb.openExternal(url);
                   else window.open(url, "_blank", "noopener");
                 }}
-                className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-hairline bg-panel py-2.5 text-sm font-medium text-ink transition-colors hover:bg-raised"
+                className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-white/[0.1] bg-white/[0.05] py-2.5 text-sm font-medium text-[#f5f5f5] transition-colors hover:bg-white/[0.08]"
               >
                 <svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true">
                   <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z" />
@@ -127,7 +126,7 @@ export function LoginPage() {
                 </svg>
                 Continue with Google
               </button>
-              <p className="text-center text-[12px] leading-relaxed text-ink-secondary">
+              <p className="text-center text-[12px] leading-relaxed text-[#a1a1a6]">
                 Opens muster.orazen.online — sign in there and type the code it shows:
               </p>
               <div className="flex gap-2">
@@ -138,13 +137,13 @@ export function LoginPage() {
                   aria-label="Pairing code"
                   maxLength={8}
                   autoComplete="off"
-                  className="w-full rounded-lg border border-hairline bg-panel px-3 py-2 font-mono text-sm uppercase tracking-[0.25em] text-ink placeholder:text-ink-secondary/50 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                  className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 font-mono text-sm uppercase tracking-[0.25em] text-[#f5f5f5] placeholder:text-[#6b6b70]/60 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
                 />
                 <button
                   type="button"
                   onClick={() => void handlePair()}
                   disabled={pairBusy || pairCode.trim().length < 4}
-                  className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:opacity-50"
+                  className="shrink-0 rounded-lg bg-[#f0460e] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#f0460e]/90 disabled:opacity-50"
                 >
                   {pairBusy ? "…" : "Connect"}
                 </button>
@@ -153,7 +152,7 @@ export function LoginPage() {
           )}
 
           <div>
-            <label htmlFor="email" className="mb-1 block text-sm font-medium text-ink-secondary">
+            <label htmlFor="email" className="mb-1 block text-[13px] font-medium text-[#a1a1a6]">
               Email
             </label>
             <input
@@ -162,20 +161,20 @@ export function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-ink placeholder-ink-secondary/50 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              className={authInputCls}
               placeholder="you@example.com"
             />
           </div>
 
           <div>
             <div className="mb-1 flex items-baseline justify-between">
-              <label htmlFor="password" className="block text-sm font-medium text-ink-secondary">
+              <label htmlFor="password" className="block text-[13px] font-medium text-[#a1a1a6]">
                 Password
               </label>
               {capabilities.passwordReset && (
                 <Link
                   to="/forgot-password"
-                  className="text-xs font-medium text-accent hover:text-accent/80"
+                  className="text-xs font-medium text-[#ff7a45] hover:text-[#f0460e]"
                 >
                   Forgot?
                 </Link>
@@ -187,27 +186,15 @@ export function LoginPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-ink placeholder-ink-secondary/50 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              className={authInputCls}
               placeholder="••••••••"
             />
           </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-accent py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:opacity-50"
-          >
+          <button type="submit" disabled={loading} className={authButtonCls}>
             {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
-
-        <p className="mt-6 text-center text-sm text-ink-secondary">
-          Don't have an account?{" "}
-          <Link to="/sign-up" className="font-medium text-accent hover:text-accent/80">
-            Sign up
-          </Link>
-        </p>
-      </div>
-    </div>
+    </AuthShell>
   );
 }
