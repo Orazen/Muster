@@ -36,7 +36,7 @@ function ProviderRow({ provider }: { provider: ProviderMeta }) {
     // bots. Self-host keeps the single shared config path.
     api("/api/user-keys", {
       method: value.trim() ? "PUT" : "DELETE",
-      body: JSON.stringify({ providerId: provider.configKey, apiKey: value.trim() }),
+      body: JSON.stringify({ providerId: provider.id, apiKey: value.trim() }),
     }).catch(() =>
       // Vault endpoint absent (older server / desktop build) — fall back to
       // the global config path.
