@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Loader2, Menu, LogOut } from "lucide-react";
+import { Menu, LogOut } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
@@ -16,6 +16,7 @@ import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 import { NotificationStack } from "@/components/NotificationStack";
+import { MusterbotMark } from "@/components/MusterbotMark";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AuthGate } from "@/components/AuthGate";
 import { LandingPage } from "@/pages/LandingPage";
@@ -122,16 +123,31 @@ function Shell() {
       ) : bot ? (
         <ChatView bot={bot} />
       ) : (
-        <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
-          <Loader2 size={20} className="animate-spin" />
-          <div className="text-[14px]">
-            {state.connected ? "No bots yet" : "Connecting to the bot server…"}
+        <main
+          className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-6 overflow-hidden bg-app text-ink-secondary"
+          style={{ background: "linear-gradient(180deg, #f9f9f9 0%, #fdf3e7 100%)" }}
+        >
+          {/* musterbot-style empty roster scene: the animated mark carries the screen */}
+          <MusterbotMark size={280} />
+          <div className="text-[15px] font-medium text-[#0a0a0c]">
+            {state.connected ? "Your roster is empty — muster your first teammate" : "Connecting to the bot server…"}
           </div>
+          {state.connected && (
+            <button
+              onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "general" })}
+              className="rounded-lg bg-[#f0460e] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(240,70,14,.28)] transition-all hover:-translate-y-px hover:bg-[#f0460e]/90"
+            >
+              New bot
+            </button>
+          )}
           {!state.connected && (
             <div className="text-[12px]">
               Start it with <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
             </div>
           )}
+          <span aria-hidden="true" className="mt-auto pb-6 text-[11px] uppercase tracking-[0.42em] text-[#f08a24]" style={{ fontWeight: 700 }}>
+            Muster
+          </span>
         </main>
       )}
       {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
