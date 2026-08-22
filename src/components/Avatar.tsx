@@ -14,6 +14,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { AGENT_COLORS, type AgentCharacter, type AgentColor, type AgentMotion, type AgentState } from "@/lib/mascot";
+import { TEAMMATE_BODY_SILHOUETTES } from "@/lib/avatar-shapes";
 import { LottieCharacter } from "./LottieCharacter";
 import { StarTeammate } from "./StarTeammate";
 import {
@@ -232,7 +233,12 @@ function AgentAvatarComponent(
         state={motionState ?? state}
         expression={expression}
         size={size}
-        silhouette={GRADIENT_SILHOUETTE}
+        silhouette={
+          character in TEAMMATE_BODY_SILHOUETTES
+            ? // SAFETY: the `in` guard proves the key is one of the shape pack's.
+              TEAMMATE_BODY_SILHOUETTES[character as keyof typeof TEAMMATE_BODY_SILHOUETTES]
+            : GRADIENT_SILHOUETTE
+        }
         gradient={gradientFor(color)}
         title={label ?? null}
         lookAround={forward ? 0 : 1}

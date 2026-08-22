@@ -8,8 +8,25 @@ export const AGENT_STATES = CURSOR_STATES;
 /** Which mascot body a bot uses. `cursor` is the procedural mascot;
  * `lottie` is the bundled .lottie bot character. `star` is the
  * musterbot star: every teammate is a star. */
-export type AgentCharacter = "cursor" | "lottie" | "star";
-export const AGENT_CHARACTERS: AgentCharacter[] = ["cursor", "lottie", "star"];
+export type AgentCharacter =
+  | "cursor"
+  | "lottie"
+  | "star"
+  | "hexagon"
+  | "triangle"
+  | "egg"
+  | "drop"
+  | "heart";
+/** Picker order: the two originals first, then the shape pack. */
+export const AGENT_CHARACTERS: AgentCharacter[] = [
+  "star",
+  "cursor",
+  "hexagon",
+  "triangle",
+  "egg",
+  "drop",
+  "heart",
+];
 
 /** CursorAvatar ships French group labels; the app shows these instead. The
  * memberships mirror its STATE_GROUPS exactly. */

@@ -410,7 +410,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                       "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-raised",
                       (bot.character ?? "star") === character && "ring-2 ring-accent-border",
                     )}
-                    title={character === "cursor" ? "Cursor mascot" : character === "star" ? "Star teammate" : "Lottie bot"}
+                    title={character.charAt(0).toUpperCase() + character.slice(1)}
                     aria-label={`Use the ${character} character`}
                   >
                     <AgentAvatar

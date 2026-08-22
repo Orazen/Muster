@@ -6,7 +6,7 @@ import { identifyEmail, setEmailGateDone, emailGateDone, track } from "@/lib/ana
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
 import { ProviderMark } from "./ProviderIcons";
-import { AGENT_COLORS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor } from "@/lib/mascot";
+import { AGENT_CHARACTERS, AGENT_COLORS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor } from "@/lib/mascot";
 import { useStore } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import type { InstanceInfo } from "@/state/store";
@@ -159,7 +159,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [botName, setBotName] = useState("");
   const [botRole, setBotRole] = useState("");
   const [botColor, setBotColor] = useState<AgentColor>("green");
-  const [botCharacter, setBotCharacter] = useState<Extract<AgentCharacter, "star" | "cursor">>("star");
+  const [botCharacter, setBotCharacter] = useState<AgentCharacter>("star");
 
   // personality state
   const [axes, setAxes] = useState<Axes>(NEUTRAL_AXES);
@@ -416,27 +416,20 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         <p className="mt-1 text-[13.5px] text-ink-secondary">
           Give one agent a face and a name. You can add more any time.
         </p>
-        <div className="mt-4 flex items-center justify-center gap-6">
-          <button
-            onClick={() => setBotCharacter("star")}
-            aria-pressed={botCharacter === "star"}
-            className={`flex flex-col items-center gap-1.5 rounded-xl border p-3 transition-colors ${
-              botCharacter === "star" ? "border-accent bg-raised" : "border-hairline/40 hover:bg-raised"
-            }`}
-          >
-            <AgentAvatar color={botColor} character="star" size={64} state="happy" />
-            <span className="text-[12px] text-ink-secondary">Star</span>
-          </button>
-          <button
-            onClick={() => setBotCharacter("cursor")}
-            aria-pressed={botCharacter === "cursor"}
-            className={`flex flex-col items-center gap-1.5 rounded-xl border p-3 transition-colors ${
-              botCharacter === "cursor" ? "border-accent bg-raised" : "border-hairline/40 hover:bg-raised"
-            }`}
-          >
-            <AgentAvatar color={botColor} character="cursor" size={64} state="happy" />
-            <span className="text-[12px] text-ink-secondary">Cursor</span>
-          </button>
+        <div className="mt-4 grid grid-cols-4 justify-items-center gap-2">
+          {AGENT_CHARACTERS.map((character) => (
+            <button
+              key={character}
+              onClick={() => setBotCharacter(character)}
+              aria-pressed={botCharacter === character}
+              className={`flex w-full flex-col items-center gap-1 rounded-xl border px-2 py-2.5 transition-colors ${
+                botCharacter === character ? "border-accent bg-raised" : "border-hairline/40 hover:bg-raised"
+              }`}
+            >
+              <AgentAvatar color={botColor} character={character} size={44} state="happy" />
+              <span className="text-[10.5px] capitalize text-ink-secondary">{character}</span>
+            </button>
+          ))}
         </div>
         <div className="mt-3 flex flex-wrap justify-center gap-2">
           {AGENT_COLOR_NAMES.map((c) => (
