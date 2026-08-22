@@ -31,10 +31,20 @@ function ProviderRow({ provider }: { provider: ProviderMeta }) {
     if (saving || (!value.trim() && !configured)) return;
     setSaving(true);
     setError(null);
-    api("/api/config", {
-      method: "PUT",
-      body: JSON.stringify({ providers: { [provider.id]: { apiKey: value.trim() } } }),
-    })
+    // Cloud deployments route provider keys into the signed-in user's own
+    // encrypted vault (/api/user-keys) — your DeepSeek key powers only your
+    // bots. Self-host keeps the single shared config path.
+    api("/api/user-keys", {
+      method: value.trim() ? "PUT" : "DELETE",
+      body: JSON.stringify({ providerId: provider.configKey, apiKey: value.trim() }),
+    }).catch(() =>
+      // Vault endpoint absent (older server / desktop build) — fall back to
+      // the global config path.
+      api("/api/config", {
+        method: "PUT",
+        body: JSON.stringify({ providers: { [provider.id]: { apiKey: value.trim() } } }),
+      })
+    )
       .then((status: ConfigStatus) => {
         dispatch({ type: "configStatus", config: status });
         setValue("");
