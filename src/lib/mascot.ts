@@ -73,7 +73,7 @@ export const AGENT_COLOR_NAMES = [
 export type AgentColor = (typeof AGENT_COLOR_NAMES)[number];
 
 export const AGENT_COLORS = {
-  green: "#009957",
+  green: "#009957", // kept for backwards compat,
   blue: "#377FE6",
   red: "#D94B52",
   orange: "#E78531",

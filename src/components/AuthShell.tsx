@@ -2,9 +2,9 @@ import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import { MusterbotMark } from "./MusterbotMark";
 
-/** Shared auth surface — vellum.ai/account/signup style: clean white page,
- * centered musterbot mark, one heading, generous whitespace. No dark canvas,
- * no glow — just clarity. */
+/** Shared auth surface — musterbot.app scene style: warm light background,
+ * the animated mark large behind/beside the form, MUSTER wordmark footer.
+ * Clean, no dark canvas, no glow. */
 export function AuthShell({
   title,
   subtitle,
@@ -17,20 +17,26 @@ export function AuthShell({
   footer?: ReactNode;
 }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-white px-4 py-10">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#f9f9f9] px-4 py-8">
+      {/* Large animated mark above the form, musterbot scene style */}
+      <Link to="/" aria-label="Muster home" className="mb-6 transition-opacity hover:opacity-80">
+        <MusterbotMark size={140} />
+      </Link>
+
       <div className="w-full max-w-[380px]">
-        <div className="mb-8 flex flex-col items-center text-center">
-          <Link to="/" aria-label="Muster home" className="transition-opacity hover:opacity-80">
-            <MusterbotMark size={56} />
-          </Link>
-          <h1 className="mt-6 text-[24px] font-semibold tracking-[-0.02em] text-[#111]">{title}</h1>
-          <p className="mt-1.5 text-[14px] leading-relaxed text-[#666]">{subtitle}</p>
-        </div>
-
-        <div>{children}</div>
-
+        <h1 className="text-center text-[24px] font-semibold tracking-[-0.02em] text-[#111]">{title}</h1>
+        <p className="mt-1.5 text-center text-[14px] leading-relaxed text-[#666]">{subtitle}</p>
+        <div className="mt-6">{children}</div>
         {footer && <div className="mt-5 text-center text-[13px] text-[#888]">{footer}</div>}
       </div>
+
+      {/* MUSTER wordmark footer */}
+      <span
+        aria-hidden="true"
+        className="mt-auto pt-10 text-[13px] font-bold uppercase tracking-[0.42em] text-[#d4d4d4]"
+      >
+        Muster
+      </span>
     </div>
   );
 }
