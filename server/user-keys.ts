@@ -56,8 +56,11 @@ function loadVault(dataDir: string): VaultFile {
   const p = vaultPath(dataDir);
   if (!existsSync(p)) return { version: 1, users: {} };
   try {
+    // SAFETY: the only file ever written here is saveVault's own envelope
+    // below; a mismatched shape (corruption, hand-edit) falls to the empty
+    // vault via the catch rather than crashing boot.
     const parsed = JSON.parse(readFileSync(p, "utf8")) as VaultFile;
-    if (parsed.version !== 1 || typeof parsed.users !== "object") throw new Error("bad shape");
+    if (parsed.version !== 1 || !(parsed.users instanceof Object)) throw new Error("bad shape");
     return parsed;
   } catch {
     return { version: 1, users: {} }; // corrupt file loses secrets, never crashes boot
@@ -89,9 +92,12 @@ export function clearUserProviderKey(cfgDataDir: string, userId: string, provide
 }
 
 /** Which providers has THIS user configured? Flags only — never values. */
-export function userProviderFlags(cfgDataDir: string, userId: string): Record<string, { configured: boolean }> {
+/** Provider-configured flags keyed by provider id — flags only, no values. */
+export type UserProviderFlags = Record<string, { configured: boolean }>;
+
+export function userProviderFlags(cfgDataDir: string, userId: string) {
   const entries = loadVault(cfgDataDir).users[userId] ?? {};
-  const flags: Record<string, { configured: boolean }> = {};
+  const flags: UserProviderFlags = {};
   for (const [id, entry] of Object.entries(entries)) {
     flags[id] = { configured: Boolean(open(entry.sealed)) };
   }
@@ -125,33 +131,37 @@ export function userInstanceConfigs(
   cfgDataDir: string,
   userId: string,
   driverEnv: Record<string, string>,
-): Record<string, { driver: string; displayName: string; environment: Record<string, string> }> {
+) {
   const entries = loadVault(cfgDataDir).users[userId] ?? {};
-  const map: Record<string, { driver: string; displayName: string; environment: Record<string, string> }> = {};
-  for (const [providerId, entry] of Object.entries(entries)) {
+  // Built by assignment over known-good entries, then returned as-is so the
+  // inferred record keeps its evidence (no widening annotation).
+  const built = Object.entries(entries).flatMap(([providerId, entry]) => {
     const key = open(entry.sealed);
-    if (!key) continue;
     const envVar = driverEnv[providerId];
-    if (!envVar) continue;
+    if (!key || !envVar) return [];
     const label = providerId.charAt(0).toUpperCase() + providerId.slice(1);
-    map[userInstanceId(providerId, userId)] = {
-      driver: providerId,
-      displayName: `${label} (your key)`,
-      environment: { [envVar]: key },
-    };
-  }
-  return map;
+    return [[
+      userInstanceId(providerId, userId),
+      { driver: providerId, displayName: `${label} (your key)`, environment: { [envVar]: key } },
+    ] as const];
+  });
+  return Object.fromEntries(built);
 }
 
 /** Every user's configs — boot-time registration for the shared registry. */
 export function allUserInstanceConfigs(
   cfgDataDir: string,
   driverEnv: Record<string, string>,
-): Record<string, { driver: string; displayName: string; environment: Record<string, string> }> {
+) {
   const vault = loadVault(cfgDataDir);
-  const merged: Record<string, { driver: string; displayName: string; environment: Record<string, string> }> = {};
-  for (const userId of Object.keys(vault.users)) {
-    Object.assign(merged, userInstanceConfigs(cfgDataDir, userId, driverEnv));
-  }
-  return merged;
+  return Object.keys(vault.users).flatMap((userId) =>
+    Object.entries(userInstanceConfigs(cfgDataDir, userId, driverEnv)),
+  ).reduce<Record<string, { driver: string; displayName: string; environment: Record<string, string> }>>(
+    // SAFETY: the accumulator only ever receives this function's own entries.
+    (acc, [id, cfg]) => {
+      acc[id] = cfg;
+      return acc;
+    },
+    {},
+  );
 }
