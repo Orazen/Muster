@@ -310,19 +310,6 @@ const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
 
-const COLORS: AgentColor[] = [
-  "orange",
-  "green",
-  "blue",
-  "red",
-  "purple",
-  "cyan",
-  "pink",
-  "yellow",
-  "teal",
-  "coral",
-];
-
 /** Resolve @mentions in a message against a bot roster: `@` must start a
  * word, the name must end on a word boundary (so "@New Bottle" never matches
  * "New Bot"), names match case-insensitively, longest name wins (so
@@ -766,14 +753,16 @@ export class Store {
       title: profile.title ?? "",
       description: profile.description ?? "",
       notifications: true,
-      color: profile.color ?? COLORS[this.bots.length % COLORS.length],
+      // Brand defaults: every teammate musters in as the orange star unless a
+      // caller (onboarding wizard, team import) says otherwise.
+      color: profile.color ?? "orange",
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},
       createdAt: Date.now(),
     };
     if (profile.ownerId) bot.ownerId = profile.ownerId;
-    if (profile.character) bot.character = profile.character;
+    bot.character = profile.character ?? "star";
     if (profile.mascotExpression) bot.mascotExpression = profile.mascotExpression;
     bot.tasks = [{ threadId: bot.threadId, title: UNTITLED_TASK, createdAt: bot.createdAt, resumeCursors: {} }];
     this.bots.unshift(bot);

@@ -61,11 +61,14 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.composio).toBe(false);
   });
 
-  it("rotates colors across created bots", () => {
+  it("defaults every new bot to the orange star, the brand's teammate", () => {
     const store = new Store(selection);
     const first = store.createBot();
     const second = store.createBot();
-    expect(first.color).not.toBe(second.color);
+    expect(first.color).toBe("orange");
+    expect(second.color).toBe("orange");
+    expect(first.character).toBe("star");
+    expect(second.character).toBe("star");
   });
 
   it("defaults a room to its first member and repairs the lead when membership changes", () => {
