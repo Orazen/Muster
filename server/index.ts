@@ -254,9 +254,16 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
 }
 
 // default selection for new bots: first available instance, claude preferred
-async function defaultSelection() {
+async function defaultSelection(forUserId?: string) {
   const described = await registry.describe();
-  const available = described.filter((d) => d.snapshot.state === "available");
+  let available = described.filter((d) => d.snapshot.state === "available");
+  // Per-user preference: when the requesting user has vault instances,
+  // prefer those over the operator's global fleet.
+  if (forUserId) {
+    const suffix = `:${forUserId}`;
+    const own = available.filter((d) => d.instanceId.endsWith(suffix));
+    if (own.length) available = own;
+  }
   // Deliberately NO fallback to described[0]. Handing a bot an engine whose
   // CLI isn't installed makes it look ready and then fail on send with a raw
   // spawn ENOENT — the single worst first-run experience, and the one every
@@ -3424,7 +3431,7 @@ let requestUserEmail: string | undefined;
     }
     if (method === "POST" && path === "/api/bots") {
       const bot = store.createBot(requestUserId ? { ownerId: requestUserId } : {});
-      store.patchBot(bot.id, { modelSelection: await defaultSelection() });
+      store.patchBot(bot.id, { modelSelection: await defaultSelection(requestUserId) });
       return json(res, 201, {
         bot: {
           ...wireBot(store.bot(bot.id)!),
