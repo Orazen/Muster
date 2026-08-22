@@ -306,12 +306,16 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
   // instance (pre-vault era, or the operator fleet) but whose owner has
   // their OWN vault instance gets healed onto it — so Priya runs on the
   // owner's DeepSeek key instead of erroring on operator-only engines.
-  if (bot.modelSelection.instanceId !== "" && bot.ownerId) {
-    const base = bot.modelSelection.instanceId.split(":")[0];
-    const own = registry.get(userInstanceId(base, bot.ownerId));
-    if (own) {
-      store.patchBot(bot.id, { modelSelection: { ...bot.modelSelection, instanceId: userInstanceId(base, bot.ownerId) } });
-      return own;
+  if (bot.modelSelection.instanceId !== "") {
+    // Vault heal (owner-scoped): a bot pointing at an operator-era global
+    // API instance runs on the owner's own vault copy when one exists.
+    if (bot.ownerId) {
+      const base = bot.modelSelection.instanceId.split(":")[0];
+      const own = registry.get(userInstanceId(base, bot.ownerId));
+      if (own) {
+        store.patchBot(bot.id, { modelSelection: { ...bot.modelSelection, instanceId: userInstanceId(base, bot.ownerId) } });
+        return own;
+      }
     }
     return null;
   }
