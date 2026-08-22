@@ -696,6 +696,33 @@
       </div>
     </section>
 
+
+    <!-- Design Philosophy (agent-reach trust builder) -->
+    <section class="section">
+      <div class="section-intro" style="max-width:100%;text-align:center;">
+        <div class="eyebrow">Design Philosophy</div>
+        <h2 class="section-heading">Why Muster is built this way</h2>
+      </div>
+      <div style="max-width:660px;margin:36px auto 0;">
+        <div style="display:flex;gap:14px;margin-bottom:22px;">
+          <span style="font-size:22px;font-weight:bold;color:rgba(255,255,255,.08);flex-shrink:0;">01</span>
+          <div><strong style="color:#f6f6f7;font-size:15px;">Your machine is the boundary</strong><p style="margin-top:4px;color:#98989e;font-size:13.5px;line-height:1.6;">Every agent process, transcript, and credential lives in ~/.muster on your disk. No cloud copy exists unless you create one.</p></div>
+        </div>
+        <div style="display:flex;gap:14px;margin-bottom:22px;">
+          <span style="font-size:22px;font-weight:bold;color:rgba(255,255,255,.08);flex-shrink:0;">02</span>
+          <div><strong style="color:#f6f6f7;font-size:15px;">Secrets are write-only</strong><p style="margin-top:4px;color:#98989e;font-size:13.5px;line-height:1.6;">Keys go in once and never come back out through the API. The UI shows configured-or-not flags, never values.</p></div>
+        </div>
+        <div style="display:flex;gap:14px;margin-bottom:22px;">
+          <span style="font-size:22px;font-weight:bold;color:rgba(255,255,255,.08);flex-shrink:0;">03</span>
+          <div><strong style="color:#f6f6f7;font-size:15px;">Bots ask before they act</strong><p style="margin-top:4px;color:#98989e;font-size:13.5px;line-height:1.6;">Shell commands and file edits surface as inline cards. You Allow or Deny per action.</p></div>
+        </div>
+        <div style="display:flex;gap:14px;">
+          <span style="font-size:22px;font-weight:bold;color:rgba(255,255,255,.08);flex-shrink:0;">04</span>
+          <div><strong style="color:#f6f6f7;font-size:15px;">Bring your own model, always</strong><p style="margin-top:4px;color:#98989e;font-size:13.5px;line-height:1.6;">Muster ships no model of its own — your bots run on CLIs already installed on your machine, using your existing subscriptions.</p></div>
+        </div>
+      </div>
+    </section>
+
     <section class="stats-band">
       <div>
         <h2>Meet your first bot</h2>
