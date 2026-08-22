@@ -2157,29 +2157,42 @@ function stderrOf(err: { stderr?: unknown }): string {
   return isText(s) ? s : Buffer.isBuffer(s) ? s.toString("utf8") : "";
 }
 
-function configStatus() {
+function configStatus(userId?: string, userEmail?: string) {
+  // Per-user scoping: non-operators read their own vault flags and their own
+  // auth profile. The operator (first account / desktop user) keeps global
+  // config — self-host is always the operator.
+  const isOperator = !userId || userId === primaryUserId();
+  const vaultFlags = !isOperator && userId ? userProviderFlags(DATA_DIR, userId) : null;
+
   const providerFlags: Record<string, { configured: boolean }> = {};
   if (cfg.providers) {
     for (const [id, entry] of Object.entries(cfg.providers)) {
-      providerFlags[id] = { configured: Boolean(entry.apiKey) };
+      providerFlags[id] = { configured: vaultFlags ? Boolean(vaultFlags[id]?.configured) : Boolean(entry.apiKey) };
     }
   }
+
+  // Profile: non-operators see their own auth identity; the operator's
+  // global profile stays in config.json.
+  const profile = isOperator
+    ? { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" }
+    : { name: userEmail?.split("@")[0] ?? "", email: userEmail ?? "" };
+
   return {
-    xai: { configured: Boolean(cfg.xai?.key) },
+    xai: { configured: vaultFlags ? Boolean(vaultFlags["xai"]?.configured) : Boolean(cfg.xai?.key) },
     composio: {
       configured: composio.configured(cfg),
       mode: composio.connectionMode(cfg),
     },
     box: { configured: Boolean(cfg.box?.token) },
     opensandbox: { configured: Boolean(cfg.opensandbox?.apiKey) },
-    opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey) },
+    opencodeGo: { configured: vaultFlags ? Boolean(vaultFlags["opencodeZen"]?.configured) : Boolean(cfg.opencodeGo?.apiKey) },
     musterCloud: { configured: musterCloudEnabled(cfg), url: cfg.musterCloud?.url ?? "" },
     providers: providerFlags,
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
     tts: tts.describeVoice(cfg),
     // not a secret — the sidebar shows it
-    profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
+    profile,
   };
 }
 
@@ -2399,6 +2412,7 @@ const server = createServer(async (req, res) => {
   /** the signed-in user for this request, once the auth gate resolves it;
    * undefined on desktop installs (no sessions there) and public paths */
   let requestUserId: string | undefined;
+let requestUserEmail: string | undefined;
   try {
     // host + origin gate before any route (DNS rebinding / CSRF). Loopback is
     // always allowed; a public host is allowed only when self-hosting is
@@ -2665,6 +2679,10 @@ const server = createServer(async (req, res) => {
       // ownership (see ownsBot below). Desktop installs have no sessions —
       // everything is the one local user's.
       requestUserId = session.userId;
+      try {
+        const acct = await auth.api.getSession({ headers: toWebRequest(req).headers }).catch(() => null);
+        requestUserEmail = acct?.user?.email ?? undefined;
+      } catch { /* best effort */ }
     }
 
     // ── multi-tenant guard (SELF_HOSTED only) ──────────────────────────
@@ -4044,7 +4062,7 @@ const server = createServer(async (req, res) => {
 
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
-      return json(res, 200, configStatus());
+      return json(res, 200, configStatus(requestUserId, requestUserEmail));
     }
     if (method === "GET" && path === "/api/providers") {
       const flags: Record<string, { configured: boolean }> = {};
