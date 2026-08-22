@@ -25,6 +25,8 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import { PUBLIC_BASE_URL } from "./auth.ts";
+import { sendEmail } from "./email.ts";
 import type { JsonValue } from "./schema.ts";
 
 /** Single switch, mirroring Dokploy's IS_CLOUD. Absent everywhere else. */
@@ -212,6 +214,63 @@ export async function getSubscription(
   }
 }
 
+/**
+ * Gate for metered actions (provisioning a cloud computer). Returns null when
+ * the action may proceed — self-hosting (null subscription means "billing
+ * does not apply") or a live subscription — or a user-facing reason when the
+ * subscription is missing, past due, or canceled.
+ */
+export function provisioningBlocked(sub: SubscriptionSummary | null): string | null {
+  if (sub === null) return null; // self-hosting: free and unlimited
+  if (sub.status === "active" || sub.status === "trialing") return null;
+  if (sub.status === "past_due") {
+    return "your subscription payment failed — update your card in Settings → Billing to keep provisioning cloud computers";
+  }
+  return "no active subscription — subscribe in Settings → Billing to provision cloud computers";
+}
+
+/** A value that is genuinely a string — the dunning-address check. */
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
+/** Read the subscription item id + current quantity, in one call. */
+async function subscriptionItem(
+  userId: string,
+  email: string,
+): Promise<{ id: string; quantity: number } | null> {
+  const customerId = await findOrCreateCustomer(userId, email);
+  const subs = await stripeRequest<StripeList<StripeSubscription>>("GET", "/subscriptions", {
+    customer: customerId,
+    status: "all",
+    limit: 1,
+    expand: ["data.items.data.price"],
+  });
+  const item = subs.data[0]?.items.data[0];
+  if (!item || !subs.data[0] || !["active", "trialing", "past_due"].includes(subs.data[0].status)) {
+    return null;
+  }
+  return { id: item.id, quantity: item.quantity ?? 0 };
+}
+
+/**
+ * Count one more metered cloud computer on the subscription. Called
+ * fire-and-forget after a successful provision: Stripe stays the source of
+ * truth, and the Billing Portal remains where customers can adjust down.
+ */
+export async function bumpSubscriptionQuantity(userId: string, email: string, by = 1): Promise<boolean> {
+  if (!isBillingConfigured()) return false;
+  try {
+    const item = await subscriptionItem(userId, email);
+    if (!item) return false;
+    await stripeRequest("POST", `/subscription_items/${item.id}`, {
+      quantity: item.quantity + by,
+    });
+    return true;
+  } catch (error) {
+    console.error("[billing] could not sync quantity:", error instanceof Error ? error.message : error);
+    return false;
+  }
+}
+
 /** Hosted Stripe Checkout URL for a new subscription. */
 export async function createCheckoutSession(opts: {
   userId: string;
@@ -311,10 +370,29 @@ export function handleWebhookEvent(event: { type: string; data?: { object?: unkn
     case "customer.subscription.deleted":
       console.log(`[billing] ${event.type}`);
       break;
-    case "invoice.payment_failed":
-      // Worth surfacing loudly: the customer is about to lose access.
+    case "invoice.payment_failed": {
+      // Worth surfacing loudly: the customer is about to lose access. Dunning
+      // mail goes out here so a failed card gets one clear, actionable notice;
+      // Stripe's own retries keep retrying quietly in the background.
       console.warn("[billing] invoice.payment_failed — subscription at risk");
+      // SAFETY: Stripe's invoice object carries customer_email as a string or
+      // null; anything else only means no dunning mail goes out.
+      const invoice = event.data?.object as { customer_email?: string | null } | undefined;
+      const to = isText(invoice?.customer_email) ? invoice.customer_email : null;
+      if (to) {
+        void sendEmail({
+          to,
+          subject: "Action needed: your Muster payment failed",
+          text:
+            "Your latest Muster subscription payment failed. " +
+            "Cloud computer provisioning pauses until the balance is settled — your bots and data are untouched. " +
+            `Update your card at ${PUBLIC_BASE_URL}/app/settings/billing.`,
+        }).catch((error) => {
+          console.error("[billing] dunning email failed:", error instanceof Error ? error.message : error);
+        });
+      }
       break;
+    }
     case "invoice.payment_succeeded":
       console.log("[billing] invoice.payment_succeeded");
       break;

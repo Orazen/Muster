@@ -109,12 +109,22 @@ stripe listen --forward-to localhost:8799/api/billing/webhook
 
 and set `MUSTER_CLOUD=true` with your `sk_test_…` key.
 
-## Not built yet
+## Enforcement, dunning, and quantity sync
 
-- **Enforcement.** Nothing currently blocks provisioning a cloud computer when the subscription is
-  `past_due` or absent. `getSubscription()` returns everything needed; the check belongs in the box
-  provisioning path (`server/box.ts`).
-- **Dunning email.** `invoice.payment_failed` is logged but sends nothing. `server/email.ts` has the
-  transport ready.
-- **Usage-based quantity sync.** Quantity is set at checkout and adjustable in the portal, but
-  provisioning an extra computer does not yet update the subscription item.
+All three are built:
+
+- **Enforcement.** Provisioning a cloud computer (`POST /api/bots/:id/computer/provision`, Box and
+  OpenSandbox backends alike) checks the live Stripe subscription first. A `past_due` or missing
+  subscription answers `402` with the exact fix ("update your card" / "subscribe"). Self-hosting
+  never hits this path — null means billing does not apply.
+- **Dunning email.** On `invoice.payment_failed` the customer gets one clear notice with a direct
+  link to the Billing panel. Bots and data are untouched; only new provisioning pauses.
+- **Quantity sync.** Every successful provision bumps the metered cloud-computer count on the
+  subscription item, fire-and-forget — a slow Stripe call must never delay a provision response.
+  Customers adjust down any time in the Billing Portal; Stripe remains the source of truth.
+
+One deliberate scope line: turn-driven auto-provisioning (a bot's first cloud use mid-conversation)
+is covered by the same session gate every `/api/*` route already requires, but not by the
+subscription check — that flow provisions only after an authenticated user explicitly selected
+Cloud for that bot. Closing that last seam belongs with per-turn usage metering, not the
+provision gate.

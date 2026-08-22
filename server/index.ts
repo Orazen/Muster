@@ -77,6 +77,8 @@ import {
   IS_CLOUD,
   isBillingConfigured,
   getSubscription,
+  provisioningBlocked,
+  bumpSubscriptionQuantity,
   createCheckoutSession,
   createPortalSession,
   verifyWebhookSignature,
@@ -3793,6 +3795,21 @@ const server = createServer(async (req, res) => {
     // Inert when self-hosting: MUSTER_CLOUD is unset, so these 404 and the
     // Settings panel that calls them never renders. Self-hosters are never
     // asked for a licence key and nothing is withheld from them.
+
+    /** Stripe-facing identity for the signed-in user, or null. Only cloud
+     * deployments with billing configured ever get a non-null answer; every
+     * call site treats null as "billing does not apply". */
+    const billingIdentity = async (): Promise<{ userId: string; email: string } | null> => {
+      if (!IS_CLOUD || !isBillingConfigured()) return null;
+      const session = await getSession(req);
+      if (!session) return null;
+      const account = await auth.api
+        .getSession({ headers: toWebRequest(req).headers })
+        .catch(() => null);
+      const email = account?.user?.email;
+      return email ? { userId: session.userId, email } : null;
+    };
+
     if (path.startsWith("/api/billing/")) {
       if (!IS_CLOUD) return json(res, 404, { error: "billing is not enabled" });
 
@@ -4147,12 +4164,34 @@ const server = createServer(async (req, res) => {
           // docs/plans/opensandbox-integration-and-pricing-decision.md).
           return json(res, 501, { error: `${m[2]} is not supported for OpenSandbox yet` });
         }
+        // Same cloud revenue gate as Box provisioning above.
+        const identity = await billingIdentity();
+        if (identity) {
+          const sub = await getSubscription(identity.userId, identity.email);
+          const blocked = provisioningBlocked(sub);
+          if (blocked) return json(res, 402, { error: blocked });
+          const provisioned = await opensandboxComputer.provisionSandbox(cfg, botId, bot.name);
+          void bumpSubscriptionQuantity(identity.userId, identity.email);
+          return json(res, 200, { boxId: provisioned.sandboxId, reused: provisioned.reused, state: "running" });
+        }
         const provisioned = await opensandboxComputer.provisionSandbox(cfg, botId, bot.name);
         return json(res, 200, { boxId: provisioned.sandboxId, reused: provisioned.reused, state: "running" });
       }
       switch (m[2]) {
-        case "provision":
+        case "provision": {
+          // Cloud revenue gate: no live subscription, no new cloud computer.
+          // Null identity means self-hosting — free and unlimited, always.
+          const identity = await billingIdentity();
+          if (identity) {
+            const sub = await getSubscription(identity.userId, identity.email);
+            const blocked = provisioningBlocked(sub);
+            if (blocked) return json(res, 402, { error: blocked });
+            const provisioned = await box.provisionBox(cfg, botId, bot.name);
+            void bumpSubscriptionQuantity(identity.userId, identity.email);
+            return json(res, 200, provisioned);
+          }
           return json(res, 200, await box.provisionBox(cfg, botId, bot.name));
+        }
         case "join":
           return json(res, 200, await box.joinBox(cfg, botId));
         case "sleep":

@@ -50,6 +50,34 @@ describe("IS_CLOUD", () => {
   });
 });
 
+describe("provisioningBlocked", () => {
+  it("allows self-hosting (null subscription means billing does not apply)", async () => {
+    const { provisioningBlocked } = await import("./billing.ts");
+    expect(provisioningBlocked(null)).toBeNull();
+  });
+
+  it("allows active and trialing subscriptions", async () => {
+    const { provisioningBlocked } = await import("./billing.ts");
+    expect(provisioningBlocked({ status: "active", quantity: 2, interval: "month", currentPeriodEnd: null, cancelAtPeriodEnd: false })).toBeNull();
+    expect(provisioningBlocked({ status: "trialing", quantity: 1, interval: "year", currentPeriodEnd: null, cancelAtPeriodEnd: false })).toBeNull();
+  });
+
+  it("blocks past_due with a card-update call to action", async () => {
+    const { provisioningBlocked } = await import("./billing.ts");
+    const reason = provisioningBlocked({ status: "past_due", quantity: 1, interval: "month", currentPeriodEnd: null, cancelAtPeriodEnd: false });
+    expect(reason).toMatch(/payment failed/i);
+    expect(reason).toMatch(/billing/i);
+  });
+
+  it("blocks none and canceled with a subscribe call to action", async () => {
+    const { provisioningBlocked } = await import("./billing.ts");
+    for (const status of ["none", "canceled"] as const) {
+      const reason = provisioningBlocked({ status, quantity: 0, interval: null, currentPeriodEnd: null, cancelAtPeriodEnd: false });
+      expect(reason).toMatch(/no active subscription/);
+    }
+  });
+});
+
 describe("verifyWebhookSignature", () => {
   const secret = "whsec_test_secret";
 
