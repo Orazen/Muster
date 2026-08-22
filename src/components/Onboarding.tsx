@@ -279,6 +279,16 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       first_task: (customTask.trim() || suggestion.trim()) || null,
     });
     const task = customTask.trim() || suggestion.trim();
+    // A fresh account has zero bots, so "Skip" must still leave one behind —
+    // otherwise the app opens on an empty roster.
+    if (!botName.trim()) {
+      try {
+        const created = await fetch("/api/bots", { method: "POST" }).then((r) => r.json());
+        dispatch({ type: "botAdded", bot: { ...created.bot, messages: created.bot.messages } });
+      } catch {
+        // best effort — empty-roster state still works
+      }
+    }
     if (botName.trim()) {
       setCreating(true);
       try {

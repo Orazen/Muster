@@ -193,7 +193,9 @@ export function SettingsModal() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      // Above the onboarding wizard (z-50): the wizard's "Add a provider key"
+      // shortcut opens this modal mid-onboarding.
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-6"
       onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
     >
       <div
