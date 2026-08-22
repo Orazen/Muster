@@ -180,7 +180,7 @@ function migrate(db: DatabaseSync): void {
   }
 }
 
-function getDb(): DatabaseSync {
+export function getDb(): DatabaseSync {
   if (!_db) {
     mkdirSync(DATA_DIR, { recursive: true });
     _db = new DatabaseSync(join(DATA_DIR, "auth.db"));

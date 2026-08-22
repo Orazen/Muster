@@ -69,6 +69,7 @@ import {
   userProviderFlags,
 } from "./user-keys.ts";
 import { PROVIDER_DRIVER_ENV, DATA_DIR } from "./config.ts";
+import { getDb } from "./auth.ts";
 import * as tts from "./tts/index.ts";
 import {
   auth,
@@ -343,7 +344,7 @@ void reloadUserInstancesAll();
 // this, ownerless records would fall through the ownership checks as
 // "unowned" and stay visible to every signed-in user. Idempotent — only
 // touches records that still have no ownerId.
-if (SELF_HOSTED) {
+{
   const primary = primaryUserId();
   if (primary) {
     let claimed = 0;
@@ -2164,7 +2165,7 @@ function stderrOf(err: { stderr?: unknown }): string {
   return isText(s) ? s : Buffer.isBuffer(s) ? s.toString("utf8") : "";
 }
 
-function configStatus(userId?: string, userEmail?: string) {
+function configStatus(userId?: string) {
   // Per-user scoping: non-operators read their own vault flags and their own
   // auth profile. The operator (first account / desktop user) keeps global
   // config — self-host is always the operator.
@@ -2178,11 +2179,23 @@ function configStatus(userId?: string, userEmail?: string) {
     }
   }
 
-  // Profile: non-operators see their own auth identity; the operator's
-  // global profile stays in config.json.
-  const profile = isOperator
-    ? { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" }
-    : { name: userEmail?.split("@")[0] ?? "", email: userEmail ?? "" };
+  // Profile: non-operators read their Better Auth record directly by userId
+  // — no reliance on a separate getSession call that may not have fired.
+  let profile = { name: "", email: "" };
+  // Always read from Better Auth when a userId exists — the global
+  // cfg.profile is the operator's legacy field, not per-account identity.
+  if (userId) {
+    try {
+      // SAFETY: the SELECT projects only the user table's name and email
+      // columns; a missing row or DB error falls to the empty default.
+      const row = getDb().prepare(
+        'SELECT name, email FROM "user" WHERE id = ?',
+      ).get(userId) as { name: string; email: string } | undefined;
+      if (row) profile = { name: row.name, email: row.email };
+    } catch {
+      // DB unavailable — leave the empty default
+    }
+  }
 
   return {
     xai: { configured: vaultFlags ? Boolean(vaultFlags["xai"]?.configured) : Boolean(cfg.xai?.key) },
@@ -2419,7 +2432,6 @@ const server = createServer(async (req, res) => {
   /** the signed-in user for this request, once the auth gate resolves it;
    * undefined on desktop installs (no sessions there) and public paths */
   let requestUserId: string | undefined;
-let requestUserEmail: string | undefined;
   try {
     // host + origin gate before any route (DNS rebinding / CSRF). Loopback is
     // always allowed; a public host is allowed only when self-hosting is
@@ -2686,10 +2698,6 @@ let requestUserEmail: string | undefined;
       // ownership (see ownsBot below). Desktop installs have no sessions —
       // everything is the one local user's.
       requestUserId = session.userId;
-      try {
-        const acct = await auth.api.getSession({ headers: toWebRequest(req).headers }).catch(() => null);
-        requestUserEmail = acct?.user?.email ?? undefined;
-      } catch { /* best effort */ }
     }
 
     // ── multi-tenant guard (SELF_HOSTED only) ──────────────────────────
@@ -2698,8 +2706,16 @@ let requestUserEmail: string | undefined;
     // dozens of /api/bots/:id and /api/threads/:id handlers: a record owned
     // by another user looks like it never existed (404), for reads, writes,
     // and every sub-route alike.
-    const ownsRecord = (r: { ownerId?: string }) =>
-      !requestUserId || r.ownerId === undefined || r.ownerId === null || r.ownerId === requestUserId;
+    // Isolation: unowned records belong to the operator (primary user).
+    // Non-operators never see them — this is what prevented Rocky balboa
+    // from seeing tharunramagiri's bots.
+    const isPrimary = !requestUserId || requestUserId === primaryUserId();
+    const ownsRecord = (r: { ownerId?: string }) => {
+      if (!requestUserId) return true; // desktop: no auth, one user
+      if (r.ownerId === requestUserId) return true;
+      // Unowned records are operator-only
+      return !r.ownerId && isPrimary;
+    };
     if (requestUserId) {
       let m2 = path.match(/^\/api\/bots\/([\w-]+)(?:\/|$)/);
       if (m2) {
@@ -4069,7 +4085,7 @@ let requestUserEmail: string | undefined;
 
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
-      return json(res, 200, configStatus(requestUserId, requestUserEmail));
+      return json(res, 200, configStatus(requestUserId));
     }
     if (method === "GET" && path === "/api/providers") {
       const flags: Record<string, { configured: boolean }> = {};
