@@ -213,7 +213,7 @@ interface InstanceCliUpdate {
 // (which withInstanceCli() uses to strip them back out before persisting an
 // override) — defined once at module scope so the two can never drift out
 // of sync with each other.
-const PROVIDER_DRIVER_ENV = {
+export const PROVIDER_DRIVER_ENV = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   google: "GOOGLE_API_KEY",

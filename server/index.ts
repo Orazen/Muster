@@ -59,6 +59,15 @@ import {
   type Message,
   type TaskRecord,
 } from "./store.ts";
+import {
+  allUserInstanceConfigs,
+  clearUserProviderKey,
+  setUserProviderKey,
+  userInstanceConfigs,
+  userInstanceOwner,
+  userProviderFlags,
+} from "./user-keys.ts";
+import { PROVIDER_DRIVER_ENV, DATA_DIR } from "./config.ts";
 import * as tts from "./tts/index.ts";
 import {
   auth,
@@ -277,7 +286,14 @@ bootSelection = await defaultSelection();
  */
 async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bot>>) {
   const direct = registry.get(bot.modelSelection.instanceId);
-  if (direct) return direct;
+  if (direct) {
+    // Vault isolation: a per-user instance id ends in `Api:<owner>` — a bot
+    // may only ride its own owner's engine, so user-b can never spend
+    // user-a's key by pointing modelSelection at it.
+    const owner = userInstanceOwner(bot.modelSelection.instanceId);
+    if (owner !== null && bot.ownerId !== owner) return null;
+    return direct;
+  }
   // Only heal a genuinely never-set selection ("") — the boot-time race
   // this function exists to fix. A non-empty instanceId that fails to
   // resolve (removed instance, typo, or a deliberately invalid one, as
@@ -294,6 +310,9 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
   return healed;
 }
 store.seedIfEmpty();
+// Per-user vault engines register at boot so saved keys are live on any
+// device the account signs in from — configured once, everywhere.
+void reloadUserInstancesAll();
 
 // Boot migration for the multi-tenant guard: records that predate per-user
 // ownership belong to the deployment's first account (the operator). Without
@@ -2149,10 +2168,29 @@ function configStatus() {
 
 /** Rebuild the provider fleet after a config change so new keys take
  * effect without a server restart (kills any in-flight turns). */
+/** Register (or refresh) one user's vault instances into the shared
+ * registry. Per-user instance ids (`deepseekApi:<userId>`) keep engines
+ * isolated: turn-start refuses an instance whose owner suffix does not
+ * match the bot's owner. */
+async function reloadUserInstances(userId: string): Promise<void> {
+  const userConfigs = userInstanceConfigs(DATA_DIR, userId, PROVIDER_DRIVER_ENV);
+  // load() upserts by instanceId — existing operator instances untouched.
+  await registry.load(userConfigs);
+}
+
+/** Register every user's vault instances (boot path). */
+async function reloadUserInstancesAll(): Promise<void> {
+  try {
+    await registry.load(allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV));
+  } catch (e) {
+    console.error("vault instance registration failed:", e instanceof Error ? e.message : e);
+  }
+}
+
 async function reloadProviders() {
   bus.detachAll();
   await registry.disposeAll();
-  await registry.load(instanceConfigs(cfg));
+  await registry.load({ ...allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV), ...instanceConfigs(cfg) });
   bus.attach(registry.instances());
   // Otherwise bootSelection stays whatever it was at process boot forever —
   // any bot created after this reload (e.g. right after saving the very
@@ -3799,6 +3837,39 @@ const server = createServer(async (req, res) => {
     // Inert when self-hosting: MUSTER_CLOUD is unset, so these 404 and the
     // Settings panel that calls them never renders. Self-hosters are never
     // asked for a licence key and nothing is withheld from them.
+
+    // ── per-user provider keys (vault) ─────────────────────────────────
+    // Each signed-in account keeps its OWN provider keys, encrypted at rest.
+    // Self-host keeps the single global config — the vault only activates
+    // when the deployment serves multiple users (SELF_HOSTED).
+    if (path === "/api/user-keys") {
+      if (!requestUserId) return json(res, 401, { error: "unauthorized: sign in required" });
+      const flags = userProviderFlags(DATA_DIR, requestUserId);
+      if (method === "GET") {
+        return json(res, 200, { providers: PROVIDERS.map((p) => ({ ...p, configured: flags[p.configKey]?.configured ?? false })) });
+      }
+      if (method === "PUT") {
+        const body = await readBody(req);
+        const providerId = isText(body?.providerId) ? body.providerId.trim() : "";
+        const apiKey = isText(body?.apiKey) ? body.apiKey.trim() : "";
+        const known = PROVIDERS.some((p) => p.configKey === providerId);
+        if (!known) return json(res, 400, { error: "unknown provider" });
+        if (!apiKey) return json(res, 400, { error: "apiKey is required" });
+        setUserProviderKey(DATA_DIR, requestUserId, providerId, apiKey);
+        await reloadUserInstances(requestUserId);
+        return json(res, 200, { ok: true });
+      }
+      if (method === "DELETE") {
+        const body = await readBody(req);
+        const providerId = isText(body?.providerId) ? body.providerId.trim() : "";
+        if (!PROVIDERS.some((p) => p.configKey === providerId)) {
+          return json(res, 400, { error: "unknown provider" });
+        }
+        clearUserProviderKey(DATA_DIR, requestUserId, providerId);
+        await reloadUserInstances(requestUserId);
+        return json(res, 200, { ok: true });
+      }
+    }
 
     /** Stripe-facing identity for the signed-in user, or null. Only cloud
      * deployments with billing configured ever get a non-null answer; every
