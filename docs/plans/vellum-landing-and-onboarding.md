@@ -1,5 +1,14 @@
 # Muster landing motion + onboarding — plan (studied from Vellum)
 
+> **Status: SHIPPED (2026-08-22).** Landing motion + StarCrowd section and the
+> six-step onboarding wizard are live (`src/pages/LandingPage.tsx`,
+> `src/components/Onboarding.tsx`, mounted in `src/App.tsx`). Verified
+> end-to-end in a browser on an isolated rig: signup → wizard → teammate
+> created with color/character/persona → first task auto-sent into its chat.
+> The muster-ui registry lives at github.com/Orazen/muster-ui (star-avatar).
+> Remaining from this doc: day-2 check-in (needs scheduling infra), and the
+> desktop app's own Google sign-in (separate known gap).
+
 Sources studied:
 - https://www.vellum.ai — hero + scroll behavior (screenshots taken, full page reviewed)
 - https://github.com/vellum-ai/vellum-assistant — `clients/web/src/domains/onboarding/**`,
