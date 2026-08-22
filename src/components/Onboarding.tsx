@@ -184,10 +184,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     if (decided || !state.connected) return;
     setDecided(true);
     const hasRealHistory = state.bots.some((b) => b.messages.some((m) => m.role === "user"));
-    if (emailGateDone()) {
+    if (emailGateDone(user?.id)) {
       onDone();
     } else if (hasRealHistory) {
-      setEmailGateDone("skipped");
+      setEmailGateDone(user?.id, "skipped");
       onDone();
     } else if (user) {
       setName(user.name ?? "");
@@ -302,7 +302,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       }
       setCreating(false);
     }
-    setEmailGateDone("submitted");
+    setEmailGateDone(user?.id, "submitted");
     onDone();
   };
 
