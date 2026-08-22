@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Check, AlertTriangle, Loader2, Mic, ArrowLeft, Sparkles } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { MusterbotMark } from "./MusterbotMark";
+import { AgentAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, emailGateDone, track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
@@ -460,7 +461,22 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         <p className="mt-1 text-[13.5px] text-ink-secondary">
           Give one agent a face and a name. You can add more any time.
         </p>
-        <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+        {/* Live preview: the selected teammate, animated (blobstudio-style) */}
+        <div className="mt-4 flex justify-center">
+          <AgentAvatar
+            color={botColor}
+            character={botCharacter}
+            size={96}
+            state={botName.trim() ? "happy" : "idle"}
+          />
+        </div>
+        {(botName.trim() || botRole.trim()) && (
+          <div className="mt-2 text-center">
+            <span className="text-[14px] font-semibold text-ink">{botName.trim() || "Your teammate"}</span>
+            {botRole.trim() && <span className="ml-1.5 text-[12px] text-ink-secondary">· {botRole.trim()}</span>}
+          </div>
+        )}
+        <div className="mt-3 flex flex-wrap justify-center gap-1.5">
           {TEAMMATE_TEMPLATES.map((t) => (
             <button
               key={t.name}
