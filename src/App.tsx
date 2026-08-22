@@ -19,7 +19,6 @@ import { NotificationStack } from "@/components/NotificationStack";
 import { MusterbotMark } from "@/components/MusterbotMark";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AuthGate } from "@/components/AuthGate";
-import { LandingPage } from "@/pages/LandingPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { SignupPage } from "@/pages/SignupPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
@@ -186,13 +185,10 @@ function AppShell() {
 // check in this codebase already uses (src/lib/desktop.ts).
 function RootRoute() {
   const { user, loading } = useAuth();
-  // window.ogb only exists inside Electron's preload bridge; the browser
-  // bundle renders this route without it.
-  if (window.ogb) {
-    if (loading) return null;
-    return <Navigate to={user ? "/app" : "/sign-in"} replace />;
-  }
-  return <LandingPage />;
+  // The marketing site is the static www/index.html served at / — the React
+  // app never renders a second landing. Browser root funnels to auth.
+  if (loading) return null;
+  return <Navigate to={user ? "/app" : "/sign-in"} replace />;
 }
 
 export default function App() {
