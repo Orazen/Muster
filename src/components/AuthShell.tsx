@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
-import { StarLogo } from "@/pages/LandingPage";
+import { MusterbotMark } from "./MusterbotMark";
 
 /** Shared auth surface: the same dark canvas, orange glow, and star mark as
  * the landing page, so sign-in/sign-up read as one continuous brand instead
@@ -28,7 +28,7 @@ export function AuthShell({
       <div className="relative w-full max-w-md">
         <div className="mb-8 flex flex-col items-center text-center">
           <Link to="/" aria-label="Muster home" className="transition-opacity hover:opacity-80">
-            <StarLogo size={40} />
+            <MusterbotMark size={64} />
           </Link>
           <h1 className="mt-5 text-[26px] font-bold tracking-[-0.02em] text-[#f5f5f5]">{title}</h1>
           <p className="mt-2 text-[14px] leading-relaxed text-[#a1a1a6]">{subtitle}</p>

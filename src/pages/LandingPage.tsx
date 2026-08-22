@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Cpu, Monitor, Shield, Plug, Users, Key } from "lucide-react";
 import { motion, useReducedMotion, type Variants } from "framer-motion";
 import { useAuth } from "@/lib/auth";
+import { MusterbotMark } from "@/components/MusterbotMark";
 
 export function StarLogo({ size = 24 }: { size?: number }) {
   return (
@@ -283,9 +284,7 @@ export function LandingPage() {
       <header className="sticky top-0 z-50 border-b border-white/[0.06] backdrop-blur-xl bg-[#0a0a0a]/70">
         <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <Link to="/" className="flex items-center gap-2.5 text-[15px] font-semibold tracking-tight text-[#f5f5f5]">
-            <Float duration={7}>
-              <StarLogo size={28} />
-            </Float>
+            <MusterbotMark size={40} />
             Muster
           </Link>
           <div className="flex items-center gap-6 max-sm:hidden">

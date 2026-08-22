@@ -159,8 +159,24 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   // teammate state
   const [botName, setBotName] = useState("");
   const [botRole, setBotRole] = useState("");
-  const [botColor, setBotColor] = useState<AgentColor>("green");
+  const [botColor, setBotColor] = useState<AgentColor>("orange");
   const [botCharacter, setBotCharacter] = useState<AgentCharacter>("star");
+
+  /** Default teammate templates (botdirectory-style starters) — tap one and
+   * the form fills itself. Indian names, per product direction. */
+  const TEAMMATE_TEMPLATES: Array<{
+    name: string;
+    role: string;
+    color: AgentColor;
+    character: AgentCharacter;
+  }> = [
+    { name: "Arya", role: "Research", color: "orange", character: "star" },
+    { name: "Rohan", role: "Ops", color: "blue", character: "hexagon" },
+    { name: "Priya", role: "Writing", color: "pink", character: "drop" },
+    { name: "Arjun", role: "Engineering", color: "teal", character: "triangle" },
+    { name: "Kiran", role: "Support", color: "purple", character: "egg" },
+    { name: "Devi", role: "Review", color: "coral", character: "heart" },
+  ];
 
   // personality state
   const [axes, setAxes] = useState<Axes>(NEUTRAL_AXES);
@@ -445,6 +461,26 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         <p className="mt-1 text-[13.5px] text-ink-secondary">
           Give one agent a face and a name. You can add more any time.
         </p>
+        <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+          {TEAMMATE_TEMPLATES.map((t) => (
+            <button
+              key={t.name}
+              onClick={() => {
+                setBotName(t.name);
+                setBotRole(t.role);
+                setBotColor(t.color);
+                setBotCharacter(t.character);
+              }}
+              className={`rounded-full border px-2.5 py-1 text-[11.5px] transition-colors ${
+                botName === t.name
+                  ? "border-accent bg-raised text-ink"
+                  : "border-hairline/40 text-ink-secondary hover:bg-raised hover:text-ink"
+              }`}
+            >
+              {t.name} · {t.role}
+            </button>
+          ))}
+        </div>
         <div className="mt-4 grid grid-cols-4 justify-items-center gap-2">
           {AGENT_CHARACTERS.map((character) => (
             <button

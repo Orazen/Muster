@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { RefreshCw, Copy, Check } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { StarLogo } from "@/pages/LandingPage";
+import { MusterbotMark } from "@/components/MusterbotMark";
 
 /** Cloud side of the desktop pairing bridge: a signed-in cloud user shows
  * this code to their desktop app, which redeems it for a local session.
@@ -59,7 +59,7 @@ export function PairPage() {
     <div className="flex min-h-screen items-center justify-center bg-app px-4">
       <div className="w-full max-w-md text-center">
         <Link to="/" className="inline-flex items-center gap-2 text-ink">
-          <StarLogo size={28} />
+          <MusterbotMark size={48} />
           <span className="text-xl font-semibold tracking-tight">Muster</span>
         </Link>
         <h1 className="mt-6 text-2xl font-bold tracking-tight text-ink">Pair your desktop app</h1>
