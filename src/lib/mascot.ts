@@ -9,23 +9,12 @@ export const AGENT_STATES = CURSOR_STATES;
  * `lottie` is the bundled .lottie bot character. `star` is the
  * musterbot star: every teammate is a star. */
 export type AgentCharacter =
-  | "cursor"
-  | "lottie"
-  | "star"
-  | "hexagon"
-  | "triangle"
-  | "egg"
-  | "drop"
-  | "heart";
-/** Picker order: the two originals first, then the shape pack. */
+  | "cursor" | "lottie" | "star"
+  | "hexagon" | "triangle" | "egg" | "drop" | "heart"
+  | "pebble" | "squircle" | "capsule" | "cloud" | "ball" | "sparkle";
 export const AGENT_CHARACTERS: AgentCharacter[] = [
-  "star",
-  "cursor",
-  "hexagon",
-  "triangle",
-  "egg",
-  "drop",
-  "heart",
+  "star", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
+  "pebble", "squircle", "capsule", "cloud", "ball", "sparkle",
 ];
 
 /** CursorAvatar ships French group labels; the app shows these instead. The

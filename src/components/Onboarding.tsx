@@ -171,11 +171,14 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     character: AgentCharacter;
   }> = [
     { name: "Arya", role: "Research", color: "orange", character: "star" },
-    { name: "Rohan", role: "Ops", color: "blue", character: "hexagon" },
+    { name: "Rohan", role: "Ops", color: "blue", character: "squircle" },
     { name: "Priya", role: "Writing", color: "pink", character: "drop" },
     { name: "Arjun", role: "Engineering", color: "teal", character: "triangle" },
-    { name: "Kiran", role: "Support", color: "purple", character: "egg" },
-    { name: "Devi", role: "Review", color: "coral", character: "heart" },
+    { name: "Kiran", role: "Support", color: "purple", character: "cloud" },
+    { name: "Devi", role: "Review", color: "coral", character: "sparkle" },
+    { name: "Vikram", role: "Data", color: "green", character: "pebble" },
+    { name: "Meera", role: "Design", color: "cyan", character: "capsule" },
+    { name: "Ravi", role: "Security", color: "red", character: "ball" },
   ];
 
   // personality state
