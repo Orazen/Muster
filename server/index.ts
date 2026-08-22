@@ -62,6 +62,7 @@ import {
 import {
   allUserInstanceConfigs,
   clearUserProviderKey,
+  userInstanceId,
   setUserProviderKey,
   userInstanceConfigs,
   userInstanceOwner,
