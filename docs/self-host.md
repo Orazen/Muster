@@ -139,3 +139,17 @@ docker compose pull && docker compose up -d
 ```
 
 Data survives upgrades because it lives in the `muster-data` volume.
+
+## Cloud hosting (multi-tenant SaaS)
+
+For production cloud hosting, use `Dockerfile.cloud` with workspace isolation:
+
+```sh
+docker build -f Dockerfile.cloud -t muster:cloud .
+docker run -d -p 8799:8799 -v /data:/data -e OMB_HOST=0.0.0.0 muster:cloud
+```
+
+- Non-root `muster` user
+- Per-workspace `OMB_DATA_DIR=/data/workspace-{id}` (via reverse proxy or subdomain)
+- Subscription tiers: Free / Pro ($20/mo) / Enterprise (custom)
+- Revenue: subscriptions (30%) + Composio rev-share + agent marketplace + services

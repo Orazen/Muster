@@ -1,0 +1,62 @@
+# syntax=docker/dockerfile:1
+
+# ── Multi-tenant Muster — cloud image ────────────────────────────────────────
+# Same build as the self-host image, but runs as a non-root `muster` user and
+# expects one container per tenant workspace: point OMB_DATA_DIR at a
+# workspace-specific volume (e.g. /data/workspace-{id} behind your reverse
+# proxy or scheduler). See docs/self-host.md → "Cloud hosting".
+
+FROM node:24-slim AS build
+WORKDIR /app
+
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY tsconfig.json tsconfig.server.json tsconfig.server.build.json vite.config.ts index.html ./
+COPY src src
+COPY server server
+COPY companion companion
+COPY scripts scripts
+COPY public public
+COPY www www
+
+RUN pnpm install --frozen-lockfile
+
+RUN pnpm build \
+  && pnpm build:server
+
+# ── runtime stage: slim Node image, non-root, built artifacts only.
+FROM node:24-slim AS runtime
+WORKDIR /app
+
+# The cloud image never touches docker sockets or the host user.
+RUN addgroup -S muster && adduser -S muster -G muster
+
+ENV NODE_ENV=production \
+    OMB_HOST=0.0.0.0 \
+    OMB_PORT=8799 \
+    OMB_DATA_DIR=/data \
+    OMB_STATIC_DIR=/app/dist \
+    OMB_MARKETING_DIR=/app/www
+
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/dist-server ./dist-server
+COPY --from=build /app/www ./www
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Per-tenant data volume. When mounting a host directory, chown it to the
+# container's `muster` user (uid of the alpine-created account) so the
+# entrypoint can persist the generated BETTER_AUTH_SECRET there.
+VOLUME ["/data"]
+
+USER muster
+EXPOSE 8799
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:8799/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["node", "dist-server/index.js"]
