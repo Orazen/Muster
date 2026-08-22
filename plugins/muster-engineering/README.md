@@ -14,7 +14,7 @@ Refer to `plugin.yaml` for full mapping. Each is applied to Muster's actual arch
 1. **Loop Engineering** (`loop-engineering`) — Audit cycle (wave-1 → wave-2 → tail fix) with 15-minute checkpoint polling
 2. **Fleet Engineering** (`fleet-engineering`) — Agent registry (`server/harness/registry.ts`), identity (`auth.ts`), permissions (`permission-proxy.ts`), audit (`store.ts` NDJSON)
 3. **Goal Engineering** (`goal-engineering`) — Goal verification gate (`rev 3` marked complete) following Grok Build `/goal` pattern
-4. **Outerloop** (`outerloop`) — Evidence (1113 lint + 56 security findings) → Verdict (all mechanical fixes approved / false positives resolved) → Answerability (commit `225ae54` + `MUSTER_AUDIT_STRATEGY.md`)
+4. **Outerloop** (`outerloop`) — Evidence (1113 lint + 56 security findings) → Verdict (all mechanical fixes approved / false positives resolved) → Answerability (commit `225ae54` + `docs/MUSTER_AUDIT_STRATEGY.md`)
 5. **Graph Engineering** (`graph-engineering`) — 5-node visible event flow: UI → Harness → Agent CLI → Broker → Computer / Apps
 6. **Memory Engineering** (`memory-engineering`) — `MemoryTab.tsx` with 8 Vellum memory types + persistence + budgeted retrieval
 
