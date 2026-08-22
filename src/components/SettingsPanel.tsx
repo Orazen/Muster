@@ -287,12 +287,7 @@ function MemoryCard({ bot }: { bot: Bot }) {
               </span>
             )}
           </div>
-          {topics.length > 0 && (
-            <MemoryTab
-              topics={topics.map((t) => ({ name: t.name, bytes: t.bytes }))}
-              onOpen={(name) => void openTopic(name)}
-            />
-          )}
+          {topics.length > 0 && <MemoryTab topics={topics} onOpen={(name) => void openTopic(name)} />}
         </div>
       )}
 
