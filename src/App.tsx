@@ -23,6 +23,7 @@ import { SignupPage } from "@/pages/SignupPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { Onboarding } from "@/components/Onboarding";
+import { PairPage } from "@/pages/PairPage";
 
 function SignOutButton() {
   const { signOut } = useAuth();
@@ -182,6 +183,7 @@ export default function App() {
           <Route path="/" element={<RootRoute />} />
           <Route path="/sign-in" element={<LoginPage />} />
           <Route path="/sign-up" element={<SignupPage />} />
+          <Route path="/pair" element={<AuthGate><PairPage /></AuthGate>} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/app/*" element={<AuthGate><AppShell /></AuthGate>} />

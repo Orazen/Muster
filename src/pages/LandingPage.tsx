@@ -3,7 +3,7 @@ import { Cpu, Monitor, Shield, Plug, Users, Key } from "lucide-react";
 import { motion, useReducedMotion, type Variants } from "framer-motion";
 import { useAuth } from "@/lib/auth";
 
-function StarLogo({ size = 24 }: { size?: number }) {
+export function StarLogo({ size = 24 }: { size?: number }) {
   return (
     <svg viewBox="0 -20 260 260" width={size} height={size} aria-hidden="true">
       <defs>

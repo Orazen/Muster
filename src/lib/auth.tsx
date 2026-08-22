@@ -39,6 +39,10 @@ export interface AuthCapabilities {
   /** Manual sign-UP is off — new accounts must use a social provider.
    * Existing accounts still sign in with a password unaffected. */
   googleOnlySignup: boolean;
+  /** Desktop Google sign-in: this server knows a cloud to pair against. */
+  cloudPairing: boolean;
+  /** The cloud base URL the pairing flow opens in the system browser. */
+  pairingCloudUrl: string | null;
 }
 
 const NO_CAPABILITIES: AuthCapabilities = {
@@ -46,6 +50,8 @@ const NO_CAPABILITIES: AuthCapabilities = {
   passwordReset: false,
   socialProviders: [],
   googleOnlySignup: false,
+  cloudPairing: false,
+  pairingCloudUrl: null,
 };
 
 interface AuthContextType {
@@ -88,6 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         passwordReset: Boolean(data.passwordReset),
         socialProviders: Array.isArray(data.socialProviders) ? data.socialProviders : [],
         googleOnlySignup: Boolean(data.googleOnlySignup),
+        cloudPairing: Boolean(data.cloudPairing),
+        pairingCloudUrl: typeof data.pairingCloudUrl === "string" ? data.pairingCloudUrl : null,
       });
     } catch {
       // Server too old or unreachable — leave every optional flow hidden.

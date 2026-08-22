@@ -66,7 +66,12 @@ import {
   SELF_HOSTED,
   PUBLIC_BASE_URL,
   primaryUserId,
+  findUserById,
+  pairCloudUrl,
+  createBridgedUser,
+  mintSession,
 } from "./auth.ts";
+import { createCode, consumeCode, VerifyError } from "./pairing.ts";
 import {
   IS_CLOUD,
   isBillingConfigured,
@@ -1226,6 +1231,17 @@ async function startTurn(
   const bot = store.bot(botId);
   if (!bot) throw Object.assign(new Error("no such bot"), { status: 404 });
   if (bot.busy) throw Object.assign(new Error("the bot is already working — interrupt it first"), { status: 409 });
+  // Multi-tenant engine guard: turns run on the deployment's engines, which
+  // belong to the operator. Another user's bot can hold a transcript but
+  // cannot spend the fleet's credentials until per-user engine config ships.
+  if (SELF_HOSTED && bot.ownerId && primaryUserId() && bot.ownerId !== primaryUserId()) {
+    throw Object.assign(
+      new Error(
+        "engines on this deployment belong to its operator — run Muster Desktop or your own self-host to power this bot",
+      ),
+      { status: 403 },
+    );
+  }
   const threadId = opts?.threadId ?? bot.threadId;
   // a webhook turn, or one inherited from a bot already running unattended
   if (opts?.automationSource === "webhook" || opts?.unattended) markUnattended(bot.id);
@@ -2438,6 +2454,71 @@ const server = createServer(async (req, res) => {
       return json(res, 200, authCapabilities());
     }
 
+    // ── cloud ↔ desktop identity pairing ───────────────────────────────
+    // The desktop app gets Google sign-in by borrowing the cloud's: the
+    // user proves who they are once in a browser on muster.orazen.online,
+    // gets an 8-character code, and their local server redeems it for a
+    // local account + session. Code mechanics live in server/pairing.ts.
+    if (method === "POST" && path === "/api/pair/create") {
+      // this route lives above the SELF_HOSTED gate with the other public
+      // paths, so it resolves its own session
+      const session = await getSession(req);
+      if (!session) return json(res, 401, { error: "sign in before generating a pairing code" });
+      const { code, expiresAt } = createCode(session.userId);
+      return json(res, 201, { code, expiresAt });
+    }
+    if (method === "GET" && path === "/api/pair/verify") {
+      try {
+        const userId = consumeCode(String(url.searchParams.get("code") ?? ""), req.socket.remoteAddress ?? "unknown");
+        const user = findUserById(userId);
+        if (!user) return json(res, 404, { error: "pairing account no longer exists" });
+        return json(res, 200, { email: user.email, name: user.name });
+      } catch (e) {
+        if (e instanceof VerifyError) return json(res, e.status, { error: e.message });
+        throw e;
+      }
+    }
+    // Local side of the bridge (desktop installs): redeem a code against
+    // the configured cloud, provision the local account, mint a session.
+    if (method === "POST" && path === "/api/pair/redeem") {
+      const cloudUrl = pairCloudUrl();
+      if (!cloudUrl) return json(res, 501, { error: "pairing is not configured on this install" });
+      const body = await readBody(req);
+      const code = typeof body.code === "string" ? body.code : "";
+      let identity: { email?: string; name?: string };
+      try {
+        const upstream = await fetch(
+          `${cloudUrl.replace(/\/$/, "")}/api/pair/verify?code=${encodeURIComponent(code)}`,
+          // a local server redeeming someone else's stolen code is the
+          // threat model — never follow redirects into ambiguity
+          { redirect: "error", signal: AbortSignal.timeout(10_000) },
+        );
+        if (!upstream.ok) {
+          const err = (await upstream.json().catch(() => null)) as { error?: string } | null;
+          return json(res, upstream.status === 429 ? 429 : 400, {
+            error: err?.error ?? "the cloud rejected that pairing code",
+          });
+        }
+        identity = (await upstream.json()) as { email?: string; name?: string };
+      } catch {
+        return json(res, 502, { error: `could not reach ${cloudUrl} — check your connection` });
+      }
+      if (!identity.email) return json(res, 400, { error: "the cloud returned no identity for that code" });
+      const userId = createBridgedUser(identity.email, identity.name ?? "");
+      const { token, expiresAt } = mintSession(userId, {
+        ip: req.socket.remoteAddress ?? undefined,
+        userAgent: req.headers["user-agent"],
+      });
+      // Same cookie name/shape Better Auth itself sets — getSession()
+      // resolves it identically. No Secure flag: the desktop serves plain
+      // loopback HTTP.
+      res.setHeader(
+        "Set-Cookie",
+        `better-auth.session_token=${token}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}`,
+      );
+      return json(res, 200, { ok: true, email: identity.email, name: identity.name ?? "" });
+    }
+
     // ── Stripe webhook ─────────────────────────────────────────────────
     // Before the session gate: Stripe authenticates with a signature over the
     // raw body, not a cookie. Must also run before any body parsing.
@@ -2844,6 +2925,23 @@ const server = createServer(async (req, res) => {
         sseClients.delete(client);
       });
       return;
+    }
+
+    // ── engine/infra guard (SELF_HOSTED, multi-tenant) ─────────────────
+    // Engines, computers and provider credentials belong to the deployment
+    // operator (the primary account). Other signed-in users get full use of
+    // their OWN bots/transcripts — the isolation above — but never this
+    // machine's fleet: listing it, configuring it, or executing on it.
+    const isPrimaryUser = !requestUserId || requestUserId === primaryUserId();
+    if (!isPrimaryUser) {
+      const infraPath =
+        path === "/api/instances" ||
+        path.startsWith("/api/local-computer") ||
+        path.startsWith("/api/bots/") && /\/computer(\/|$)/.test(path);
+      if (infraPath) return json(res, 404, { error: "no such resource" });
+      if ((method === "PUT" || method === "PATCH" || method === "DELETE") && path === "/api/config") {
+        return json(res, 403, { error: "only the deployment operator can change configuration" });
+      }
     }
 
     // ── bots ──

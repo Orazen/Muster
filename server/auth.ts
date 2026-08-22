@@ -205,6 +205,77 @@ export function primaryUserId(): string | null {
   }
 }
 
+/** Look up a user by email — the pairing bridge resolves a cloud identity
+ * against the local account list before deciding to provision. */
+export function findUserByEmail(email: string): { id: string; name: string; email: string } | null {
+  try {
+    const row = getDb()
+      .prepare('SELECT "id", "name", "email" FROM "user" WHERE lower("email") = lower(?) LIMIT 1')
+      .get(email.trim().toLowerCase()) as { id: string; name: string; email: string } | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Look up a user by id — the pairing verify endpoint resolves a consumed
+ * code's owner back to their identity. */
+export function findUserById(id: string): { id: string; name: string; email: string } | null {
+  try {
+    const row = getDb()
+      .prepare('SELECT "id", "name", "email" FROM "user" WHERE "id" = ? LIMIT 1')
+      .get(id) as { id: string; name: string; email: string } | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Provision a local account from a cloud-verified identity (pairing
+ * bridge). Direct inserts for the same reason provisionOrganizationFor
+ * is: Better Auth's route handlers require a request context that doesn't
+ * exist in server-to-server flows. The org hook fires here explicitly —
+ * the databaseHooks.user.create.after path only covers Better Auth's own
+ * sign-up routes. */
+export function createBridgedUser(email: string, name: string): string {
+  const db = getDb();
+  const normalized = email.trim().toLowerCase();
+  const existing = findUserByEmail(normalized);
+  if (existing) return existing.id;
+  const userId = `usr_${randomBytes(12).toString("base64url")}`;
+  const now = new Date().toISOString();
+  db.prepare(
+    'INSERT INTO "user" ("id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt") VALUES (?, ?, ?, 1, NULL, ?, ?)',
+  ).run(userId, name || normalized.split("@")[0], normalized, now, now);
+  provisionOrganizationFor(userId, name || normalized);
+  return userId;
+}
+
+/** Mint a real session row + token for an already-provisioned user. The
+ * token goes into the standard Better Auth session cookie on the response;
+ * getSession() resolves it exactly like any other login. */
+export function mintSession(
+  userId: string,
+  meta?: { ip?: string; userAgent?: string },
+): { token: string; expiresAt: Date } {
+  const db = getDb();
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60_000);
+  db.prepare(
+    'INSERT INTO "session" ("id", "expiresAt", "token", "createdAt", "updatedAt", "ipAddress", "userAgent", "userId") VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(
+    `ses_${randomBytes(12).toString("base64url")}`,
+    expiresAt.toISOString(),
+    token,
+    new Date().toISOString(),
+    new Date().toISOString(),
+    meta?.ip ?? null,
+    meta?.userAgent ?? null,
+    userId,
+  );
+  return { token, expiresAt };
+}
+
 /** Extra origins a self-hosted deployment opts into, same var index.ts reads. */
 const EXTRA_TRUSTED_ORIGINS = (process.env.OMB_ALLOWED_ORIGINS ?? "")
   .split(",")
@@ -235,12 +306,25 @@ function socialProviders() {
 }
 
 /** Which optional auth features are live, so the UI can render accordingly. */
+/** The cloud this install pairs desktop Google sign-in against. Desktop
+ * installs default to Muster Cloud so the flow works out of the box; a
+ * self-host must opt in explicitly (it has no business silently trusting
+ * an external identity source). */
+export function pairCloudUrl(): string | null {
+  const explicit = process.env.OMB_PAIR_CLOUD_URL?.trim() || null;
+  if (explicit) return explicit;
+  return SELF_HOSTED ? null : "https://muster.orazen.online";
+}
+
 export function authCapabilities(): {
   emailVerification: boolean;
   passwordReset: boolean;
   socialProviders: string[];
   googleOnlySignup: boolean;
+  cloudPairing: boolean;
+  pairingCloudUrl: string | null;
 } {
+  const pairingCloudUrl = pairCloudUrl();
   return {
     emailVerification: isEmailConfigured() && SELF_HOSTED,
     passwordReset: isEmailConfigured(),
@@ -249,6 +333,10 @@ export function authCapabilities(): {
     // password exactly as before — see the /api/auth/sign-up/email gate
     // in server/index.ts for the enforcement, this is only the UI signal.
     googleOnlySignup: process.env.OMB_GOOGLE_ONLY_SIGNUP === "true",
+    // Desktop Google sign-in: when the local server knows which cloud to
+    // pair against, the login page offers the code flow.
+    cloudPairing: Boolean(pairingCloudUrl),
+    pairingCloudUrl,
   };
 }
 
@@ -466,6 +554,13 @@ export function isPublicApiPath(path: string): boolean {
     path === "/api/auth-capabilities" ||
     // Stripe posts here with a signed payload, not a session cookie. The
     // handler verifies the signature itself.
-    path === "/api/billing/webhook"
+    path === "/api/billing/webhook" ||
+    // Pairing redemption is server-to-server: the desktop's local server
+    // presents a short-lived single-use code instead of a session. The
+    // code's entropy + TTL + per-IP attempt limits are the gate here —
+    // see server/pairing.ts. Creating codes still requires a session.
+    path === "/api/pair/verify" ||
+    // the desktop's local redeem endpoint — same code-as-credential story
+    path === "/api/pair/redeem"
   );
 }
