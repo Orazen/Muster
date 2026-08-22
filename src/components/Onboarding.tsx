@@ -481,21 +481,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             </button>
           ))}
         </div>
-        <div className="mt-4 grid grid-cols-4 justify-items-center gap-2">
-          {AGENT_CHARACTERS.map((character) => (
-            <button
-              key={character}
-              onClick={() => setBotCharacter(character)}
-              aria-pressed={botCharacter === character}
-              className={`flex w-full flex-col items-center gap-1 rounded-xl border px-2 py-2.5 transition-colors ${
-                botCharacter === character ? "border-accent bg-raised" : "border-hairline/40 hover:bg-raised"
-              }`}
-            >
-              <AgentAvatar color={botColor} character={character} size={44} state="happy" />
-              <span className="text-[10.5px] capitalize text-ink-secondary">{character}</span>
-            </button>
-          ))}
-        </div>
+
         <div className="mt-3 flex flex-wrap justify-center gap-2">
           {AGENT_COLOR_NAMES.map((c) => (
             <button
