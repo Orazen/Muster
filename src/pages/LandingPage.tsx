@@ -394,6 +394,78 @@ export function LandingPage() {
           </div>
         </section>
 
+        {/* ── Two-tier capability reveal (agent-reach pattern) ── */}
+        <section className="px-6 py-20 max-sm:py-12">
+          <div className="mx-auto max-w-5xl">
+            <Reveal>
+              <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Capability</div>
+              <h2 className="text-[clamp(24px,3.5vw,34px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">
+                Works out of the box. Unlocks on demand.
+              </h2>
+            </Reveal>
+            <div className="mt-8 grid gap-5 sm:grid-cols-2">
+              <Reveal>
+                <div className="h-full rounded-2xl border border-accent/30 bg-[rgba(240,70,14,.05)] p-6">
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="inline-flex items-center rounded-full bg-[rgba(240,70,14,.12)] px-2.5 py-0.5 text-[11px] font-semibold text-[#ff7a45]">Right now</span>
+                    <span className="text-[12px] text-[#a1a1a6]">zero config</span>
+                  </div>
+                  <div className="space-y-2.5 text-[13.5px] leading-relaxed text-[#cfcfd2]">
+                    <div>✦ Sign in with Google — one tap</div>
+                    <div>✦ Chat with any of the 10+ CLI engines already on your machine</div>
+                    <div>✦ Name a teammate and pick its shape — 13 bodies available</div>
+                    <div>✦ Desktop app for macOS &amp; Windows with auto-update</div>
+                  </div>
+                </div>
+              </Reveal>
+              <Reveal>
+                <div className="h-full rounded-2xl border border-white/[0.08] bg-white/[0.02] p-6">
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="inline-flex items-center rounded-full border border-white/[0.12] px-2.5 py-0.5 text-[11px] font-semibold text-[#a1a1a6]">Paste a key</span>
+                    <span className="text-[12px] text-[#a1a1a6]">one field, one save</span>
+                  </div>
+                  <div className="space-y-2.5 text-[13.5px] leading-relaxed text-[#a1a1a6]">
+                    <div>→ OpenAI · Anthropic · Google · DeepSeek · Groq + 5 more</div>
+                    <div>→ Cloud Linux desktop per bot (OpenSandbox or Box)</div>
+                    <div>→ 500+ connected apps via Composio OAuth</div>
+                    <div>→ Voice mode with ElevenLabs</div>
+                  </div>
+                </div>
+              </Reveal>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Design philosophy (agent-reach trust builder) ── */}
+        <section className="border-t border-white/[0.06] px-6 py-20 max-sm:py-12">
+          <div className="mx-auto max-w-3xl text-center">
+            <Reveal>
+              <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Design Philosophy</div>
+              <h2 className="text-[clamp(24px,3.5vw,34px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">
+                Why Muster is built this way
+              </h2>
+            </Reveal>
+            <div className="mt-8 space-y-6 text-left">
+              {[
+                { n: "01", t: "Your machine is the boundary", d: "Every agent process, transcript, and credential lives in ~/.muster on your disk. No cloud copy exists unless you explicitly create one. The harness only talks to the engines you point it at." },
+                { n: "02", t: "Secrets are write-only", d: "Keys go in once and never come back out through the API. The UI shows configured-or-not flags, never values. Another account on the same deployment cannot read or use your keys." },
+                { n: "03", t: "Bots ask before they act", d: "Shell commands, file edits, and questions surface as inline cards in the chat thread. You Allow or Deny per action. An audit log you own records every decision." },
+                { n: "04", t: "Bring your own model, always", d: "Muster ships no model of its own. Your bots run on CLIs already installed and logged in on your machine, using your existing subscriptions — no proxy, no markup, no seat count." },
+              ].map((item) => (
+                <Reveal key={item.n}>
+                  <div className="flex gap-4">
+                    <span className="shrink-0 text-[22px] font-bold text-white/[0.08]">{item.n}</span>
+                    <div>
+                      <div className="text-[15px] font-semibold text-[#f5f5f5]">{item.t}</div>
+                      <div className="mt-1 text-[13.5px] leading-relaxed text-[#a1a1a6]">{item.d}</div>
+                    </div>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* ── Engines ── */}
         <section id="engines" className="px-6 py-20 max-sm:py-12">
           <div className="mx-auto max-w-6xl">
