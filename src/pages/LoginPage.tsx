@@ -5,7 +5,7 @@ import { SocialSignIn } from "@/components/SocialSignIn";
 import { Star } from "lucide-react";
 
 export function LoginPage() {
-  const { signIn, capabilities } = useAuth();
+  const { signIn, capabilities, user, loading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const justReset = params.get("reset") === "done";
@@ -42,6 +42,32 @@ export function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-hairline bg-panel p-6">
+          {!authLoading && user && (
+            <div className="flex flex-col gap-2.5 rounded-lg bg-accent/10 px-4 py-3 text-sm text-ink">
+              <span>
+                Already signed in as <span className="font-semibold">{user.email}</span>.
+              </span>
+              <span className="flex gap-3 text-xs">
+                <button
+                  type="button"
+                  onClick={() => navigate("/app")}
+                  className="font-semibold text-accent hover:text-accent/80"
+                >
+                  Continue as {user.name?.split(" ")[0] || "this user"}
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await signOut();
+                    setEmail("");
+                  }}
+                  className="text-ink-secondary hover:text-ink"
+                >
+                  Use another account
+                </button>
+              </span>
+            </div>
+          )}
           {justReset && (
             <div className="rounded-lg bg-accent/10 px-4 py-3 text-sm text-ink">
               Password updated. Sign in with your new one.

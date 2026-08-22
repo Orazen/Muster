@@ -190,6 +190,21 @@ function getDb(): DatabaseSync {
   return _db;
 }
 
+/** The deployment's first account — the primary user. The boot migration
+ * stamps pre-ownership bots/groups with this id, so everything that existed
+ * before per-user ownership lands on the operator's account rather than
+ * staying visible to every signed-in account. */
+export function primaryUserId(): string | null {
+  try {
+    const row = getDb().prepare("SELECT id FROM \"user\" ORDER BY \"createdAt\" ASC LIMIT 1").get() as
+      | { id: string }
+      | undefined;
+    return row?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Extra origins a self-hosted deployment opts into, same var index.ts reads. */
 const EXTRA_TRUSTED_ORIGINS = (process.env.OMB_ALLOWED_ORIGINS ?? "")
   .split(",")

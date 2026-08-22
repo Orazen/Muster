@@ -4,6 +4,18 @@ accounts see the identical bot (same ID) — see `muster/tenant-isolation-incide
 Root cause: `cfg`, `store`, `registry`, `bus`, and every other piece of server state in
 `server/index.ts` are module-level singletons — one per process, zero per-user scoping._
 
+> **Update 2026-08-22 — interim guard shipped.** Full isolation below is still the plan,
+> but production is no longer wide-open between accounts: bots and groups now carry
+> `ownerId` (stamped at every HTTP creation path), a single choke point in
+> `server/index.ts` returns 404 for another user's bot/group/thread before any handler
+> runs, SSE live + replayed frames are filtered per stream owner, and a boot migration
+> assigns all pre-ownership records to the deployment's first account.
+> Verified end-to-end with two real sessions: B's list is empty and probing A's bot id
+> by ID returns 404 (`server/ownership.test.ts` pins the store-level semantics).
+> **Known remaining sharing:** engines/computers/credentials are deployment-wide — every
+> signed-in user can run turns on the shared fleet until Option B lands. Sign-up is open
+> (allowlist removed) on that basis.
+
 ## 1. Why this exists, and why it isn't a bug in the usual sense
 
 Muster's server was built for **one person, one deployment** — a personal desktop app, or a

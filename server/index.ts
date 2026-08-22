@@ -65,6 +65,7 @@ import {
   authCapabilities,
   SELF_HOSTED,
   PUBLIC_BASE_URL,
+  primaryUserId,
 } from "./auth.ts";
 import {
   IS_CLOUD,
@@ -284,6 +285,32 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
 }
 store.seedIfEmpty();
 
+// Boot migration for the multi-tenant guard: records that predate per-user
+// ownership belong to the deployment's first account (the operator). Without
+// this, ownerless records would fall through the ownership checks as
+// "unowned" and stay visible to every signed-in user. Idempotent — only
+// touches records that still have no ownerId.
+if (SELF_HOSTED) {
+  const primary = primaryUserId();
+  if (primary) {
+    let claimed = 0;
+    for (const bot of store.bots) {
+      if (bot.ownerId === undefined || bot.ownerId === null) {
+        bot.ownerId = primary;
+        claimed++;
+      }
+    }
+    for (const group of store.groups) {
+      if (group.ownerId === undefined || group.ownerId === null) group.ownerId = primary;
+    }
+    if (claimed > 0) {
+      store.saveBots();
+      store.saveGroups();
+      console.log(`ownership migration: ${claimed} existing record(s) assigned to the primary account`);
+    }
+  }
+}
+
 /** A bot as a client may see it: no provider session bookkeeping.
  *
  * `resumeCursors` is the harness's own bookkeeping — the native session id
@@ -294,7 +321,7 @@ store.seedIfEmpty();
 const wireTask = ({ resumeCursors, lastInstanceId, ...task }: TaskRecord) => task;
 
 const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
-  const { resumeCursors, tasks, ...rest } = bot;
+  const { resumeCursors, tasks, ownerId, ...rest } = bot;
   return { ...rest, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
 };
 
@@ -399,6 +426,10 @@ interface SseClient {
    * while a bot works. A client that isn't showing the computer panel —
    * a phone on cellular, most of all — should not pay for them. */
   screens: boolean;
+  /** the signed-in user this stream belongs to (SELF_HOSTED). Frames about
+   * records owned by someone else never reach this client — live or
+   * replayed. */
+  userId?: string;
 }
 const sseClients = new Set<SseClient>();
 
@@ -415,7 +446,7 @@ const sseClients = new Set<SseClient>();
 const STREAM_ID = randomUUID().slice(0, 8);
 const REPLAY_MAX = 500;
 let lastSeq = 0;
-const replayBuffer: Array<{ seq: number; kind: string; frame: string | null }> = [];
+const replayBuffer: Array<{ seq: number; kind: string; frame: string | null; payload?: Record<string, unknown> }> = [];
 
 /** Screen frames are the only kind a client can decline. */
 const wants = (client: SseClient, kind: string) => kind !== "screen" || client.screens;
@@ -438,16 +469,43 @@ function broadcast(payload: Record<string, unknown>) {
   // Live desktop captures can each be hundreds of kilobytes and become stale
   // as soon as the next one arrives. Keep their sequence slots so resume-gap
   // detection stays honest, but never retain their base64 payloads.
-  replayBuffer.push({ seq, kind, frame: kind === "screen" ? null : frame });
+  replayBuffer.push({ seq, kind, frame, payload });
   if (replayBuffer.length > REPLAY_MAX) replayBuffer.shift();
   for (const client of [...sseClients]) {
-    if (!wants(client, kind)) continue;
+    if (!wants(client, kind) || !visibleToClient(client, payload)) continue;
     try {
       client.res.write(frame);
     } catch {
       sseClients.delete(client);
     }
   }
+}
+
+/** Multi-tenant frame filter (SELF_HOSTED): a stream belonging to one user
+ * never receives frames about another user's bots/threads/groups. Frames
+ * without a resolvable record — engine status, usage, config events — are
+ * deployment-wide and go to everyone. Desktop installs have no userId on
+ * the client, so everything flows as before. */
+function visibleToClient(client: SseClient, payload: Record<string, unknown>): boolean {
+  if (!client.userId) return true;
+  const botId = typeof payload.botId === "string" ? payload.botId : null;
+  if (botId) {
+    const b = store.bot(botId);
+    return !b || b.ownerId === undefined || b.ownerId === null || b.ownerId === client.userId;
+  }
+  const groupId = typeof payload.groupId === "string" ? payload.groupId : null;
+  if (groupId) {
+    const g = store.groups.find((x) => x.id === groupId);
+    return !g || g.ownerId === undefined || g.ownerId === null || g.ownerId === client.userId;
+  }
+  const threadId = typeof payload.threadId === "string" ? payload.threadId : null;
+  if (threadId) {
+    const b = store.botByThread(threadId);
+    if (b) return b.ownerId === undefined || b.ownerId === null || b.ownerId === client.userId;
+    const g = store.groupByThread(threadId);
+    if (g) return g.ownerId === undefined || g.ownerId === null || g.ownerId === client.userId;
+  }
+  return true;
 }
 
 // ── server-side event folding (upstream's ingestion worker, miniature) ──
@@ -2228,6 +2286,9 @@ const server = createServer(async (req, res) => {
   const method = req.method ?? "GET";
   /** scratch for route matches, shared by every `path.match` below */
   let m: RegExpMatchArray | null = null;
+  /** the signed-in user for this request, once the auth gate resolves it;
+   * undefined on desktop installs (no sessions there) and public paths */
+  let requestUserId: string | undefined;
   try {
     // host + origin gate before any route (DNS rebinding / CSRF). Loopback is
     // always allowed; a public host is allowed only when self-hosting is
@@ -2416,6 +2477,37 @@ const server = createServer(async (req, res) => {
       const session = await getSession(req);
       if (!session) {
         return json(res, 401, { error: "unauthorized: sign in required" });
+      }
+      // Kept in scope for the rest of the handler: per-user bot/group
+      // ownership (see ownsBot below). Desktop installs have no sessions —
+      // everything is the one local user's.
+      requestUserId = session.userId;
+    }
+
+    // ── multi-tenant guard (SELF_HOSTED only) ──────────────────────────
+    // One shared store serves every signed-in account, so ownership is
+    // enforced at this single choke point instead of inside each of the
+    // dozens of /api/bots/:id and /api/threads/:id handlers: a record owned
+    // by another user looks like it never existed (404), for reads, writes,
+    // and every sub-route alike.
+    const ownsRecord = (r: { ownerId?: string }) =>
+      !requestUserId || r.ownerId === undefined || r.ownerId === null || r.ownerId === requestUserId;
+    if (requestUserId) {
+      let m2 = path.match(/^\/api\/bots\/([\w-]+)(?:\/|$)/);
+      if (m2) {
+        const b = store.bot(m2[1]);
+        if (b && !ownsRecord(b)) return json(res, 404, { error: "no such bot" });
+      }
+      m2 = path.match(/^\/api\/groups\/([\w-]+)(?:\/|$)/);
+      if (m2) {
+        const g = store.groups.find((x) => x.id === m2![1]);
+        if (g && !ownsRecord(g)) return json(res, 404, { error: "no such group" });
+      }
+      m2 = path.match(/^\/api\/threads\/([\w-]+)(?:\/|$)/);
+      if (m2) {
+        const b = store.botByThread(m2[1]);
+        const g = store.groupByThread?.(m2[1]);
+        if ((b && !ownsRecord(b)) || (g && !ownsRecord(g))) return json(res, 404, { error: "no such conversation" });
       }
     }
 
@@ -2701,7 +2793,7 @@ const server = createServer(async (req, res) => {
 
     // ── events stream ──
     if (method === "GET" && path === "/api/events") {
-      const client: SseClient = { res, screens: url.searchParams.get("screens") !== "off" };
+      const client: SseClient = { res, screens: url.searchParams.get("screens") !== "off", userId: requestUserId };
       res.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
@@ -2731,7 +2823,13 @@ const server = createServer(async (req, res) => {
       );
       if (resumed) {
         for (const buffered of replayBuffer) {
-          if (buffered.seq > since && buffered.frame && wants(client, buffered.kind)) res.write(buffered.frame);
+          if (
+            buffered.seq > since &&
+            buffered.frame &&
+            wants(client, buffered.kind) &&
+            (!buffered.payload || visibleToClient(client, buffered.payload))
+          )
+            res.write(buffered.frame);
         }
       }
 
@@ -2753,8 +2851,8 @@ const server = createServer(async (req, res) => {
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       return json(res, 200, {
-        bots: store.bots.map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
-        groups: store.groups.map((g) => ({ ...g, ...messagePage(g.threadId, limit) })),
+        bots: store.bots.filter(ownsRecord).map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
+        groups: store.groups.filter(ownsRecord).map((g) => ({ ...g, ...messagePage(g.threadId, limit) })),
       });
     }
 
@@ -2886,14 +2984,19 @@ const server = createServer(async (req, res) => {
     if (method === "POST" && path === "/api/groups") {
       const body = await readBody(req);
       const memberIds = (Array.isArray(body.memberIds) ? body.memberIds : []).filter(
-        (id: unknown): id is string => typeof id === "string" && Boolean(store.bot(id)),
+        (id: unknown): id is string => {
+          if (typeof id !== "string" || !id) return false;
+          const bot = store.bot(id);
+          // can only room with bots you own — another user's bot doesn't exist
+          return Boolean(bot) && ownsRecord(bot!);
+        },
       );
       if (memberIds.length === 0) return json(res, 400, { error: "a room needs at least one bot" });
       const name =
         typeof body.name === "string" && body.name.trim()
           ? body.name.trim()
           : `${store.bot(memberIds[0])!.name} & co.`;
-      const group = store.createGroup(name, memberIds);
+      const group = store.createGroup(name, memberIds, false, requestUserId);
       return json(res, 201, { group: { ...group, messages: [] } });
     }
     if (method === "POST" && path === "/api/teams/export") {
@@ -2982,6 +3085,7 @@ const server = createServer(async (req, res) => {
           // the user can switch it on per bot after reading who they got.
           const created = store.createBot(
             {
+              ...(requestUserId ? { ownerId: requestUserId } : {}),
               name: member.name,
               title: member.title,
               description: member.description,
@@ -3094,7 +3198,7 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { message: patched });
     }
     if (method === "POST" && path === "/api/bots") {
-      const bot = store.createBot();
+      const bot = store.createBot(requestUserId ? { ownerId: requestUserId } : {});
       store.patchBot(bot.id, { modelSelection: await defaultSelection() });
       return json(res, 201, {
         bot: {

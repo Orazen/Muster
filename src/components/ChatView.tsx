@@ -479,6 +479,75 @@ function ActivityChip({ message }: { message: Message }) {
   );
 }
 
+/** Status mark for one tool run — shared by the chip and the group header. */
+function ToolStatusMark({ tool }: { tool: NonNullable<Message["tool"]> }) {
+  const failed = tool.ok === false;
+  if (tool.ok === undefined) return <Loader2 size={13} className="animate-spin" />;
+  return failed ? <X size={13} /> : <Check size={13} className="text-success" />;
+}
+
+/** gaia-ui-style collapsed run: consecutive tool calls become one
+ * "Used N tools" section — stacked status marks, expandable to the
+ * individual chips. A long agent turn reads as one calm line instead of a
+ * wall of chips. */
+function ToolRunGroup({ items }: { items: Message[] }) {
+  const [open, setOpen] = useState(false);
+  const running = items.filter((m) => m.tool?.ok === undefined).length;
+  return (
+    <div className="flex justify-start">
+      <div className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-hairline/40 bg-panel">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[13px] text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
+        >
+          <span className="flex -space-x-1.5">
+            {items.slice(-4).map((m) => (
+              <span key={m.id} className="rounded-full border border-hairline/40 bg-panel p-1">
+                {m.tool ? <ToolStatusMark tool={m.tool} /> : null}
+              </span>
+            ))}
+          </span>
+          <span>
+            Used {items.length} tools{running > 0 ? ` · ${running} running` : ""}
+          </span>
+          <ChevronDown size={14} className={cn("ml-auto transition-transform", open && "rotate-180")} />
+        </button>
+        {open && (
+          <div className="flex flex-col gap-1 border-t border-hairline/40 p-2">
+            {items.map((m) => (
+              <ActivityChip key={m.id} message={m} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+type RenderItem = { msg: Message } | { group: Message[] };
+
+/** Collapse consecutive plain tool-run messages into single groups. Bot⇄bot
+ * comm chips, errors, and everything else pass through untouched. */
+function groupToolRuns(messages: Message[]): RenderItem[] {
+  const out: RenderItem[] = [];
+  let buf: Message[] = [];
+  const flush = () => {
+    if (buf.length > 1) out.push({ group: buf });
+    else if (buf.length === 1) out.push({ msg: buf[0] });
+    buf = [];
+  };
+  for (const msg of messages) {
+    if (msg.kind === "activity" && msg.tool && !msg.comm && !msg.tool.name.startsWith("error:")) buf.push(msg);
+    else {
+      flush();
+      out.push({ msg });
+    }
+  }
+  flush();
+  return out;
+}
+
 function ScreenFrame({ png, mime }: { png: string; mime?: string }) {
   return (
     <div className="flex justify-start">
@@ -569,9 +638,23 @@ const MessagesList = memo(function MessagesList({
           </div>
         </div>
       )}
-      {messages.map((m, i) => {
-        const prev = messages[i - 1];
-        const newDay = !prev || new Date(prev.at).toDateString() !== new Date(m.at).toDateString();
+      {(() => {
+        let prevMsg: Message | undefined;
+        return groupToolRuns(messages).map((item) => {
+          if ("group" in item) {
+            const first = item.group[0];
+            const groupNewDay = !prevMsg || new Date(prevMsg.at).toDateString() !== new Date(first.at).toDateString();
+            prevMsg = item.group[item.group.length - 1];
+            return (
+              <div key={first.id} className="contents">
+                {groupNewDay && <DaySeparator at={first.at} />}
+                <ToolRunGroup items={item.group} />
+              </div>
+            );
+          }
+          const m = item.msg;
+          const newDay = !prevMsg || new Date(prevMsg.at).toDateString() !== new Date(m.at).toDateString();
+          prevMsg = m;
         const row = (() => {
           switch (m.kind) {
             case "connector":
@@ -619,6 +702,7 @@ const MessagesList = memo(function MessagesList({
             {row}
           </div>
         );
+        })
       })}
     </>
   );

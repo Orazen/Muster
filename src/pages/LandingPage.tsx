@@ -308,7 +308,7 @@ export function LandingPage() {
           <div className="mx-auto max-w-4xl">
             <motion.div {...heroItem(0)}>
               <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[rgba(240,70,14,.28)] bg-[rgba(240,70,14,.07)] px-3.5 py-1.5 text-[13px] font-medium text-[#ff7a45]">
-                Open source · local-first · bring your own AI
+                Google sign-in · local-first · bring your own AI
               </div>
             </motion.div>
             <motion.h1 {...heroItem(0.08)} className="text-[clamp(42px,7vw,76px)] font-bold leading-[1.02] tracking-[-0.035em] text-[#f5f5f5]">
@@ -318,7 +318,7 @@ export function LandingPage() {
               </span>
             </motion.h1>
             <motion.p {...heroItem(0.16)} className="mx-auto mt-6 max-w-xl text-[19px] leading-relaxed text-[#a1a1a6]">
-              A local-first roster of AI agents you actually own. Bring your own Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, or OpenCode Go — give each one a body, and run your team from a chat app, not a subscription.
+              Sign in with Google, name your first agent, give it a personality — it's working in under a minute. Bring your own Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, or OpenCode Go, and run the whole team from one chat app.
             </motion.p>
             <motion.div {...heroItem(0.24)} className="mt-10 flex flex-wrap items-center justify-center gap-3.5">
               <Link to={user ? "/app" : "/sign-up"} className="inline-flex items-center gap-2 rounded-xl bg-[#f0460e] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(240,70,14,.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(240,70,14,.42)]">

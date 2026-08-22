@@ -170,6 +170,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [customTask, setCustomTask] = useState("");
   const [creating, setCreating] = useState(false);
 
+  // Browser mic permission (web only — desktop uses the OS TCC flow below).
+  const [webMic, setWebMic] = useState<"prompt" | "granted" | "denied" | "unsupported">("prompt");
+  const isDesktop = Boolean(window.ogb);
+
   // Existing users skip silently: decide only once the store has connected,
   // so a slow SSE doesn't flash the wizard over a populated roster. A fresh
   // install is never empty — seedIfEmpty() plants one greeting-only bot — so
@@ -223,6 +227,31 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       return () => clearInterval(t);
     }
   }, [step, capabilities.dictation.available]);
+
+  useEffect(() => {
+    if (step !== 4 || isDesktop) return;
+    navigator.permissions
+      ?.query(
+        // SAFETY: "microphone" is valid at runtime in every browser that
+        // ships navigator.permissions; TS's DOM lib predates it.
+        { name: "microphone" as PermissionName },
+      )
+      .then((status) => {
+        setWebMic(status.state);
+        status.onchange = () => setWebMic(status.state);
+      })
+      .catch(() => setWebMic("unsupported"));
+  }, [step, isDesktop]);
+
+  const enableWebMic = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((t) => t.stop());
+      setWebMic("granted");
+    } catch {
+      setWebMic("denied");
+    }
+  };
 
   const saveProfile = () => {
     if (valid) {
@@ -517,24 +546,41 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               <div>
                 <div className="text-[14px] font-medium text-ink">Microphone & speech</div>
                 <div className="mt-0.5 text-[12.5px] text-ink-secondary">
-                  Voice dictation into the composer, transcribed on-device.
+                  {isDesktop
+                    ? "Voice dictation into the composer, transcribed on-device."
+                    : "Voice input in the composer — your browser will ask for access."}
                 </div>
               </div>
             </div>
-            {perms?.mic === "granted" ? (
+            {isDesktop ? (
+              perms?.mic === "granted" ? (
+                <Check size={16} className="shrink-0 text-[#38d591]" />
+              ) : perms?.mic === "denied" || perms?.mic === "restricted" ? (
+                <button
+                  onClick={() => window.ogb?.permOpenSettings?.("mic")}
+                  className="shrink-0 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
+                >
+                  Open Settings
+                </button>
+              ) : (
+                <button
+                  onClick={() =>
+                    window.ogb?.permRequestMic?.().then(() => window.ogb?.permStatus?.().then(setPerms))
+                  }
+                  className="shrink-0 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
+                >
+                  Enable
+                </button>
+              )
+            ) : webMic === "granted" ? (
               <Check size={16} className="shrink-0 text-[#38d591]" />
-            ) : perms?.mic === "denied" || perms?.mic === "restricted" ? (
-              <button
-                onClick={() => window.ogb?.permOpenSettings?.("mic")}
-                className="shrink-0 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
-              >
-                Open Settings
-              </button>
+            ) : webMic === "denied" ? (
+              <span className="shrink-0 text-[12px] text-ink-secondary">Blocked in site settings</span>
+            ) : webMic === "unsupported" ? (
+              <span className="shrink-0 text-[12px] text-ink-secondary">Not available here</span>
             ) : (
               <button
-                onClick={() =>
-                  window.ogb?.permRequestMic?.().then(() => window.ogb?.permStatus?.().then(setPerms))
-                }
+                onClick={enableWebMic}
                 className="shrink-0 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
               >
                 Enable

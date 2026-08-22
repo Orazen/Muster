@@ -20,7 +20,7 @@ export interface CommsBus {
 export function getOrCreateChannel(store: Store, from: BotRecord, target: BotRecord): GroupRecord {
   return (
     store.dmGroup(from.id, target.id) ??
-    store.createGroup(`${from.name} ⇄ ${target.name}`, [from.id, target.id], true)
+    store.createGroup(`${from.name} ⇄ ${target.name}`, [from.id, target.id], true, from.ownerId)
   );
 }
 

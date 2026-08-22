@@ -139,9 +139,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   /** Hand off to an OAuth provider. On success the browser is redirected, so
-   *  this only ever returns to report a failure. */
+   *  this only ever returns to report a failure.
+   *
+   *  Any existing session is cleared first. Without this, picking a
+   *  different Google account while already signed in bounces straight back
+   *  to the original account — the stale session cookie wins over the
+   *  account chosen in the OAuth flow. Signing out here makes the choice
+   *  real; on the sign-in page that is exactly what the user asked for. */
   async function signInWithProvider(provider: string): Promise<{ error?: string }> {
     try {
+      try {
+        await authClient.signOut();
+        setUser(null);
+        setSession(null);
+      } catch {
+        // best effort — proceed with the OAuth handoff regardless
+      }
       const res = await authClient.signIn.social({
         provider: provider as Parameters<typeof authClient.signIn.social>[0]["provider"],
         callbackURL: `${window.location.origin}/app`,

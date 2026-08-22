@@ -119,6 +119,10 @@ export interface GroupRecord {
   bulletin: string;
   unread: boolean;
   createdAt: number;
+  /** owning user (multi-tenant guard, SELF_HOSTED only). Absent on records
+   * from before it existed — the boot migration stamps those with the
+   * deployment's primary user. */
+  ownerId?: string;
   /** true for auto-created bot⇄bot channels (ask_bot exchanges live here;
    * the user can open the channel and chip in) */
   dm?: boolean;
@@ -234,6 +238,10 @@ export interface BotRecord {
   id: string;
   /** the ACTIVE task's thread — everything that runs a turn reads this */
   threadId: ThreadId;
+  /** owning user (multi-tenant guard, SELF_HOSTED only). Absent on records
+   * from before it existed — the boot migration stamps those with the
+   * deployment's primary user. */
+  ownerId?: string;
   /** every task this bot has, newest first */
   tasks?: TaskRecord[];
   name: string;
@@ -495,11 +503,13 @@ export class Store {
     }
   }
 
-  private saveBots() {
+  /** Persist bots after an out-of-band mutation (the ownership boot
+   * migration mutates records in place). */
+  saveBots() {
     writeFileAtomic(BOTS_FILE, JSON.stringify(this.bots, null, 2));
   }
 
-  private saveGroups() {
+  saveGroups() {
     writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId, ...g }) => g), null, 2));
   }
 
@@ -529,7 +539,7 @@ export class Store {
     return this.groups.find((g) => g.threadId === threadId);
   }
 
-  createGroup(name: string, memberIds: string[], dm = false): GroupRecord {
+  createGroup(name: string, memberIds: string[], dm = false, ownerId?: string): GroupRecord {
     const group: GroupRecord = {
       id: newId(),
       threadId: newId(),
@@ -539,6 +549,7 @@ export class Store {
       bulletin: "",
       unread: false,
       createdAt: Date.now(),
+      ...(ownerId ? { ownerId } : {}),
       dm: dm || undefined,
       busyBotId: null,
     };
@@ -735,7 +746,7 @@ export class Store {
 
   createBot(
     profile: Partial<
-      Pick<BotRecord, "name" | "title" | "description" | "color" | "character" | "mascotExpression" | "modelSelection">
+      Pick<BotRecord, "name" | "title" | "description" | "color" | "character" | "mascotExpression" | "modelSelection" | "ownerId">
     > = {},
     opts: {
       /** false = no greeting/onboarding seed. Imported bots must not open
@@ -747,6 +758,7 @@ export class Store {
     const bot: BotRecord = {
       id: newId(),
       threadId: newId(),
+      ...(profile.ownerId ? { ownerId: profile.ownerId } : {}),
       name,
       title: profile.title ?? "",
       description: profile.description ?? "",
