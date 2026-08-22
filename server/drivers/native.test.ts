@@ -50,7 +50,10 @@ describe("appendNative", () => {
 
   it("never throws, whatever it is handed", () => {
     expect(() => appendNative("t-bad", { dir: "in", source: "acp", msg: undefined })).not.toThrow();
-    const cyclic: Record<string, unknown> = {};
+    interface CyclicPayload {
+      self?: CyclicPayload;
+    }
+    const cyclic: CyclicPayload = {};
     cyclic.self = cyclic;
     expect(() => appendNative("t-cyclic", { dir: "in", source: "acp", msg: cyclic })).not.toThrow();
   });

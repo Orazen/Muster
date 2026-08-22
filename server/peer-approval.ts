@@ -20,13 +20,16 @@ import type { BotRecord, Message, Store } from "./store.ts";
 
 export { peerAllowKey } from "./peer-approval-key.ts";
 
+/** SSE envelopes on this server are keyed: every frame leads with `kind`. */
+export type KeyedFrame = { kind: string };
+
 /** What a peer-approval helper needs from the outside world: the store
  * for thread append + persist, and the SSE broadcaster so the chat
  * updates without waiting for a refresh. */
 export interface ApprovalBus {
   store: Store;
   /** SSE broadcast (kind: "message" envelope). */
-  broadcast: (payload: Record<string, unknown>) => void;
+  broadcast: (payload: KeyedFrame) => void;
 }
 
 interface Pending {
@@ -160,7 +163,9 @@ export function resolvePeerComms(
 /** Drop every approval waiting on a bot that no longer exists (or is being
  * deleted), denying it so the caller's turn doesn't wait out the timeout. */
 export function cancelPeerApprovalsFor(botId: string): void {
-  for (const [requestId, pending] of [...pendingComms]) {
+  // Deleting the current entry mid-iteration is safe for Maps: visited-once
+  // semantics mean each pending record settles exactly once.
+  for (const [requestId, pending] of pendingComms) {
     if (pending.fromBotId !== botId && pending.toBotId !== botId) continue;
     pendingComms.delete(requestId);
     clearTimeout(pending.timer);

@@ -62,7 +62,7 @@ describe("createOpenAICompatibleDriver (generic factory)", () => {
   });
 
   it("streams a turn and posts to the configured URL with a Bearer header", async () => {
-    (global.fetch as any).mockResolvedValue(streamResponse([sseChunk("hi "), sseChunk("there")]));
+    vi.mocked(global.fetch).mockResolvedValue(streamResponse([sseChunk("hi "), sseChunk("there")]));
     const instance = await testDriver.create({
       instanceId: "x",
       displayName: undefined,
@@ -73,7 +73,7 @@ describe("createOpenAICompatibleDriver (generic factory)", () => {
     let completed: any = null;
     let text = "";
     instance.adapter.onEvent((e) => {
-      if (e.type === "content.delta") text += (e as any).delta;
+      if (e.type === "content.delta" && "delta" in e) text += String(e.delta);
       if (e.type === "turn.completed") completed = e;
     });
     await instance.adapter.sendTurn({ threadId: "t1", text: "hi" });
@@ -81,9 +81,9 @@ describe("createOpenAICompatibleDriver (generic factory)", () => {
 
     expect(text).toBe("hi there");
     expect(completed?.ok).toBe(true);
-    const call = (fetch as any).mock.calls[0];
+    const call = vi.mocked(fetch).mock.calls[0];
     expect(call[0]).toBe("https://api.test-provider.example/v1/chat/completions");
-    expect(call[1].headers.authorization).toBe("Bearer key-123");
+    expect(new Headers(call[1]?.headers).get("authorization")).toBe("Bearer key-123");
   });
 });
 
@@ -112,7 +112,7 @@ describe.each([
   });
 
   it(`reads its key from ${envVar}`, async () => {
-    (global.fetch as any).mockResolvedValue(
+    vi.mocked(global.fetch).mockResolvedValue(
       new Response(
         new ReadableStream({
           start(c) {
@@ -137,7 +137,7 @@ describe.each([
     });
     await instance.adapter.sendTurn({ threadId: "t", text: "hi" });
     for (let i = 0; i < 50 && !completed; i++) await new Promise((r) => setTimeout(r, 5));
-    const call = (fetch as any).mock.calls[0];
-    expect(call[1].headers.authorization).toBe("Bearer the-key");
+    const call = vi.mocked(fetch).mock.calls[0];
+    expect(new Headers(call[1]?.headers).get("authorization")).toBe("Bearer the-key");
   });
 });

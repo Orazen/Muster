@@ -877,7 +877,9 @@ export function ChatView({ bot }: { bot: Bot }) {
   // on Windows the frameless window's min/max/close overlay sits at the
   // top-right: the header becomes the drag strip and clears room for it
   const isWin = window.ogb?.platform === "win32";
+  // SAFETY: -webkit-app-region is an Electron-only property absent from React's CSSProperties.
   const drag = isWin ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined;
+  // SAFETY: same Electron-only property as the drag style above.
   const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined;
 
   return (

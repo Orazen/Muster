@@ -15,20 +15,28 @@ import {
   queueDelegation,
   _pendingCount,
 } from "./delegations.ts";
-import { peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
-import { Store, type BotRecord } from "./store.ts";
+import { peerAllowKey, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
+import { Store, type BotRecord, type Message } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
 
+/** Frames the test buses emit: the keyed SSE envelope plus the mirrored
+ * message fields the assertions read back. */
+interface TestBroadcastFrame {
+  kind: string;
+  threadId?: string;
+  message?: Message;
+}
+
 interface BusPair {
   commsBus: CommsBus;
-  approvalBus: { store: Store; broadcast: (payload: unknown) => void };
-  broadcasts: unknown[];
+  approvalBus: ApprovalBus;
+  broadcasts: TestBroadcastFrame[];
 }
 
 function setupBuses(store: Store): BusPair {
-  const broadcasts: unknown[] = [];
-  const broadcast = (payload: unknown) => {
+  const broadcasts: TestBroadcastFrame[] = [];
+  const broadcast = (payload: TestBroadcastFrame) => {
     broadcasts.push(payload);
   };
   // the store emits what it writes; the server turns those into frames.
@@ -38,8 +46,15 @@ function setupBuses(store: Store): BusPair {
       broadcasts.push({ kind: change.type, threadId: change.threadId, message: change.message });
     }
   });
-  const commsBus: CommsBus = { store, broadcast };
-  const approvalBus = { store, broadcast };
+  const commsBus: CommsBus = {
+    store,
+    broadcast(payload) {
+      // SAFETY: this server's SSE envelopes always lead with `kind` — that
+      // is the CommsBus envelope contract — so any payload is a broadcast frame.
+      broadcasts.push(payload as TestBroadcastFrame);
+    },
+  };
+  const approvalBus: ApprovalBus = { store, broadcast };
   return { commsBus, approvalBus, broadcasts };
 }
 
@@ -50,7 +65,12 @@ async function waitFor<T>(predicate: () => T | undefined | false, timeout = 2_00
   const deadline = Date.now() + timeout;
   for (;;) {
     const v = predicate();
-    if (v) return v as T;
+    if (v) {
+      // SAFETY: truthiness is this helper's contract for "done" — callers
+      // return T | undefined | false exactly so the poll loop can tell them
+      // apart, so a truthy value is the T itself.
+      return v as T;
+    }
     if (Date.now() > deadline) throw new Error("waitFor: timed out");
     await new Promise((r) => setTimeout(r, 25));
   }
@@ -61,7 +81,7 @@ describe("queueDelegation", () => {
   let from: BotRecord;
   let target: BotRecord;
   let commsBus: CommsBus;
-  let broadcasts: unknown[];
+  let broadcasts: TestBroadcastFrame[];
 
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
@@ -122,11 +142,7 @@ describe("queueDelegation", () => {
     // The chip is also broadcast over SSE so chat clients see it without
     // polling /api/bots
     const broadcast = broadcasts.find(
-      (b) =>
-        typeof b === "object" &&
-        b !== null &&
-        (b as { kind?: string }).kind === "message" &&
-        (b as { threadId?: string }).threadId === from.threadId,
+      (b) => b.kind === "message" && b.threadId === from.threadId,
     );
     expect(broadcast).toBeTruthy();
   });
@@ -158,7 +174,7 @@ describe("drainDelegations", () => {
   let from: BotRecord;
   let target: BotRecord;
   let commsBus: CommsBus;
-  let approvalBus: { store: Store; broadcast: (payload: unknown) => void };
+  let approvalBus: ApprovalBus;
   let runTargetCalls: Array<{ toBotId: string; message: string; commsDepth: number; sourceThreadId?: string }>;
 
   beforeEach(() => {
@@ -427,6 +443,8 @@ describe("delegations survive a restart", () => {
   it("writes the queue to disk on queue, and clears it on drain and discard", async () => {
     expect(queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1)).toBe("ok");
     expect(existsSync(file())).toBe(true);
+    // SAFETY: delegations.json is queueDelegation's own on-disk map of
+    // threadId → queued delegation list; the expects below pin its entries.
     const onDisk = JSON.parse(readFileSync(file(), "utf8")) as Record<string, unknown[]>;
     expect(onDisk[from.threadId]).toHaveLength(1);
     expect(onDisk[from.threadId][0]).toMatchObject({ toBotId: target.id, message: "do this" });
@@ -507,6 +525,8 @@ describe("delegations survive a restart", () => {
     _resetPending();
     _loadPending(); // no file
     expect(pendingThreads()).toEqual([]);
+    // SAFETY: require resolves to the same node:fs namespace the static
+    // import types describe; only mkdirSync/writeFileSync are taken from it.
     const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(DATA_DIR, { recursive: true });
     writeFileSync(file(), "{not json");

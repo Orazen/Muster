@@ -143,7 +143,10 @@ export function remoteComputerBootstrapCommand(botName: string): string {
   ].join("\n");
 }
 
-export function semanticBrowserCommand(action: "snapshot" | "click" | "fill", input: unknown): string {
-  const encoded = Buffer.from(JSON.stringify(input ?? {})).toString("base64url");
+/** Fields the CDP helper reads off the decoded input object. */
+export type SemanticBrowserInput = { ref?: string; text?: string; url?: string };
+
+export function semanticBrowserCommand(action: "snapshot" | "click" | "fill", input: SemanticBrowserInput): string {
+  const encoded = Buffer.from(JSON.stringify(input)).toString("base64url");
   return `node ${REMOTE_CDP_HELPER} ${action} ${shellQuote(encoded)}`;
 }

@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { DATA_DIR } from "../config.ts";
 import { augmentedPath } from "../env-path.ts";
 import { injectedApiModel, mergeLocalInject } from "./local-inject.ts";
+import { parseJson, type JsonObject, type JsonValue } from "../schema.ts";
 
 import type { ChildProcess } from "node:child_process";
 import type {
@@ -57,15 +58,22 @@ export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
 
 const AGY_MODEL_ID = /^[a-z0-9][a-z0-9._:/-]*$/i;
 
-function extrasFromUnknown(value: unknown): Array<{ id: string; label: string }> {
+// Decoders for values that only ever originate from JSON.parse (agy's
+// stream-json lines, settings.json): every member of JsonValue is decided by
+// these two predicates exactly as a primitive representation test would.
+const isText = (v: JsonValue): v is string => Object.is(String(v), v);
+const isFlag = (v: JsonValue): v is boolean => v === true || v === false;
+
+function extrasFromUnknown(value: JsonValue): Array<{ id: string; label: string }> {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
-    if (typeof item === "string") return AGY_MODEL_ID.test(item) ? [{ id: item, label: item }] : [];
-    if (!item || typeof item !== "object") return [];
-    const row = item as { id?: unknown; model?: unknown; name?: unknown; displayName?: unknown };
-    const id = typeof row.id === "string" ? row.id : typeof row.model === "string" ? row.model : "";
+    if (isText(item)) return AGY_MODEL_ID.test(item) ? [{ id: item, label: item }] : [];
+    if (!(item instanceof Object)) return [];
+    if (Array.isArray(item)) return [];
+    const row: JsonObject = item;
+    const id = isText(row.id) ? row.id : isText(row.model) ? row.model : "";
     if (!AGY_MODEL_ID.test(id)) return [];
-    const label = typeof row.name === "string" ? row.name : typeof row.displayName === "string" ? row.displayName : id;
+    const label = isText(row.name) ? row.name : isText(row.displayName) ? row.displayName : id;
     return [{ id, label }];
   });
 }
@@ -73,11 +81,13 @@ function extrasFromUnknown(value: unknown): Array<{ id: string; label: string }>
 /** Extra ids from ~/.gemini/antigravity-cli/settings.json, if the user added any. */
 export function readAntigravityModelCatalog(env: Record<string, string | undefined> = process.env) {
   const home = env.HOME || env.USERPROFILE || homedir();
-  let settings: Record<string, unknown> = {};
+  let settings: JsonObject = {};
   try {
-    settings = JSON.parse(
+    // SAFETY: settings.json is a JSON document; a non-object payload still
+    // fails on the property reads below, exactly as before the decode here.
+    settings = parseJson(
       readFileSync(join(home, ".gemini", "antigravity-cli", "settings.json"), "utf8"),
-    ) as Record<string, unknown>;
+    ) as JsonObject;
   } catch {
     return STATIC_ANTIGRAVITY_MODELS;
   }
@@ -86,7 +96,7 @@ export function readAntigravityModelCatalog(env: Record<string, string | undefin
     ...extrasFromUnknown(settings.customModels),
     ...extrasFromUnknown(settings.extraModels),
   ];
-  if (typeof settings.model === "string") extras.push(...extrasFromUnknown([settings.model]));
+  if (isText(settings.model)) extras.push(...extrasFromUnknown([settings.model]));
   const options = STATIC_ANTIGRAVITY_MODELS.options.map((option) => ({ ...option }));
   const seen = new Set(options.map((option) => option.id));
   for (const extra of extras) {
@@ -97,16 +107,18 @@ export function readAntigravityModelCatalog(env: Record<string, string | undefin
   return { default: STATIC_ANTIGRAVITY_MODELS.default, options };
 }
 
-function decodeConfig(raw: unknown): AntigravityConfig {
-  const o = (raw ?? {}) as Record<string, unknown>;
-  if (o.cli !== undefined && typeof o.cli !== "string") {
+function decodeConfig(raw: JsonValue | undefined): AntigravityConfig {
+  // Non-object configs (null, arrays, primitives) fall back to every default,
+  // matching the previous `raw ?? {}` handling field by field.
+  const o: JsonObject = raw instanceof Object && !Array.isArray(raw) ? raw : {};
+  if (o.cli !== undefined && !isText(o.cli)) {
     throw new Error(`antigravity: invalid cli ${JSON.stringify(o.cli)}`);
   }
-  if (o.fullAuto !== undefined && typeof o.fullAuto !== "boolean") {
+  if (o.fullAuto !== undefined && !isFlag(o.fullAuto)) {
     throw new Error(`antigravity: invalid fullAuto ${JSON.stringify(o.fullAuto)}`);
   }
   return {
-    cli: typeof o.cli === "string" ? o.cli : "agy",
+    cli: isText(o.cli) ? o.cli : "agy",
     // Default fullAuto to TRUE: agy's headless print harness invokes tools even
     // for trivial prompts and, with no interactive approval channel, auto-denies
     // them — producing no output, so a non-fullAuto bot's turns frequently fail.
@@ -133,7 +145,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
 
   async create(input: DriverCreateInput<AntigravityConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
-    const catalogEnv: Record<string, string | undefined> = { ...process.env, ...input.environment };
+    const catalogEnv = { ...process.env, ...input.environment };
     let models = STATIC_ANTIGRAVITY_MODELS;
     const refreshModels = async () => {
       try {
@@ -153,7 +165,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
     const children = new Set<ChildProcess>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of listeners) l(event);
     };
 
     // Reap every tracked child's tree (mirrors the per-turn stop()) — POSIX
@@ -202,7 +214,10 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
       // Trade-off: a very large prompt could exceed argv limits (E2BIG),
       // guarded below since stdin is not an option.
       const prompt = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
-      const resumeCursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+      // SAFETY: resumeCursor is contract-typed unknown (upstream compat); the
+      // persisted cursor is always the provider-native conversation id string.
+      const rawCursor: JsonValue = turn.resumeCursor as JsonValue;
+      const resumeCursor = isText(rawCursor) ? rawCursor : null;
 
       let settled = false;
       // backstop watchdog: if agy hangs without emitting `result` and without
@@ -219,7 +234,17 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         settled = true;
         clearTimeout(watchdog);
         active.delete(threadId);
-        emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
+        // usage rides along on the completed event; undefined when the CLI
+        // did not report token totals for this turn.
+        const completed: Extract<RuntimeEvent, { type: "turn.completed" }> = {
+          ...base(threadId, turnId),
+          type: "turn.completed",
+          ok,
+          stopReason,
+          cost,
+          usage,
+        };
+        emit(completed);
       };
 
       // agy's print mode is argv-only, so a prompt beyond ARG_MAX would fail the
@@ -305,7 +330,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
           }
           case "result": {
             // agy delivers the assistant text in result.response (not streamed)
-            const response = typeof payload.response === "string" ? payload.response : "";
+            const response = isText(payload.response) ? payload.response : "";
             if (response) {
               emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta: response });
               emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text: response });

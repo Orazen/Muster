@@ -19,30 +19,39 @@ export type FileAttachment = {
 
 export type Attachment = PasteAttachment | FileAttachment;
 
-export function isAttachment(value: unknown): value is Attachment {
-  if (!value || typeof value !== "object") return false;
-  const attachment = value as Record<string, unknown>;
-  if (typeof attachment.id !== "string" || !validSize(attachment.size)) return false;
-  if (attachment.kind === "paste") {
-    return (
-      typeof attachment.text === "string" &&
-      typeof attachment.lines === "number" &&
-      Number.isInteger(attachment.lines) &&
-      attachment.lines >= 1
-    );
+// Wire decoders: attachments arrive untyped from the clipboard and
+// drag-and-drop, so raw values are discriminated exactly here.
+const isText = <T>(value: T): value is T & string => String(value) === value;
+const isCount = <T>(value: T): value is T & number => Number.isInteger(value);
+
+/** Raw attachment fields before validation; every field may be absent or any JSON scalar. */
+type RawFields = {
+  id?: unknown;
+  kind?: unknown;
+  text?: unknown;
+  size?: unknown;
+  lines?: unknown;
+  path?: unknown;
+  name?: unknown;
+};
+
+const isRawAttachment = <T>(value: T): value is T & RawFields =>
+  value instanceof Object && value.constructor === Object;
+
+export function isAttachment<T>(value: T): value is T & Attachment {
+  if (!isRawAttachment(value)) return false;
+  if (!isText(value.id) || !validSize(value.size)) return false;
+  if (value.kind === "paste") {
+    return isText(value.text) && isCount(value.lines) && value.lines >= 1;
   }
-  if (attachment.kind === "file") {
-    return (
-      typeof attachment.path === "string" &&
-      attachment.path.length > 0 &&
-      typeof attachment.name === "string"
-    );
+  if (value.kind === "file") {
+    return isText(value.path) && value.path.length > 0 && isText(value.name);
   }
   return false;
 }
 
-function validSize(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+function validSize<T>(value: T): value is T & number {
+  return Number.isFinite(value) && Number(value) >= 0;
 }
 
 /** Past this, a paste stops reading as typing and becomes an attachment.

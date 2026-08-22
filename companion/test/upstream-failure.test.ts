@@ -17,7 +17,10 @@ import { createProxyHandler } from "../src/proxy.ts";
 
 const listen = (server: Server): Promise<number> =>
   new Promise((resolve) =>
-    server.listen(0, "127.0.0.1", () => resolve((server.address() as { port: number }).port)),
+    server.listen(0, "127.0.0.1", () => {
+      // SAFETY: listening on an OS-assigned port makes the address an AddressInfo.
+      resolve((server.address() as { port: number }).port);
+    }),
   );
 
 const close = (server: Server): Promise<void> =>
@@ -86,7 +89,9 @@ describe("an upstream that fails mid-stream", () => {
       try {
         // read until the stream dies — the point is that it dies here and
         // not in the sidecar's process
-        for await (const _chunk of res.body as unknown as AsyncIterable<Uint8Array>) void _chunk;
+        // SAFETY: undici response bodies are async-iterable at runtime; the
+        // DOM lib type just omits the async iterator.
+        for await (const _chunk of res.body as AsyncIterable<Uint8Array>) void _chunk;
       } catch {
         /* a destroyed connection is exactly what this is provoking */
       }
@@ -153,6 +158,8 @@ describe("an upstream that fails mid-stream", () => {
     const escaped = await watchingForCrashes(async () => {
       const res = await fetch(`${base}/api/health`, { headers: { authorization: "Bearer omb_x" } });
       expect(res.status).toBe(502);
+      // SAFETY: the sidecar writes this exact refusal body itself on an
+      // upstream that never answered.
       expect((await res.json()) as { error: string }).toEqual({
         error: "Muster is not running on this computer",
       });

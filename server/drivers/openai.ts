@@ -11,10 +11,15 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
+import type { JsonObject, JsonValue } from "../schema.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "openai";
 const DEFAULT_URL = "https://api.openai.com/v1";
+
+// Strings are the only values String() round-trips exactly, so this rejects
+// numbers/booleans/null/nested objects a config envelope could carry.
+const isText = (v: JsonValue): v is string => Object.is(String(v), v);
 
 const MODELS = {
   default: "gpt-4o",
@@ -31,11 +36,13 @@ export interface OpenAIConfig {
   apiKeyEnv: string;
 }
 
-function decodeConfig(raw: unknown): OpenAIConfig {
-  const o = (raw ?? {}) as Record<string, unknown>;
+function decodeConfig(raw: JsonValue | undefined): OpenAIConfig {
+  // Non-object configs (null, arrays, primitives) fall back to every default,
+  // matching the previous `raw ?? {}` handling field by field.
+  const o: JsonObject = raw instanceof Object && !Array.isArray(raw) ? raw : {};
   return {
-    url: typeof o.url === "string" ? o.url : DEFAULT_URL,
-    apiKeyEnv: typeof o.apiKeyEnv === "string" ? o.apiKeyEnv : "OPENAI_API_KEY",
+    url: isText(o.url) ? o.url : DEFAULT_URL,
+    apiKeyEnv: isText(o.apiKeyEnv) ? o.apiKeyEnv : "OPENAI_API_KEY",
   };
 }
 
@@ -53,7 +60,7 @@ export const OpenAIDriver: ProviderDriver<OpenAIConfig> = {
     const active = new Map<string, { abort: AbortController; turnId: string }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of listeners) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -162,9 +169,12 @@ export const OpenAIDriver: ProviderDriver<OpenAIConfig> = {
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
         } catch (e) {
           active.delete(threadId);
-          const aborted = (e as Error).name === "AbortError";
+          // SAFETY: the awaited fetch/stream path rejects with Error instances
+          // (AbortError on interrupt), so name and message exist on the thrown value
+          const err = e as Error;
+          const aborted = err.name === "AbortError";
           if (!aborted) {
-            emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
+            emit({ ...base(threadId, turnId), type: "runtime.error", message: err.message });
           }
           emit({
             ...base(threadId, turnId),

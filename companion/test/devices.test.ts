@@ -145,9 +145,14 @@ describe("DeviceRegistry", () => {
   it("rolls cloud desktop access back when it cannot be saved", () => {
     const registry = new DeviceRegistry();
     const { token, device } = pair(registry);
-    (registry as unknown as { persist: () => void }).persist = () => {
-      throw new Error("ENOSPC: no space left on device");
-    };
+    // Shadowing the private `persist` on this one instance is the only way to
+    // simulate the failing disk; assigning over the prototype keeps every
+    // other registry untouched.
+    Object.assign(registry, {
+      persist() {
+        throw new Error("ENOSPC: no space left on device");
+      },
+    });
 
     expect(() => registry.setCloudDesktopAccess(device.id, true)).toThrow("ENOSPC");
     expect(registry.authenticate(token)?.cloudDesktopAccess).toBe(false);
@@ -228,10 +233,12 @@ describe("authenticate under a failing disk", () => {
     // it. Assigning on the instance shadows the prototype method for this
     // registry only — the failing disk is simulated where the disk is used,
     // rather than by mocking node:fs for the whole file.
-    (registry as unknown as { persist: () => void }).persist = () => {
-      attempted++;
-      throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
-    };
+    Object.assign(registry, {
+      persist() {
+        attempted++;
+        throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+      },
+    });
 
     expect(registry.authenticate(token)?.id).toBe(device.id);
     expect(attempted).toBe(1);
@@ -252,9 +259,11 @@ describe("a pairing that cannot be saved", () => {
     // SAFETY: as above — the private `persist` shadowed on this one instance,
     // which is the only way to make the write fail without a filesystem that
     // really is read-only.
-    (registry as unknown as { persist: () => void }).persist = () => {
-      throw new Error("EROFS: read-only file system");
-    };
+    Object.assign(registry, {
+      persist() {
+        throw new Error("EROFS: read-only file system");
+      },
+    });
 
     const { code } = registry.openPairing();
     const result = registry.redeem(code, "iPhone");

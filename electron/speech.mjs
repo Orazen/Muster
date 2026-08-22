@@ -26,6 +26,9 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(__dirname, "resources", "speech-helper.swift");
 const INFO = path.join(__dirname, "resources", "speech-helper-Info.plist");
+
+/** Helper stdout is line-delimited JSON; only primitive strings are text. */
+const isText = (v) => Object.is(String(v), v);
 // Packaged: the helper bundle ships pre-built + signed in Resources. A signed
 // app bundle must never be rewritten — lazy compilation would break its seal.
 const BUNDLE = app.isPackaged
@@ -136,8 +139,8 @@ export function startSpeech(win, options = {}) {
       if (!line) continue;
       try {
         const parsed = JSON.parse(line);
-        if (typeof parsed.error === "string") reportedError = parsed.error;
-        if (parsed.partial === false && typeof parsed.text === "string") completed = true;
+        if (isText(parsed.error)) reportedError = parsed.error;
+        if (parsed.partial === false && isText(parsed.text)) completed = true;
         // A stopped/replaced helper can flush one last chunk. Never leak it
         // into the session that replaced it.
         if (child === speechSession && !win.isDestroyed()) {

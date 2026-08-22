@@ -3,8 +3,13 @@
 import { saveConfig, type AppConfig } from "./config.ts";
 import { randomUUID } from "node:crypto";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import type { JsonValue } from "./schema.ts";
+import { z } from "zod";
 
 const DEFAULT_BACKEND_ORIGIN = "https://backend.composio.dev";
+
+// Wire strings: a JSON string, or absent. Any other value reads as absent.
+const wireText = z.string().optional().catch(undefined);
 
 function apiBase() {
   return (process.env.OMB_COMPOSIO_API ?? `${DEFAULT_BACKEND_ORIGIN}/api/v3.1`).replace(/\/$/, "");
@@ -56,22 +61,19 @@ export function configured(cfg: AppConfig): boolean {
 async function brokerRequest(path: string, init?: RequestInit): Promise<Response> {
   const broker = brokerAccess();
   if (!broker) throw new Error("The connected-apps service is unavailable");
+  const headers = new Headers({ authorization: `Bearer ${broker.token}` });
+  if (init?.body) headers.set("content-type", "application/json");
   return fetch(`${broker.url}${path}`, {
     ...init,
-    headers: {
-      authorization: `Bearer ${broker.token}`,
-      ...(init?.body ? { "content-type": "application/json" } : {}),
-      ...init?.headers,
-    },
+    headers: { ...Object.fromEntries(headers), ...init?.headers },
     signal: init?.signal ?? AbortSignal.timeout(30_000),
   });
 }
 
 function projectHeaders(apiKey: string, json = false) {
-  return {
-    "x-api-key": apiKey,
-    ...(json ? { "content-type": "application/json" } : {}),
-  };
+  const headers = new Headers({ "x-api-key": apiKey });
+  if (json) headers.set("content-type", "application/json");
+  return headers;
 }
 
 async function responseError(res: Response, fallback: string) {
@@ -84,8 +86,8 @@ async function responseError(res: Response, fallback: string) {
   }
 }
 
-function trustedAuthUrl(value: unknown, slug: string): string {
-  if (typeof value !== "string") throw new Error(`Connected-apps service returned no authorization link for ${slug}`);
+function trustedAuthUrl(value: string | undefined, slug: string): string {
+  if (value === undefined) throw new Error(`Connected-apps service returned no authorization link for ${slug}`);
   const url = new URL(value);
   if (url.protocol !== "https:" || (url.hostname !== "composio.dev" && !url.hostname.endsWith(".composio.dev"))) {
     throw new Error("Connected-apps service returned an untrusted authorization link");
@@ -100,6 +102,7 @@ async function getProjectSession(apiKey: string, sessionId: string): Promise<Ses
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await responseError(res, `Composio session: HTTP ${res.status}`));
+  // SAFETY: tool_router/session GET replies with the SessionResponse envelope; only session_id/mcp/config are read
   return (await res.json()) as SessionResponse;
 }
 
@@ -138,6 +141,7 @@ export async function prepareProjectSession(
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(await responseError(res, `Composio rejected this key (HTTP ${res.status})`));
+  // SAFETY: session-create POST replies with the SessionResponse envelope; only session_id/mcp.url are read
   const session = (await res.json()) as SessionResponse;
   if (!session.session_id || !session.mcp?.url) throw new Error("Composio created an incomplete Session");
   return { apiKey: trimmed, userId, sessionId: session.session_id };
@@ -186,7 +190,7 @@ export async function mcpIntegration(
 
 export async function relayMcp(
   cfg: AppConfig,
-  payload: unknown,
+  payload: JsonValue,
   transportSessionId?: string,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string; transportSessionId?: string }> {
   const broker = brokerAccess();
@@ -228,6 +232,7 @@ export async function connectionStatus(cfg: AppConfig, slugs: string[]) {
   if (brokerAccess() || !cfg.composio?.apiKey) {
     const response = await brokerRequest(`/v1/connectors?${new URLSearchParams({ services: slugs.join(",") })}`);
     if (!response.ok) throw new Error(await responseError(response, `Connected apps: HTTP ${response.status}`));
+    // SAFETY: /v1/connectors replies with a services map keyed by slug; only connected/pending/status are read
     const body = (await response.json()) as { services?: Record<string, { connected: boolean; pending?: boolean; status?: string }> };
     return body.services ?? {};
   }
@@ -252,6 +257,7 @@ export async function connectionStatus(cfg: AppConfig, slugs: string[]) {
         )
           .then(async (accountRes) => {
             if (!accountRes.ok) return [];
+            // SAFETY: connected_accounts replies with an items array of account rows; only toolkit.slug/status/updated_at are read
             const accountBody = (await accountRes.json()) as {
               items?: Array<{ toolkit?: { slug?: string }; status?: string; updated_at?: string }>;
             };
@@ -261,6 +267,7 @@ export async function connectionStatus(cfg: AppConfig, slugs: string[]) {
       : Promise.resolve([]),
   ]);
   if (!res.ok) throw new Error(await responseError(res, `Composio toolkits: HTTP ${res.status}`));
+  // SAFETY: session toolkits reply with an items array of toolkit rows; only slug/is_no_auth/connected_account are read
   const body = (await res.json()) as { items?: Array<{ slug?: string; is_no_auth?: boolean; connected_account?: { status?: string } }> };
   const bySlug = new Map((body.items ?? []).map((item) => [item.slug?.toLowerCase(), item]));
   const accountBySlug = new Map<string, { status?: string; updated_at?: string }>();
@@ -298,6 +305,7 @@ export async function removeService(cfg: AppConfig, slug: string) {
   if (brokerAccess() || !cfg.composio?.apiKey) {
     const response = await brokerRequest(`/v1/connectors/${encodeURIComponent(slug)}`, { method: "DELETE" });
     if (!response.ok) throw new Error(await responseError(response, `Connected apps: HTTP ${response.status}`));
+    // SAFETY: /v1/connectors DELETE replies with {removed}; only the count is read
     return response.json() as Promise<{ removed: number }>;
   }
   const session = await ensureProjectSession(cfg);
@@ -307,6 +315,7 @@ export async function removeService(cfg: AppConfig, slug: string) {
     { headers: projectHeaders(cfg.composio.apiKey), signal: AbortSignal.timeout(15_000) },
   );
   if (!list.ok) throw new Error(await responseError(list, `Composio toolkits: HTTP ${list.status}`));
+  // SAFETY: session toolkits reply with an items array; only slug and connected_account.id are read
   const body = (await list.json()) as { items?: Array<{ slug?: string; connected_account?: { id?: string } }> };
   const id = body.items?.find((item) => item.slug?.toLowerCase() === slug.toLowerCase())?.connected_account?.id;
   if (!id) return { removed: 0 };
@@ -323,8 +332,9 @@ export async function authorizeService(cfg: AppConfig, slug: string) {
   if (brokerAccess() || !cfg.composio?.apiKey) {
     const response = await brokerRequest(`/v1/connectors/${encodeURIComponent(slug)}/authorize`, { method: "POST" });
     if (!response.ok) throw new Error(await responseError(response, `Connected apps: HTTP ${response.status}`));
+    // SAFETY: authorize endpoint replies with {url} — the only field read before trust-checking the link
     const body = (await response.json()) as { url?: string };
-    return { url: trustedAuthUrl(body.url, slug) };
+    return { url: trustedAuthUrl(wireText.parse(body.url), slug) };
   }
   const session = await ensureProjectSession(cfg);
   const res = await fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(session.session_id)}/link`, {
@@ -334,8 +344,9 @@ export async function authorizeService(cfg: AppConfig, slug: string) {
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(await responseError(res, `Composio authorization: HTTP ${res.status}`));
+  // SAFETY: session link endpoint replies with {redirect_url} — the only field read before trust-checking the link
   const body = (await res.json()) as { redirect_url?: string };
-  return { url: trustedAuthUrl(body.redirect_url, slug) };
+  return { url: trustedAuthUrl(wireText.parse(body.redirect_url), slug) };
 }
 
 // ── marketplace catalog ────────────────────────────────────────────────

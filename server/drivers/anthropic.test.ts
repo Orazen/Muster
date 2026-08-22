@@ -54,6 +54,7 @@ describe("AnthropicDriver", () => {
   });
 
   it("streams a turn end-to-end, parsing the Messages API's named SSE events", async () => {
+    // SAFETY: the suite swaps in a jest-fetch mock; only its mockResolvedValue entry is used.
     (global.fetch as any).mockResolvedValue(
       streamResponse([messageStart(12), textDelta("Hel"), textDelta("lo!"), messageDelta(3)]),
     );
@@ -69,7 +70,10 @@ describe("AnthropicDriver", () => {
     let usage: any = null;
     let text = "";
     instance.adapter.onEvent((e) => {
-      if (e.type === "content.delta") text += (e as any).delta;
+      if (e.type === "content.delta") {
+        // SAFETY: content.delta events always carry a string delta field.
+        text += (e as any).delta;
+      }
       if (e.type === "thread.token-usage.updated") usage = e;
       if (e.type === "turn.completed") completed = e;
     });
@@ -81,6 +85,7 @@ describe("AnthropicDriver", () => {
     expect(completed?.ok).toBe(true);
     expect(usage).toMatchObject({ input: 12, output: 3 });
 
+    // SAFETY: every mocked call is the driver's fetch with [url, init] arguments.
     const call = (fetch as any).mock.calls[0];
     expect(call[0]).toBe("https://api.anthropic.com/v1/messages");
     expect(call[1].headers["x-api-key"]).toBe("sk-ant-test");
@@ -89,6 +94,7 @@ describe("AnthropicDriver", () => {
   });
 
   it("surfaces a non-2xx response as a failed turn", async () => {
+    // SAFETY: the suite swaps in a jest-fetch mock; only its mockResolvedValue entry is used.
     (global.fetch as any).mockResolvedValue(new Response("bad key", { status: 401 }));
     const instance = await AnthropicDriver.create({
       instanceId: "anthropicApi",

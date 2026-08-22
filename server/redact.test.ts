@@ -6,8 +6,6 @@ import { describe, expect, it } from "vitest";
 
 import { redactSecrets } from "./redact.ts";
 
-const flat = (value: unknown) => JSON.stringify(value);
-
 describe("redactSecrets", () => {
   it("masks the tokens in an ACP session/new, keeping the shape", () => {
     const sessionNew = {
@@ -39,7 +37,7 @@ describe("redactSecrets", () => {
       },
     };
 
-    const out = flat(redactSecrets(sessionNew));
+    const out = JSON.stringify(redactSecrets(sessionNew));
 
     expect(out).not.toContain("s3cret-comms-token-value");
     expect(out).not.toContain("box_live_abcdefghijklmnop");
@@ -66,7 +64,7 @@ describe("redactSecrets", () => {
       },
     };
 
-    const out = flat(redactSecrets(config));
+    const out = JSON.stringify(redactSecrets(config));
     expect(out).not.toContain("ak_live_supersecret");
     expect(out).not.toContain("box_live_zzz");
     expect(out).toContain("app.composio.dev");
@@ -84,6 +82,7 @@ describe("redactSecrets", () => {
 
   it("does not mangle words that merely contain 'key'", () => {
     const msg = { keyboard: "cmd+k", monkey: "business", keys: "SECRET-LIST", hotkey: "ctrl" };
+    // SAFETY: the input is a flat object of string values; redaction preserves keys and shapes
     const out = redactSecrets(msg) as Record<string, string>;
     expect(out.keyboard).toBe("cmd+k");
     expect(out.monkey).toBe("business");
@@ -96,7 +95,10 @@ describe("redactSecrets", () => {
     expect(redactSecrets("plain")).toBe("plain");
     expect(redactSecrets(null)).toBe(null);
     expect(redactSecrets(42)).toBe(42);
-    let deep: Record<string, unknown> = { token: "deep-secret" };
+    interface SecretTree {
+      [key: string]: SecretTree | string;
+    }
+    let deep: SecretTree = { token: "deep-secret" };
     for (let i = 0; i < 20; i++) deep = { nested: deep };
     expect(() => redactSecrets(deep)).not.toThrow();
   });
@@ -161,6 +163,7 @@ describe("redactSecretsInText", () => {
   });
 
   it("is applied to string values inside redactSecrets too", () => {
+    // SAFETY: the input is a flat object of string values; redaction preserves keys and shapes
     const out = redactSecrets({ command: "curl -H 'Authorization: Bearer abcdefghijklmnop'", note: "fine" }) as Record<string, string>;
     expect(out.command).toContain("«redacted");
     expect(out.note).toBe("fine");

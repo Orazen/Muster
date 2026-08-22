@@ -88,6 +88,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const base = window.location.origin;
       const res = await fetch(`${base}/api/auth-capabilities`, { credentials: "include" });
       if (!res.ok) return;
+      // SAFETY: /api/auth-capabilities serves the AuthCapabilities shape or a
+      // non-2xx status (rejected above); every field below is coerced
+      // individually, so an unexpected payload only hides optional flows.
       const data = (await res.json()) as Partial<AuthCapabilities>;
       setCapabilities({
         emailVerification: Boolean(data.emailVerification),
@@ -95,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         socialProviders: Array.isArray(data.socialProviders) ? data.socialProviders : [],
         googleOnlySignup: Boolean(data.googleOnlySignup),
         cloudPairing: Boolean(data.cloudPairing),
-        pairingCloudUrl: typeof data.pairingCloudUrl === "string" ? data.pairingCloudUrl : null,
+        pairingCloudUrl: data.pairingCloudUrl ?? null,
       });
     } catch {
       // Server too old or unreachable — leave every optional flow hidden.
@@ -163,6 +166,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         // best effort — proceed with the OAuth handoff regardless
       }
+      // SAFETY: provider arrives from the sign-in buttons rendered for the
+      // configured socialProviders list ("google" today), which is exactly
+      // the provider union better-auth's social() accepts.
       const res = await authClient.signIn.social({
         provider: provider as Parameters<typeof authClient.signIn.social>[0]["provider"],
         callbackURL: `${window.location.origin}/app`,

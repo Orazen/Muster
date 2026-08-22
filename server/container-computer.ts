@@ -253,10 +253,17 @@ function normalizeImageId(id: string | undefined): string | null {
   return id?.trim().replace(/^sha256:/, "") || null;
 }
 
-function inspectedImage(stdout: string): {
-  labels: Record<string, string> | undefined;
-  id: string | null;
-} {
+/** Apple's `container inspect` reports the image either as a bare reference
+ * string or as a descriptor object; this is the boundary that tells them apart. */
+function imageIsBareName(
+  image: string | { reference?: string; descriptor?: { digest?: string } } | undefined,
+): image is string {
+  return Object.prototype.toString.call(image) === "[object String]";
+}
+
+function inspectedImage(stdout: string) {
+  // SAFETY: stdout is the engine's `image inspect` JSON array; unknown engines
+  // omit fields, so every field stays optional and is coalesced below.
   const parsed = JSON.parse(stdout) as Array<{
     Id?: string;
     id?: string;
@@ -351,6 +358,8 @@ export async function containerComputerStatus(
   try {
     const { stdout } = await runner(status.runtime, ["inspect", CONTAINER]);
     if (status.runtime === "container") {
+      // SAFETY: stdout is the engine's `container inspect` JSON array; fields
+      // absent on older engines stay optional and are defaulted below.
       const inspected = JSON.parse(stdout) as Array<{
         configuration?: {
           image?: string | { reference?: string; descriptor?: { digest?: string } };
@@ -366,14 +375,12 @@ export async function containerComputerStatus(
       const detail = inspected[0];
       status.container = detail?.status?.state === "running" ? "running" : "stopped";
       status.network = applePortsAreLocal(detail?.configuration?.publishedPorts) ? "loopback" : "unsafe";
-      const appleImage =
-        typeof detail?.configuration?.image === "string"
-          ? detail.configuration.image
-          : detail?.configuration?.image?.reference ?? detail?.configuration?.imageReference;
-      const appleImageId =
-        typeof detail?.configuration?.image === "object"
-          ? normalizeImageId(detail.configuration.image.descriptor?.digest)
-          : null;
+      const appleImage = imageIsBareName(detail?.configuration?.image)
+        ? detail.configuration.image
+        : detail?.configuration?.image?.reference ?? detail?.configuration?.imageReference;
+      const appleImageId = imageIsBareName(detail?.configuration?.image)
+        ? null
+        : normalizeImageId(detail?.configuration?.image?.descriptor?.digest);
       status.imageMatches =
         appleImage === IMAGE && status.image_id !== null && appleImageId === status.image_id;
       status.managed = containerLabelsMatch(detail?.configuration?.labels);
@@ -385,6 +392,8 @@ export async function containerComputerStatus(
         (resources?.memoryInBytes ?? 0) >= MEMORY_BYTES && resources?.cpus === 2 ? "hardened" : "unsafe";
       status.viewer_url = viewerUrl(viewerPassword(detail?.configuration?.environment));
     } else {
+      // SAFETY: stdout is the engine's `container inspect` JSON array; fields
+      // absent on older engines stay optional and are defaulted below.
       const inspected = JSON.parse(stdout) as Array<{
         Config?: { Image?: string; Labels?: Record<string, string>; Env?: string[] };
         HostConfig?: {
@@ -440,6 +449,7 @@ export async function containerComputerStatus(
         cuaExecArgs(["call", "health_report", "{}", "--socket", CUA_SOCKET]),
         15_000,
       );
+      // SAFETY: the cua-driver health_report contract; any missing field fails validation below.
       const report = JSON.parse(health.stdout) as { schema_version?: string; overall?: string; checks?: unknown[] };
       if (
         report.schema_version !== "1" ||

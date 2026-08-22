@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { parseJson, type JsonObject, type JsonValue } from "../../schema.ts";
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 
 const CATALOG_URL = "https://opencode.ai/zen/go/v1/models";
@@ -19,6 +20,41 @@ const STATIC_MODELS: ModelCatalog = {
 };
 
 let lastSuccessfulCatalog: ModelCatalog | null = null;
+
+/**
+ * Decoding helpers for third-party OpenCode JSON files and HTTP payloads.
+ * Every unparsed value crosses one of these exactly once; the rest of the
+ * module branches on decoded records and strings, not representations.
+ */
+
+function jsonRecordOf(value: JsonValue | undefined): JsonObject | null {
+  if (
+    value === null ||
+    value === undefined ||
+    Array.isArray(value) ||
+    // SAFETY: single shape-check boundary for untrusted JSON — after ruling
+    // out null, undefined and arrays, an "object" JSON value is exactly a record.
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof
+    typeof value !== "object"
+  ) {
+    return null;
+  }
+  return value;
+}
+
+function jsonStringOf(value: JsonValue | undefined): string | null {
+  // SAFETY: scalar boundary — JSON model ids are strings; other representations are rejected.
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof
+  return typeof value === "string" ? value : null;
+}
+
+function parseJsonRecord(raw: string): JsonObject | null {
+  try {
+    return jsonRecordOf(parseJson(raw));
+  } catch {
+    return null;
+  }
+}
 
 function labelForModel(id: string): string {
   return id
@@ -40,15 +76,19 @@ export async function fetchOpenCodeGoModels(fetcher: typeof fetch = fetch): Prom
     try {
       const response = await fetcher(CATALOG_URL, { signal: controller.signal });
       if (!response.ok) throw new Error(`catalog HTTP ${response.status}`);
-      const payload = await response.json() as unknown;
+      // SAFETY: catalog HTTP body is untrusted wire data; fields are decoded
+      // via the JSON helpers below before use.
+      const payload = (await response.json()) as JsonValue;
+      const root = jsonRecordOf(payload);
       const records = Array.isArray(payload)
         ? payload
-        : payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
-          ? (payload as { data: unknown[] }).data
+        : root !== null && Array.isArray(root.data)
+          ? root.data
           : [];
-      const ids = records
-        .map((record) => record && typeof record === "object" ? (record as { id?: unknown }).id : undefined)
-        .filter((id): id is string => typeof id === "string" && /^[a-z0-9][a-z0-9._-]*$/i.test(id));
+      const ids = records.flatMap((record) => {
+        const id = jsonStringOf(jsonRecordOf(record)?.id);
+        return id !== null && /^[a-z0-9][a-z0-9._-]*$/i.test(id) ? [id] : [];
+      });
       if (!ids.length) throw new Error("catalog contained no valid models");
       const options = STATIC_MODELS.options.map((option) => ({ ...option }));
       const seen = new Set(options.map((option) => option.id));
@@ -100,38 +140,22 @@ export function ensureOpenCodeInjectModel(
   const dir = opencodeConfigDir(env);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "opencode.json");
-  let config: Record<string, unknown> = { $schema: "https://opencode.ai/config.json" };
-  if (existsSync(path)) {
-    try {
-      config = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    } catch {
-      // Malformed user config — inject into a fresh object rather than fail the turn.
-    }
-  }
-  const providers =
-    config.provider && typeof config.provider === "object" && !Array.isArray(config.provider)
-      ? { ...(config.provider as Record<string, unknown>) }
-      : {};
+  const storedConfig = existsSync(path)
+    ? parseJsonRecord(readFileSync(path, "utf8"))
+    : null;
+  const config: JsonObject = storedConfig ?? { $schema: "https://opencode.ai/config.json" };
+  const providers = { ...jsonRecordOf(config.provider) };
   const previous = providers[inject.host];
-  const existing =
-    previous && typeof previous === "object" && !Array.isArray(previous)
-      ? { ...(previous as Record<string, unknown>) }
-      : {
-          npm: "@ai-sdk/openai-compatible",
-          name: host.label,
-          options: {},
-          models: {},
-        };
-  const options =
-    existing.options && typeof existing.options === "object" && !Array.isArray(existing.options)
-      ? { ...(existing.options as Record<string, unknown>) }
-      : {};
+  const existing = jsonRecordOf(previous) ?? {
+    npm: "@ai-sdk/openai-compatible",
+    name: host.label,
+    options: {},
+    models: {},
+  };
+  const options = { ...jsonRecordOf(existing.options) };
   options.baseURL = host.baseUrl;
   if (!options.apiKey) options.apiKey = hostApiKey(host, env);
-  const models =
-    existing.models && typeof existing.models === "object" && !Array.isArray(existing.models)
-      ? { ...(existing.models as Record<string, unknown>) }
-      : {};
+  const models = { ...jsonRecordOf(existing.models) };
   if (!models[inject.model]) {
     models[inject.model] = { name: `${inject.model} (${host.label})` };
   }
@@ -167,13 +191,8 @@ function hasStoredOpenCodeGoAuth(env: Record<string, string | undefined>) {
     // A missing or unreadable file simply means there is no ambient login.
   }
   return candidates.some((raw) => {
-    try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const auth = parsed["opencode-go"];
-      return Boolean(auth && typeof auth === "object" && (auth as { key?: unknown }).key);
-    } catch {
-      return false;
-    }
+    const auth = jsonRecordOf(parseJsonRecord(raw)?.["opencode-go"]);
+    return auth !== null && Boolean(auth.key);
   });
 }
 
@@ -207,9 +226,13 @@ const support = (fetcher: typeof fetch): AcpSupport => ({
   buildPromptText: (turn) => turn.system ? `${turn.system}\n\n${turn.text}` : turn.text,
 });
 
-export function classifyOpenCodeGoError(error: unknown): ProviderErrorCode | undefined {
-  const value = error && typeof error === "object" ? error as Record<string, unknown> : {};
-  const code = value.code;
+/** Error frames reach the classifier as JSON-RPC error objects or thrown
+ * values; both shapes carry their discriminator in `code` or `message`. */
+export function classifyOpenCodeGoError(error: {
+  code?: JsonValue;
+  message?: string;
+}): ProviderErrorCode | undefined {
+  const code = error?.code;
   if (code === -32000) return "invalid_credentials";
   if (code === "AUTH_REQUIRED" || code === "INVALID_API_KEY" || code === "UNAUTHORIZED") return "invalid_credentials";
   if (code === "SUBSCRIPTION_INACTIVE") return "inactive_subscription";

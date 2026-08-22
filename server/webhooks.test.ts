@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { WebhookManager, type WebhookManagerOptions } from "./webhooks.ts";
+import {
+  WebhookManager,
+  type WebhookManagerOptions,
+  type WebhookTrigger,
+} from "./webhooks.ts";
 
 const dirs: string[] = [];
 
@@ -15,7 +19,7 @@ function harness() {
   let bot: "ready" | "busy" | "missing" = "ready";
   let run = 0;
   let pending = 0;
-  const queued: Array<Record<string, unknown>> = [];
+  const queued: Array<Parameters<WebhookManagerOptions["enqueue"]>[0]> = [];
   const cancelled: Array<{ id: string; message: string }> = [];
   const emitted: unknown[] = [];
   const options: WebhookManagerOptions = {
@@ -90,7 +94,12 @@ describe("WebhookManager", () => {
   it("removes duration metadata saved by an earlier webhook build", () => {
     const h = harness();
     create(h.manager);
-    const disk = JSON.parse(readFileSync(h.file, "utf8")) as { webhooks: Array<Record<string, unknown>> };
+    // SAFETY: webhooks.json is written by WebhookManager.save() itself, so its
+    // JSON is the persisted trigger list; durationMinutes is a legacy field
+    // injected here to prove a reload scrubs it.
+    const disk = JSON.parse(readFileSync(h.file, "utf8")) as {
+      webhooks: Array<WebhookTrigger & { durationMinutes?: number }>;
+    };
     disk.webhooks[0].durationMinutes = 120;
     writeFileSync(h.file, JSON.stringify(disk));
 

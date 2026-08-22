@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { GoogleDriver } from "./google.ts";
 
 function candidateChunk(text: string) {
@@ -17,8 +17,10 @@ function streamResponse(chunks: string[]) {
 
 describe("GoogleDriver", () => {
   const originalFetch = global.fetch;
+  let fetchMock: Mock;
   beforeEach(() => {
-    global.fetch = vi.fn();
+    fetchMock = vi.fn();
+    global.fetch = fetchMock;
   });
   afterEach(() => {
     global.fetch = originalFetch;
@@ -37,7 +39,7 @@ describe("GoogleDriver", () => {
   });
 
   it("streams a turn, puts the key as a query param, and maps assistant->model role", async () => {
-    (global.fetch as any).mockResolvedValue(streamResponse([candidateChunk("Hel"), candidateChunk("lo!")]));
+    fetchMock.mockResolvedValue(streamResponse([candidateChunk("Hel"), candidateChunk("lo!")]));
     const instance = await GoogleDriver.create({
       instanceId: "x",
       displayName: undefined,
@@ -48,7 +50,7 @@ describe("GoogleDriver", () => {
     let completed: any = null;
     let text = "";
     instance.adapter.onEvent((e) => {
-      if (e.type === "content.delta") text += (e as any).delta;
+      if (e.type === "content.delta") text += e.delta;
       if (e.type === "turn.completed") completed = e;
     });
     await instance.adapter.sendTurn({
@@ -60,7 +62,7 @@ describe("GoogleDriver", () => {
 
     expect(text).toBe("Hello!");
     expect(completed?.ok).toBe(true);
-    const call = (fetch as any).mock.calls[0];
+    const call = fetchMock.mock.calls[0];
     expect(call[0]).toContain("key=AIza-test");
     expect(call[0]).toContain(":streamGenerateContent");
     const sentBody = JSON.parse(call[1].body);

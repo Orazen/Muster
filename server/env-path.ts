@@ -246,7 +246,7 @@ function nodeExe(near: string): string | null {
   // make a stray node.cmd hide the real node.exe beside it.
   const onPath = whichWin("node.exe");
   if (onPath && extname(onPath).toLowerCase() === ".exe") return onPath;
-  return (process.versions as Record<string, string | undefined>).electron ? null : process.execPath;
+  return process.versions.electron ? null : process.execPath;
 }
 
 /** npm/pnpm .cmd shims all spell their target as "%dp0%\..." (or

@@ -22,13 +22,13 @@ type State =
   | { kind: "unconfigured" }
   | { kind: "ready"; subscription: SubscriptionSummary };
 
-const STATUS_COPY: Record<SubscriptionSummary["status"], string> = {
+const STATUS_COPY = {
   active: "Active",
   trialing: "Trial",
   past_due: "Payment failed",
   canceled: "Cancelled",
   none: "No subscription",
-};
+} satisfies Record<SubscriptionSummary["status"], string>;
 
 function formatRenewal(unixSeconds: number | null): string | null {
   if (!unixSeconds) return null;
@@ -51,6 +51,8 @@ export function BillingSection() {
       if (res.status === 404) return setState({ kind: "self-hosted" });
       if (!res.ok) throw new Error(`Could not load billing (${res.status})`);
 
+      // SAFETY: /api/billing/subscription answers with exactly this summary
+      // shape; anything else surfaces as the self-hosted/error state below.
       const data = (await res.json()) as {
         configured: boolean;
         subscription: SubscriptionSummary | null;
@@ -68,7 +70,7 @@ export function BillingSection() {
   }, [load]);
 
   /** Both flows hand off to a Stripe-hosted page — no card data touches us. */
-  async function go(endpoint: "checkout" | "portal", body?: Record<string, unknown>) {
+  async function go(endpoint: "checkout" | "portal", body?: { interval?: "month" | "year"; quantity?: number }) {
     setBusy(true);
     setError("");
     try {
@@ -78,6 +80,8 @@ export function BillingSection() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body ?? {}),
       });
+      // SAFETY: the billing endpoints answer { url } on success and
+      // { error } otherwise; a missing url falls into the throw below.
       const data = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !data.url) throw new Error(data.error ?? "Could not open Stripe");
       window.location.href = data.url;

@@ -82,12 +82,18 @@ interface RoutineFile {
   runs: RoutineRun[];
 }
 
+/** Frames the manager publishes on the server's keyed event bus: every
+ * payload leads with `kind`, which is what lets the bus number and replay
+ * them. */
+export type RoutineEvent =
+  | { kind: "routine"; routine: Routine }
+  | { kind: "routine.run"; run: RoutineRun }
+  | { kind: "routine.deleted"; routineId: string };
+
 export interface RoutineManagerOptions {
   file?: string;
   now?: () => number;
-  /** Keyed frames only: every payload on this bus is `{ kind, … }`, which
-   * is what lets the server number and replay them. */
-  emit?: (payload: Record<string, unknown>) => void;
+  emit?: (payload: RoutineEvent) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
   createTask: (botId: string, title: string, activate?: boolean) => { threadId: string } | null;
   startTurn: (
@@ -105,7 +111,7 @@ const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const CATCH_UP_MS = 12 * 60 * 60_000;
 const MAX_RUNS = 2_000;
 
-function cleanDays(days: unknown): number[] {
+function cleanDays(days: ReadonlyArray<unknown> | undefined): number[] {
   if (!Array.isArray(days)) return ALL_DAYS;
   const out = [...new Set(days.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
   return out.length ? out : ALL_DAYS;
@@ -173,6 +179,8 @@ export class RoutineManager {
     this.file = options.file ?? join(DATA_DIR, "routines.json");
     this.now = options.now ?? Date.now;
     try {
+      // SAFETY: save() writes exactly the RoutineFile shape; a corrupt or
+      // foreign file throws below and resets to an empty schedule.
       const disk = JSON.parse(readFileSync(this.file, "utf8")) as Partial<RoutineFile>;
       this.routines = Array.isArray(disk.routines)
         ? disk.routines.map((routine) => ({ ...routine, runOn: routine.runOn ?? "agent" }))

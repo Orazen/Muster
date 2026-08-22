@@ -151,7 +151,7 @@ export interface TaskRecord {
   title: string;
   createdAt: number;
   /** provider-native continuation per instance, for THIS task only */
-  resumeCursors: Record<string, unknown>;
+  resumeCursors: Record<string, string>;
   /** which instance dispatched the most recent turn. A cursor alone can't
    * say whether an engine's session is current — another engine may have
    * taken turns since — so this is what decides an inline replay. Absent
@@ -185,13 +185,15 @@ export interface TaskUsage {
 function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number }>(message: T): T {
   if (message.role !== "bot") return message;
   const out = { ...message };
-  if (typeof out.text === "string") out.text = redactSecretsInText(out.text);
+  if (out.text !== undefined) out.text = redactSecretsInText(out.text);
   if (out.tool?.name) out.tool = { ...out.tool, name: redactSecretsInText(out.tool.name) };
   if (out.card) {
-    const card = { ...out.card } as OptionCardData & { summary?: string };
+    // SAFETY: cards saved by older builds may carry a summary field that
+    // OptionCardData no longer declares; redaction must still cover it.
+    const card: OptionCardData & { summary?: string } = { ...out.card };
     card.title = redactSecretsInText(card.title);
-    if (typeof card.subtitle === "string") card.subtitle = redactSecretsInText(card.subtitle);
-    if (typeof card.summary === "string") card.summary = redactSecretsInText(card.summary);
+    if (card.subtitle !== undefined) card.subtitle = redactSecretsInText(card.subtitle);
+    if (card.summary !== undefined) card.summary = redactSecretsInText(card.summary);
     out.card = card;
   }
   if (out.connector) {
@@ -254,7 +256,7 @@ export interface BotRecord {
   unread: boolean;
   modelSelection: ModelSelection;
   /** provider-native continuation per instance (e.g. claude session id) */
-  resumeCursors: Record<string, unknown>;
+  resumeCursors: Record<string, string>;
   /** which computer the bot acts on: its cloud box, this Mac (local CUA),
    * or none. Unset = auto (box when it exists, else local when available). */
   computer?: "cloud" | "vm" | "local" | "opensandbox" | "off";
@@ -351,21 +353,22 @@ export function mentionedBots<T extends { name: string; hidden?: boolean }>(text
  * field; giving them their first member as lead fixes the old silent-send
  * behavior without making every prompt fan out to every model. */
 export function normalizeGroupDefaultResponder(
-  value: unknown,
+  value: GroupDefaultResponder,
   memberIds: string[],
   dm = false,
 ): GroupDefaultResponder {
   if (dm) return { kind: "mentions" };
-  if (value && typeof value === "object") {
-    const candidate = value as { kind?: unknown; botId?: unknown };
-    if (candidate.kind === "everyone") return { kind: "everyone" };
-    if (candidate.kind === "mentions") return { kind: "mentions" };
+  // Persisted rooms may predate this field's shape; only plain JSON objects
+  // carry a decodable policy.
+  if (value instanceof Object && value.constructor === Object) {
+    if (value.kind === "everyone") return { kind: "everyone" };
+    if (value.kind === "mentions") return { kind: "mentions" };
     if (
-      candidate.kind === "member" &&
-      typeof candidate.botId === "string" &&
-      memberIds.includes(candidate.botId)
+      value.kind === "member" &&
+      String(value.botId) === value.botId &&
+      memberIds.includes(value.botId)
     ) {
-      return { kind: "member", botId: candidate.botId };
+      return { kind: "member", botId: value.botId };
     }
   }
   if (memberIds.length === 0) return { kind: "mentions" };
@@ -462,6 +465,7 @@ export class Store {
         const candidates = this.bots.filter((candidate) => candidate.name === match[2]);
         if (candidates.length !== 1) return key;
         changed = true;
+        // SAFETY: the regex above only matches ask_bot / delegate_bot prefixes.
         return peerAllowKey(match[1] as PeerAction, candidates[0]!.id);
       });
       if (changed) {
@@ -510,7 +514,7 @@ export class Store {
   }
 
   saveGroups() {
-    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId, ...g }) => g), null, 2));
+    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, ...g }) => g), null, 2));
   }
 
   // ── groups ────────────────────────────────────────────────────────────
@@ -522,7 +526,7 @@ export class Store {
   }
 
   private emit(change: StoreChange) {
-    for (const listener of [...this.listeners]) {
+    for (const listener of Array.from(this.listeners)) {
       try {
         listener(change);
       } catch (error) {
@@ -549,10 +553,10 @@ export class Store {
       bulletin: "",
       unread: false,
       createdAt: Date.now(),
-      ...(ownerId ? { ownerId } : {}),
       dm: dm || undefined,
       busyBotId: null,
     };
+    if (ownerId) group.ownerId = ownerId;
     this.groups.unshift(group);
     this.saveGroups();
     this.emit({ type: "group", groupId: group.id });
@@ -758,19 +762,19 @@ export class Store {
     const bot: BotRecord = {
       id: newId(),
       threadId: newId(),
-      ...(profile.ownerId ? { ownerId: profile.ownerId } : {}),
       name,
       title: profile.title ?? "",
       description: profile.description ?? "",
       notifications: true,
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
-      ...(profile.character ? { character: profile.character } : {}),
-      ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},
       createdAt: Date.now(),
     };
+    if (profile.ownerId) bot.ownerId = profile.ownerId;
+    if (profile.character) bot.character = profile.character;
+    if (profile.mascotExpression) bot.mascotExpression = profile.mascotExpression;
     bot.tasks = [{ threadId: bot.threadId, title: UNTITLED_TASK, createdAt: bot.createdAt, resumeCursors: {} }];
     this.bots.unshift(bot);
     this.saveBots();
@@ -852,7 +856,7 @@ export class Store {
     return changed;
   }
 
-  setResumeCursor(botId: string, instanceId: string, cursor: unknown, threadId?: string) {
+  setResumeCursor(botId: string, instanceId: string, cursor: string, threadId?: string) {
     const bot = this.bot(botId);
     if (!bot) return;
     // the cursor belongs to the task that produced it, not to the bot
@@ -886,11 +890,11 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task) return null;
     const prev: TaskUsage = { input: 0, output: 0, costUsd: null, turns: 0, ...task.usage };
-    const cost = typeof turn.costUsd === "number" && Number.isFinite(turn.costUsd) ? turn.costUsd : null;
-    const prevCost = typeof prev.costUsd === "number" ? prev.costUsd : null;
+    const cost = turn.costUsd !== null && Number.isFinite(turn.costUsd) ? turn.costUsd : null;
+    const prevCost = prev.costUsd !== null ? prev.costUsd : null;
     // providers occasionally report NaN or a negative on a partial turn —
     // never let that poison a running tally
-    const clean = (n: number | undefined) => (typeof n === "number" && Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0);
+    const clean = (n: number | undefined) => (n !== undefined && Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0);
     task.usage = {
       input: prev.input + clean(turn.input),
       output: prev.output + clean(turn.output),

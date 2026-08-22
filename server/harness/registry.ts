@@ -5,6 +5,7 @@
 // compatible — do not remove it); dispose tears an instance down without
 // touching its siblings.
 import { findCliCandidates } from "../env-path.ts";
+import type { JsonObject } from "../schema.ts";
 import type {
   AnyProviderDriver,
   InstanceConfigMap,
@@ -27,13 +28,17 @@ export type RegistryEntry =
   | { instanceId: InstanceId; live: ProviderInstance; shadow?: undefined }
   | { instanceId: InstanceId; live?: undefined; shadow: ShadowInstance };
 
+/** True only for primitive strings — what JSON decoding yields for text fields. */
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
 /** The `cli` field off a driver's default config, when it has one — the
  * placeholder an override input shows when nothing is set. */
 function cliDefaultOf(driver: AnyProviderDriver | undefined): string | undefined {
   if (!driver) return undefined;
   try {
+    // SAFETY: defaultConfig returns the driver's own config shape; only its optional `cli` field is read here
     const cfg = driver.defaultConfig() as { cli?: unknown };
-    return typeof cfg?.cli === "string" ? cfg.cli : undefined;
+    return isText(cfg?.cli) ? cfg.cli : undefined;
   } catch {
     return undefined;
   }
@@ -41,9 +46,11 @@ function cliDefaultOf(driver: AnyProviderDriver | undefined): string | undefined
 
 /** Raw `config.cli` straight from disk — shadow snapshots can't decode, so
  * this is the only faithful way to echo back what was configured. */
-function cliOfRaw(raw: unknown): string | undefined {
-  const cli = (raw as { cli?: unknown } | undefined)?.cli;
-  return typeof cli === "string" && cli ? cli : undefined;
+function cliOfRaw(entry: { config?: unknown }): string | undefined {
+  // SAFETY: config is decoded JSON from config.json; only a record can carry a cli field
+  const record = entry.config as JsonObject | undefined;
+  const cli = record?.cli;
+  return isText(cli) && cli ? cli : undefined;
 }
 
 export class ProviderRegistry {
@@ -67,7 +74,7 @@ export class ProviderRegistry {
             instanceId,
             driverKind: entry.driver,
             displayName: entry.displayName,
-            cli: cliOfRaw(entry.config),
+            cli: cliOfRaw(entry),
             shadow: true,
             reason: `unknown driver "${entry.driver}" — kept as configured, unavailable here`,
           },
@@ -79,7 +86,7 @@ export class ProviderRegistry {
         // Override detection is on the RAW config, never the decoded one:
         // decodeConfig fills in the driver default ("claude", "codex", …),
         // so reading `cli` there would flag every instance as overridden.
-        const rawCli = cliOfRaw(entry.config);
+        const rawCli = cliOfRaw(entry);
         if (rawCli) this.cliByInstance.set(instanceId, rawCli);
         const live = await driver.create({
           instanceId,
@@ -96,7 +103,7 @@ export class ProviderRegistry {
             instanceId,
             driverKind: entry.driver,
             displayName: entry.displayName ?? driver.metadata.displayName,
-            cli: cliOfRaw(entry.config),
+            cli: cliOfRaw(entry),
             shadow: true,
             reason: e instanceof Error ? e.message : String(e),
           },

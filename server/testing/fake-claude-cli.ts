@@ -27,7 +27,28 @@ const argAfter = (flag: string): string | null => {
   return i === -1 ? null : (argv[i + 1] ?? null);
 };
 
-const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
+/** A stream-json frame: one JSON line of the CLI's stdout protocol. */
+interface StreamJsonFrame {
+  type: string;
+  subtype?: string;
+  session_id?: string;
+  model?: string;
+  parent_tool_use_id?: string;
+  event?: {
+    type: string;
+    delta?: { type?: string; thinking?: string; text?: string };
+  };
+  message?: {
+    content?: Array<{ type: string; text?: string; id?: string; name?: string; is_error?: boolean; tool_use_id?: string }>;
+    usage?: Record<string, number>;
+  };
+  is_error?: boolean;
+  stop_reason?: string;
+  total_cost_usd?: number;
+  usage?: Record<string, number>;
+}
+
+const out = (frame: StreamJsonFrame) => process.stdout.write(JSON.stringify(frame) + "\n");
 
 // Snapshot probes: both answer on argv alone and exit without reading stdin.
 if (argv[0] === "--version") {
@@ -65,7 +86,7 @@ process.stdin.on("end", () => {
 
   if (process.env.FAKE_CLAUDE_DUMP) {
     const configPath = argAfter("--mcp-config");
-    let mcpConfig: unknown = null;
+    let mcpConfig = null;
     if (configPath) {
       try {
         mcpConfig = JSON.parse(readFileSync(configPath, "utf8"));
@@ -98,7 +119,8 @@ process.stdin.on("end", () => {
   }
 
   if (mode === "stream") {
-    const delta = (d: unknown) => out({ type: "stream_event", event: { type: "content_block_delta", delta: d } });
+    const delta = (d: NonNullable<NonNullable<StreamJsonFrame["event"]>["delta"]>) =>
+      out({ type: "stream_event", event: { type: "content_block_delta", delta: d } });
     delta({ type: "thinking_delta", thinking: "hmm" });
     delta({ type: "text_delta", text: "hello from " });
     delta({ type: "text_delta", text: "fake claude" });

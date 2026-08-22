@@ -7,9 +7,17 @@ import { isAbsolute, resolve } from "node:path";
 
 export type CwdValidation = { ok: true; cwd: string | null } | { ok: false; error: string };
 
-export function validateBotCwd(input: unknown): CwdValidation {
+/** Any value a JSON request field can carry over the wire. */
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+/** The boundary where an unparsed wire value becomes a path string. */
+function isText(value: JsonValue): value is string {
+  return Object.prototype.toString.call(value) === "[object String]";
+}
+
+export function validateBotCwd(input: JsonValue): CwdValidation {
   if (input === null) return { ok: true, cwd: null };
-  if (typeof input !== "string") return { ok: false, error: "working folder must be a path" };
+  if (!isText(input)) return { ok: false, error: "working folder must be a path" };
   const trimmed = input.trim();
   if (!trimmed) return { ok: true, cwd: null };
   const expanded = trimmed === "~" || trimmed.startsWith("~/") ? homedir() + trimmed.slice(1) : trimmed;

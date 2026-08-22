@@ -15,8 +15,26 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-const line = (o: unknown) => JSON.stringify(o) + "\n";
-const runtime = (event: Record<string, unknown>) => ({ provider: "test", threadId: "t1", ...event });
+/** One NDJSON record as this suite writes it: runtime events and native
+ * inspector lines share the log format but carry disjoint fields. */
+interface TestLogRecord {
+  eventId?: string;
+  type?: string;
+  createdAt?: string;
+  provider?: string;
+  threadId?: string;
+  streamKind?: string;
+  delta?: string;
+  text?: string;
+  ok?: boolean;
+  at?: string;
+  dir?: string;
+  source?: string;
+  msg?: { type?: string } | Record<string, never>;
+}
+
+const line = (record: TestLogRecord | null) => JSON.stringify(record) + "\n";
+const runtime = (event: TestLogRecord) => ({ provider: "test", threadId: "t1", ...event });
 
 describe("readThreadEvents", () => {
   it("returns an empty page when neither log exists", () => {
@@ -61,6 +79,8 @@ describe("readThreadEvents", () => {
     }
     writeFileSync(join(eventsDir, "t1.ndjson"), body);
     const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1", limit: 3 });
+    // SAFETY: entry.data preserves the original record whole, and every
+    // runtime line this suite wrote carries an eventId.
     expect(page.entries.map((e) => (e.data as { eventId: string }).eventId)).toEqual(["e7", "e8", "e9"]);
     expect(page.total.runtime).toBe(10);
   });
@@ -92,6 +112,8 @@ describe("readThreadEvents", () => {
     );
     writeFileSync(join(nativeDir, "t1.ndjson"), line(null) + line({ at: "2", dir: "in", source: "claude", msg: {} }));
     const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
+    // SAFETY: entry.data preserves the original record whole; only the valid
+    // runtime line carries an eventId, and native lines never do.
     expect(page.entries.map((entry) => [entry.kind, (entry.data as { eventId?: string }).eventId])).toEqual([
       ["runtime", "valid"],
       ["native", undefined],
@@ -107,6 +129,8 @@ describe("readThreadEvents", () => {
     ).join("");
     writeFileSync(join(eventsDir, "t1.ndjson"), body + "{broken}\n");
     const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1", limit: 3 });
+    // SAFETY: entry.data preserves the original record whole, and every
+    // runtime line this suite wrote carries an eventId.
     expect(page.entries.map((e) => (e.data as { eventId: string }).eventId)).toEqual(["e17", "e18", "e19"]);
     expect(page.total.runtime).toBe(21);
   });
@@ -129,7 +153,11 @@ describe("readThreadEvents", () => {
     appendFileSync(file, line(runtime({ eventId: "latest", createdAt: "2", type: "turn.started" })));
     const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1", limit: 2 });
     expect(page.total.runtime).toBe(2);
+    // SAFETY: entry.data preserves the original record whole — both appended
+    // runtime lines carry an eventId, and the first also carries `text`.
     expect(page.entries.map((entry) => (entry.data as { eventId: string }).eventId)).toEqual(["large", "latest"]);
+    // SAFETY: the "large" record was written with a 40k-char mouse string;
+    // entry.data preserves it whole, reassembled across read chunks.
     expect((page.entries[0]!.data as { text: string }).text.startsWith("🐭🐭")).toBe(true);
   });
 

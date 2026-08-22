@@ -26,6 +26,8 @@ import { createAcpDriver, type AcpSupport } from "./core.ts";
 // back to whatever the CLI advertises so a new method id still works.
 const AUTH_PREFERENCE = ["gemini-api-key", "oauth-personal", "vertex-ai"];
 
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
 const support: AcpSupport = {
   driverKind: "geminiAgent",
   displayName: "Gemini",
@@ -44,7 +46,7 @@ const support: AcpSupport = {
   credentialEnv: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
 
   pickAuthMethod: (methods) => {
-    const ids = methods.map((m) => m.id).filter((id): id is string => typeof id === "string");
+    const ids = methods.map((m) => m.id).filter(isText);
     for (const pref of AUTH_PREFERENCE) if (ids.includes(pref)) return pref;
     return ids[0] ?? null;
   },

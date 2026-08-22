@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { JsonValue } from "./schema.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -24,7 +25,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 let child: ChildProcess;
 let home: string;
 
-const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+const api = async (method: string, path: string, body?: JsonValue): Promise<{ status: number; body: any }> => {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: body ? { "content-type": "application/json" } : undefined,

@@ -121,6 +121,8 @@ describe("tasks", () => {
     store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Plan the offsite" });
     // simulate a record saved before tasks existed
     const legacy = store.bot(bot.id)!;
+    // SAFETY: BotRecord always carries tasks today; deleting it reproduces
+    // the pre-tasks on-disk shape that migration must adopt.
     delete (legacy as { tasks?: unknown }).tasks;
     // patchBot persists, so what lands on disk is the pre-tasks shape
     store.patchBot(bot.id, { resumeCursors: { claude: "old-session" } });

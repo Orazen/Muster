@@ -4,13 +4,21 @@
 
 import type { BotRecord, GroupRecord, Message, Store } from "./store.ts";
 
+/** One SSE chat-frame payload: what the server fans out to every open
+ * event stream when the store changes. */
+type BroadcastFrame = {
+  kind: "message" | "group" | "thread" | "bot" | "bot.deleted";
+  threadId?: string;
+  message?: Message;
+};
+
 /** What a peer-exchange helper needs from the outside world:
  * the store (for persisted messages + groups) and the SSE broadcasters
  * so chat clients see the change without waiting for a refresh. */
 export interface CommsBus {
   store: Store;
   /** SSE broadcast (kind: "message" envelope). */
-  broadcast: (payload: Record<string, unknown>) => void;
+  broadcast: (payload: BroadcastFrame) => void;
   /** SSE broadcast (kind: "group" envelope) for a single group. */
 }
 

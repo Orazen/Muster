@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
+import type { JsonValue } from "./schema.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
@@ -29,7 +30,7 @@ let home: string;
 let staticDir: string;
 let stderr = "";
 
-const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+const api = async (method: string, path: string, body?: JsonValue): Promise<{ status: number; body: any }> => {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: body ? { "content-type": "application/json" } : undefined,
@@ -112,21 +113,23 @@ beforeAll(async () => {
     res.end(JSON.stringify(ok ? { ok: true, boxes: [] } : { ok: false, code: "unauthorized" }));
   });
   await new Promise<void>((r) => boxStub.listen(0, "127.0.0.1", r));
+  // SAFETY: the stub listens on the loopback wildcard with port 0, so the OS assigned an AddressInfo port.
   boxStubPort = (boxStub.address() as { port: number }).port;
 
+  const childEnv: NodeJS.ProcessEnv = {
+    HOME: home,
+    USERPROFILE: home,
+    OMB_PORT: String(PORT),
+    OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
+    OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
+    OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
+    OMB_STATIC_DIR: staticDir,
+  };
+  if (process.env.PATH) childEnv.PATH = process.env.PATH;
+  if (process.env.SystemRoot) childEnv.SystemRoot = process.env.SystemRoot;
   child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: ROOT,
-    env: {
-      ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-      ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      HOME: home,
-      USERPROFILE: home,
-      OMB_PORT: String(PORT),
-      OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
-      OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
-      OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
-      OMB_STATIC_DIR: staticDir,
-    },
+    env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stderr!.on("data", (c) => (stderr += c));
@@ -167,7 +170,7 @@ describe("harness HTTP API", () => {
     const { status, body } = await api("GET", "/api/health");
     expect(status).toBe(200);
     expect(body.app).toBe("muster");
-    expect(typeof body.pid).toBe("number");
+    expect(body.pid).toBeTypeOf("number");
     expect(body.static).toBe(true);
   });
 
@@ -665,6 +668,7 @@ describe("harness HTTP API", () => {
     });
     const first = await deliver();
     expect(first.status).toBe(202);
+    // SAFETY: webhook acceptance responses are the server's { runId, accepted, duplicate } envelope.
     const accepted = await first.json() as { runId: string; accepted: boolean; duplicate: boolean };
     expect(accepted).toMatchObject({ accepted: true, duplicate: false });
     const retry = await deliver();
@@ -990,6 +994,7 @@ describe("message pages", () => {
     const before = (await api("GET", "/api/bots")).body.bots.length;
     const res = await fetch(`${BASE}/api/threads/not-a-thread/messages/not-a-message/image`);
     expect(res.status).toBe(404);
+    // SAFETY: API problem responses are always a JSON envelope with an `error` string.
     expect(((await res.json()) as { error: string }).error).toBe("no such conversation");
     // and the phantom thread is not now answerable as an empty conversation
     expect((await api("GET", "/api/threads/not-a-thread/messages")).status).toBe(404);

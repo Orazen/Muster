@@ -72,7 +72,7 @@ describe("what it may not", () => {
       ["DELETE", "/api/connectors/gmail"],
       ["GET", "/api/routines"],
       ["POST", "/api/teams/import"],
-    ] as Array<[string, string]>) {
+    ]) {
       const denial = ask(method, path);
       expect(denial?.status, `${method} ${path}`).toBe(403);
       expect(denial?.error, `${method} ${path}`).toMatch(/on your computer/);

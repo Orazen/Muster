@@ -137,7 +137,9 @@ env_key = "UNSLOTH_STUDIO_AUTH_TOKEN"
       { HOME: ignored, CODEX_HOME: codexHome, UNSLOTH_STUDIO_AUTH_TOKEN: "sk-test" },
       async (url, init) => {
         expect(String(url)).toBe("http://127.0.0.1:8888/v1/models");
-        expect((init as RequestInit | undefined)?.headers).toMatchObject({ Authorization: "Bearer sk-test" });
+        // SAFETY: fetchImpl is typed as typeof fetch, so init is RequestInit
+        // | undefined by construction — no runtime parsing can change that.
+        expect(init?.headers).toMatchObject({ Authorization: "Bearer sk-test" });
         return new Response(JSON.stringify({ data: [{ id: "unsloth/extra-live" }, { id: "bad id" }] }), { status: 200 });
       },
     );

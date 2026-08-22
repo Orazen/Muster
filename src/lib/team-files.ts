@@ -7,7 +7,13 @@ interface ExportedTeam {
   };
 }
 
-function downloadManifest(manifest: ExportedTeam): { name: string; members: number } {
+/** What a completed team export reports back to the caller. */
+interface TeamExportSummary {
+  name: string;
+  members: number;
+}
+
+function downloadManifest(manifest: ExportedTeam): TeamExportSummary {
   const slug =
     manifest.team.name
       .trim()
@@ -29,7 +35,9 @@ function downloadManifest(manifest: ExportedTeam): { name: string; members: numb
 }
 
 /** Export every active sidebar bot in one click. The server excludes hidden bots. */
-export async function downloadAllBots(): Promise<{ name: string; members: number }> {
+export async function downloadAllBots(): Promise<TeamExportSummary> {
+  // SAFETY: /api/teams/export returns this server's team manifest shape;
+  // only team.name and team.members.length are read below.
   const manifest = (await api("/api/teams/export", {
     method: "POST",
     body: "{}",

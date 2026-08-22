@@ -64,6 +64,8 @@ describe("opensandbox config wiring", () => {
 
   it("refuses to create a sandbox with no key configured, without ever calling the SDK", async () => {
     delete process.env.OPEN_SANDBOX_API_KEY;
+    // SAFETY: the no-key gate reads only the opensandbox section of the
+    // app config and throws before any other section is touched.
     await expect(createSandbox({} as AppConfig)).rejects.toThrow(/no OpenSandbox API key/);
   });
 });
@@ -77,6 +79,10 @@ describe("opensandbox runCommand — matches server/box.ts's runCommand() shape 
     logs: { stdout: Array<{ text: string; timestamp: number }>; stderr: Array<{ text: string; timestamp: number }> };
     exitCode?: number | null;
   }) {
+    // SAFETY: the SDK's Sandbox class has a private constructor, so no
+    // test value can satisfy it structurally; runCommand() only touches
+    // commands.run, supplied here.
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
     return {
       commands: {
         run: async () => execution,

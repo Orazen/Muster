@@ -13,6 +13,7 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
+import type { JsonValue } from "../schema.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "grok";
@@ -33,11 +34,16 @@ export interface GrokConfig {
   apiKeyEnv: string;
 }
 
-function decodeConfig(raw: unknown): GrokConfig {
-  const o = (raw ?? {}) as Record<string, unknown>;
+/** Wire text fields decode as primitive strings and nothing else. */
+const isText = (v: JsonValue): v is string => Object.is(String(v), v);
+
+function decodeConfig(raw: JsonValue | undefined): GrokConfig {
+  // Non-object configs (null, arrays, primitives) fall back to every default,
+  // matching the previous `raw ?? {}` handling field by field.
+  const o = raw instanceof Object && !Array.isArray(raw) ? raw : {};
   return {
-    url: typeof o.url === "string" ? o.url : DEFAULT_URL,
-    apiKeyEnv: typeof o.apiKeyEnv === "string" ? o.apiKeyEnv : "XAI_API_KEY",
+    url: isText(o.url) ? o.url : DEFAULT_URL,
+    apiKeyEnv: isText(o.apiKeyEnv) ? o.apiKeyEnv : "XAI_API_KEY",
   };
 }
 
@@ -56,7 +62,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
     const active = new Map<string, { abort: AbortController; turnId: string }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of listeners) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -165,9 +171,12 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
         } catch (e) {
           active.delete(threadId);
-          const aborted = (e as Error).name === "AbortError";
+          // SAFETY: abort and fetch failures both surface as Error instances;
+          // anything else is normalized so the event still carries a message.
+          const error = e instanceof Error ? e : new Error(String(e));
+          const aborted = error.name === "AbortError";
           if (!aborted) {
-            emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
+            emit({ ...base(threadId, turnId), type: "runtime.error", message: error.message });
           }
           emit({
             ...base(threadId, turnId),

@@ -12,6 +12,7 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
+import type { JsonObject, JsonValue } from "../schema.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "anthropic";
@@ -32,11 +33,18 @@ export interface AnthropicConfig {
   apiKeyEnv: string;
 }
 
-function decodeConfig(raw: unknown): AnthropicConfig {
-  const o = (raw ?? {}) as Record<string, unknown>;
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
+/** A config record, or null for every other wire shape (scalars, arrays). */
+function jsonRecordOf(value: JsonValue | undefined): JsonObject | null {
+  return value instanceof Object && !Array.isArray(value) ? value : null;
+}
+
+function decodeConfig(raw: JsonValue | undefined): AnthropicConfig {
+  const o = jsonRecordOf(raw) ?? {};
   return {
-    url: typeof o.url === "string" ? o.url : DEFAULT_URL,
-    apiKeyEnv: typeof o.apiKeyEnv === "string" ? o.apiKeyEnv : "ANTHROPIC_API_KEY",
+    url: isText(o.url) ? o.url : DEFAULT_URL,
+    apiKeyEnv: isText(o.apiKeyEnv) ? o.apiKeyEnv : "ANTHROPIC_API_KEY",
   };
 }
 
@@ -54,7 +62,7 @@ export const AnthropicDriver: ProviderDriver<AnthropicConfig> = {
     const active = new Map<string, { abort: AbortController; turnId: string }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of listeners) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -80,7 +88,9 @@ export const AnthropicDriver: ProviderDriver<AnthropicConfig> = {
         body: JSON.stringify({
           model,
           max_tokens: 8192,
-          ...(system ? { system } : {}),
+          // an absent system reads the same on the wire as an omitted key:
+          // JSON.stringify drops undefined-valued fields
+          system,
           messages,
           stream: opts.stream,
         }),
@@ -127,7 +137,7 @@ export const AnthropicDriver: ProviderDriver<AnthropicConfig> = {
             continue;
           }
           if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta") {
-            const delta = chunk.delta.text as string;
+            const delta = chunk.delta.text;
             text += delta;
             opts.onDelta?.(delta);
           } else if (chunk.type === "message_start" && chunk.message?.usage) {
@@ -185,9 +195,10 @@ export const AnthropicDriver: ProviderDriver<AnthropicConfig> = {
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
         } catch (e) {
           active.delete(threadId);
-          const aborted = (e as Error).name === "AbortError";
+          const aborted = e instanceof Error && e.name === "AbortError";
           if (!aborted) {
-            emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
+            const message = e instanceof Error ? e.message : String(e);
+            emit({ ...base(threadId, turnId), type: "runtime.error", message });
           }
           emit({
             ...base(threadId, turnId),

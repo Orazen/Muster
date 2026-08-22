@@ -24,6 +24,8 @@ import { cn } from "@/lib/cn";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutineEditor } from "./RoutinesPage";
 
+const isText = <T,>(value: T): value is T & string => String(value) === value;
+
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, { headers: { "content-type": "application/json" }, ...init });
   const body = await res.json().catch(() => ({}));
@@ -249,7 +251,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       vmInFlight.current = true;
       try {
         const { image } = await api("/api/local-computer/screenshot", { method: "POST" });
-        if (alive && typeof image === "string") setVmFrame(image);
+        if (alive && isText(image)) setVmFrame(image);
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : String(e));
       } finally {

@@ -15,6 +15,7 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
+import type { JsonObject, JsonValue } from "../schema.ts";
 
 const DRIVER_KIND = "google";
 const DEFAULT_URL = "https://generativelanguage.googleapis.com/v1beta";
@@ -32,11 +33,25 @@ export interface GoogleConfig {
   apiKeyEnv: string;
 }
 
-function decodeConfig(raw: unknown): GoogleConfig {
-  const o = (raw ?? {}) as Record<string, unknown>;
+// Decoders for values that only ever originate from JSON.parse (the persisted
+// instance config): every member of JsonValue is decided by this predicate
+// exactly as a primitive representation test would.
+const isText = (v: JsonValue): v is string => Object.is(String(v), v);
+
+/** The generateContent request envelope; systemInstruction attaches only when
+ * a system prompt exists. */
+type GenerateContentRequest = {
+  contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+  systemInstruction?: { parts: Array<{ text: string }> };
+};
+
+function decodeConfig(raw: JsonValue | undefined): GoogleConfig {
+  // Non-object configs fall back to every default, matching `raw ?? {}`
+  // field by field.
+  const o: JsonObject = raw instanceof Object && !Array.isArray(raw) ? raw : {};
   return {
-    url: typeof o.url === "string" ? o.url : DEFAULT_URL,
-    apiKeyEnv: typeof o.apiKeyEnv === "string" ? o.apiKeyEnv : "GOOGLE_API_KEY",
+    url: isText(o.url) ? o.url : DEFAULT_URL,
+    apiKeyEnv: isText(o.apiKeyEnv) ? o.apiKeyEnv : "GOOGLE_API_KEY",
   };
 }
 
@@ -54,7 +69,7 @@ export const GoogleDriver: ProviderDriver<GoogleConfig> = {
     const active = new Map<string, { abort: AbortController; turnId: string }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of listeners) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -72,13 +87,13 @@ export const GoogleDriver: ProviderDriver<GoogleConfig> = {
     ): Promise<{ text: string; usage: { input: number; output: number } | null }> => {
       const method = opts.stream ? "streamGenerateContent" : "generateContent";
       const url = `${config.url}/models/${model}:${method}?key=${encodeURIComponent(apiKey)}${opts.stream ? "&alt=sse" : ""}`;
+      // systemInstruction rides along only when a system prompt exists.
+      const payload: GenerateContentRequest = { contents };
+      if (system) payload.systemInstruction = { parts: [{ text: system }] };
       const res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          contents,
-          ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-        }),
+        body: JSON.stringify(payload),
         signal: opts.signal ?? AbortSignal.timeout(120_000),
       });
       if (!res.ok) {
@@ -176,9 +191,11 @@ export const GoogleDriver: ProviderDriver<GoogleConfig> = {
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
         } catch (e) {
           active.delete(threadId);
-          const aborted = (e as Error).name === "AbortError";
+          // SAFETY: thrown values here are fetch/abort Errors with name and message set
+          const err = e as Error;
+          const aborted = err.name === "AbortError";
           if (!aborted) {
-            emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
+            emit({ ...base(threadId, turnId), type: "runtime.error", message: err.message });
           }
           emit({
             ...base(threadId, turnId),

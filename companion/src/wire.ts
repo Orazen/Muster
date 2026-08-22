@@ -11,15 +11,28 @@
 // sidecar to depend on someone else's API: assume nothing, and be correct
 // either way.
 
+type JsonAtom = string | number | boolean | null;
+/** A decoded JSON record — what JSON.parse yields for `{…}` payloads. */
+interface JsonRecord {
+  [key: string]: Json;
+}
+type Json = JsonAtom | JsonRecord | Json[];
+
 /** Recursively drop `resumeCursors`, wherever it appears. */
 export function scrub<T>(value: T): T {
-  if (Array.isArray(value)) return value.map(scrub) as unknown as T;
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+  if (Array.isArray(value)) {
+    const mapped: unknown = value.map((item) => scrub(item));
+    // SAFETY: mapping preserves length and order, so the scrubbed array keeps the caller's array type
+    return mapped as T;
+  }
+  if (value && value instanceof Object) {
+    const out: JsonRecord = {};
+    // SAFETY: value is narrowed to a non-array object; its entries are the record's own enumerable properties
+    for (const [key, inner] of Object.entries(value as JsonRecord)) {
       if (key === "resumeCursors") continue;
       out[key] = scrub(inner);
     }
+    // SAFETY: every key except resumeCursors is copied, so the record keeps the caller's object shape
     return out as T;
   }
   return value;

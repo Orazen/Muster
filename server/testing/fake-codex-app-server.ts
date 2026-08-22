@@ -9,6 +9,9 @@
 //   FAKE_CODEX_DUMP   path to write {argv, env, calls, decision} as JSON
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
+/** JSON-shaped values only; everything here reads or writes JSON messages. */
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
 import { writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
@@ -26,10 +29,10 @@ if (process.argv[2] === "login" && process.argv[3] === "status") {
   process.exit(0);
 }
 const calls: Array<{ method: string; params: unknown }> = [];
-let decision: unknown = null;
+let decision: JsonValue | null = null;
 
-const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
-const notify = (method: string, params: unknown) => out({ jsonrpc: "2.0", method, params });
+const out = (obj: JsonValue) => process.stdout.write(JSON.stringify(obj) + "\n");
+const notify = (method: string, params: JsonValue) => out({ jsonrpc: "2.0", method, params });
 
 const dump = () => {
   if (process.env.FAKE_CODEX_DUMP) {

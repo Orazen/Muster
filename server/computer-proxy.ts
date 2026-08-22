@@ -26,6 +26,8 @@
 //     type, Enter) in one round trip with one frame at the end.
 //
 // stdout is the MCP channel — never console.log here.
+import { z } from "zod";
+import { parseJson, type JsonObject, type JsonValue } from "./schema.ts";
 import {
   normalizeBrowserUrl,
   normalizeCrop,
@@ -42,6 +44,7 @@ import {
   REMOTE_CUA_SOCKET,
   REMOTE_CUA_VERSION,
   semanticBrowserCommand,
+  type SemanticBrowserInput,
 } from "./remote-computer.ts";
 
 const BOX_API = process.env.OGB_BOX_API ?? "https://ascii.dev/api/box/v1";
@@ -371,9 +374,9 @@ async function fetchFrameBox(expectedBytes?: number): Promise<string | null> {
       { headers: auth, signal: AbortSignal.timeout(30_000) },
     );
     const body: any = await res.json().catch(() => null);
-    const content = body?.content;
-    if (!res.ok || typeof content !== "string" || !content) return null;
-    return wholeImage(Buffer.from(content, "base64"), expectedBytes) ? content : null;
+    const content = z.string().min(1).safeParse(body?.content);
+    if (!res.ok || !content.success) return null;
+    return wholeImage(Buffer.from(content.data, "base64"), expectedBytes) ? content.data : null;
   } catch {
     return null;
   }
@@ -405,14 +408,18 @@ function geometryFrom(stdout: string): Frame["geometry"] {
   return width > 0 && height > 0 ? { width, height } : null;
 }
 
+const isJsonObject = (value: JsonValue): value is JsonObject => value instanceof Object && !Array.isArray(value);
+const nonEmptyString = z.string().min(1);
+
 function automationSummary(stdout: string): string {
   if (/^BACKEND CUA$/m.test(stdout)) {
     const encoded = stdout.match(/^CUA_RESULT\s+([^\s]+)$/m)?.[1];
     if (!encoded) return `Cua Driver ${REMOTE_CUA_VERSION}`;
     try {
-      const result = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as Record<string, unknown>;
+      const result = parseJson(Buffer.from(encoded, "base64").toString("utf8"));
+      if (!isJsonObject(result)) return `Cua Driver ${REMOTE_CUA_VERSION}`;
       const details = [result.effect, result.route, result.escalation]
-        .filter((value): value is string => typeof value === "string" && Boolean(value))
+        .filter((value) => nonEmptyString.safeParse(value).success)
         .slice(0, 3);
       return [`Cua Driver ${REMOTE_CUA_VERSION}`, ...details].join(" · ");
     } catch {
@@ -464,17 +471,25 @@ async function frameFrom(out: RunOut): Promise<Frame | null> {
   return { data: fetched, mime: "image/jpeg", hash, geometry };
 }
 
-const send = (obj: unknown): void => {
+/** JSON-RPC request id: echoed verbatim into the response. */
+type RequestId = string | number;
+
+const send = (obj: {
+  jsonrpc: "2.0";
+  id: RequestId;
+  result?: unknown;
+  error?: { code: number; message: string };
+}): void => {
   process.stdout.write(JSON.stringify(obj) + "\n");
 };
-const text = (id: unknown, t: string, isError = false): void =>
+const text = (id: RequestId, t: string, isError = false): void =>
   send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: t }], isError: isError || undefined } });
 
 /** An action result: the text plus the frame the action produced. When
  * the pixels are byte-identical to the frame the model just saw, the
  * image is dropped — it already has it, and it costs ~1.2k tokens. */
 function observed(
-  id: unknown,
+  id: RequestId,
   note: string,
   frame: Frame | null,
   crop: CropRegion | null = null,
@@ -751,7 +766,7 @@ function actionShell(a: any): string | { error: string } {
 /** The whole point: one round trip carries geometry, the actions, the
  * settle, the capture and the frame bytes. */
 async function actAndObserve(
-  id: unknown,
+  id: RequestId,
   actions: any[],
   note: string,
   args: any,
@@ -760,7 +775,7 @@ async function actAndObserve(
   const parts: string[] = [];
   for (const a of actions) {
     const shell = actionShell(a);
-    if (typeof shell !== "string") return text(id, shell.error, true);
+    if (shell instanceof Object) return text(id, shell.error, true);
     // X11 needs a beat between steps — a click that focuses a field and
     // an immediate type will drop leading characters
     if (parts.length) parts.push(`sleep ${(ACTION_GAP_MS / 1000).toFixed(2)}`);
@@ -800,7 +815,7 @@ async function actAndObserve(
 }
 
 async function semanticActAndObserve(
-  id: unknown,
+  id: RequestId,
   action: "click" | "fill",
   ref: string,
   value: string | undefined,
@@ -810,11 +825,9 @@ async function semanticActAndObserve(
     return text(id, "that browser ref is stale or unknown — take a new browser_snapshot", true);
   }
   const observe = wantsFrame(args);
-  const semantic = semanticBrowserCommand(action, {
-    ref,
-    ...(action === "fill" ? { text: value ?? "" } : {}),
-    url: semanticBrowserUrl,
-  });
+  const semanticInput: SemanticBrowserInput = { ref, url: semanticBrowserUrl };
+  if (action === "fill") semanticInput.text = value ?? "";
+  const semantic = semanticBrowserCommand(action, semanticInput);
   const guarded = `if ${semantic}; then SEM=ok; else SEM=failed; fi`;
   const command = [
     ENV,
@@ -839,7 +852,7 @@ async function semanticActAndObserve(
   return observed(id, note, await frameFrom(out));
 }
 
-async function call(id: unknown, name: string, args: any) {
+async function call(id: RequestId, name: string, args: any) {
   if (name === "screenshot") {
     let crop: CropRegion | null = null;
     if (args.region !== undefined) {
@@ -881,8 +894,14 @@ async function call(id: unknown, name: string, args: any) {
       return text(id, "Semantic browser state is unavailable. Open Chrome with open_url, or use screenshot.", true);
     }
     try {
-      const snapshot = JSON.parse(out.stdout) as SemanticBrowserSnapshot;
-      if (!Array.isArray(snapshot.elements) || typeof snapshot.url !== "string") throw new Error("invalid snapshot");
+      // SAFETY: our own CDP helper emits this snapshot line; nothing about
+      // parseJson's return type is trusted until re-checked below.
+      const rawSnapshot = parseJson(out.stdout) as unknown;
+      // SAFETY: only url and the element list are relied on, and both are
+      // re-validated immediately after this assertion.
+      const snapshot = rawSnapshot as SemanticBrowserSnapshot;
+      if (!Array.isArray(snapshot.elements) || !nonEmptyString.safeParse(snapshot.url).success)
+        throw new Error("invalid snapshot");
       semanticBrowserUrl = snapshot.url;
       semanticBrowserRefs = new Set(snapshot.elements.map((element) => element.ref));
       observations.noteStructuredObservation();

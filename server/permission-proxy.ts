@@ -53,7 +53,15 @@ conn.on("data", (chunk) => {
   }
 });
 
-const send = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
+/** A JSON-RPC response frame on stdout — result or error, per the spec. */
+interface JsonRpcReply {
+  jsonrpc: "2.0";
+  id?: number | string;
+  result?: object;
+  error?: { code: number; message: string };
+}
+
+const send = (reply: JsonRpcReply) => process.stdout.write(JSON.stringify(reply) + "\n");
 
 const TOOLS = [
   {

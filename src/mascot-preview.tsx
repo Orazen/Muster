@@ -121,6 +121,7 @@ function Tuner({
   setForward: (v: boolean) => void;
 }) {
   const handle = useRef<AgentAvatarHandle>(null);
+  // SAFETY: DEFAULTS defines a value for every Tuning key, so its key set is exactly keyof Tuning.
   const changed = (Object.keys(DEFAULTS) as (keyof Tuning)[]).filter(
     (k) => tuning[k] !== DEFAULTS[k],
   );

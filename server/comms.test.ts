@@ -84,7 +84,22 @@ describe("comms e2e (fake ACP fleet)", () => {
   let home: string;
   let stderr = "";
 
-  const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+  const api = async (
+    method: string,
+    path: string,
+    body?: {
+      toBotId?: string;
+      message?: string;
+      hidden?: boolean;
+      name?: string;
+      modelSelection?: { instanceId: string; model: string };
+      text?: string;
+      approvePeerComms?: boolean;
+      requestId?: string;
+      behavior?: string;
+      xai?: { key: string };
+    },
+  ): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
       method,
       headers: body ? { "content-type": "application/json" } : undefined,

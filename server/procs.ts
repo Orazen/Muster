@@ -29,12 +29,13 @@ export function spawnCli(
   opts: SpawnOptions,
 ): ChildProcessByStdio<Writable, Readable, Readable> {
   const resolved = resolveCli(cli, args);
+  // SAFETY: opts always pipes all three stdio streams, so the child is the fully-stdio overload.
   const child = spawn(resolved.command, resolved.args, {
     ...opts,
     // posix: own process group so kill(-pid) reaps child MCP servers;
     // win32: taskkill /T does the reaping instead (see killCliTree)
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
-  }) as ChildProcessByStdio<Writable, Readable, Readable>; // callers always pipe all three
+  }) as ChildProcessByStdio<Writable, Readable, Readable>;
 
   // A write to a dying child's stdin fails differently per platform, and one
   // of the ways is fatal. On POSIX the kill is synchronous, the stream is
@@ -59,7 +60,7 @@ export function execCli(
 ): void {
   const resolved = resolveCli(cli, args);
   execFile(resolved.command, resolved.args, { ...opts, windowsHide: true }, (err, stdout) =>
-    cb(err, typeof stdout === "string" ? stdout : String(stdout)),
+    cb(err, String(stdout)),
   );
 }
 

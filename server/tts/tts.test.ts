@@ -5,12 +5,13 @@ import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "../config.ts";
+import type { JsonValue } from "../schema.ts";
 
 let server: Server;
 /** every request the stub saw, so tests can assert on what we sent */
 const seen: Array<{ method: string; url: string; headers: Record<string, string>; body: string }> = [];
 /** flipped by tests that want ElevenLabs to refuse */
-let refuse: { status: number; body: unknown } | null = null;
+let refuse: { status: number; body: JsonValue } | null = null;
 
 const MP3 = Buffer.from([0xff, 0xfb, 0x90, 0x00, 0x11, 0x22, 0x33, 0x44]);
 
@@ -22,10 +23,12 @@ beforeAll(async () => {
       seen.push({
         method: req.method ?? "",
         url: req.url ?? "",
+        // SAFETY: the stub only re-reads header names it set itself; every
+        // value it asserts on is a single string.
         headers: req.headers as Record<string, string>,
         body,
       });
-      const send = (status: number, payload: unknown) => {
+      const send = (status: number, payload: JsonValue) => {
         res.writeHead(status, { "content-type": "application/json" });
         res.end(JSON.stringify(payload));
       };
@@ -48,6 +51,7 @@ beforeAll(async () => {
     });
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  // SAFETY: listening on an OS-assigned port makes the address an AddressInfo.
   const port = (server.address() as { port: number }).port;
   process.env.OMB_ELEVENLABS_API = `http://127.0.0.1:${port}/v1`;
 });

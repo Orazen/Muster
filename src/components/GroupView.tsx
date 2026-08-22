@@ -49,11 +49,13 @@ function dayLabel(at: number): string {
 
 /** 16px agent + name, shown once per sender cluster. */
 function ClusterLabel({ bot, name, color }: { bot?: Bot; name: string; color: string }) {
+  // SAFETY: the fallback comes from the same sender palette as Bot["color"]
+  const avatarColor = (bot?.color ?? color) as Bot["color"];
   return (
     <div className="mt-1 flex items-center gap-1.5 pl-0.5">
       <AgentAvatar
         character={bot?.character}
-        color={(bot?.color ?? color) as Bot["color"]}
+        color={avatarColor}
         state={normalizeState(bot?.mascotExpression) ?? "happy"}
         size={16}
         motion="none"
@@ -443,7 +445,9 @@ export function GroupView({ group }: { group: Group }) {
   };
 
   const isWin = window.ogb?.platform === "win32";
+  // SAFETY: WebkitAppRegion is Electron's non-standard drag style; it is absent from the DOM CSSProperties type
   const drag = isWin ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined;
+  // SAFETY: WebkitAppRegion is Electron's non-standard drag style; it is absent from the DOM CSSProperties type
   const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined;
 
   return (

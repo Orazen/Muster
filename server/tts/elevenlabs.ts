@@ -38,11 +38,13 @@ async function safeJson(res: Response): Promise<any> {
 
 /** Prefer ElevenLabs' own words over anything we can invent — it knows the
  * plan, the quota and the model name. Mirrors box.boxErrorMessage. */
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
 function message(status: number, what: string, body: any): string {
   const theirs =
-    (typeof body?.detail === "string" && body.detail.trim()) ||
-    (typeof body?.detail?.message === "string" && body.detail.message.trim()) ||
-    (typeof body?.message === "string" && body.message.trim()) ||
+    (isText(body?.detail) && body.detail.trim()) ||
+    (isText(body?.detail?.message) && body.detail.message.trim()) ||
+    (isText(body?.message) && body.message.trim()) ||
     "";
   if (status === 401 || status === 403) {
     // Restricted keys are the common case, not a corner: a key with the

@@ -8,7 +8,7 @@ export type NotifyFrame = Notification;
 /** Ask while handling the settings click. Browsers may reject permission
  * requests that are triggered later by an incoming SSE frame. */
 export function requestNotificationPermission(): Promise<NotificationPermission> | null {
-  if (typeof Notification === "undefined" || Notification.permission !== "default") return null;
+  if (!("Notification" in globalThis) || Notification.permission !== "default") return null;
   return Notification.requestPermission();
 }
 
@@ -16,7 +16,7 @@ export function requestNotificationPermission(): Promise<NotificationPermission>
  * the window you are looking at is noise, and the chat itself already shows
  * the card. */
 export function showNotification(frame: NotifyFrame, onOpen: (botId: string) => void) {
-  if (typeof Notification === "undefined") return;
+  if (!("Notification" in globalThis)) return;
   if (document.hasFocus()) return;
 
   const open = () => {

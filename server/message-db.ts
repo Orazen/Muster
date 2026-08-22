@@ -67,6 +67,7 @@ function db(): DatabaseSync {
   return handle;
 }
 
+// SAFETY: each messages row stores exactly one serialized Message in its json cell
 const rowToMessage = (row: { json: string }): Message => JSON.parse(row.json) as Message;
 
 export interface ThreadRows {
@@ -76,16 +77,24 @@ export interface ThreadRows {
 
 /** Read one thread, importing its legacy JSON file on first touch. */
 export function readThread(threadId: string, legacyFile: string): ThreadRows {
+  // SAFETY: the select lists only the json TEXT column of the messages table
   const rows = db()
     .prepare("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid")
     .all(threadId) as Array<{ json: string }>;
   if (rows.length) {
+    // SAFETY: thread_state rows carry a single active_leaf_id column
     const state = db()
       .prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?")
       .get(threadId) as { active_leaf_id: string | null } | undefined;
     return { messages: rows.map(rowToMessage), activeLeafId: state?.active_leaf_id ?? null };
   }
   return importLegacy(threadId, legacyFile);
+}
+
+/** Legacy JSON thread file: a flat Message array or a {messages, activeLeafId} wrapper. */
+interface LegacyThreadFile {
+  messages?: Message[];
+  activeLeafId?: string | null;
 }
 
 function importLegacy(threadId: string, legacyFile: string): ThreadRows {
@@ -97,10 +106,12 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
   } catch {
     return { messages, activeLeafId }; // fresh thread
   }
-  if (Array.isArray(raw)) messages = raw as Message[]; // pre-branching flat file
-  else if (raw && typeof raw === "object") {
-    messages = ((raw as { messages?: Message[] }).messages ?? []) as Message[];
-    activeLeafId = (raw as { activeLeafId?: string | null }).activeLeafId ?? null;
+  // SAFETY: legacy thread files are flat Message arrays or wrapped objects
+  const decoded = raw as LegacyThreadFile | Message[] | null | undefined;
+  if (Array.isArray(decoded)) messages = decoded; // pre-branching flat file
+  else if (decoded instanceof Object) {
+    messages = decoded.messages ?? [];
+    activeLeafId = decoded.activeLeafId ?? null;
   }
   const insert = db().prepare(
     "INSERT OR REPLACE INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -193,6 +204,7 @@ export function searchMessages(query: string, limit = 40): SearchHit[] {
   // text messages by their text; activity chips by the tool name — "which
   // bot ran that migration" is a tool-name question. The chip's name lives
   // in the row's json; a JSON1 extract keeps this one query.
+  // SAFETY: the SELECT aliases every column this mapping reads
   const rows = db()
     .prepare(
       "SELECT thread_id, id, at, role, kind, text, json_extract(json, '$.tool.name') AS tool_name, json_extract(json, '$.from.name') AS from_name FROM messages " +
@@ -221,7 +233,7 @@ export function searchMessages(query: string, limit = 40): SearchHit[] {
     // whitespace folding can shift the offset; find the match again inside
     const folded = needle.replace(/\s+/g, " ");
     const matchStart = snippet.toLowerCase().indexOf(folded);
-    return {
+    const hit: SearchHit = {
       threadId: row.thread_id,
       messageId: row.id,
       at: row.at,
@@ -231,8 +243,9 @@ export function searchMessages(query: string, limit = 40): SearchHit[] {
       matchStart: matchStart < 0 ? head.length : matchStart,
       // A defensive fallback must not mark arbitrary snippet text as the hit.
       matchLength: matchStart < 0 ? 0 : folded.length,
-      ...(row.from_name ? { from: row.from_name } : {}),
     };
+    if (row.from_name) hit.from = row.from_name;
+    return hit;
   });
 }
 

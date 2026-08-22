@@ -34,8 +34,8 @@ export const EFFORT_LEVELS = ["none", "low", "medium", "high", "xhigh", "max"] a
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 
 /** Narrow untrusted API/config input before it becomes a model selection. */
-export function isEffortLevel(value: unknown): value is EffortLevel {
-  return typeof value === "string" && (EFFORT_LEVELS as readonly string[]).includes(value);
+export function isEffortLevel(value: string): value is EffortLevel {
+  return EFFORT_LEVELS.some((level) => level === value);
 }
 
 // ── model selection ────────────────────────────────────────────────────
@@ -295,7 +295,11 @@ export interface ProviderDriver<Config = unknown> {
   /** How to get this engine installed. Omit for engines that need no local
    * binary (API-key drivers), which is what makes it optional. */
   readonly install?: EngineInstall;
-  /** Decode the opaque config envelope; throw on invalid (→ shadow). */
+  /** Decode the opaque config envelope; throw on invalid (→ shadow). The
+   * envelope is driver-owned by design — each decodeConfig is its own parse
+   * boundary, and the persisted shape is deliberately untyped here so no
+   * single engine's schema leaks into the registry. */
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the raw envelope is the named contract; drivers own its decode
   decodeConfig(raw: unknown): Config;
   defaultConfig(): Config;
   readonly models: ModelCatalog;

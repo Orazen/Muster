@@ -32,7 +32,11 @@ export function initAnalytics() {
   posthog.capture("app_opened", { platform });
 }
 
-export function track(event: string, props?: Record<string, unknown>) {
+/** Analytics event properties: scalars only — PostHog renders these as
+ * event columns and complex values would be stringified opaquely. */
+export type AnalyticsProps = Record<string, string | number | boolean | null | undefined>;
+
+export function track(event: string, props?: AnalyticsProps) {
   if (!ready) return;
   posthog.capture(event, props);
 }

@@ -27,6 +27,8 @@ let cloudDesktopAccess = true;
 /** What the stub harness answers with next. Set per test. */
 let respond: (res: ServerResponse) => void = (res) => res.end();
 
+// SAFETY: listen() resolves only from the listening callback, where
+// address() is an AddressInfo carrying the assigned port.
 const listen = (server: Server): Promise<number> =>
   new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve((server.address() as { port: number }).port)));
 

@@ -29,7 +29,8 @@ export interface TurnContextInput {
 export function engineIsFresh(input: {
   instanceId: string;
   lastInstanceId: string | undefined;
-  resumeCursors: Record<string, unknown>;
+  /** native session id to resume, per engine instance — see store.ts */
+  resumeCursors: Record<string, string>;
   transcript: Array<{ role: "user" | "assistant"; text: string }>;
 }): boolean {
   const { instanceId, lastInstanceId, resumeCursors, transcript } = input;
@@ -44,11 +45,15 @@ const REWOUND_PREAMBLE =
 const FRESH_PREAMBLE =
   "[You are joining this conversation mid-thread (the user switched this bot over to you). The conversation so far:]";
 
-export function buildTurnContext(input: TurnContextInput): {
+/** The turn text a driver receives, plus whether its native session may be
+ * resumed. */
+export interface BuiltTurnContext {
   turnText: string;
   /** false when the native session must not be resumed */
   resume: boolean;
-} {
+}
+
+export function buildTurnContext(input: TurnContextInput): BuiltTurnContext {
   const { text, transcript, rewound, fresh, replaysNatively } = input;
   const resume = !rewound && !fresh;
   const replay = !resume && !replaysNatively && transcript.length > 0;

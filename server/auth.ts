@@ -174,6 +174,7 @@ function migrate(db: DatabaseSync): void {
     ["session", "activeOrganizationId", 'ALTER TABLE "session" ADD COLUMN "activeOrganizationId" text'],
   ];
   for (const [table, column, ddl] of columnAdditions) {
+    // SAFETY: PRAGMA table_info always yields rows with a text "name" column
     const cols = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === column)) db.exec(ddl);
   }
@@ -196,6 +197,7 @@ function getDb(): DatabaseSync {
  * staying visible to every signed-in account. */
 export function primaryUserId(): string | null {
   try {
+    // SAFETY: the SELECT projects only the users table's id column
     const row = getDb().prepare("SELECT id FROM \"user\" ORDER BY \"createdAt\" ASC LIMIT 1").get() as
       | { id: string }
       | undefined;
@@ -209,6 +211,7 @@ export function primaryUserId(): string | null {
  * against the local account list before deciding to provision. */
 export function findUserByEmail(email: string): { id: string; name: string; email: string } | null {
   try {
+    // SAFETY: the SELECT projects exactly the id/name/email columns returned here
     const row = getDb()
       .prepare('SELECT "id", "name", "email" FROM "user" WHERE lower("email") = lower(?) LIMIT 1')
       .get(email.trim().toLowerCase()) as { id: string; name: string; email: string } | undefined;
@@ -222,6 +225,7 @@ export function findUserByEmail(email: string): { id: string; name: string; emai
  * code's owner back to their identity. */
 export function findUserById(id: string): { id: string; name: string; email: string } | null {
   try {
+    // SAFETY: the SELECT projects exactly the id/name/email columns returned here
     const row = getDb()
       .prepare('SELECT "id", "name", "email" FROM "user" WHERE "id" = ? LIMIT 1')
       .get(id) as { id: string; name: string; email: string } | undefined;
@@ -257,7 +261,7 @@ export function createBridgedUser(email: string, name: string): string {
 export function mintSession(
   userId: string,
   meta?: { ip?: string; userAgent?: string },
-): { token: string; expiresAt: Date } {
+) {
   const db = getDb();
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60_000);
@@ -316,14 +320,7 @@ export function pairCloudUrl(): string | null {
   return SELF_HOSTED ? null : "https://muster.orazen.online";
 }
 
-export function authCapabilities(): {
-  emailVerification: boolean;
-  passwordReset: boolean;
-  socialProviders: string[];
-  googleOnlySignup: boolean;
-  cloudPairing: boolean;
-  pairingCloudUrl: string | null;
-} {
+export function authCapabilities() {
   const pairingCloudUrl = pairCloudUrl();
   return {
     emailVerification: isEmailConfigured() && SELF_HOSTED,
@@ -405,6 +402,7 @@ export const auth = betterAuth({
         before: async (session) => {
           try {
             const db = getDb();
+            // SAFETY: the SELECT projects only member rows' organizationId column
             const existing = db
               .prepare('SELECT "organizationId" FROM "member" WHERE "userId" = ? ORDER BY "createdAt" ASC LIMIT 1')
               .get(session.userId) as { organizationId?: string } | undefined;
@@ -420,6 +418,7 @@ export const auth = betterAuth({
             // attempt is still in flight or already succeeded, the
             // redundant insert here just hits the same unique constraint
             // and is swallowed — never a duplicate organization.
+            // SAFETY: the SELECT projects exactly the name/email columns read below
             const user = db.prepare('SELECT "name", "email" FROM "user" WHERE "id" = ?').get(session.userId) as
               | { name?: string; email?: string }
               | undefined;
@@ -511,11 +510,13 @@ export function toWebRequest(req: import("node:http").IncomingMessage): Request 
   // empty body and rejects every sign-up/sign-in with a validation error —
   // this was previously dropped entirely, silently breaking every POST.
   const hasBody = method !== "GET" && method !== "HEAD";
-  return new Request(url, {
-    method,
-    headers,
-    ...(hasBody ? { body: req as unknown as ReadableStream, duplex: "half" } : {}),
-  } as RequestInit);
+  const init: RequestInit & { duplex?: "half" } = { method, headers };
+  if (hasBody) {
+    // The raw request stream becomes the fetch body verbatim; a streaming
+    // body must declare duplex "half" or the Request constructor rejects it.
+    Object.assign(init, { body: req, duplex: "half" });
+  }
+  return new Request(url, init);
 }
 
 /** Resolved session for a request, or null when unauthenticated. */

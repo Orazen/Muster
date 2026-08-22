@@ -20,13 +20,17 @@
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
 import readline from "node:readline";
 
+import { z } from "zod";
+
+import { parseJson, type JsonObject, type JsonValue } from "../schema.ts";
+
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
 const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
 
-const TOOLS = [
+const TOOLS: JsonObject[] = [
   {
     name: "list_bots",
     description:
@@ -62,11 +66,29 @@ const TOOLS = [
   },
 ];
 
-type Json = Record<string, unknown>;
-const send = (msg: Json) => process.stdout.write(JSON.stringify(msg) + "\n");
-const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
-const rpcErr = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
-const textResult = (id: unknown, text: string, isError = false) =>
+type Json = JsonObject;
+/** Echoed-back request id: whatever JSON value the caller sent, absent for
+ * notifications. */
+type RpcId = JsonValue | undefined;
+
+// Stdio is the trust boundary: a line must be a JSON-RPC object with a
+// string method before anything may read .method/.id/.params off it.
+const jsonObject = z.record(z.string(), z.json());
+const rpcMessageSchema = z.object({
+  id: z.json().optional().catch(undefined),
+  method: z.string(),
+  params: jsonObject.optional().catch({}),
+});
+
+type RpcMessage = z.output<typeof rpcMessageSchema>;
+
+// Wire strings: a JSON string, or absent. Any other value reads as absent.
+const wireText = z.string().optional().catch(undefined);
+
+const send = (msg: Record<string, JsonValue | undefined>) => process.stdout.write(JSON.stringify(msg) + "\n");
+const ok = (id: RpcId, result: JsonValue) => send({ jsonrpc: "2.0", id, result });
+const rpcErr = (id: RpcId, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
+const textResult = (id: RpcId, text: string, isError = false) =>
   ok(id, { content: [{ type: "text", text }], isError });
 
 async function api(path: string, init?: RequestInit): Promise<Json> {
@@ -74,7 +96,10 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
     ...init,
     headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}`, ...init?.headers },
   });
-  const body = (await res.json().catch(() => ({}))) as Json;
+  // A body that is missing or not an object reads as empty, exactly like
+  // the previous catch(() => ({})) fallback.
+  const parsed = jsonObject.safeParse(await res.json().catch(() => null));
+  const body: Json = parsed.success ? parsed.data : {};
   if (!res.ok) throw new Error(String(body.error ?? `HTTP ${res.status}`));
   return body;
 }
@@ -82,7 +107,10 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
-    const bots = (r.bots as Array<Json>) ?? [];
+    const bots = (Array.isArray(r.bots) ? r.bots : []).flatMap((b) => {
+      const row = jsonObject.safeParse(b);
+      return row.success ? [row.data] : [];
+    });
     if (!bots.length) return { text: "No other bots in this workspace yet." };
     const lines = bots.map((b) => {
       const role = b.title ? ` — ${b.title}` : "";
@@ -106,9 +134,9 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
   if (name === "delegate_bot") {
     const toBotId = String(args.bot_id ?? "").trim();
     const message = String(args.message ?? "").trim();
-    const reason = typeof args.reason === "string" ? args.reason.trim() : "";
+    const reason = wireText.parse(args.reason)?.trim() ?? "";
     if (!toBotId || !message) return { text: "delegate_bot needs bot_id and message.", isError: true };
-    const body: Record<string, unknown> = {
+    const body: JsonObject = {
       fromBotId: BOT_ID,
       fromThreadId: THREAD_ID,
       toBotId,
@@ -120,20 +148,19 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     if (r.error) return { text: `Couldn't queue the delegation: ${r.error}`, isError: true };
     // Fire-and-forget by contract: the harness returns immediately, the
     // peer turn runs after our current turn finishes.
-    return { text: typeof r.message === "string" ? r.message : "Delegation queued." };
+    return { text: wireText.parse(r.message) ?? "Delegation queued." };
   }
   return { text: `Unknown tool: ${name}`, isError: true };
 }
 
-async function handle(msg: Json) {
+async function handle(msg: RpcMessage) {
   const id = msg.id;
-  const method = msg.method as string | undefined;
-  if (!method) return;
-  const params = (msg.params ?? {}) as Json;
+  const { method } = msg;
+  const params: Json = msg.params ?? {};
   switch (method) {
     case "initialize":
       ok(id, {
-        protocolVersion: (params.protocolVersion as string) ?? "2024-11-05",
+        protocolVersion: wireText.parse(params.protocolVersion) ?? "2024-11-05",
         capabilities: { tools: {} },
         serverInfo: { name: "opengrokbot-agents", version: "0.1.0" },
       });
@@ -148,13 +175,15 @@ async function handle(msg: Json) {
       ok(id, { tools: TOOLS });
       return;
     case "tools/call": {
-      const name = params.name as string;
+      const name = wireText.parse(params.name) ?? "";
       if (!TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
       try {
-        const { text, isError } = await callTool(name, (params.arguments ?? {}) as Json);
+        const argsParsed = jsonObject.safeParse(params.arguments);
+        const args: Json = argsParsed.success ? argsParsed.data : {};
+        const { text, isError } = await callTool(name, args);
         textResult(id, text, isError);
       } catch (e) {
-        textResult(id, (e as Error).message, true);
+        textResult(id, e instanceof Error ? e.message : String(e), true);
       }
       return;
     }
@@ -167,14 +196,17 @@ const rl = readline.createInterface({ input: process.stdin, terminal: false });
 rl.on("line", (line) => {
   const t = line.trim();
   if (!t) return;
-  let msg: Json;
+  let raw: JsonValue;
   try {
-    msg = JSON.parse(t) as Json;
+    raw = parseJson(t);
   } catch {
     return;
   }
+  const parsed = rpcMessageSchema.safeParse(raw);
+  if (!parsed.success) return;
+  const msg = parsed.data;
   void handle(msg).catch((e) => {
-    if (msg.id !== undefined) rpcErr(msg.id, -32603, (e as Error).message);
+    if (msg.id !== undefined) rpcErr(msg.id, -32603, e instanceof Error ? e.message : String(e));
   });
 });
 rl.on("close", () => process.exit(0));

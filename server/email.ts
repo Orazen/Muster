@@ -35,6 +35,16 @@ export interface OutboundEmail {
   html?: string;
 }
 
+/** The Resend send-message envelope; `html` rides along only for messages
+ * that carry an HTML body. */
+interface ResendPayload {
+  from: string;
+  to: string[];
+  subject: string;
+  text: string;
+  html?: string;
+}
+
 /**
  * Send one message. Never throws: a mail failure must not turn into a 500 on
  * a sign-up request, and Better Auth treats a rejected promise as a failed
@@ -51,19 +61,21 @@ export async function sendEmail(message: OutboundEmail): Promise<boolean> {
   }
 
   try {
+    const payload: ResendPayload = {
+      from: EMAIL_FROM,
+      to: [message.to],
+      subject: message.subject,
+      text: message.text,
+    };
+    if (message.html) payload.html = message.html;
+
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${RESEND_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        from: EMAIL_FROM,
-        to: [message.to],
-        subject: message.subject,
-        text: message.text,
-        ...(message.html ? { html: message.html } : {}),
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {

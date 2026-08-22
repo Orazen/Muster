@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 
+import { parseJson } from "./schema.ts";
+
+/** True only for primitive strings — what JSON decoding yields for text fields. */
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
 /** Provider-neutral policy for deciding when a computer observation needs vision. */
 export interface ObservationMetrics {
   screenshotsCaptured: number;
@@ -41,13 +46,24 @@ export const emptyObservationMetrics = (): ObservationMetrics => ({
   verificationFailures: 0,
 });
 
-export function normalizeCrop(raw: unknown, maxWidth: number, maxHeight: number): CropRegion | null {
-  if (!raw || typeof raw !== "object") return null;
-  const value = raw as Record<string, unknown>;
-  const x = Math.round(Number(value.x));
-  const y = Math.round(Number(value.y));
-  const width = Math.round(Number(value.width));
-  const height = Math.round(Number(value.height));
+/** Crop region arguments from a computer-tool call; coordinates may be absent or junk. */
+interface CropInput {
+  x?: unknown;
+  y?: unknown;
+  width?: unknown;
+  height?: unknown;
+}
+
+export function normalizeCrop(
+  raw: CropInput | null | undefined,
+  maxWidth: number,
+  maxHeight: number,
+): CropRegion | null {
+  if (!raw) return null;
+  const x = Math.round(Number(raw.x));
+  const y = Math.round(Number(raw.y));
+  const width = Math.round(Number(raw.width));
+  const height = Math.round(Number(raw.height));
   if (
     ![x, y, width, height, maxWidth, maxHeight].every(Number.isFinite) ||
     maxWidth <= 0 ||
@@ -66,8 +82,8 @@ export function normalizeCrop(raw: unknown, maxWidth: number, maxHeight: number)
 /** Canonical value for internal navigation checks. Credentials are never
  * needed for equality and are removed here; query and fragment remain so
  * two distinct application states cannot verify as the same destination. */
-export function normalizeBrowserUrl(value: unknown): string | null {
-  if (typeof value !== "string" || !value || value.length > 8_192) return null;
+export function normalizeBrowserUrl<M>(value: M): string | null {
+  if (!isText(value) || !value || value.length > 8_192) return null;
   try {
     const url = new URL(value);
     if (!/^https?:$/.test(url.protocol)) return null;
@@ -80,7 +96,7 @@ export function normalizeBrowserUrl(value: unknown): string | null {
 }
 
 /** Removes credentials, query, and fragment before browser state reaches a model or log. */
-export function safeBrowserUrl(value: unknown): string | null {
+export function safeBrowserUrl<M>(value: M): string | null {
   const normalized = normalizeBrowserUrl(value);
   if (!normalized) return null;
   const url = new URL(normalized);
@@ -90,19 +106,28 @@ export function safeBrowserUrl(value: unknown): string | null {
   return safe.length <= 2_048 ? safe : null;
 }
 
+/** One row of Chrome's /json/list response; only these fields are read. */
+interface ChromeTargetRecord {
+  id?: unknown;
+  type?: unknown;
+  title?: unknown;
+  url?: unknown;
+}
+
 /** Parses Chrome's /json/list response into a small, safe structured observation. */
 export function parseBrowserTargets(raw: string): BrowserTarget[] {
   if (raw.length > 1_000_000) return [];
   try {
-    const parsed: unknown = JSON.parse(raw);
+    const parsed = parseJson(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.slice(0, 20).flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
-      const value = item as Record<string, unknown>;
+      // SAFETY: /json/list rows are JSON objects keyed by id/type/title/url
+      const value = item as ChromeTargetRecord | null | undefined;
+      if (!value || !(value instanceof Object)) return [];
       const comparisonUrl = normalizeBrowserUrl(value.url);
       const url = safeBrowserUrl(value.url);
-      if (value.type !== "page" || !url || !comparisonUrl || typeof value.id !== "string") return [];
-      const title = typeof value.title === "string" ? value.title.replace(/\s+/g, " ").trim().slice(0, 200) : "";
+      if (value.type !== "page" || !url || !comparisonUrl || !isText(value.id)) return [];
+      const title = isText(value.title) ? value.title.replace(/\s+/g, " ").trim().slice(0, 200) : "";
       return [{ id: value.id.slice(0, 100), title, url, comparisonUrl }];
     });
   } catch {

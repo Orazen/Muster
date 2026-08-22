@@ -72,6 +72,8 @@ describe("toRows", () => {
     expect(row.summary).toMatch(/^assistant_text: word0 word1/);
     expect(row.summary.endsWith("…")).toBe(true);
     expect(row.summary.length).toBeLessThanOrEqual("assistant_text: ".length + 120);
-    expect((row.data as unknown[])).toHaveLength(500);
+    // SAFETY: every entry above carries a content.delta event, and toRows
+    // folds those deltas onto the summary row's data as an array.
+    expect(row.data as unknown[]).toHaveLength(500);
   });
 });

@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ensureDirs } from "../../config.ts";
 import type { ProviderInstance } from "../../contracts.ts";
+import type { JsonValue } from "../../schema.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import { GrokAgentDriver } from "./grok.ts";
@@ -62,14 +63,17 @@ const AsyncAuthDriver = createAcpDriver({
   isAuthenticated: async () => true,
 });
 
+/** Error frame the fake ACP CLI reports: a JSON-RPC error object with a code. */
+interface ClassifiedErrorFrame {
+  code?: JsonValue;
+  message?: string;
+}
+
 const ClassifiedErrorDriver = createAcpDriver({
   ...SELECT_MODEL_SUPPORT,
   driverKind: "classifiedErrorTest",
   selectModel: undefined,
-  classifyError: (error) =>
-    error && typeof error === "object" && (error as { code?: unknown }).code === -32000
-      ? "invalid_credentials"
-      : undefined,
+  classifyError: (error: ClassifiedErrorFrame) => (error?.code === -32000 ? "invalid_credentials" : undefined),
 });
 
 describe("ACP decodeConfig", () => {
@@ -189,8 +193,8 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "grokAgent")).toBe(true);
     const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated")!;
     expect(usage).toMatchObject({ input: 10, output: 5 });
-    const text = recorder.events.find((e) => e.type === "item.completed" && (e as any).itemType === "assistant_text")!;
-    expect((text as any).text).toBe("hello from fake acp");
+    const text = recorder.events.find((e) => e.type === "item.completed" && e.itemType === "assistant_text");
+    expect(text).toMatchObject({ text: "hello from fake acp" });
     const done = recorder.events.at(-1)!;
     expect(done).toMatchObject({ type: "turn.completed", ok: true });
     expect(instance.adapter.hasSession("t-happy")).toBe(false);
@@ -336,7 +340,7 @@ describe("ACP turns (fake CLI)", () => {
     const opened = await recorder.until((e) => e.type === "request.opened");
     expect(opened).toMatchObject({ requestType: "permission", tool: "shell" });
 
-    await instance.adapter.respondToRequest("t-perm", (opened as any).requestId, { behavior: "allow" });
+    await instance.adapter.respondToRequest("t-perm", opened.requestId!, { behavior: "allow" });
     const resolved = await recorder.until((e) => e.type === "request.resolved");
     expect(resolved).toMatchObject({ behavior: "allow", source: "user" });
     const done = await recorder.until((e) => e.type === "turn.completed");

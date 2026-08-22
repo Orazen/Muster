@@ -124,7 +124,10 @@ const KNOWN_STATES = new Set<string>(AGENT_STATES);
 /** Resolves any stored value — current, legacy or junk — to a real state. */
 export function normalizeState(value: string | null | undefined): AgentState | null {
   if (!value) return null;
-  if (KNOWN_STATES.has(value)) return value as AgentState;
+  if (KNOWN_STATES.has(value)) {
+    // SAFETY: membership in AGENT_STATES is exactly what defines AgentState.
+    return value as AgentState;
+  }
   return LEGACY_STATES[value] ?? null;
 }
 

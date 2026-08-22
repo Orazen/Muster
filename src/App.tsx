@@ -168,7 +168,9 @@ function AppShell() {
 // check in this codebase already uses (src/lib/desktop.ts).
 function RootRoute() {
   const { user, loading } = useAuth();
-  if (typeof window !== "undefined" && window.ogb) {
+  // window.ogb only exists inside Electron's preload bridge; the browser
+  // bundle renders this route without it.
+  if (window.ogb) {
     if (loading) return null;
     return <Navigate to={user ? "/app" : "/sign-in"} replace />;
   }

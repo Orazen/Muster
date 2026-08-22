@@ -109,6 +109,8 @@ export function LocalComputerSection() {
     const response = await fetch("/api/local-computer", { signal });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `Status request failed (${response.status})`);
+    // SAFETY: /api/local-computer serves the Status shape by contract; a
+    // malformed body falls back to {} above and renders as an idle panel.
     setStatus(body as Status);
     setError(null);
   }, []);
@@ -149,6 +151,8 @@ export function LocalComputerSection() {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `${action} failed`);
+    // SAFETY: the action endpoints answer with the same Status shape the
+    // poll endpoint serves; the UI re-polls, so a stale body self-heals.
     setStatus(body as Status);
   };
 

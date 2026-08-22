@@ -17,6 +17,21 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 
+/** Child env: inherit PATH so the server can find CLIs, isolate HOME to a
+ * throwaway profile, and pin the two ports under test. */
+function childEnv(home: string, port: number): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    HOME: home,
+    USERPROFILE: home,
+    OMB_PORT: String(port),
+    OMB_WEBHOOK_PORT: String(port + 1000),
+    BETTER_AUTH_SECRET: "test-secret-at-least-32-chars-long-ok",
+    OMB_ALLOW_SIGNUPS: "true",
+  };
+  if (process.env.PATH) env.PATH = process.env.PATH;
+  return env;
+}
+
 async function bootServer(): Promise<{
   child: ChildProcess;
   base: string;
@@ -31,15 +46,7 @@ async function bootServer(): Promise<{
 
   const child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: join(SERVER_DIR, ".."),
-    env: {
-      ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-      HOME: home,
-      USERPROFILE: home,
-      OMB_PORT: String(port),
-      OMB_WEBHOOK_PORT: String(port + 1000),
-      BETTER_AUTH_SECRET: "test-secret-at-least-32-chars-long-ok",
-      OMB_ALLOW_SIGNUPS: "true",
-    },
+    env: childEnv(home, port),
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -89,6 +96,8 @@ describe("organization plugin migration", () => {
       // so a fresh account has exactly one, not zero. The point of this
       // test stays the same either way: organization/list must not 500 on
       // a fresh database.
+      // SAFETY: organization/list answers with the org rows themselves; a fresh
+      // account's auto-provisioned workspace is the only one.
       const orgs = (await list.json()) as Array<{ name: string }>;
       expect(orgs).toHaveLength(1);
       expect(orgs[0].name).toBe("Org Mig's workspace");
@@ -111,10 +120,13 @@ describe("organization plugin migration", () => {
 
       const session = await fetch(`${server.base}/api/auth/get-session`, { headers: { cookie } });
       expect(session.status).toBe(200);
+      // SAFETY: get-session echoes the session row, whose plugin column names
+      // the org the sign-up auto-provisioned.
       const body = (await session.json()) as { session: { activeOrganizationId: string | null } };
       expect(body.session.activeOrganizationId).toBeTruthy();
 
       const list = await fetch(`${server.base}/api/auth/organization/list`, { headers: { cookie } });
+      // SAFETY: organization/list answers with the org rows themselves.
       const orgs = (await list.json()) as Array<{ id: string }>;
       expect(orgs.map((o) => o.id)).toContain(body.session.activeOrganizationId);
     } finally {
@@ -132,15 +144,7 @@ describe("organization plugin migration", () => {
     const boot = async () => {
       const child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
         cwd: join(SERVER_DIR, ".."),
-        env: {
-          ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-          HOME: home,
-          USERPROFILE: home,
-          OMB_PORT: String(port),
-          OMB_WEBHOOK_PORT: String(port + 1000),
-          BETTER_AUTH_SECRET: "test-secret-at-least-32-chars-long-ok",
-          OMB_ALLOW_SIGNUPS: "true",
-        },
+        env: childEnv(home, port),
         stdio: ["ignore", "pipe", "pipe"],
       });
       const deadline = Date.now() + 15_000;
@@ -172,6 +176,8 @@ describe("organization plugin migration", () => {
         body: JSON.stringify({ name: "Restart Org", slug: "restart-org" }),
       });
       expect(created.status).toBe(200);
+      // SAFETY: organization/create answers with the created org row plus its
+      // member list; the owner is the only member right after creation.
       const org = (await created.json()) as { id: string; members: Array<{ role: string }> };
       expect(org.members).toHaveLength(1);
       expect(org.members[0].role).toBe("owner");
@@ -181,6 +187,7 @@ describe("organization plugin migration", () => {
       child = await boot();
 
       const list = await fetch(`${base}/api/auth/organization/list`, { headers: { cookie } });
+      // SAFETY: organization/list answers with the org rows themselves.
       const orgs = (await list.json()) as Array<{ slug: string }>;
       expect(orgs.map((o) => o.slug)).toContain("restart-org");
     } finally {

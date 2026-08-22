@@ -36,6 +36,7 @@ beforeAll(async () => {
     discovery: () => ({ advertising: false, name: "Test computer" }),
   });
   port = await new Promise<number>((resolve) =>
+    // SAFETY: listening on port 0 makes address() carry the assigned port.
     control.listen(0, "127.0.0.1", () => resolve((control.address() as { port: number }).port)),
   );
 });
@@ -60,9 +61,11 @@ describe("origins the control server will change state for", () => {
 
   it("reports a permission write failure without dropping the control server", async () => {
     const [device] = devices.list();
-    const writable = devices as unknown as { persist: () => void };
-    const persist = writable.persist;
-    writable.persist = () => {
+    // persist is the registry's disk-write hook (public for exactly this
+    // test): shadowing it simulates an ENOSPC failure on an otherwise real
+    // registry, restored in the finally below.
+    const persist = devices.persist;
+    devices.persist = () => {
       throw new Error("ENOSPC: no space left on device");
     };
     try {
@@ -74,7 +77,7 @@ describe("origins the control server will change state for", () => {
       expect(devices.list().find((candidate) => candidate.id === device.id)?.cloudDesktopAccess).toBe(false);
       expect((await ask("GET", "/state")).status).toBe(200);
     } finally {
-      writable.persist = persist;
+      devices.persist = persist;
     }
   });
 

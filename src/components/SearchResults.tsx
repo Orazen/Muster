@@ -33,7 +33,7 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
     const t = setTimeout(() => {
       api(`/api/search?q=${encodeURIComponent(q)}&limit=40`)
         .then((r: { hits: SearchHit[] }) => alive && (setHits(r.hits), setError(null)))
-        .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : String(e)));
+        .catch((e: Error) => alive && setError(e instanceof Error ? e.message : String(e)));
     }, DEBOUNCE_MS);
     return () => {
       alive = false;

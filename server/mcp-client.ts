@@ -12,10 +12,13 @@
 // agents-proxy.ts, dweb-proxy.ts) actually needs from a client.
 import { spawn, type ChildProcess } from "node:child_process";
 
+import type { JsonObject, JsonValue } from "./schema.ts";
+
 export interface McpTool {
   name: string;
   description?: string;
-  inputSchema: Record<string, unknown>;
+  /** JSON Schema for the tool's arguments, passed through verbatim. */
+  inputSchema: JsonObject;
 }
 
 export interface McpToolResult {
@@ -25,7 +28,7 @@ export interface McpToolResult {
 
 export interface McpClient {
   tools: McpTool[];
-  callTool(name: string, args: Record<string, unknown>): Promise<McpToolResult>;
+  callTool(name: string, args: JsonObject): Promise<McpToolResult>;
   close(): void;
 }
 
@@ -81,7 +84,7 @@ export async function connectMcpStdio(
     pending.clear();
   });
 
-  const rpc = (method: string, params?: unknown): Promise<any> => {
+  const rpc = (method: string, params?: JsonValue): Promise<any> => {
     if (closed) return Promise.reject(new Error("MCP server is not running"));
     const id = nextId++;
     return new Promise((resolve, reject) => {
@@ -102,7 +105,7 @@ export async function connectMcpStdio(
       child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
     });
   };
-  const notify = (method: string, params?: unknown) => {
+  const notify = (method: string, params?: JsonValue) => {
     if (closed) return;
     child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n");
   };
@@ -121,6 +124,7 @@ export async function connectMcpStdio(
       tools,
       async callTool(name, args) {
         const result = await rpc("tools/call", { name, arguments: args });
+        // SAFETY: tools/call replies with the McpToolResult envelope; content/isError are the only fields read
         return result as McpToolResult;
       },
       close() {

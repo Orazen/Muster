@@ -40,6 +40,9 @@ export function waitForExit(
   child: ChildProcess | undefined,
   options: WaitForExitOptions | number = {},
 ): Promise<void> {
+  // Callers pass either a bare grace period in milliseconds or the full
+  // options record; the two shapes must be told apart at runtime.
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof
   const { signal, graceMs = 5_000 } = typeof options === "number" ? { graceMs: options } : options;
 
   return new Promise<void>((resolve) => {

@@ -21,6 +21,7 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
+import type { JsonObject, JsonValue } from "../schema.ts";
 
 const DRIVER_KIND = "boxAgent";
 const BOX_API = "https://ascii.dev/api/box/v1";
@@ -36,13 +37,27 @@ const MODELS = {
 
 const providerFor = (model: string) => (model.startsWith("gpt") ? "codex" : "claude-code");
 
+/** True only for primitive strings — what JSON decoding yields for text fields. */
+const isText = <T>(value: T): value is T & string => String(value) === value;
+// Whatever remains once objects, arrays, null, strings and booleans are
+// excluded is precisely the JSON numbers.
+const isJsonNumber = <T>(value: T): value is T & number =>
+  value !== undefined &&
+  value !== null &&
+  !(value instanceof Object) &&
+  !isText(value) &&
+  value !== true &&
+  value !== false;
+
 export interface BoxAgentConfig {
   pollMs: number;
 }
 
-function decodeConfig(raw: unknown): BoxAgentConfig {
-  const o = (raw ?? {}) as Record<string, unknown>;
-  return { pollMs: typeof o.pollMs === "number" ? o.pollMs : 2500 };
+function decodeConfig(raw: JsonValue | undefined): BoxAgentConfig {
+  // Non-object configs fall back to every default, matching `raw ?? {}`
+  // field by field.
+  const o: JsonObject = raw instanceof Object && !Array.isArray(raw) ? raw : {};
+  return { pollMs: isJsonNumber(o.pollMs) ? o.pollMs : 2500 };
 }
 
 export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
@@ -59,7 +74,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
     const active = new Map<string, { cancel: () => void; turnId: string; boxId: string }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of listeners) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -73,7 +88,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
       const res = await fetch(`${BOX_API}${path}`, {
         ...opts,
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...opts.headers },
-        signal: (opts as any).signal ?? AbortSignal.timeout(30_000),
+        signal: opts.signal ?? AbortSignal.timeout(30_000),
       });
       const body: any = await res.json().catch(() => null);
       if (!res.ok || body?.ok === false) {
@@ -147,7 +162,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
               // event re-sends whole and the settled message replaces the
               // stream anyway.
               const text = ev.text ?? ev.message ?? ev.data?.text ?? ev.data?.content ?? null;
-              if (/assistant|message|output|response/i.test(kind) && typeof text === "string" && text.trim()) {
+              if (/assistant|message|output|response/i.test(kind) && isText(text) && text.trim()) {
                 const delta = text.startsWith(lastText) ? text.slice(lastText.length) : text;
                 lastText = text;
                 if (delta) {
@@ -186,7 +201,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
                 const result = run?.result ?? run?.output ?? lastText;
                 // stream only the growth past what events already sent —
                 // the settled message below carries the full text regardless
-                if (typeof result === "string" && result.trim() && result !== lastText && result.startsWith(lastText)) {
+                if (isText(result) && result.trim() && result !== lastText && result.startsWith(lastText)) {
                   emit({
                     ...base(threadId, turnId),
                     type: "content.delta",
@@ -198,7 +213,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
                   ...base(threadId, turnId),
                   type: "item.completed",
                   itemType: "assistant_text",
-                  text: typeof result === "string" && result.trim() ? result : lastText || "(finished)",
+                  text: isText(result) && result.trim() ? result : lastText || "(finished)",
                 });
                 active.delete(threadId);
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
@@ -222,6 +237,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
         } catch (e) {
           active.delete(threadId);
+          // SAFETY: thrown values on this path are fetch/timeout Errors carrying a message
           emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "error", cost: null });
         }
@@ -238,6 +254,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
         await api("/me");
         return { state: "available", authenticated: true, version: null };
       } catch (e) {
+        // SAFETY: api() throws Errors built from HTTP failures; their message is the useful part
         return { state: "unavailable", reason: `box API unreachable: ${(e as Error).message}` };
       }
     };

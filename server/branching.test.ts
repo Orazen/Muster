@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { JsonObject } from "./schema.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 
@@ -50,7 +51,7 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
   let home: string;
   let stderr = "";
 
-  const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+  const api = async (method: string, path: string, body?: JsonObject): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
       method,
       headers: body ? { "content-type": "application/json" } : undefined,

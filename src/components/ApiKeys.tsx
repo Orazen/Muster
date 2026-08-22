@@ -8,10 +8,24 @@ import { cn } from "@/lib/cn";
 
 export type ConfigSection = "composio" | "box" | "opensandbox" | "opencodeGo" | "xai" | "musterCloud";
 
-const SECTIONS: Record<
-  ConfigSection,
-  { body: (value: string) => unknown; flag: (config: ConfigStatus) => boolean }
-> = {
+/** How one section saves its credential and how its configured flag reads back. */
+interface SectionBinding {
+  body: (value: string) => object;
+  flag: (config: ConfigStatus) => boolean;
+}
+
+/** What each credential row shows next to its input. */
+interface CredentialSpec {
+  label: string;
+  placeholder: string;
+  description: string;
+  href: string;
+  linkLabel: string;
+  optional: boolean;
+  warning?: string;
+}
+
+const SECTIONS = {
   composio: {
     body: (v) => ({ composio: { apiKey: v } }),
     flag: (c) => c.composio.configured,
@@ -24,20 +38,9 @@ const SECTIONS: Record<
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
   musterCloud: { body: (v) => ({ musterCloud: { url: v } }), flag: (c) => c.musterCloud?.configured ?? false },
-};
+} satisfies Record<ConfigSection, SectionBinding>;
 
-const CREDENTIALS: Record<
-  ConfigSection,
-  {
-    label: string;
-    placeholder: string;
-    description: string;
-    href: string;
-    linkLabel: string;
-    optional: boolean;
-    warning?: string;
-  }
-> = {
+const CREDENTIALS = {
   composio: {
     label: "Composio project key",
     placeholder: "ak_…",
@@ -90,10 +93,10 @@ const CREDENTIALS: Record<
     optional: true,
     warning: "This install will need internet access to sign in once this is set, and trusts that server with your login.",
   },
-};
+} satisfies Record<ConfigSection, CredentialSpec>;
 
 function CredentialHelp({ section }: { section: ConfigSection }) {
-  const credential = CREDENTIALS[section];
+  const credential: CredentialSpec = CREDENTIALS[section];
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);

@@ -233,7 +233,7 @@ function RoomContextMenu({
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest("[data-room-menu]")) onClose();
+      if (e.target instanceof Element && !e.target.closest("[data-room-menu]")) onClose();
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("mousedown", onDown);
@@ -366,7 +366,7 @@ function BotContextMenu({
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest("[data-bot-menu]")) onClose();
+      if (e.target instanceof Element && !e.target.closest("[data-bot-menu]")) onClose();
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("mousedown", onDown);
@@ -926,6 +926,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       {/* macOS owns inset traffic lights; Linux/Windows use native chrome. */}
       <div
         className="flex items-center justify-between px-4 pt-3.5 pb-1"
+        // SAFETY: Electron honors the non-standard -webkit-app-region drag
+        // style, which React's CSSProperties does not declare.
         style={macInset ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined}
       >
         {macInset ? (
@@ -939,6 +941,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         ) : <div />}
         <div
           className="relative"
+          // SAFETY: Electron honors the non-standard -webkit-app-region drag
+          // style, which React's CSSProperties does not declare.
           style={macInset ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined}
         >
           <button

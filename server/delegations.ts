@@ -19,6 +19,7 @@ import { getOrCreateChannel, mirrorExchange, type CommsBus } from "./comms-visib
 import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
+import { parseJson, type JsonObject, type JsonValue } from "./schema.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
 
 export interface DelegationItem {
@@ -48,6 +49,20 @@ const pendingDelegations = new Map<string, PendingDelegationItem[]>();
 const drainingThreads = new Set<string>();
 const DELEGATIONS_FILE = join(DATA_DIR, "delegations.json");
 
+/** Decoding helpers for the delegations.json file. Every unparsed value
+ * crosses one of these exactly once; the rest of the module branches on
+ * decoded records and strings, not representations. */
+
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
+const isCount = <T>(value: T): value is T & number =>
+  Object.is(Number(value), value) && Number.isFinite(value);
+
+/** A JSON record, or null for every other wire shape (scalars, arrays). */
+function jsonRecordOf(value: JsonValue | undefined): JsonObject | null {
+  return value instanceof Object && !Array.isArray(value) ? value : null;
+}
+
 function savePending(): void {
   try {
     writeFileAtomic(DELEGATIONS_FILE, JSON.stringify(Object.fromEntries(pendingDelegations), null, 2), { mode: 0o600 });
@@ -56,29 +71,28 @@ function savePending(): void {
   }
 }
 
+/** Decode one queued-handoff row; anything short of a deliverable item drops. */
+function decodeDelegation(value: JsonValue): PendingDelegationItem[] {
+  const item = jsonRecordOf(value);
+  if (!item || !isText(item.toBotId) || !isText(item.message) || !isCount(item.depth)) return [];
+  const decoded: PendingDelegationItem = {
+    id: isText(item.id) && item.id ? item.id : newId(),
+    toBotId: item.toBotId,
+    message: item.message,
+    depth: Math.max(0, Math.trunc(item.depth)),
+  };
+  if (isText(item.reason)) decoded.reason = item.reason;
+  return [decoded];
+}
+
 /** Load what a previous process left queued. Missing or corrupt → empty. */
 export function _loadPending(): void {
   pendingDelegations.clear();
   try {
-    const raw = JSON.parse(readFileSync(DELEGATIONS_FILE, "utf8")) as Record<string, unknown>;
-    for (const [threadId, list] of Object.entries(raw)) {
+    const raw = jsonRecordOf(parseJson(readFileSync(DELEGATIONS_FILE, "utf8")));
+    for (const [threadId, list] of Object.entries(raw ?? {})) {
       if (!Array.isArray(list)) continue;
-      const items = list.flatMap((value): PendingDelegationItem[] => {
-        if (!value || typeof value !== "object") return [];
-        const item = value as Partial<PendingDelegationItem>;
-        if (
-          typeof item.toBotId !== "string" ||
-          typeof item.message !== "string" ||
-          !Number.isFinite(item.depth)
-        ) return [];
-        return [{
-          id: typeof item.id === "string" && item.id ? item.id : newId(),
-          toBotId: item.toBotId,
-          message: item.message,
-          ...(typeof item.reason === "string" ? { reason: item.reason } : {}),
-          depth: Math.max(0, Math.trunc(item.depth!)),
-        }];
-      });
+      const items = list.flatMap(decodeDelegation);
       if (items.length) pendingDelegations.set(threadId, items);
     }
   } catch {

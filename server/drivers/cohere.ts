@@ -21,6 +21,7 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
+import type { JsonObject, JsonValue } from "../schema.ts";
 
 const DRIVER_KIND = "cohere";
 const DEFAULT_URL = "https://api.cohere.com/v2";
@@ -38,11 +39,18 @@ export interface CohereConfig {
   apiKeyEnv: string;
 }
 
-function decodeConfig(raw: unknown): CohereConfig {
-  const o = (raw ?? {}) as Record<string, unknown>;
+// Config arrives as persisted provider config JSON; each field is decoded
+// here exactly as a primitive representation test would, defaulting anything
+// else.
+const isText = (v: JsonValue): v is string => Object.is(String(v), v);
+
+function decodeConfig(raw: JsonValue | undefined): CohereConfig {
+  // Non-object configs (null, arrays, primitives) fall back to every default,
+  // matching the previous `raw ?? {}` handling field by field.
+  const o: JsonObject = raw instanceof Object && !Array.isArray(raw) ? raw : {};
   return {
-    url: typeof o.url === "string" ? o.url : DEFAULT_URL,
-    apiKeyEnv: typeof o.apiKeyEnv === "string" ? o.apiKeyEnv : "COHERE_API_KEY",
+    url: isText(o.url) ? o.url : DEFAULT_URL,
+    apiKeyEnv: isText(o.apiKeyEnv) ? o.apiKeyEnv : "COHERE_API_KEY",
   };
 }
 
@@ -60,7 +68,7 @@ export const CohereDriver: ProviderDriver<CohereConfig> = {
     const active = new Map<string, { abort: AbortController; turnId: string }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of listeners) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -120,6 +128,8 @@ export const CohereDriver: ProviderDriver<CohereConfig> = {
             continue;
           }
           if (chunk.type === "content-delta") {
+            // SAFETY: content-delta events carry a text block per Cohere v2;
+            // an absent field stays undefined and is skipped below.
             const delta = chunk.delta?.message?.content?.text as string | undefined;
             if (delta) {
               text += delta;
@@ -174,9 +184,15 @@ export const CohereDriver: ProviderDriver<CohereConfig> = {
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
         } catch (e) {
           active.delete(threadId);
-          const aborted = (e as Error).name === "AbortError";
+          // Abort classification only inspects name/message; non-Error
+          // throws fall through to the error branch either way.
+          const aborted = e instanceof Error && e.name === "AbortError";
           if (!aborted) {
-            emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
+            emit({
+              ...base(threadId, turnId),
+              type: "runtime.error",
+              message: e instanceof Error ? e.message : String(e),
+            });
           }
           emit({
             ...base(threadId, turnId),

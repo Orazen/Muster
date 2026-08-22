@@ -14,17 +14,23 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
-import { connectMcpStdio, type McpClient } from "../mcp-client.ts";
+import { connectMcpStdio, type McpClient, type McpTool } from "../mcp-client.ts";
 import { computerProxyEnv } from "../container-computer.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { type JsonObject, type JsonValue } from "../schema.ts";
 
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
+
+// Values decoded here only ever originate from JSON.parse of persisted
+// instance config: the predicate decides exactly the primitive a
+// representation test would.
+const isText = (v: JsonValue): v is string => Object.is(String(v), v);
 
 /** Every OpenAI-compatible chat-completions API accepts `tools` in this
  * exact shape — it's the same de facto standard the request/response body
  * already is (this factory's own header comment). Translating MCP's
  * inputSchema straight through works because both are plain JSON Schema. */
-function toOpenAiTool(serverKey: string, tool: { name: string; description?: string; inputSchema: Record<string, unknown> }) {
+function toOpenAiTool(serverKey: string, tool: McpTool) {
   return {
     type: "function" as const,
     function: {
@@ -102,11 +108,12 @@ export interface OpenAICompatibleSpec {
 export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): ProviderDriver<OpenAICompatibleConfig> {
   const { driverKind, displayName, defaultUrl, defaultApiKeyEnv, models, quickModel } = spec;
 
-  function decodeConfig(raw: unknown): OpenAICompatibleConfig {
-    const o = (raw ?? {}) as Record<string, unknown>;
+  function decodeConfig(raw: JsonValue | undefined): OpenAICompatibleConfig {
+    // Non-object configs fall back to every default, field by field.
+    const o: JsonObject = raw instanceof Object && !Array.isArray(raw) ? raw : {};
     return {
-      url: typeof o.url === "string" ? o.url : defaultUrl,
-      apiKeyEnv: typeof o.apiKeyEnv === "string" ? o.apiKeyEnv : defaultApiKeyEnv,
+      url: isText(o.url) ? o.url : defaultUrl,
+      apiKeyEnv: isText(o.apiKeyEnv) ? o.apiKeyEnv : defaultApiKeyEnv,
     };
   }
 
@@ -124,7 +131,7 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
       const active = new Map<string, { abort: AbortController; turnId: string }>();
 
       const emit = (event: RuntimeEvent) => {
-        for (const l of [...listeners]) l(event);
+        for (const l of listeners) l(event);
       };
       const base = (threadId: string, turnId: string) => ({
         eventId: newEventId(),
@@ -201,7 +208,7 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
        * using the exact same streaming path this factory already had,
        * zero behavior change, zero added risk. */
       const completeWithTools = async (
-        messages: Array<Record<string, unknown>>,
+        messages: Array<JsonObject>,
         model: string,
         tools: ReturnType<typeof toOpenAiTool>[],
         signal?: AbortSignal,
@@ -243,7 +250,7 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
        * calls. Capped so a model that never stops calling tools can't hang
        * a turn forever. */
       const runToolLoop = async (
-        initialMessages: Array<Record<string, unknown>>,
+        initialMessages: Array<JsonObject>,
         model: string,
         clients: Map<string, McpClient>,
         tools: ReturnType<typeof toOpenAiTool>[],
@@ -351,9 +358,9 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
             emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
           } catch (e) {
             active.delete(threadId);
-            const aborted = (e as Error).name === "AbortError";
+            const aborted = e instanceof Error && e.name === "AbortError";
             if (!aborted) {
-              emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
+              emit({ ...base(threadId, turnId), type: "runtime.error", message: e instanceof Error ? e.message : String(e) });
             }
             emit({
               ...base(threadId, turnId),

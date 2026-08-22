@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { ProviderInstance } from "../contracts.ts";
+import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { CodexDriver } from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -183,10 +183,11 @@ describe("CodexDriver turns (fake app-server)", () => {
     // the two streamed chunks only — no third whole-message fallback delta
     expect(text.map((d: any) => d.delta)).toEqual(["done from ", "fake codex"]);
     const settled = recorder.events.filter(
-      (e: any) => e.type === "item.completed" && e.itemType === "assistant_text",
+      (e: any): e is RuntimeEvent & { itemType: string; text: string } =>
+        e.type === "item.completed" && e.itemType === "assistant_text",
     );
     expect(settled).toHaveLength(1);
-    expect((settled[0] as any).text).toBe("done from fake codex");
+    expect(settled[0]?.text).toBe("done from fake codex");
   });
 
   it("tries thread/resume with a cursor and reuses the thread id", async () => {

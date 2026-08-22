@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 
 /** Provider marks. Inline so no icon dependency has to carry brand logos. */
-const MARKS: Record<string, { label: string; icon: React.ReactNode }> = {
+const MARKS = {
   github: {
     label: "GitHub",
     icon: (
@@ -24,6 +24,8 @@ const MARKS: Record<string, { label: string; icon: React.ReactNode }> = {
   },
 };
 
+type SocialProviderId = keyof typeof MARKS;
+
 /**
  * Social sign-in buttons.
  *
@@ -36,7 +38,7 @@ export function SocialSignIn({ action = "Sign in" }: { action?: string }) {
   const [error, setError] = useState("");
   const [pending, setPending] = useState<string | null>(null);
 
-  const providers = capabilities.socialProviders.filter((p) => p in MARKS);
+  const providers = capabilities.socialProviders.filter((p): p is SocialProviderId => p in MARKS);
   if (providers.length === 0) return null;
 
   async function handle(provider: string) {

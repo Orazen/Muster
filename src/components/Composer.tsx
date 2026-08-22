@@ -173,7 +173,9 @@ export function Composer({
     }
     setSpeechError(null);
     const offTranscript = bridge.onSpeechTranscript((line) => {
-      if (typeof line.text === "string") {
+      // ogb.d.ts declares text as an optional string, so truthiness is the
+      // whole contract — no representation sniffing needed.
+      if (line.text) {
         const base = baseText.current;
         setText(base ? `${base} ${line.text}` : line.text);
       }
@@ -310,8 +312,8 @@ export function Composer({
             }
             setAttachments((prev) => [...prev, pasteAttachment(pasted)]);
           }}
-          onKeyUp={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
-          onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
+          onKeyUp={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+          onClick={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
           onKeyDown={(e) => {
             if (pickerOpen) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {

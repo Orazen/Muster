@@ -8,13 +8,16 @@
 // status SUCCESS. Deterministic, no network.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
+/** JSON-shaped values only; everything out() writes is stringified. */
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
 const argv = process.argv.slice(2);
 if (argv.includes("--version")) {
   console.log("1.1.12");
   process.exit(0);
 }
 
-const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
+const out = (obj: JsonValue) => process.stdout.write(JSON.stringify(obj) + "\n");
 const CONV = "conv-fake-123";
 
 // The prompt is the value that follows --print on argv (mirrors the driver,

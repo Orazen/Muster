@@ -80,8 +80,8 @@ if (argv.includes("--version")) {
   process.exit(0);
 }
 
-const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
-const result = (id: unknown, res: unknown) => out({ jsonrpc: "2.0", id, result: res });
+const out = <M>(obj: M) => process.stdout.write(JSON.stringify(obj) + "\n");
+const result = <I, R>(id: I, res: R) => out({ jsonrpc: "2.0", id, result: res });
 const rpcMethods: string[] = [];
 const recordMethod = (method: string) => {
   rpcMethods.push(method);
@@ -110,7 +110,7 @@ function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: str
     const timer = setTimeout(() => (child.kill(), reject(new Error("mcp timeout"))), 60_000);
     let step = -1; // -1 = initialize in flight
     let last = "";
-    const write = (obj: unknown) => child.stdin.write(JSON.stringify(obj) + "\n");
+    const write = <M>(obj: M) => child.stdin.write(JSON.stringify(obj) + "\n");
     const next = () => {
       step += 1;
       if (step >= calls.length) {
@@ -148,6 +148,9 @@ function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: str
     write({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05" } });
   });
 }
+
+/** True only for primitive strings — the ACP wire contract for id fields. */
+const isText = <T>(value: T): value is T & string => String(value) === value;
 
 function playTurn() {
   out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "hello from fake acp" } } } });
@@ -230,7 +233,7 @@ function handle(msg: any) {
         return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
       }
       const settingId = msg.method === "session/set_mode" ? "modeId" : "modelId";
-      if (typeof msg.params?.sessionId !== "string" || typeof msg.params?.[settingId] !== "string") {
+      if (!isText(msg.params?.sessionId) || !isText(msg.params?.[settingId])) {
         out({
           jsonrpc: "2.0",
           id: msg.id,
@@ -294,8 +297,8 @@ function handle(msg: any) {
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `peer says: ${reply}` } } } });
             complete();
           })
-          .catch((e) => {
-            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `peer error: ${(e as Error).message}` } } } });
+          .catch((e: Error) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `peer error: ${e.message}` } } } });
             complete();
           });
         return;
@@ -341,8 +344,8 @@ function handle(msg: any) {
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `delegated: ${reply}` } } } });
             complete();
           })
-          .catch((e) => {
-            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `delegate error: ${(e as Error).message}` } } } });
+          .catch((e: Error) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `delegate error: ${e.message}` } } } });
             complete();
           });
         return;

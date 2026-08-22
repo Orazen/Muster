@@ -80,13 +80,14 @@ const device = async (
   opts: { token?: string | null; body?: unknown; headers?: Record<string, string> } = {},
 ): Promise<{ status: number; body: any }> => {
   const token = opts.token === undefined ? TOKEN : opts.token;
+  // explicit headers win: a device request can override anything set here
+  const headers: Record<string, string> = {};
+  if (opts.body) headers["content-type"] = "application/json";
+  if (token) headers.authorization = `Bearer ${token}`;
+  Object.assign(headers, opts.headers);
   const res = await fetch(`${SIDECAR}${path}`, {
     method,
-    headers: {
-      ...(opts.body ? { "content-type": "application/json" } : {}),
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...opts.headers,
-    },
+    headers,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   const text = await res.text();
@@ -133,15 +134,17 @@ beforeAll(async () => {
     JSON.stringify({ instances: { ghost: { driver: "not-a-real-driver", displayName: "Ghost" } } }),
   );
 
+  // only the vars that exist are forwarded; the child must not inherit the
+  // parent's HOME or port
+  const env: Record<string, string> = {};
+  if (process.env.PATH) env.PATH = process.env.PATH;
+  if (process.env.SystemRoot) env.SystemRoot = process.env.SystemRoot;
+  env.HOME = home;
+  env.USERPROFILE = home;
+  env.OMB_PORT = String(HARNESS_PORT);
   harness = spawn(process.execPath, [join(ROOT, "server", "index.ts")], {
     cwd: ROOT,
-    env: {
-      ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-      ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      HOME: home,
-      USERPROFILE: home,
-      OMB_PORT: String(HARNESS_PORT),
-    },
+    env,
     stdio: ["ignore", "pipe", "pipe"],
   });
   harness.stderr!.on("data", (c) => (stderr += c));
@@ -374,12 +377,16 @@ describe("the sidecar in front of an unmodified harness", () => {
       }),
     );
     await new Promise<void>((r) => orphan.listen(0, "127.0.0.1", r));
+    // SAFETY: address() is AddressInfo — an object with a port — for any
+    // IP server that is listening, which the awaited listen guarantees.
     const port = (orphan.address() as { port: number }).port;
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/bots`, {
         headers: { authorization: `Bearer ${TOKEN}` },
       });
       expect(res.status).toBe(502);
+      // SAFETY: the proxy's own 502 body is its { error: string } contract;
+      // the contains below fails if the shape drifts.
       expect(((await res.json()) as { error: string }).error).toContain("not running");
     } finally {
       await new Promise<void>((r) => orphan.close(() => r()));
@@ -396,6 +403,8 @@ describe("the sidecar in front of an unmodified harness", () => {
       /* accepted, and deliberately never answered */
     });
     await new Promise<void>((r) => mute.listen(0, "127.0.0.1", r));
+    // SAFETY: address() is AddressInfo — an object with a port — for any
+    // IP server that is listening, which the awaited listen guarantees.
     const mutePort = (mute.address() as { port: number }).port;
     const stalled = createServer(
       createProxyHandler({
@@ -408,6 +417,8 @@ describe("the sidecar in front of an unmodified harness", () => {
       }),
     );
     await new Promise<void>((r) => stalled.listen(0, "127.0.0.1", r));
+    // SAFETY: address() is AddressInfo — an object with a port — for any
+    // IP server that is listening, which the awaited listen guarantees.
     const port = (stalled.address() as { port: number }).port;
     try {
       const started = Date.now();
@@ -415,6 +426,8 @@ describe("the sidecar in front of an unmodified harness", () => {
         headers: { authorization: `Bearer ${TOKEN}` },
       });
       expect(res.status).toBe(504);
+      // SAFETY: the proxy's own 504 body is its { error: string } contract;
+      // the contains below fails if the shape drifts.
       expect(((await res.json()) as { error: string }).error).toContain("did not respond");
       expect(Date.now() - started).toBeLessThan(5_000);
     } finally {
@@ -447,6 +460,8 @@ describe("the sidecar in front of an unmodified harness", () => {
       upstreamReached();
     });
     await new Promise<void>((r) => slow.listen(0, "127.0.0.1", r));
+    // SAFETY: address() is AddressInfo — an object with a port — for any
+    // IP server that is listening, which the awaited listen guarantees.
     const slowPort = (slow.address() as { port: number }).port;
     const relay = createServer(
       createProxyHandler({
@@ -457,6 +472,8 @@ describe("the sidecar in front of an unmodified harness", () => {
       }),
     );
     await new Promise<void>((r) => relay.listen(0, "127.0.0.1", r));
+    // SAFETY: address() is AddressInfo — an object with a port — for any
+    // IP server that is listening, which the awaited listen guarantees.
     const port = (relay.address() as { port: number }).port;
     const abort = new AbortController();
     try {
@@ -506,6 +523,8 @@ describe("the sidecar in front of an unmodified harness", () => {
       pump();
     });
     await new Promise<void>((r) => flood.listen(0, "127.0.0.1", r));
+    // SAFETY: address() is AddressInfo — an object with a port — for any
+    // IP server that is listening, which the awaited listen guarantees.
     const floodPort = (flood.address() as { port: number }).port;
     const relay = createServer(
       createProxyHandler({
@@ -516,6 +535,8 @@ describe("the sidecar in front of an unmodified harness", () => {
       }),
     );
     await new Promise<void>((r) => relay.listen(0, "127.0.0.1", r));
+    // SAFETY: address() is AddressInfo — an object with a port — for any
+    // IP server that is listening, which the awaited listen guarantees.
     const port = (relay.address() as { port: number }).port;
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/events`, {
@@ -554,6 +575,8 @@ describe("pairing, end to end", () => {
       }),
     );
     await new Promise<void>((r) => paired.listen(0, "127.0.0.1", r));
+    // SAFETY: address() is AddressInfo — an object with a port — for any
+    // IP server that is listening, which the awaited listen guarantees.
     const port = (paired.address() as { port: number }).port;
     const control = createControlServer({
       devices: registry,

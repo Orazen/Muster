@@ -23,17 +23,21 @@ async function bootServer(extraEnv: Record<string, string>): Promise<{
   const home = mkdtempSync(join(tmpdir(), "muster-signup-gate-"));
   mkdirSync(join(home, ".muster"), { recursive: true });
 
+  // Undefined entries are dropped when the child environment is built, so
+  // PATH is inherited only when the host defines it.
+  const env = {
+    PATH: process.env.PATH,
+    HOME: home,
+    USERPROFILE: home,
+    OMB_PORT: String(port),
+    OMB_WEBHOOK_PORT: String(port + 1000),
+    BETTER_AUTH_SECRET: "test-secret-at-least-32-chars-long-ok",
+    ...extraEnv,
+  };
+
   const child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: join(SERVER_DIR, ".."),
-    env: {
-      ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-      HOME: home,
-      USERPROFILE: home,
-      OMB_PORT: String(port),
-      OMB_WEBHOOK_PORT: String(port + 1000),
-      BETTER_AUTH_SECRET: "test-secret-at-least-32-chars-long-ok",
-      ...extraEnv,
-    },
+    env,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -71,6 +75,7 @@ describe("sign-up stopgap gate", () => {
         body: JSON.stringify({ name: "Nope", email: "stranger@example.com", password: "testpassword12345" }),
       });
       expect(res.status).toBe(403);
+      // SAFETY: the gate's fixed rejection body; only the code field is asserted.
       const body = (await res.json()) as { code?: string };
       expect(body.code).toBe("SIGNUPS_CLOSED");
     } finally {
@@ -88,6 +93,7 @@ describe("sign-up stopgap gate", () => {
         body: JSON.stringify({ name: "Allowed", email: "ALLOWED@example.com", password: "testpassword12345" }),
       });
       expect(res.status).toBe(200);
+      // SAFETY: better-auth sign-up response envelope; only user.email is asserted.
       const body = (await res.json()) as { user?: { email?: string } };
       expect(body.user?.email).toBe("allowed@example.com");
     } finally {

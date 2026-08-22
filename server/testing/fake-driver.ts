@@ -10,6 +10,7 @@ import type {
   RuntimeEvent,
   RuntimeEventListener,
 } from "../contracts.ts";
+import type { JsonObject, JsonValue } from "../schema.ts";
 
 export interface FakeDriverOptions {
   kind?: string;
@@ -21,8 +22,15 @@ export interface FakeDriverOptions {
   effortLevels?: readonly EffortLevel[];
 }
 
+/** Config contract for the fake driver: fields ride through verbatim; only
+ * the `bad` flag is interpreted (it triggers the shadow-downgrade path). */
+export interface FakeDriverConfig {
+  bad?: boolean;
+  [key: string]: JsonValue | undefined;
+}
+
 export interface FakeDriverHandle {
-  driver: ProviderDriver<Record<string, unknown>>;
+  driver: ProviderDriver<FakeDriverConfig>;
   /** Live instances by instanceId, with their event-emit hook. */
   created: Map<string, { instance: ProviderInstance; emit: (e: RuntimeEvent) => void }>;
   decodedConfigs: unknown[];
@@ -39,19 +47,22 @@ export function makeFakeDriver(opts: FakeDriverOptions = {}): FakeDriverHandle {
       driverKind: kind,
       metadata: { displayName: `Fake ${kind}` },
       models: { default: `${kind}-1`, options: [{ id: `${kind}-1`, label: `${kind} one` }] },
-      decodeConfig(raw: unknown) {
-        if (raw && typeof raw === "object" && (raw as Record<string, unknown>).bad) {
+      decodeConfig(raw: JsonValue | undefined) {
+        // Non-object configs decode to the empty config; only `bad` is read.
+        const o: JsonObject = raw instanceof Object && !Array.isArray(raw) ? raw : {};
+        if (o.bad) {
           throw new Error(`${kind}: bad config`);
         }
         handle.decodedConfigs.push(raw);
-        return (raw ?? {}) as Record<string, unknown>;
+        // SAFETY: the fake driver passes persisted config through verbatim; only the `bad` flag is interpreted
+        return o as FakeDriverConfig;
       },
       defaultConfig: () => ({ isDefault: true }),
-      async create(input: DriverCreateInput<Record<string, unknown>>): Promise<ProviderInstance> {
+      async create(input: DriverCreateInput<FakeDriverConfig>): Promise<ProviderInstance> {
         if (opts.failCreate) throw new Error(opts.failCreate);
         const listeners = new Set<RuntimeEventListener>();
         const emit = (event: RuntimeEvent) => {
-          for (const l of [...listeners]) l(event);
+          for (const l of listeners) l(event);
         };
         const instance: ProviderInstance = {
           instanceId: input.instanceId,

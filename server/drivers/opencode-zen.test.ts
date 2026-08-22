@@ -52,6 +52,8 @@ describe("OpenCodeZenDriver", () => {
   });
 
   it("posts to opencode.ai/zen/v1/chat/completions with the default free model", async () => {
+    // SAFETY: fetch is replaced by a vi.fn() mock; only mockResolvedValue
+    // exists on the double.
     (global.fetch as any).mockResolvedValue(streamResponse([sseChunk("OK")]));
     const instance = await OpenCodeZenDriver.create({
       instanceId: "x",
@@ -68,6 +70,7 @@ describe("OpenCodeZenDriver", () => {
     for (let i = 0; i < 50 && !completed; i++) await new Promise((r) => setTimeout(r, 5));
 
     expect(completed?.ok).toBe(true);
+    // SAFETY: fetch is a vi.fn() here; mock.calls exists on every mock.
     const call = (fetch as any).mock.calls[0];
     expect(call[0]).toBe("https://opencode.ai/zen/v1/chat/completions");
     const sentBody = JSON.parse(call[1].body);

@@ -213,7 +213,7 @@ interface InstanceCliUpdate {
 // (which withInstanceCli() uses to strip them back out before persisting an
 // override) — defined once at module scope so the two can never drift out
 // of sync with each other.
-const PROVIDER_DRIVER_ENV: Record<string, string> = {
+const PROVIDER_DRIVER_ENV = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   google: "GOOGLE_API_KEY",
@@ -229,7 +229,7 @@ const PROVIDER_DRIVER_ENV: Record<string, string> = {
   // providers.opencodeZen.apiKey lights up both the API-key engine here and
   // the CLI engine there.
   opencodeZen: "OPENCODE_API_KEY",
-};
+} satisfies Record<string, string>;
 
 function injectedEnvironment(cfg: AppConfig): Map<string, string> {
   const environment = new Map<string, string>();
@@ -272,40 +272,36 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     computer: { driver: "boxAgent" },
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
-    // The API-key Grok engine appears as a second Grok option once an xAI
-    // key is saved — no CLI install required. It rides the `grok` (API)
-    // driver, which bills via XAI_API_KEY over plain HTTPS.
-    ...(cfg.xai?.key ? { grokApi: { driver: "grok", displayName: "Grok (API)" } } : {}),
-    // Same pattern for OpenAI/Anthropic: saving a key in Settings → Providers
-    // (server/providers.ts's PROVIDERS catalog) is enough to bring the bot
-    // online with no CLI install, alongside claude/codex's CLI-driven
-    // instances above.
-    ...(cfg.providers?.openai?.apiKey ? { openaiApi: { driver: "openai", displayName: "OpenAI (API)" } } : {}),
-    ...(cfg.providers?.anthropic?.apiKey
-      ? { anthropicApi: { driver: "anthropic", displayName: "Anthropic (API)" } }
-      : {}),
-    // Remaining server/providers.ts catalog entries: same bring-your-own-key,
-    // no-CLI-required pattern, one instance per configured provider.
-    ...(cfg.providers?.google?.apiKey ? { googleApi: { driver: "google", displayName: "Google (API)" } } : {}),
-    ...(cfg.providers?.deepseek?.apiKey
-      ? { deepseekApi: { driver: "deepseek", displayName: "DeepSeek (API)" } }
-      : {}),
-    ...(cfg.providers?.mistral?.apiKey ? { mistralApi: { driver: "mistral", displayName: "Mistral (API)" } } : {}),
-    ...(cfg.providers?.cohere?.apiKey ? { cohereApi: { driver: "cohere", displayName: "Cohere (API)" } } : {}),
-    ...(cfg.providers?.groq?.apiKey ? { groqApi: { driver: "groq", displayName: "Groq (API)" } } : {}),
-    ...(cfg.providers?.together?.apiKey
-      ? { togetherApi: { driver: "together", displayName: "Together AI (API)" } }
-      : {}),
-    ...(cfg.providers?.fireworks?.apiKey
-      ? { fireworksApi: { driver: "fireworks", displayName: "Fireworks AI (API)" } }
-      : {}),
-    ...(cfg.providers?.openrouter?.apiKey
-      ? { openrouterApi: { driver: "openrouter", displayName: "OpenRouter (API)" } }
-      : {}),
-    ...(cfg.providers?.opencodeZen?.apiKey
-      ? { opencodeZenApi: { driver: "opencodeZen", displayName: "OpenCode Zen (API)" } }
-      : {}),
   };
+  // Bring-your-own-key API engines appear as extra instances once their key
+  // is saved in Settings → Providers (server/providers.ts catalog): no CLI
+  // install required, alongside the CLI-driven instances above. The xAI one
+  // bills via XAI_API_KEY over plain HTTPS and shows up as a second Grok
+  // option.
+  if (cfg.xai?.key) DEFAULT_FLEET.grokApi = { driver: "grok", displayName: "Grok (API)" };
+  if (cfg.providers?.openai?.apiKey) DEFAULT_FLEET.openaiApi = { driver: "openai", displayName: "OpenAI (API)" };
+  if (cfg.providers?.anthropic?.apiKey) {
+    DEFAULT_FLEET.anthropicApi = { driver: "anthropic", displayName: "Anthropic (API)" };
+  }
+  if (cfg.providers?.google?.apiKey) DEFAULT_FLEET.googleApi = { driver: "google", displayName: "Google (API)" };
+  if (cfg.providers?.deepseek?.apiKey) {
+    DEFAULT_FLEET.deepseekApi = { driver: "deepseek", displayName: "DeepSeek (API)" };
+  }
+  if (cfg.providers?.mistral?.apiKey) DEFAULT_FLEET.mistralApi = { driver: "mistral", displayName: "Mistral (API)" };
+  if (cfg.providers?.cohere?.apiKey) DEFAULT_FLEET.cohereApi = { driver: "cohere", displayName: "Cohere (API)" };
+  if (cfg.providers?.groq?.apiKey) DEFAULT_FLEET.groqApi = { driver: "groq", displayName: "Groq (API)" };
+  if (cfg.providers?.together?.apiKey) {
+    DEFAULT_FLEET.togetherApi = { driver: "together", displayName: "Together AI (API)" };
+  }
+  if (cfg.providers?.fireworks?.apiKey) {
+    DEFAULT_FLEET.fireworksApi = { driver: "fireworks", displayName: "Fireworks AI (API)" };
+  }
+  if (cfg.providers?.openrouter?.apiKey) {
+    DEFAULT_FLEET.openrouterApi = { driver: "openrouter", displayName: "OpenRouter (API)" };
+  }
+  if (cfg.providers?.opencodeZen?.apiKey) {
+    DEFAULT_FLEET.opencodeZenApi = { driver: "opencodeZen", displayName: "OpenCode Zen (API)" };
+  }
   const CUSTOM_ONLY = {
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
@@ -329,7 +325,11 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     if (entry.driver === "opencodeGo" && cfg.opencodeGo?.apiKey) {
       environment.OPENCODE_API_KEY = cfg.opencodeGo.apiKey;
     }
-    const envVar = PROVIDER_DRIVER_ENV[entry.driver];
+    // SAFETY: guarded by the `in` check, so entry.driver is one of the
+    // direct-API kinds PROVIDER_DRIVER_ENV maps to an env var.
+    const envVar = entry.driver in PROVIDER_DRIVER_ENV
+      ? PROVIDER_DRIVER_ENV[entry.driver as keyof typeof PROVIDER_DRIVER_ENV]
+      : undefined;
     const providerKey = cfg.providers?.[entry.driver]?.apiKey;
     if (envVar && providerKey) environment[envVar] = providerKey;
     entry.environment = environment;

@@ -55,6 +55,7 @@ describe("OpenAIDriver", () => {
   });
 
   it("streams a turn end-to-end and emits token-level deltas", async () => {
+    // SAFETY: the suite swaps in a jest-fetch mock; only its mockResolvedValue entry is used.
     (global.fetch as any).mockResolvedValue(
       streamResponse([sseChunk("Hel"), sseChunk("lo!")], { prompt_tokens: 5, completion_tokens: 2 }),
     );
@@ -71,7 +72,10 @@ describe("OpenAIDriver", () => {
     let text = "";
     instance.adapter.onEvent((e) => {
       events.push(e.type);
-      if (e.type === "content.delta") text += (e as any).delta;
+      if (e.type === "content.delta") {
+        // SAFETY: content.delta events always carry a string delta field.
+        text += (e as any).delta;
+      }
       if (e.type === "turn.completed") completed = e;
     });
 
@@ -90,6 +94,7 @@ describe("OpenAIDriver", () => {
   });
 
   it("surfaces a non-2xx response as a failed turn, not a throw", async () => {
+    // SAFETY: the suite swaps in a jest-fetch mock; only its mockResolvedValue entry is used.
     (global.fetch as any).mockResolvedValue(new Response("bad key", { status: 401 }));
     const instance = await OpenAIDriver.create({
       instanceId: "openaiApi",
@@ -108,6 +113,7 @@ describe("OpenAIDriver", () => {
   });
 
   it("rejects a second concurrent turn on the same thread", async () => {
+    // SAFETY: the suite swaps in a jest-fetch mock; only its mockImplementation entry is used.
     (global.fetch as any).mockImplementation(
       () => new Promise(() => {}), // never resolves — turn stays in-flight
     );

@@ -25,6 +25,8 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import type { JsonValue } from "./schema.ts";
+
 /** Single switch, mirroring Dokploy's IS_CLOUD. Absent everywhere else. */
 export const IS_CLOUD = process.env.MUSTER_CLOUD === "true";
 
@@ -49,21 +51,26 @@ export function isBillingConfigured(): boolean {
  * Stripe's API is form-encoded, including nested structures, which it expects
  * as `parent[child]` and `list[0][field]`. Flatten a plain object into that.
  */
-function toFormBody(input: Record<string, unknown>, prefix = ""): string[] {
+// Objects and arrays both recurse into indexed form fields; an array is
+// an object here, which is exactly what Object.entries walks by index.
+const isFormSection = (value: JsonValue): value is Record<string, JsonValue> =>
+  value !== null && value instanceof Object;
+
+function toFormBody(input: Record<string, JsonValue>, prefix = ""): string[] {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(input)) {
     if (value === undefined || value === null) continue;
     const name = prefix ? `${prefix}[${key}]` : key;
     if (Array.isArray(value)) {
       value.forEach((item, index) => {
-        if (item !== null && typeof item === "object") {
-          parts.push(...toFormBody(item as Record<string, unknown>, `${name}[${index}]`));
+        if (isFormSection(item)) {
+          parts.push(...toFormBody(item, `${name}[${index}]`));
         } else {
           parts.push(`${encodeURIComponent(`${name}[${index}]`)}=${encodeURIComponent(String(item))}`);
         }
       });
-    } else if (typeof value === "object") {
-      parts.push(...toFormBody(value as Record<string, unknown>, name));
+    } else if (isFormSection(value)) {
+      parts.push(...toFormBody(value, name));
     } else {
       parts.push(`${encodeURIComponent(name)}=${encodeURIComponent(String(value))}`);
     }
@@ -74,27 +81,32 @@ function toFormBody(input: Record<string, unknown>, prefix = ""): string[] {
 async function stripeRequest<T>(
   method: "GET" | "POST",
   path: string,
-  params?: Record<string, unknown>,
+  params?: Record<string, JsonValue>,
 ): Promise<T> {
   if (!STRIPE_SECRET_KEY) throw new Error("STRIPE_SECRET_KEY is not set");
 
   const body = params ? toFormBody(params).join("&") : undefined;
   const url = method === "GET" && body ? `${STRIPE_API}${path}?${body}` : `${STRIPE_API}${path}`;
 
-  const res = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Stripe-Version": "2024-09-30.acacia",
-    },
-    ...(method === "POST" && body ? { body } : {}),
-  });
+  const headers = {
+    Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Stripe-Version": "2024-09-30.acacia",
+  };
+  const init: RequestInit = { method, headers };
+  // Only POST carries the encoded params as a body; GET puts them in the URL.
+  if (method === "POST" && body) init.body = body;
 
+  const res = await fetch(url, init);
+
+  // SAFETY: Stripe answers every endpoint with a JSON envelope; only the
+  // error message field is read here and both may be absent.
   const payload = (await res.json()) as { error?: { message?: string } };
   if (!res.ok) {
     throw new Error(`Stripe ${method} ${path} failed (${res.status}): ${payload.error?.message ?? "unknown"}`);
   }
+  // SAFETY: T is the caller's declared slice of this Stripe response; the
+  // fields each caller reads are optional on their interfaces.
   return payload as T;
 }
 
@@ -185,6 +197,8 @@ export async function getSubscription(
     const item = sub.items.data[0];
     const interval = item?.price?.recurring?.interval;
 
+    // SAFETY: the early returns above leave only active, trialing, or
+    // past_due — exactly the statuses SubscriptionSummary carries.
     return {
       status: sub.status as SubscriptionSummary["status"],
       quantity: item?.quantity ?? 0,

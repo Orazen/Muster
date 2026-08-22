@@ -77,6 +77,8 @@ beforeAll(async () => {
     res.end(JSON.stringify({ error: "not found" }));
   });
   await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
+  // SAFETY: address() is AddressInfo — an object with a port — for any
+  // server that has finished listening.
   base = `http://127.0.0.1:${(api.address() as { port: number }).port}/api/v3.1`;
   process.env.OMB_COMPOSIO_API = base;
 });

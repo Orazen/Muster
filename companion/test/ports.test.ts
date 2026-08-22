@@ -33,15 +33,16 @@ const ENTRY = join(HERE, "..", "src", "index.ts");
  * where the child writes. */
 const start = (env: Record<string, string>): Promise<{ code: number | null; err: string }> =>
   new Promise((resolve) => {
+    // An empty env would leave the child without a usable PATH, and on Windows
+    // without SystemRoot; these five must travel when set. Everything else is
+    // deliberately withheld so the suite never reads real user state.
+    const childEnv = { ...env };
+    for (const key of ["PATH", "SystemRoot", "HOME", "USERPROFILE", "OMB_COMPANION_DIR"] as const) {
+      const value = process.env[key];
+      if (value !== undefined) childEnv[key] = value;
+    }
     const child = spawn(process.execPath, [ENTRY], {
-      env: {
-        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-        ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
-        ...(process.env.USERPROFILE ? { USERPROFILE: process.env.USERPROFILE } : {}),
-        ...(process.env.OMB_COMPANION_DIR ? { OMB_COMPANION_DIR: process.env.OMB_COMPANION_DIR } : {}),
-        ...env,
-      },
+      env: childEnv,
       stdio: ["ignore", "ignore", "pipe"],
     });
     let err = "";

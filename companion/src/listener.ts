@@ -13,6 +13,12 @@ import { execFile } from "node:child_process";
 import { homedir, networkInterfaces } from "node:os";
 import { join } from "node:path";
 
+/** Any value a JSON document can carry. */
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+/** CLI output decoded as JSON yields primitive strings for text fields. */
+const isText = (v: JsonValue): v is string => Object.is(String(v), v);
+
 /** Every IPv4 address a phone on the same network could dial. Link-local
  * (169.254/16) is dropped: it means DHCP failed and nothing will reach us. */
 export function lanAddresses(): string[] {
@@ -139,7 +145,7 @@ export async function refreshTailnetName(
           try {
             const dns = JSON.parse(stdout)?.Self?.DNSName;
             // MagicDNS names are fully qualified, trailing dot and all
-            const trimmed = typeof dns === "string" && dns ? dns.replace(/\.$/, "") : null;
+            const trimmed = isText(dns) && dns ? dns.replace(/\.$/, "") : null;
             onAttempt?.(cli, trimmed ? `ok: ${trimmed}` : "ran, but no MagicDNS name in status");
             resolve(trimmed);
           } catch {

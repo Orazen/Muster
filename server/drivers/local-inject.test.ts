@@ -23,6 +23,7 @@ import {
   loadedIdsFromPayloads,
   LOCAL_HOSTS,
   mergeLocalInject,
+  type ProviderEnvironment,
 } from "./local-inject.ts";
 
 const scratchDirs: string[] = [];
@@ -206,7 +207,9 @@ describe("applyClaudeInject", () => {
 
 describe("codexLocalProviderArgs", () => {
   it("configures custom providers through env keys without putting credentials on argv", () => {
-    const env: Record<string, string | undefined> = { UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret" };
+    // codexLocalProviderArgs writes the injected API-key env var into this
+    // record, so it is typed as a mutable env, not a fixed-shape literal.
+    const env: ProviderEnvironment = { UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret" };
     const args = codexLocalProviderArgs(env, "unsloth::local-model");
     const rendered = JSON.stringify(args);
     expect(rendered).toContain("model_providers.unsloth.base_url");
@@ -297,6 +300,7 @@ describe("ensureDroidInjectModel", () => {
     const again = ensureDroidInjectModel("omlx::MiniMax-M3-4bit", { HOME: home });
     expect(first).toBe("custom:muster-omlx-MiniMax-M3-4bit");
     expect(again).toBe(first);
+    // SAFETY: ensureDroidInjectModel wrote this settings.json with the injected customModels row.
     const settings = JSON.parse(readFileSync(join(home, ".factory", "settings.json"), "utf8")) as {
       hooks: unknown;
       customModels: Array<{ id: string; model: string; baseUrl: string; provider: string }>;
@@ -322,6 +326,7 @@ describe("ensureDroidInjectModel", () => {
       }),
     );
     const id = ensureDroidInjectModel("omlx::MiniMax-M3-4bit", { HOME: home });
+    // SAFETY: ensureDroidInjectModel wrote this settings.json and stamps ids onto matching rows.
     const settings = JSON.parse(readFileSync(join(home, ".factory", "settings.json"), "utf8")) as {
       customModels: Array<{ id?: string; model: string }>;
     };
@@ -352,6 +357,7 @@ describe("ensureOpenCodeInjectModel", () => {
     );
     const native = ensureOpenCodeInjectModel("omlx::GLM-5.2-fp8", { HOME: home });
     expect(native).toBe("omlx/GLM-5.2-fp8");
+    // SAFETY: ensureOpenCodeInjectModel wrote this opencode.json with a provider entry per host.
     const config = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8")) as {
       provider: { omlx: { models: Record<string, { name: string }>; options: { baseURL: string } } };
     };
@@ -367,8 +373,9 @@ describe("ensureOpenCodeInjectModel", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "opencode.json"), "{not-json");
     expect(ensureOpenCodeInjectModel("omlx::GLM-5.2-fp8", { HOME: home })).toBe("omlx/GLM-5.2-fp8");
+    // SAFETY: ensureOpenCodeInjectModel wrote this opencode.json from its default object.
     const config = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8")) as {
-      provider: { omlx: { models: Record<string, unknown> } };
+      provider: { omlx: { models: Record<string, { name: string }> } };
     };
     expect(config.provider.omlx.models["GLM-5.2-fp8"]).toBeTruthy();
   });
@@ -435,6 +442,7 @@ describe("ensureQwenInjectModel", () => {
     );
     const native = ensureQwenInjectModel("omlx::GLM-5.2-fp8", { HOME: home });
     expect(native).toBe("GLM-5.2-fp8");
+    // SAFETY: the Qwen driver under test wrote this settings.json with the injected modelProviders row.
     const settings = JSON.parse(readFileSync(join(home, ".qwen", "settings.json"), "utf8")) as {
       env: Record<string, string>;
       modelProviders: { openai: Array<{ id: string }> };
@@ -452,6 +460,7 @@ describe("ensureQwenInjectModel", () => {
     mkdirSync(join(home, ".qwen"), { recursive: true });
     writeFileSync(join(home, ".qwen", "settings.json"), "{not-json");
     expect(ensureQwenInjectModel("omlx::GLM-5.2-fp8", { HOME: home })).toBe("GLM-5.2-fp8");
+    // SAFETY: the Qwen driver under test wrote this settings.json from its default object.
     const settings = JSON.parse(readFileSync(join(home, ".qwen", "settings.json"), "utf8")) as {
       modelProviders: { openai: Array<{ id: string }> };
     };
@@ -462,6 +471,7 @@ describe("ensureQwenInjectModel", () => {
 describe("live Custom lists on every local CLI harness", () => {
   it("merges probed host models onto Kimi, Droid, and Antigravity", async () => {
     const previous = globalThis.fetch;
+    // SAFETY: the stub accepts every URL shape fetch passes and answers only the :8080 probes.
     globalThis.fetch = (async (url: string | URL) => {
       if (String(url).includes(":8080")) {
         return new Response(JSON.stringify({ data: [{ id: "GLM-5.2-fp8" }] }), { status: 200 });

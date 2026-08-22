@@ -317,6 +317,30 @@ export interface AppState {
 
 type BotAnnouncement = Omit<Bot, "messages"> & { messages?: Message[] };
 
+/** Fields a bot-settings PATCH may change; also what duplicateBot copies. */
+type BotPatch = Partial<
+  Pick<
+    Bot,
+    | "name"
+    | "title"
+    | "description"
+    | "notifications"
+    | "computer"
+    | "color"
+    | "character"
+    | "mascotExpression"
+    | "autoApprove"
+    | "speakReplies"
+    | "voice"
+    | "pinned"
+    | "hidden"
+    | "chiefOfStaff"
+    | "approvePeerComms"
+    | "composio"
+    | "modelSelection"
+  >
+>;
+
 export type Action =
   | { type: "hydrate"; bots: Bot[]; groups: Group[] }
   | { type: "showRoutines" }
@@ -395,28 +419,7 @@ export type Action =
   | {
       type: "updateBot";
       botId: string;
-      patch: Partial<
-        Pick<
-          Bot,
-          | "name"
-          | "title"
-          | "description"
-          | "notifications"
-          | "computer"
-          | "color"
-          | "character"
-          | "mascotExpression"
-          | "autoApprove"
-          | "speakReplies"
-          | "voice"
-          | "pinned"
-          | "hidden"
-          | "chiefOfStaff"
-          | "approvePeerComms"
-          | "composio"
-          | "modelSelection"
-        >
-      >;
+      patch: BotPatch;
     };
 
 function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot): AppState {
@@ -510,6 +513,9 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "groupPatched": {
       const exists = state.groups.some((g) => g.id === action.group.id);
+      // SAFETY: a group frame for an id the client has not yet seen carries
+      // the full Group record — that is the stream's first-sight contract —
+      // and the messages fallback covers frames that omit them.
       const groups = exists
         ? state.groups.map((g) => (g.id === action.group.id ? { ...g, ...action.group, messages: action.group.messages ?? g.messages } : g))
         : [{ ...(action.group as Group), messages: action.group.messages ?? [] }, ...state.groups];
@@ -596,8 +602,7 @@ export function reducer(state: AppState, action: Action): AppState {
             ),
           }
         : animated;
-      const switchedThread =
-        typeof action.bot.threadId === "string" && action.bot.threadId !== before.threadId;
+      const switchedThread = action.bot.threadId !== before.threadId;
       return updateBot(next, action.bot.id, (b) => ({
         ...b,
         ...action.bot,
@@ -968,10 +973,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   };
 
   // debounced PATCH per bot for text-field edits (name/title/description)
-  const patchTimers = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; patch: Record<string, unknown> }>());
+  const patchTimers = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; patch: BotPatch }>());
 
   const dispatch = useMemo(() => {
-    const showError = (e: unknown) => {
+    const showError = (e: Error) => {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
       setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
     };
@@ -1099,18 +1104,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "duplicateBot": {
           const source = stateRef.current.bots.find((b) => b.id === action.botId);
           if (!source) break;
+          const copy: BotPatch = {
+            name: `${source.name} copy`,
+            title: source.title,
+            description: source.description,
+            notifications: source.notifications,
+            modelSelection: source.modelSelection,
+          };
+          // a duplicate keeps the original's computer target, when one is set
+          if (source.computer) copy.computer = source.computer;
           api("/api/bots", { method: "POST" })
             .then(({ bot }) =>
               api(`/api/bots/${bot.id}`, {
                 method: "PATCH",
-                body: JSON.stringify({
-                  name: `${source.name} copy`,
-                  title: source.title,
-                  description: source.description,
-                  notifications: source.notifications,
-                  modelSelection: source.modelSelection,
-                  ...(source.computer ? { computer: source.computer } : {}),
-                }),
+                body: JSON.stringify(copy),
               }).then(({ bot: patched }) =>
                 rawDispatch({ type: "botAdded", bot: { ...bot, ...patched, messages: bot.messages } }),
               ),
@@ -1320,6 +1327,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           clearStream(frame.threadId);
           break;
         case "bot": {
+          // SAFETY: a `bot` stream frame always carries the full announcement
+          // payload — the stream's own envelope contract for kind "bot".
           const bot = frame.bot as BotAnnouncement;
           // reading the selected chat clears its badge immediately
           if (bot.unread && bot.id === stateRef.current.selectedId) {
@@ -1334,6 +1343,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "group": {
+          // SAFETY: a `group` stream frame carries the group record with its
+          // id; only the fields read below are depended on.
           const group = frame.group as Partial<Group> & { id: string };
           // reading the selected room clears its badge immediately
           if (group.unread && group.id === stateRef.current.selectedId) {

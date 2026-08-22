@@ -48,10 +48,9 @@ export function claudeSignedIn(
   return new Promise((resolve) => {
     run(cli, ["auth", "status", "--json"], { timeout: 8000, env }, (_error, stdout) => {
       try {
-        const status: unknown = JSON.parse(stdout);
-        resolve(
-          typeof status === "object" && status !== null && "loggedIn" in status && status.loggedIn === true,
-        );
+        // SAFETY: auth status JSON is an object envelope; only its loggedIn flag is read
+        const status = JSON.parse(stdout) as { loggedIn?: unknown } | null | undefined;
+        resolve(status?.loggedIn === true);
       } catch {
         resolve(false);
       }
@@ -103,26 +102,48 @@ function claudeConfigDir(env: Record<string, string | undefined>): string {
   return join(env.HOME || env.USERPROFILE || homedir(), ".claude");
 }
 
-function extrasFromUnknown(value: unknown): Array<{ id: string; label: string }> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (typeof item === "string") {
-      return CLAUDE_MODEL_ID.test(item) ? [{ id: item, label: item }] : [];
+/** One row of a settings.json model list — plain id string or partial descriptor. */
+interface ClaudeCatalogRow {
+  id?: string;
+  model?: string;
+  slug?: string;
+  name?: string;
+  displayName?: string;
+  label?: string;
+}
+
+function extrasFromUnknown(
+  list: ReadonlyArray<string | ClaudeCatalogRow> | undefined,
+): Array<{ id: string; label: string }> {
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((item) => {
+    if (!(item instanceof Object)) {
+      return item !== undefined && CLAUDE_MODEL_ID.test(item) ? [{ id: item, label: item }] : [];
     }
-    if (!item || typeof item !== "object") return [];
-    const row = item as { id?: unknown; model?: unknown; slug?: unknown; name?: unknown; displayName?: unknown; label?: unknown };
-    const id = [row.id, row.model, row.slug].find((candidate): candidate is string => typeof candidate === "string");
+    const id = [item.id, item.model, item.slug].find((candidate) => candidate !== undefined);
     if (!id || !CLAUDE_MODEL_ID.test(id)) return [];
-    const label = [row.name, row.displayName, row.label].find((candidate): candidate is string => typeof candidate === "string");
+    const label = [item.name, item.displayName, item.label].find(
+      (candidate) => candidate !== undefined,
+    );
     return [{ id, label: label || id }];
   });
 }
 
+/** Model-catalog fields Muster reads from ~/.claude/settings.json. */
+interface ClaudeSettingsFile {
+  availableModels?: ReadonlyArray<string | ClaudeCatalogRow>;
+  customModels?: ReadonlyArray<string | ClaudeCatalogRow>;
+  extraModels?: ReadonlyArray<string | ClaudeCatalogRow>;
+  env?: { ANTHROPIC_MODEL?: string } | null;
+  model?: string;
+}
+
 /** Extra ids from ~/.claude/settings.json. Official cloud rows stay untagged. */
 export function readClaudeModelCatalog(env: Record<string, string | undefined> = process.env) {
-  let settings: Record<string, unknown> = {};
+  let settings: ClaudeSettingsFile = {};
   try {
-    settings = JSON.parse(readFileSync(join(claudeConfigDir(env), "settings.json"), "utf8")) as Record<string, unknown>;
+    // SAFETY: settings.json is a JSON object; only the model-catalog fields are read
+    settings = JSON.parse(readFileSync(join(claudeConfigDir(env), "settings.json"), "utf8")) as ClaudeSettingsFile;
   } catch {
     return STATIC_CLAUDE_MODELS;
   }
@@ -132,10 +153,9 @@ export function readClaudeModelCatalog(env: Record<string, string | undefined> =
     ...extrasFromUnknown(settings.customModels),
     ...extrasFromUnknown(settings.extraModels),
   ];
-  const nestedEnv = settings.env && typeof settings.env === "object" ? (settings.env as Record<string, unknown>) : {};
-  const envModel = nestedEnv.ANTHROPIC_MODEL ?? env.ANTHROPIC_MODEL;
-  if (typeof envModel === "string") extras.push(...extrasFromUnknown([envModel]));
-  if (typeof settings.model === "string") extras.push(...extrasFromUnknown([settings.model]));
+  const envModel = settings.env?.ANTHROPIC_MODEL ?? env.ANTHROPIC_MODEL;
+  if (envModel !== undefined) extras.push(...extrasFromUnknown([envModel]));
+  if (settings.model !== undefined) extras.push(...extrasFromUnknown([settings.model]));
 
   const options = STATIC_CLAUDE_MODELS.options.map((option) => ({ ...option }));
   const seen = new Set(options.map((option) => option.id));
@@ -164,15 +184,31 @@ const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 // the claude CLI) forwards asks over it and waits. Unanswered permission
 // asks deny after timeoutMs with a keep-moving note; unanswered questions
 // answer with "use your best judgment" — guidance, never a block.
+/** Tool input from the CLI permission prompt — prompt fields arrive as strings. */
+type AskInput = {
+  question?: string;
+  command?: string;
+  url?: string;
+  choices?: string[];
+  [key: string]: string | string[] | undefined;
+};
+
 interface Ask {
   id: string;
   kind: "permission" | "question";
   tool: string;
-  input: Record<string, unknown>;
+  input: AskInput;
   at: number;
 }
 type AskBehavior = "allow" | "deny" | "answer";
 type AskResolutionSource = "user" | "timeout" | "system";
+
+/** One stdio entry of the --mcp-config JSON handed to the CLI. */
+interface McpServerSpec {
+  command: string;
+  args?: string[];
+  env?: Record<string, string | undefined>;
+}
 
 const DENY_TIMEOUT_NOTE =
   "Muster: nobody answered this permission request in time. Skip this action and finish what you can without it.";
@@ -181,9 +217,9 @@ const QUESTION_TIMEOUT_NOTE = "Muster: nobody answered in time. Use your best ju
 /** One human-readable line for an ask — what the card subtitle shows. */
 function askSummary(ask: Ask): string {
   const input = ask.input ?? {};
-  if (typeof input.question === "string") return input.question.slice(0, 300);
-  if (typeof input.command === "string") return input.command.slice(0, 200);
-  if (typeof input.url === "string") return input.url.slice(0, 200);
+  if (input.question !== undefined) return input.question.slice(0, 300);
+  if (input.command !== undefined) return input.command.slice(0, 200);
+  if (input.url !== undefined) return input.url.slice(0, 200);
   const text = JSON.stringify(input);
   return text === "{}" ? (ask.tool ?? "tool") : text.slice(0, 200);
 }
@@ -263,7 +299,7 @@ function createPermissionBroker(opts: {
       return true;
     },
     close() {
-      for (const p of [...pending.values()]) {
+      for (const p of pending.values()) {
         if (p.ask.kind === "question") p.finish("answer", "Muster: the turn is ending — wrap up.", "system");
         else p.finish("deny", "Muster: the turn ended", "system");
       }
@@ -277,27 +313,32 @@ function createPermissionBroker(opts: {
   };
 }
 
-function decodeConfig(raw: unknown): ClaudeConfig {
-  const o = (raw ?? {}) as Record<string, unknown>;
-  const mode = o.permissionMode;
+/** Stored driver config — persisted JSON whose fields may be absent or stale. */
+interface ClaudeConfigFile {
+  cli?: string;
+  permissionMode?: string;
+}
+
+function decodeConfig(raw: ClaudeConfigFile | null | undefined): ClaudeConfig {
+  const mode = raw?.permissionMode;
   if (mode !== undefined && mode !== "acceptEdits" && mode !== "auto" && mode !== "bypassPermissions") {
     throw new Error(`claude: invalid permissionMode ${JSON.stringify(mode)}`);
   }
   return {
-    cli: typeof o.cli === "string" ? o.cli : "claude",
-    permissionMode: (mode as ClaudeConfig["permissionMode"]) ?? "acceptEdits",
+    cli: raw?.cli ?? "claude",
+    permissionMode: mode ?? "acceptEdits",
   };
 }
 
-function firstText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter((b) => b?.type === "text" && b.text)
-      .map((b) => b.text)
-      .join("");
-  }
-  return "";
+/** stream-json assistant content: plain text or a list of typed blocks. */
+type StreamContent = string | Array<{ type?: string; text?: string }>;
+
+function firstText(content: StreamContent | null | undefined): string {
+  if (content === null || content === undefined || !Array.isArray(content)) return content ?? "";
+  return content
+    .filter((b) => b?.type === "text" && b.text)
+    .map((b) => b.text)
+    .join("");
 }
 
 export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
@@ -321,7 +362,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
   async create(input: DriverCreateInput<ClaudeConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
-    const catalogEnv: Record<string, string | undefined> = { ...process.env, ...input.environment };
+    const catalogEnv = { ...process.env, ...input.environment };
     let models = STATIC_CLAUDE_MODELS;
     const refreshModels = async () => {
       try {
@@ -337,7 +378,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const active = new Map<string, { stop: () => void; turnId: string; broker?: ReturnType<typeof createPermissionBroker> }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of listeners) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -351,7 +392,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const { threadId } = turn;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       const turnId = newId();
-      const sessionId = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+      // SAFETY: resumeCursor carries this driver's own session ids (strings)
+      const sessionId = (turn.resumeCursor as string | undefined) ?? null;
       const newSessionId = sessionId ? null : newId();
 
       const args = [
@@ -374,7 +416,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
       // integrations → MCP servers; pre-allow their tools (a headless
       // acceptEdits run silently denies anything unlisted)
-      const mcpServers: Record<string, unknown> = {};
+      const mcpServers: Record<string, McpServerSpec> = {};
       const allowed: string[] = [];
       if (turn.integrations?.composio) {
         mcpServers.composio = { ...turn.integrations.composio };
@@ -431,7 +473,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               requestType: ask.kind,
               tool: ask.tool,
               summary: askSummary(ask),
-              choices: Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
+              choices: Array.isArray(ask.input.choices) ? ask.input.choices.slice(0, 5) : undefined,
             }),
           onResolve: (resolved) =>
             emit({
@@ -485,7 +527,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           } catch {}
         }
         active.delete(threadId);
-        emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
+        if (usage) emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost, usage });
+        else emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost });
       };
 
       // token streaming: true while --include-partial-messages is delivering
@@ -515,11 +558,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             if (o.parent_tool_use_id) break;
             const ev = o.event ?? {};
             if (ev.type !== "content_block_delta") break;
-            const d = ev.delta ?? {};
-            if (d.type === "text_delta" && typeof d.text === "string" && d.text) {
+            // SAFETY: stream-json delta frames are { type, text? , thinking? }
+            const d = (ev.delta ?? {}) as { type?: string; text?: string; thinking?: string };
+            if (d.type === "text_delta" && d.text) {
               sawStreamDelta = true;
               emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta: d.text });
-            } else if (d.type === "thinking_delta" && typeof d.thinking === "string" && d.thinking) {
+            } else if (d.type === "thinking_delta" && d.thinking) {
               emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta: d.thinking });
             }
             break;

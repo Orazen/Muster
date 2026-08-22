@@ -126,6 +126,8 @@ describe("OpenCode Go catalog", () => {
         config: { cli: FAKE_CLI, fullAuto: false },
       });
       await instance.snapshot();
+      // SAFETY: the dump file is written by this test's own fake CLI as a
+      // flat {env: {...string}} record before it is read back here.
       const child = JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> };
       expect(child.env.OPENCODE_API_KEY).toBe("secret-value");
       expect(child.env.OPENAI_API_KEY).toBeUndefined();

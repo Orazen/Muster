@@ -13,7 +13,7 @@ const frame: NotifyFrame = {
 
 function installNotification(permission: NotificationPermission) {
   const notices: Array<{ title: string; options?: NotificationOptions; onclick: (() => void) | null }> = [];
-  const requestPermission = vi.fn(async () => "granted" as NotificationPermission);
+  const requestPermission = vi.fn(async (): Promise<NotificationPermission> => "granted");
   class FakeNotification {
     static permission = permission;
     static requestPermission = requestPermission;

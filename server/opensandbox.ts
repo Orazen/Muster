@@ -31,18 +31,16 @@ export function configured(cfg: AppConfig): boolean {
 export function connectionConfig(cfg: AppConfig): ConnectionConfigOptions {
   const apiKey = cfg.opensandbox?.apiKey || process.env.OPEN_SANDBOX_API_KEY || "";
   const domain = cfg.opensandbox?.url || process.env.OMB_OPENSANDBOX_URL || undefined;
-  return {
-    ...(domain ? { domain } : {}),
-    ...(apiKey ? { apiKey } : {}),
-    // Live-tested finding: the common self-host setup (Docker bridge mode,
-    // the mode docker-compose.example.yaml in the OpenSandbox repo itself
-    // ships) puts sandboxes on a network this Node process can't reach
-    // directly — the SDK's own health check fails with READY_TIMEOUT and
-    // explicitly suggests this fix in its error message. Routing exec
-    // through the sandbox server instead of dialing the sandbox directly
-    // is the correct default for a self-hosted deployment; set
-    // useServerProxy: false explicitly if a deployment's network topology
-    // genuinely allows direct sandbox access (e.g. host networking mode).
+  // Live-tested finding: the common self-host setup (Docker bridge mode,
+  // the mode docker-compose.example.yaml in the OpenSandbox repo itself
+  // ships) puts sandboxes on a network this Node process can't reach
+  // directly — the SDK's own health check fails with READY_TIMEOUT and
+  // explicitly suggests this fix in its error message. Routing exec
+  // through the sandbox server instead of dialing the sandbox directly
+  // is the correct default for a self-hosted deployment; set
+  // useServerProxy: false explicitly if a deployment's network topology
+  // genuinely allows direct sandbox access (e.g. host networking mode).
+  const config: ConnectionConfigOptions = {
     useServerProxy: cfg.opensandbox?.useServerProxy ?? true,
     // Same live-tested reasoning as createSandbox()'s readyTimeoutSeconds:
     // the SDK's own default (30s) is real-world too short for this class
@@ -54,6 +52,9 @@ export function connectionConfig(cfg: AppConfig): ConnectionConfigOptions {
     // margin above that rather than re-tuning on every flake.
     requestTimeoutSeconds: 180,
   };
+  if (domain) config.domain = domain;
+  if (apiKey) config.apiKey = apiKey;
+  return config;
 }
 
 export interface OpenSandboxHandle {
@@ -77,15 +78,16 @@ export async function createSandbox(
   if (!configured(cfg)) {
     throw new Error("no OpenSandbox API key — add it in Settings, or set OPEN_SANDBOX_API_KEY");
   }
-  const sandbox = await Sandbox.create({
+  const createOpts: Parameters<typeof Sandbox.create>[0] = {
     connectionConfig: connectionConfig(cfg),
-    ...(opts?.image ? { image: opts.image } : {}),
     // The SDK's own default (30s) is real-world too short for a first-ever
     // sandbox with an uncached or large image — live-tested this session:
     // a real image pull + first-boot health check routinely takes 60-140s.
     // 120s is the value already proven reliable end to end.
     readyTimeoutSeconds: opts?.readyTimeoutSeconds ?? 170,
-  });
+  };
+  if (opts?.image) createOpts.image = opts.image;
+  const sandbox = await Sandbox.create(createOpts);
   return {
     sandbox,
     async run(command, runOpts) {

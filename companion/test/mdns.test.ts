@@ -375,15 +375,40 @@ describe("tailscaleAddress", () => {
 // and its owner — and a UDP reflector besides, since the reply goes wherever
 // the source address claims and that claim is free to make.
 describe("isOnLink", () => {
-  // SAFETY: the literal below carries exactly the four fields `isOnLink`
-  // reads — family, address, netmask, internal — for each interface; the
-  // assertion stands in for the rest of NetworkInterfaceInfo (cidr, mac,
-  // scopeid), which nothing on this path touches.
+  // The stub carries exactly the fields NetworkInterfaceInfo requires;
+  // `isOnLink` reads only family, address and netmask from it.
   const interfaces = {
-    lo: [{ family: "IPv4", address: "127.0.0.1", netmask: "255.0.0.0", internal: true }],
-    en0: [{ family: "IPv4", address: "192.168.1.42", netmask: "255.255.255.0", internal: false }],
-    ts0: [{ family: "IPv4", address: "100.102.178.88", netmask: "255.192.0.0", internal: false }],
-  } as unknown as ReturnType<typeof import("node:os").networkInterfaces>;
+    lo: [
+      {
+        family: "IPv4",
+        address: "127.0.0.1",
+        netmask: "255.0.0.0",
+        mac: "00:00:00:00:00:00",
+        internal: true,
+        cidr: "127.0.0.1/8",
+      },
+    ],
+    en0: [
+      {
+        family: "IPv4",
+        address: "192.168.1.42",
+        netmask: "255.255.255.0",
+        mac: "a4:83:e7:11:22:33",
+        internal: false,
+        cidr: "192.168.1.42/24",
+      },
+    ],
+    ts0: [
+      {
+        family: "IPv4",
+        address: "100.102.178.88",
+        netmask: "255.192.0.0",
+        mac: "aa:bb:cc:dd:ee:ff",
+        internal: false,
+        cidr: "100.102.178.88/10",
+      },
+    ],
+  } satisfies Parameters<typeof isOnLink>[1];
 
   it("accepts a source on a directly attached subnet", () => {
     expect(isOnLink("192.168.1.7", interfaces)).toBe(true);

@@ -9,7 +9,18 @@
 import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 
-type Json = Record<string, unknown>;
+type JsonPrimitive = string | number | boolean | null;
+interface JsonRecord {
+  [key: string]: JsonValue;
+}
+type JsonValue = JsonPrimitive | JsonRecord | JsonValue[];
+type Json = JsonRecord;
+
+// Wire decoders: JSON.parse output from the stdio transport and upstream HTTP
+// responses is discriminated exactly here and nowhere else.
+const isText = <T>(value: T): value is T & string => String(value) === value;
+const isJsonRecord = <T>(value: T): value is T & Json =>
+  value instanceof Object && value.constructor === Object;
 
 const UPSTREAM = process.env.OMB_CONNECTOR_UPSTREAM_URL ?? "";
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
@@ -21,9 +32,9 @@ const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 function parsedHeaders(): Record<string, string> {
   try {
     const value: unknown = JSON.parse(process.env.OMB_CONNECTOR_UPSTREAM_HEADERS ?? "{}");
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    if (!isJsonRecord(value)) return {};
     return Object.fromEntries(
-      Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+      Object.entries(value).filter((entry): entry is [string, string] => isText(entry[1])),
     );
   } catch {
     return {};
@@ -34,8 +45,10 @@ const upstreamHeaders = parsedHeaders();
 let upstreamSessionId = "";
 const send = (message: Json) => process.stdout.write(`${JSON.stringify(message)}\n`);
 
-function textResult(id: unknown, text: string, isError = false): Json {
-  return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) } };
+function textResult(id: JsonValue, text: string, isError = false): Json {
+  const result: Json = { content: [{ type: "text", text }] };
+  if (isError) result.isError = true;
+  return { jsonrpc: "2.0", id, result };
 }
 
 async function readBounded(response: Response): Promise<string> {
@@ -59,18 +72,19 @@ async function readBounded(response: Response): Promise<string> {
   return text + decoder.decode();
 }
 
-function parseUpstream(text: string, id: unknown): Json | null {
+function parseUpstream(text: string, id: JsonValue): Json | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
-  if (trimmed.startsWith("{")) return JSON.parse(trimmed) as Json;
+  // SAFETY: a leading "{" means the frame is one complete JSON object document.
+  if (trimmed.startsWith("{")) return JSON.parse(trimmed);
   const frames = trimmed
     .split(/\r?\n/)
     .filter((line) => line.startsWith("data:"))
     .map((line) => line.slice(5).trim())
     .filter((line) => line && line !== "[DONE]")
-    .flatMap((line) => {
+    .flatMap((line): Json[] => {
       try {
-        return [JSON.parse(line) as Json];
+        return [JSON.parse(line)];
       } catch {
         return [];
       }
@@ -80,14 +94,14 @@ function parseUpstream(text: string, id: unknown): Json | null {
 
 async function relay(message: Json): Promise<Json | null> {
   if (!UPSTREAM) throw new Error("connected apps are unavailable");
+  const headers: Record<string, string> = {};
+  headers["content-type"] = "application/json";
+  headers.accept = "application/json, text/event-stream";
+  Object.assign(headers, upstreamHeaders);
+  if (upstreamSessionId) headers["mcp-session-id"] = upstreamSessionId;
   const response = await fetch(UPSTREAM, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json, text/event-stream",
-      ...upstreamHeaders,
-      ...(upstreamSessionId ? { "mcp-session-id": upstreamSessionId } : {}),
-    },
+    headers,
     body: JSON.stringify(message),
     signal: AbortSignal.timeout(10 * 60_000),
   });
@@ -97,17 +111,16 @@ async function relay(message: Json): Promise<Json | null> {
   return parseUpstream(await readBounded(response), message.id);
 }
 
-function connectorAdds(args: unknown): string[] {
-  if (!args || typeof args !== "object" || Array.isArray(args)) return [];
-  const toolkits = (args as { toolkits?: unknown }).toolkits;
+function connectorAdds(args: JsonValue): string[] {
+  if (!isJsonRecord(args)) return [];
+  const toolkits = args.toolkits;
   if (!Array.isArray(toolkits)) return [];
-  return [...new Set(toolkits.flatMap((item) => {
-    if (typeof item === "string") return [item.toLowerCase()];
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const row = item as { name?: unknown; toolkit?: unknown; action?: unknown };
-    const slug = typeof row.toolkit === "string" ? row.toolkit : row.name;
-    const action = String(row.action ?? "add").toLowerCase();
-    return typeof slug === "string" && ["add", "connect", "initiate"].includes(action) ? [slug.toLowerCase()] : [];
+  return [...new Set(toolkits.flatMap((item): string[] => {
+    if (isText(item)) return [item.toLowerCase()];
+    if (!isJsonRecord(item)) return [];
+    const slug = isText(item.toolkit) ? item.toolkit : item.name;
+    const action = String(item.action ?? "add").toLowerCase();
+    return isText(slug) && ["add", "connect", "initiate"].includes(action) ? [slug.toLowerCase()] : [];
   }))];
 }
 
@@ -119,6 +132,7 @@ async function showConnectorCards(slugs: string[]): Promise<void> {
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
+    // SAFETY: harness error bodies are JSON objects; only the error field is read.
     const body = (await response.json().catch(() => ({}))) as { error?: unknown };
     throw new Error(String(body.error ?? `could not show connection card (HTTP ${response.status})`));
   }
@@ -128,7 +142,7 @@ async function handle(message: Json): Promise<void> {
   const id = message.id;
   const method = String(message.method ?? "");
   if (method === "tools/call") {
-    const params = (message.params ?? {}) as Json;
+    const params = isJsonRecord(message.params) ? message.params : {};
     const name = String(params.name ?? "");
     const slugs = /MANAGE_CONNECTIONS$/i.test(name) ? connectorAdds(params.arguments) : [];
     if (slugs.length) {
@@ -154,7 +168,7 @@ input.on("line", (line) => {
   if (!trimmed) return;
   let message: Json;
   try {
-    message = JSON.parse(trimmed) as Json;
+    message = JSON.parse(trimmed);
   } catch {
     return;
   }

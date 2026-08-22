@@ -7,7 +7,7 @@
 // fence is very likely complete), then highlights and caches — so the settled
 // bubble, a fresh component instance, mounts straight from cache instead of
 // popping from plain to highlighted.
-import { memo, useEffect, useState, type ReactNode } from "react";
+import { isValidElement, memo, useEffect, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy } from "lucide-react";
@@ -122,8 +122,21 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
             const lang = /language-([\w-]+)/.exec(className)?.[1] ?? "";
             // children can be a string OR an array of strings/nodes — flatten
             // strings only, so String() never comma-joins an array
-            const flat = (n: any): string =>
-              typeof n === "string" ? n : Array.isArray(n) ? n.map(flat).join("") : (n?.props?.children ? flat(n.props.children) : "");
+            const flat = (node: ReactNode): string => {
+              // SAFETY: scalar boundary — a string leaf is exactly the renderable
+              // text; every other node is structure to recurse into or skip.
+              // oxlint-disable-next-line anti-slop/no-runtime-typeof
+              const leaf = typeof node === "string" ? node : null;
+              if (leaf !== null) return leaf;
+              if (Array.isArray(node)) return node.map(flat).join("");
+              if (isValidElement(node)) {
+                // SAFETY: an element's renderable text sits one level down
+                // under props.children.
+                const nested = (node.props as { children?: ReactNode } | undefined)?.children;
+                return nested ? flat(nested) : "";
+              }
+              return "";
+            };
             const code = flat(child?.props?.children).replace(/\n$/, "");
             return <CodeBlock code={code} lang={lang} streaming={streaming} />;
           },

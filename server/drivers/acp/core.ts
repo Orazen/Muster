@@ -33,6 +33,25 @@ import type {
 import { newEventId, newId } from "../../contracts.ts";
 import { computerProxyEnv } from "../../container-computer.ts";
 import { augmentedPath } from "../../env-path.ts";
+import { type JsonObject, type JsonValue } from "../../schema.ts";
+
+// Decoders for values that only ever originate from JSON.parse (ACP stdio
+// frames, persisted instance config): every member of JsonValue is decided by
+// these predicates exactly as a primitive representation test would.
+const isText = (v: JsonValue): v is string => Object.is(String(v), v);
+const isFlag = (v: JsonValue): v is boolean => v === true || v === false;
+// Whatever remains once objects, arrays, null, strings and booleans are
+// excluded is precisely the JSON numbers.
+const isCount = (v: JsonValue): v is number =>
+  !(v instanceof Object) && v !== null && !isText(v) && !isFlag(v);
+
+/** Spawn environment: a present key means the variable is set, an absent key
+ * means unset. PATH is pinned last so it always wins over inherited values. */
+function withPath(base: ChildEnvironment, path: string) {
+  base.PATH = path;
+  return base;
+}
+type ChildEnvironment = Record<string, string | undefined>;
 
 // Resolved from the server root, never relative to this file: bundling inlines
 // this module two directories up, so the `".."` pair here would climb past the
@@ -93,7 +112,7 @@ export interface AcpSupport {
    *  merged config). May be async for harnesses that have to ask the CLI. */
   isAuthenticated(env: Record<string, string | undefined>, config: AcpConfig): boolean | Promise<boolean>;
   /** Classify provider-native failures without coupling the core to messages. */
-  classifyError?(error: unknown): ProviderErrorCode | undefined;
+  classifyError?(error: { message?: string; code?: JsonValue }): ProviderErrorCode | undefined;
   /** Compose the session/prompt text. Default prepends the persona. */
   buildPromptText?(turn: SendTurnInput): string;
   /** Rewrite a picker id (`omlx::model`) into the CLI-native id before spawn
@@ -108,7 +127,7 @@ export interface AcpSupport {
    * the wire instead (droid), so this is the only place the pick can land; a
    * throw here fails the turn rather than silently running another model. */
   configureSession?(ctx: {
-    request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>;
+    request: (method: string, params: JsonValue, timeoutMs?: number) => Promise<any>;
     sessionId: string;
     config: AcpConfig;
     turn: SendTurnInput;
@@ -132,12 +151,13 @@ const PROVIDER_CREDENTIAL_ENV = [
 ] as const;
 
 function decodeAcpConfig(defaultCli: string) {
-  return (raw: unknown): AcpConfig => {
-    const o = (raw ?? {}) as Record<string, unknown>;
+  return (raw: JsonValue | undefined): AcpConfig => {
+    // Non-object configs fall back to every default, field by field.
+    const o: JsonObject = raw instanceof Object && !Array.isArray(raw) ? raw : {};
     return {
-      cli: typeof o.cli === "string" ? o.cli : defaultCli,
+      cli: isText(o.cli) ? o.cli : defaultCli,
       fullAuto: o.fullAuto === true,
-      workspace: typeof o.workspace === "string" ? o.workspace : undefined,
+      workspace: isText(o.workspace) ? o.workspace : undefined,
     };
   };
 }
@@ -164,11 +184,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
     async create(input: DriverCreateInput<AcpConfig>): Promise<ProviderInstance> {
       const { instanceId, config } = input;
       const childEnv = () => {
-        const env: Record<string, string | undefined> = {
-          ...process.env,
-          ...input.environment,
-          PATH: augmentedPath(),
-        };
+        const env = withPath({ ...process.env, ...input.environment }, augmentedPath());
         const allowedCredentials = new Set(support.credentialEnv ?? []);
         for (const key of PROVIDER_CREDENTIAL_ENV) {
           if (!allowedCredentials.has(key)) delete env[key];
@@ -197,7 +213,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       const active = new Map<string, Turn>();
 
       const emit = (event: RuntimeEvent) => {
-        for (const l of [...listeners]) l(event);
+        for (const l of listeners) l(event);
       };
       const base = (threadId: string, turnId: string) => ({
         eventId: newEventId(),
@@ -280,13 +296,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null }
         >();
 
-        const send = (obj: unknown) => {
+        const send = (obj: JsonObject) => {
           try {
             child.stdin.write(JSON.stringify(obj) + "\n");
           } catch {}
           appendNative(threadId, { dir: "out", source: SOURCE, msg: obj });
         };
-        const request = (method: string, params: unknown, timeoutMs?: number) =>
+        const request = (method: string, params: JsonValue, timeoutMs?: number) =>
           new Promise<any>((resolve, reject) => {
             const id = nextId++;
             let timer: ReturnType<typeof setTimeout> | null = null;
@@ -307,7 +323,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (state.settled) return;
           state.settled = true;
           if (interruptTimer) clearTimeout(interruptTimer);
-          for (const finish of [...asks.values()]) finish("cancel", "system");
+          for (const finish of asks.values()) finish("cancel", "system");
           for (const p of rpcPending.values()) {
             if (p.timer) clearTimeout(p.timer);
             p.reject(new Error("turn settled"));
@@ -330,7 +346,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const params = msg.params ?? {};
           const options: Array<{ optionId?: string; kind?: string }> = Array.isArray(params.options) ? params.options : [];
           const optionFor = (want: "allow" | "reject") =>
-            options.find((o) => String(o.kind ?? "").startsWith(want) && typeof o.optionId === "string")?.optionId ?? null;
+            options.find((o) => String(o.kind ?? "").startsWith(want) && o.optionId !== undefined)?.optionId ?? null;
           const cancelled = { outcome: { outcome: "cancelled" } };
           const missing = (want: string) =>
             emit({
@@ -398,7 +414,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           switch (u.sessionUpdate) {
             case "agent_message_chunk": {
               const delta = u.content?.text;
-              if (typeof delta === "string" && delta) {
+              if (isText(delta) && delta) {
                 state.text += delta;
                 emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta });
               }
@@ -406,7 +422,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             case "agent_thought_chunk": {
               const delta = u.content?.text;
-              if (typeof delta === "string" && delta) {
+              if (isText(delta) && delta) {
                 emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta });
               }
               break;
@@ -525,7 +541,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw new Error(support.loginNote);
             }
 
-            const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+            // SAFETY: resumeCursor is contract-typed unknown (upstream compat);
+            // the persisted cursor is always the provider-native session id.
+            const rawCursor: JsonValue = turn.resumeCursor as JsonValue;
+            const cursor = isText(rawCursor) ? rawCursor : null;
             let sessionResult: any = null;
             if (cursor) {
               try {
@@ -541,7 +560,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             if (!sessionId) {
               sessionResult = await request("session/new", { cwd, mcpServers }, NEW_SESSION_TIMEOUT);
-              sessionId = typeof sessionResult?.sessionId === "string" ? sessionResult.sessionId : null;
+              const newSessionId = sessionResult?.sessionId;
+              sessionId = isText(newSessionId) ? newSessionId : null;
               if (!sessionId) throw new Error("session/new returned no sessionId");
             }
             let selectedModel: string | null = null;
@@ -611,7 +631,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             // opencode 1.18.18 reports usage at the result root; grok and
             // gemini put it under _meta. Read both rather than lose the count.
             const usage = result?.usage ?? result?._meta ?? {};
-            if (typeof usage.inputTokens === "number" || typeof usage.outputTokens === "number") {
+            if (isCount(usage.inputTokens) || isCount(usage.outputTokens)) {
               emit({
                 ...base(threadId, turnId),
                 type: "thread.token-usage.updated",
@@ -626,18 +646,17 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           } catch (e) {
             if (!state.settled) {
               const message = e instanceof Error ? e.message : String(e);
-              const code = support.classifyError?.(e);
+              // SAFETY: thrown values here are Error-like from this runtime or
+              // the RPC layer; classification only inspects `message`/`code`.
+              const code = support.classifyError?.(e as { message?: string; code?: JsonValue });
               // Authentication setup is a user action, not a retry. The
               // classifier is preferred; loginNote remains a compatibility
               // fallback for existing ACP supports.
               const needsAuth = code === "invalid_credentials" || code === "inactive_subscription"
                 || message === support.loginNote;
-              emit({
-                ...base(threadId, turnId),
-                type: "runtime.error",
-                message,
-                ...(needsAuth ? { setup: true } : {}),
-              });
+              const failure: RuntimeEvent = { ...base(threadId, turnId), type: "runtime.error", message };
+              if (needsAuth) failure.setup = true;
+              emit(failure);
               settle(false, needsAuth ? "auth_required" : "rpc_error");
             }
           }

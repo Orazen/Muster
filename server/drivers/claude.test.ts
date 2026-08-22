@@ -117,6 +117,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // the settled message still lands exactly once
     const settled = recorder.events.filter((e: any) => e.type === "item.completed" && e.itemType === "assistant_text");
     expect(settled).toHaveLength(1);
+    // SAFETY: item.completed assistant_text events always carry the settled text.
     expect((settled[0] as any).text).toBe("hello from fake claude");
   });
 
@@ -264,6 +265,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
     const configPath = (() => {
       const seen = JSON.parse(readFileSync(dump, "utf8"));
+      // SAFETY: the dump records argv as strings; --mcp-config is always followed by its path value.
       return seen.argv[seen.argv.indexOf("--mcp-config") + 1] as string;
     })();
     expect(configPath).toMatch(/omb-mcp-/);

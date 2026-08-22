@@ -10,6 +10,7 @@ import { extname, join } from "node:path";
 import { z } from "zod";
 
 import { approvalKey, autoDecision } from "./auto-approve.ts";
+import type { JsonValue } from "./schema.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import * as box from "./box.ts";
@@ -43,7 +44,7 @@ import { isEffortLevel, type RequestOutcome, type RuntimeEvent } from "./contrac
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages } from "./message-db.ts";
-import { _loadPending, discardDelegations, drainDelegations, pendingThreads, queueDelegation, type QueueResult } from "./delegations.ts";
+import { _loadPending, discardDelegations, drainDelegations, pendingThreads, queueDelegation } from "./delegations.ts";
 import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
@@ -124,7 +125,7 @@ const ALLOWED_ORIGINS = (process.env.OMB_ALLOWED_ORIGINS ?? "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
-const MIME: Record<string, string> = {
+const MIME = new Map(Object.entries({
   ".html": "text/html",
   ".js": "text/javascript",
   ".mjs": "text/javascript",
@@ -145,7 +146,7 @@ const MIME: Record<string, string> = {
   ".lottie": "application/zip",
   ".wasm": "application/wasm",
   ".webmanifest": "application/manifest+json",
-};
+}));
 
 ensureDirs();
 const cfg = loadConfig();
@@ -323,11 +324,11 @@ if (SELF_HOSTED) {
  * paired phone has even less business holding provider session identifiers
  * than the desktop window did. Stripped here rather than at each call site
  * so a new broadcast cannot forget. */
-const wireTask = ({ resumeCursors, lastInstanceId, ...task }: TaskRecord) => task;
+const wireTask = ({ resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, ...task }: TaskRecord) => task;
 
 const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
-  const { resumeCursors, tasks, ownerId, ...rest } = bot;
-  return { ...rest, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
+  const { resumeCursors: _resumeCursors, tasks, ownerId: _ownerId, ...rest } = bot;
+  return tasks ? { ...rest, tasks: tasks.map(wireTask) } : rest;
 };
 
 const publicBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => ({
@@ -393,11 +394,19 @@ function pageSize(raw: string | null): number | null | undefined {
   return Math.min(size, MESSAGE_PAGE_MAX);
 }
 
+/** True only for primitive strings — what JSON decoding yields for text fields. */
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
+/** True only for primitive booleans — what JSON decoding yields for flags. */
+const isFlag = <T>(value: T): value is T & boolean => value === true || value === false;
+
 /** A screen message without its pixels. The client fetches those from
  * `/api/threads/:threadId/messages/:id/image` when it actually shows one. */
-function slimMessage(message: Message): Message | Record<string, unknown> {
+type SlimMessage = Omit<Message, "png" | "mime"> & { hasImage: true };
+
+function slimMessage(message: Message): Message | SlimMessage {
   if (message.kind !== "screen" || !message.png) return message;
-  const { png, mime, ...rest } = message;
+  const { png: _png, mime: _mime, ...rest } = message;
   return { ...rest, hasImage: true };
 }
 
@@ -438,6 +447,15 @@ interface SseClient {
 }
 const sseClients = new Set<SseClient>();
 
+/** The few frame fields the multi-tenant stream filter inspects; frames
+ * carry arbitrary other fields that only ever go to the wire verbatim. */
+interface FrameIdentity {
+  kind?: unknown;
+  botId?: unknown;
+  groupId?: unknown;
+  threadId?: unknown;
+}
+
 /** Every frame is numbered, and the last few hundred are kept, so a client
  * whose connection dropped can ask for what it missed instead of
  * re-downloading every transcript. The desktop reconnects in milliseconds
@@ -451,7 +469,7 @@ const sseClients = new Set<SseClient>();
 const STREAM_ID = randomUUID().slice(0, 8);
 const REPLAY_MAX = 500;
 let lastSeq = 0;
-const replayBuffer: Array<{ seq: number; kind: string; frame: string | null; payload?: Record<string, unknown> }> = [];
+const replayBuffer: Array<{ seq: number; kind: string; frame: string | null; payload?: FrameIdentity }> = [];
 
 /** Screen frames are the only kind a client can decline. */
 const wants = (client: SseClient, kind: string) => kind !== "screen" || client.screens;
@@ -467,7 +485,7 @@ function cursorSeq(raw: string | string[] | undefined): number | null {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function broadcast(payload: Record<string, unknown>) {
+function broadcast<P extends FrameIdentity>(payload: P) {
   const seq = ++lastSeq;
   const kind = String(payload.kind ?? "");
   const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
@@ -476,7 +494,7 @@ function broadcast(payload: Record<string, unknown>) {
   // detection stays honest, but never retain their base64 payloads.
   replayBuffer.push({ seq, kind, frame, payload });
   if (replayBuffer.length > REPLAY_MAX) replayBuffer.shift();
-  for (const client of [...sseClients]) {
+  for (const client of sseClients) {
     if (!wants(client, kind) || !visibleToClient(client, payload)) continue;
     try {
       client.res.write(frame);
@@ -491,19 +509,19 @@ function broadcast(payload: Record<string, unknown>) {
  * without a resolvable record — engine status, usage, config events — are
  * deployment-wide and go to everyone. Desktop installs have no userId on
  * the client, so everything flows as before. */
-function visibleToClient(client: SseClient, payload: Record<string, unknown>): boolean {
+function visibleToClient(client: SseClient, payload: FrameIdentity): boolean {
   if (!client.userId) return true;
-  const botId = typeof payload.botId === "string" ? payload.botId : null;
+  const botId = isText(payload.botId) ? payload.botId : null;
   if (botId) {
     const b = store.bot(botId);
     return !b || b.ownerId === undefined || b.ownerId === null || b.ownerId === client.userId;
   }
-  const groupId = typeof payload.groupId === "string" ? payload.groupId : null;
+  const groupId = isText(payload.groupId) ? payload.groupId : null;
   if (groupId) {
     const g = store.groups.find((x) => x.id === groupId);
     return !g || g.ownerId === undefined || g.ownerId === null || g.ownerId === client.userId;
   }
-  const threadId = typeof payload.threadId === "string" ? payload.threadId : null;
+  const threadId = isText(payload.threadId) ? payload.threadId : null;
   if (threadId) {
     const b = store.botByThread(threadId);
     if (b) return b.ownerId === undefined || b.ownerId === null || b.ownerId === client.userId;
@@ -559,7 +577,7 @@ async function answerRequest(
   return outcome;
 }
 
-function requestBehavior(value: unknown): "allow" | "deny" | "answer" | null {
+function requestBehavior(value: JsonValue | undefined): "allow" | "deny" | "answer" | null {
   return value === "allow" || value === "deny" || value === "answer" ? value : null;
 }
 // the last settled assistant text per thread, so a "finished" notification
@@ -1024,7 +1042,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
     const targetThreadId = store.bot(toBotId)?.threadId;
     if (targetThreadId) delegationWatch.set(targetThreadId, { channelId: channel?.id, toBotId });
     let failureReported = false;
-    const reportStartFailure = (error: unknown) => {
+    const reportStartFailure = <E>(error: E) => {
       if (failureReported) return;
       failureReported = true;
       const bot = store.bot(toBotId);
@@ -1140,6 +1158,8 @@ function startScreenPoller(botId: string, boxId?: string, { screenIsTheWork = fa
   let current: Promise<void> | null = null;
   let lastAt = 0;
   const entry = {
+    // SAFETY: placeholder nulls until the first capture arms the interval
+    // and stores a frame; consumers only read them after startScreenPoller.
     timer: null as ReturnType<typeof setInterval> | null,
     capture: (): Promise<void> => {
       if (!current && Date.now() - lastAt < SCREEN_MIN_GAP_MS) return Promise.resolve();
@@ -1160,6 +1180,8 @@ function startScreenPoller(botId: string, boxId?: string, { screenIsTheWork = fa
       })();
       return current;
     },
+    // SAFETY: no frame exists until the first capture resolves; pollers
+    // read `last` only after startScreenPoller has armed the interval.
     last: null as Frame | null,
     touched: screenIsTheWork,
   };
@@ -1654,11 +1676,17 @@ try {
   console.error(`muster webhook receiver unavailable: ${webhookIngressError}`);
 }
 
-const webhookIngressStatus = () => ({
-  available: Boolean(webhookIngress),
-  baseUrl: webhookIngress?.baseUrl ?? `http://127.0.0.1:${WEBHOOK_PORT}`,
-  ...(webhookIngressError ? { error: webhookIngressError } : {}),
-});
+const webhookIngressStatus = () =>
+  webhookIngressError
+    ? {
+        available: Boolean(webhookIngress),
+        baseUrl: webhookIngress?.baseUrl ?? `http://127.0.0.1:${WEBHOOK_PORT}`,
+        error: webhookIngressError,
+      }
+    : {
+        available: Boolean(webhookIngress),
+        baseUrl: webhookIngress?.baseUrl ?? `http://127.0.0.1:${WEBHOOK_PORT}`,
+      };
 
 // ── config hot-reload ─────────────────────────────────────────────────
 // ── group turn engine ──────────────────────────────────────────────────
@@ -2034,21 +2062,28 @@ async function testCliBinary(
       },
       (err, stdout) => {
         if (err) {
-          const e = err as NodeJS.ErrnoException & { killed?: boolean };
+          // SAFETY: execCli surfaces child_process rejections; code widens
+          // to string | number because non-zero exits surface there too,
+          // stderr rides on the same object, and only the killed flag is
+          // read alongside them.
+          const e = err as NodeJS.ErrnoException & { killed?: boolean; stderr?: unknown };
           // err.code is an errno CONSTANT ("ENOENT", "EACCES") only for spawn
           // failures; for a non-zero exit it's the exit STATUS (a number) and
           // for a timeout it's null + killed:true — describeSpawnFailure words
           // only the first kind
           const exceededBuffer = e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
-          const isSpawnError = typeof e.code === "string" && !exceededBuffer;
+          const isSpawnError = isText(e.code) && !exceededBuffer;
           const message = exceededBuffer
             ? "CLI test produced more than 64 KiB of output"
             : isSpawnError
               ? describeSpawnFailure(e, cli).message
               : e.killed
               ? "CLI test timed out after 10s"
-              : `CLI exited with error ${String(e.code)}: ${(stderrOf(err) || "").slice(0, 200) || err.message.split("\n")[0]}`;
-          resolve({ ok: false, message, ...(driver?.install && isSpawnError ? { install: driver.install } : {}) });
+              : `CLI exited with error ${String(e.code)}: ${(stderrOf(e) || "").slice(0, 200) || err.message.split("\n")[0]}`;
+          const failure = driver?.install && isSpawnError
+            ? { ok: false, message, install: driver.install }
+            : { ok: false, message };
+          resolve(failure);
           return;
         }
         resolve({ ok: true, version: stdout.trim().split("\n")[0] });
@@ -2077,9 +2112,9 @@ function cliProbeEnvironment(): NodeJS.ProcessEnv {
 }
 
 /** execFile's error carries the child's stderr in .stderr. */
-function stderrOf(err: unknown): string {
-  const s = (err as { stderr?: unknown }).stderr;
-  return typeof s === "string" ? s : Buffer.isBuffer(s) ? s.toString("utf8") : "";
+function stderrOf(err: { stderr?: unknown }): string {
+  const s = err.stderr;
+  return isText(s) ? s : Buffer.isBuffer(s) ? s.toString("utf8") : "";
 }
 
 function configStatus() {
@@ -2157,7 +2192,7 @@ async function reloadProviders() {
 let providerConfigBusy = false;
 
 // ── HTTP plumbing ─────────────────────────────────────────────────────
-function json(res: ServerResponse, status: number, body: unknown) {
+function json<B>(res: ServerResponse, status: number, body: B) {
   const data = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json" });
   res.end(data);
@@ -2177,7 +2212,7 @@ function readRawBody(req: IncomingMessage): Promise<string> {
     let done = false;
     req.on("data", (c) => {
       if (done) return;
-      bytes += typeof c === "string" ? Buffer.byteLength(c) : c.length;
+      bytes += Buffer.isBuffer(c) ? c.length : Buffer.byteLength(c);
       if (bytes > 1_000_000) {
         done = true;
         return reject(Object.assign(new Error("body too large"), { status: 413 }));
@@ -2210,7 +2245,7 @@ function readBody(req: IncomingMessage): Promise<any> {
     };
     req.on("data", (c) => {
       if (done) return;
-      bytes += typeof c === "string" ? Buffer.byteLength(c) : c.length;
+      bytes += Buffer.isBuffer(c) ? c.length : Buffer.byteLength(c);
       if (bytes > 1_000_000) {
         // Keep draining the socket, but stop retaining attacker-controlled
         // bytes. Destroying the request here prevents the caller from
@@ -2332,12 +2367,14 @@ const server = createServer(async (req, res) => {
         try {
           bodyForCloud = await readBody(req);
         } catch (e) {
+          // SAFETY: readBody rejections carry an HTTP status attached via
+          // Object.assign at its size-limit rejection site.
           const status = (e as { status?: number }).status ?? 400;
           return json(res, status, { error: e instanceof Error ? e.message : String(e) });
         }
-        const email = typeof bodyForCloud?.email === "string" ? bodyForCloud.email.trim() : "";
-        const password = typeof bodyForCloud?.password === "string" ? bodyForCloud.password : "";
-        const name = typeof bodyForCloud?.name === "string" ? bodyForCloud.name : email;
+        const email = isText(bodyForCloud?.email) ? bodyForCloud.email.trim() : "";
+        const password = isText(bodyForCloud?.password) ? bodyForCloud.password : "";
+        const name = isText(bodyForCloud?.name) ? bodyForCloud.name : email;
         if (!email || !password) return json(res, 400, { error: "email and password are required" });
         const verified = await verifyAgainstMusterCloud(cloudUrl, email, password, name);
         if (!verified.ok) return json(res, 401, { error: verified.reason, code: "MUSTER_CLOUD_REJECTED" });
@@ -2411,10 +2448,12 @@ const server = createServer(async (req, res) => {
           try {
             bodyForGate = await readBody(req);
           } catch (e) {
+            // SAFETY: readBody rejections carry an HTTP status attached via
+            // Object.assign at its size-limit rejection site.
             const status = (e as { status?: number }).status ?? 400;
             return json(res, status, { error: e instanceof Error ? e.message : String(e) });
           }
-          const requestedEmail = typeof bodyForGate?.email === "string" ? bodyForGate.email.trim().toLowerCase() : "";
+          const requestedEmail = isText(bodyForGate?.email) ? bodyForGate.email.trim().toLowerCase() : "";
           if (!requestedEmail || !allowlist.includes(requestedEmail)) {
             return json(res, 403, {
               message: "Sign-ups are closed on this deployment while account data isolation is being fixed.",
@@ -2484,7 +2523,7 @@ const server = createServer(async (req, res) => {
       const cloudUrl = pairCloudUrl();
       if (!cloudUrl) return json(res, 501, { error: "pairing is not configured on this install" });
       const body = await readBody(req);
-      const code = typeof body.code === "string" ? body.code : "";
+      const code = isText(body.code) ? body.code : "";
       let identity: { email?: string; name?: string };
       try {
         const upstream = await fetch(
@@ -2494,11 +2533,15 @@ const server = createServer(async (req, res) => {
           { redirect: "error", signal: AbortSignal.timeout(10_000) },
         );
         if (!upstream.ok) {
+          // SAFETY: verify's error responses are JSON of the shape
+          // {error: string}; non-JSON bodies resolve to null via the catch.
           const err = (await upstream.json().catch(() => null)) as { error?: string } | null;
           return json(res, upstream.status === 429 ? 429 : 400, {
             error: err?.error ?? "the cloud rejected that pairing code",
           });
         }
+        // SAFETY: a 200 from the cloud's pair/verify is JSON carrying the
+        // account identity fields; both are optional in the contract.
         identity = (await upstream.json()) as { email?: string; name?: string };
       } catch {
         return json(res, 502, { error: `could not reach ${cloudUrl} — check your connection` });
@@ -2694,7 +2737,7 @@ const server = createServer(async (req, res) => {
         const fromBotId = String(body.fromBotId ?? "");
         const toBotId = String(body.toBotId ?? "");
         const message = String(body.message ?? "").trim();
-        const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : undefined;
+        const reason = isText(body.reason) && body.reason.trim() ? body.reason.trim() : undefined;
         const depth = Number(body.depth ?? 0) || 0;
         if (!toBotId || !message) return json(res, 400, { error: "toBotId and message required" });
         const from = store.bot(fromBotId);
@@ -2713,7 +2756,7 @@ const server = createServer(async (req, res) => {
         if (result !== "ok") {
           // the agent reads this string — a bare enum ("too_deep") tells it
           // nothing about what to do instead
-          const said: Record<Exclude<QueueResult, "ok">, string> = {
+          const said = {
             self: "a bot cannot delegate to itself",
             too_deep: "delegation chains are limited to one hop — do this one yourself",
             no_target: "no such bot",
@@ -2738,11 +2781,13 @@ const server = createServer(async (req, res) => {
             ? req.headers["mcp-session-id"][0]
             : req.headers["mcp-session-id"],
         );
-        const headers: Record<string, string> = {
-          "content-type": upstream.contentType,
-          "cache-control": "no-store",
-        };
-        if (upstream.transportSessionId) headers["mcp-session-id"] = upstream.transportSessionId;
+        const headers = upstream.transportSessionId
+          ? {
+              "content-type": upstream.contentType,
+              "cache-control": "no-store",
+              "mcp-session-id": upstream.transportSessionId,
+            }
+          : { "content-type": upstream.contentType, "cache-control": "no-store" };
         res.writeHead(upstream.status, headers);
         return res.end(Buffer.from(upstream.bytes));
       }
@@ -2752,7 +2797,7 @@ const server = createServer(async (req, res) => {
         const threadId = String(body.threadId ?? "");
         const resumeKey = String(body.resumeKey ?? "");
         const slugs: string[] = Array.isArray(body.slugs)
-          ? [...new Set<string>(body.slugs.map((slug: unknown) => String(slug).toLowerCase()).filter((slug: string) => CONNECTOR_SLUG.test(slug)))]
+          ? [...new Set<string>(body.slugs.map((slug: string) => String(slug).toLowerCase()).filter((slug: string) => CONNECTOR_SLUG.test(slug)))]
           : [];
         const owner = connectorThread(botId, threadId);
         if (!owner) return json(res, 403, { error: "conversation does not belong to this bot" });
@@ -2773,10 +2818,9 @@ const server = createServer(async (req, res) => {
           }
           const toolkit = await composio.toolkitCard(cfg, slug);
           const connected = connectionState[slug]?.connected === true;
-          const message = store.appendMessage(threadId, {
+          const messageInput: Omit<Message, "id" | "at"> = {
             role: "bot",
             kind: "connector",
-            ...(owner.group ? { from: { botId: owner.bot.id, name: owner.bot.name, color: owner.bot.color } } : {}),
             connector: {
               slug,
               label: toolkit.label,
@@ -2784,7 +2828,11 @@ const server = createServer(async (req, res) => {
               status: connected ? "connected" : "required",
               resumeKey,
             },
-          });
+          };
+          if (owner.group) {
+            messageInput.from = { botId: owner.bot.id, name: owner.bot.name, color: owner.bot.color };
+          }
+          const message = store.appendMessage(threadId, messageInput);
           messageIds.push(message.id);
         }
         maybeResumeConnectors(botId, threadId, resumeKey);
@@ -3053,7 +3101,7 @@ const server = createServer(async (req, res) => {
       if (format === "json") {
         // pixels stripped — an export is for reading and archiving, and a
         // base64 desktop frame is neither
-        const slim = messages.map(({ png, mime, ...rest }) => rest);
+        const slim = messages.map(({ png: _png, mime: _mime, ...rest }) => rest);
         res.writeHead(200, {
           "content-type": "application/json",
           "content-disposition": `attachment; filename="${filename}.json"`,
@@ -3082,8 +3130,8 @@ const server = createServer(async (req, res) => {
     if (method === "POST" && path === "/api/groups") {
       const body = await readBody(req);
       const memberIds = (Array.isArray(body.memberIds) ? body.memberIds : []).filter(
-        (id: unknown): id is string => {
-          if (typeof id !== "string" || !id) return false;
+        <T>(id: T): id is T & string => {
+          if (!isText(id) || !id) return false;
           const bot = store.bot(id);
           // can only room with bots you own — another user's bot doesn't exist
           return Boolean(bot) && ownsRecord(bot!);
@@ -3091,7 +3139,7 @@ const server = createServer(async (req, res) => {
       );
       if (memberIds.length === 0) return json(res, 400, { error: "a room needs at least one bot" });
       const name =
-        typeof body.name === "string" && body.name.trim()
+        isText(body.name) && body.name.trim()
           ? body.name.trim()
           : `${store.bot(memberIds[0])!.name} & co.`;
       const group = store.createGroup(name, memberIds, false, requestUserId);
@@ -3101,7 +3149,7 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const profileName = cfg.profile?.name?.trim();
       const name =
-        typeof body.name === "string" && body.name.trim()
+        isText(body.name) && body.name.trim()
           ? body.name.trim()
           : profileName
             ? `${profileName}'s Team`
@@ -3136,18 +3184,22 @@ const server = createServer(async (req, res) => {
       try {
         return json(res, 200, await fetchLibraryTeam(m[1]));
       } catch (error) {
+        // SAFETY: library fetches re-throw with an HTTP status attached
+        // when the cloud answered; absence of one means transport failure.
         const status = (error as { status?: number }).status === 404 ? 404 : 502;
         return json(res, status, { error: error instanceof Error ? error.message : "The team could not be loaded" });
       }
     }
     if (method === "POST" && path === "/api/team-library/github") {
       const body = await readBody(req);
-      if (typeof body.url !== "string" || !body.url.trim()) {
+      if (!isText(body.url) || !body.url.trim()) {
         return json(res, 400, { error: "A GitHub URL is required" });
       }
       try {
         return json(res, 200, await fetchGithubTeam(body.url));
       } catch (error) {
+        // SAFETY: github import re-throws with an HTTP status attached
+        // when the cloud answered; anything else is a bad request.
         const status = (error as { status?: number }).status === 404 ? 404 : 400;
         return json(res, status, { error: error instanceof Error ? error.message : "The GitHub team could not be loaded" });
       }
@@ -3181,18 +3233,16 @@ const server = createServer(async (req, res) => {
           // the user as though it were new. composio: false — a shared
           // persona never starts with reach into the user's connected apps;
           // the user can switch it on per bot after reading who they got.
-          const created = store.createBot(
-            {
-              ...(requestUserId ? { ownerId: requestUserId } : {}),
-              name: member.name,
-              title: member.title,
-              description: member.description,
-              color: member.appearance.color,
-              mascotExpression: member.appearance.mascotExpression,
-              modelSelection: selection,
-            },
-            { seedMessages: false },
-          );
+          const profile: Parameters<typeof store.createBot>[0] = {
+            name: member.name,
+            title: member.title,
+            description: member.description,
+            color: member.appearance.color,
+            mascotExpression: member.appearance.mascotExpression,
+            modelSelection: selection,
+          };
+          if (requestUserId) profile.ownerId = requestUserId;
+          const created = store.createBot(profile, { seedMessages: false });
           store.patchBot(created.id, { composio: false });
           importedBots.push(created);
         }
@@ -3214,21 +3264,21 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const existing = store.group(m[1]);
       if (!existing) return json(res, 404, { error: "no such room" });
-      const patch: Record<string, unknown> = {};
+      const patch: Parameters<typeof store.patchGroup>[1] = {};
       for (const key of ["name", "bulletin", "unread"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
       if (Array.isArray(body.memberIds)) {
-        const ids = body.memberIds.filter((id: unknown): id is string => typeof id === "string" && Boolean(store.bot(id)));
+        const ids = body.memberIds.filter(<T>(id: T): boolean => isText(id) && Boolean(store.bot(id)));
         if (ids.length) patch.memberIds = ids;
       }
       if (body.defaultResponder !== undefined) {
-        const value = body.defaultResponder as { kind?: unknown; botId?: unknown } | null;
-        const memberIds = (patch.memberIds as string[] | undefined) ?? existing.memberIds;
+        const value: { kind?: unknown; botId?: unknown } | null = body.defaultResponder;
+        const memberIds = patch.memberIds ?? existing.memberIds;
         let responder: GroupDefaultResponder | null = null;
         if (value?.kind === "everyone") responder = { kind: "everyone" };
         else if (value?.kind === "mentions") responder = { kind: "mentions" };
-        else if (value?.kind === "member" && typeof value.botId === "string" && memberIds.includes(value.botId)) {
+        else if (value?.kind === "member" && isText(value.botId) && memberIds.includes(value.botId)) {
           responder = { kind: "member", botId: value.botId };
         }
         if (!responder) return json(res, 400, { error: "invalid default responder" });
@@ -3291,7 +3341,7 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const emoji = String(body.emoji ?? "").slice(0, 8);
       if (!emoji) return json(res, 400, { error: "emoji required" });
-      const patched = store.toggleReaction(m[1], m[2], emoji, typeof body.by === "string" ? body.by : "user");
+      const patched = store.toggleReaction(m[1], m[2], emoji, isText(body.by) ? body.by : "user");
       if (!patched) return json(res, 404, { error: "no such message" });
       return json(res, 200, { message: patched });
     }
@@ -3317,7 +3367,7 @@ const server = createServer(async (req, res) => {
     m = path.match(/^\/api\/bots\/([\w-]+)\/always-allow$/);
     if (m && method === "POST") {
       const body = await readBody(req);
-      const allowKey = typeof body.allowKey === "string" ? body.allowKey : "";
+      const allowKey = isText(body.allowKey) ? body.allowKey : "";
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       if (!allowKey) return json(res, 400, { error: "allowKey required" });
@@ -3352,9 +3402,7 @@ const server = createServer(async (req, res) => {
       // be offline would cost the copy all of them. Letting it through is
       // safe — startTurn refuses to run a turn on an unavailable instance
       // anyway, so an unverifiable level never reaches a CLI.
-      const nextSelection = (body as Record<string, unknown>).modelSelection as
-        | { instanceId?: string; effort?: string }
-        | undefined;
+      const nextSelection: { instanceId?: string; effort?: string } | undefined = body.modelSelection;
       if (nextSelection?.effort !== undefined) {
         if (!isEffortLevel(nextSelection.effort)) {
           return json(res, 400, { error: `effort "${String(nextSelection.effort)}" is not recognized` });
@@ -3376,17 +3424,17 @@ const server = createServer(async (req, res) => {
       for (const [field, max] of [["name", 100], ["title", 200], ["description", 4000]] as const) {
         const value = body[field];
         if (value === undefined) continue;
-        if (typeof value !== "string") return json(res, 400, { error: `${field} must be a string` });
+        if (!isText(value)) return json(res, 400, { error: `${field} must be a string` });
         if (value.length > max) return json(res, 400, { error: `${field} must be at most ${max} characters` });
         if (field === "name" && !value.trim()) return json(res, 400, { error: "name must not be empty" });
       }
-      const patch: Record<string, unknown> = {};
+      const patch: Parameters<typeof store.patchBot>[1] = {};
       for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "character", "mascotExpression", "pinned", "hidden", "speakReplies", "voice"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
       // per-bot gate on the workspace's connected apps (Composio)
       if (body.composio !== undefined) {
-        if (typeof body.composio !== "boolean") return json(res, 400, { error: "composio must be true or false" });
+        if (!isFlag(body.composio)) return json(res, 400, { error: "composio must be true or false" });
         patch.composio = body.composio;
       }
       if (
@@ -3398,7 +3446,7 @@ const server = createServer(async (req, res) => {
       if (body.character !== undefined && !["cursor", "lottie", "star"].includes(String(body.character))) {
         return json(res, 400, { error: "character must be cursor, lottie, or star" });
       }
-      if (body.chiefOfStaff !== undefined && typeof body.chiefOfStaff !== "boolean") {
+      if (body.chiefOfStaff !== undefined && !isFlag(body.chiefOfStaff)) {
         return json(res, 400, { error: "chiefOfStaff must be true or false" });
       }
       if (body.cwd !== undefined) {
@@ -3413,19 +3461,20 @@ const server = createServer(async (req, res) => {
       // type-checked rather than copied through: a string alwaysAllow would
       // still answer .includes() — with substring matches, not tool names
       if (body.autoApprove !== undefined) {
-        if (typeof body.autoApprove !== "boolean") return json(res, 400, { error: "autoApprove must be true or false" });
+        if (!isFlag(body.autoApprove)) return json(res, 400, { error: "autoApprove must be true or false" });
         patch.autoApprove = body.autoApprove;
       }
       if (body.approvePeerComms !== undefined) {
-        if (typeof body.approvePeerComms !== "boolean") {
+        if (!isFlag(body.approvePeerComms)) {
           return json(res, 400, { error: "approvePeerComms must be true or false" });
         }
         patch.approvePeerComms = body.approvePeerComms;
       }
       if (body.alwaysAllow !== undefined) {
-        if (!Array.isArray(body.alwaysAllow) || body.alwaysAllow.some((t: unknown) => typeof t !== "string")) {
+        if (!Array.isArray(body.alwaysAllow) || body.alwaysAllow.some(<T>(t: T) => !isText(t))) {
           return json(res, 400, { error: "alwaysAllow must be a list of tool keys" });
         }
+        // SAFETY: the .some() guard above rejected any non-string tool key.
         patch.alwaysAllow = [...new Set(body.alwaysAllow as string[])].slice(0, 200);
       }
       const bot = store.patchBot(m[1], patch);
@@ -3515,13 +3564,10 @@ const server = createServer(async (req, res) => {
       const existing = store.messagesFor(bot.threadId).find((msg) => msg.id === m![2]);
       if (!existing?.card) return json(res, 404, { error: "no such card" });
       const body = await readBody(req);
-      const patched = store.patchMessage(bot.threadId, m[2], {
-        card: {
-          ...existing.card,
-          ...(body.answered !== undefined ? { answered: body.answered } : {}),
-          ...(body.dismissed !== undefined ? { dismissed: body.dismissed } : {}),
-        },
-      });
+      const card = { ...existing.card };
+      if (body.answered !== undefined) card.answered = body.answered;
+      if (body.dismissed !== undefined) card.dismissed = body.dismissed;
+      const patched = store.patchMessage(bot.threadId, m[2], { card });
       return json(res, 200, { message: patched });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages$/);
@@ -3658,7 +3704,7 @@ const server = createServer(async (req, res) => {
       if (!bot) return json(res, 404, { error: "no such bot" });
       if (bot.busy) return json(res, 409, { error: "this bot is working — let it finish before starting a task" });
       const body = await readBody(req);
-      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined);
+      const task = store.createTask(bot.id, isText(body.title) ? body.title : undefined);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       const fresh = botWithThread(store.bot(bot.id)!);
       broadcast({ kind: "bot", bot: fresh });
@@ -3707,6 +3753,8 @@ const server = createServer(async (req, res) => {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
+      // SAFETY: the route regex above only matches the lifecycle action
+      // names the Local VM endpoints accept.
       const action = m[1] as LifecycleAction;
       if (localVmLifecycleBusy) {
         return json(res, 409, { error: "another Local VM setup action is still running" });
@@ -3842,9 +3890,9 @@ const server = createServer(async (req, res) => {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const body = await readBody(req);
-      const cli = typeof body?.cli === "string" ? body.cli.trim() : "";
+      const cli = isText(body?.cli) ? body.cli.trim() : "";
       if (!cli || /[\n\r]/.test(cli)) return json(res, 400, { error: "cli must be a non-empty path" });
-      const driver = typeof body?.driver === "string" ? BUILT_IN_DRIVERS.find((d) => d.driverKind === body.driver) : undefined;
+      const driver = isText(body?.driver) ? BUILT_IN_DRIVERS.find((d) => d.driverKind === body.driver) : undefined;
       // Probe the exact configured wrapper plus --version. testCliBinary uses
       // a credential-redacted environment, so fixed wrapper arguments cannot
       // turn this endpoint into an inherited-secret reader.
@@ -3862,7 +3910,7 @@ const server = createServer(async (req, res) => {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const body = await readBody(req);
-      if (typeof body?.cli !== "string") return json(res, 400, { error: "cli must be a string" });
+      if (!isText(body?.cli)) return json(res, 400, { error: "cli must be a string" });
       if (/[\n\r]/.test(body.cli)) return json(res, 400, { error: "cli must not contain newlines" });
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
       providerConfigBusy = true;
@@ -3971,7 +4019,7 @@ const server = createServer(async (req, res) => {
     if (method === "POST" && path === "/api/tts/prepare") {
       const body = await readBody(req);
       return json(res, 200, {
-        ready: tts.voiceReady(cfg, typeof body.voiceId === "string" ? body.voiceId : undefined),
+        ready: tts.voiceReady(cfg, isText(body.voiceId) ? body.voiceId : undefined),
         utterances: toUtterances(String(body.text ?? "")),
       });
     }
@@ -3991,7 +4039,7 @@ const server = createServer(async (req, res) => {
       // voice account into an unbounded, billable synthesis job.
       if (text.length > 500) return json(res, 413, { error: "voice utterances are limited to 500 characters" });
       try {
-        const audio = await tts.speak(cfg, text, typeof body.voiceId === "string" ? body.voiceId : undefined);
+        const audio = await tts.speak(cfg, text, isText(body.voiceId) ? body.voiceId : undefined);
         res.writeHead(200, {
           "content-type": audio.mime,
           "content-length": String(audio.bytes.byteLength),
@@ -4124,7 +4172,7 @@ const server = createServer(async (req, res) => {
       try {
         const file = join(MARKETING_DIR, path === "/" ? "index.html" : path.slice(1));
         const data = readFileSync(file);
-        res.writeHead(200, { "content-type": MIME[extname(file)] ?? "text/html" });
+        res.writeHead(200, { "content-type": MIME.get(extname(file)) ?? "text/html" });
         return res.end(data);
       } catch {
         /* fall through to the app SPA below */
@@ -4138,7 +4186,7 @@ const server = createServer(async (req, res) => {
       const file = join(STATIC_DIR, safe);
       try {
         const data = readFileSync(file);
-        res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+        res.writeHead(200, { "content-type": MIME.get(extname(file)) ?? "application/octet-stream" });
         return res.end(data);
       } catch {
         // SPA fallback
@@ -4154,7 +4202,9 @@ const server = createServer(async (req, res) => {
 
     return json(res, 404, { error: `no route: ${method} ${path}` });
   } catch (e) {
-    const status = (e as any)?.status ?? 500;
+    // SAFETY: handlers attach an HTTP status to their errors via
+    // Object.assign; anything without one falls back to a bare 500.
+    const status = (e as { status?: number }).status ?? 500;
     return json(res, status, { error: e instanceof Error ? e.message : String(e) });
   }
 });

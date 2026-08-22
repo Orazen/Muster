@@ -43,6 +43,8 @@ describe("CohereDriver", () => {
   });
 
   it("streams a turn, parsing content-delta/message-end typed events", async () => {
+    // SAFETY: fetch is replaced by a vi.fn() mock; only mockResolvedValue
+    // exists on the double.
     (global.fetch as any).mockResolvedValue(streamResponse([contentDelta("Hel"), contentDelta("lo!"), messageEnd(10, 3)]));
     const instance = await CohereDriver.create({
       instanceId: "x",
@@ -55,7 +57,7 @@ describe("CohereDriver", () => {
     let usage: any = null;
     let text = "";
     instance.adapter.onEvent((e) => {
-      if (e.type === "content.delta") text += (e as any).delta;
+      if (e.type === "content.delta") text += e.delta;
       if (e.type === "thread.token-usage.updated") usage = e;
       if (e.type === "turn.completed") completed = e;
     });
@@ -65,12 +67,15 @@ describe("CohereDriver", () => {
     expect(text).toBe("Hello!");
     expect(completed?.ok).toBe(true);
     expect(usage).toMatchObject({ input: 10, output: 3 });
+    // SAFETY: fetch is a vi.fn() here; mock.calls exists on every mock.
     const call = (fetch as any).mock.calls[0];
     expect(call[0]).toBe("https://api.cohere.com/v2/chat");
     expect(call[1].headers.authorization).toBe("Bearer co-test");
   });
 
   it("surfaces a non-2xx response as a failed turn", async () => {
+    // SAFETY: fetch is replaced by a vi.fn() mock; only mockResolvedValue
+    // exists on the double.
     (global.fetch as any).mockResolvedValue(new Response("bad key", { status: 401 }));
     const instance = await CohereDriver.create({
       instanceId: "x",

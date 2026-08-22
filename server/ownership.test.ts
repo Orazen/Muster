@@ -35,6 +35,7 @@ describe("bot + group ownership", () => {
     const store = newStore();
     store.createBot({ name: "Scout", ownerId: "user-a" }, { seedMessages: false });
     store.saveBots();
+    // SAFETY: bots.json was just written by saveBots from this store's BotRecords.
     const raw = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as BotRecord[];
     expect(raw.find((b) => b.name === "Scout")?.ownerId).toBe("user-a");
   });

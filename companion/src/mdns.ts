@@ -122,10 +122,16 @@ export function encodeName(name: string): Buffer {
   return Buffer.concat(chunks);
 }
 
+/** One decoded name plus the offset just past it in the packet. */
+interface DecodedName {
+  name: string;
+  offset: number;
+}
+
 /** Read a name, following compression pointers. Returns the offset just
  * past the name *as written here*, which is not where a followed pointer
  * ended up. */
-function decodeName(buf: Buffer, start: number): { name: string; offset: number } {
+function decodeName(buf: Buffer, start: number): DecodedName {
   const labels: string[] = [];
   let pos = start;
   let end = start;
@@ -297,23 +303,32 @@ function dedupe(records: ResourceRecord[], exclude: ResourceRecord[] = []): Reso
   return out;
 }
 
-/** The four records that describe the service, as a browser expects them. */
-export function serviceRecords(service: ServiceInfo) {
+/** The four records that describe the service, as a browser expects them.
+ * Naming the shape gives each record literal its ResourceRecord member
+ * context directly. */
+export interface ServiceRecords {
+  serviceName: string;
+  instance: string;
+  ptr: ResourceRecord;
+  srv: ResourceRecord;
+  txt: ResourceRecord;
+  addresses: ResourceRecord[];
+}
+
+export function serviceRecords(service: ServiceInfo): ServiceRecords {
   const serviceName = `${service.type}.local`;
   const instance = `${service.name}.${serviceName}`;
   return {
     serviceName,
     instance,
-    ptr: { name: serviceName, type: TYPE.PTR, data: instance } as ResourceRecord,
+    ptr: { name: serviceName, type: TYPE.PTR, data: instance },
     srv: {
       name: instance,
       type: TYPE.SRV,
       data: { port: service.port, target: service.host },
-    } as ResourceRecord,
-    txt: { name: instance, type: TYPE.TXT, data: service.txt } as ResourceRecord,
-    addresses: service.addresses.map(
-      (address) => ({ name: service.host, type: TYPE.A, data: address }) as ResourceRecord,
-    ),
+    },
+    txt: { name: instance, type: TYPE.TXT, data: service.txt },
+    addresses: service.addresses.map((address) => ({ name: service.host, type: TYPE.A, data: address })),
   };
 }
 
@@ -330,10 +345,15 @@ export function announcement(service: ServiceInfo): ResourceRecord[] {
  * (RFC 6763 §12): browsing then resolves in one round trip instead of three,
  * which is the difference between a picker that fills in instantly and one
  * that looks broken for a second. */
+export interface DnsReply {
+  answers: ResourceRecord[];
+  additionals: ResourceRecord[];
+}
+
 export function answersFor(
   message: DnsMessage,
   service: ServiceInfo,
-): { answers: ResourceRecord[]; additionals: ResourceRecord[] } {
+): DnsReply {
   if (message.response) return { answers: [], additionals: [] };
   const { serviceName, instance, ptr, srv, txt, addresses } = serviceRecords(service);
   const answers: ResourceRecord[] = [];
@@ -368,8 +388,11 @@ export function answersFor(
 /** One DNS label: no dots (they would split it into two labels), no control
  * characters, and inside the 63-byte limit even in UTF-8. */
 export function dnsLabel(text: string, fallback = "Muster"): string {
-  let label = text
-    .replace(/[\u0000-\u001f\u007f]/g, "")
+  // Strip C0 controls and DEL by code point; a character-class regex would
+  // need control characters inside the pattern itself.
+  let label = Array.from(text)
+    .filter((ch) => ch.codePointAt(0)! > 0x1f && ch.codePointAt(0)! !== 0x7f)
+    .join("")
     .replace(/\./g, " ")
     .trim();
   while (Buffer.byteLength(label, "utf8") > 63) label = label.slice(0, -1).trimEnd();
