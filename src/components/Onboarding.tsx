@@ -459,7 +459,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           <div className="flex w-full max-w-[260px] shrink-0 flex-col overflow-y-auto pr-0.5 [scrollbar-width:thin] max-sm:max-w-none">
             <h2 className="text-[13px] font-semibold text-ink">Shape</h2>
             <div className="mt-1.5 grid grid-cols-3 gap-1">
-              {AGENT_CHARACTERS.filter((c) => c !== "cursor" && c !== "lottie").map((sh) => (
+              {AGENT_CHARACTERS.filter((c) => !["cursor", "lottie", "star", "capsule"].includes(c)).map((sh) => (
                 <button
                   key={sh}
                   onClick={() => setBotCharacter(sh)}

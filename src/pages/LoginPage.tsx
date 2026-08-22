@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { AuthShell, authButtonCls, authCardBox } from "@/components/AuthShell";
+import { AuthShell, authCardBox } from "@/components/AuthShell";
 
 /** Google-only sign-in. Email/password is gone from the product surface:
  * one identity provider, one button — on web and in the packaged desktop app
