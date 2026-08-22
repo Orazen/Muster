@@ -216,8 +216,15 @@
 
   .feature-card, .roster-card, .comparison-card {
     border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-soft);
+    /* Gaia design system: generous radius, subtle lift on hover. */
+    border-radius: 16px; transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
   }
-  .feature-card { border-radius: 20px; padding: 26px; }
+  .feature-card:hover, .roster-card:hover, .comparison-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px -14px rgba(0, 0, 0, 0.55);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  }
+  .feature-card { border-radius: 16px; padding: 26px; }
   .feature-card h3, .comparison-card h3 {
     color: var(--ink); font-size: 20px; font-weight: 500; letter-spacing: -0.02em;
   }
@@ -541,6 +548,39 @@
           <h3>Chief of Staff</h3>
           <p>Runs the week: briefings, bookings, and handoffs between your other bots.</p>
         </article>
+      </div>
+    </section>
+
+
+    <!-- Why Muster (problem-first, agent-reach clarity) -->
+    <section class="section" style="padding-top:80px;">
+      <div style="max-width:660px;">
+        <div class="eyebrow">Why Muster</div>
+        <h2 class="section-heading">AI agents can write code. Ask one to check your inbox, and it's blind.</h2>
+        <p class="section-copy">Chat apps rent you a model. Muster gives each agent a name, a memory that persists between tasks, and a real Linux desktop it drives — so "check my mail and draft the reply" is a job, not a wish.</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:36px;">
+        <div class="feature-card"><h3>One chat tab per task</h3><p>Twelve browser tabs of half-finished prompts. No memory between them, no handoffs.</p></div>
+        <div class="feature-card"><h3>Agents with no hands</h3><p>Models that can reason but can't click, type, or run anything — so nothing actually gets done.</p></div>
+        <div class="feature-card"><h3>Lock-in by subscription</h3><p>Renting someone else's key and their sandbox, with your data on their servers.</p></div>
+      </div>
+    </section>
+
+    <!-- Capability two-tier (agent-reach pattern) -->
+    <section class="section">
+      <div class="section-intro">
+        <div class="eyebrow">Capability</div>
+        <h2 class="section-heading">Works out of the box. Unlocks on demand.</h2>
+      </div>
+      <div class="card-grid-3" style="grid-template-columns:1fr 1fr;">
+        <div class="feature-card" style="border-color:rgba(240,70,14,.3);background:rgba(240,70,14,.05);">
+          <span style="display:inline-block;border-radius:999px;background:rgba(240,70,14,.12);padding:4px 10px;font-size:11px;font-weight:600;color:#ff7a45;margin-bottom:12px;">Right now · zero config</span>
+          <p>✦ Sign in with Google — one tap<br/>✦ Chat with 10+ CLI engines already installed<br/>✦ Pick from 13 teammate shapes<br/>✦ Desktop app with auto-update</p>
+        </div>
+        <div class="feature-card">
+          <span style="display:inline-block;border-radius:999px;border:1px solid rgba(255,255,255,.12);padding:4px 10px;font-size:11px;font-weight:600;color:#a1a1a6;margin-bottom:12px;">Paste a key · one field</span>
+          <p>→ OpenAI · Anthropic · Google · DeepSeek · Groq +5 more<br/>→ Cloud Linux desktop per bot<br/>→ 500+ apps via Composio OAuth<br/>→ Voice mode with ElevenLabs</p>
+        </div>
       </div>
     </section>
 
