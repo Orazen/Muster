@@ -318,7 +318,7 @@ export function LandingPage() {
               </span>
             </motion.h1>
             <motion.p {...heroItem(0.16)} className="mx-auto mt-6 max-w-xl text-[19px] leading-relaxed text-[#a1a1a6]">
-              Sign in with Google, name your first agent, give it a personality — it's working in under a minute. Bring your own Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, or OpenCode Go, and run the whole team from one chat app.
+              One chat app for a whole roster of AI agents — each with its own memory, model, and a real computer to work on.
             </motion.p>
             <motion.div {...heroItem(0.24)} className="mt-10 flex flex-wrap items-center justify-center gap-3.5">
               <Link to={user ? "/app" : "/sign-up"} className="inline-flex items-center gap-2 rounded-xl bg-[#f0460e] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(240,70,14,.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(240,70,14,.42)]">
@@ -339,6 +339,35 @@ export function LandingPage() {
 
         {/* ── Mascot crowd (the vellum.ai moment) ── */}
         <StarCrowdSection />
+
+        {/* ── Why (problem-first, agent-reach style) ── */}
+        <section id="why" className="px-6 py-20 max-sm:py-12">
+          <div className="mx-auto max-w-3xl text-center">
+            <Reveal>
+              <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Why Muster</div>
+              <h2 className="text-[clamp(26px,4vw,38px)] font-bold leading-tight tracking-[-0.02em] text-[#f5f5f5]">
+                AI agents can write code. Ask one to check your inbox, and it's blind.
+              </h2>
+              <p className="mx-auto mt-4 max-w-xl text-[16px] leading-relaxed text-[#a1a1a6]">
+                Chat apps rent you a model. Muster gives each agent a name, a memory that persists between tasks, and a real Linux desktop it drives — so "check my mail and draft the reply" is a job, not a wish.
+              </p>
+            </Reveal>
+            <div className="mt-10 grid gap-4 text-left sm:grid-cols-3">
+              {[
+                { t: "One chat tab per task", d: "Twelve browser tabs of half-finished prompts. No memory between them, no handoffs." },
+                { t: "Agents with no hands", d: "Models that can reason but can't click, type, or run anything — so nothing actually gets done." },
+                { t: "Lock-in by subscription", d: "Renting someone else's key and their sandbox, with your data on their servers." },
+              ].map((p) => (
+                <Reveal key={p.t}>
+                  <div className="h-full rounded-2xl border border-white/[0.08] bg-white/[0.02] p-5">
+                    <div className="text-[14px] font-semibold text-[#f5f5f5]">{p.t}</div>
+                    <div className="mt-2 text-[13px] leading-relaxed text-[#a1a1a6]">{p.d}</div>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
 
         {/* ── Features ── */}
         <section id="features" className="px-6 py-20 max-sm:py-12">
@@ -402,6 +431,33 @@ export function LandingPage() {
                       <div className="mt-0.5 text-[13px] text-[#a1a1a6]">{meta}</div>
                     </div>
                     <a href={href} target="_blank" rel="noopener" className="text-[14px] font-semibold text-[#ff7a45]">{label}</a>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── Platforms (agent-reach style support grid) ── */}
+        <section className="px-6 pb-4 pt-20 max-sm:pt-12">
+          <div className="mx-auto max-w-6xl">
+            <Reveal>
+              <h2 className="text-center text-[clamp(24px,3.5vw,32px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">
+                Runs everywhere you do
+              </h2>
+            </Reveal>
+            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-5">
+              {[
+                { name: "macOS", note: "Universal · signed & notarized" },
+                { name: "Windows", note: "x64 installer + auto-update" },
+                { name: "Web", note: "Self-host in one Docker command" },
+                { name: "iOS", note: "Native companion · App Store kit ready" },
+                { name: "Android", note: "Companion · sideload or Play" },
+              ].map((p) => (
+                <Reveal key={p.name}>
+                  <div className="h-full rounded-2xl border border-white/[0.08] bg-white/[0.02] px-4 py-4 text-center">
+                    <div className="text-[14px] font-semibold text-[#f5f5f5]">{p.name}</div>
+                    <div className="mt-1 text-[11.5px] leading-snug text-[#a1a1a6]">{p.note}</div>
                   </div>
                 </Reveal>
               ))}
