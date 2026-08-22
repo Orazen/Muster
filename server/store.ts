@@ -36,7 +36,7 @@ export type AgentExpression = string;
 /** Which mascot body a bot uses: the procedural cursor, the .lottie
  * character, the star teammate, or one of the shape-pack bodies (rendered
  * through the same cursor engine client-side). */
-export type AgentCharacter = "cursor" | "lottie" | "star" | "hexagon" | "triangle" | "egg" | "drop" | "heart" | "pebble" | "squircle" | "capsule" | "cloud" | "ball" | "sparkle";
+export type AgentCharacter = "cursor" | "lottie" | "star" | "hexagon" | "triangle" | "egg" | "drop" | "heart" | "pebble" | "squircle" | "capsule" | "cloud" | "ball" | "sparkle" | "circle";
 export const AGENT_CHARACTERS: readonly AgentCharacter[] = [
   "star", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
   "pebble", "squircle", "capsule", "cloud", "ball", "sparkle", "circle",
