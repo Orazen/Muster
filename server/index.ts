@@ -2216,8 +2216,10 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
  * match the bot's owner. */
 async function reloadUserInstances(userId: string): Promise<void> {
   const userConfigs = userInstanceConfigs(DATA_DIR, userId, PROVIDER_DRIVER_ENV);
-  // load() upserts by instanceId — existing operator instances untouched.
   await registry.load(userConfigs);
+  // Broadcast the refreshed fleet so connected clients (model picker,
+  // composer) see the new vault engines without a page reload.
+  bus.publish({ type: "instances", instances: registry.describe() });
 }
 
 /** Register every user's vault instances (boot path). */
@@ -4011,7 +4013,16 @@ let requestUserEmail = "";
       // Windows never pushes PATH changes into a live process, so without
       // this the answer is frozen at boot and "check again" is a no-op.
       resetPathCache();
-      return json(res, 200, { instances: await registry.describe() });
+      const described = await registry.describe();
+      // Non-operators see global instances + their OWN vault instances.
+      if (requestUserId && requestUserId !== primaryUserId()) {
+        const suffix = `:${requestUserId}`;
+        const filtered = described.filter(
+          (d) => !d.instanceId.includes(":") || d.instanceId.endsWith(suffix),
+        );
+        return json(res, 200, { instances: filtered });
+      }
+      return json(res, 200, { instances: described });
     }
 
     // ── CLI binary discovery for the Engines "detected" dropdown ──
