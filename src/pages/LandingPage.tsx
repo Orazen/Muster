@@ -151,7 +151,7 @@ const CROWD_STAR_PATH = computeCrowdStarPath();
  * teammates in engine colors, springing in with stagger, then idle-floating.
  * Static under reduced motion. */
 const CROWD: { color: string; size: number; left: number; top: number; rot: number; dur: number }[] = [
-  { color: "#009957", size: 88, left: 3, top: 24, rot: -8, dur: 5.4 },
+  { color: "#f0460e", size: 88, left: 3, top: 24, rot: -8, dur: 5.4 },
   { color: "#377FE6", size: 62, left: 16, top: 58, rot: 7, dur: 6.2 },
   { color: "#E78531", size: 96, left: 28, top: 12, rot: -5, dur: 5.8 },
   { color: "#D84F8B", size: 56, left: 42, top: 54, rot: 9, dur: 6.6 },
@@ -217,13 +217,13 @@ function HeroMock() {
           {[
             { c: "#E78531", n: "Scout", active: true },
             { c: "#377FE6", n: "Writer" },
-            { c: "#009957", n: "Ops" },
+            { c: "#ff7a45", n: "Ops" },
             { c: "#8057C8", n: "Reviewer" },
           ].map(({ c, n, active }) => (
             <div key={n} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] ${active ? "bg-white/[0.06] text-[#f5f5f5]" : "text-[#a1a1a6]"}`}>
               <span className="size-4 shrink-0 rounded-full" style={{ background: `linear-gradient(135deg, ${c}bb, ${c})` }} />
               <span className="truncate">{n}</span>
-              {active && <span className="ml-auto size-1.5 rounded-full bg-[#38d591]" />}
+              {active && <span className="ml-auto size-1.5 rounded-full bg-[#f08a24]" />}
             </div>
           ))}
           <div className="mt-auto rounded-lg border border-white/[0.06] px-2 py-1.5 text-[11px] text-[#a1a1a6]">

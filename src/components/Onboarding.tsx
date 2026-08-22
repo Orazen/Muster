@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Check, AlertTriangle, Loader2, Mic, ArrowLeft, Sparkles } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { MusterbotMark } from "./MusterbotMark";
 import { AgentAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, emailGateDone, track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -325,7 +326,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const stepContent = [
     (
       <div className="flex flex-col items-center">
-        <AgentAvatar color="green" character="star" state="happy" size={72} />
+        <MusterbotMark size={96} wordmark />
         <h1 className="mt-4 text-[20px] font-semibold text-ink">Welcome to Muster</h1>
         <p className="mt-1.5 text-center text-[14px] leading-relaxed text-ink-secondary">
           A roster of AI agents that do real work on their own computer. Let&rsquo;s set yours up —
