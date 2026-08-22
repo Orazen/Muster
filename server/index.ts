@@ -301,7 +301,19 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
   // means something specific broke and must keep failing loudly, not get
   // silently redirected to a different engine than what was actually
   // configured.
-  if (bot.modelSelection.instanceId !== "") return null;
+  // Cloud heal: a bot whose selection points at the operator's global API
+  // instance (pre-vault era, or the operator fleet) but whose owner has
+  // their OWN vault instance gets healed onto it — so Priya runs on the
+  // owner's DeepSeek key instead of erroring on operator-only engines.
+  if (bot.modelSelection.instanceId !== "" && bot.ownerId) {
+    const base = bot.modelSelection.instanceId.split(":")[0];
+    const own = registry.get(userInstanceId(base, bot.ownerId));
+    if (own) {
+      store.patchBot(bot.id, { modelSelection: { ...bot.modelSelection, instanceId: userInstanceId(base, bot.ownerId) } });
+      return own;
+    }
+    return null;
+  }
   const selection = await defaultSelection();
   if (!selection.instanceId) return null;
   const healed = registry.get(selection.instanceId);
@@ -4031,9 +4043,20 @@ const server = createServer(async (req, res) => {
     }
     if (method === "GET" && path === "/api/providers") {
       const flags: Record<string, { configured: boolean }> = {};
+      // Non-operator accounts read their own vault — the operator's global
+      // keys are theirs alone and must never light up someone else's panel.
+      const own = requestUserId && requestUserId !== primaryUserId()
+        ? userProviderFlags(DATA_DIR, requestUserId)
+        : null;
       if (cfg.providers) {
         for (const [id, entry] of Object.entries(cfg.providers)) {
           flags[id] = { configured: Boolean(entry.apiKey) };
+        }
+      }
+      if (own) {
+        for (const [id, entry] of Object.entries(own)) {
+          if (entry.configured) flags[id] = entry;
+          else delete flags[id];
         }
       }
       return json(res, 200, { providers: PROVIDERS.map((p) => ({ ...p, configured: flags[p.id]?.configured ?? false })) });
