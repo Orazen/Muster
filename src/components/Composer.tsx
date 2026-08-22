@@ -287,7 +287,8 @@ export function Composer({
           onAdd={addAttachments}
           onRemove={removeAttachment}
         />
-        <div className="flex items-end gap-2 rounded-3xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2">
+        {/* Gaia composer: soft elevated shell, hairline ring, generous radius */}
+        <div className="flex items-end gap-2 rounded-[26px] border border-hairline/50 bg-card py-2.5 pl-4 pr-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.06),0_8px_24px_-8px_rgba(0,0,0,0.08)] transition-colors focus-within:border-accent/50">
         <textarea
           ref={inputRef}
           rows={1}
@@ -397,8 +398,10 @@ export function Composer({
             aria-label={busy ? "Queue message" : "Send message"}
             title={busy ? "Sends when the current turn finishes" : "Send"}
             className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              busy ? "bg-raised text-ink-secondary hover:bg-raised-hover" : "bg-accent hover:brightness-110",
+              "flex size-9 shrink-0 items-center justify-center rounded-full text-white",
+              busy
+                ? "bg-raised text-ink-secondary hover:bg-raised-hover"
+                : "bg-accent shadow-[0_4px_14px_rgba(240,70,14,0.32)] hover:brightness-110",
             )}
           >
             {busy ? <Clock size={15} /> : <ArrowUp size={17} />}
