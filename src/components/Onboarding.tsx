@@ -334,16 +334,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   if (!decided) return null;
 
   // dense array indexed by step — steps are 0..5 by construction
-  // Vellum-style progress indicator
-  const dots = Array.from({ length: 6 }, (_, i) => (
-    <span
-      key={i}
-      className={`h-1.5 rounded-full transition-all duration-300 ${
-        i === step ? "w-6 bg-accent" : i < step ? "w-1.5 bg-accent/40" : "w-1.5 bg-raised-hover"
-      }`}
-    />
-  ));
-
   const stepContent = [
     (
       <div className="flex flex-col items-center">
@@ -738,7 +728,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-app px-4">
-      <div className="flex items-center justify-center gap-2 pb-5">{dots}</div>
       <div
         className={`flex max-h-full w-full flex-col rounded-2xl border border-hairline/40 bg-panel p-8 ${
           step === 1 ? "max-w-[680px]" : "max-w-[460px]"
