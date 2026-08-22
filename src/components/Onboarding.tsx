@@ -7,7 +7,7 @@ import { identifyEmail, setEmailGateDone, emailGateDone, track } from "@/lib/ana
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
 import { ProviderMark } from "./ProviderIcons";
-import { AGENT_COLORS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor } from "@/lib/mascot";
+import type { AgentCharacter, AgentColor } from "@/lib/mascot";
 import { useStore } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import type { InstanceInfo } from "@/state/store";
@@ -457,89 +457,78 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
     (
       <div className="flex min-h-0 flex-col">
-        <h1 className="text-[18px] font-semibold text-ink">Meet your first teammate</h1>
-        <p className="mt-1 text-[13.5px] text-ink-secondary">
-          Give one agent a face and a name. You can add more any time.
-        </p>
-        {/* Live preview: the selected teammate, animated (blobstudio-style) */}
-        <div className="mt-4 flex justify-center">
-          <AgentAvatar
-            color={botColor}
-            character={botCharacter}
-            size={96}
-            state={botName.trim() ? "happy" : "idle"}
-          />
-        </div>
-        {(botName.trim() || botRole.trim()) && (
-          <div className="mt-2 text-center">
-            <span className="text-[14px] font-semibold text-ink">{botName.trim() || "Your teammate"}</span>
-            {botRole.trim() && <span className="ml-1.5 text-[12px] text-ink-secondary">· {botRole.trim()}</span>}
-          </div>
-        )}
-        <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-          {TEAMMATE_TEMPLATES.map((t) => (
-            <button
-              key={t.name}
-              onClick={() => {
-                setBotName(t.name);
-                setBotRole(t.role);
-                setBotColor(t.color);
-                setBotCharacter(t.character);
-              }}
-              className={`rounded-full border px-2.5 py-1 text-[11.5px] transition-colors ${
-                botName === t.name
-                  ? "border-accent bg-raised text-ink"
-                  : "border-hairline/40 text-ink-secondary hover:bg-raised hover:text-ink"
-              }`}
-            >
-              {t.name} · {t.role}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-3 flex flex-wrap justify-center gap-2">
-          {AGENT_COLOR_NAMES.map((c) => (
-            <button
-              key={c}
-              onClick={() => setBotColor(c)}
-              aria-label={`Color: ${c}`}
-              aria-pressed={botColor === c}
-              className={`size-6 rounded-full transition-transform ${
-                botColor === c ? "scale-110 ring-2 ring-ink ring-offset-2 ring-offset-panel" : "hover:scale-105"
-              }`}
-              style={{ backgroundColor: AGENT_COLORS[c] }}
+        {/* musterbot layout: big animated avatar LEFT, form panel RIGHT */}
+        <div className="flex min-h-0 flex-1 items-center gap-6 max-sm:flex-col">
+          <div className="flex flex-1 items-center justify-center">
+            <AgentAvatar
+              color={botColor}
+              character={botCharacter}
+              size={220}
+              state={botName.trim() ? "happy" : "idle"}
+              animated
             />
-          ))}
-        </div>
-        <input
-          autoFocus
-          type="text"
-          value={botName}
-          onChange={(e) => setBotName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && botName.trim() && setStep(3)}
-          placeholder="Name your teammate (e.g. Scout)"
-          className="mt-4 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-        />
-        <input
-          type="text"
-          value={botRole}
-          onChange={(e) => setBotRole(e.target.value)}
-          placeholder="Role — research, writing, ops… (optional)"
-          className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-        />
-        <div className="mt-5 flex gap-3">
-          <button
-            onClick={() => setStep(1)}
-            className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[15px] text-ink-secondary hover:bg-raised hover:text-ink"
-          >
-            Back
-          </button>
-          <button
-            onClick={() => (botName.trim() ? setStep(3) : finish())}
-            className="flex-1 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
-          >
-            {botName.trim() ? "Continue" : "Skip — no teammate yet"}
-          </button>
+          </div>
+          <div className="w-full max-w-[300px] shrink-0">
+            <h2 className="text-[15px] font-bold text-ink">Your teammate</h2>
+            {(botName.trim() || botRole.trim()) && (
+              <p className="mt-0.5 text-[12.5px] text-ink-secondary">
+                {botName.trim() || "Unnamed"}
+                {botRole.trim() ? ` · ${botRole.trim()}` : ""}
+              </p>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {TEAMMATE_TEMPLATES.map((t) => (
+                <button
+                  key={t.name}
+                  onClick={() => {
+                    setBotName(t.name);
+                    setBotRole(t.role);
+                    setBotColor(t.color);
+                    setBotCharacter(t.character);
+                  }}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                    botName === t.name
+                      ? "border-accent bg-raised font-medium text-ink"
+                      : "border-hairline/40 text-ink-secondary hover:bg-raised hover:text-ink"
+                  }`}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+
+            <input
+              autoFocus
+              type="text"
+              value={botName}
+              onChange={(e) => setBotName(e.target.value)}
+              placeholder="Name your teammate (e.g. Scout)"
+              className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+            />
+            <input
+              type="text"
+              value={botRole}
+              onChange={(e) => setBotRole(e.target.value)}
+              placeholder="Role — research, writing, ops…"
+              className="mt-2 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+            />
+
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setStep(1)}
+                className="rounded-lg border border-hairline/40 px-3.5 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => (botName.trim() ? setStep(3) : finish())}
+                className="flex-1 rounded-lg bg-accent py-2 text-[13.5px] font-medium text-white"
+              >
+                {botName.trim() ? "Continue" : "Skip — no teammate yet"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     ),
