@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Cpu, Monitor, Shield, Plug, Users, Key } from "lucide-react";
+import { motion, useReducedMotion, type Variants } from "framer-motion";
 import { useAuth } from "@/lib/auth";
 
 function StarLogo({ size = 24 }: { size?: number }) {
@@ -54,8 +55,227 @@ const DOWNLOADS = [
   { os: "Self-host (web)", meta: "Run the web UI + harness in Docker", href: "https://github.com/Orazen/Muster/blob/main/docs/self-host.md", label: "Docker guide" },
 ];
 
+/* ── Motion primitives ──────────────────────────────────────────────
+ * Vellum-style grammar: restrained fade+rise reveals, one spring moment
+ * for the mascot crowd. Everything collapses to static under
+ * prefers-reduced-motion. */
+
+const riseVariants: Variants = {
+  hidden: { opacity: 0, y: 24 },
+  shown: { opacity: 1, y: 0 },
+};
+
+/** Scroll-triggered fade+rise. `delay` staggers siblings. */
+function Reveal({
+  children,
+  delay = 0,
+  className,
+}: {
+  children: React.ReactNode;
+  delay?: number;
+  className?: string;
+}) {
+  const reduced = useReducedMotion();
+  if (reduced) return <div className={className}>{children}</div>;
+  return (
+    <motion.div
+      className={className}
+      variants={riseVariants}
+      initial="hidden"
+      whileInView="shown"
+      viewport={{ once: true, margin: "-60px" }}
+      transition={{ duration: 0.55, delay, ease: [0.22, 0.61, 0.36, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/** Gentle perpetual float for mascots. Disabled under reduced motion. */
+function Float({ children, duration = 6, delay = 0 }: { children: React.ReactNode; duration?: number; delay?: number }) {
+  const reduced = useReducedMotion();
+  if (reduced) return <>{children}</>;
+  return (
+    <motion.div animate={{ y: [0, -7, 0] }} transition={{ duration, delay, repeat: Infinity, ease: "easeInOut" }}>
+      {children}
+    </motion.div>
+  );
+}
+
+/** Five-point star body with capsule eyes — same silhouette family as the
+ * in-app StarTeammate mascot, standalone so the marketing page stays free of
+ * app imports. */
+function CrowdStar({ color, size }: { color: string; size: number }) {
+  const gradId = `crowd-${color.slice(1)}`;
+  return (
+    <svg width={size} height={size} viewBox="-48 -48 96 96" aria-hidden="true" className="block">
+      <defs>
+        <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0" stopColor={color} stopOpacity="0.72" />
+          <stop offset="1" stopColor={color} />
+        </linearGradient>
+      </defs>
+      <path d={CROWD_STAR_PATH} fill={`url(#${gradId})`} />
+      <rect x="-10.1" y="-6.2" width="5.2" height="8.4" rx="2.6" fill="#111" />
+      <rect x="4.9" y="-6.2" width="5.2" height="8.4" rx="2.6" fill="#111" />
+    </svg>
+  );
+}
+
+// Same rounded-star math the app's StarTeammate uses (starRadius curve,
+// Catmull-Rom through 128 samples), precomputed to a static path string.
+function computeCrowdStarPath(): string {
+  const STEPS = 128;
+  const TAU = Math.PI * 2;
+  const radius = (theta: number) => 0.62 + 0.38 * Math.abs(Math.cos(2.5 * theta + Math.PI / 4)) ** 0.6;
+  const raw = Array.from({ length: STEPS }, (_, i) => {
+    const a = (i / STEPS) * TAU;
+    return { x: Math.cos(a) * radius(a), y: Math.sin(a) * radius(a) };
+  });
+  const maxR = Math.max(...raw.map((p) => Math.hypot(p.x, p.y)));
+  const pts = raw.map((p) => ({ x: (p.x / maxR) * 44, y: (p.y / maxR) * 44 }));
+  const tension = 1 / 6;
+  let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
+  for (let i = 0; i < STEPS; i++) {
+    const p0 = pts[(i - 1 + STEPS) % STEPS];
+    const p1 = pts[i];
+    const p2 = pts[(i + 1) % STEPS];
+    const p3 = pts[(i + 2) % STEPS];
+    d += ` C ${(p1.x + (p2.x - p0.x) * tension).toFixed(2)} ${(p1.y + (p2.y - p0.y) * tension).toFixed(2)}, ${(p2.x - (p3.x - p1.x) * tension).toFixed(2)} ${(p2.y - (p3.y - p1.y) * tension).toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
+  }
+  return `${d} Z`;
+}
+const CROWD_STAR_PATH = computeCrowdStarPath();
+
+/** The vellum.ai moment, in our own skin: a scroll-revealed crowd of star
+ * teammates in engine colors, springing in with stagger, then idle-floating.
+ * Static under reduced motion. */
+const CROWD: { color: string; size: number; left: number; top: number; rot: number; dur: number }[] = [
+  { color: "#009957", size: 88, left: 3, top: 24, rot: -8, dur: 5.4 },
+  { color: "#377FE6", size: 62, left: 16, top: 58, rot: 7, dur: 6.2 },
+  { color: "#E78531", size: 96, left: 28, top: 12, rot: -5, dur: 5.8 },
+  { color: "#D84F8B", size: 56, left: 42, top: 54, rot: 9, dur: 6.6 },
+  { color: "#8057C8", size: 76, left: 52, top: 18, rot: -7, dur: 5.2 },
+  { color: "#0EA5C6", size: 64, left: 64, top: 56, rot: 6, dur: 6.8 },
+  { color: "#D8A729", size: 84, left: 74, top: 14, rot: -6, dur: 5.6 },
+  { color: "#D94B52", size: 60, left: 86, top: 52, rot: 8, dur: 6.4 },
+  { color: "#01A492", size: 70, left: 92, top: 26, rot: -4, dur: 6.0 },
+];
+
+function StarCrowdSection() {
+  const reduced = useReducedMotion();
+  return (
+    <section className="relative overflow-hidden px-6 py-24 max-sm:py-14" aria-label="Your team of agents">
+      <div className="mx-auto max-w-6xl text-center">
+        <Reveal>
+          <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Your team</div>
+          <h2 className="text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Muster your team.</h2>
+          <p className="mx-auto mt-4 max-w-xl text-[17px] leading-relaxed text-[#a1a1a6]">
+            Every agent gets a face, a name, and a mind of its own. Assemble the roster once — it shows up for work every day after.
+          </p>
+        </Reveal>
+        <div className="relative mx-auto mt-4 h-[190px] max-w-3xl max-sm:h-[140px]">
+          {CROWD.map((s, i) => {
+            const star = <CrowdStar {...s} />;
+            return (
+              <div key={s.color} className="absolute" style={{ left: `${s.left}%`, top: `${s.top}%` }}>
+                {reduced ? (
+                  <div style={{ transform: `rotate(${s.rot}deg)` }}>{star}</div>
+                ) : (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0, rotate: s.rot * 3 }}
+                    whileInView={{ opacity: 1, scale: 1, rotate: s.rot }}
+                    viewport={{ once: true, margin: "-40px" }}
+                    transition={{ type: "spring", stiffness: 260, damping: 16, delay: 0.08 * i }}
+                  >
+                    <Float duration={s.dur} delay={0.35 * i}>
+                      {star}
+                    </Float>
+                  </motion.div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Hero visual: a miniature, static mock of the Muster app — roster sidebar,
+ * a chat with an approval card — built in DOM so it can never 404 like the
+ * old /hero.png did. */
+function HeroMock() {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#101012] text-left shadow-[0_30px_80px_rgba(0,0,0,.5)]">
+      <div className="flex h-[380px] max-sm:h-[300px]">
+        {/* sidebar */}
+        <div className="hidden w-44 shrink-0 flex-col gap-1 border-r border-white/[0.06] p-3 sm:flex">
+          <div className="mb-2 flex items-center gap-2 px-2 text-[12px] font-semibold text-[#f5f5f5]">
+            <StarLogo size={14} /> Muster
+          </div>
+          {[
+            { c: "#E78531", n: "Scout", active: true },
+            { c: "#377FE6", n: "Writer" },
+            { c: "#009957", n: "Ops" },
+            { c: "#8057C8", n: "Reviewer" },
+          ].map(({ c, n, active }) => (
+            <div key={n} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] ${active ? "bg-white/[0.06] text-[#f5f5f5]" : "text-[#a1a1a6]"}`}>
+              <span className="size-4 shrink-0 rounded-full" style={{ background: `linear-gradient(135deg, ${c}bb, ${c})` }} />
+              <span className="truncate">{n}</span>
+              {active && <span className="ml-auto size-1.5 rounded-full bg-[#38d591]" />}
+            </div>
+          ))}
+          <div className="mt-auto rounded-lg border border-white/[0.06] px-2 py-1.5 text-[11px] text-[#a1a1a6]">
+            + New Bot
+          </div>
+        </div>
+        {/* chat */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex flex-1 flex-col justify-end gap-3 p-5">
+            <div className="self-end rounded-2xl rounded-br-md bg-[#f0460e] px-4 py-2.5 text-[13px] text-white max-w-[75%]">
+              Scout — check the deploy logs and tell me what broke.
+            </div>
+            <div className="flex items-start gap-2.5 self-start">
+              <CrowdStar color="#E78531" size={26} />
+              <div className="rounded-2xl rounded-bl-md bg-white/[0.05] px-4 py-2.5 text-[13px] leading-relaxed text-[#e5e5e5] max-w-[80%]">
+                Found it — the build failed on a missing env var. Two tests also need a re-run; everything else is green.
+              </div>
+            </div>
+            {/* approval card */}
+            <div className="self-start rounded-xl border border-[rgba(240,70,14,.35)] bg-[rgba(240,70,14,.06)] p-3.5 max-w-[85%]">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[#ff7a45]">Wants to run</div>
+              <code className="block text-[12px] text-[#d4d4d8]">vercel logs muster --error</code>
+              <div className="mt-2.5 flex gap-2">
+                <span className="rounded-lg bg-[#f0460e] px-3 py-1 text-[12px] font-semibold text-white">Allow</span>
+                <span className="rounded-lg border border-white/[0.1] px-3 py-1 text-[12px] text-[#a1a1a6]">Deny</span>
+              </div>
+            </div>
+          </div>
+          <div className="border-t border-white/[0.06] p-3.5">
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-2.5 text-[12.5px] text-[#6b6b70]">
+              Message your team…
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function LandingPage() {
   const { user } = useAuth();
+  const reduced = useReducedMotion();
+
+  // Staggered hero entrance: badge → headline → subcopy → CTAs → screenshot.
+  const heroItem = (delay: number) =>
+    reduced
+      ? {}
+      : {
+          initial: { opacity: 0, y: 26 },
+          animate: { opacity: 1, y: 0 },
+          transition: { duration: 0.6, delay, ease: [0.22, 0.61, 0.36, 1] as const },
+        };
 
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
@@ -63,7 +283,9 @@ export function LandingPage() {
       <header className="sticky top-0 z-50 border-b border-white/[0.06] backdrop-blur-xl bg-[#0a0a0a]/70">
         <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <Link to="/" className="flex items-center gap-2.5 text-[15px] font-semibold tracking-tight text-[#f5f5f5]">
-            <StarLogo size={28} />
+            <Float duration={7}>
+              <StarLogo size={28} />
+            </Float>
             Muster
           </Link>
           <div className="flex items-center gap-6 max-sm:hidden">
@@ -84,19 +306,21 @@ export function LandingPage() {
         {/* ── Hero ── */}
         <section className="relative px-6 pb-20 pt-24 text-center max-sm:pt-16 max-sm:pb-12">
           <div className="mx-auto max-w-4xl">
-            <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[rgba(240,70,14,.28)] bg-[rgba(240,70,14,.07)] px-3.5 py-1.5 text-[13px] font-medium text-[#ff7a45]">
-              Open source · local-first · bring your own AI
-            </div>
-            <h1 className="text-[clamp(42px,7vw,76px)] font-bold leading-[1.02] tracking-[-0.035em] text-[#f5f5f5]">
+            <motion.div {...heroItem(0)}>
+              <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[rgba(240,70,14,.28)] bg-[rgba(240,70,14,.07)] px-3.5 py-1.5 text-[13px] font-medium text-[#ff7a45]">
+                Open source · local-first · bring your own AI
+              </div>
+            </motion.div>
+            <motion.h1 {...heroItem(0.08)} className="text-[clamp(42px,7vw,76px)] font-bold leading-[1.02] tracking-[-0.035em] text-[#f5f5f5]">
               Muster{" "}
               <span className="bg-gradient-to-br from-[#ff7a45] via-[#f0460e] to-[#c93a0b] bg-clip-text text-transparent">
                 your agents.
               </span>
-            </h1>
-            <p className="mx-auto mt-6 max-w-xl text-[19px] leading-relaxed text-[#a1a1a6]">
+            </motion.h1>
+            <motion.p {...heroItem(0.16)} className="mx-auto mt-6 max-w-xl text-[19px] leading-relaxed text-[#a1a1a6]">
               A local-first roster of AI agents you actually own. Bring your own Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, or OpenCode Go — give each one a body, and run your team from a chat app, not a subscription.
-            </p>
-            <div className="mt-10 flex flex-wrap items-center justify-center gap-3.5">
+            </motion.p>
+            <motion.div {...heroItem(0.24)} className="mt-10 flex flex-wrap items-center justify-center gap-3.5">
               <Link to={user ? "/app" : "/sign-up"} className="inline-flex items-center gap-2 rounded-xl bg-[#f0460e] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(240,70,14,.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(240,70,14,.42)]">
                 {user ? "Open Muster →" : "Get Started →"}
               </Link>
@@ -106,30 +330,37 @@ export function LandingPage() {
               <a href="https://github.com/Orazen/Muster" target="_blank" rel="noopener" className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-7 py-3.5 text-[15px] font-semibold text-[#f5f5f5] transition-all hover:-translate-y-0.5 hover:border-white/20">
                 View on GitHub
               </a>
-            </div>
-            <div className="mx-auto mt-14 max-w-[900px] overflow-hidden rounded-2xl border border-white/[0.08] shadow-[0_30px_80px_rgba(0,0,0,.5)]">
-              <img src="/hero.png" alt="Muster — a chat app where every chat is a real AI agent" className="block w-full" />
-            </div>
+            </motion.div>
+            <motion.div {...heroItem(0.36)} className="mx-auto mt-14 max-w-[900px]">
+              <HeroMock />
+            </motion.div>
           </div>
         </section>
+
+        {/* ── Mascot crowd (the vellum.ai moment) ── */}
+        <StarCrowdSection />
 
         {/* ── Features ── */}
         <section id="features" className="px-6 py-20 max-sm:py-12">
           <div className="mx-auto max-w-6xl">
-            <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Features</div>
-            <h2 className="text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Agents that behave like a team</h2>
-            <p className="mt-4 max-w-xl text-[17px] leading-relaxed text-[#a1a1a6]">
-              One assistant in one box is the wrong shape for agents. Muster treats AI the way a real team works — a roster of agents you chat with like contacts, each with its own personality, memory, model, computer, and connected apps.
-            </p>
+            <Reveal>
+              <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Features</div>
+              <h2 className="text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Agents that behave like a team</h2>
+              <p className="mt-4 max-w-xl text-[17px] leading-relaxed text-[#a1a1a6]">
+                One assistant in one box is the wrong shape for agents. Muster treats AI the way a real team works — a roster of agents you chat with like contacts, each with its own personality, memory, model, computer, and connected apps.
+              </p>
+            </Reveal>
             <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {FEATURES.map(({ icon: Icon, title, desc }) => (
-                <div key={title} className="group rounded-2xl border border-white/[0.06] bg-[#141414] p-6 transition-all hover:-translate-y-0.5 hover:border-[rgba(240,70,14,.28)]">
-                  <div className="mb-3.5 flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.04] text-[#ff7a45] transition-colors group-hover:bg-[rgba(240,70,14,.1)]">
-                    <Icon size={20} />
+              {FEATURES.map(({ icon: Icon, title, desc }, i) => (
+                <Reveal key={title} delay={0.07 * (i % 3)} className="h-full">
+                  <div className="group h-full rounded-2xl border border-white/[0.06] bg-[#141414] p-6 transition-all hover:-translate-y-0.5 hover:border-[rgba(240,70,14,.28)]">
+                    <div className="mb-3.5 flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.04] text-[#ff7a45] transition-colors group-hover:bg-[rgba(240,70,14,.1)]">
+                      <Icon size={20} />
+                    </div>
+                    <h3 className="mb-2 text-[15px] font-semibold tracking-tight text-[#f5f5f5]">{title}</h3>
+                    <p className="text-[14px] leading-relaxed text-[#a1a1a6]">{desc}</p>
                   </div>
-                  <h3 className="mb-2 text-[15px] font-semibold tracking-tight text-[#f5f5f5]">{title}</h3>
-                  <p className="text-[14px] leading-relaxed text-[#a1a1a6]">{desc}</p>
-                </div>
+                </Reveal>
               ))}
             </div>
           </div>
@@ -138,14 +369,18 @@ export function LandingPage() {
         {/* ── Engines ── */}
         <section id="engines" className="px-6 py-20 max-sm:py-12">
           <div className="mx-auto max-w-6xl">
-            <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Engines</div>
-            <h2 className="text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Bring your own model</h2>
-            <p className="mt-4 max-w-xl text-[17px] leading-relaxed text-[#a1a1a6]">
-              Muster doesn't ship a model of its own — your bots run on the AI CLIs already installed and logged in on your machine, using your existing subscriptions. Point any engine at a custom binary in Settings → Engines.
-            </p>
+            <Reveal>
+              <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Engines</div>
+              <h2 className="text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Bring your own model</h2>
+              <p className="mt-4 max-w-xl text-[17px] leading-relaxed text-[#a1a1a6]">
+                Muster doesn't ship a model of its own — your bots run on the AI CLIs already installed and logged in on your machine, using your existing subscriptions. Point any engine at a custom binary in Settings → Engines.
+              </p>
+            </Reveal>
             <div className="mt-8 flex flex-wrap gap-2.5">
-              {ENGINES.map((e) => (
-                <span key={e} className="rounded-full border border-white/[0.08] bg-[#1d1d1f] px-4 py-2 text-[13px] font-medium text-[#a1a1a6]">{e}</span>
+              {ENGINES.map((e, i) => (
+                <Reveal key={e} delay={0.04 * i}>
+                  <span className="inline-block rounded-full border border-white/[0.08] bg-[#1d1d1f] px-4 py-2 text-[13px] font-medium text-[#a1a1a6]">{e}</span>
+                </Reveal>
               ))}
             </div>
           </div>
@@ -154,17 +389,21 @@ export function LandingPage() {
         {/* ── Download ── */}
         <section id="download" className="border-y border-white/[0.06] bg-[#141414] px-6 py-20 max-sm:py-12">
           <div className="mx-auto max-w-6xl">
-            <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Download</div>
-            <h2 className="text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Get Muster</h2>
+            <Reveal>
+              <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Download</div>
+              <h2 className="text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Get Muster</h2>
+            </Reveal>
             <div className="mt-9 grid max-w-xl gap-3.5">
-              {DOWNLOADS.map(({ os, meta, href, label }) => (
-                <div key={os} className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-[#0a0a0a] px-5 py-4 transition-colors hover:border-[rgba(240,70,14,.28)]">
-                  <div>
-                    <div className="font-semibold text-[#f5f5f5]">{os}</div>
-                    <div className="mt-0.5 text-[13px] text-[#a1a1a6]">{meta}</div>
+              {DOWNLOADS.map(({ os, meta, href, label }, i) => (
+                <Reveal key={os} delay={0.05 * i}>
+                  <div className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-[#0a0a0a] px-5 py-4 transition-colors hover:border-[rgba(240,70,14,.28)]">
+                    <div>
+                      <div className="font-semibold text-[#f5f5f5]">{os}</div>
+                      <div className="mt-0.5 text-[13px] text-[#a1a1a6]">{meta}</div>
+                    </div>
+                    <a href={href} target="_blank" rel="noopener" className="text-[14px] font-semibold text-[#ff7a45]">{label}</a>
                   </div>
-                  <a href={href} target="_blank" rel="noopener" className="text-[14px] font-semibold text-[#ff7a45]">{label}</a>
-                </div>
+                </Reveal>
               ))}
             </div>
           </div>
@@ -173,11 +412,13 @@ export function LandingPage() {
         {/* ── CTA ── */}
         <section className="px-6 py-24 text-center max-sm:py-16">
           <div className="mx-auto max-w-6xl">
-            <h2 className="text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Ready to muster your team?</h2>
-            <p className="mt-3 text-[#a1a1a6]">Open source. Runs on the agents you already pay for.</p>
-            <Link to={user ? "/app" : "/sign-up"} className="mt-9 inline-flex items-center gap-2 rounded-xl bg-[#f0460e] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(240,70,14,.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(240,70,14,.42)]">
-              Open Muster →
-            </Link>
+            <Reveal>
+              <h2 className="text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Ready to muster your team?</h2>
+              <p className="mt-3 text-[#a1a1a6]">Open source. Runs on the agents you already pay for.</p>
+              <Link to={user ? "/app" : "/sign-up"} className="mt-9 inline-flex items-center gap-2 rounded-xl bg-[#f0460e] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(240,70,14,.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(240,70,14,.42)]">
+                Open Muster →
+              </Link>
+            </Reveal>
           </div>
         </section>
       </main>
