@@ -50,9 +50,11 @@ import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import {
+  AGENT_CHARACTERS,
   mentionedBots,
   roomResponders,
   Store,
+  type AgentCharacter,
   type GroupDefaultResponder,
   type Message,
   type TaskRecord,
@@ -3445,8 +3447,10 @@ const server = createServer(async (req, res) => {
       ) {
         return json(res, 400, { error: "computer must be cloud, vm, local, opensandbox, or off" });
       }
-      if (body.character !== undefined && !["cursor", "lottie", "star"].includes(String(body.character))) {
-        return json(res, 400, { error: "character must be cursor, lottie, or star" });
+      // SAFETY: the includes() check above proves body.character is one of
+      // the known teammate bodies before it reaches the store.
+      if (body.character !== undefined && !AGENT_CHARACTERS.includes(body.character as AgentCharacter)) {
+        return json(res, 400, { error: `character must be one of: ${AGENT_CHARACTERS.join(", ")}` });
       }
       if (body.chiefOfStaff !== undefined && !isFlag(body.chiefOfStaff)) {
         return json(res, 400, { error: "chiefOfStaff must be true or false" });

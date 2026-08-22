@@ -367,9 +367,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
     (
       <div className="flex min-h-0 flex-col">
-        <h1 className="text-[18px] font-semibold text-ink">Your engines</h1>
+        <h1 className="text-[18px] font-semibold text-ink">
+          {isDesktop ? "Your engines" : "Connect a provider"}
+        </h1>
         <p className="mt-1 text-[13.5px] text-ink-secondary">
-          Bots run on AI tools installed on this computer — here&rsquo;s what we found.
+          {isDesktop
+            ? "Bots run on AI tools installed on this computer — here's what we found."
+            : "Web bots run on API-key providers — Claude, GPT, Gemini and more. Paste a key now, or set it up later in Settings → Providers."}
         </p>
         <div className="mt-4 flex min-h-0 flex-col gap-2.5 overflow-y-auto pr-1 [scrollbar-width:thin]">
           {!instances ? (
@@ -388,7 +392,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                   </div>
                 </>
               )}
-              {setupEngines.length > 0 && (
+              {isDesktop && setupEngines.length > 0 && (
                 <>
                   <div className={`text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary ${readyEngines.length ? "mt-2" : ""}`}>
                     Needs setup
@@ -401,11 +405,25 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             </>
           )}
         </div>
+        {!isDesktop && (
+          <button
+            onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "providers" })}
+            className="mt-4 w-full shrink-0 rounded-lg border border-hairline/60 bg-raised py-2.5 text-[14px] font-medium text-ink transition-colors hover:bg-raised-hover"
+          >
+            Add a provider key
+          </button>
+        )}
         <button
           onClick={() => setStep(2)}
           className="mt-5 w-full shrink-0 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
         >
           Continue
+        </button>
+        <button
+          onClick={() => setStep(2)}
+          className="mt-2 w-full shrink-0 text-[12.5px] text-ink-secondary transition-colors hover:text-ink"
+        >
+          Set up later
         </button>
       </div>
     ),
