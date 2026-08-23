@@ -11,6 +11,7 @@ import { DeepSeekDriver } from "./deepseek.ts";
 import { FireworksDriver } from "./fireworks.ts";
 import { GoogleDriver } from "./google.ts";
 import { GrokDriver } from "./grok.ts";
+import { LocalDriver } from "./local.ts";
 import { GroqDriver } from "./groq.ts";
 import { MistralDriver } from "./mistral.ts";
 import { OpenAIDriver } from "./openai.ts";
@@ -34,6 +35,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   MistralDriver,
   CohereDriver,
   GroqDriver,
+  LocalDriver,
   TogetherDriver,
   FireworksDriver,
   OpenRouterDriver,

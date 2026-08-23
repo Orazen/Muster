@@ -103,6 +103,38 @@ function indexAfterId(messages: Message[], id: string | undefined): number | nul
   return idx === -1 ? null : idx + 1;
 }
 
+/** How many of the most recent activity/screen messages keep their real
+ * content in a rebuild. Older ones are the work already absorbed into the
+ * conversation — on a small local window they are the first thing worth
+ * forgetting, and a model call to summarize them would be wasted money. */
+const KEEP_RECENT_TOOL_RESULTS = 4;
+
+/** Model-free pruning (v2 plan 3.1): replace stale tool output with a
+ * one-line stub before any sizing or summarization runs. Newest N stay
+ * intact because that is usually the working set the engine is mid-way
+ * through; everything older costs ~10 tokens instead of its full output.
+ * Text turns are never touched. */
+export function pruneStaleToolOutput(messages: Message[]): Message[] {
+  let recent = 0;
+  const out: Message[] = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if ((m.kind === "activity" && m.tool) || m.kind === "screen") {
+      recent++;
+      if (recent <= KEEP_RECENT_TOOL_RESULTS) {
+        out[i] = m;
+        continue;
+      }
+      out[i] =
+        m.kind === "activity"
+          ? { ...m, tool: { name: "earlier tool activity omitted", ok: true } }
+          : { ...m, text: "[earlier screenshot omitted]" };
+      continue;
+    }
+    out[i] = m;
+  }
+  return out;
+}
 /** The newest compaction record in the path, if any. */
 export function latestCompaction(messages: Message[]): { message: Message; data: CompactionData } | null {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -166,7 +198,7 @@ export async function buildModelContext(opts: {
   /** Absent (engine cannot generate text) → bounded truncation, no summary. */
   summarize?: (prompt: string) => Promise<string>;
 }): Promise<BuiltContext> {
-  const messages = opts.messages;
+  const messages = pruneStaleToolOutput(opts.messages);
   const windowTokens = opts.targetWindow && opts.targetWindow > 0 ? opts.targetWindow : DEFAULT_CONTEXT_WINDOW;
   const budget = windowTokens - reserveForReply(windowTokens);
 
