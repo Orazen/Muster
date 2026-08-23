@@ -13,6 +13,13 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import type { JsonObject, JsonValue } from "../schema.ts";
 import { appendNative } from "./native.ts";
+import {
+  closeAll,
+  connectIntegrations,
+  parseChatToolResponse,
+  runToolLoop,
+  type OpenAiTool,
+} from "./openai-tools.ts";
 
 const DRIVER_KIND = "openai";
 const DEFAULT_URL = "https://api.openai.com/v1";
@@ -129,6 +136,28 @@ export const OpenAIDriver: ProviderDriver<OpenAIConfig> = {
       return { text, usage };
     };
 
+    /** Non-streaming request carrying integration tools; parsing + the
+     * agentic loop live in ./openai-tools.ts, shared with grok.ts and the
+     * generic compatible factory. */
+    const completeWithTools = async (
+      messages: Array<JsonObject>,
+      model: string,
+      tools: OpenAiTool[],
+      signal?: AbortSignal,
+    ): Promise<ReturnType<typeof parseChatToolResponse>> => {
+      const res = await fetch(`${config.url}/chat/completions`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ model, messages, tools, tool_choice: "auto", stream: false }),
+        signal: signal ?? AbortSignal.timeout(120_000),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`OpenAI HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+      }
+      return parseChatToolResponse(await res.json());
+    };
+
     const sendTurn = async (turn: SendTurnInput) => {
       const { threadId } = turn;
       if (!apiKey) throw new Error(`no OpenAI key — set ${config.apiKeyEnv} or config.json providers.openai.apiKey`);
@@ -150,23 +179,43 @@ export const OpenAIDriver: ProviderDriver<OpenAIConfig> = {
       emit({ ...base(threadId, turnId), type: "turn.started" });
       emit({ ...base(threadId, turnId), type: "session.started", sessionId: null, model: turn.model ?? MODELS.default });
 
+      // Shared ending so the tool path and the streaming path settle identically.
+      const finishOk = (text: string, usage: { input: number; output: number } | null) => {
+        appendNative(threadId, { dir: "in", source: "openai.chat.completions", msg: { text, usage } });
+        if (text.trim()) {
+          emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+        }
+        if (usage) {
+          emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...usage });
+        }
+        active.delete(threadId);
+        emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
+      };
+
       (async () => {
+        const { clients, tools } = await connectIntegrations(turn.integrations);
         try {
+          if (tools.length > 0) {
+            // Tool turns run non-streamed through the shared agentic loop;
+            // the whole answer lands as one item.completed when it settles.
+            const { text, usage } = await runToolLoop({
+              chat: completeWithTools,
+              messages,
+              model: turn.model || MODELS.default,
+              clients,
+              tools,
+              signal: abort.signal,
+            });
+            finishOk(text, usage);
+            return;
+          }
           const { text, usage } = await complete(messages, turn.model || MODELS.default, {
             stream: true,
             signal: abort.signal,
             onDelta: (delta) =>
               emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta }),
           });
-          appendNative(threadId, { dir: "in", source: "openai.chat.completions", msg: { text, usage } });
-          if (text.trim()) {
-            emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
-          }
-          if (usage) {
-            emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...usage });
-          }
-          active.delete(threadId);
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
+          finishOk(text, usage);
         } catch (e) {
           active.delete(threadId);
           // SAFETY: the awaited fetch/stream path rejects with Error instances
@@ -183,6 +232,8 @@ export const OpenAIDriver: ProviderDriver<OpenAIConfig> = {
             stopReason: aborted ? "interrupted" : "error",
             cost: null,
           });
+        } finally {
+          closeAll(clients);
         }
       })();
 
@@ -208,7 +259,7 @@ export const OpenAIDriver: ProviderDriver<OpenAIConfig> = {
       snapshot,
       adapter: {
         provider: DRIVER_KIND,
-        capabilities: { sessionModelSwitch: "in-session" },
+        capabilities: { sessionModelSwitch: "in-session", computerMcp: true, composioMcp: true },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.abort.abort(),
         respondToRequest: async () => "unavailable" as const,

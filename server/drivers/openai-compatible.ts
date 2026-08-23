@@ -3,6 +3,7 @@
 // request/response/SSE shape (it's become a de facto standard). One
 // implementation, one set of bugs to fix, instead of six near-duplicates
 // of openai.ts/grok.ts.
+// Tool calling lives in ./openai-tools.ts, shared with those twins.
 import type {
   DriverCreateInput,
   ProviderDriver,
@@ -13,81 +14,21 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
+import type { McpClient } from "../mcp-client.ts";
 import { appendNative } from "./native.ts";
-import { connectMcpStdio, type McpClient, type McpTool } from "../mcp-client.ts";
-import { computerProxyEnv } from "../container-computer.ts";
-import { SPAWNED_PROXIES } from "../proxy-paths.ts";
-import { type JsonObject, type JsonValue } from "../schema.ts";
-
-const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
+import {
+  closeAll,
+  connectIntegrations,
+  parseChatToolResponse,
+  runToolLoop,
+  type OpenAiTool,
+} from "./openai-tools.ts";
+import type { JsonObject, JsonValue } from "../schema.ts";
 
 // Values decoded here only ever originate from JSON.parse of persisted
 // instance config: the predicate decides exactly the primitive a
 // representation test would.
 const isText = (v: JsonValue): v is string => Object.is(String(v), v);
-
-/** Every OpenAI-compatible chat-completions API accepts `tools` in this
- * exact shape — it's the same de facto standard the request/response body
- * already is (this factory's own header comment). Translating MCP's
- * inputSchema straight through works because both are plain JSON Schema. */
-function toOpenAiTool(serverKey: string, tool: McpTool) {
-  return {
-    type: "function" as const,
-    function: {
-      name: `${serverKey}__${tool.name}`,
-      description: tool.description ?? "",
-      parameters: tool.inputSchema ?? { type: "object", properties: {} },
-    },
-  };
-}
-
-/** Spawn an MCP client per configured integration this driver actually
- * supports (computer, composio — agents/dweb are the same mechanical
- * pattern, not wired yet). Each tool name gets prefixed with its server
- * key ("computer__screenshot") so a tool_call can be routed back to the
- * right client; every real OpenAI-compatible API leaves function names
- * otherwise unconstrained, so this is a safe, collision-proof scheme. */
-async function connectIntegrations(
-  integrations: SendTurnInput["integrations"] | undefined,
-): Promise<{ clients: Map<string, McpClient>; tools: ReturnType<typeof toOpenAiTool>[] }> {
-  const clients = new Map<string, McpClient>();
-  const tools: ReturnType<typeof toOpenAiTool>[] = [];
-  const specs: Array<{ key: string; command: string; args: string[]; env: Record<string, string> }> = [];
-
-  if (integrations?.computer) {
-    specs.push({
-      key: "computer",
-      command: process.execPath,
-      args: [SPAWNED_PROXIES.computer],
-      env: { ...NODE_ENV_FLAG, ...computerProxyEnv(integrations.computer) },
-    });
-  } else if (integrations?.localComputer) {
-    specs.push({ key: "computer", ...integrations.localComputer });
-  }
-  if (integrations?.composio) {
-    specs.push({ key: "composio", ...integrations.composio });
-  }
-
-  await Promise.all(
-    specs.map(async (spec) => {
-      try {
-        const client = await connectMcpStdio(spec.command, spec.args, spec.env, { timeoutMs: 20_000 });
-        clients.set(spec.key, client);
-        for (const tool of client.tools) tools.push(toOpenAiTool(spec.key, tool));
-      } catch {
-        // A tool source that fails to connect is simply absent this turn —
-        // matches the CLI drivers' own behavior (a dead MCP server doesn't
-        // crash the turn, its tools just aren't there).
-      }
-    }),
-  );
-
-  return { clients, tools };
-}
-
-function closeAll(clients: Map<string, McpClient>) {
-  for (const client of clients.values()) client.close();
-}
 
 export interface OpenAICompatibleConfig {
   url: string;
@@ -200,9 +141,8 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
         return { text, usage };
       };
 
-      /** Same request shape as complete(), but non-streamed and returning
-       * any tool_calls the model asked for — the shape every real
-       * OpenAI-compatible tool-calling response actually returns. Kept
+      /** Same request shape as complete(), but non-streamed and carrying the
+       * integration tools. Parsing + the loop live in ./openai-tools.ts; kept
        * separate from complete() rather than folding tool support into it:
        * a turn with no integrations (the overwhelming common case) keeps
        * using the exact same streaming path this factory already had,
@@ -210,13 +150,9 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
       const completeWithTools = async (
         messages: Array<JsonObject>,
         model: string,
-        tools: ReturnType<typeof toOpenAiTool>[],
+        tools: OpenAiTool[],
         signal?: AbortSignal,
-      ): Promise<{
-        text: string;
-        toolCalls: Array<{ id: string; name: string; arguments: string }>;
-        usage: { input: number; output: number } | null;
-      }> => {
+      ): Promise<ReturnType<typeof parseChatToolResponse>> => {
         const res = await fetch(`${config.url}/chat/completions`, {
           method: "POST",
           headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
@@ -227,78 +163,11 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
           const body = await res.text().catch(() => "");
           throw new Error(`${displayName} HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
         }
-        const json: any = await res.json();
-        const message = json.choices?.[0]?.message ?? {};
-        const toolCalls = Array.isArray(message.tool_calls)
-          ? message.tool_calls.map((tc: any) => ({
-              id: tc.id ?? "",
-              name: tc.function?.name ?? "",
-              arguments: tc.function?.arguments ?? "{}",
-            }))
-          : [];
-        return {
-          text: message.content ?? "",
-          toolCalls,
-          usage: json.usage
-            ? { input: json.usage.prompt_tokens ?? 0, output: json.usage.completion_tokens ?? 0 }
-            : null,
-        };
+        return parseChatToolResponse(await res.json());
       };
 
-      /** The agentic loop: ask the model, run whatever tools it asked for,
-       * feed the results back, repeat until it answers with no more tool
-       * calls. Capped so a model that never stops calling tools can't hang
-       * a turn forever. */
-      const runToolLoop = async (
-        initialMessages: Array<JsonObject>,
-        model: string,
-        clients: Map<string, McpClient>,
-        tools: ReturnType<typeof toOpenAiTool>[],
-        signal?: AbortSignal,
-      ): Promise<{ text: string; usage: { input: number; output: number } | null }> => {
-        const messages = [...initialMessages];
-        let totalUsage: { input: number; output: number } | null = null;
-        const MAX_ROUNDS = 20;
-        for (let round = 0; round < MAX_ROUNDS; round++) {
-          const { text, toolCalls, usage } = await completeWithTools(messages, model, tools, signal);
-          if (usage) {
-            const priorInput: number = totalUsage === null ? 0 : totalUsage.input;
-            const priorOutput: number = totalUsage === null ? 0 : totalUsage.output;
-            totalUsage = { input: priorInput + usage.input, output: priorOutput + usage.output };
-          }
-          if (toolCalls.length === 0) return { text, usage: totalUsage };
-
-          messages.push({
-            role: "assistant",
-            content: text || null,
-            tool_calls: toolCalls.map((tc) => ({
-              id: tc.id,
-              type: "function",
-              function: { name: tc.name, arguments: tc.arguments },
-            })),
-          });
-          for (const call of toolCalls) {
-            const sepIdx = call.name.indexOf("__");
-            const serverKey = sepIdx === -1 ? "" : call.name.slice(0, sepIdx);
-            const toolName = sepIdx === -1 ? call.name : call.name.slice(sepIdx + 2);
-            const client = clients.get(serverKey);
-            let resultText: string;
-            if (!client) {
-              resultText = `error: no such tool source "${serverKey}"`;
-            } else {
-              try {
-                const args = JSON.parse(call.arguments || "{}");
-                const result = await client.callTool(toolName, args);
-                resultText = result.content.map((c) => c.text ?? c.data ?? "").join("\n") || "(no output)";
-              } catch (e) {
-                resultText = `error: ${e instanceof Error ? e.message : String(e)}`;
-              }
-            }
-            messages.push({ role: "tool", tool_call_id: call.id, content: resultText });
-          }
-        }
-        return { text: "(stopped after too many tool calls)", usage: totalUsage };
-      };
+      const runTurnToolLoop = (messages: Array<JsonObject>, model: string, clients: Map<string, McpClient>, tools: OpenAiTool[], signal?: AbortSignal) =>
+        runToolLoop({ chat: completeWithTools, messages, model, clients, tools, signal });
 
       const sendTurn = async (turn: SendTurnInput) => {
         const { threadId } = turn;
@@ -338,7 +207,7 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
               // is non-streaming, needed to read tool_calls out of the
               // response) — the whole answer arrives as one chunk once the
               // loop finishes, same "item.completed" event either way.
-              ({ text, usage } = await runToolLoop(messages, model, clients, tools, abort.signal));
+              ({ text, usage } = await runTurnToolLoop(messages, model, clients, tools, abort.signal));
             } else {
               ({ text, usage } = await complete(messages, model, {
                 stream: true,
