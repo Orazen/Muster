@@ -1377,16 +1377,31 @@ async function startTurn(
   const bot = store.bot(botId);
   if (!bot) throw Object.assign(new Error("no such bot"), { status: 404 });
   if (bot.busy) throw Object.assign(new Error("the bot is already working — interrupt it first"), { status: 409 });
+  // Claim the bot NOW, synchronously, before any await: everything between
+  // here and the old mid-dispatch setActivity("working") — context rebuild,
+  // summarization, MCP spawns — can take seconds, and two messages landing
+  // in that window would both pass the check above and double-dispatch.
+  // The catch below resets to idle if dispatch fails; the watchdog, reaper,
+  // and turn.completed fold all settle from "working" as usual. setActivity
+  // is idempotent, so the later call stays as documentation, not state.
+  store.setActivity(bot.id, "working");
+  /** Pre-dispatch failure: this turn never reached a driver, so release
+   * the busy claim before propagating — otherwise the bot is stuck working
+   * with no turn running and nothing will ever settle it. */
+  const fail = (err: Error): never => {
+    store.setActivity(bot.id, "idle");
+    throw err;
+  };
   // Multi-tenant engine guard: turns run on the deployment's engines, which
   // belong to the operator. Another user's bot can hold a transcript but
   // cannot spend the fleet's credentials until per-user engine config ships.
   if (SELF_HOSTED && bot.ownerId && primaryUserId() && bot.ownerId !== primaryUserId()) {
-    throw Object.assign(
+    fail(Object.assign(
       new Error(
         "engines on this deployment belong to its operator — run Muster Desktop or your own self-host to power this bot",
       ),
       { status: 403 },
-    );
+    ));
   }
   const threadId = opts?.threadId ?? bot.threadId;
   // a webhook turn, or one inherited from a bot already running unattended
@@ -1394,7 +1409,7 @@ async function startTurn(
   // a person typing into this bot ends the unattended window immediately
   else if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.connectorContinuation) clearUnattended(bot.id);
   const task = store.taskByThread(bot.id, threadId);
-  if (!task) throw Object.assign(new Error("no such task"), { status: 404 });
+  if (!task) fail(Object.assign(new Error("no such task"), { status: 404 }));
   const commsDepth = opts?.commsDepth ?? 0;
   // a task takes its name from the first thing you asked it to do
   if (text.trim() && !opts?.connectorContinuation) store.titleTaskFromFirstMessage(bot.id, text, threadId);
@@ -1408,14 +1423,14 @@ async function startTurn(
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
     : await resolveInstanceForBot(bot);
   if (!instance) {
-    throw Object.assign(
+    fail(Object.assign(
       new Error(
         opts?.runOn === "cloud"
           ? "the Cloud VM runner is unavailable — configure Box in App Settings"
           : `provider instance "${bot.modelSelection.instanceId}" is unavailable — pick another model in settings`,
       ),
       { status: 409 },
-    );
+    ));
   }
   const instanceId = instance.instanceId;
   const model = opts?.runOn === "cloud" ? instance.models.default : bot.modelSelection.model;
@@ -1425,10 +1440,10 @@ async function startTurn(
   // A selection can be persisted while its engine is offline. Re-check when
   // the engine returns so an old or unsupported value never reaches a CLI.
   if (effort && !instance.adapter.capabilities.effortLevels?.includes(effort)) {
-    throw Object.assign(
+    fail(Object.assign(
       new Error(`effort "${effort}" is not offered by this bot's engine — choose another level in settings`),
       { status: 409 },
-    );
+    ));
   }
 
   // an edit hands us its already-branched user message; a plain send appends
@@ -1488,7 +1503,11 @@ async function startTurn(
     transcript,
     rewound,
     fresh,
-    replaysNatively: instance.driverKind === "grok",
+    // transcript-replay engines (grok + every compatible-API driver) get
+    // history structurally via turn.transcript; wrapping the text too would
+    // deliver it twice. Capability-driven: a new API driver gets this right
+    // by construction instead of by remembering to edit a driver-kind list.
+    replaysNatively: instance.adapter.capabilities.transcriptReplay === true,
   });
 
   const persona = [

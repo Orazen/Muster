@@ -213,6 +213,13 @@ export interface ProviderAdapter {
      * the driver cannot set effort, so the app never offers the control —
      * same rule as computerMcp: never show a knob the driver cannot turn. */
     effortLevels?: readonly EffortLevel[];
+    /** True when the engine consumes SendTurnInput.transcript directly (the
+     * OpenAI-shaped chat-completions drivers). For these, rewind/fresh
+     * history is delivered structurally as transcript entries and the
+     * turn text must NOT also embed a prose replay of it — double delivery.
+     * Drivers that ignore the transcript field (CLI/session engines) leave
+     * this off and get the inline replay wrapper instead. */
+    transcriptReplay?: boolean;
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;

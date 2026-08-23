@@ -375,6 +375,8 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
             sessionModelSwitch: "in-session",
             computerMcp: capabilityOverrides?.computerMcp ?? true,
             composioMcp: capabilityOverrides?.composioMcp ?? true,
+            // every factory-built driver reads turn.transcript directly
+            transcriptReplay: true,
           },
           sendTurn,
           interruptTurn: async (threadId) => active.get(threadId)?.abort.abort(),
