@@ -64,3 +64,27 @@ jobs:
           git add .deploy-trigger
           git commit -m "chore: autodeploy trigger"
           git push origin main
+
+      # Belt and braces: the trigger commit also fires Dokploy's GitHub App
+      # webhook, but that delivery is unreliable for bot-authored pushes —
+      # so we call the dockerWebhook endpoint directly with a GitHub-shaped
+      # payload. The URL lives in a repo secret; the endpoint requires the
+      # real push shape (body.ref must match the app branch) or it answers
+      # 301 "Branch Not Match".
+      - name: Trigger Dokploy build
+        if: steps.check.outputs.skip == 'false'
+        env:
+          DOKPLOY_WEBHOOK_URL: ${{ secrets.DOKPLOY_WEBHOOK_URL }}
+        run: |
+          SHA="$(git rev-parse origin/main)"
+          curl -fsS -X POST "$DOKPLOY_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -H 'X-GitHub-Event: push' \
+            -d "{
+              \"ref\": \"refs/heads/main\",
+              \"after\": \"$SHA\",
+              \"repository\": {\"full_name\": \"Orazen/Muster\"},
+              \"commits\": [{\"id\": \"$SHA\", \"message\": \"chore: autodeploy trigger\", \"modified\": [\".deploy-trigger\"], \"added\": [], \"removed\": []}],
+              \"head_commit\": {\"id\": \"$SHA\", \"message\": \"chore: autodeploy trigger\"}
+            }"
+          echo "Dokploy deploy triggered for $SHA"
