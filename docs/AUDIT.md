@@ -27,14 +27,15 @@ problem as found; the "Fixed in" note records what changed.
 
 ### Still open
 
-Nothing from the audit. Two things the billing work deliberately left for later, tracked in
-`docs/billing.md`:
+Nothing from the audit — and both billing follow-ups it left for later have since shipped
+(implemented in `server/billing.ts`, `server/index.ts`; see `docs/billing.md`):
 
-- **Subscription enforcement** — nothing yet blocks provisioning a cloud computer when a
-  subscription is `past_due` or absent. `getSubscription()` returns everything needed; the check
-  belongs in `server/box.ts`.
-- **Dunning email and quantity sync** — `invoice.payment_failed` is logged but sends nothing, and
-  provisioning an extra computer does not update the Stripe subscription item.
+- ✅ **Subscription enforcement** — provisioning a cloud computer (Box or OpenSandbox) is now
+  blocked with a 402 when the subscription is `past_due` or absent; null billing identity means
+  self-hosting and stays free and unlimited.
+- ✅ **Dunning email and quantity sync** — `invoice.payment_failed` sends a dunning email when an
+  address is on file, and provisioning an extra computer updates the Stripe subscription item
+  quantity (`bumpSubscriptionQuantity`).
 
 ---
 

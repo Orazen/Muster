@@ -92,7 +92,8 @@ monetize, but the SaaS-competition risk that MIT would have left wide open is al
 
 ## 5. Recommended sequencing
 
-1. ✅ Done: branch protection, landing page fix merged, v0.1.26 released, dashboard/domain healthy.
+1. ✅ Done: branch protection, landing page fix merged, v0.1.26 released at the time of writing
+   (current release line is 0.5.x — see `package.json`), dashboard/domain healthy.
 2. **This week (no blockers on my end):** submit 2–3 Muster bot prompts to `botdirectory.ai` via PR
    for free distribution; add a `docs/plans/` roadmap link from the README so contributors see the
    monetization direction.

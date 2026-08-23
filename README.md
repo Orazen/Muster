@@ -261,8 +261,8 @@ flowchart LR
 | **macOS** (Intel) | [Muster-intel.dmg](https://github.com/Orazen/Muster/releases/latest/download/Muster-intel.dmg) | Same app, built for Intel Macs. Same unsigned-quarantine note and fix as above. |
 | **Windows** (x64) | [Muster-setup.exe](https://github.com/Orazen/Muster/releases/latest/download/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
 | **Linux** (x64) | [Muster.deb](https://github.com/Orazen/Muster/releases/latest/download/Muster.deb) · [Muster.AppImage](https://github.com/Orazen/Muster/releases/latest/download/Muster.AppImage) | `.deb`: `sudo dpkg -i Muster.deb` · AppImage: `chmod +x Muster.AppImage && ./Muster.AppImage` |
-| **Android** | [Play Store](https://play.google.com/store/apps/details?id=com.muster.companion) (coming soon) | Pair with your computer's companion service |
-| **iOS** | [App Store](https://apps.apple.com/app/muster-mobile/id1234567890) (coming soon) | Pair with your computer's companion service |
+| **Android** | Play Store (coming soon — app is built, listing needs a Play developer account) | Pair with your computer's companion service |
+| **iOS** | App Store (coming soon — app is built, listing needs an Apple Developer account) | Pair with your computer's companion service |
 
 **Homebrew (macOS):**
 

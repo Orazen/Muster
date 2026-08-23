@@ -2,6 +2,13 @@
 _Written in-character as founder, per explicit direction to make the calls that were previously
 left open. Backed by evidence gathered this session, not guesses._
 
+> **Update 2026-08-23 — integration shipped.** The "not started yet" note below is outdated in
+> the good direction: OpenSandbox is now a real computer backend — `server/opensandbox.ts` +
+> `opensandbox-lifecycle.ts` (with tests), Settings config for server URL + API key, and
+> `computer: "opensandbox"` bots provisioning sandboxes through the same billing gate as Box.
+> The desktop-viewer surface (`join`/`sleep`/`screenshot`) is still Box-only and returns 501 for
+> OpenSandbox.
+
 ## 1. OpenSandbox — DECIDED: integrate as a self-hosted "computer" alternative
 
 ### What it is (audited from source, `opensandbox-group/OpenSandbox`)
