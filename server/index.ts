@@ -258,7 +258,8 @@ async function defaultSelection(forUserId?: string) {
   const described = await registry.describe();
   let available = described.filter((d) => d.snapshot.state === "available");
   // Per-user preference: when the requesting user has vault instances,
-  // prefer those over the operator's global fleet.
+  // prefer those over the operator's global fleet. If none exist, fall
+  // back to any CLI engine so a fresh account still gets a working bot.
   if (forUserId) {
     const suffix = `:${forUserId}`;
     const own = available.filter((d) => d.instanceId.endsWith(suffix));
@@ -317,11 +318,21 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
     // Vault heal (owner-scoped): a bot pointing at an operator-era global
     // API instance runs on the owner's own vault copy when one exists.
     if (bot.ownerId) {
+      // Try the exact same driver kind first
       const base = bot.modelSelection.instanceId.split(":")[0];
-      const own = registry.get(userInstanceId(base, bot.ownerId));
-      if (own) {
+      const exact = registry.get(userInstanceId(base, bot.ownerId));
+      if (exact) {
         store.patchBot(bot.id, { modelSelection: { ...bot.modelSelection, instanceId: userInstanceId(base, bot.ownerId) } });
-        return own;
+        return exact;
+      }
+      // Fallback: try ANY vault instance owned by this user
+      const described = await registry.describe();
+      const anyOwn = described.find(
+        (d) => d.instanceId.endsWith(`:${bot.ownerId}`) && d.snapshot.state === "available",
+      );
+      if (anyOwn) {
+        store.patchBot(bot.id, { modelSelection: { instanceId: anyOwn.instanceId, model: "" } });
+        return registry.get(anyOwn.instanceId);
       }
     }
     return null;

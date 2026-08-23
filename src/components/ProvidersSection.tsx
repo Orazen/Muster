@@ -18,7 +18,7 @@ interface ProviderMeta {
 }
 
 function ProviderRow({ provider }: { provider: ProviderMeta }) {
-  const { state, dispatch } = useStore();
+  const { state, dispatch, refreshInstances } = useStore();
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +47,9 @@ function ProviderRow({ provider }: { provider: ProviderMeta }) {
     )
       .then((status: ConfigStatus) => {
         dispatch({ type: "configStatus", config: status });
+        // Vault save registers new instances server-side; refresh the
+        // client's instance list so the model picker sees them immediately.
+        void refreshInstances();
         setValue("");
       })
       .catch((e: Error) => setError(e.message))
