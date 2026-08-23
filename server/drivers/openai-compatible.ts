@@ -110,6 +110,9 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
     driverKind,
     metadata: { displayName, supportsMultipleInstances: true },
     models: staticModels,
+    // optional install affordance flows straight from the spec; undefined
+    // simply leaves the readonly contract field unset
+    install,
     decodeConfig,
     defaultConfig: () => decodeConfig({}),
 
@@ -358,6 +361,15 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
         return { state: "available", authenticated: true, version: null };
       };
 
+      // `refreshModels` is readonly on the public contract — readers must
+      // not hot-swap it — so the hook is chosen HERE, at construction, and
+      // travels with the literal instead of being assigned afterwards.
+      const refreshModelsHook = dynamicModels
+        ? async (): Promise<void> => {
+            await fetchModelCatalog();
+          }
+        : undefined;
+
       const instance: ProviderInstance = {
         instanceId,
         driverKind,
@@ -369,6 +381,7 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
           return catalog;
         },
         snapshot,
+        refreshModels: refreshModelsHook,
         adapter: {
           provider: driverKind,
           capabilities: {
@@ -399,10 +412,8 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
           listeners.clear();
         },
       };
-      if (dynamicModels) instance.refreshModels = fetchModelCatalog;
       return instance;
     },
   };
-  if (install) driver.install = install;
   return driver;
 }

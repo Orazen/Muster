@@ -1387,8 +1387,13 @@ async function startTurn(
   store.setActivity(bot.id, "working");
   /** Pre-dispatch failure: this turn never reached a driver, so release
    * the busy claim before propagating — otherwise the bot is stuck working
-   * with no turn running and nothing will ever settle it. */
-  const fail = (err: Error): never => {
+   * with no turn running and nothing will ever settle it.
+   *
+   * SAFETY: the type annotation lives on the VARIABLE, not just the arrow's
+   * return type — TypeScript only treats calls as never-returning (keeping
+   * null-narrowing after `if (!x) fail(...)`) when the referenced name is
+   * explicitly typed. */
+  const fail: (err: Error) => never = (err) => {
     store.setActivity(bot.id, "idle");
     throw err;
   };

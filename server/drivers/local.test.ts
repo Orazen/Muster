@@ -167,8 +167,8 @@ describe("LocalDriver", () => {
 });
 
 describe("pruneStaleToolOutput", () => {
-  const act = (name: string): Message => ({ id: name, role: "bot", kind: "activity", tool: { name, ok: true }, createdAt: 0 });
-  const txt = (id: string, text: string): Message => ({ id, role: "user", kind: "text", text, createdAt: 0 });
+  const act = (name: string): Message => ({ id: name, at: 0, role: "bot", kind: "activity", tool: { name, ok: true } });
+  const txt = (id: string, text: string): Message => ({ id, at: 0, role: "user", kind: "text", text });
 
   it("stubs activity older than the recent window, keeps text untouched", () => {
     const messages = [act("a1"), act("a2"), act("a3"), act("a4"), act("a5"), act("a6"), txt("u1", "hello")];
