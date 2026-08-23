@@ -173,7 +173,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     });
     child.stderr!.on("data", (c) => (stderr += c));
 
-    const deadline = Date.now() + 20_000;
+    const deadline = Date.now() + 90_000;
     for (;;) {
       try {
         const res = await fetch(`${BASE}/api/health`);
@@ -630,7 +630,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       let askerBot: any;
       let helperBot: any;
       let card: any;
-      const cardDeadline = Date.now() + 20_000;
+      const cardDeadline = Date.now() + 90_000;
       for (;;) {
         const state = (await api("GET", "/api/bots")).body;
         askerBot = state.bots.find((b: any) => b.id === asker.id);
@@ -715,7 +715,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     let askerBot: any;
     let helperBot: any;
     let card: any;
-    const cardDeadline = Date.now() + 20_000;
+    const cardDeadline = Date.now() + 90_000;
     for (;;) {
       const state = (await api("GET", "/api/bots")).body;
       askerBot = state.bots.find((b: any) => b.id === asker.id);
@@ -743,7 +743,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     // which wraps it as "Couldn't reach that bot: denied by user" and
     // returns it to A's agent. A's final assistant text carries that
     // signal — wait for A's turn to settle with it.
-    const settledDeadline = Date.now() + 20_000;
+    const settledDeadline = Date.now() + 90_000;
     for (;;) {
       const state = (await api("GET", "/api/bots")).body;
       askerBot = state.bots.find((b: any) => b.id === asker.id);

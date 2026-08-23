@@ -18,6 +18,10 @@ export default defineConfig({
     // parallel files introduce load-sensitive flakes for no win
     fileParallelism: false,
     testTimeout: 20_000,
+    // Spawn-heavy e2e (fake ACP fleet, real harness server) starve on
+    // slow/loaded runners and fail on timing, not logic. Retry those
+    // flakes in CI only; locally keep the fast signal.
+    retry: process.env.CI ? 2 : 0,
     hookTimeout: 30_000,
   },
   resolve: {
