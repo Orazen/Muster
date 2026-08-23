@@ -75,7 +75,7 @@ export interface ConnectorCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "compaction";
   text?: string;
   card?: OptionCardData;
   connector?: ConnectorCardData;
@@ -88,6 +88,10 @@ export interface Message {
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
   /** screen messages: a frame of the bot's computer (base64 image) */
   png?: string;
+  /** compaction messages: a model-context summary covering everything
+   * before firstKeptId. Lives in the tree like any message — removes
+   * nothing behind it (the two-transcripts rule). */
+  compaction?: import("./model-context.ts").CompactionData;
   mime?: string;
   at: number;
   /** the message this one follows; null = thread root. Edited messages

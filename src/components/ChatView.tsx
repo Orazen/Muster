@@ -37,6 +37,7 @@ import { stateForBot } from "@/lib/mascot";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { MessageBody } from "./MessageBody";
+import { CompactionDivider } from "./CompactionDivider";
 import { OptionCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { Composer } from "./Composer";
@@ -681,6 +682,10 @@ const MessagesList = memo(function MessagesList({
               );
             case "screen":
               return m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null;
+            case "compaction":
+              // The model-context summary marker — quiet, expandable, and
+              // proof that nothing was deleted (scrolling still reaches it).
+              return m.compaction ? <CompactionDivider data={m.compaction} /> : null;
             default:
               return (
                 <Bubble

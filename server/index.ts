@@ -44,6 +44,7 @@ import {
 } from "./config.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
+import { buildModelContext } from "./model-context.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import { isEffortLevel, type RequestOutcome, type RuntimeEvent } from "./contracts.ts";
 
@@ -1391,13 +1392,34 @@ async function startTurn(
       : store.appendMessage(threadId, { role: "user", kind: "text", text });
   }
 
-  // transcript for API-backed drivers: settled text turns on the ACTIVE
-  // branch only — abandoned forks never reach the model
-  const transcript = store
-    .activePath(threadId)
-    .filter((m) => m.kind === "text" && m.text && m.id !== userMessage.id)
-    .slice(-40)
-    .map((m) => ({ role: m.role === "user" ? ("user" as const) : ("assistant" as const), text: m.text! }));
+  // transcript for API-backed drivers: portable-context rebuild on the
+  // ACTIVE branch only — abandoned forks never reach the model. Sized for
+  // the target engine's declared window (catalog contextWindow, else the
+  // conservative default); tool work is represented compactly; overflow is
+  // summarized once and cached as a compaction record in the thread.
+  const instanceWindow = instance.models.options.find((o) => o.id === (bot.modelSelection.model || instance.models.default))?.contextWindow ?? null;
+  const priorMessages = store.activePath(threadId).filter((m) => m.id !== userMessage.id);
+  const built = await buildModelContext({
+    messages: priorMessages,
+    targetWindow: instanceWindow,
+    summarize: instance.generateText ? (prompt) => instance.generateText!(prompt) : undefined,
+  });
+  if (built.pending) {
+    // Persist the summary as a tree node: nothing behind it is removed, the
+    // next rebuild hits the cache instead of re-summarizing, and the UI gets
+    // its divider for free because the record is just a message.
+    store.appendMessage(threadId, { role: "bot", kind: "compaction", compaction: built.pending });
+  }
+  const transcript: Array<{ role: "user" | "assistant"; text: string }> = [];
+  if (built.summary) {
+    // assistant-role: this is harness-provided context, and a user-role
+    // first entry would trip engineIsFresh's prior-user-turn heuristic.
+    transcript.push({
+      role: "assistant",
+      text: `[Earlier conversation, summarized — full history is still in the app]\n\n${built.summary}`,
+    });
+  }
+  transcript.push(...built.transcript);
 
   // After a rewind (edit / branch switch) the provider's native session
   // still contains the abandoned branch: start a fresh session instead of

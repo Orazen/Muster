@@ -270,7 +270,17 @@ export interface EngineInstall {
 // a rejection to an unavailable shadow snapshot.
 export interface ModelCatalog {
   default: string;
-  options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean }>;
+  options: Array<{
+    id: string;
+    label: string;
+    custom?: boolean;
+    loaded?: boolean;
+    /** Declared context window in tokens. Absent = unknown; context sizing
+     * falls back to a conservative default (see server/model-context.ts). */
+    contextWindow?: number;
+    /** Declared max output tokens, when the provider publishes one. */
+    maxTokens?: number;
+  }>;
 }
 
 export interface DriverCreateInput<Config> {

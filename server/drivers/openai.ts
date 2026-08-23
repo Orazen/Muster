@@ -31,10 +31,10 @@ const isText = (v: JsonValue): v is string => Object.is(String(v), v);
 const MODELS = {
   default: "gpt-4o",
   options: [
-    { id: "gpt-4o", label: "GPT-4o" },
-    { id: "gpt-4.1", label: "GPT-4.1" },
-    { id: "o3", label: "o3" },
-    { id: "o3-mini", label: "o3 Mini" },
+    { id: "gpt-4o", label: "GPT-4o", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "gpt-4.1", label: "GPT-4.1", contextWindow: 1_047_576, maxTokens: 32_768 },
+    { id: "o3", label: "o3", contextWindow: 200_000, maxTokens: 100_000 },
+    { id: "o3-mini", label: "o3 Mini", contextWindow: 200_000, maxTokens: 100_000 },
   ],
 };
 

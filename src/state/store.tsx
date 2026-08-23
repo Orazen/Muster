@@ -53,7 +53,7 @@ export interface ConnectorCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "compaction";
   text?: string;
   card?: OptionCardData;
   connector?: ConnectorCardData;
@@ -64,6 +64,8 @@ export interface Message {
   /** screen messages: a frame of the bot's computer (base64) */
   png?: string;
   mime?: string;
+  /** compaction messages: model-context summary marker (server-generated) */
+  compaction?: { summary: string; firstKeptId: string; tokensBefore: number; at: number };
   at: number;
   /** the message this one follows; null = thread root. Edited messages
    * share a parentId with the version they replace — that's a fork. */
