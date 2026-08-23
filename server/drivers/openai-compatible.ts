@@ -81,7 +81,10 @@ export interface OpenAICompatibleSpec {
   displayName: string;
   defaultUrl: string;
   defaultApiKeyEnv: string;
-  models: { default: string; options: Array<{ id: string; label: string }> };
+  models: {
+    default: string;
+    options: Array<{ id: string; label: string; vision?: boolean }>;
+  };
   /** Model used for generateText (titles/thread names) — usually the
    * cheapest/fastest option in the catalog. With dynamicModels the live
    * catalog's default wins when present. */
@@ -426,9 +429,11 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
             // makes dispatch hand this turn's attachments to sendTurn. A
             // driver that accepted parts but refused the attach would be a
             // dead feature; non-vision twins keep both off so the composer
-            // refuses politely instead of failing mid-turn.
-            images: vision === true,
-            visionParts: vision === true,
+            // refuses politely instead of failing mid-turn. A mixed catalog
+            // (some vision-flagged models) enables both too — per-model
+            // gating then applies via modelAcceptsImages().
+            images: vision === true || staticModels.options.some((m) => m.vision === true),
+            visionParts: vision === true || staticModels.options.some((m) => m.vision === true),
           },
           sendTurn,
           interruptTurn: async (threadId) => active.get(threadId)?.abort.abort(),

@@ -18,6 +18,7 @@ import {
   saveAttachment,
 } from "./attachments.ts";
 import type { JsonValue } from "./schema.ts";
+import { modelAcceptsImages } from "./contracts.ts";
 import { scrubForCloud } from "./privacy-shield.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
@@ -1766,14 +1767,16 @@ async function startTurn(
             ? outboundTranscript
             : transcript,
         // Vision-capable API drivers get this turn's attached images as
-        // base64 parts. Gated on the driver's own capability, not the
-        // composer's: a CLI driver must never receive bytes (its prompt
-        // already carries <attached-image/> paths), and an API driver
-        // without visionParts would drop them silently. The read itself is
-        // safe by construction — imagesForTurn only ever opens names that
-        // saveAttachment wrote.
+        // base64 parts. modelAcceptsImages is the SAME rule the composer
+        // used to allow the attach — driver capability, then per-model
+        // gating on mixed catalogs, so a text-only model never receives
+        // parts it would 4xx on. The read itself is safe by construction —
+        // imagesForTurn only ever opens names that saveAttachment wrote.
         images:
-          instance.adapter.capabilities.visionParts === true ? imagesForTurn(text) : undefined,
+          instance.adapter.capabilities.visionParts === true &&
+          modelAcceptsImages(instance.models, instance.adapter.capabilities, model)
+            ? imagesForTurn(text)
+            : undefined,
         system:
           persona +
           (computerKind === "vm"

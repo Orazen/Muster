@@ -296,7 +296,29 @@ export interface ModelCatalog {
     contextWindow?: number;
     /** Declared max output tokens, when the provider publishes one. */
     maxTokens?: number;
+    /** This specific model accepts image parts. Gates the composer's
+     * attach affordance per model on providers whose catalogs mix text and
+     * vision entries — the driver-wide `capabilities.images` unlocks the
+     * affordance only for drivers where EVERY model can see. */
+    vision?: boolean;
   }>;
+}
+
+/** The one rule for "may THIS bot's composer accept an image right now",
+ * shared by the UI (Composer) and dispatch (server/index.ts) so the two can
+ * never disagree. Driver-wide capability unlocks the affordance; when any
+ * catalog entry is flagged, a mixed catalog applies and only flagged models
+ * pass — attaching to a text-only model would 4xx mid-turn. */
+export function modelAcceptsImages(
+  catalog: Pick<ModelCatalog, "options"> | undefined,
+  capabilities: { images?: boolean } | undefined,
+  selectedModel: string | undefined,
+): boolean {
+  if (capabilities?.images !== true) return false;
+  const options = catalog?.options ?? [];
+  const hasVisionEntries = options.some((o) => o.vision === true);
+  if (!hasVisionEntries) return true;
+  return options.some((o) => o.id === selectedModel && o.vision === true);
 }
 
 export interface DriverCreateInput<Config> {

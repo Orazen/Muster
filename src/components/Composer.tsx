@@ -15,6 +15,7 @@ import {
 import { MAX_IMAGE_BYTES, uploadImageAttachment } from "@/lib/image-upload";
 import { normalizeState } from "@/lib/mascot";
 import { groupComposerHint } from "@/lib/group-routing";
+import { modelAcceptsImages } from "../../server/contracts";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 
@@ -86,7 +87,11 @@ export function Composer({
     (b?: Bot) => {
       if (!b) return false;
       const inst = state.instances.find((i) => i.instanceId === b.modelSelection.instanceId);
-      return Boolean(inst?.capabilities?.images);
+      // Same rule dispatch applies before sending parts (server/contracts
+      // modelAcceptsImages): driver capability first, then per-model gating
+      // on mixed catalogs so a text-only model can't be handed an image it
+      // would 4xx on.
+      return modelAcceptsImages(inst?.models, inst?.capabilities, b.modelSelection.model);
     },
     [state.instances],
   );
