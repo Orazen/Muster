@@ -2191,12 +2191,12 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
 
   return {
     xai: { configured: vaultFlags ? Boolean(vaultFlags["xai"]?.configured) : Boolean(cfg.xai?.key) },
+    box: { configured: vaultFlags ? Boolean(vaultFlags["box"]?.configured) : Boolean(cfg.box?.token) },
+    opensandbox: { configured: vaultFlags ? Boolean(vaultFlags["opensandbox"]?.configured) : Boolean(cfg.opensandbox?.apiKey) },
     composio: {
-      configured: composio.configured(cfg),
-      mode: composio.connectionMode(cfg),
+      configured: vaultFlags ? Boolean(vaultFlags["composio"]?.configured) : composio.configured(cfg),
+      mode: vaultFlags ? "direct" : composio.connectionMode(cfg),
     },
-    box: { configured: Boolean(cfg.box?.token) },
-    opensandbox: { configured: Boolean(cfg.opensandbox?.apiKey) },
     opencodeGo: { configured: vaultFlags ? Boolean(vaultFlags["opencodeZen"]?.configured) : Boolean(cfg.opencodeGo?.apiKey) },
     musterCloud: { configured: musterCloudEnabled(cfg), url: cfg.musterCloud?.url ?? "" },
     providers: providerFlags,
