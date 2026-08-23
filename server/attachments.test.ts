@@ -1,7 +1,7 @@
 // Unit tests for the attachment store. The vitest setup redirects HOME (and
 // therefore DATA_DIR) at a throwaway directory per file, so these write real
 // files without ever touching a real ~/.muster.
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,10 +10,12 @@ import {
   ATTACHMENTS_DIR,
   AttachmentError,
   MAX_ATTACHMENT_BYTES,
+  imagesForTurn,
   isAttachmentName,
   readAttachment,
   saveAttachment,
 } from "./attachments.ts";
+import { DATA_DIR } from "./config.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -87,5 +89,44 @@ describe("readAttachment", () => {
     expect(readAttachment("not-a-uuid.png")).toMatchObject({ found: false });
     expect(readAttachment(`${"0".repeat(36)}.png`)).toMatchObject({ found: false });
     expect(readAttachment("")).toMatchObject({ found: false });
+  });
+});
+
+describe("imagesForTurn", () => {
+  it("reads referenced attachments back as base64 parts", () => {
+    const saved = saveAttachment("image/png", PNG);
+    const text = `look at this <attached-image path="${saved.path}" /> please`;
+    const parts = imagesForTurn(text);
+    expect(parts).toHaveLength(1);
+    // SAFETY: toHaveLength above pins the array before positional access.
+    if (parts.length !== 1) throw new Error("unreachable");
+    expect(parts[0].mediaType).toBe("image/png");
+    expect(parts[0].dataBase64).toBe(PNG.toString("base64"));
+  });
+
+  it("never opens anything outside ATTACHMENTS_DIR, whatever the tag says", () => {
+    const secret = "top-secret-content";
+    writeFileSync(join(DATA_DIR, "secret.txt"), secret);
+    const text =
+      '<attached-image path="/etc/passwd" /> <attached-image path="../../config.json" /> ' +
+      '<attached-image path="not-a-uuid.png" /> <attached-image path="" />';
+    expect(imagesForTurn(text)).toEqual([]);
+    // The baited file is still unread through any spelling of its name.
+    expect(readFileSync(join(DATA_DIR, "secret.txt"), "utf8")).toBe(secret);
+  });
+
+  it("drops stale references silently and caps a burst at four", () => {
+    const saved = saveAttachment("image/jpeg", Buffer.from("ff d8 ff".replace(/ /g, ""), "hex"));
+    const ghost = `${DATA_DIR}/attachments/${"9".repeat(8)}-${"9".repeat(4)}-${"9".repeat(4)}-${"9".repeat(4)}-${"9".repeat(12)}.jpg`;
+    const fiveTags = Array.from(
+      { length: 5 },
+      () => `<attached-image path="${saved.path}" />`,
+    ).join("\n");
+    const mixed = `<attached-image path="${ghost}" />\n${fiveTags}`;
+    const parts = imagesForTurn(mixed);
+    expect(parts).toHaveLength(4);
+    // SAFETY: length guard precedes the per-part field checks.
+    if (parts.length !== 4) throw new Error("unreachable");
+    for (const part of parts) expect(part.dataBase64.length).toBeGreaterThan(0);
   });
 });

@@ -85,6 +85,98 @@ describe("createOpenAICompatibleDriver (generic factory)", () => {
     expect(call[0]).toBe("https://api.test-provider.example/v1/chat/completions");
     expect(new Headers(call[1]?.headers).get("authorization")).toBe("Bearer key-123");
   });
+
+  it("text-only turns keep string content even on a vision driver", async () => {
+    const visionDriver = createOpenAICompatibleDriver({
+      driverKind: "vision-provider",
+      displayName: "Vision Provider",
+      defaultUrl: "https://api.vision.example/v1",
+      defaultApiKeyEnv: "VISION_API_KEY",
+      models: { default: "v-model", options: [{ id: "v-model", label: "V" }] },
+      quickModel: "v-model",
+      vision: true,
+    });
+    expect(
+      (await (await visionDriver.create({
+        instanceId: "x",
+        displayName: undefined,
+        environment: { VISION_API_KEY: "k" },
+        enabled: true,
+        config: visionDriver.decodeConfig({}),
+      })).adapter.capabilities).visionParts,
+    ).toBe(true);
+
+    vi.mocked(global.fetch).mockResolvedValue(streamResponse([sseChunk("ok")]));
+    const instance = await visionDriver.create({
+      instanceId: "y",
+      displayName: undefined,
+      environment: { VISION_API_KEY: "k" },
+      enabled: true,
+      config: visionDriver.decodeConfig({}),
+    });
+    let done = false;
+    instance.adapter.onEvent((e) => {
+      if (e.type === "turn.completed") done = true;
+    });
+    await instance.adapter.sendTurn({ threadId: "t-v", text: "plain words" });
+    for (let i = 0; i < 50 && !done; i++) await new Promise((r) => setTimeout(r, 5));
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls.at(-1)?.[1]?.body));
+    expect(body.messages.at(-1)).toEqual({ role: "user", content: "plain words" });
+  });
+
+  it("vision drivers send turn.images as image_url parts after the text", async () => {
+    const visionDriver = createOpenAICompatibleDriver({
+      driverKind: "vision-provider",
+      displayName: "Vision Provider",
+      defaultUrl: "https://api.vision.example/v1",
+      defaultApiKeyEnv: "VISION_API_KEY",
+      models: { default: "v-model", options: [{ id: "v-model", label: "V" }] },
+      quickModel: "v-model",
+      vision: true,
+    });
+    vi.mocked(global.fetch).mockResolvedValue(streamResponse([sseChunk("seen")]));
+    const instance = await visionDriver.create({
+      instanceId: "z",
+      displayName: undefined,
+      environment: { VISION_API_KEY: "k" },
+      enabled: true,
+      config: visionDriver.decodeConfig({}),
+    });
+    let done = false;
+    instance.adapter.onEvent((e) => {
+      if (e.type === "turn.completed") done = true;
+    });
+    const png = Buffer.from("89504e47", "hex").toString("base64");
+    await instance.adapter.sendTurn({
+      threadId: "t-img",
+      text: "what is this?",
+      images: [{ mediaType: "image/png", dataBase64: png }],
+    });
+    for (let i = 0; i < 50 && !done; i++) await new Promise((r) => setTimeout(r, 5));
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls.at(-1)?.[1]?.body));
+    const content = body.messages.at(-1).content;
+    expect(Array.isArray(content)).toBe(true);
+    // SAFETY: the Array.isArray guard above narrows the union before the
+    // positional assertions.
+    if (!Array.isArray(content)) throw new Error("unreachable");
+    expect(content[0]).toEqual({ type: "text", text: "what is this?" });
+    expect(content[1]).toEqual({
+      type: "image_url",
+      image_url: { url: `data:image/png;base64,${png}` },
+    });
+
+    // The same turn to a NON-vision twin never carries parts: dispatch
+    // gates on visionParts === true, so the factory must say false.
+    expect(
+      (await (await testDriver.create({
+        instanceId: "w",
+        displayName: undefined,
+        environment: { TEST_PROVIDER_API_KEY: "k" },
+        enabled: true,
+        config: testDriver.decodeConfig({}),
+      })).adapter.capabilities).visionParts,
+    ).toBe(false);
+  });
 });
 
 // Every OpenAI-compatible provider driver: verify each one is correctly

@@ -13,6 +13,7 @@ import { approvalKey, autoDecision } from "./auto-approve.ts";
 import {
   AttachmentError,
   MAX_ATTACHMENT_BYTES,
+  imagesForTurn,
   readAttachment,
   saveAttachment,
 } from "./attachments.ts";
@@ -1729,6 +1730,15 @@ async function startTurn(
         // resume the wrong conversation and defeat the context bubble
         resumeCursor: resume ? task.resumeCursors[instanceId] : undefined,
         transcript,
+        // Vision-capable API drivers get this turn's attached images as
+        // base64 parts. Gated on the driver's own capability, not the
+        // composer's: a CLI driver must never receive bytes (its prompt
+        // already carries <attached-image/> paths), and an API driver
+        // without visionParts would drop them silently. The read itself is
+        // safe by construction — imagesForTurn only ever opens names that
+        // saveAttachment wrote.
+        images:
+          instance.adapter.capabilities.visionParts === true ? imagesForTurn(text) : undefined,
         system:
           persona +
           (computerKind === "vm"

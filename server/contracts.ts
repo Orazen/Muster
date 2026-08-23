@@ -153,6 +153,11 @@ export interface SendTurnInput {
   resumeCursor?: unknown;
   /** Prior turns for transcript-replay providers (API-backed drivers). */
   transcript?: Array<{ role: "user" | "assistant"; text: string }>;
+  /** Images attached to THIS turn, base64-encoded. Only API drivers whose
+   * capabilities carry visionParts consume these — CLI drivers ignore the
+   * field entirely because their prompt already carries <attached-image/>
+   * file paths they open themselves. */
+  images?: Array<{ mediaType: string; dataBase64: string }>;
   /** Bot persona (name/title/description) as a system prompt. */
   system?: string;
   /** Per-bot integrations the driver may hand to the agent as tools. */
@@ -209,6 +214,10 @@ export interface ProviderAdapter {
      * leave this off so the UI refuses politely instead of silently
      * degrading the bot's understanding. */
     images?: boolean;
+    /** True when the driver's sendTurn consumes turn.images as multimodal
+     * content parts (OpenAI-shaped chat APIs). Distinct from `images`, which
+     * means "CLI opens files by path" — an API driver never reads disk. */
+    visionParts?: boolean;
     /** Effort levels this driver can pass to its CLI, ascending. Absent =
      * the driver cannot set effort, so the app never offers the control —
      * same rule as computerMcp: never show a knob the driver cannot turn. */

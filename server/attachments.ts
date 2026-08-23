@@ -103,3 +103,31 @@ export function readAttachment(name: string): ReadAttachment {
     return { found: false };
   }
 }
+
+/** The exact tag the composer folds into the prompt (src/lib/
+ * composer-attachments.ts writes it; MessageBody renders it). */
+const PROMPT_IMAGE_TAG = /<attached-image\s+path="([^"]*)"\s*\/>/g;
+
+/** How many images one turn may carry to a vision API. Four covers any
+ * realistic paste/drop burst; vision APIs price per image, so an unbounded
+ * fan-out would let one message get expensive fast. */
+const MAX_IMAGES_PER_TURN = 4;
+
+/** Images referenced by one prompt, read back as turn-ready base64 parts
+ * for vision-capable API drivers. Safety mirrors GET exactly: the tag's
+ * path is reduced to its basename and judged by isAttachmentName — only
+ * names saveAttachment could have written are read, so crafted prompt text
+ * can never lift arbitrary files off the disk. Missing/expired attachments
+ * and traversal shapes are dropped silently; the text keeps the tag either
+ * way, so the model at worst sees a stale reference instead of a lie. */
+export function imagesForTurn(text: string): Array<{ mediaType: string; dataBase64: string }> {
+  const out: Array<{ mediaType: string; dataBase64: string }> = [];
+  for (const match of text.matchAll(PROMPT_IMAGE_TAG)) {
+    if (out.length >= MAX_IMAGES_PER_TURN) break;
+    const name = match[1].split(/[\\/]/).pop() ?? "";
+    const file = readAttachment(name);
+    if (!file.found) continue;
+    out.push({ mediaType: file.mime, dataBase64: file.data.toString("base64") });
+  }
+  return out;
+}

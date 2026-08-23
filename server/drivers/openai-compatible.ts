@@ -26,6 +26,31 @@ import {
 } from "./openai-tools.ts";
 import type { JsonObject, JsonValue } from "../schema.ts";
 
+/** One chat-completions message. Content is a plain string for text turns
+ * and an OpenAI content-part array when the turn carries images (vision
+ * twins only — dispatch never sets turn.images without visionParts). */
+type ChatMessage = {
+  role: string;
+  content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+};
+
+/** The final user message of a turn: text alone, or text plus one image
+ * part per attached image, each as a self-contained data URL so no extra
+ * upload round-trip exists. History replays stay text-only by design —
+ * re-sending every past screenshot on every turn would multiply cost with
+ * no benefit; the model answered them already. */
+function userContent(turn: SendTurnInput): ChatMessage["content"] {
+  const images = turn.images ?? [];
+  if (images.length === 0) return turn.text;
+  return [
+    { type: "text", text: turn.text },
+    ...images.map((i) => ({
+      type: "image_url" as const,
+      image_url: { url: `data:${i.mediaType};base64,${i.dataBase64}` },
+    })),
+  ];
+}
+
 // Values decoded here only ever originate from JSON.parse of persisted
 // instance config: the predicate decides exactly the primitive a
 // representation test would.
@@ -80,6 +105,11 @@ export interface OpenAICompatibleSpec {
   /** Capability-flag overrides. Defaults keep the cloud-API behavior
    * (computer + composio MCP mounted); local engines set honest falses. */
   capabilities?: { computerMcp?: boolean; composioMcp?: boolean };
+  /** Vision: the provider's chat endpoint accepts multimodal content parts
+   * (image_url data URLs). Opt-in per twin — a text-only model 4xxs on
+   * image parts, and the app's contract is to refuse the attach politely
+   * up front rather than fail mid-turn. */
+  vision?: boolean;
 }
 
 export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): ProviderDriver<OpenAICompatibleConfig> {
@@ -95,6 +125,7 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
     dynamicModels = false,
     install,
     capabilities: capabilityOverrides,
+    vision,
   } = spec;
 
   function decodeConfig(raw: JsonValue | undefined): OpenAICompatibleConfig {
@@ -165,8 +196,8 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
         createdAt: new Date().toISOString(),
       });
 
-      const complete = async (
-        messages: Array<{ role: string; content: string }>,
+  const complete = async (
+        messages: Array<ChatMessage>,
         model: string,
         opts: { stream: boolean; signal?: AbortSignal; onDelta?: (d: string) => void },
       ): Promise<{ text: string; usage: { input: number; output: number } | null }> => {
@@ -262,13 +293,13 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
         const abort = new AbortController();
         active.set(threadId, { abort, turnId });
 
-        const messages = [
+      const messages: Array<ChatMessage> = [
           ...(turn.system ? [{ role: "system", content: turn.system }] : []),
           ...(turn.transcript ?? []).map((m) => ({
             role: m.role === "assistant" ? "assistant" : "user",
             content: m.text,
           })),
-          { role: "user", content: turn.text },
+          { role: "user", content: userContent(turn) },
         ];
         appendNative(threadId, {
           dir: "out",
@@ -390,6 +421,9 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
             composioMcp: capabilityOverrides?.composioMcp ?? true,
             // every factory-built driver reads turn.transcript directly
             transcriptReplay: true,
+            // vision twins consume turn.images as multimodal parts; the
+            // rest never see the field (dispatch gates on this flag)
+            visionParts: vision === true,
           },
           sendTurn,
           interruptTurn: async (threadId) => active.get(threadId)?.abort.abort(),
