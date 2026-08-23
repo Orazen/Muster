@@ -776,6 +776,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           agentsMcp: true,
           computerMcp: true,
           composioMcp: true,
+          images: true,
           effortLevels: ["low", "medium", "high", "xhigh", "max"],
         },
         sendTurn,

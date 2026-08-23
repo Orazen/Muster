@@ -202,6 +202,13 @@ export interface ProviderAdapter {
      * connected apps). Same rule again: a key in the config says the user
      * HAS those connections, not that this driver can reach them. */
     composioMcp?: boolean;
+    /** True when the driver's engine can read image files it is given by
+     * path — the gate for the composer's paste/drop-image affordance. CLI
+     * engines get the path inside <attached-image/> and open it themselves;
+     * API drivers without vision (or without SendTurnInput.images yet) must
+     * leave this off so the UI refuses politely instead of silently
+     * degrading the bot's understanding. */
+    images?: boolean;
     /** Effort levels this driver can pass to its CLI, ascending. Absent =
      * the driver cannot set effort, so the app never offers the control —
      * same rule as computerMcp: never show a knob the driver cannot turn. */

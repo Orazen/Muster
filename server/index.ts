@@ -10,6 +10,12 @@ import { extname, join } from "node:path";
 import { z } from "zod";
 
 import { approvalKey, autoDecision } from "./auto-approve.ts";
+import {
+  AttachmentError,
+  MAX_ATTACHMENT_BYTES,
+  readAttachment,
+  saveAttachment,
+} from "./attachments.ts";
 import type { JsonValue } from "./schema.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
@@ -2338,6 +2344,42 @@ function readRawBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+/**
+ * Read the body as raw bytes up to `maxBytes`, for binary uploads (image
+ * attachments). Like readBody, rejections carry an HTTP status for the
+ * route to return. Unlike readRawBody this keeps the payload as a Buffer —
+ * image bytes are not valid UTF-8, and a string round-trip would corrupt them.
+ */
+function readRawBytes(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let done = false;
+    const fail = (status: number, msg: string) => {
+      if (done) return;
+      done = true;
+      reject(Object.assign(new Error(msg), { status }));
+    };
+    req.on("data", (c) => {
+      if (done) return;
+      const chunk = Buffer.isBuffer(c) ? c : Buffer.from(c);
+      bytes += chunk.length;
+      if (bytes > maxBytes) return fail(413, "body too large");
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (done) return;
+      done = true;
+      resolve(Buffer.concat(chunks));
+    });
+    req.on("error", (e) => {
+      if (done) return;
+      done = true;
+      reject(e instanceof Error ? e : new Error(String(e)));
+    });
+  });
+}
+
 function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -3037,6 +3079,46 @@ let requestUserEmail = "";
       return webhooks.remove(webhookMatch[1])
         ? json(res, 200, { ok: true })
         : json(res, 404, { error: "no such webhook" });
+    }
+
+    // ── image attachments ──
+    // POST stores an image body; GET serves one back for transcript display.
+    // Both sit behind the session gate like every other /api route, and GET's
+    // name allow-list (isAttachmentName) is what keeps a URL from reaching
+    // any file save() did not write.
+    if (method === "POST" && path === "/api/attachments") {
+      const mime = String(req.headers["content-type"] ?? "").split(";")[0].trim();
+      try {
+        const bytes = await readRawBytes(req, MAX_ATTACHMENT_BYTES);
+        return json(res, 201, saveAttachment(mime, bytes));
+      } catch (e) {
+        if (e instanceof AttachmentError) return json(res, e.status, { error: e.message });
+        // SAFETY: readRawBytes attaches an HTTP status to every rejection,
+        // same contract as readBody above.
+        const status = (e as { status?: number }).status;
+        if (status === 413) return json(res, 413, { error: "attachment too large" });
+        throw e;
+      }
+    }
+    m = path.match(/^\/api\/attachments\/([^/]+)$/);
+    if (m && method === "GET") {
+      // Decode before validating, same rule as memory topics: an encoded
+      // traversal must be judged by what it decodes TO.
+      let name: string;
+      try {
+        name = decodeURIComponent(m[1]);
+      } catch {
+        return json(res, 400, { error: "invalid attachment name" });
+      }
+      const file = readAttachment(name);
+      if (!file.found) return json(res, 404, { error: "no such attachment" });
+      // Immutable: names are UUIDs, so content can never change under a URL.
+      res.writeHead(200, {
+        "content-type": file.mime,
+        "cache-control": "private, max-age=31536000, immutable",
+        "content-length": file.data.length,
+      });
+      return res.end(file.data);
     }
 
     // ── events stream ──

@@ -254,6 +254,9 @@ export interface InstanceInfo {
     computerMcp?: boolean;
     agentsMcp?: boolean;
     composioMcp?: boolean;
+    /** Engine reads images given by path — gates the composer's paste/drop
+     * image affordance (see server/contracts.ts ProviderAdapter). */
+    images?: boolean;
     effortLevels?: readonly EffortLevel[];
   };
   /** `custom` agents sit below the rail divider — no subscription catalog. */

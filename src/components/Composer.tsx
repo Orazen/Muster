@@ -12,6 +12,7 @@ import {
   pasteAttachment,
   type Attachment,
 } from "@/lib/composer-attachments";
+import { MAX_IMAGE_BYTES, uploadImageAttachment } from "@/lib/image-upload";
 import { normalizeState } from "@/lib/mascot";
 import { groupComposerHint } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
@@ -73,6 +74,61 @@ export function Composer({
   const removeAttachment = useCallback(
     (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id)),
     [setAttachments],
+  );
+
+  // ── image gating ──
+  // An engine that cannot open an image by path must never be handed one:
+  // the paste/drop affordance checks the driver's declared capability, and
+  // refusal says so plainly instead of silently degrading what the bot sees.
+  // In a room, any vision-capable member unlocks it — routing picks who
+  // answers, and a path tag is inert text to anyone who can't read it.
+  const engineSupportsImages = useCallback(
+    (b?: Bot) => {
+      if (!b) return false;
+      const inst = state.instances.find((i) => i.instanceId === b.modelSelection.instanceId);
+      return Boolean(inst?.capabilities?.images);
+    },
+    [state.instances],
+  );
+  const allowImages = group
+    ? (members ?? []).some((m) => engineSupportsImages(m))
+    : engineSupportsImages(bot);
+  const engineLabel = group ? group.name : (bot?.name ?? "This engine");
+  // refusals + upload failures for pasted images (drops report through the
+  // attachment strip's own notice)
+  const [imageNotice, setImageNotice] = useState<string | null>(null);
+  const attachPastedImages = useCallback(
+    async (files: File[]) => {
+      let refused = false;
+      const results = await Promise.all(
+        files.map(async (file): Promise<{ ok: true; chip: Attachment } | { ok: false; message: string }> => {
+          if (!allowImages) {
+            refused = true;
+            return { ok: false, message: file.name };
+          }
+          if (file.size > MAX_IMAGE_BYTES) {
+            return { ok: false, message: `${file.name} is over the image size limit` };
+          }
+          try {
+            return { ok: true, chip: await uploadImageAttachment(file) };
+          } catch (e) {
+            return {
+              ok: false,
+              message: `${file.name}: ${e instanceof Error ? e.message : "upload failed"}`,
+            };
+          }
+        }),
+      );
+      if (refused) {
+        setImageNotice(`${engineLabel}'s engine can't read images yet.`);
+        return;
+      }
+      const chips = results.flatMap((r) => (r.ok ? [r.chip] : []));
+      const failures = results.flatMap((r) => (r.ok ? [] : [r.message]));
+      if (chips.length) addAttachments(chips);
+      setImageNotice(failures.length ? failures.join(" ") : null);
+    },
+    [allowImages, engineLabel, addAttachments],
   );
   const [recording, setRecording] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
@@ -286,6 +342,10 @@ export function Composer({
           items={attachments}
           onAdd={addAttachments}
           onRemove={removeAttachment}
+          allowImages={allowImages}
+          engineLabel={engineLabel}
+          externalNotice={imageNotice}
+          onDismissExternalNotice={() => setImageNotice(null)}
         />
         {/* Gaia composer: soft elevated shell, hairline ring, generous radius */}
         <div className="flex items-end gap-2 rounded-[26px] border border-hairline/50 bg-card py-2.5 pl-4 pr-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.06),0_8px_24px_-8px_rgba(0,0,0,0.08)] transition-colors focus-within:border-accent/50">
@@ -299,6 +359,16 @@ export function Composer({
             setDismissedAt(null);
           }}
           onPaste={(e) => {
+            // A screenshot paste arrives as clipboard FILES, not text — route
+            // it before the text branch can swallow the event.
+            const imageFiles = Array.from(e.clipboardData.files).filter((f) =>
+              f.type.startsWith("image/"),
+            );
+            if (imageFiles.length) {
+              e.preventDefault();
+              void attachPastedImages(imageFiles);
+              return;
+            }
             // a wall of text becomes a chip instead of burying the input
             const pasted = e.clipboardData.getData("text/plain");
             if (!isLongPaste(pasted)) return;
