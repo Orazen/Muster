@@ -14,6 +14,7 @@
 
 import type { SendTurnInput } from "../contracts.ts";
 import { connectMcpStdio, type McpClient } from "../mcp-client.ts";
+import { callKey } from "../repeat-detector.ts";
 import { computerProxyEnv } from "../container-computer.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import type { JsonObject } from "../schema.ts";
@@ -132,6 +133,25 @@ export type ToolChat = (
  * screenshot-and-click flow. */
 export const MAX_TOOL_ROUNDS = 20;
 
+/** Loop enforcement (v2 plan 3.3, API drivers only — the harness owns these
+ * calls end-to-end; CLI turns can only be interrupted wholesale, see the
+ * verified EOF note on item 3.2). Keyed exactly like the observe-side
+ * detector: tool name plus whitespace-normalized arguments. At the advisory
+ * threshold the call still runs but its result carries a nudge; at the hard
+ * threshold the call is NOT executed and the model gets a synthetic
+ * termination result instead — a repeated identical click is not something
+ * running a sixth time makes better. */
+const ADVISORY_AT = 3;
+const TERMINATE_AT = 6;
+
+function enforcementNote(count: number): string {
+  return `[harness] this exact call has now been made ${count} times this turn with identical arguments — it is almost certainly stuck in a loop. Do not repeat it again; change approach or answer directly.]`;
+}
+
+function terminationText(count: number): string {
+  return `terminated by harness after ${count} identical calls this turn — do not repeat this call; change approach or answer directly.`;
+}
+
 /** The agentic loop: ask the model, run whatever tools it asked for, feed
  * the results back, repeat until it answers with no more tool calls. */
 export async function runToolLoop(opts: {
@@ -145,6 +165,9 @@ export async function runToolLoop(opts: {
   const { chat, model, clients, tools, signal } = opts;
   const messages = [...opts.messages];
   let totalUsage: { input: number; output: number } | null = null;
+  // per-turn repeat ledger for enforcement (see ADVISORY_AT above) — lives
+  // outside the round loop: the point is catching repeats ACROSS rounds
+  const counts = new Map<string, number>();
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const { text, toolCalls, usage } = await chat(messages, model, tools, signal);
     if (usage) {
@@ -170,6 +193,15 @@ export async function runToolLoop(opts: {
       const serverKey = sepIdx === -1 ? "" : call.name.slice(0, sepIdx);
       const toolName = sepIdx === -1 ? call.name : call.name.slice(sepIdx + 2);
       const client = clients.get(serverKey);
+
+      const key = callKey(toolName, call.arguments) ?? `bare:${call.name}`;
+      const count = (counts.get(key) ?? 0) + 1;
+      counts.set(key, count);
+      if (count >= TERMINATE_AT) {
+        messages.push({ role: "tool", tool_call_id: call.id, content: terminationText(count) });
+        continue;
+      }
+
       let resultText: string;
       if (!client) {
         resultText = `error: no such tool source "${serverKey}"`;
@@ -182,6 +214,7 @@ export async function runToolLoop(opts: {
           resultText = `error: ${e instanceof Error ? e.message : String(e)}`;
         }
       }
+      if (count >= ADVISORY_AT) resultText = `${resultText}\n${enforcementNote(count)}`;
       const toolResult: JsonObject = { role: "tool", tool_call_id: call.id, content: resultText };
       messages.push(toolResult);
     }

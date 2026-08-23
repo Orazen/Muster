@@ -119,6 +119,55 @@ describe("runToolLoop", () => {
     expect(second.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call-1-0", content: 'echo:{"msg":"ping"}' });
   });
 
+  it("loop enforcement: identical calls get an advisory at 3 and are terminated at 6", async () => {
+    // the model hammers the same call every round; a real server would be
+    // clicked seven times under the old observe-only behavior
+    const same = Array.from({ length: 7 }, () => ({ toolCalls: [{ name: "computer__echo", args: '{"msg":"ping"}' }] }));
+    const { chat, calls } = scriptedChat([...same, { content: "gave up on the loop" }]);
+    const executions: Array<{ name: string; args: any }> = [];
+    const clients = new Map([
+      ["computer", fakeClient('echo:{"msg":"ping"}', executions)],
+    ]);
+    const out = await runToolLoop({
+      chat,
+      messages: baseMessages,
+      model: "m",
+      clients,
+      tools: [toOpenAiTool("computer", { name: "echo", inputSchema: { type: "object", properties: {} } })],
+    });
+    expect(out.text).toBe("gave up on the loop");
+    // rounds 1-2 run clean (counts 1,2), round 3 runs with advisory (3),
+    // rounds 4-5 still execute past advisory? no — counts 4,5 < 6 so they
+    // run too; count 6 and 7 are terminated without executing
+    expect(executions.length).toBe(5);
+    // the last round's messages end with the synthetic termination result
+    const last = calls.at(-2)!.messages; // the round that received termination #6
+    const results = last.filter((m: any) => m.role === "tool");
+    expect(String(results.at(-1)?.content)).toContain("terminated by harness after 6");
+    // and an earlier result carried the advisory nudge
+    const advisories = calls.flatMap((c) => c.messages).filter((m: any) => m.role === "tool" && String(m.content).includes("[harness]"));
+    expect(advisories.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("distinct arguments are never counted as repeats", async () => {
+    const varied = Array.from({ length: 6 }, (_, i) => ({
+      toolCalls: [{ name: "computer__echo", args: `{"msg":"ping-${i}"}` }],
+    }));
+    const { chat } = scriptedChat([...varied, { content: "done" }]);
+    const executions: Array<{ name: string; args: any }> = [];
+    const clients = new Map([
+      ["computer", fakeClient('echo:{"msg":"x"}', executions)],
+    ]);
+    await runToolLoop({
+      chat,
+      messages: baseMessages,
+      model: "m",
+      clients,
+      tools: [toOpenAiTool("computer", { name: "echo", inputSchema: { type: "object", properties: {} } })],
+    });
+    expect(executions.length).toBe(6); // every distinct call ran; nothing terminated
+  });
+
   it("feeds an error back when the tool source is unknown, then lets the model answer", async () => {
     const { chat, calls } = scriptedChat([
       { toolCalls: [{ name: "nosuch__tool" }] },
