@@ -954,6 +954,18 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       break;
     }
+    case "turn.retrying":
+      // A retry must never look like a freeze: the chip says what hiccuped
+      // and how many tries remain. attempt is the one that just failed.
+      pushMessage({
+        role: "bot",
+        kind: "activity",
+        tool: {
+          name: `engine hiccup — retrying (try ${event.attempt + 1} of ${event.maxAttempts + 1}): ${event.reason}`,
+          ok: true,
+        },
+      });
+      break;
     case "runtime.error":
       pushMessage({
         role: "bot",

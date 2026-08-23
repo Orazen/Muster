@@ -15,6 +15,7 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import type { JsonValue } from "../schema.ts";
 import { appendNative } from "./native.ts";
+import { MAX_RETRIES, abortableSleep, retryDelayMs, transientReason } from "./retry.ts";
 
 const DRIVER_KIND = "grok";
 const DEFAULT_URL = "https://api.x.ai/v1";
@@ -153,38 +154,55 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       emit({ ...base(threadId, turnId), type: "session.started", sessionId: null, model: turn.model ?? MODELS.default });
 
       (async () => {
-        try {
-          const { text, usage } = await complete(messages, turn.model || MODELS.default, {
-            stream: true,
-            signal: abort.signal,
-            onDelta: (delta) =>
-              emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta }),
-          });
-          appendNative(threadId, { dir: "in", source: "xai.chat.completions", msg: { text, usage } });
-          if (text.trim()) {
-            emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+        // Bounded auto-retry on transient failures (v2 plan 3.4): a 429/5xx
+        // or dropped socket retries with backoff as long as nothing has been
+        // streamed yet; once deltas reached the chat, a retry would duplicate
+        // them, so the turn fails instead. Abort during backoff = interrupt.
+        for (let attempt = 1; ; attempt++) {
+          let gotDelta = false;
+          try {
+            const { text, usage } = await complete(messages, turn.model || MODELS.default, {
+              stream: true,
+              signal: abort.signal,
+              onDelta: (delta) => {
+                gotDelta = true;
+                emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta });
+              },
+            });
+            appendNative(threadId, { dir: "in", source: "xai.chat.completions", msg: { text, usage } });
+            if (text.trim()) {
+              emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+            }
+            if (usage) {
+              emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...usage });
+            }
+            active.delete(threadId);
+            emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
+            return;
+          } catch (e) {
+            // SAFETY: abort and fetch failures both surface as Error instances;
+            // anything else is normalized so the event still carries a message.
+            const error = e instanceof Error ? e : new Error(String(e));
+            const aborted = error.name === "AbortError";
+            const transient = !aborted && !gotDelta && attempt <= MAX_RETRIES ? transientReason(error.message) : null;
+            if (transient) {
+              emit({ ...base(threadId, turnId), type: "turn.retrying", attempt, maxAttempts: MAX_RETRIES, reason: transient.reason });
+              await abortableSleep(retryDelayMs(attempt), abort.signal);
+              if (!abort.signal.aborted) continue;
+            }
+            active.delete(threadId);
+            if (!aborted) {
+              emit({ ...base(threadId, turnId), type: "runtime.error", message: error.message });
+            }
+            emit({
+              ...base(threadId, turnId),
+              type: "turn.completed",
+              ok: false,
+              stopReason: aborted ? "interrupted" : "error",
+              cost: null,
+            });
+            return;
           }
-          if (usage) {
-            emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...usage });
-          }
-          active.delete(threadId);
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
-        } catch (e) {
-          active.delete(threadId);
-          // SAFETY: abort and fetch failures both surface as Error instances;
-          // anything else is normalized so the event still carries a message.
-          const error = e instanceof Error ? e : new Error(String(e));
-          const aborted = error.name === "AbortError";
-          if (!aborted) {
-            emit({ ...base(threadId, turnId), type: "runtime.error", message: error.message });
-          }
-          emit({
-            ...base(threadId, turnId),
-            type: "turn.completed",
-            ok: false,
-            stopReason: aborted ? "interrupted" : "error",
-            cost: null,
-          });
         }
       })();
 

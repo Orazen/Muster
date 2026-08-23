@@ -29,6 +29,7 @@ import { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from
 import { codexLocalProviderArgs } from "./local-inject.ts";
 import { augmentedPath } from "../env-path.ts";
 import { appendNative } from "./native.ts";
+import { MAX_RETRIES, cancellableSleep, retryDelayMs, transientReason } from "./retry.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -125,38 +126,103 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       const turnId = newId();
 
-      const env = childEnv();
-      const appServerArgs = ["app-server", ...codexLocalProviderArgs(env, turn.model)];
-      if (turn.integrations?.composio) {
-        const bridge = turn.integrations.composio;
-        Object.assign(env, bridge.env);
-        const prefix = "mcp_servers.muster_connectors";
-        appServerArgs.push(
-          "-c", `${prefix}.command=${JSON.stringify(bridge.command)}`,
-          "-c", `${prefix}.args=${JSON.stringify(bridge.args)}`,
-          "-c", `${prefix}.env_vars=${JSON.stringify(Object.keys(bridge.env))}`,
-          "-c", `${prefix}.default_tools_approval_mode="auto"`,
-        );
+      // ── bounded auto-retry (v2 plan item 3.4) ────────────────────────────
+      // Each attempt spawns a fresh app-server and reruns handshake + kickoff.
+      // Only a clean failure that confidently looks transient retries; a
+      // dirty attempt (anything already streamed or asked), an interruption,
+      // or an ambiguous/auth-shaped error fails the turn as before.
+      let settled = false;
+      let interrupted = false;
+      let attempt = 0;
+      let retrySleep: ReturnType<typeof cancellableSleep> | undefined;
+      // Token usage is a running total the last live attempt keeps banking.
+      let reportedUsage: { input: number; output: number } | undefined;
+      // One stable slot per attempt-scoped resource; `epoch` invalidates the
+      // retired attempt's listeners the moment a retry tears it down.
+      type AskFinish = (behavior: "allow" | "deny" | "answer", message?: string, source?: "user" | "timeout" | "system") => void;
+      interface CodexAttempt {
+        child: ReturnType<typeof spawnCli> | null;
+        asks: Map<string, AskFinish>;
+        rpcPending: Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>;
+        epoch: number;
+      }
+      const current: CodexAttempt = { child: null, asks: new Map(), rpcPending: new Map(), epoch: 0 };
+
+      const cleanupAttempt = () => {
+        current.epoch += 1; // a late close/rpc rejection belongs to a dead attempt
+        if (current.child) killCliTree(current.child); // the app-server never exits on its own
+        current.child = null;
+        current.asks = new Map();
+        current.rpcPending = new Map();
+      };
+
+      const settle = (ok: boolean, stopReason: string | null) => {
+        if (settled) return;
+        settled = true;
+        retrySleep?.cancel();
+        for (const finish of current.asks.values()) finish("deny", "Muster: the turn ended", "system");
+        for (const p of current.rpcPending.values()) p.reject(new Error("turn settled"));
+        cleanupAttempt();
+        active.delete(threadId);
+        emit({
+          ...base(threadId, turnId),
+          type: "turn.completed",
+          ok,
+          stopReason,
+          cost: null,
+          ...(reportedUsage ? { usage: reportedUsage } : undefined),
+        });
+      };
+
+      async function scheduleRetry(reason: string): Promise<void> {
+        // Tear the failed attempt down quietly — no error chip, no settle.
+        cleanupAttempt();
+        emit({ ...base(threadId, turnId), type: "turn.retrying", attempt, maxAttempts: MAX_RETRIES, reason });
+        retrySleep = cancellableSleep(retryDelayMs(attempt));
+        await retrySleep.promise;
+        if (settled) return;
+        if (interrupted) {
+          settle(false, "interrupted");
+          return;
+        }
+        startAttempt();
       }
 
-      const child = spawnCli(config.cli, appServerArgs, {
-        cwd: turn.cwd ?? homedir(),
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      function startAttempt(): void {
+        const epochAtStart = current.epoch;
+        attempt += 1;
+        // Anything user-visible this attempt makes it dirty — a retry would
+        // duplicate or strand that output, so dirty attempts fail instead.
+        let attemptDirty = false;
 
-      const state = {
-        settled: false,
-        lastText: "",
-        sawStreamDelta: false,
-        // codex reports token usage as a running THREAD total; the harness
-        // wants this turn's figure, so the last report is banked on settle
-        // SAFETY: starts unset; tokenUsage frames assign the real shape before settle reads it
-        usage: undefined as { input: number; output: number } | undefined,
-      };
-      const asks = new Map<string, (behavior: "allow" | "deny" | "answer", message?: string, source?: "user" | "timeout" | "system") => void>();
+        const env = childEnv();
+        const appServerArgs = ["app-server", ...codexLocalProviderArgs(env, turn.model)];
+        if (turn.integrations?.composio) {
+          const bridge = turn.integrations.composio;
+          Object.assign(env, bridge.env);
+          const prefix = "mcp_servers.muster_connectors";
+          appServerArgs.push(
+            "-c", `${prefix}.command=${JSON.stringify(bridge.command)}`,
+            "-c", `${prefix}.args=${JSON.stringify(bridge.args)}`,
+            "-c", `${prefix}.env_vars=${JSON.stringify(Object.keys(bridge.env))}`,
+            "-c", `${prefix}.default_tools_approval_mode="auto"`,
+          );
+        }
+
+        const child = spawnCli(config.cli, appServerArgs, {
+          cwd: turn.cwd ?? homedir(),
+          env,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        current.child = child;
+
+        const state = {
+          lastText: "",
+          sawStreamDelta: false,
+        };
+      const asks = current.asks;
       let nextId = 1;
-      const rpcPending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+      const rpcPending = current.rpcPending;
 
       const send = (obj: JsonObject) => {
         try {
@@ -185,26 +251,6 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           });
           send({ jsonrpc: "2.0", id, method, params });
         });
-
-      const stop = () => killCliTree(child);
-
-      const settle = (ok: boolean, stopReason: string | null) => {
-        if (state.settled) return;
-        state.settled = true;
-        for (const finish of asks.values()) finish("deny", "Muster: the turn ended", "system");
-        for (const p of rpcPending.values()) p.reject(new Error("turn settled"));
-        rpcPending.clear();
-        active.delete(threadId);
-        emit({
-          ...base(threadId, turnId),
-          type: "turn.completed",
-          ok,
-          stopReason,
-          cost: null,
-          ...(state.usage ? { usage: state.usage } : undefined),
-        });
-        stop(); // the app-server never exits on its own
-      };
 
       // server→client approval request → canonical request.opened
       const handleServerRequest = (msg: any) => {
@@ -263,6 +309,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         );
         timer.unref?.();
         asks.set(requestId, finish);
+        // an ask reached the chat — this attempt is no longer retryable
+        attemptDirty = true;
         emit({
           ...base(threadId, turnId),
           type: "request.opened",
@@ -303,6 +351,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             const delta = p.delta ?? "";
             if (delta) {
               state.sawStreamDelta = true;
+              attemptDirty = true;
               emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta });
             }
             break;
@@ -310,7 +359,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           case "item/reasoning/textDelta":
           case "item/reasoning/summaryTextDelta": {
             const delta = p.delta ?? "";
-            if (delta) emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta });
+            if (delta) {
+              attemptDirty = true;
+              emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta });
+            }
             break;
           }
           case "item/started": {
@@ -325,7 +377,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
                     : item.type === "webSearch"
                       ? "web_search"
                       : null;
-            if (title) emit({ ...base(threadId, turnId), type: "item.started", itemType: "tool", itemId: item.id, title });
+            if (title) {
+              attemptDirty = true;
+              emit({ ...base(threadId, turnId), type: "item.started", itemType: "tool", itemId: item.id, title });
+            }
             break;
           }
           case "item/completed": {
@@ -333,6 +388,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             if (item.type === "agentMessage") {
               const messageText = item.text;
               if (messageText?.trim()) {
+                attemptDirty = true;
                 state.lastText = messageText;
                 if (!state.sawStreamDelta) {
                   emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta: messageText });
@@ -358,7 +414,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             // `total` is the thread so far — a fresh app-server per turn
             // makes that this turn's figure too
             const turnUsage = p.tokenUsage?.last ?? p.tokenUsage?.total;
-            if (turnUsage) state.usage = { input: turnUsage.inputTokens ?? 0, output: turnUsage.outputTokens ?? 0 };
+            if (turnUsage) reportedUsage = { input: turnUsage.inputTokens ?? 0, output: turnUsage.outputTokens ?? 0 };
             const t = p.tokenUsage?.total;
             if (t) {
               emit({
@@ -432,17 +488,34 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         settle(false, "spawn_error");
       });
       child.on("close", (code) => {
-        if (!state.settled) {
-          emit({
-            ...base(threadId, turnId),
-            type: "runtime.error",
-            message: `codex exited ${code} before turn/completed${stderr ? `: ${stderr.trim().slice(-300)}` : ""}`,
-          });
-          settle(false, "exit_before_result");
+        if (settled || current.epoch !== epochAtStart) return;
+        const transient =
+          !interrupted && attempt <= MAX_RETRIES && !attemptDirty ? transientReason(stderr) : null;
+        if (transient) {
+          void scheduleRetry(transient.reason);
+          return;
         }
+        emit({
+          ...base(threadId, turnId),
+          type: "runtime.error",
+          message: `codex exited ${code} before turn/completed${stderr ? `: ${stderr.trim().slice(-300)}` : ""}`,
+        });
+        settle(false, "exit_before_result");
       });
 
-      active.set(threadId, { stop, turnId, asks });
+      active.set(threadId, {
+        turnId,
+        get stop() {
+          return () => {
+            interrupted = true;
+            retrySleep?.cancel(); // an interrupt during backoff settles at once
+            if (current.child) killCliTree(current.child);
+          };
+        },
+        get asks() {
+          return current.asks;
+        },
+      });
       emit({ ...base(threadId, turnId), type: "turn.started" });
 
       // handshake + kickoff; any refusal surfaces as failure, not a hang
@@ -497,9 +570,17 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             })(),
           );
         } catch (e) {
-          if (!state.settled) {
+          if (!settled && current.epoch === epochAtStart) {
             const message = e instanceof Error ? e.message : String(e);
             const needsAuth = /(?:\b401\b|unauthorized|missing bearer|authentication required)/i.test(message);
+            const transient =
+              !needsAuth && !interrupted && !attemptDirty && attempt <= MAX_RETRIES
+                ? transientReason(message)
+                : null;
+            if (transient) {
+              void scheduleRetry(transient.reason);
+              return;
+            }
             emit({
               ...base(threadId, turnId),
               type: "runtime.error",
@@ -510,6 +591,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
         }
       })();
+      } // startAttempt
+
+      startAttempt();
 
       return { turnId };
     };

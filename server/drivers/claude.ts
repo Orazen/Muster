@@ -32,6 +32,7 @@ import { newEventId, newId } from "../contracts.ts";
 import { applyClaudeInject, mergeLocalInject } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { MAX_RETRIES, cancellableSleep, retryDelayMs, transientReason } from "./retry.ts";
 
 /** Whether `claude` has been signed in.
  *
@@ -396,6 +397,74 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const sessionId = (turn.resumeCursor as string | undefined) ?? null;
       const newSessionId = sessionId ? null : newId();
 
+      // ── bounded auto-retry (v2 plan item 3.4) ────────────────────────────
+      // Everything below down to startAttempt()'s end runs once PER ATTEMPT:
+      // a fresh CLI process, permission broker, and MCP config file each try.
+      // A clean failure that confidently looks transient (529, rate limit,
+      // dropped socket) retries after backoff; anything user-visible already
+      // emitted, any interruption, or an ambiguous/auth-shaped error does not.
+      let settled = false;
+      let interrupted = false;
+      let attempt = 0;
+      let retrySleep: ReturnType<typeof cancellableSleep> | undefined;
+      // One stable slot the active-map entry reads, so interruptTurn and
+      // respondToRequest always reach whichever attempt is live.
+      interface ClaudeAttempt {
+        child: ReturnType<typeof spawnCli> | null;
+        broker?: ReturnType<typeof createPermissionBroker>;
+        mcpDir: string | null;
+      }
+      const current: ClaudeAttempt = { child: null, mcpDir: null };
+
+      const cleanupAttempt = () => {
+        current.broker?.close();
+        current.broker = undefined;
+        if (current.mcpDir) {
+          // every attempt's config file holds live credentials — none may outlive it
+          try {
+            rmSync(current.mcpDir, { recursive: true, force: true });
+          } catch {}
+          current.mcpDir = null;
+        }
+        current.child = null;
+      };
+
+      const settle = (
+        ok: boolean,
+        stopReason: string | null,
+        cost: number | null = null,
+        usage?: { input: number; output: number },
+      ) => {
+        if (settled) return;
+        settled = true;
+        retrySleep?.cancel();
+        cleanupAttempt();
+        active.delete(threadId);
+        if (usage) emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost, usage });
+        else emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost });
+      };
+
+      async function scheduleRetry(reason: string): Promise<void> {
+        // Tear the failed attempt down quietly — no error chip, no settle.
+        cleanupAttempt();
+        emit({ ...base(threadId, turnId), type: "turn.retrying", attempt, maxAttempts: MAX_RETRIES, reason });
+        retrySleep = cancellableSleep(retryDelayMs(attempt));
+        await retrySleep.promise;
+        if (settled) return;
+        if (interrupted) {
+          settle(false, "interrupted");
+          return;
+        }
+        startAttempt();
+      }
+
+      function startAttempt(): void {
+        attempt += 1;
+        // Anything user-visible this attempt (text deltas, tool chips, asks)
+        // makes it dirty — a retry would duplicate or strand that output, so
+        // dirty attempts fail instead of retrying.
+        let attemptDirty = false;
+
       const args = [
         "-p",
         "--output-format", "stream-json",
@@ -465,7 +534,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         const socketPath = permissionSocketPath(threadId);
         broker = createPermissionBroker({
           socketPath,
-          onAsk: (ask) =>
+          onAsk: (ask) => {
+            // an ask reached the chat — this attempt is no longer retryable
+            attemptDirty = true;
             emit({
               ...base(threadId, turnId),
               type: "request.opened",
@@ -474,7 +545,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               tool: ask.tool,
               summary: askSummary(ask),
               choices: Array.isArray(ask.input.choices) ? ask.input.choices.slice(0, 5) : undefined,
-            }),
+            });
+          },
           onResolve: (resolved) =>
             emit({
               ...base(threadId, turnId),
@@ -488,48 +560,29 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: { ...NODE_ENV_FLAG } };
         allowed.push("mcp__ogb");
       }
-      // The MCP config carries credentials — a Composio consumer key in a
-      // header, the box token in the computer proxy's env, the comms token in
-      // the agents proxy's env. On argv every one of those is world-readable
-      // through `ps` for the life of the turn, to any local process. The CLI
-      // accepts a FILE for this flag, so the secrets go in a 0600 file that
-      // is removed when the turn settles.
-      let mcpConfigPath: string | null = null;
-      if (Object.keys(mcpServers).length) {
-        mcpConfigPath = join(mkdtempSync(join(tmpdir(), "omb-mcp-")), "mcp.json");
-        writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
-        args.push("--mcp-config", mcpConfigPath);
-        args.push("--allowedTools", allowed.join(","));
-      }
-
-      const env = claudeEnvironment(turn.model, turnEnvironment);
-
-      const child = spawnCli(config.cli, args, {
-        cwd: turn.cwd ?? homedir(),
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      let settled = false;
-      const settle = (
-        ok: boolean,
-        stopReason: string | null,
-        cost: number | null = null,
-        usage?: { input: number; output: number },
-      ) => {
-        if (settled) return;
-        settled = true;
-        broker?.close();
-        // the config file holds live credentials — it must not outlive the turn
-        if (mcpConfigPath) {
-          try {
-            rmSync(dirname(mcpConfigPath), { recursive: true, force: true });
-          } catch {}
+        // The MCP config carries credentials — a Composio consumer key in a
+        // header, the box token in the computer proxy's env, the comms token in
+        // the agents proxy's env. On argv every one of those is world-readable
+        // through `ps` for the life of the turn, to any local process. The CLI
+        // accepts a FILE for this flag, so the secrets go in a 0600 file that
+        // is removed when the attempt ends.
+        if (Object.keys(mcpServers).length) {
+          const mcpConfigPath = join(mkdtempSync(join(tmpdir(), "omb-mcp-")), "mcp.json");
+          writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
+          args.push("--mcp-config", mcpConfigPath);
+          args.push("--allowedTools", allowed.join(","));
+          current.mcpDir = dirname(mcpConfigPath);
         }
-        active.delete(threadId);
-        if (usage) emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost, usage });
-        else emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost });
-      };
+
+        const env = claudeEnvironment(turn.model, turnEnvironment);
+
+        const child = spawnCli(config.cli, args, {
+          cwd: turn.cwd ?? homedir(),
+          env,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        current.child = child;
+        current.broker = broker;
 
       // token streaming: true while --include-partial-messages is delivering
       // text deltas for the current assistant message, so the whole-message
@@ -562,8 +615,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             const d = (ev.delta ?? {}) as { type?: string; text?: string; thinking?: string };
             if (d.type === "text_delta" && d.text) {
               sawStreamDelta = true;
+              attemptDirty = true;
               emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta: d.text });
             } else if (d.type === "thinking_delta" && d.thinking) {
+              attemptDirty = true;
               emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta: d.thinking });
             }
             break;
@@ -572,6 +627,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             const msg = o.message ?? {};
             const text = firstText(msg.content);
             if (text.trim()) {
+              attemptDirty = true;
               // fallback delta for CLIs/paths that never streamed the block
               if (!sawStreamDelta) {
                 emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta: text });
@@ -581,6 +637,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             for (const b of Array.isArray(msg.content) ? msg.content : []) {
               if (b.type === "tool_use") {
+                attemptDirty = true;
                 emit({ ...base(threadId, turnId), type: "item.started", itemType: "tool", itemId: b.id, title: b.name });
               }
             }
@@ -597,6 +654,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           case "user":
             for (const b of Array.isArray(o.message?.content) ? o.message.content : []) {
               if (b.type === "tool_result") {
+                attemptDirty = true;
                 emit({ ...base(threadId, turnId), type: "item.completed", itemType: "tool", itemId: b.tool_use_id, ok: !b.is_error });
               }
             }
@@ -646,25 +704,42 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       });
 
       child.on("close", (code) => {
-        if (!settled) {
-          emit({
-            ...base(threadId, turnId),
-            type: "runtime.error",
-            message: `claude exited ${code} before result${stderr ? `: ${stderr.trim().slice(-300)}` : ""}`,
-          });
-          settle(false, "exit_before_result");
+        if (settled) return;
+        const transient =
+          !interrupted && attempt <= MAX_RETRIES && !attemptDirty ? transientReason(stderr) : null;
+        if (transient) {
+          void scheduleRetry(transient.reason);
+          return;
         }
+        emit({
+          ...base(threadId, turnId),
+          type: "runtime.error",
+          message: `claude exited ${code} before result${stderr ? `: ${stderr.trim().slice(-300)}` : ""}`,
+        });
+        settle(false, "exit_before_result");
       });
 
-      const stop = () => killCliTree(child);
-      active.set(threadId, { stop, turnId, broker });
-      emit({ ...base(threadId, turnId), type: "turn.started" });
+        // prompt over stdin as a stream-json message — never argv (ARG_MAX)
+        const promptMsg = { type: "user", message: { role: "user", content: turn.text } };
+        child.stdin.write(JSON.stringify(promptMsg) + "\n");
+        child.stdin.end();
+        appendNative(threadId, { dir: "out", source: "claude.sdk.message", msg: promptMsg });
+      } // startAttempt
 
-      // prompt over stdin as a stream-json message — never argv (ARG_MAX)
-      const promptMsg = { type: "user", message: { role: "user", content: turn.text } };
-      child.stdin.write(JSON.stringify(promptMsg) + "\n");
-      child.stdin.end();
-      appendNative(threadId, { dir: "out", source: "claude.sdk.message", msg: promptMsg });
+      const stop = () => {
+        interrupted = true;
+        retrySleep?.cancel(); // an interrupt during backoff settles at once
+        if (current.child) killCliTree(current.child);
+      };
+      active.set(threadId, {
+        stop,
+        turnId,
+        get broker() {
+          return current.broker;
+        },
+      });
+      emit({ ...base(threadId, turnId), type: "turn.started" });
+      startAttempt();
 
       return { turnId };
     };

@@ -17,7 +17,7 @@
 //                      inherited-api-key — what `auth status` reports
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 
@@ -105,7 +105,38 @@ process.stdin.on("end", () => {
     process.exit(3);
   }
 
+  // First run exits with a transient upstream error; the marker file's
+  // existence says a retry already happened, so this run succeeds.
+  if (mode === "flaky") {
+    const marker = process.env.FAKE_CLAUDE_FLAKY_FILE ?? "";
+    if (!marker || !existsSync(marker)) {
+      writeFileSync(marker, "attempted");
+      process.stderr.write("API Error: 529 overloaded_error — the server is temporarily overloaded\n");
+      process.exit(1);
+    }
+  }
+
+  if (mode === "auth-error") {
+    process.stderr.write("Invalid API key · please run /login\n");
+    process.exit(1);
+  }
+
+  // Every run fails transiently — lets a test drive the retry cap to
+  // exhaustion and assert the bounded number of attempts.
+  if (mode === "always-overloaded") {
+    process.stderr.write("API Error: 529 overloaded_error\n");
+    process.exit(1);
+  }
+
   out({ type: "system", subtype: "init", session_id: sessionId, model });
+
+  if (mode === "die-after-delta") {
+    // stream some text, THEN die transiently — the driver must not retry
+    // an attempt whose partial output already reached the chat
+    out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "partial" } } });
+    process.stderr.write("API Error: 529 overloaded_error\n");
+    process.exit(1);
+  }
 
   if (mode === "hang") {
     // stay alive until killed — lets tests exercise interrupt + the

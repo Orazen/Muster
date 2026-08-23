@@ -86,6 +86,15 @@ export type RuntimeEvent = RuntimeEventBase &
     | { type: "session.exited"; reason?: string }
     | { type: "turn.started" }
     | {
+        type: "turn.retrying";
+        /** 1-based number of the attempt that just failed; the next try is
+         * attempt + 1 of maxAttempts + 1 total. */
+        attempt: number;
+        maxAttempts: number;
+        /** Why the failure looked transient — shown on the retry chip. */
+        reason: string;
+      }
+    | {
         type: "turn.completed";
         ok: boolean;
         stopReason?: string | null;
