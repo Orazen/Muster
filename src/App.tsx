@@ -24,6 +24,7 @@ import { SignupPage } from "@/pages/SignupPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { Onboarding } from "@/components/Onboarding";
+import { emailGateDone } from "@/lib/analytics";
 import { PairPage } from "@/pages/PairPage";
 
 function SignOutButton() {
@@ -43,8 +44,17 @@ function SignOutButton() {
 
 function Shell() {
   const { state, dispatch } = useStore();
+  const { user, loading: authLoading } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [firstRun, setFirstRun] = useState(true);
+  // Web audit 2026-08-23: the wizard must not render until the identity is
+  // resolved — its dismissal is persisted under the per-user gate key, and
+  // rendering earlier let a pre-auth Escape write the legacy key while the
+  // wizard kept reappearing for the signed-in account on every reload.
+  const [authResolvedOnce, setAuthResolvedOnce] = useState(false);
+  useEffect(() => {
+    if (!authLoading) setAuthResolvedOnce(true);
+  }, [authLoading]);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
@@ -156,7 +166,9 @@ function Shell() {
       {state.pluginsOpen && <PluginsPanel />}
       <CommandPalette />
       <NotificationStack />
-      {firstRun && <Onboarding onDone={() => setFirstRun(false)} />}
+      {firstRun && authResolvedOnce && !emailGateDone(user?.id) && (
+        <Onboarding onDone={() => setFirstRun(false)} />
+      )}
       </div>
       <SignOutButton />
     </div>
