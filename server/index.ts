@@ -2594,6 +2594,28 @@ let requestUserEmail = "";
     if (origin && !isAllowedOrigin(origin, req.headers.host)) {
       return json(res, 403, { error: "forbidden: cross-origin request" });
     }
+    // ── security headers, every response ─────────────────────────────────
+    // Web audit 2026-08-23: the deployment shipped none of these. HSTS is
+    // gated on a TLS-terminating proxy announcing itself; the rest are
+    // unconditional. frame-ancestors is the CSP directive that matters for
+    // clickjacking without breaking the SPA's inline boot scripts.
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+    if (req.headers["x-forwarded-proto"] === "https") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+    // Better Auth bounces OAuth failures (expired state cookie after 5 min
+    // on the Google chooser, blocked third-party context) to
+    // /api/auth/error?error=…, which renders as a bare JSON 404 for users.
+    // Send them back to the sign-in screen where retrying is one tap.
+    if (path === "/api/auth/error") {
+      const code = url.searchParams.get("error") ?? "unknown";
+      res.writeHead(302, { location: `/sign-in?authError=${encodeURIComponent(code)}` });
+      res.end();
+      return;
+    }
     // ── auth routes (Better Auth) ────────────────────────────────────────
     if (path.startsWith("/api/auth/")) {
       // Muster Cloud identity bridge — opt-in (server/muster-cloud.ts).

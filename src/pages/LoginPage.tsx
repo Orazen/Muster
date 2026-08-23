@@ -16,6 +16,18 @@ export function LoginPage() {
   const [error, setError] = useState("");
   const [googlePending, setGooglePending] = useState(false);
 
+  // OAuth failures bounce back here as /sign-in?authError=<code> (the server
+  // rewrites better-auth's /api/auth/error). state_mismatch is by far the
+  // common one: the state cookie lives 5 minutes, so a Google chooser left
+  // open past that expires the attempt — the fix is simply trying again.
+  const authError = params.get("authError");
+  const authErrorHint =
+    authError === "state_mismatch"
+      ? "That sign-in took too long and expired. One more tap and you're in."
+      : authError
+        ? `Sign-in failed (${authError}). Please try again.`
+        : "";
+
   // desktop pairing bridge: code typed from muster.orazen.online/pair
   const [pairCode, setPairCode] = useState("");
   const [pairBusy, setPairBusy] = useState(false);
@@ -48,6 +60,11 @@ export function LoginPage() {
   return (
     <AuthShell title="Welcome back" subtitle="One tap and your team of agents is waiting.">
       <div className="space-y-4">
+        {authErrorHint && (
+          <div role="alert" className="rounded-lg border border-[#7a3b12] bg-[#2a1a10] px-3 py-2 text-sm text-[#ffb27d]">
+            {authErrorHint}
+          </div>
+        )}
         {!authLoading && user && (
           <div className={`flex flex-col gap-2.5 ${authCardBox}`}>
             <span>
