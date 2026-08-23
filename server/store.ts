@@ -75,7 +75,7 @@ export interface ConnectorCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "compaction";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "compaction" | "privacy";
   text?: string;
   card?: OptionCardData;
   connector?: ConnectorCardData;
@@ -92,6 +92,9 @@ export interface Message {
    * before firstKeptId. Lives in the tree like any message — removes
    * nothing behind it (the two-transcripts rule). */
   compaction?: import("./model-context.ts").CompactionData;
+  /** privacy messages: what Privacy Shield masked before this turn left
+   * for a cloud model. Counts only — never the masked values. */
+  privacy?: { secrets: number; emails: number; phones: number };
   mime?: string;
   at: number;
   /** the message this one follows; null = thread root. Edited messages
@@ -306,6 +309,12 @@ export interface BotRecord {
    * start false — a shared persona must not reach the user's Gmail on
    * turn one. */
   composio?: boolean;
+  /** Privacy Shield: rewrite this bot's prompts (and replayed history)
+   * through scrubForCloud() before any cloud API driver sees them —
+   * credential shapes and PII become [SECRET_N]/[EMAIL_N]/[PHONE_N]
+   * placeholders. Opt-in per bot; CLI engines that never leave the machine
+   * don't need it, so the default is off. */
+  privacyShield?: boolean;
   /** Derived from `activity` — kept so the 200+ readers across the app and
    * tests keep working unchanged. Write through setActivity(), never here. */
   busy?: boolean;

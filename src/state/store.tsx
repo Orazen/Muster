@@ -53,7 +53,7 @@ export interface ConnectorCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "compaction";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "compaction" | "privacy";
   text?: string;
   card?: OptionCardData;
   connector?: ConnectorCardData;
@@ -66,6 +66,9 @@ export interface Message {
   mime?: string;
   /** compaction messages: model-context summary marker (server-generated) */
   compaction?: { summary: string; firstKeptId: string; tokensBefore: number; at: number };
+  /** privacy messages: what Privacy Shield masked before this turn left
+   * for a cloud model. Counts only — the server never stores values. */
+  privacy?: { secrets: number; emails: number; phones: number };
   at: number;
   /** the message this one follows; null = thread root. Edited messages
    * share a parentId with the version they replace — that's a fork. */
@@ -176,6 +179,9 @@ export interface Bot {
   /** Whether this bot may use the workspace's connected apps. Unset means
    * allowed for existing bots; imported bots start with this disabled. */
   composio?: boolean;
+  /** Privacy Shield: mask secrets/emails/phones before prompts reach a
+   * cloud model (server-side, opt-in per bot). */
+  privacyShield?: boolean;
   messages: Message[];
   /** leaf of the visible conversation branch (see visibleMessages) */
   activeLeafId?: string | null;

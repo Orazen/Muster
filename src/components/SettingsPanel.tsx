@@ -318,6 +318,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "chiefOfStaff"
         | "approvePeerComms"
         | "composio"
+        | "privacyShield"
         | "modelSelection"
       >
     >,
@@ -542,8 +543,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                   ? "This bot will stop and ask before it reaches out to another bot."
                   : "Let this bot talk to teammates on its own, without a confirmation step."}
               </div>
-            </div>
-            <button
+            </div>            <button
               role="switch"
               aria-checked={Boolean(bot.approvePeerComms)}
               aria-label="Ask me before contacting other bots"
@@ -559,6 +559,34 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 className={cn(
                   "absolute top-[3px] size-5 rounded-full bg-white transition-all",
                   bot.approvePeerComms ? "left-[21px]" : "left-[3px]",
+                )}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
+            <div>
+              <div className="text-[15px] font-medium text-ink">Privacy Shield</div>
+              <div className="mt-0.5 text-[13px] text-ink-secondary">
+                {bot.privacyShield
+                  ? "Secrets, emails, and phone numbers are masked before anything reaches the cloud model."
+                  : "Mask secrets and personal details before this bot's prompts leave for a cloud model."}
+              </div>
+            </div>
+            <button
+              role="switch"
+              aria-checked={Boolean(bot.privacyShield)}
+              aria-label="Privacy Shield"
+              onClick={() => patch({ privacyShield: !bot.privacyShield })}
+              className={cn(
+                "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors",
+                bot.privacyShield ? "bg-accent" : "bg-raised",
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-[3px] size-5 rounded-full bg-white transition-all",
+                  bot.privacyShield ? "left-[21px]" : "left-[3px]",
                 )}
               />
             </button>

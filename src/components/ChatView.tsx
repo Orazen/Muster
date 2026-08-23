@@ -38,6 +38,7 @@ import { showWorkingDots } from "@/lib/turn-tail";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { MessageBody } from "./MessageBody";
 import { CompactionDivider } from "./CompactionDivider";
+import { PrivacyNotice } from "./PrivacyNotice";
 import { OptionCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { Composer } from "./Composer";
@@ -686,6 +687,8 @@ const MessagesList = memo(function MessagesList({
               // The model-context summary marker — quiet, expandable, and
               // proof that nothing was deleted (scrolling still reaches it).
               return m.compaction ? <CompactionDivider data={m.compaction} /> : null;
+            case "privacy":
+              return m.privacy ? <PrivacyNotice privacy={m.privacy} /> : null;
             default:
               return (
                 <Bubble

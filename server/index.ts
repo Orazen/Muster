@@ -18,6 +18,7 @@ import {
   saveAttachment,
 } from "./attachments.ts";
 import type { JsonValue } from "./schema.ts";
+import { scrubForCloud } from "./privacy-shield.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import * as box from "./box.ts";
@@ -1720,16 +1721,50 @@ async function startTurn(
           : "";
 
       watchdog.watch(threadId, bot.id);
+
+      // Privacy Shield: when the bot opts in AND the engine is a cloud API
+      // driver (transcript-replay = prompt leaves the machine), rewrite
+      // this turn's text and every replayed history entry through the
+      // scrubber. CLI engines run locally and never need it. The counts go
+      // into the thread as a privacy message so masking is always visible,
+      // never silent — and only counts travel, never the masked values.
+      let outboundText = turnText;
+      let outboundTranscript = transcript;
+      if (bot.privacyShield === true && instance.adapter.capabilities.transcriptReplay === true) {
+        const turnScan = scrubForCloud(turnText);
+        outboundText = turnScan.text;
+        outboundTranscript = transcript.map((m) => ({ ...m, text: scrubForCloud(m.text).text }));
+        const totals = { secrets: 0, emails: 0, phones: 0 };
+        for (const f of turnScan.findings) totals[f.kind === "secret" ? "secrets" : f.kind === "email" ? "emails" : "phones"] += f.count;
+        if (totals.secrets + totals.emails + totals.phones > 0) {
+          store.appendMessage(threadId, {
+            role: "bot",
+            kind: "privacy",
+            text: `Privacy Shield masked ${[
+              totals.secrets > 0 && `${totals.secrets} secret${totals.secrets === 1 ? "" : "s"}`,
+              totals.emails > 0 && `${totals.emails} email${totals.emails === 1 ? "" : "s"}`,
+              totals.phones > 0 && `${totals.phones} phone number${totals.phones === 1 ? "" : "s"}`,
+            ].filter(Boolean).join(", ")} before sending to the cloud model.`,
+            privacy: totals,
+          });
+        }
+      }
+
       await instance.adapter.sendTurn({
         threadId,
-        text: turnText,
+        // the shield's rewrite wins when active — raw turnText must never
+        // reach a cloud driver on a protected bot
+        text: bot.privacyShield === true && instance.adapter.capabilities.transcriptReplay === true ? outboundText : turnText,
         model,
         effort,
         // a rewound thread never resumes the abandoned branch's session
         // the active task's own session — another task's cursor would
         // resume the wrong conversation and defeat the context bubble
         resumeCursor: resume ? task.resumeCursors[instanceId] : undefined,
-        transcript,
+        transcript:
+          bot.privacyShield === true && instance.adapter.capabilities.transcriptReplay === true
+            ? outboundTranscript
+            : transcript,
         // Vision-capable API drivers get this turn's attached images as
         // base64 parts. Gated on the driver's own capability, not the
         // composer's: a CLI driver must never receive bytes (its prompt
