@@ -28,7 +28,9 @@ concurrency:
 jobs:
   trigger:
     runs-on: ubuntu-latest
-    if:
+    # NOTE: folded scalar, not a bare multiline value — a continuation line
+    # starting with `!` parses as a YAML tag and kills the whole workflow.
+    if: >-
       github.event.head_commit.message != 'chore: autodeploy trigger' &&
       !contains(github.event.head_commit.message, '[skip deploy]')
     steps:
