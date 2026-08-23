@@ -186,17 +186,33 @@ export function ApiKeyRow({
     if (saving || (!value.trim() && !configured)) return;
     setSaving(true);
     setError(null);
-    const request = section === "composio" && window.ogb?.setCredential
-      ? window.ogb.setCredential("composioApiKey", value.trim())
-      : api("/api/config", {
-          method: "PUT",
-          body: JSON.stringify(SECTIONS[section].body(value.trim())),
-        });
-    request
+    // Cloud: write to the user's own encrypted vault. Desktop/self-host:
+    // keep the existing global config path.
+    const isCloud = !window.ogb; // browser session = cloud deployment
+    const vaultBody = JSON.stringify({ providerId: section, apiKey: value.trim() });
+
+    const request = isCloud
+      ? api("/api/user-keys", {
+          method: value.trim() ? "PUT" : "DELETE",
+          body: vaultBody,
+        }).catch(() =>
+          // Vault route absent (older server) — fall back to global config
+          api("/api/config", {
+            method: "PUT",
+            body: JSON.stringify(SECTIONS[section].body(value.trim())),
+          })
+        )
+      : section === "composio" && window.ogb?.setCredential
+        ? window.ogb.setCredential("composioApiKey", value.trim())
+        : api("/api/config", {
+            method: "PUT",
+            body: JSON.stringify(SECTIONS[section].body(value.trim())),
+          });
+    Promise.resolve(request)
       .then((status: ConfigStatus) => {
         dispatch({ type: "configStatus", config: status });
         setValue("");
-        onSaved?.(SECTIONS[section].flag(status));
+        onSaved?.(true);
       })
       .catch((e) => setError(e.message))
       .finally(() => setSaving(false));
