@@ -201,6 +201,20 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     track("onboarding_step", { step, name: STEP_LABELS[step] });
   }, [step]);
 
+  // Escape dismisses onboarding and persists the skip — the modal is
+  // full-screen with no backdrop click target, so keyboard was the only
+  // sane escape hatch (it previously had none at all).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      track("email_skipped");
+      setEmailGateDone(user?.id, "skipped");
+      onDone();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [user?.id, onDone]);
+
   useEffect(() => {
     if (step !== 1) return;
     let active = true;
@@ -368,7 +382,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         <button
           onClick={() => {
             track("email_skipped");
-            setStep(1);
+            // "Maybe later" means come back never: persist the gate so the
+            // modal stops reappearing on every reload (web audit 2026-08-23
+            // found it bouncing straight back because nothing was saved).
+            setEmailGateDone(user?.id, "skipped");
+            onDone();
           }}
           className="mt-3 text-[12px] text-ink-secondary hover:text-ink"
         >
