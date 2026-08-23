@@ -105,6 +105,16 @@ describe("createOpenAICompatibleDriver (generic factory)", () => {
         config: visionDriver.decodeConfig({}),
       })).adapter.capabilities).visionParts,
     ).toBe(true);
+    // One switch, two flags: the attach affordance unlocks with it.
+    expect(
+      (await (await visionDriver.create({
+        instanceId: "x2",
+        displayName: undefined,
+        environment: { VISION_API_KEY: "k" },
+        enabled: true,
+        config: visionDriver.decodeConfig({}),
+      })).adapter.capabilities).images,
+    ).toBe(true);
 
     vi.mocked(global.fetch).mockResolvedValue(streamResponse([sseChunk("ok")]));
     const instance = await visionDriver.create({
@@ -175,6 +185,16 @@ describe("createOpenAICompatibleDriver (generic factory)", () => {
         enabled: true,
         config: testDriver.decodeConfig({}),
       })).adapter.capabilities).visionParts,
+    ).toBe(false);
+    // ...and the composer affordance stays locked alongside it.
+    expect(
+      (await (await testDriver.create({
+        instanceId: "w",
+        displayName: undefined,
+        environment: { TEST_PROVIDER_API_KEY: "k" },
+        enabled: true,
+        config: testDriver.decodeConfig({}),
+      })).adapter.capabilities).images,
     ).toBe(false);
   });
 });

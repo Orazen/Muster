@@ -421,8 +421,13 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
             composioMcp: capabilityOverrides?.composioMcp ?? true,
             // every factory-built driver reads turn.transcript directly
             transcriptReplay: true,
-            // vision twins consume turn.images as multimodal parts; the
-            // rest never see the field (dispatch gates on this flag)
+            // Vision twins get ONE switch that does the whole job: `images`
+            // unlocks the composer's paste/drop affordance, `visionParts`
+            // makes dispatch hand this turn's attachments to sendTurn. A
+            // driver that accepted parts but refused the attach would be a
+            // dead feature; non-vision twins keep both off so the composer
+            // refuses politely instead of failing mid-turn.
+            images: vision === true,
             visionParts: vision === true,
           },
           sendTurn,

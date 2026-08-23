@@ -207,16 +207,16 @@ export interface ProviderAdapter {
      * connected apps). Same rule again: a key in the config says the user
      * HAS those connections, not that this driver can reach them. */
     composioMcp?: boolean;
-    /** True when the driver's engine can read image files it is given by
-     * path — the gate for the composer's paste/drop-image affordance. CLI
-     * engines get the path inside <attached-image/> and open it themselves;
-     * API drivers without vision (or without SendTurnInput.images yet) must
-     * leave this off so the UI refuses politely instead of silently
-     * degrading the bot's understanding. */
+    /** True when the driver's engine can take an image: CLI engines get
+     * the path inside <attached-image/> and open it themselves; vision API
+     * drivers receive turn.images parts instead. Gates the composer's
+     * paste/drop affordance — without it the UI refuses politely rather
+     * than silently degrading the bot's understanding. */
     images?: boolean;
-    /** True when the driver's sendTurn consumes turn.images as multimodal
-     * content parts (OpenAI-shaped chat APIs). Distinct from `images`, which
-     * means "CLI opens files by path" — an API driver never reads disk. */
+    /** API drivers only: sendTurn consumes turn.images as multimodal
+     * content parts (OpenAI-shaped chat APIs). Always paired with `images`
+     * true — one switch, two flags — so the composer affordance and the
+     * wire behavior can never disagree. */
     visionParts?: boolean;
     /** Effort levels this driver can pass to its CLI, ascending. Absent =
      * the driver cannot set effort, so the app never offers the control —
