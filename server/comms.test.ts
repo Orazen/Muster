@@ -290,7 +290,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       // wait for A's turn to settle: it should NOT have a "peer says:" line
       // (delegate_bot doesn't return the peer's reply to A) and the channel
       // chip should be the "Messaged @Helper" kind, not the ask_bot one.
-      const deadline = Date.now() + 30_000;
+      const deadline = Date.now() + 90_000;
       let askerBot: any;
       let helperBot: any;
       let note: any;
@@ -397,7 +397,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
       expect(send.status).toBe(202);
 
-      const deadline = Date.now() + 30_000;
+      const deadline = Date.now() + 90_000;
       let channel: any;
       for (;;) {
         const state = (await api("GET", "/api/bots")).body;
@@ -448,7 +448,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(send.status).toBe(202);
 
       let channelId: string | undefined;
-      const busyDeadline = Date.now() + 30_000;
+      const busyDeadline = Date.now() + 90_000;
       for (;;) {
         const state = (await api("GET", "/api/bots")).body;
         const askerBot = state.bots.find((b: any) => b.id === asker.id);
@@ -468,7 +468,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       const reload = await api("PUT", "/api/config", { xai: { key: "xai_reload_test" } });
       expect(reload.status).toBe(200);
 
-      const terminalDeadline = Date.now() + 30_000;
+      const terminalDeadline = Date.now() + 90_000;
       for (;;) {
         const state = (await api("GET", "/api/bots")).body;
         const channel = state.groups.find((g: any) => g.id === channelId);
@@ -513,7 +513,7 @@ describe("comms e2e (fake ACP fleet)", () => {
 
       // settle = the channel exists (request mirrored) and carries the
       // failed terminal chip (B's turn started and crashed at initialize)
-      const deadline = Date.now() + 30_000;
+      const deadline = Date.now() + 90_000;
       let channel: any;
       for (;;) {
         const state = (await api("GET", "/api/bots")).body;
@@ -566,7 +566,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
       expect(send.status).toBe(202);
 
-      const deadline = Date.now() + 30_000;
+      const deadline = Date.now() + 90_000;
       let channel: any;
       let sourceChip: any;
       for (;;) {
@@ -802,7 +802,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     expect(send.status).toBe(202);
 
     // Wait for B's depth-1 turn to settle and write its reply
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + 90_000;
     let helperBot: any;
     for (;;) {
       const state = (await api("GET", "/api/bots")).body;

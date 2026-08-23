@@ -1,0 +1,64 @@
+# Auto-deploy: every push to main ships.
+#
+# Dokploy only redeploys when `.deploy-trigger` changes (its dockerWebhook
+# endpoint rejects external calls with "Branch Not Match" regardless of
+# payload, so the trigger-file commit is the only working mechanism). This
+# workflow appends a timestamp to that file and pushes, which fires the
+# Dokploy GitHub webhook — the same thing a manual `chore: trigger
+# deployment` commit does.
+#
+# Loop protection (two independent guards):
+# 1. The job skips itself when the head commit is its own ("chore:
+#    autodeploy trigger").
+# 2. It also skips when the incoming push already touched
+#    `.deploy-trigger`, so manual trigger commits never double-fire.
+name: autodeploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: autodeploy
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    if:
+      github.event.head_commit.message != 'chore: autodeploy trigger' &&
+      !contains(github.event.head_commit.message, '[skip deploy]')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip when this push already bumped .deploy-trigger
+        id: check
+        run: |
+          before="${{ github.event.before }}"
+          if git cat-file -e "$before" 2>/dev/null; then
+            base="$before"
+          else
+            base="$(git rev-parse HEAD^)"
+          fi
+          if git diff --name-only "$base" "${{ github.sha }}" | grep -qx '.deploy-trigger'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump .deploy-trigger
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" >> .deploy-trigger
+          git config user.name "muster-autodeploy"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .deploy-trigger
+          git commit -m "chore: autodeploy trigger"
+          git push origin main
