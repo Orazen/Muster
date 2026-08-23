@@ -36,6 +36,7 @@ export function spawnCli(
     // win32: taskkill /T does the reaping instead (see killCliTree)
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
   }) as ChildProcessByStdio<Writable, Readable, Readable>;
+  trackChild(child, cli);
 
   // A write to a dying child's stdin fails differently per platform, and one
   // of the ways is fatal. On POSIX the kill is synchronous, the stream is
@@ -108,6 +109,58 @@ export function killCliTree(child: ChildProcess): void {
       /* already gone */
     }
   }
+}
+
+// ── process death journal (liveness reaper) ─────────────────────────────
+// Every driver process flows through spawnCli, so this is the one choke
+// point where "a CLI died" is observable. The journal records each child's
+// spawn and its exit; the liveness reaper (server/liveness.ts) reads deaths
+// from here and attributes them to in-flight turns. `exit` — not `close` —
+// is the signal that matters: exit fires when the process itself is gone
+// even if a detached grandchild inherited the stdio pipes and keeps them
+// open, which is exactly the hang case (`close` would never fire) the
+// reaper exists to catch.
+export interface ProcessDeath {
+  pid: number;
+  /** the cli string as spawned — used for a human-readable crash note */
+  cli: string;
+  /** wall-clock spawn stamp; the liveness reaper correlates this against
+   * a watched turn's startedAt (see server/liveness.ts) */
+  spawnedAt: number;
+  /** monotonic sequence of the exit, from the same counter as deathMark */
+  exitedAtSeq: number;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
+let seqCounter = 0;
+const nextSeq = () => ++seqCounter;
+/** Monotonic mark: pass to deathsSince() to observe only newer exits. */
+export const deathMark = () => nextSeq();
+const MAX_DEATHS = 256;
+const deadProcesses: ProcessDeath[] = [];
+
+/** Deaths recorded strictly after the given mark, oldest first. */
+export function deathsSince(mark: number): ProcessDeath[] {
+  return deadProcesses.filter((d) => d.exitedAtSeq > mark);
+}
+
+function trackChild(child: ChildProcessByStdio<Writable, Readable, Readable>, cli: string): void {
+  const pid = child.pid;
+  if (!pid) return; // spawn failed synchronously — nothing to track
+  const spawnedAt = Date.now();
+  child.once("exit", (code, signal) => {
+    deadProcesses.push({ pid, cli, spawnedAt, exitedAtSeq: nextSeq(), code, signal });
+    // bounded memory: a long session spawns many short-lived helper CLIs
+    if (deadProcesses.length > MAX_DEATHS) deadProcesses.splice(0, deadProcesses.length - MAX_DEATHS);
+  });
+}
+
+/** Human wording for an unexpected engine exit, for crash notes. */
+export function describeProcessDeath(death: ProcessDeath): string {
+  if (death.signal) return `${death.cli} was killed by ${death.signal}`;
+  if (death.code === 0) return `${death.cli} exited cleanly mid-turn`;
+  return `${death.cli} exited with code ${death.code ?? "?"}`;
 }
 
 /** Per-turn broker channel: unix socket on POSIX, named pipe on Windows

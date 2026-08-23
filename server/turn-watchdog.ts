@@ -82,6 +82,12 @@ export class TurnWatchdog {
     return this.turns.has(threadId);
   }
 
+  /** Current in-flight turns, for the liveness reaper's sweep. Copies, so
+   * callers cannot mutate the watchdog's bookkeeping. */
+  snapshot(): WatchedTurn[] {
+    return [...this.turns.values()].map((t) => ({ ...t }));
+  }
+
   /** Visible for tests; the interval calls this. */
   sweep(): void {
     const at = this.now();

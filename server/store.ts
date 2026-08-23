@@ -408,6 +408,9 @@ export class Store {
   bots: BotRecord[] = [];
   groups: GroupRecord[] = [];
   private threads = new Map<string, ThreadState>();
+  /** Bots that were mid-turn when the previous process exited; consumed by
+   * takeStartupLosses() so the server can reconcile them visibly. */
+  private startupLosses: string[] = [];
   private defaultSelection: () => ModelSelection;
   private listeners = new Set<(change: StoreChange) => void>();
 
@@ -426,6 +429,8 @@ export class Store {
     }
     // busy never survives a restart — no turn does either. Rooms saved
     // before default responders existed adopt their first member as lead.
+    // Bots that were mid-turn are remembered (takeStartupLosses) so the
+    // server can say so in their thread instead of silently idling them.
     let botsMigrated = false;
     let chiefSeen = false;
     let groupsMigrated = false;
@@ -433,7 +438,10 @@ export class Store {
       // transient state never survives a restart — and if a previous
       // process died mid-turn, bots.json still says busy/working; persist
       // the reset so the next load does not read it again
-      if (b.busy || (b.activity !== undefined && b.activity !== "idle")) botsMigrated = true;
+      if (b.busy || (b.activity !== undefined && b.activity !== "idle")) {
+        botsMigrated = true;
+        this.startupLosses.push(b.id);
+      }
       b.busy = false;
       b.activity = "idle";
     }
@@ -816,6 +824,14 @@ export class Store {
     this.saveBots();
     this.emit({ type: "bot", botId: id });
     return bot;
+  }
+
+  /** Bots that were persisted mid-turn when this process loaded. Returned
+   * once; the server appends a visible reconciliation note to each thread. */
+  takeStartupLosses(): string[] {
+    const lost = this.startupLosses;
+    this.startupLosses = [];
+    return lost;
   }
 
   /** The one way runtime state changes. Sets `activity` and derives `busy`

@@ -6,6 +6,9 @@
 // turn. Failure modes mirror how real ACP agents misbehave:
 //
 //   FAKE_ACP_MODE   happy (default) | empty-reply | exit-early | hang | no-auth | auth-required | permission
+//                   | die-midturn (engine exits code 9 mid-prompt while a
+//                     grandchild holds stdio open — the pipe-held crash the
+//                     liveness reaper exists for)
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
 //                   | ask-peer (spawn the injected "agents" MCP server from
@@ -55,6 +58,9 @@ const configOptions = () =>
       ]
     : null;
 const argv = process.argv.slice(2);
+// FAKE_ACP_PIDFILE  path to write this process's pid, so a test can kill
+//                   the engine externally mid-turn (liveness reaper e2e)
+if (process.env.FAKE_ACP_PIDFILE) writeFileSync(process.env.FAKE_ACP_PIDFILE, String(process.pid));
 if (process.env.FAKE_ACP_DUMP) {
   const dumpEnv = Object.fromEntries(
     [
@@ -270,6 +276,21 @@ function handle(msg: any) {
         // never resolve the prompt — lets tests exercise interrupt
         setInterval(() => {}, 1_000);
         return;
+      }
+      if (mode === "die-midturn") {
+        // Simulates the crash the liveness reaper exists for: the engine
+        // dies mid-turn, but a grandchild inherits stdout/stderr, so the
+        // client sees neither a result nor an EOF — no close event ever
+        // fires and the driver hangs. The grandchild's pid is journalled
+        // so the test can reap it.
+        const gc = spawn(process.execPath, ["-e", "setInterval(() => {}, 1 << 30)"], {
+          stdio: ["ignore", process.stdout, process.stderr],
+        });
+        if (process.env.FAKE_ACP_PIDFILE) {
+          writeFileSync(`${process.env.FAKE_ACP_PIDFILE}.gc`, String(gc.pid));
+        }
+        gc.unref();
+        process.exit(9);
       }
       const complete = () => {
         recordMethod("session/prompt.result");

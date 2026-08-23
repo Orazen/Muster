@@ -43,7 +43,9 @@ import {
   NATIVE_DIR,
 } from "./config.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
-import { describeSpawnFailure, execCli } from "./procs.ts";
+import { describeSpawnFailure, deathsSince, describeProcessDeath, execCli } from "./procs.ts";
+import { LivenessReaper } from "./liveness.ts";
+import type { WatchedTurn } from "./turn-watchdog.ts";
 import { buildModelContext } from "./model-context.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import { isEffortLevel, type RequestOutcome, type RuntimeEvent } from "./contracts.ts";
@@ -283,6 +285,20 @@ async function defaultSelection(forUserId?: string) {
 let bootSelection = { instanceId: "", model: "" };
 const store = new Store(() => bootSelection);
 bootSelection = await defaultSelection();
+
+// Startup reconciliation: a bot persisted mid-turn lost its turn when the
+// previous process exited — no process survived, so there is nothing to
+// probe. Instead of idling those bots silently, say so in their thread:
+// the user deserves to know the task they handed off died with the app.
+for (const botId of store.takeStartupLosses()) {
+  const bot = store.bot(botId);
+  if (!bot) continue;
+  store.appendMessage(bot.threadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: "error: the app restarted while this task was running — its turn did not survive", ok: false },
+  });
+}
 
 /**
  * Resolve the live provider instance for a bot's stored model selection,
@@ -678,43 +694,74 @@ const repeats = new RepeatDetector({ thresholds: [5, 10, 20], maxKeysPerThread: 
 // activity-based, so an hour-long turn that keeps streaming is never
 // touched, and turns parked on a human approval are exempt.
 const TURN_STALL_MS = Math.max(60_000, Number(process.env.OMB_TURN_STALL_MS) || 20 * 60_000);
+
+/** Settle a turn the harness had to take away from its engine — stall or
+ * crash. One path so both losses behave identically: delegation watchers
+ * resolve, queued sends drain, group ownership returns, and the bot idles
+ * after a short grace that keeps the dying process as the turn's owner. */
+function settleLostTurn(turn: WatchedTurn, note: string): void {
+  repeats.settle(turn.threadId);
+  store.appendMessage(turn.threadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: `error: ${note}`, ok: false },
+  });
+  finalizeDelegationWatch(turn.threadId, false, "", "Delegated turn was lost");
+  turnUsage.delete(turn.threadId);
+  // ACP interruption settles within five seconds; other adapters settle
+  // sooner. Keep ownership during that grace period so another turn cannot
+  // overlap the process we are stopping. The normal turn.completed fold
+  // clears it first when the adapter responds.
+  const release = setTimeout(() => {
+    const group = store.groupByThread(turn.threadId);
+    const speaker = groupSpeakers.get(turn.threadId);
+    if (group && group.busyBotId === turn.botId && speaker?.botId === turn.botId) {
+      groupSpeakers.delete(turn.threadId);
+      store.patchGroup(group.id, { busyBotId: null, unread: true });
+    }
+    const currentBot = store.bot(turn.botId);
+    if (currentBot?.busy) {
+      stopScreenPoller(currentBot.id);
+      store.setActivity(currentBot.id, "idle");
+    }
+  }, 6_000);
+  release.unref?.();
+}
+
 const watchdog = new TurnWatchdog({
   stallMs: TURN_STALL_MS,
   checkMs: 60_000,
   onStall: (turn) => {
-    repeats.settle(turn.threadId);
-    const bot = store.bot(turn.botId);
-    const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
+    const instance = (() => {
+      const bot = store.bot(turn.botId);
+      return bot ? registry.get(bot.modelSelection.instanceId) : null;
+    })();
     void instance?.adapter.interruptTurn(turn.threadId).catch(() => {});
     const minutes = Math.round(TURN_STALL_MS / 60_000);
-    store.appendMessage(turn.threadId, {
-      role: "bot",
-      kind: "activity",
-      tool: { name: `error: no activity for ${minutes} minutes — the turn was stopped`, ok: false },
-    });
-    finalizeDelegationWatch(turn.threadId, false, "", "Delegated turn stalled and was stopped");
-    turnUsage.delete(turn.threadId);
-    // ACP interruption settles within five seconds; other adapters settle
-    // sooner. Keep ownership during that grace period so another turn cannot
-    // overlap the process we are stopping. The normal turn.completed fold
-    // clears it first when the adapter responds.
-    const release = setTimeout(() => {
-      const group = store.groupByThread(turn.threadId);
-      const speaker = groupSpeakers.get(turn.threadId);
-      if (group && group.busyBotId === turn.botId && speaker?.botId === turn.botId) {
-        groupSpeakers.delete(turn.threadId);
-        store.patchGroup(group.id, { busyBotId: null, unread: true });
-      }
-      const currentBot = store.bot(turn.botId);
-      if (currentBot?.busy) {
-        stopScreenPoller(currentBot.id);
-        store.setActivity(currentBot.id, "idle");
-      }
-    }, 6_000);
-    release.unref?.();
+    settleLostTurn(turn, `no activity for ${minutes} minutes — the turn was stopped`);
   },
 });
 watchdog.start();
+
+// The fast sibling of the stall watchdog: when a driver's PROCESS dies
+// mid-turn (killed externally, OOM-killed, crashed) no terminal event may
+// ever reach the harness — a detached grandchild can hold the stdio pipes
+// open forever, leaving the driver awaiting a close that never comes and
+// the bot busy until the 20-minute stall fires. The reaper notices the
+// exit on the next tick instead and settles with an honest crash note.
+const reaper = new LivenessReaper({
+  checkMs: 5_000,
+  deathsSince,
+  snapshotTurns: () => watchdog.snapshot(),
+  onLost: (turn, death) => {
+    const bot = store.bot(turn.botId);
+    const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
+    void instance?.adapter.interruptTurn(turn.threadId).catch(() => {});
+    watchdog.settle(turn.threadId);
+    settleLostTurn(turn, `${describeProcessDeath(death)} mid-turn — the turn was stopped`);
+  },
+});
+reaper.start();
 
 bus.subscribe((event: RuntimeEvent) => {
   if (event.type === "request.opened") watchdog.setWaitingOnHuman(event.threadId, true);
@@ -4532,6 +4579,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     localVmIdle.cancel();
     watchdog.stop();
+    reaper.stop();
     routines?.stop();
     webhookIngress?.server.close();
     void registry.disposeAll().finally(() => process.exit(0));
