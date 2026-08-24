@@ -323,6 +323,11 @@ expose it beyond your machine. There are **no accounts** — see
 [docs/self-host.md](docs/self-host.md) for configuration, security, and model
 setup.
 
+> **Don't want to run anything?** [Muster Cloud](https://muster.orazen.online)
+> is this same app, hosted — from **$20/month per cloud computer**, with the
+> Privacy Shield included. Self-hosting stays free forever; the hosted tier pays
+> for the computers, not the software.
+
 ### Optional credentials
 
 These credentials are optional — local chat works without them. Paste a key once in **App Settings** (gear
