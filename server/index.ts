@@ -369,8 +369,11 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
     // may only ride its own owner's engine, so user-b can never spend
     // user-a's key by pointing modelSelection at it.
     const owner = userInstanceOwner(bot.modelSelection.instanceId);
-    if (owner !== null && bot.ownerId !== owner) return null;
-    return direct;
+    if (owner === null || bot.ownerId === owner) return direct;
+    // A foreign selection (legacy data, merged accounts, deleted users)
+    // must not dead-end with "unavailable": fall through to the heal below,
+    // which re-points the bot at an instance ITS OWNER controls. Isolation
+    // holds — every healed target ends in this bot's own ownerId.
   }
   // Only heal a genuinely never-set selection ("") — the boot-time race
   // this function exists to fix. A non-empty instanceId that fails to
