@@ -3,13 +3,14 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { AuthShell, authCardBox } from "@/components/AuthShell";
 
-/** Google-only sign-in. Email/password is gone from the product surface:
- * one identity provider, one button — on web and in the packaged desktop app
- * (where the pairing bridge below IS the Google path). If a deployment has
- * no Google OAuth configured, whatever providers it does have render as a
- * last resort rather than bricking the install. */
+/** Three ways in, on web and in the packaged desktop app alike:
+ *   1. Continue with Google        (when the deployment has OAuth configured)
+ *   2. Pairing code bridge         (desktop; code minted on the cloud /pair)
+ *   3. Email + password            (always available; sign-up lives at /sign-up)
+ * Whatever a deployment lacks renders as a last resort rather than bricking
+ * the install — no path here is ever hidden behind another one. */
 export function LoginPage() {
-  const { capabilities, signInWithProvider, user, loading: authLoading, signOut } = useAuth();
+  const { capabilities, signInWithProvider, signIn, user, loading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = params.get("next") ?? "/app";
@@ -31,6 +32,33 @@ export function LoginPage() {
   // desktop pairing bridge: code typed from muster.orazen.online/pair
   const [pairCode, setPairCode] = useState("");
   const [pairBusy, setPairBusy] = useState(false);
+
+  // email + password: first-class path, not a fallback
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+
+  async function handleEmailSignIn(e?: React.FormEvent) {
+    e?.preventDefault();
+    setError("");
+    if (!email.trim() || !password) {
+      setError("enter your email and password");
+      return;
+    }
+    setEmailBusy(true);
+    try {
+      const result = await signIn(email.trim(), password);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      navigate(next.startsWith("/") ? next : "/app");
+    } catch {
+      setError("could not reach the server");
+    } finally {
+      setEmailBusy(false);
+    }
+  }
 
   async function handlePair() {
     setError("");
@@ -118,6 +146,45 @@ export function LoginPage() {
             {googlePending ? "Connecting…" : "Continue with Google"}
           </button>
         )}
+
+        <form
+          onSubmit={(e) => void handleEmailSignIn(e)}
+          className="space-y-2.5 rounded-xl border border-neutral-300 bg-white p-4 shadow-sm"
+        >
+          <p className="text-center text-[12px] font-medium text-neutral-700">or continue with email</p>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            aria-label="Email"
+            autoComplete="email"
+            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-black placeholder:text-neutral-400 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            aria-label="Password"
+            autoComplete="current-password"
+            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-black placeholder:text-neutral-400 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
+          />
+          <button
+            type="submit"
+            disabled={emailBusy}
+            className="w-full rounded-lg bg-[#1f1f1f] py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f1f1f]/90 disabled:opacity-50"
+          >
+            {emailBusy ? "Signing in…" : "Sign in with email"}
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate(`/sign-up?next=${encodeURIComponent(next)}`)}
+            className="w-full text-center text-[12px] font-medium text-[#f0460e] hover:text-[#f0460e]/80"
+          >
+            New here? Create an account
+          </button>
+        </form>
 
         {capabilities.cloudPairing && (
           // deliberately NOT inside a <form>: nested forms are illegal HTML.
