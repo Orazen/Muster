@@ -10,9 +10,12 @@ export const OpenRouterDriver = createOpenAICompatibleDriver({
   models: {
     default: "openai/gpt-4o",
     options: [
-      { id: "openai/gpt-4o", label: "GPT-4o (via OpenRouter)" },
-      { id: "anthropic/claude-sonnet-4.5", label: "Claude Sonnet 4.5 (via OpenRouter)" },
-      { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro (via OpenRouter)" },
+      // Every entry here is multimodal — flagged so modelAcceptsImages
+      // unlocks image attach for exactly these.
+      { id: "openai/gpt-4o", label: "GPT-4o (via OpenRouter)", vision: true },
+      { id: "openai/gpt-4o-mini", label: "GPT-4o Mini (via OpenRouter)", vision: true },
+      { id: "anthropic/claude-sonnet-4.5", label: "Claude Sonnet 4.5 (via OpenRouter)", vision: true },
+      { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro (via OpenRouter)", vision: true },
     ],
   },
   quickModel: "openai/gpt-4o-mini",

@@ -290,6 +290,7 @@ export function LandingPage() {
           <div className="flex items-center gap-6 max-sm:hidden">
             <a href="#features" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">Features</a>
             <a href="#engines" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">Engines</a>
+            <a href="#pricing" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">Pricing</a>
             <a href="#download" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">Download</a>
             <a href="https://github.com/Orazen/Muster" target="_blank" rel="noopener" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">GitHub</a>
             {user ? (
@@ -486,8 +487,63 @@ export function LandingPage() {
           </div>
         </section>
 
+        {/* ── Pricing ── */}
+        <section id="pricing" className="border-y border-white/[0.06] bg-[#141414] px-6 py-20 max-sm:py-12">
+          <div className="mx-auto max-w-6xl">
+            <Reveal>
+              <div className="mb-3 text-center text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Pricing</div>
+              <h2 className="text-center text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Free to self-host. Pay for the hands.</h2>
+              <p className="mx-auto mt-4 max-w-xl text-center text-[17px] leading-relaxed text-[#a1a1a6]">
+                Bots are free and unlimited. The metered unit is the cloud computer — the Linux desktop your bot actually drives — so you only pay when a bot gets real work done.
+              </p>
+            </Reveal>
+            <div className="mt-10 grid gap-4 md:grid-cols-3">
+              <Reveal>
+                <div className="flex h-full flex-col rounded-2xl border border-white/[0.08] bg-[#0a0a0a] p-6">
+                  <div className="text-[15px] font-semibold text-[#f5f5f5]">Self-host</div>
+                  <div className="mt-3 text-[36px] font-bold leading-none tracking-tight text-[#f5f5f5]">$0</div>
+                  <div className="mt-1 text-[13px] text-[#a1a1a6]">forever, on your own hardware</div>
+                  <ul className="mt-5 space-y-2 text-[13.5px] text-[#a1a1a6]">
+                    <li>✓ Every feature, nothing withheld</li>
+                    <li>✓ Unlimited bots & cloud computers</li>
+                    <li>✓ One Docker command to start</li>
+                  </ul>
+                  <a href="https://github.com/Orazen/Muster" target="_blank" rel="noopener" className="mt-6 inline-flex justify-center rounded-xl border border-white/[0.08] bg-white/[0.02] px-5 py-2.5 text-[14px] font-semibold text-[#f5f5f5] transition-all hover:border-white/20">Star on GitHub</a>
+                </div>
+              </Reveal>
+              <Reveal delay={0.05}>
+                <div className="relative flex h-full flex-col rounded-2xl border border-[rgba(240,70,14,.45)] bg-[#0a0a0a] p-6 shadow-[0_0_40px_rgba(240,70,14,.12)]">
+                  <div className="absolute -top-3 left-6 rounded-full bg-[#f0460e] px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">Most popular</div>
+                  <div className="text-[15px] font-semibold text-[#f5f5f5]">Cloud · Monthly</div>
+                  <div className="mt-3 text-[36px] font-bold leading-none tracking-tight text-[#f5f5f5]">$20<span className="text-[16px] font-medium text-[#a1a1a6]"> /cloud computer /mo</span></div>
+                  <div className="mt-1 text-[13px] text-[#a1a1a6]">hosted, managed, ready in minutes</div>
+                  <ul className="mt-5 space-y-2 text-[13.5px] text-[#a1a1a6]">
+                    <li>✓ No servers, no Docker, no setup</li>
+                    <li>✓ Privacy Shield included</li>
+                    <li>✓ Scale count up or down anytime</li>
+                  </ul>
+                  <Link to={user ? "/app" : "/sign-up"} className="mt-6 inline-flex justify-center rounded-xl bg-[#f0460e] px-5 py-2.5 text-[14px] font-semibold text-white shadow-[0_8px_24px_rgba(240,70,14,.28)] transition-all hover:-translate-y-px">Start with Muster Cloud</Link>
+                </div>
+              </Reveal>
+              <Reveal delay={0.1}>
+                <div className="flex h-full flex-col rounded-2xl border border-white/[0.08] bg-[#0a0a0a] p-6">
+                  <div className="text-[15px] font-semibold text-[#f5f5f5]">Cloud · Annual</div>
+                  <div className="mt-3 text-[36px] font-bold leading-none tracking-tight text-[#f5f5f5]">$192<span className="text-[16px] font-medium text-[#a1a1a6]"> /cloud computer /yr</span></div>
+                  <div className="mt-1 text-[13px] text-[#ff7a45]">two months free vs monthly</div>
+                  <ul className="mt-5 space-y-2 text-[13.5px] text-[#a1a1a6]">
+                    <li>✓ Everything in Monthly</li>
+                    <li>✓ Locked-in rate for the year</li>
+                    <li>✓ Cancel anytime from the billing portal</li>
+                  </ul>
+                  <Link to={user ? "/app" : "/sign-up"} className="mt-6 inline-flex justify-center rounded-xl border border-white/[0.08] bg-white/[0.02] px-5 py-2.5 text-[14px] font-semibold text-[#f5f5f5] transition-all hover:border-white/20">Go annual</Link>
+                </div>
+              </Reveal>
+            </div>
+          </div>
+        </section>
+
         {/* ── Download ── */}
-        <section id="download" className="border-y border-white/[0.06] bg-[#141414] px-6 py-20 max-sm:py-12">
+        <section id="download" className="px-6 py-20 max-sm:py-12">
           <div className="mx-auto max-w-6xl">
             <Reveal>
               <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Download</div>

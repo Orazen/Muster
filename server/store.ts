@@ -764,7 +764,7 @@ export class Store {
 
   createBot(
     profile: Partial<
-      Pick<BotRecord, "name" | "title" | "description" | "color" | "character" | "mascotExpression" | "modelSelection" | "ownerId">
+      Pick<BotRecord, "name" | "title" | "description" | "color" | "character" | "mascotExpression" | "modelSelection" | "ownerId" | "privacyShield">
     > = {},
     opts: {
       /** false = no greeting/onboarding seed. Imported bots must not open
@@ -780,6 +780,11 @@ export class Store {
       title: profile.title ?? "",
       description: profile.description ?? "",
       notifications: true,
+      // Privacy Shield defaults ON: new bots scrub PII and secrets out of any
+      // transcript replay before it reaches a cloud model (the shield is a
+      // no-op for local drivers, so self-hosters lose nothing). Existing bots
+      // keep whatever their owner chose — this only moves the starting point.
+      privacyShield: profile.privacyShield ?? true,
       // Brand defaults: every teammate musters in as the orange star unless a
       // caller (onboarding wizard, team import) says otherwise.
       color: profile.color ?? "orange",

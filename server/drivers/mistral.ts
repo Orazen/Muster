@@ -12,6 +12,9 @@ export const MistralDriver = createOpenAICompatibleDriver({
       { id: "mistral-large-latest", label: "Mistral Large" },
       { id: "mistral-medium-latest", label: "Mistral Medium" },
       { id: "codestral-latest", label: "Codestral" },
+      // Pixtral is Mistral's multimodal line — flagged for modelAcceptsImages.
+      { id: "pixtral-large-latest", label: "Pixtral Large (vision)", vision: true },
+      { id: "pixtral-12b-2409", label: "Pixtral 12B (vision)", vision: true },
     ],
   },
   quickModel: "mistral-medium-latest",
