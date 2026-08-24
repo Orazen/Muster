@@ -57,6 +57,9 @@ model, computer, and connected apps — open, local-first, and running on the ag
   versioned build or wrapper) in **Settings → Engines**.
 - **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
   events live in `~/.muster`, not a cloud.
+- **Privacy Shield built in.** When a transcript is replayed to a cloud model, emails, phone numbers, and
+  secrets are scrubbed first — deterministically, with a counts-only receipt in the thread. Your bot keeps
+  context; the cloud never sees the raw data.
 - **Agents with hands.** Each bot can get a real computer — a cloud Linux desktop it drives while you watch
   live, or your own Mac — plus 500+ connected apps through Composio.
 
