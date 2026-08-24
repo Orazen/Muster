@@ -134,7 +134,10 @@ export function LoginPage() {
                 onChange={(e) => setPairCode(e.target.value.toUpperCase())}
                 placeholder="PAIRING CODE"
                 aria-label="Pairing code"
-                maxLength={8}
+                // Why. 8 fits generated codes, but any longer server-side code
+                // truncated SILENTLY here and read as "isn't valid" forever.
+                // Headroom costs nothing; wrong codes still fail loudly.
+                maxLength={12}
                 autoComplete="off"
                 className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 font-mono text-sm uppercase tracking-[0.25em] text-black placeholder:text-neutral-400 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
               />
