@@ -396,6 +396,7 @@
         <a href="#privacy">Privacy</a>
         <a href="#engines">Engines</a>
         <a href="#pricing">Pricing</a>
+        <a href="#compare">Compare</a>
         <a href="#download">Download</a>
       </nav>
     </div>
@@ -419,6 +420,7 @@
           <a href="#privacy">Privacy</a>
           <a href="#engines">Engines</a>
           <a href="#pricing">Pricing</a>
+          <a href="#compare">Compare</a>
           <a href="#download">Download</a>
           <a href="https://github.com/Orazen/Muster" target="_blank" rel="noreferrer">GitHub</a>
           <a href="/app">Open Muster</a>
@@ -847,6 +849,159 @@
         </div>
       </div>
     </section>
+
+<!-- ============================================================
+     Competitor comparison section for the Muster landing page.
+     Drop inside <main><div class="container"> next to the other
+     <section class="section"> blocks. Uses the page's :root vars
+     (--line, --ink, --muted, --accent-*) and existing utility
+     classes (.section, .section-intro, .eyebrow, .section-heading,
+     .section-copy). Every data cell carries a comment citing the
+     exact source line it was verified against.
+     ============================================================ -->
+<section id="compare" class="section">
+  <div class="section-intro">
+    <div class="eyebrow">Compare</div>
+    <h2 class="section-heading">Four teams are building this. Here’s the honest difference.</h2>
+    <p class="section-copy">
+      Every fact below is taken from each project’s public README, checked line by line.
+      Where a README doesn’t answer, the cell stays empty instead of guessing.
+    </p>
+  </div>
+
+  <div style="margin-top:40px;overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:var(--shadow-soft);">
+    <table style="min-width:900px;width:100%;border-collapse:collapse;font-size:14.5px;line-height:1.5;text-align:left;">
+      <thead>
+        <tr>
+          <!-- Column label cell -->
+          <th scope="col" aria-label="Feature" style="padding:16px 18px;border-bottom:1px solid var(--line);"></th>
+          <!-- Source: muster-audit/README.md L5 (# Muster) -->
+          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--accent-line);background:linear-gradient(to bottom, var(--accent-wash), var(--accent-wash-2));color:var(--accent-soft);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Muster</th>
+          <!-- Source: rival-osaurus/README.md L5 (<h1>Osaurus</h1>) -->
+          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--line);color:var(--ink);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Osaurus</th>
+          <!-- Source: rival-rakazo/README.md L1 (# Rakazo) -->
+          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--line);color:var(--ink);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Rakazo</th>
+          <!-- Source: rival-openbot/README.md L3 (# OpenBot) -->
+          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--line);color:var(--ink);font-weight:600;font-size:15px;letter-spacing:-0.01em;">OpenBot</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <tr>
+          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Platforms</th>
+          <!-- Source: muster-audit/README.md L257-L263 (macOS/Windows/Linux downloads), L313-L319 (self-host web via Docker) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">macOS · Windows · Ubuntu · Web (self-host)</td>
+          <!-- Source: rival-osaurus/README.md L24 (badge “Platform macOS (Apple Silicon)”), L49, L69 (requires macOS 15.5+ Apple Silicon) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">macOS (Apple Silicon)</td>
+          <!-- Source: rival-rakazo/README.md L8-L10 (“available on the web, as an Electron desktop app, and through an Expo mobile app”) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Web · Desktop (Electron) · Mobile (Expo)</td>
+          <!-- Source: rival-openbot/README.md L34 (“runs inside your own infrastructure. Docker Compose brings up every part”), L95 (web UI on localhost:3010) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Web, self-hosted (Docker)</td>
+        </tr>
+
+        <tr>
+          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">License</th>
+          <!-- Source: muster-audit/README.md L23 (BSL 1.1 badge), L398-L405 (Business Source License 1.1, converts to Apache 2.0 after 2030-08-19) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">BSL 1.1 (source-available)</td>
+          <!-- Source: rival-osaurus/README.md L53 (“MIT licensed”), L359-L361 (License: MIT) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">MIT</td>
+          <!-- Source: rival-rakazo/README.md L145 (“licensed under the Apache License 2.0”) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Apache-2.0</td>
+          <!-- Source: rival-openbot/README.md L11 (License: MIT badge), L345-L347 (MIT © CopilotKit) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">MIT</td>
+        </tr>
+
+        <tr>
+          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Self-host free</th>
+          <!-- Source: muster-audit/README.md L326-L329 (“Self-hosting stays free forever”), L312-L319 (Docker self-host guide) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Yes — free forever</td>
+          <!-- Source: rival-osaurus/README.md L9 (“Fully offline. Open source.”), L53 (free local Mac app, MIT) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Yes — free local app</td>
+          <!-- Source: rival-rakazo/README.md L42-L72 (Docker Compose + pnpm quick start), L78/L131 (self-hosting guide) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Yes (Docker Compose)</td>
+          <!-- Source: rival-openbot/README.md L30 (single-user env admits admin on fresh clone), L53-L55 (Docker requirements; Intelligence free plan available) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Yes (Docker Compose)</td>
+        </tr>
+
+        <tr>
+          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Hosted tier available</th>
+          <!-- Source: muster-audit/README.md L326-L329 (Muster Cloud hosted tier at muster.orazen.online) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Yes — Muster Cloud</td>
+          <!-- Source: rival-osaurus/README.md L151 (“Osaurus Router is the hosted path — pay-as-you-go with credits”; hosted model routing, not a hosted app) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Model routing only (Router, pay-as-you-go)</td>
+          <!-- Not stated: rival-rakazo/README.md links rakazo.com (L12) but describes no hosted tier or plans -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
+          <!-- Not stated: rival-openbot/README.md describes self-hosted deployment only; no hosted tier mentioned -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
+        </tr>
+
+        <tr>
+          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Price</th>
+          <!-- Source: muster-audit/README.md L327-L328 (“from $20/month per cloud computer”); www/index.html L694 ($20/mo), L706 ($192/yr annual) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Published: $20/mo per cloud computer · $192/yr · self-host free</td>
+          <!-- Source: rival-osaurus/README.md L53 (MIT, free app), L151 (Router: “pay-as-you-go with credits”) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Free app; Router pay-as-you-go credits</td>
+          <!-- Not stated: rival-rakazo/README.md contains no pricing; self-host is free under Apache-2.0 (L145) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
+          <!-- Not stated: rival-openbot/README.md states no product price; CopilotKit Intelligence dependency has a free plan (L55) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
+        </tr>
+
+        <tr>
+          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Privacy tech</th>
+          <!-- Source: muster-audit/www/index.html L531-L553 (Privacy Shield: on-device scrubbing of emails/phones/secrets before cloud models, deterministic masking, counts-only receipt per turn) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">On-device Privacy Shield — scrubs emails, phones, secrets before any cloud model sees them; counts-only receipts per turn</td>
+          <!-- Source: rival-osaurus/README.md L107 (on-device privacy filter: classifier + regex scrubbing, fail-closed send block, wire-level verification in Insights panel) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">On-device privacy filter (classifier + regex), fail-closed scrubbing, wire-level verification</td>
+          <!-- Source: rival-rakazo/README.md L52 (ENCRYPTION_KEY), L58-L59 (“Connector credentials are encrypted on the server and are never returned by the API”) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Connector credentials encrypted server-side, never returned by the API</td>
+          <!-- Source: rival-openbot/README.md L143-L156 (gateway decides + records every action, CEL policy fail-closed, readable audit trail, credentials encrypted at rest, secrets never enter transcript) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Policy gateway + audit trail, fail-closed CEL rules, encrypted credentials, secrets kept out of transcripts</td>
+        </tr>
+
+        <tr>
+          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Computer providers</th>
+          <!-- Source: muster-audit/README.md L60-L61 (cloud Linux desktop or your own Mac), L186 (Box / box.ascii.dev cloud computer agent) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Cloud Linux desktop per bot (Box) or your own machine</td>
+          <!-- Source: rival-osaurus/README.md L83-L99 (local sandbox Linux VM via Apple Containerization), L127 (per-agent WebKit browser session) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Local sandbox VM (Apple Containerization) + per-agent browser</td>
+          <!-- Source: rival-rakazo/README.md L23 (“Docker, E2B, Daytona, and trusted local-computer support”) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Docker · E2B · Daytona · local machines</td>
+          <!-- Source: rival-openbot/README.md L141 (one container per Bot with own /workspace and browser profile; COMPUTER_RUNTIME=runsc for gVisor) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">One container per bot (browser + workspace), optional gVisor</td>
+        </tr>
+
+        <tr>
+          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Voice mode</th>
+          <!-- Source: muster-audit/README.md L134-L141 (read replies aloud, calls, BYO ElevenLabs key), L143-L145 (native on-device dictation, macOS) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Spoken replies + bot calls (BYO ElevenLabs); on-device dictation</td>
+          <!-- Source: rival-osaurus/README.md L205 (on-device transcription via FluidAudio, voice input, VAD wake-word, global hotkey; “No audio leaves your Mac”) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">On-device voice input — transcription, wake word, global hotkey</td>
+          <!-- Source: rival-rakazo/README.md L17 (“Voice mode: speak replies, dictate, and call a bot. Bring your own ElevenLabs, OpenAI, or Cartesia key”) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Speak replies, dictate, call bots — BYO ElevenLabs / OpenAI / Cartesia</td>
+          <!-- Not mentioned: rival-openbot/README.md has no voice/audio feature -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
+        </tr>
+
+        <tr>
+          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Mobile apps</th>
+          <!-- Source: muster-audit/README.md L346-L364 (iOS and Android apps built; App Store / Play listings pending developer accounts) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Built — store listings pending</td>
+          <!-- Not mentioned: rival-osaurus/README.md covers macOS only; no mobile app referenced -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
+          <!-- Source: rival-rakazo/README.md L9 (“through an Expo mobile app”), L80-L90 (Desktop and mobile section, docs/mobile-release.md) -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Yes — Expo app</td>
+          <!-- Not mentioned: rival-openbot/README.md references no mobile app -->
+          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
+        </tr>
+
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Required footnote -->
+  <p style="margin-top:16px;color:var(--muted-2);font-size:13px;">Compared from public READMEs Aug 2026 — corrections welcome.</p>
+</section>
 
   </main>
 
