@@ -1,4 +1,5 @@
-// One-place setup and lifecycle for the shared, isolated Local VM.
+// One-place setup and lifecycle for the shared, isolated Local VM, plus the
+// desktop isolation setting (shared singleton vs one desktop per bot).
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -39,6 +40,8 @@ interface Status {
   workspace_guest_path: string;
   viewer_url: string;
   idle_timeout_ms: number;
+  mode?: "shared" | "perBot";
+  max_instances?: number;
   commands: {
     install: string | null;
     runtimeStart: string | null;
@@ -95,6 +98,128 @@ function ActionButton({
       {pending === action && <Loader2 size={13} className="animate-spin" />}
       {children}
     </button>
+  );
+}
+
+type IsolationMode = NonNullable<Status["mode"]>;
+const MAX_DESKTOPS_MIN = 1;
+const MAX_DESKTOPS_MAX = 16;
+
+function clampMaxDesktops(value: number): number {
+  if (!Number.isFinite(value)) return 4;
+  return Math.min(MAX_DESKTOPS_MAX, Math.max(MAX_DESKTOPS_MIN, Math.trunc(value)));
+}
+
+/** Radio pair + cap input persisted to /api/config {localVm}. The server
+ * refuses a per-bot → shared switch while bots still hold their own desktops,
+ * so its error text is surfaced verbatim here. */
+function DesktopIsolationCard({ status }: { status: Status | null }) {
+  const [mode, setMode] = useState<IsolationMode>("shared");
+  const [maxInstances, setMaxInstances] = useState(4);
+  const [hydrated, setHydrated] = useState(false);
+  const [editingMax, setEditingMax] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Poll refreshes must not stomp in-progress edits; only the server's saved
+  // values flow back in while the user is not typing or saving.
+  useEffect(() => {
+    if (!status?.mode || saving || editingMax) return;
+    setMode(status.mode);
+    setMaxInstances(status.max_instances ?? 4);
+    setHydrated(true);
+  }, [status?.mode, status?.max_instances, saving, editingMax]);
+
+  const save = async (nextMode: IsolationMode, nextMax: number) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/config", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ localVm: { mode: nextMode, maxInstances: nextMax } }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? `Saving failed (${response.status})`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const options: Array<{ value: IsolationMode; label: string; detail: string }> = [
+    {
+      value: "shared",
+      label: "Shared",
+      detail: "One desktop all bots lease one at a time — cheapest, and everyone sees the same screen.",
+    },
+    {
+      value: "perBot",
+      label: "Per-bot",
+      detail:
+        "Each bot gets its own dedicated desktop — container, workspace, viewer and lease. Desktops are created when a bot starts working and recycled after 8 idle hours.",
+    },
+  ];
+
+  return (
+    <Card
+      title="Isolation"
+      subtitle="Choose whether bots share one Local VM or each gets their own. Every desktop is capped at 4 GB memory and 2 CPUs."
+    >
+      <div className="flex flex-col gap-2">
+        {options.map((option) => (
+          <label
+            key={option.value}
+            className={cn(
+              "flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors",
+              mode === option.value ? "border-accent/50 bg-accent/5" : "border-hairline/40 hover:bg-raised",
+            )}
+          >
+            <input
+              type="radio"
+              name="desktop-isolation"
+              className="mt-0.5 accent-[var(--color-accent)]"
+              checked={mode === option.value}
+              disabled={saving || !hydrated}
+              onChange={() => {
+                setMode(option.value);
+                void save(option.value, clampMaxDesktops(maxInstances));
+              }}
+            />
+            <span className="min-w-0">
+              <span className="block text-[13.5px] text-ink">{option.label}</span>
+              <span className="block text-[12px] leading-relaxed text-ink-secondary">{option.detail}</span>
+            </span>
+          </label>
+        ))}
+        <div className="flex items-center gap-3 pl-1 pt-1">
+          <label htmlFor="max-per-bot-desktops" className={cn("text-[13px]", mode === "perBot" ? "text-ink" : "text-ink-secondary")}>
+            Maximum per-bot desktops
+          </label>
+          <input
+            id="max-per-bot-desktops"
+            type="number"
+            min={MAX_DESKTOPS_MIN}
+            max={MAX_DESKTOPS_MAX}
+            step={1}
+            value={maxInstances}
+            disabled={saving || !hydrated}
+            onFocus={() => setEditingMax(true)}
+            onBlur={() => {
+              setEditingMax(false);
+              const clamped = clampMaxDesktops(maxInstances);
+              setMaxInstances(clamped);
+              if (clamped !== (status?.max_instances ?? 4)) void save(mode, clamped);
+            }}
+            onChange={(e) => setMaxInstances(e.target.valueAsNumber)}
+            className="w-20 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-center text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
+          />
+          {saving && <Loader2 size={13} className="animate-spin text-ink-secondary" />}
+        </div>
+        {error && <div className="rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
+      </div>
+    </Card>
   );
 }
 
@@ -240,6 +365,7 @@ export function LocalComputerSection() {
 
   return (
     <>
+      <DesktopIsolationCard status={status} />
       <Card
         title="Local VM"
         subtitle={`A shared Cua Linux sandbox on this ${host} for bots to browse and work in — isolated, backed by one durable workspace, and automatically recycled after 8 hours without activity.`}

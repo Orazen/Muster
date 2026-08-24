@@ -35,17 +35,24 @@ import { musterCloudEnabled, musterCloudUrl, verifyAgainstMusterCloud } from "./
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import {
+  SHARED_LOCAL_VM_TARGET,
   containerComputerAction,
   containerComputerMcp,
   containerComputerScreenshot,
   containerComputerStatus,
+  countExistingDesktops,
+  perBotLocalVmTarget,
   setupCommands,
   type LifecycleAction,
+  type LocalVmTarget,
+  type Runtime,
 } from "./container-computer.ts";
 import {
   ensureDirs,
   instanceConfigs,
   loadConfig,
+  localVmMaxInstances,
+  localVmMode,
   parseConfigPatch,
   saveConfig,
   withInstanceCli,
@@ -142,8 +149,8 @@ import {
   MEMORY_FILE_MAX_BYTES,
 } from "./workspace.ts";
 import { readCuaConnection } from "./local-computer.ts";
-import { LocalVmIdleTimer } from "./local-vm-idle.ts";
-import { LocalVmLease } from "./local-vm-lease.ts";
+import { LocalVmIdleTimerPool } from "./local-vm-idle.ts";
+import { LocalVmLeasePool } from "./local-vm-lease.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-library.ts";
@@ -829,46 +836,91 @@ function isUnattended(botId?: string | null): boolean {
   return true;
 }
 let routines: RoutineManager | null = null;
-// The Local VM is intentionally one shared, visible desktop. Two agents
-// driving it simultaneously would mix clicks, keystrokes and screenshots,
-// so only one thread may lease it at a time.
-const localVmLease = new LocalVmLease(30 * 60_000);
+// Desktop isolation: "shared" keeps one visible desktop every bot leases
+// one at a time; "perBot" gives each bot its own container, workspace,
+// viewer port and lease/idle lanes. All lanes live in pools keyed by the
+// resolved desktop target, so shared mode exercises exactly one entry and
+// behaves byte-for-byte like the historical singleton.
+const LOCAL_VM_LEASE_TTL_MS = 30 * 60_000;
+const localVmLeases = new LocalVmLeasePool(LOCAL_VM_LEASE_TTL_MS);
 const localVmOwnerBusy = (botId: string) => store.bot(botId)?.busy === true;
-let localVmLifecycleBusy = false;
-let localVmActiveThread: string | null = null;
+const localVmLifecycleBusy = new Set<string>();
+// targetKey -> threadId currently driving that desktop.
+const localVmActiveThreads = new Map<string, string>();
+// threadId -> targetKey, so runtime events find the right lease lane.
+const threadDesktopTarget = new Map<string, string>();
+// Every target handed out by desktopTargetForBot registers here so idle
+// recycling can remove the exact container even if its bot was deleted.
+const localVmTargets = new Map<string, LocalVmTarget>([[SHARED_LOCAL_VM_TARGET.key, SHARED_LOCAL_VM_TARGET]]);
+// Cross-target fence for per-bot creates: two bots allocating simultaneously
+// could both pass the cap count before either container exists.
+let localVmProvisionBusy = false;
 const LOCAL_VM_IDLE_MS = 8 * 60 * 60_000;
-const localVmIdle = new LocalVmIdleTimer(
+const localVmIdles = new LocalVmIdleTimerPool(
   LOCAL_VM_IDLE_MS,
-  () => localVmLifecycleBusy || localVmActiveThread !== null,
-  async () => {
+  (targetKey) => localVmLifecycleBusy.has(targetKey) || localVmActiveThreads.has(targetKey),
+  async (targetKey) => {
+    const target = localVmTargets.get(targetKey);
+    if (!target || localVmLifecycleBusy.has(targetKey)) return;
     // Fence lifecycle and turn dispatch before the first runtime inspection.
-    localVmLifecycleBusy = true;
+    localVmLifecycleBusy.add(targetKey);
     try {
-      const status = await containerComputerStatus();
+      const status = await containerComputerStatus(undefined, undefined, target);
       // The upstream desktop leaves a stale X lock after a stop, so it cannot
-      // safely resume. Remove only the disposable container; the mounted
-      // workspace and prepared image remain for a fast, clean recreation.
-      if (status.container === "running") await containerComputerAction("remove");
+      // safely resume. Remove only this disposable container; its mounted
+      // workspace and the prepared image remain for a fast, clean recreation.
+      if (status.container === "running") await containerComputerAction("remove", undefined, undefined, target);
     } finally {
-      localVmLifecycleBusy = false;
+      localVmLifecycleBusy.delete(targetKey);
     }
   },
 );
 
-// A running VM may have survived an app/server restart. Start its idle
-// backstop even if nobody opens Settings or begins a turn this session.
+/** Resolve the desktop a bot allocates under the current isolation mode and
+ * remember it for lease, idle and recycle lookups. */
+function desktopTargetForBot(botId: string): LocalVmTarget {
+  const target = localVmMode(cfg) === "perBot" ? perBotLocalVmTarget(botId) : SHARED_LOCAL_VM_TARGET;
+  localVmTargets.set(target.key, target);
+  return target;
+}
+
+/** Global ceiling on simultaneously existing per-bot desktops, checked
+ * against the machine (not memory) so restarts cannot inflate the count. */
+async function enforcePerBotDesktopCap(runtime: Runtime, botId: string): Promise<void> {
+  const max = localVmMaxInstances(cfg);
+  const others = [...new Set(store.bots.map((b) => b.id))]
+    .filter((id) => id !== botId)
+    .map(perBotLocalVmTarget);
+  const existing = await countExistingDesktops(runtime, others);
+  if (existing >= max) {
+    throw Object.assign(
+      new Error(
+        `Maximum ${max} per-bot desktops reached — unused desktops recycle automatically after 8 idle hours, or raise the limit in App Settings → Local VM`,
+      ),
+      { status: 409 },
+    );
+  }
+}
+
+// A running VM may have survived an app/server restart. Start the shared
+// desktop's idle backstop even if nobody opens Settings or begins a turn
+// this session; per-bot desktops re-arm their own timers at allocation.
 void containerComputerStatus()
   .then((status) => {
-    if (status.container === "running") localVmIdle.touch();
+    if (status.container === "running") localVmIdles.forTarget(SHARED_LOCAL_VM_TARGET.key).touch();
   })
   .catch(() => null);
 
 bus.subscribe((event: RuntimeEvent) => {
-  localVmLease.touch(event.threadId);
-  if (localVmActiveThread === event.threadId) localVmIdle.touch();
-  if (event.type === "turn.completed") {
-    localVmLease.release(event.threadId);
-    if (localVmActiveThread === event.threadId) localVmActiveThread = null;
+  const heldKey = threadDesktopTarget.get(event.threadId);
+  if (heldKey !== undefined) {
+    localVmLeases.forTarget(heldKey).touch(event.threadId);
+    if (localVmActiveThreads.get(heldKey) === event.threadId) localVmIdles.forTarget(heldKey).touch();
+  }
+  if (event.type === "turn.completed" && heldKey !== undefined) {
+    localVmLeases.forTarget(heldKey).release(event.threadId);
+    if (localVmActiveThreads.get(heldKey) === event.threadId) localVmActiveThreads.delete(heldKey);
+    threadDesktopTarget.delete(event.threadId);
   }
   broadcast({ kind: "runtime", event });
   routines?.handleRuntimeEvent(event);
@@ -1622,22 +1674,51 @@ async function startTurn(
         if (!mountsComputerMcp || instance.driverKind === "boxAgent") {
           throw new Error("this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination");
         }
-        if (localVmLifecycleBusy) {
+        const target = desktopTargetForBot(bot.id);
+        const desktopLabel = target.key === SHARED_LOCAL_VM_TARGET.key ? "the shared Local VM" : "this bot's Local VM";
+        if (localVmLifecycleBusy.has(target.key)) {
           throw new Error("the Local VM is being started, stopped, or replaced — wait for setup to finish");
         }
         // Claim before the first await. The lifecycle route performs its
         // matching check synchronously, so neither side can enter while the
         // other is between inspection and mutation.
-        if (!localVmLease.claim(threadId, bot.id, localVmOwnerBusy)) {
-          throw new Error("the shared Local VM is already being used by another bot — wait for that turn to finish");
+        if (!localVmLeases.forTarget(target.key).claim(threadId, bot.id, localVmOwnerBusy)) {
+          throw new Error(`${desktopLabel} is already being used by another bot — wait for that turn to finish`);
         }
-        localVmActiveThread = threadId;
-        localVmIdle.touch();
-        const localVm = await containerComputerStatus();
+        localVmActiveThreads.set(target.key, threadId);
+        threadDesktopTarget.set(threadId, target.key);
+        localVmIdles.forTarget(target.key).touch();
+        let localVm = await containerComputerStatus(undefined, undefined, target);
+        // Per-bot allocation happens here, on demand: a bot that needs a
+        // computer gets its own dedicated desktop inside the global cap.
+        if (
+          target.key !== SHARED_LOCAL_VM_TARGET.key &&
+          localVm.container === "missing" &&
+          localVm.image &&
+          localVm.runtime &&
+          localVm.daemonUp
+        ) {
+          if (localVmProvisionBusy) {
+            throw Object.assign(new Error("another per-bot desktop is being created — retry shortly"), { status: 409 });
+          }
+          localVmProvisionBusy = true;
+          try {
+            await enforcePerBotDesktopCap(localVm.runtime, bot.id);
+            localVmLifecycleBusy.add(target.key);
+            try {
+              await containerComputerAction("run", undefined, undefined, target);
+            } finally {
+              localVmLifecycleBusy.delete(target.key);
+            }
+            localVm = await containerComputerStatus(undefined, undefined, target);
+          } finally {
+            localVmProvisionBusy = false;
+          }
+        }
         if (!localVm.ready || !localVm.runtime) {
           throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (App Settings → Local VM)`);
         }
-        integrations.localComputer = containerComputerMcp(localVm.runtime);
+        integrations.localComputer = containerComputerMcp(localVm.runtime, target);
         computerKind = "vm";
       } else if (wants === "local") {
         if (!mountsComputerMcp) {
@@ -1834,7 +1915,9 @@ async function startTurn(
         system:
           persona +
           (computerKind === "vm"
-            ? " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Use the computer tools for desktop, accessibility, window, and shell work. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully."
+            ? (localVmMode(cfg) === "perBot"
+              ? " You have your own isolated Cua sandbox: a Linux desktop in a container on this machine that no other bot shares. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Use the computer tools for desktop, accessibility, window, and shell work. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully."
+              : " You have a shared, isolated Cua sandbox: a Linux desktop in a container on this machine. Only /home/cua/workspace is durable; save downloads, repositories, working files, and browser profiles there because everything else inside the VM is disposable. No other host folder is mounted. Use the computer tools for desktop, accessibility, window, and shell work. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and work carefully.")
             : (computerKind === "box" && instance.driverKind !== "boxAgent") || computerKind === "opensandbox"
             ? " You have your own cloud computer. In Chrome, prefer browser_snapshot with browser_click/browser_fill for semantic, trusted actions; use screenshot/click/type_text for visual or non-browser UI, open_url for navigation, and computer_exec for Linux tasks. Every action already returns the resulting screen, so don't follow it with screenshot; batch predictable pixel actions with computer_batch."
               : computerKind === "local"
@@ -1875,8 +1958,12 @@ async function startTurn(
         startScreenPoller(bot.id, previewBoxId, { screenIsTheWork: instance.driverKind === "boxAgent" });
       }
     } catch (e) {
-      localVmLease.release(threadId);
-      if (localVmActiveThread === threadId) localVmActiveThread = null;
+      const failedKey = threadDesktopTarget.get(threadId);
+      if (failedKey !== undefined) {
+        localVmLeases.forTarget(failedKey).release(threadId);
+        if (localVmActiveThreads.get(failedKey) === threadId) localVmActiveThreads.delete(failedKey);
+        threadDesktopTarget.delete(threadId);
+      }
       watchdog.settle(threadId);
       turnUsage.delete(threadId);
       const message = e instanceof Error ? e.message : String(e);
@@ -2452,6 +2539,8 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
     tts: tts.describeVoice(cfg),
     // not a secret — the sidebar shows it
     profile,
+    // desktop isolation is a setting, not a secret; the Local VM panel reads it
+    localVm: { mode: localVmMode(cfg), maxInstances: localVmMaxInstances(cfg) },
   };
 }
 
@@ -2492,10 +2581,14 @@ async function reloadProviders() {
   // async under the hood), stranding the bot busy — and its screen poller —
   // forever. Settle anything still marked busy.
   for (const b of store.bots.filter((b) => b.busy)) {
-    const vmLease = localVmLease.current(localVmOwnerBusy);
-    if (vmLease?.botId === b.id) {
-      localVmLease.release(vmLease.threadId);
-      if (localVmActiveThread === vmLease.threadId) localVmActiveThread = null;
+    const heldKey = threadDesktopTarget.get(b.threadId);
+    if (heldKey !== undefined) {
+      const vmLease = localVmLeases.forTarget(heldKey).current(localVmOwnerBusy);
+      if (vmLease?.botId === b.id) {
+        localVmLeases.forTarget(heldKey).release(vmLease.threadId);
+        if (localVmActiveThreads.get(heldKey) === vmLease.threadId) localVmActiveThreads.delete(heldKey);
+        threadDesktopTarget.delete(vmLease.threadId);
+      }
     }
     stopScreenPoller(b.id);
     finalizeDelegationWatch(
@@ -4201,7 +4294,13 @@ let requestUserEmail = "";
     // its daemon is up, and whether the desktop image and container exist
     if (method === "GET" && path === "/api/local-computer") {
       const status = await containerComputerStatus();
-      return json(res, 200, { ...status, commands: setupCommands(status.runtime), idle_timeout_ms: LOCAL_VM_IDLE_MS });
+      return json(res, 200, {
+        ...status,
+        commands: setupCommands(status.runtime),
+        idle_timeout_ms: LOCAL_VM_IDLE_MS,
+        mode: localVmMode(cfg),
+        max_instances: localVmMaxInstances(cfg),
+      });
     }
     m = path.match(/^\/api\/local-computer\/(pull|run|start|stop|remove|runtimeStart)$/);
     if (m && method === "POST") {
@@ -4215,29 +4314,39 @@ let requestUserEmail = "";
       // SAFETY: the route regex above only matches the lifecycle action
       // names the Local VM endpoints accept.
       const action = m[1] as LifecycleAction;
-      if (localVmLifecycleBusy) {
+      const target = SHARED_LOCAL_VM_TARGET;
+      // In per-bot mode each bot's desktop is allocated by its own turns;
+      // creating the unused shared singleton here would only confuse.
+      if (localVmMode(cfg) === "perBot" && action === "run") {
+        return json(res, 409, {
+          error: "Per-bot isolation is on — each bot's desktop is created automatically when its turn starts",
+        });
+      }
+      if (localVmLifecycleBusy.has(target.key)) {
         return json(res, 409, { error: "another Local VM setup action is still running" });
       }
-      const vmOwner = localVmLease.current(localVmOwnerBusy);
+      const vmOwner = localVmLeases.forTarget(target.key).current(localVmOwnerBusy);
       if (vmOwner && (action === "stop" || action === "remove" || action === "run")) {
         return json(res, 409, { error: "the Local VM is being used by a bot — stop that turn first" });
       }
-      localVmLifecycleBusy = true;
+      localVmLifecycleBusy.add(target.key);
       try {
-        const status = await containerComputerAction(action);
-        if (action === "run" || action === "start") localVmIdle.touch();
-        if (action === "stop" || action === "remove") localVmIdle.cancel();
+        const status = await containerComputerAction(action, undefined, undefined, target);
+        if (action === "run" || action === "start") localVmIdles.forTarget(target.key).touch();
+        if (action === "stop" || action === "remove") localVmIdles.forTarget(target.key).cancel();
         return json(res, 200, {
           ...status,
           commands: setupCommands(status.runtime),
           idle_timeout_ms: LOCAL_VM_IDLE_MS,
+          mode: localVmMode(cfg),
+          max_instances: localVmMaxInstances(cfg),
         });
       } finally {
-        localVmLifecycleBusy = false;
+        localVmLifecycleBusy.delete(target.key);
       }
     }
     if (method === "POST" && path === "/api/local-computer/screenshot") {
-      localVmIdle.touch();
+      localVmIdles.forTarget(SHARED_LOCAL_VM_TARGET.key).touch();
       return json(res, 200, { image: await containerComputerScreenshot() });
     }
 
@@ -4544,6 +4653,15 @@ let requestUserEmail = "";
       const body = await readBody(req);
       const patch = parseConfigPatch(body);
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
+      // Refuse a per-bot → shared switch while any bot still holds its own
+      // desktop: shared mode has no lease lane for those containers, so an
+      // active turn would keep driving a desktop nothing coordinates anymore.
+      if (patch.localVm?.mode === "shared" && localVmMode(cfg) === "perBot") {
+        const heldPerBot = [...threadDesktopTarget.values()].some((key) => key !== SHARED_LOCAL_VM_TARGET.key);
+        if (heldPerBot) {
+          return json(res, 409, { error: "stop the turns using their own desktops before switching to Shared isolation" });
+        }
+      }
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
       providerConfigBusy = true;
       try {
@@ -4831,7 +4949,7 @@ server.listen(PORT, HOST, () => {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    localVmIdle.cancel();
+    localVmIdles.cancelAll();
     watchdog.stop();
     reaper.stop();
     routines?.stop();

@@ -12,6 +12,11 @@ import type { InstanceConfigMap } from "./contracts.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 
 const optionalText = z.string().optional();
+export type LocalVmIsolationMode = "shared" | "perBot";
+// The cap bounds keep a per-bot fleet from silently eating the host: 16
+// desktops x 4 GB is already the RAM of a well-appointed machine.
+const LOCAL_VM_MAX_INSTANCES_MIN = 1;
+const LOCAL_VM_MAX_INSTANCES_MAX = 16;
 const instanceConfigSchema = z.object({
   driver: z.string().min(1),
   displayName: optionalText,
@@ -40,6 +45,15 @@ const appConfigSchema = z.object({
   tts: z.object({ key: optionalText, voice: optionalText }).optional(),
   /** Non-secret profile details shown in the sidebar. */
   profile: z.object({ name: optionalText, email: optionalText }).optional(),
+  /** Local VM desktop isolation. "shared" keeps the historical singleton
+   * desktop every bot leases one at a time; "perBot" gives each bot its own
+   * container, workspace, viewer port and lease lanes. */
+  localVm: z
+    .object({
+      mode: z.enum(["shared", "perBot"]).optional(),
+      maxInstances: z.number().int().min(LOCAL_VM_MAX_INSTANCES_MIN).max(LOCAL_VM_MAX_INSTANCES_MAX).optional(),
+    })
+    .optional(),
   /** Per-provider API keys — write-only, only configured-or-not flags exposed. */
   providers: z.record(z.string(), z.object({ apiKey: optionalText })).optional(),
   instances: instanceConfigMapSchema.optional(),
@@ -65,6 +79,8 @@ export interface AppConfig {
   musterCloud?: { url?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; voice?: string };
+  /** Desktop isolation mode and the global per-bot desktop cap. */
+  localVm?: { mode?: LocalVmIsolationMode; maxInstances?: number };
   profile?: { name?: string; email?: string };
   providers?: Record<string, { apiKey?: string }>;
   instances?: InstanceConfigMap;
@@ -91,6 +107,32 @@ export const DATA_DIR = process.env.OMB_DATA_DIR ?? join(homedir(), ".muster");
 const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");
+
+const DEFAULT_LOCAL_VM_MODE: LocalVmIsolationMode = "shared";
+const DEFAULT_LOCAL_VM_MAX_INSTANCES = 4;
+
+/** Parse OMB_MAX_PER_BOT_DESKTOPS. Out-of-range or non-integer values fall
+ * back to null so a typo'd env var degrades to the default cap instead of
+ * refusing to boot the whole app over a desktop-count setting. */
+export function envMaxPerBotDesktops(raw: string | undefined): number | null {
+  if (raw === undefined || raw.trim() === "") return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value)) return null;
+  if (value < LOCAL_VM_MAX_INSTANCES_MIN || value > LOCAL_VM_MAX_INSTANCES_MAX) return null;
+  return value;
+}
+
+/** Shared keeps the historical singleton; per-bot gives every bot that needs
+ * a computer its own dedicated desktop instance. */
+export function localVmMode(cfg: AppConfig): LocalVmIsolationMode {
+  return cfg.localVm?.mode ?? DEFAULT_LOCAL_VM_MODE;
+}
+
+/** Global ceiling on simultaneously existing per-bot desktops. Config wins
+ * over the env knob so the Settings UI stays authoritative once saved. */
+export function localVmMaxInstances(cfg: AppConfig): number {
+  return cfg.localVm?.maxInstances ?? envMaxPerBotDesktops(process.env.OMB_MAX_PER_BOT_DESKTOPS) ?? DEFAULT_LOCAL_VM_MAX_INSTANCES;
+}
 
 export function ensureDirs() {
   // one-time migration from the pre-rename data dir — bots, transcripts,
@@ -133,7 +175,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
-  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud"] as const) {
+  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
