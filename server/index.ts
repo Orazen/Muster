@@ -131,6 +131,7 @@ import {
   signedSessionCookieValue,
   deleteAuthUser,
 } from "./auth.ts";
+import { fallbackEligible, markAttempted, pickAlternate } from "./provider-fallback.ts";
 import { consumeCode, getOrCreateCode, VerifyError } from "./pairing.ts";
 import {
   IS_CLOUD,
@@ -418,6 +419,44 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
   if (!healed) return null;
   store.patchBot(bot.id, { modelSelection: selection });
   return healed;
+}
+
+/** One-shot cross-provider rescue for rate-limited turns. Re-points the bot
+ * at another available instance it is allowed to use and re-dispatches the
+ * user's message through connectorContinuation so no duplicate bubble is
+ * appended. Guarded by fallbackEligible/markAttempted in
+ * server/provider-fallback.ts: one hop per thread per cooldown. */
+async function attemptProviderFallback(threadId: string, errorMessage: string): Promise<void> {
+  try {
+    if (!fallbackEligible(threadId, errorMessage)) return;
+    const threadBot = store.botByThread(threadId);
+    if (!threadBot?.ownerId && !threadBot) return;
+    markAttempted(threadId);
+    const current = threadBot.modelSelection?.instanceId ?? "";
+    const described = await registry.describe();
+    const alt = pickAlternate(
+      current,
+      threadBot.ownerId,
+      described.map((d) => ({ instanceId: d.instanceId, state: d.snapshot.state })),
+    );
+    if (!alt) return;
+    const lastUser = [...store.messagesFor(threadId)].reverse().find((m) => m.role === "user" && m.kind === "text");
+    if (!lastUser?.text) return;
+    store.patchBot(threadBot.id, {
+      modelSelection: { ...threadBot.modelSelection, instanceId: alt, model: "" },
+    });
+    store.appendMessage(threadId, {
+      role: "bot",
+      kind: "activity",
+      tool: {
+        name: `${current.split(":")[0]} hit its limit — switching this bot to ${alt.split(":")[0]} and re-asking`,
+        ok: true,
+      },
+    });
+    await startTurn(threadBot.id, lastUser.text, { threadId, connectorContinuation: true }).catch(() => {});
+  } catch {
+    // fallback must never become a second failure surface
+  }
 }
 store.seedIfEmpty();
 // Per-user vault engines register at boot so saved keys are live on any
@@ -1145,6 +1184,10 @@ bus.subscribe((event: RuntimeEvent) => {
       // dispatch moves it to working; turn.completed (which follows a setup
       // failure) is told to leave "dead" alone.
       if (event.setup && bot) store.setActivity(bot.id, "dead");
+      // Rate-limit deaths are recoverable when the owner has another
+      // provider configured — hop once and re-ask instead of leaving the
+      // user staring at activity chips with no words.
+      void attemptProviderFallback(event.threadId, event.message);
       break;
     case "thread.token-usage.updated":
       // running totals for the turn in flight; folded into the task's
