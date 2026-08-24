@@ -290,6 +290,64 @@ describe("harness HTTP API", () => {
     expect(after.body.hits.find((h: { botId?: string }) => h.botId === bot.id)).toBeUndefined();
   });
 
+  it("answers a query nothing matches with an empty hit list, not an error", async () => {
+    const res = await api("GET", "/api/search?q=xyzzy-q9z-nothing-embeds-this");
+    expect(res.status).toBe(200);
+    expect(res.body.hits).toEqual([]);
+  });
+
+  it("searches across bots, attributing each hit to its own conversation", async () => {
+    const first = (await api("POST", "/api/bots")).body.bot;
+    const second = (await api("POST", "/api/bots")).body.bot;
+    // each fresh bot seeds the same greeting, so one query must surface
+    // both threads — each under its own bot id and name
+    const res = await api("GET", "/api/search?q=nice%20to%20meet");
+    expect(res.status).toBe(200);
+    const forBot = (botId: string) => res.body.hits.filter((h: { botId?: string }) => h.botId === botId);
+    const left = forBot(first.id);
+    const right = forBot(second.id);
+    expect(left).toHaveLength(1);
+    expect(right).toHaveLength(1);
+    expect(left[0]).toMatchObject({ threadId: first.threadId, name: first.name, kind: "text" });
+    expect(right[0]).toMatchObject({ threadId: second.threadId, name: second.name, kind: "text" });
+    // cleanup keeps later assertions about the fleet deterministic, and
+    // doubles as proof that both hits really belonged to these bots
+    await api("DELETE", `/api/bots/${first.id}`);
+    await api("DELETE", `/api/bots/${second.id}`);
+    const gone = await api("GET", "/api/search?q=nice%20to%20meet");
+    expect(gone.body.hits.filter((h: { botId?: string }) => h.botId === first.id)).toHaveLength(0);
+    expect(gone.body.hits.filter((h: { botId?: string }) => h.botId === second.id)).toHaveLength(0);
+  });
+
+  it("treats LIKE wildcards and backslashes as literal characters over HTTP", async () => {
+    const { body } = await api("GET", "/api/bots");
+    const created = await api("POST", "/api/groups", { name: "Char probe", memberIds: [body.bots[0].id] });
+    expect(created.status).toBe(201);
+    const groupId = created.body.group.id;
+    // mentions-only room: the user message lands without any bot answering,
+    // so the transcript this test searches is exactly what it posted
+    const quiet = await api("PATCH", `/api/groups/${groupId}`, { defaultResponder: { kind: "mentions" } });
+    expect(quiet.status).toBe(200);
+    const text = "budget zzprobe is 50%_over the a_b\\c limit";
+    const posted = await api("POST", `/api/groups/${groupId}/messages`, { text });
+    expect(posted.status).toBe(202);
+
+    // % _ and \\ all reach SQL literally; a wildcard reading of "%" would
+    // have matched every message in every transcript instead
+    for (const needle of ["50%_", "a_b", "b\\c"]) {
+      const res = await api("GET", `/api/search?q=${encodeURIComponent(needle)}`);
+      expect(res.status).toBe(200);
+      const mine = res.body.hits.filter((h: { groupId?: string }) => h.groupId === groupId);
+      expect(mine).toHaveLength(1);
+      const hit = mine[0];
+      expect(hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength).toLowerCase()).toBe(needle);
+    }
+
+    await api("DELETE", `/api/groups/${groupId}`);
+    const dropped = await api("GET", `/api/search?q=${encodeURIComponent("a_b")}`);
+    expect(dropped.body.hits.filter((h: { groupId?: string }) => h.groupId === groupId)).toHaveLength(0);
+  });
+
   it("creates, patches, and deletes a bot", async () => {
     const created = await api("POST", "/api/bots");
     expect(created.status).toBe(201);
