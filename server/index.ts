@@ -109,7 +109,7 @@ import {
   userInstanceOwner,
   userProviderFlags,
 } from "./user-keys.ts";
-import { vpsComputerStatus, vpsEnsureDesktop, vpsDockerHost } from "./vps-computer.ts";
+import { vpsComputerStatus, vpsEnsureDesktop, vpsDockerHost, vpsReachable } from "./vps-computer.ts";
 import { PROVIDER_DRIVER_ENV, DATA_DIR } from "./config.ts";
 import * as tts from "./tts/index.ts";
 import {
@@ -4683,6 +4683,16 @@ let requestUserEmail = "";
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configStatus(requestUserId, requestUserName, requestUserEmail));
     }
+    // ── BYO VPS (SSH alias) ───────────────────────────────────────────
+    // Reachability probe for the Settings card: does the alias resolve and
+    // is a Docker daemon listening on the other end? Never throws.
+    if (method === "GET" && path === "/api/vps/status") {
+      const alias = vpsSshAlias(cfg);
+      if (!alias) return json(res, 200, { configured: false, sshAlias: "", daemonUp: false });
+      const daemonUp = await vpsReachable(alias);
+      return json(res, 200, { configured: true, sshAlias: alias, daemonUp });
+    }
+
     if (method === "GET" && path === "/api/diagnostics") {
       // Bug-report bundle: versions, boolean-only config flags and a redacted
       // native log tail. Redaction lives in server/diagnostics.ts so it stays

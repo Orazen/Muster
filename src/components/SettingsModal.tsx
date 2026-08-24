@@ -223,6 +223,77 @@ function ChannelTurnCapCard() {
   );
 }
 
+/** Self-hosted VPS — the only stored value is an SSH config alias. ssh(1)
+ * resolves host/key/agent from ~/.ssh itself; Muster never sees credentials.
+ * The reachability line pings the remote Docker daemon through the alias. */
+function VpsCard() {
+  const { state, dispatch } = useStore();
+  const savedAlias = state.config?.vps?.sshAlias ?? "";
+  const [alias, setAlias] = useState(savedAlias);
+  const [reach, setReach] = useState<"idle" | "checking" | "up" | "down">("idle");
+  useEffect(() => {
+    setAlias(savedAlias);
+  }, [savedAlias]);
+
+  const save = () => {
+    const next = alias.trim();
+    if (next === savedAlias) return;
+    void fetch("/api/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ vps: { sshAlias: next } }),
+    })
+      .then((r) => r.json())
+      .then((config) => dispatch({ type: "configStatus", config }))
+      .catch(() => {});
+    setReach("idle");
+  };
+
+  const checkReachable = async () => {
+    if (!alias.trim() || reach === "checking") return;
+    setReach("checking");
+    try {
+      const res = await fetch("/api/vps/status", { headers: { "content-type": "application/json" } });
+      const body = (await res.json().catch(() => null)) as { daemonUp?: boolean } | null;
+      setReach(body?.daemonUp ? "up" : "down");
+    } catch {
+      setReach("down");
+    }
+  };
+
+  return (
+    <Card
+      title="Self-hosted VPS"
+      subtitle="Optional SSH config alias for your own Linux VPS as a bot computer. Muster uses your normal SSH config and agent; it does not store keys or passwords. The remote host needs Docker."
+    >
+      <div className="flex items-center gap-3 text-[13.5px] text-ink-secondary">
+        <input
+          value={alias}
+          placeholder="my-vps"
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(e) => setAlias(e.target.value)}
+          onBlur={save}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          className="w-44 rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink focus:border-hairline focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={() => void checkReachable()}
+          disabled={!alias.trim() || reach === "checking"}
+          className="rounded-lg border border-hairline/40 px-3 py-2 text-[12.5px] text-ink-secondary hover:text-ink disabled:opacity-40"
+        >
+          {reach === "checking" ? "Checking…" : "Test connection"}
+        </button>
+        {reach === "up" && <span className="text-[12.5px] text-success">Connected</span>}
+        {reach === "down" && (
+          <span className="text-[12.5px] text-danger">Not reachable — check ~/.ssh/config</span>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 /** Downloads GET /api/diagnostics verbatim as a JSON file. The server has
  * already redacted everything — the client just names the download. */
 function DiagnosticsCard() {
@@ -401,6 +472,7 @@ export function SettingsModal() {
                   <ProfileFields />
                 </Card>
                 <ChannelTurnCapCard />
+                <VpsCard />
                 <DiagnosticsCard />
                 <AccountSection />
                 <UpdatesRow />

@@ -235,6 +235,8 @@ export interface ConfigStatus {
   /** Server-side cap on every bot turn in a channel, in minutes. Direct
    * chats are exempt — they stop on silence via the stall watchdog. */
   channels?: { turnCapMinutes: number };
+  /** BYO VPS computer; the alias is a setting, credentials stay in ssh(1). */
+  vps?: { sshAlias: string };
 }
 
 /** How an engine gets installed — declared by its driver, mirrors
