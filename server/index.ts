@@ -126,7 +126,7 @@ import {
   createBridgedUser,
   mintSession,
 } from "./auth.ts";
-import { createCode, consumeCode, VerifyError } from "./pairing.ts";
+import { consumeCode, getOrCreateCode, VerifyError } from "./pairing.ts";
 import {
   IS_CLOUD,
   isBillingConfigured,
@@ -3040,7 +3040,7 @@ let requestUserEmail = "";
       // paths, so it resolves its own session
       const session = await getSession(req);
       if (!session) return json(res, 401, { error: "sign in before generating a pairing code" });
-      const { code, expiresAt } = createCode(session.userId);
+      const { code, expiresAt } = getOrCreateCode(session.userId);
       return json(res, 201, { code, expiresAt });
     }
     if (method === "GET" && path === "/api/pair/verify") {

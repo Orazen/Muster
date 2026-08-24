@@ -63,9 +63,10 @@ export function PairPage() {
           <span className="text-xl font-semibold tracking-tight">Muster</span>
         </Link>
         <h1 className="mt-6 text-2xl font-bold tracking-tight text-ink">Pair your desktop app</h1>
-        <p className="mt-2 text-sm leading-relaxed text-ink-secondary">
-          Open Muster Desktop, choose <span className="font-medium text-ink">Continue with Google</span>, then type
-          this code there. It expires in five minutes and works once.
+        <p className="mt-6 text-sm leading-relaxed text-ink-secondary">
+          Open Muster Desktop, then type this code where it asks for a pairing
+          code. It expires in five minutes and works once. Reloading this page
+          always shows the same code until it expires.
         </p>
 
         <div className="mt-6 rounded-xl border border-hairline bg-panel p-6">
@@ -76,9 +77,9 @@ export function PairPage() {
               <button
                 onClick={copy}
                 title="Copy code"
-                className="group mx-auto flex items-center gap-3 rounded-lg px-4 py-2 hover:bg-raised"
+                className="group mx-auto flex items-center gap-3 rounded-lg bg-white px-4 py-2 shadow-sm ring-1 ring-black/10 hover:bg-white"
               >
-                <span className="font-mono text-4xl font-semibold tracking-[0.3em] text-ink">
+                <span className="font-mono text-4xl font-semibold tracking-[0.3em] text-black">
                   {code || "····"}
                 </span>
                 {copied ? <Check size={16} className="text-success" /> : <Copy size={16} className="text-ink-secondary opacity-0 transition-opacity group-hover:opacity-100" />}

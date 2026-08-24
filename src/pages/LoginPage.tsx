@@ -96,26 +96,28 @@ export function LoginPage() {
           </div>
         )}
 
-        <button
-          type="button"
-          disabled={googlePending || !googleConfigured}
-          onClick={async () => {
-            setGooglePending(true);
-            const result = await signInWithProvider("google");
-            // success navigates away; reaching here means it failed
-            setGooglePending(false);
-            if (result.error) setError(result.error);
-          }}
-          className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-gray-200 bg-white py-2.5 text-sm font-semibold text-[#1f1f1f] shadow-sm transition-all hover:bg-gray-50 disabled:opacity-50"
-        >
-          <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
-            <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z" />
-            <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18Z" />
-            <path fill="#FBBC05" d="M3.97 10.72a5.41 5.41 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33Z" />
-            <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.46 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z" />
-          </svg>
-          {googlePending ? "Connecting…" : "Continue with Google"}
-        </button>
+        {googleConfigured && (
+          <button
+            type="button"
+            disabled={googlePending}
+            onClick={async () => {
+              setGooglePending(true);
+              const result = await signInWithProvider("google");
+              // success navigates away; reaching here means it failed
+              setGooglePending(false);
+              if (result.error) setError(result.error);
+            }}
+            className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-gray-200 bg-white py-2.5 text-sm font-semibold text-[#1f1f1f] shadow-sm transition-all hover:bg-gray-50 disabled:opacity-50"
+          >
+            <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+              <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z" />
+              <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18Z" />
+              <path fill="#FBBC05" d="M3.97 10.72a5.41 5.41 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33Z" />
+              <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.46 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z" />
+            </svg>
+            {googlePending ? "Connecting…" : "Continue with Google"}
+          </button>
+        )}
 
         {capabilities.cloudPairing && (
           // deliberately NOT inside a <form>: nested forms are illegal HTML.
@@ -123,19 +125,8 @@ export function LoginPage() {
           // authenticate on the web, type the one-time code here.
           <div className="space-y-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
             <p className="text-center text-[12px] leading-relaxed text-[#a1a1a6]">
-              Using the desktop app? Open{" "}
-              <button
-                type="button"
-                onClick={() => {
-                  const url = `${(capabilities.pairingCloudUrl ?? "").replace(/\/$/, "")}/pair`;
-                  if (window.ogb?.openExternal) window.ogb.openExternal(url);
-                  else window.open(url, "_blank", "noopener");
-                }}
-                className="font-medium text-[#ff7a45] hover:text-[#f0460e]"
-              >
-                muster.orazen.online/pair
-              </button>{" "}
-              with Google and type the code it shows:
+              Sign in once on muster.orazen.online with Google, then type the
+              code it shows here. Codes last five minutes.
             </p>
             <div className="flex gap-2">
               <input

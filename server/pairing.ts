@@ -133,6 +133,26 @@ export function createCode(userId: string, now = Date.now()) {
   return { code, expiresAt };
 }
 
+/** Idempotent variant: returns the user's existing unexpired code when one
+ * is live, creating only when needed.
+ *
+ * Why. The pair page re-mounts (tab restore, navigation, double render) and
+ * each mount used to ROTATE the code server-side while the browser kept
+ * displaying the previous one — the desktop then redeemed a code that no
+ * longer existed and got "isn't valid" for no visible reason. With this,
+ * every fetch of the pair page shows the SAME live code until it truly
+ * expires or the user explicitly rotates via New code. */
+export function getOrCreateCode(userId: string, now = Date.now()) {
+  if (!userId) throw Object.assign(new Error("a session is required to create a pairing code"), { status: 401 });
+  sweepExpired(now);
+  for (const [code, entry] of pending) {
+    if (entry.userId === userId && entry.expiresAt > now) {
+      return { code, expiresAt: entry.expiresAt };
+    }
+  }
+  return createCode(userId, now);
+}
+
 export class VerifyError extends Error {
   status: number;
   constructor(message: string, status = 400) {
