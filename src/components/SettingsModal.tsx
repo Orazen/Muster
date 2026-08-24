@@ -3,8 +3,8 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, CreditCard, KeyRound, Monitor, Smartphone, Terminal, User, Volume2, X, Cloud } from "lucide-react";
-import { useStore, type AppSettingsSection } from "@/state/store";
+import { Coins, CreditCard, KeyRound, Monitor, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud } from "lucide-react";
+import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
@@ -16,6 +16,7 @@ import { UsageSection } from "./UsageSection";
 import { BillingSection } from "./BillingSection";
 import { VoiceSettings } from "./VoiceSettings";
 import { ProvidersSection } from "./ProvidersSection";
+import { AuditPanel, type AuditPage } from "./AuditPanel";
 import { cn } from "@/lib/cn";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
@@ -143,10 +144,38 @@ function UpdatesRow() {
   );
 }
 
+/** The Audit section is earned, not permanent: one cheap probe decides
+ * whether the selected bot has any decisions to show. A bot with an empty
+ * ledger gets no nav item at all — a trust surface with nothing to trust
+ * yet shouldn't look broken. */
+function useAuditBotId(): string | null {
+  const { state } = useStore();
+  const selectedBotId = state.bots.find((b) => b.id === state.selectedId)?.id ?? null;
+  const [auditBotId, setAuditBotId] = useState<string | null>(null);
+  useEffect(() => {
+    setAuditBotId(null);
+    if (!selectedBotId) return;
+    let cancelled = false;
+    void api(`/api/bots/${selectedBotId}/audit?limit=1`)
+      .then((page: AuditPage) => {
+        if (!cancelled && page.entries.length > 0) setAuditBotId(selectedBotId);
+      })
+      .catch(() => {}); // unreachable server / desktop-local: hide the section cleanly
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBotId]);
+  return auditBotId;
+}
+
 export function SettingsModal() {
   const { state, dispatch } = useStore();
   const section = state.appSettingsSection;
   const dialogRef = useRef<HTMLDivElement>(null);
+  const auditBotId = useAuditBotId();
+  // Audit sits before Billing; present only when the selected bot has history.
+  const sections = [...SECTIONS];
+  if (auditBotId) sections.splice(sections.length - 1, 0, { id: "audit", label: "Audit", icon: ShieldCheck });
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -211,7 +240,7 @@ export function SettingsModal() {
           <div id="app-settings-title" className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink">
             Settings
           </div>
-          {SECTIONS.map(({ id, label, icon: Icon }) => (
+          {sections.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: id })}
@@ -230,7 +259,7 @@ export function SettingsModal() {
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center justify-between px-5 py-3">
             <span className="text-[15px] font-semibold text-ink">
-              {SECTIONS.find((s) => s.id === section)?.label}
+              {sections.find((s) => s.id === section)?.label}
             </span>
             <button
               onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
@@ -309,6 +338,12 @@ export function SettingsModal() {
             {section === "computer" && <LocalComputerSection />}
 
             {section === "usage" && <UsageSection />}
+
+            {section === "audit" && auditBotId && (
+              <Card title="Audit" subtitle="Every action this bot takes gets decided before it happens. Newest first.">
+                <AuditPanel botId={auditBotId} />
+              </Card>
+            )}
 
             {section === "billing" && <BillingSection />}
           </div>

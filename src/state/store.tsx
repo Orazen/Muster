@@ -288,6 +288,7 @@ export type AppSettingsSection =
   | "voice"
   | "computer"
   | "usage"
+  | "audit"
   | "billing";
 
 export interface AppState {
