@@ -288,6 +288,31 @@
 
   /* ---------- downloads ---------- */
   .download-rows { display: grid; gap: 14px; margin-top: 40px; }
+  /* ---------- faq ---------- */
+  .faq-list { max-width: 760px; margin-top: 40px; display: grid; gap: 12px; }
+  .faq-item {
+    border: 1px solid var(--line);
+    background: var(--surface-soft, #101011);
+    border-radius: 14px;
+    padding: 0;
+    overflow: hidden;
+  }
+  .faq-item summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 18px 22px;
+    font-weight: 600;
+    font-size: 15.5px;
+    color: var(--ink);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+  }
+  .faq-item summary::-webkit-details-marker { display: none; }
+  .faq-item summary::after { content: "+"; color: var(--muted); font-size: 20px; line-height: 1; }
+  .faq-item[open] summary::after { content: "–"; }
+  .faq-item .faq-a { padding: 0 22px 18px; color: var(--muted); font-size: 14.5px; line-height: 1.6; }
   .download-row {
     display: flex; align-items: center; justify-content: space-between; gap: 20px;
     border: 1px solid var(--line); border-radius: 16px; padding: 20px 24px;
@@ -688,6 +713,36 @@
             <a class="button button--secondary button--small" href="/sign-up" rel="noreferrer">Go annual</a>
           </div>
         </article>
+      </div>
+    </section>
+
+    <!-- FAQ (objection handling before download) -->
+    <section id="faq" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">FAQ</div>
+        <h2 class="section-heading">Questions, answered plainly</h2>
+      </div>
+      <div class="faq-list">
+        <details class="faq-item" open>
+          <summary>What exactly is a “cloud computer”?</summary>
+          <div class="faq-a">A small Linux desktop in our cloud that your bot drives like a person would — real browser, real files, real apps. It's the metered unit because it's the only part of Muster that costs us compute. Bots themselves are free and unlimited on every plan.</div>
+        </details>
+        <details class="faq-item">
+          <summary>Does the Privacy Shield slow my bots down or break their context?</summary>
+          <div class="faq-a">No. Masking is deterministic — the same email always becomes the same <code>[EMAIL_n]</code> token — so models keep thread context across turns. You get a counts-only receipt each turn showing exactly how many items were masked, never the content itself.</div>
+        </details>
+        <details class="faq-item">
+          <summary>If I self-host, do I lose any features?</summary>
+          <div class="faq-a">None. The software ships complete under BSL 1.1 — every feature, unlimited bots, no license keys, no phone-home. What we sell is hosting and convenience, not unlocks.</div>
+        </details>
+        <details class="faq-item">
+          <summary>What happens to my bots if I cancel?</summary>
+          <div class="faq-a">Your bots, transcripts, and connected apps stay intact. Cloud computer provisioning pauses until billing resumes, and you can export everything and self-host the same harness at any time.</div>
+        </details>
+        <details class="faq-item">
+          <summary>Which AI models can my bots use?</summary>
+          <div class="faq-a">Whatever you already pay for. Bots run on Claude Code, Codex, Grok, Gemini, and any OpenAI-compatible API — including local models via Ollama. Vision-capable models can also read screenshots you attach.</div>
+        </details>
       </div>
     </section>
 
