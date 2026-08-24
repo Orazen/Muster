@@ -248,24 +248,27 @@ function UpdatesRow() {
  * whether the selected bot has any decisions to show. A bot with an empty
  * ledger gets no nav item at all — a trust surface with nothing to trust
  * yet shouldn't look broken. */
-function useAuditBotId(): string | null {
+function useAuditBotId(): { botId: string | null; reachable: boolean } {
   const { state } = useStore();
   const selectedBotId = state.bots.find((b) => b.id === state.selectedId)?.id ?? null;
-  const [auditBotId, setAuditBotId] = useState<string | null>(null);
+  const [audit, setAudit] = useState<{ botId: string | null; reachable: boolean }>({ botId: null, reachable: false });
   useEffect(() => {
-    setAuditBotId(null);
+    setAudit({ botId: null, reachable: false });
     if (!selectedBotId) return;
     let cancelled = false;
     void api(`/api/bots/${selectedBotId}/audit?limit=1`)
       .then((page: AuditPage) => {
-        if (!cancelled && page.entries.length > 0) setAuditBotId(selectedBotId);
+        // Reachable beats non-empty: an empty ledger used to hide the nav
+        // item entirely, which read as "the feature is missing". Now the
+        // section appears with an honest empty state instead.
+        if (!cancelled) setAudit({ botId: selectedBotId, reachable: true });
       })
       .catch(() => {}); // unreachable server / desktop-local: hide the section cleanly
     return () => {
       cancelled = true;
     };
   }, [selectedBotId]);
-  return auditBotId;
+  return audit;
 }
 
 /** Channel turn cap — the one server-side knob in this modal. Saved on blur
@@ -424,7 +427,10 @@ export function SettingsModal() {
   const { state, dispatch } = useStore();
   const section = state.appSettingsSection;
   const dialogRef = useRef<HTMLDivElement>(null);
-  const auditBotId = useAuditBotId();
+  const audit = useAuditBotId();
+  const auditBotId = audit.botId;
+
+  if (audit.reachable && auditBotId)
   // Audit sits before Billing; present only when the selected bot has history.
   const sections = [...SECTIONS];
   if (auditBotId)
@@ -635,9 +641,9 @@ export function SettingsModal() {
 
             {section === "usage" && <UsageSection />}
 
-            {section === "audit" && auditBotId && (
+            {section === "audit" && audit.botId && (
               <Card title="Audit" subtitle="Every action this bot takes gets decided before it happens. Newest first.">
-                <AuditPanel botId={auditBotId} />
+                <AuditPanel botId={audit.botId} />
               </Card>
             )}
 
