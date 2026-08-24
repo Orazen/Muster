@@ -1532,6 +1532,29 @@ async function startTurn(
   // a task takes its name from the first thing you asked it to do
   if (text.trim() && !opts?.connectorContinuation) store.titleTaskFromFirstMessage(bot.id, text, threadId);
 
+  // The user's words land in the thread BEFORE anything that can fail.
+  // Every pre-dispatch refusal below used to throw before this append ran,
+  // so a 409/403 erased the message the user just typed — "I sent msg but
+  // I don't see it." Now a failed turn still shows what was asked, with
+  // the reason right under it.
+  let userMessage = opts?.userMessage;
+  if (!userMessage) {
+    userMessage = opts?.connectorContinuation
+      ? { id: `connector-${randomUUID()}`, at: Date.now(), role: "user", kind: "text", text }
+      : store.appendMessage(threadId, { role: "user", kind: "text", text });
+  }
+  /** Same release-the-claim contract as fail(), but the refusal is also
+   * written into the thread as an activity entry — visible next to the
+   * user's message instead of only in a toast. */
+  const failVisible: (err: Error) => never = (err) => {
+    store.appendMessage(threadId, {
+      role: "bot",
+      kind: "activity",
+      tool: { name: `error: ${err.message}`, ok: false },
+    });
+    return fail(err);
+  };
+
   // "cloud" is Box's special embedded-agent driver (the whole turn runs
   // inside the Box VM, not just its computer tools mounted on the bot's
   // own model) — OpenSandbox has no equivalent driver, so "opensandbox"
@@ -1541,7 +1564,7 @@ async function startTurn(
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
     : await resolveInstanceForBot(bot);
   if (!instance) {
-    fail(Object.assign(
+    failVisible(Object.assign(
       new Error(
         opts?.runOn === "cloud"
           ? "the Cloud VM runner is unavailable — configure Box in App Settings"
@@ -1558,18 +1581,10 @@ async function startTurn(
   // A selection can be persisted while its engine is offline. Re-check when
   // the engine returns so an old or unsupported value never reaches a CLI.
   if (effort && !instance.adapter.capabilities.effortLevels?.includes(effort)) {
-    fail(Object.assign(
+    failVisible(Object.assign(
       new Error(`effort "${effort}" is not offered by this bot's engine — choose another level in settings`),
       { status: 409 },
     ));
-  }
-
-  // an edit hands us its already-branched user message; a plain send appends
-  let userMessage = opts?.userMessage;
-  if (!userMessage) {
-    userMessage = opts?.connectorContinuation
-      ? { id: `connector-${randomUUID()}`, at: Date.now(), role: "user", kind: "text", text }
-      : store.appendMessage(threadId, { role: "user", kind: "text", text });
   }
 
   // transcript for API-backed drivers: portable-context rebuild on the
