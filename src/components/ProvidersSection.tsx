@@ -23,6 +23,7 @@ function ProviderRow({ provider }: { provider: ProviderMeta }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
 
   const configured = state.config?.providers?.[provider.id]?.configured ?? provider.configured ?? false;
   const clearing = !value.trim() && configured;
@@ -51,6 +52,10 @@ function ProviderRow({ provider }: { provider: ProviderMeta }) {
         // client's instance list so the model picker sees them immediately.
         void refreshInstances();
         setValue("");
+        // Keys are write-only — nothing echoes back, so say plainly that the
+        // save landed before the field goes quiet again.
+        setJustSaved(true);
+        setTimeout(() => setJustSaved(false), 4000);
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setSaving(false));
@@ -62,6 +67,7 @@ function ProviderRow({ provider }: { provider: ProviderMeta }) {
         <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
         <span className="text-[13px] font-medium text-ink">{provider.label}</span>
         {configured && <span className="text-[11px] text-success">Connected</span>}
+        {justSaved && <span className="text-[11px] font-medium text-success">Saved ✓</span>}
         <div className="relative ml-auto">
           <button
             type="button"
