@@ -165,3 +165,26 @@ export function allUserInstanceConfigs(
     {},
   );
 }
+
+/** Move every provider key from one account to another. Where both hold the
+ * same provider the TARGET keeps its own value — the account the user is
+ * actively using wins. The source's vault entry is removed. Returns
+ * [movedProviderIds, keptProviderIds] for the UI summary. */
+export function mergeUserVault(cfgDataDir: string, fromUser: string, toUser: string): [string[], string[]] {
+  const vault = loadVault(cfgDataDir);
+  const src = vault.users[fromUser];
+  if (!src) return [[], []];
+  const dst = (vault.users[toUser] ??= {});
+  const moved: string[] = [];
+  const kept: string[] = [];
+  for (const [providerId, entry] of Object.entries(src)) {
+    if (dst[providerId]) kept.push(providerId);
+    else {
+      dst[providerId] = entry;
+      moved.push(providerId);
+    }
+  }
+  delete vault.users[fromUser];
+  saveVault(cfgDataDir, vault);
+  return [moved, kept];
+}

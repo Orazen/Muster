@@ -575,3 +575,11 @@ export function isPublicApiPath(path: string): boolean {
     path === "/api/pair/redeem"
   );
 }
+
+/** Hard-delete one auth user; FK cascades clear their sessions and linked
+ * accounts. Only caller: account-merge, AFTER vault keys and bot ownership
+ * have already migrated — ownership of both halves is proven by the token
+ * exchange, so this is bookkeeping, not a destructive surprise. */
+export function deleteAuthUser(userId: string): void {
+  getDb().prepare('DELETE FROM "user" WHERE "id" = ?').run(userId);
+}

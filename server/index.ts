@@ -110,6 +110,8 @@ import {
   userProviderFlags,
 } from "./user-keys.ts";
 import { vpsComputerStatus, vpsEnsureDesktop, vpsDockerHost, vpsReachable } from "./vps-computer.ts";
+import { startAccountMerge, spendAccountMergeToken } from "./account-merge.ts";
+import { mergeUserVault } from "./user-keys.ts";
 import { PROVIDER_DRIVER_ENV, DATA_DIR } from "./config.ts";
 import * as tts from "./tts/index.ts";
 import {
@@ -126,6 +128,7 @@ import {
   createBridgedUser,
   mintSession,
   signedSessionCookieValue,
+  deleteAuthUser,
 } from "./auth.ts";
 import { consumeCode, getOrCreateCode, VerifyError } from "./pairing.ts";
 import {
@@ -4466,6 +4469,47 @@ let requestUserEmail = "";
     // Each signed-in account keeps its OWN provider keys, encrypted at rest.
     // Self-host keeps the single global config — the vault only activates
     // when the deployment serves multiple users (SELF_HOSTED).
+    // ── account merge (one human, several sign-in identities) ─────────
+    // Step 1 — signed in as the account you want to KEEP: mint a token.
+    if (path === "/api/account/merge/start" && method === "POST") {
+      if (!requestUserId) return json(res, 401, { error: "sign in first" });
+      return json(res, 200, { token: startAccountMerge(requestUserId), expiresInMs: 15 * 60_000 });
+    }
+    // Step 2 — signed in as the account you want to FOLD IN: spend the
+    // token. Vault keys migrate (target wins conflicts), bot ownership
+    // moves, the source auth row is deleted with its sessions.
+    if (path === "/api/account/merge/complete" && method === "POST") {
+      if (!requestUserId) return json(res, 401, { error: "sign in first" });
+      const body = await readBody(req);
+      const token = isText(body?.token) ? body.token.trim() : "";
+      if (!token) return json(res, 400, { error: "paste the merge code from your other account" });
+      const intent = spendAccountMergeToken(token, requestUserId);
+      if (!intent) return json(res, 400, { error: "that merge code is unknown, expired, or already used" });
+      const sourceUserId = requestUserId;
+      const targetUserId = intent.targetUserId;
+      const [moved, kept] = mergeUserVault(DATA_DIR, sourceUserId, targetUserId);
+      let botsReassigned = 0;
+      for (const b of store.bots) {
+        if (b.ownerId === sourceUserId) {
+          store.patchBot(b.id, { ownerId: targetUserId });
+          botsReassigned++;
+        }
+      }
+      deleteAuthUser(sourceUserId);
+      await reloadUserInstancesAll();
+      broadcast({ kind: "config", ...configStatus(targetUserId) });
+      console.log(
+        `[merge] ${sourceUserId.slice(0, 8)}*** folded into ${targetUserId.slice(0, 8)}*** keys=${moved.length}+${kept.length} bots=${botsReassigned}`,
+      );
+      return json(res, 200, {
+        ok: true,
+        targetEmail: findUserById(targetUserId)?.email ?? "",
+        movedKeys: moved,
+        keptKeys: kept,
+        botsReassigned,
+      });
+    }
+
     if (path === "/api/user-keys") {
       if (!requestUserId) return json(res, 401, { error: "unauthorized: sign in required" });
       const flags = userProviderFlags(DATA_DIR, requestUserId);

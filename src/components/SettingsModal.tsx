@@ -118,6 +118,95 @@ function AccountSection() {
   );
 }
 
+/** One human, several Google identities — this card folds the extras in.
+ * Step 1 runs on the account you KEEP (mint a code), step 2 on the one you
+ * are retiring (spend the code). Vault keys and bot ownership migrate; the
+ * retired identity's sign-in stops working. */
+function MergeAccountsCard() {
+  const { user } = useAuth();
+  const [code, setCode] = useState("");
+  const [paste, setPaste] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  if (!user) return null;
+
+  const mint = async () => {
+    setBusy(true);
+    setNote("");
+    try {
+      const r = (await api("/api/account/merge/start", { method: "POST" })) as { token: string };
+      setCode(r.token);
+    } catch {
+      setNote("Could not start a merge — is this a cloud deployment?");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const complete = async () => {
+    if (!paste.trim()) return;
+    setBusy(true);
+    setNote("");
+    try {
+      const r = (await api("/api/account/merge/complete", {
+        method: "POST",
+        body: JSON.stringify({ token: paste.trim() }),
+      })) as { movedKeys: string[]; keptKeys: string[]; botsReassigned: number; targetEmail: string };
+      setPaste("");
+      setNote(
+        `Merged into ${r.targetEmail} — ${r.movedKeys.length} key(s) moved, ${r.keptKeys.length} kept, ${r.botsReassigned} bot(s) reassigned. Reload to see everything together.`,
+      );
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "Merge failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card
+      title="Merge another account"
+      subtitle={`Fold an older sign-in (${user.email} keeps everything)`}
+    >
+      <div className="space-y-3 text-[13px] text-ink/80">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={mint}
+            disabled={busy}
+            className="rounded-lg border border-hairline/40 bg-inset px-3 py-1.5 transition-colors hover:bg-raised disabled:opacity-60"
+          >
+            Generate merge code for this account
+          </button>
+          {code && (
+            <code className="rounded bg-inset px-2 py-1 font-mono text-[12px]">{code}</code>
+          )}
+        </div>
+        <p className="text-ink/60">
+          Sign in with the other account (in another browser), open this same settings page, and paste the code there.
+          Valid 15 minutes, works once.
+        </p>
+        <div className="flex gap-2">
+          <input
+            value={paste}
+            onChange={(e) => setPaste(e.target.value)}
+            placeholder="Paste a merge code from your other account"
+            aria-label="Merge code from other account"
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px]"
+          />
+          <button
+            onClick={complete}
+            disabled={busy || !paste.trim()}
+            className="w-fit rounded-lg border border-hairline/40 bg-inset px-3.5 py-2 transition-colors hover:bg-raised disabled:opacity-60"
+          >
+            Merge
+          </button>
+        </div>
+        {note && <p className="text-ink/70">{note}</p>}
+      </div>
+    </Card>
+  );
+}
+
 function UpdatesRow() {
   const s = useUpdaterState();
   if (!window.ogb?.updater) return null;
@@ -475,6 +564,7 @@ export function SettingsModal() {
                 <VpsCard />
                 <DiagnosticsCard />
                 <AccountSection />
+                <MergeAccountsCard />
                 <UpdatesRow />
               </>
             )}
