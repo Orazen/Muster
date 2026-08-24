@@ -49,6 +49,7 @@ import {
 } from "./container-computer.ts";
 import {
   channelTurnCapMinutes,
+  vpsSshAlias,
   ensureDirs,
   instanceConfigs,
   loadConfig,
@@ -108,6 +109,7 @@ import {
   userInstanceOwner,
   userProviderFlags,
 } from "./user-keys.ts";
+import { vpsComputerStatus, vpsEnsureDesktop, vpsDockerHost } from "./vps-computer.ts";
 import { PROVIDER_DRIVER_ENV, DATA_DIR } from "./config.ts";
 import * as tts from "./tts/index.ts";
 import {
@@ -1669,7 +1671,7 @@ async function startTurn(
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       const mountsCloudComputer = mountsComputerMcp || instance.driverKind === "boxAgent";
       let previewBoxId: string | null = null;
-      let computerKind: "box" | "vm" | "local" | "opensandbox" | null = null;
+      let computerKind: "box" | "vm" | "local" | "opensandbox" | "vps" | null = null;
 
       // Explicit destinations are strict. In particular, Local VM must never
       // fall through to host CUA and accidentally click on the user's Mac.
@@ -1723,6 +1725,34 @@ async function startTurn(
         }
         integrations.localComputer = containerComputerMcp(localVm.runtime, target);
         computerKind = "vm";
+      } else if (wants === "vps") {
+        if (!mountsComputerMcp || instance.driverKind === "boxAgent") {
+          throw new Error("this model engine cannot use the VPS computer — choose Claude or an ACP engine, or select another destination");
+        }
+        const alias = vpsSshAlias(cfg);
+        if (!alias) {
+          throw new Error("VPS is not configured — add your SSH config alias in App Settings → Self-hosted VPS, or choose another destination");
+        }
+        const target = desktopTargetForBot(bot.id);
+        broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
+        let status: Awaited<ReturnType<typeof vpsComputerStatus>>;
+        try {
+          status = await vpsEnsureDesktop(alias, target);
+        } catch (e) {
+          const detail = e instanceof Error ? e.message : String(e);
+          throw new Error(/could not reach|timeout/i.test(detail)
+            ? `could not reach the VPS "${alias}" — check ~/.ssh/config and that the host is up`
+            : detail);
+        }
+        if (!status.ready) {
+          throw new Error(status.problem ?? `the VPS desktop is not ready (App Settings → Self-hosted VPS)`);
+        }
+        // The MCP child inherits DOCKER_HOST so its own docker exec calls
+        // land on the same remote daemon.
+        integrations.localComputer = containerComputerMcp("docker", target, {
+          DOCKER_HOST: vpsDockerHost(alias),
+        });
+        computerKind = "vps";
       } else if (wants === "local") {
         if (!mountsComputerMcp) {
           throw new Error("this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
@@ -2563,6 +2593,8 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
     localVm: { mode: localVmMode(cfg), maxInstances: localVmMaxInstances(cfg) },
     // same for the channel turn cap; the General panel's minutes input reads it
     channels: { turnCapMinutes: channelTurnCapMinutes(cfg) },
+    // alias is a setting, not a secret — ssh(1) holds the actual credentials
+    vps: { sshAlias: vpsSshAlias(cfg) ?? "" },
   };
 }
 

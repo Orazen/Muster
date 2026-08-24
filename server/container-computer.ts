@@ -893,11 +893,15 @@ type ContainerMcpLaunch = {
   env: Record<string, string>;
 };
 
-export function containerComputerMcp(runtime: Runtime, target: LocalVmTarget = SHARED_LOCAL_VM_TARGET): ContainerMcpLaunch {
+export function containerComputerMcp(
+  runtime: Runtime,
+  target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+  extraEnv: Record<string, string> = {},
+): ContainerMcpLaunch {
   return {
     command: process.execPath,
     args: [containerMcpPath, runtime, target.containerName, CUA_SOCKET],
-    env: { ELECTRON_RUN_AS_NODE: "1" },
+    env: { ELECTRON_RUN_AS_NODE: "1", ...extraEnv },
   };
 }
 

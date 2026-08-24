@@ -68,6 +68,11 @@ const appConfigSchema = z.object({
       turnCapMinutes: z.number().int().min(CHANNEL_TURN_CAP_MIN_MINUTES).max(CHANNEL_TURN_CAP_MAX_MINUTES).optional(),
     })
     .optional(),
+  /** BYO Linux VPS as a bot computer. The ONLY stored value is the user's
+   * SSH config alias: ssh(1) itself resolves host/key/agent from ~/.ssh,
+   * and Docker's native ssh:// transport reaches the remote daemon. No
+   * credentials ever live in Muster. */
+  vps: z.object({ sshAlias: optionalText }).optional(),
   /** Per-provider API keys — write-only, only configured-or-not flags exposed. */
   providers: z.record(z.string(), z.object({ apiKey: optionalText })).optional(),
   instances: instanceConfigMapSchema.optional(),
@@ -97,6 +102,8 @@ export interface AppConfig {
   localVm?: { mode?: LocalVmIsolationMode; maxInstances?: number };
   /** Channel settings; see the channels schema note for the turn cap. */
   channels?: { turnCapMinutes?: number };
+  /** BYO VPS over SSH; see isValidSshAlias for what may be stored here. */
+  vps?: { sshAlias?: string };
   profile?: { name?: string; email?: string };
   providers?: Record<string, { apiKey?: string }>;
   instances?: InstanceConfigMap;
@@ -158,6 +165,22 @@ export function channelTurnCapMinutes(cfg: AppConfig): number {
   return cfg.channels?.turnCapMinutes ?? DEFAULT_CHANNEL_TURN_CAP_MINUTES;
 }
 
+// ── BYO VPS (SSH alias) ────────────────────────────────────────────────────
+
+/** What a safe SSH config alias looks like. The alias is handed to ssh(1)
+ * as a single argv element and into a DOCKER_HOST URL — never through a
+ * shell — but keeping it to this charset also makes config files, logs and
+ * error messages unambiguous. */
+export function isValidSshAlias(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) && value.length <= 128;
+}
+
+/** The configured alias, or null when unset/invalid. Invalid stored values
+ * degrade to "not configured" rather than throwing mid-turn. */
+export function vpsSshAlias(cfg: AppConfig): string | null {
+  return isValidSshAlias(cfg.vps?.sshAlias) ? cfg.vps!.sshAlias : null;
+}
+
 export function ensureDirs() {
   // one-time migration from the pre-rename data dir — bots, transcripts,
   // config and keys all carry over
@@ -199,7 +222,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
-  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm", "channels"] as const) {
+  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm", "channels", "vps"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
