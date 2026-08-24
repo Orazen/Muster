@@ -917,7 +917,16 @@ export async function api(path: string, init?: RequestInit): Promise<any> {
     ...init,
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    // An expired session used to 401 every hydrate call into silent
+    // .catch(() => {}) sinks — the user got a permanently EMPTY app
+    // (blank transcript, no bots) instead of a login page. Bounce to
+    // sign-in once, preserving where they were.
+    if (res.status === 401 && !window.location.pathname.startsWith("/sign") && window.location.pathname !== "/pair") {
+      window.location.href = `/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+    }
+    throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+  }
   return body;
 }
 
