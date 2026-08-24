@@ -307,6 +307,13 @@ async function defaultSelection(forUserId?: string) {
     const suffix = `:${forUserId}`;
     const own = available.filter((d) => d.instanceId.endsWith(suffix));
     if (own.length) available = own;
+  } else {
+    // No owner context — user-scoped vault engines are FORBIDDEN here.
+    // Handing an unowned bot someone's vault instance bakes a cross-owner
+    // reference into its modelSelection that turn-start will refuse
+    // forever after (the "openrouterApi:<someone-else> is unavailable"
+    // class of bug).
+    available = available.filter((d) => !d.instanceId.includes(":"));
   }
   // Deliberately NO fallback to described[0]. Handing a bot an engine whose
   // CLI isn't installed makes it look ready and then fail on send with a raw
@@ -377,7 +384,14 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
     if (bot.ownerId) {
       // Try the exact same driver kind first
       const base = bot.modelSelection.instanceId.split(":")[0];
-      const exact = registry.get(userInstanceId(base, bot.ownerId));
+      let exact = registry.get(userInstanceId(base, bot.ownerId));
+      if (!exact && userProviderFlags(DATA_DIR, bot.ownerId)[base]?.configured) {
+        // Vault says the owner has this key but the registry lost the
+        // instance (boot race, partial reload). Re-register and retry once
+        // instead of leaving the bot stuck on a foreign/dead selection.
+        await reloadUserInstances(bot.ownerId);
+        exact = registry.get(userInstanceId(base, bot.ownerId));
+      }
       if (exact) {
         store.patchBot(bot.id, { modelSelection: { ...bot.modelSelection, instanceId: userInstanceId(base, bot.ownerId) } });
         return exact;
@@ -404,7 +418,9 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
 store.seedIfEmpty();
 // Per-user vault engines register at boot so saved keys are live on any
 // device the account signs in from — configured once, everywhere.
-void reloadUserInstancesAll();
+// Awaited, not fire-and-forget: an early /api/instances or first turn must
+// never observe a registry that hasn't loaded the vault engines yet.
+await reloadUserInstancesAll();
 
 // Boot migration for the multi-tenant guard: records that predate per-user
 // ownership belong to the deployment's first account (the operator). Without
@@ -2623,9 +2639,26 @@ async function reloadUserInstances(userId: string): Promise<void> {
 /** Register every user's vault instances (boot path). */
 async function reloadUserInstancesAll(): Promise<void> {
   try {
-    await registry.load(allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV));
+    const configs = allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV);
+    await registry.load(configs);
+    console.log(
+      `[instances] vault engines registered: ${Object.keys(configs).length} across ${Object.keys(loadVaultUsers()).length} users`,
+    );
   } catch (e) {
     console.error("vault instance registration failed:", e instanceof Error ? e.message : e);
+  }
+}
+
+/** User ids present in the vault — for the boot log line only. */
+function loadVaultUsers(): string[] {
+  try {
+    // SAFETY: read-only view of our own vault envelope; shape enforced by
+    // loadVault inside user-keys (flags path). Kept local to avoid widening
+    // the module's export surface.
+    const raw = JSON.parse(readFileSync(join(DATA_DIR, "user-keys.json"), "utf8")) as { users?: Record<string, unknown> };
+    return Object.keys(raw.users ?? {});
+  } catch {
+    return [];
   }
 }
 
@@ -4448,7 +4481,11 @@ let requestUserEmail = "";
         if (!apiKey) return json(res, 400, { error: "apiKey is required" });
         setUserProviderKey(DATA_DIR, requestUserId, providerId, apiKey);
         await reloadUserInstances(requestUserId);
-        return json(res, 200, { ok: true });
+        // Return the SAME configStatus shape /api/config PUT returns — the
+        // settings UI dispatches this straight into its store. Returning
+        // {ok:true} here made the UI wipe its own provider flags on every
+        // successful save, so a freshly-saved key showed "not Connected".
+        return json(res, 200, configStatus(requestUserId, requestUserName, requestUserEmail));
       }
       if (method === "DELETE") {
         const body = await readBody(req);
@@ -4458,7 +4495,7 @@ let requestUserEmail = "";
         }
         clearUserProviderKey(DATA_DIR, requestUserId, providerId);
         await reloadUserInstances(requestUserId);
-        return json(res, 200, { ok: true });
+        return json(res, 200, configStatus(requestUserId, requestUserName, requestUserEmail));
       }
     }
 
