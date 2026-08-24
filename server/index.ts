@@ -19,7 +19,14 @@ import {
 } from "./attachments.ts";
 import type { JsonValue } from "./schema.ts";
 import { modelAcceptsImages } from "./contracts.ts";
-import { scrubForCloud } from "./privacy-shield.ts";
+import {
+  forgetShieldSession,
+  rememberScrub,
+  scrubForCloud,
+  scrubOutbound,
+  shieldSessionKey,
+  unscrubText,
+} from "./privacy-shield.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import * as box from "./box.ts";
@@ -871,10 +878,21 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "item.completed":
       if (event.itemType === "assistant_text") {
-        pushMessage({ role: "bot", kind: "text", text: event.text });
+        // Privacy Shield v2: the cloud model answered in placeholder dialect
+        // ("[EMAIL_1]") — restore this session's recorded originals BEFORE
+        // persisting, so the human's transcript shows real values again.
+        // Only shield-enabled bots have a recorded session (built during
+        // dispatch); every other bot's text passes through untouched.
+        const replyBot = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
+        const shownText =
+          replyBot?.privacyShield === true
+            ? unscrubText(shieldSessionKey(replyBot.id, event.threadId), event.text)
+            : event.text;
+        pushMessage({ role: "bot", kind: "text", text: shownText });
         // kept so "finished" can say what it finished with, rather than
-        // just that something ended
-        lastReply.set(event.threadId, event.text);
+        // just that something ended — carrying the SAME restored values
+        // that were persisted above, never placeholder dialect
+        lastReply.set(event.threadId, shownText);
       } else if (event.itemType === "tool" && event.itemId) {
         const itemKey = `${event.threadId}:${event.itemId}`;
         const messageId = toolMessageByItem.get(itemKey);
@@ -1732,9 +1750,22 @@ async function startTurn(
       let outboundText = turnText;
       let outboundTranscript = transcript;
       if (bot.privacyShield === true && instance.adapter.capabilities.transcriptReplay === true) {
-        const turnScan = scrubForCloud(turnText);
+        // v2: deterministic pass always runs; when a classifier is installed
+        // (configureClassifier — no runtime caller yet, seam for a future
+        // on-device model) it awaits AFTER and merges into the same result.
+        const turnScan = await scrubOutbound(turnText);
         outboundText = turnScan.text;
-        outboundTranscript = transcript.map((m) => ({ ...m, text: scrubForCloud(m.text).text }));
+        // History is re-scrubbed per message exactly as before; its pairs
+        // are kept too. History records FIRST, then the current turn LAST,
+        // so its pairs win ties when a reply says "[EMAIL_1]" — most
+        // plausibly naming what the latest prompt discussed.
+        const historyScans = transcript.map((m) => ({ m, scan: scrubForCloud(m.text) }));
+        outboundTranscript = historyScans.map((entry) => ({ ...entry.m, text: entry.scan.text }));
+        // Session-scoped reverse map for un-scrub-on-reply (bus.subscribe).
+        // Harness memory only, LRU-bounded — see privacy-shield.ts.
+        const shieldKey = shieldSessionKey(bot.id, threadId);
+        for (const entry of historyScans) rememberScrub(shieldKey, entry.scan);
+        rememberScrub(shieldKey, turnScan);
         const totals = { secrets: 0, emails: 0, phones: 0 };
         for (const f of turnScan.findings) totals[f.kind === "secret" ? "secrets" : f.kind === "email" ? "emails" : "phones"] += f.count;
         if (totals.secrets + totals.emails + totals.phones > 0) {
@@ -3983,6 +4014,9 @@ let requestUserEmail = "";
       const message = store.branchMessage(bot.threadId, messageId, text);
       if (!message) return json(res, 404, { error: "no such message" });
       store.patchBot(bot.id, { rewound: true });
+      // the abandoned branch's placeholder pairs belong to a dead
+      // conversation — drop them so stale originals cannot bleed into forks
+      forgetShieldSession(shieldSessionKey(bot.id, bot.threadId));
       await startTurn(bot.id, text, { userMessage: message });
       return json(res, 202, { ok: true });
     }
@@ -3998,6 +4032,8 @@ let requestUserEmail = "";
       if (!leaf) return json(res, 404, { error: "no such message" });
       // provider sessions still hold the other branch — next turn replays
       store.patchBot(bot.id, { rewound: true });
+      // same as edit-fork above: the hidden branch's reverse map is dead
+      forgetShieldSession(shieldSessionKey(bot.id, bot.threadId));
       return json(res, 200, { activeLeafId: leaf });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/respond$/);
