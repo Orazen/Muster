@@ -460,7 +460,10 @@ jobs:
           [ -f "$res/ui/index.html" ] || { echo "::error::missing $res/ui/index.html"; fail=1; }
           [ -f "$res/app-update.yml" ] || { echo "::error::missing $res/app-update.yml"; fail=1; }
           if [ -f "$res/app-update.yml" ]; then
-            grep -q "Orazen/Muster" "$res/app-update.yml" || {
+            # electron-builder writes owner/repo on separate lines, so check
+            # them individually — a literal "Orazen/Muster" grep never matches.
+            grep -q "owner: Orazen" "$res/app-update.yml" && \
+              grep -q "repo: Muster" "$res/app-update.yml" || {
               echo "::error::app-update.yml does not point at Orazen/Muster"; fail=1; }
             if [ -n "$CSC_LINK" ]; then
               grep -q "publisherName" "$res/app-update.yml" || {
