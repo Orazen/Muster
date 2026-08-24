@@ -42,6 +42,59 @@ function sectionMatches(section: (typeof SECTIONS)[number], query: string): bool
   return [section.label, ...section.keywords].some((part) => part.toLowerCase().includes(query));
 }
 
+/** The user-owned team brief. Saved to /api/team-context and injected into
+ * every bot's system prompt as read-only shared context — agents cannot
+ * edit it, only the user writes through this card. */
+function TeamContextCard() {
+  const { dispatch } = useStore();
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  useEffect(() => {
+    void api("/api/team-context")
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- the response body is untyped JSON off the wire; this is the boundary decode for the single text field.
+      .then((body: { text?: string }) => setText(typeof body?.text === "string" ? body.text : ""))
+      .catch(() => undefined);
+  }, []);
+
+  const save = async (next: string) => {
+    setText(next);
+    setStatus("saving");
+    try {
+      await api("/api/team-context", { method: "PUT", body: JSON.stringify({ text: next }) });
+      setStatus("saved");
+    } catch (error) {
+      dispatch({ type: "error", message: error instanceof Error ? error.message : "Could not save team context" });
+      setStatus("error");
+    }
+  };
+
+  return (
+    <Card
+      title="Team context"
+      subtitle="Shared reference for every agent — goals, conventions, links. Read-only to bots; only you can edit it here."
+    >
+      <textarea
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value);
+          setStatus("idle");
+        }}
+        onBlur={() => {
+          if (status === "idle") void save(text);
+        }}
+        rows={6}
+        maxLength={24_000}
+        placeholder="e.g. We ship under the Orazen brand. Deploy days are Tue/Thu. Never email clients directly."
+        className="w-full resize-y rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent"
+      />
+      <div className="mt-1 text-[12px] text-ink-secondary">
+        {status === "saving" ? "Saving…" : status === "saved" ? "Saved" : status === "error" ? "Could not save" : `${text.length}/24,000 characters`}
+      </div>
+    </Card>
+  );
+}
+
 /** Name + email, persisted to /api/config {profile} on blur. Pre-fills from
  * the signed-in account when the local profile override hasn't been set
  * yet, so a freshly created account doesn't show a blank name/email box. */
@@ -571,6 +624,7 @@ export function SettingsModal() {
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
                   <ProfileFields />
                 </Card>
+                <TeamContextCard />
                 <ChannelTurnCapCard />
                 <VpsCard />
                 <DiagnosticsCard />

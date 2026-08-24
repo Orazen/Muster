@@ -16,10 +16,13 @@ import {
   Monitor,
   Pencil,
   RefreshCw,
+  Search,
   Square,
   Webhook,
   X,
 } from "lucide-react";
+
+import { ChatFindBar } from "./ChatFindBar";
 import { costCaption, formatTokens, formatUsd, usageChip } from "@/lib/usage";
 import {
   useStore,
@@ -721,6 +724,19 @@ const MessagesList = memo(function MessagesList({
 export function ChatView({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [findOpen, setFindOpen] = useState(false);
+
+  useEffect(() => setFindOpen(false), [bot.threadId]);
+  useEffect(() => {
+    const onFind = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onFind);
+    return () => window.removeEventListener("keydown", onFind);
+  }, []);
 
   const stream = useStreaming();
   const streaming = stream.streaming[bot.threadId];
@@ -961,6 +977,18 @@ export function ChatView({ bot }: { bot: Bot }) {
             <Monitor size={18} />
           </button>
           <button
+            onClick={() => setFindOpen((open) => !open)}
+            aria-label="Find in conversation"
+            aria-pressed={findOpen}
+            className={cn(
+              "rounded-md p-1.5 hover:bg-raised",
+              findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+            )}
+            title="Find in conversation (⌘F)"
+          >
+            <Search size={18} />
+          </button>
+          <button
             onClick={() => dispatch({ type: "toggleInspector" })}
             aria-label="Inspector"
             aria-pressed={state.inspectorOpen}
@@ -974,6 +1002,8 @@ export function ChatView({ bot }: { bot: Bot }) {
           </button>
         </div>
       </div>
+
+      {findOpen && <ChatFindBar threadId={bot.threadId} onClose={() => setFindOpen(false)} />}
 
       {/* Error banner */}
       {state.error && (
