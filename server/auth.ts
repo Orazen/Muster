@@ -341,8 +341,11 @@ export function authCapabilities() {
     // in server/index.ts for the enforcement, this is only the UI signal.
     googleOnlySignup: process.env.OMB_GOOGLE_ONLY_SIGNUP === "true",
     // Desktop Google sign-in: when the local server knows which cloud to
-    // pair against, the login page offers the code flow.
+    // pair against, the login page offers the code flow — and, first-class,
+    // the real OAuth handoff (cloud does the Google dance, desktop receives
+    // a one-time code over loopback).
     cloudPairing: Boolean(pairingCloudUrl),
+    desktopOAuth: Boolean(pairingCloudUrl),
     pairingCloudUrl,
   };
 }

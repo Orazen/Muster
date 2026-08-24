@@ -1,11 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { AuthShell, authCardBox } from "@/components/AuthShell";
 
 /** Three ways in, on web and in the packaged desktop app alike:
- *   1. Continue with Google        (when the deployment has OAuth configured)
- *   2. Pairing code bridge         (desktop; code minted on the cloud /pair)
+ *   1. Continue with Google        — direct OAuth on deployments with creds;
+ *                                    on the DESKTOP this becomes the cloud
+ *                                    handoff: the browser does Google against
+ *                                    muster.orazen.online, the app receives
+ *                                    the identity over loopback (no codes)
+ *   2. Pairing code bridge         (desktop fallback for the same flow)
  *   3. Email + password            (always available; sign-up lives at /sign-up)
  * Whatever a deployment lacks renders as a last resort rather than bricking
  * the install — no path here is ever hidden behind another one. */
@@ -37,6 +41,44 @@ export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
+
+  // Desktop OAuth handoff: after the system browser finishes Google on the
+  // cloud and bounces back to /oauth/finish, THAT page signs us in by
+  // setting the session cookie. From here we just watch get-session until
+  // a user materializes, then hard-navigate like pairing does.
+  const [oauthWaiting, setOauthWaiting] = useState(false);
+
+  useEffect(() => {
+    if (!oauthWaiting) return;
+    let alive = true;
+    const started = Date.now();
+    const tick = async () => {
+      try {
+        const r = await fetch("/api/auth/get-session", { credentials: "include" });
+        // SAFETY: get-session's success body is better-auth's session JSON
+        // ({user: {...}, ...}); non-JSON or error bodies resolve null and
+        // the poll simply continues.
+        if (r.ok && ((await r.json().catch(() => null)) as { user?: unknown } | null)?.user) {
+          if (!alive) return;
+          setOauthWaiting(false);
+          window.location.href = next.startsWith("/") ? next : "/app";
+          return;
+        }
+      } catch {
+        /* local server restarting or offline — keep polling */
+      }
+      if (alive && Date.now() - started > 180_000) {
+        setOauthWaiting(false);
+        setError("sign-in took too long — please start again");
+      }
+    };
+    void tick();
+    const id = setInterval(() => void tick(), 1500);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [oauthWaiting, next]);
 
   async function handleEmailSignIn(e?: React.FormEvent) {
     e?.preventDefault();
@@ -84,6 +126,9 @@ export function LoginPage() {
   }
 
   const googleConfigured = capabilities.socialProviders.includes("google");
+  // On the packaged app there are no OAuth secrets locally; the Google
+  // button routes through the cloud handoff instead of better-auth here.
+  const desktopOAuthHandoff = Boolean(capabilities.desktopOAuth) && !googleConfigured;
 
   return (
     <AuthShell title="Welcome back" subtitle="One tap and your team of agents is waiting.">
@@ -124,11 +169,20 @@ export function LoginPage() {
           </div>
         )}
 
-        {googleConfigured && (
+        {(googleConfigured || desktopOAuthHandoff) && (
           <button
             type="button"
-            disabled={googlePending}
+            disabled={googlePending || oauthWaiting}
             onClick={async () => {
+              setError("");
+              if (desktopOAuthHandoff) {
+                const cloud = (capabilities.pairingCloudUrl ?? "https://muster.orazen.online").replace(/\/$/, "");
+                const url = `${cloud}/desktop-auth/start?redirect=${encodeURIComponent(window.location.origin)}`;
+                if (window.ogb?.openExternal) window.ogb.openExternal(url);
+                else window.open(url, "_blank", "noopener");
+                setOauthWaiting(true);
+                return;
+              }
               setGooglePending(true);
               const result = await signInWithProvider("google");
               // success navigates away; reaching here means it failed
@@ -143,7 +197,7 @@ export function LoginPage() {
               <path fill="#FBBC05" d="M3.97 10.72a5.41 5.41 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33Z" />
               <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.46 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z" />
             </svg>
-            {googlePending ? "Connecting…" : "Continue with Google"}
+            {oauthWaiting ? "Finish in your browser…" : googlePending ? "Connecting…" : "Continue with Google"}
           </button>
         )}
 
@@ -232,7 +286,7 @@ export function LoginPage() {
           </div>
         )}
 
-        {!googleConfigured && !capabilities.cloudPairing && (
+        {!googleConfigured && !desktopOAuthHandoff && !capabilities.cloudPairing && (
           <p className={`text-center text-[12px] ${authCardBox}`}>
             This deployment has no Google sign-in configured — ask whoever runs it to set
             GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.

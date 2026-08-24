@@ -110,6 +110,7 @@ import {
   userProviderFlags,
 } from "./user-keys.ts";
 import { vpsComputerStatus, vpsEnsureDesktop, vpsDockerHost, vpsReachable } from "./vps-computer.ts";
+import { isLoopbackRedirect, issueDesktopGrant, issueHandoffCode, redeemHandoffCode } from "./desktop-auth.ts";
 import { startAccountMerge, spendAccountMergeToken } from "./account-merge.ts";
 import { mergeUserVault } from "./user-keys.ts";
 import { PROVIDER_DRIVER_ENV, DATA_DIR } from "./config.ts";
@@ -2575,9 +2576,13 @@ function stderrOf(err: { stderr?: unknown }): string {
 function appVersion(): string {
   try {
     // SAFETY: parsing this repo's own package.json; any surprise shape or IO
-    // error falls through to the "unknown" fallback below.
-    const parsed = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: unknown };
-    return typeof parsed.version === "string" ? parsed.version : "unknown";
+    // error falls through to the "unknown" fallback below. The contract for
+    // this field is a semver string per npm's own spec, so the domain type
+    // carries the check — no runtime typeof needed.
+    const parsed = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+      version?: string;
+    };
+    return parsed.version && /^\d+\.\d+/.test(parsed.version) ? parsed.version : "unknown";
   } catch {
     return "unknown";
   }
@@ -2673,7 +2678,9 @@ function loadVaultUsers(): string[] {
     // SAFETY: read-only view of our own vault envelope; shape enforced by
     // loadVault inside user-keys (flags path). Kept local to avoid widening
     // the module's export surface.
-    const raw = JSON.parse(readFileSync(join(DATA_DIR, "user-keys.json"), "utf8")) as { users?: Record<string, unknown> };
+    const raw = JSON.parse(readFileSync(join(DATA_DIR, "user-keys.json"), "utf8")) as {
+      users?: Record<string, Record<string, { sealed?: string; updatedAt?: number }>>;
+    };
     return Object.keys(raw.users ?? {});
   } catch {
     return [];
@@ -2731,6 +2738,13 @@ async function reloadProviders() {
 let providerConfigBusy = false;
 
 // ── HTTP plumbing ─────────────────────────────────────────────────────
+function html(res: ServerResponse, status: number, body: string) {
+  // tiny sibling of json() for the handful of handoff/error pages the
+  // desktop OAuth flow renders directly.
+  res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
+  res.end(body);
+}
+
 function json<B>(res: ServerResponse, status: number, body: B) {
   const data = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json" });
@@ -3090,6 +3104,123 @@ let requestUserEmail = "";
     // social buttons to render and whether "forgot password" can work.
     if (method === "GET" && path === "/api/auth-capabilities") {
       return json(res, 200, authCapabilities());
+    }
+
+    // ── desktop OAuth handoff (real Google sign-in, no code typing) ────
+    // These live next to pairing because they serve the same surface and
+    // must work on any deployment acting as "the cloud" (prod + e2e twin).
+    if (method === "GET" && path === "/desktop-auth/start") {
+      // Browser navigated here from the desktop app. Validate the loopback
+      // target BEFORE spending anything, then bounce into Google with the
+      // grant riding through better-auth's callbackURL.
+      const redirectRaw = url.searchParams.get("redirect") ?? "";
+      const redirect = decodeURIComponent(redirectRaw);
+      if (!isLoopbackRedirect(redirect)) {
+        return html(res, 400, "<body style=\"font:14px -apple-system,sans-serif;padding:2rem\">desktop sign-in needs a http://127.0.0.1 or localhost redirect.</body>");
+      }
+      const grant = issueDesktopGrant(redirect);
+      const callback = `/desktop-auth/done?grant=${encodeURIComponent(grant)}`;
+      return res.writeHead(302, { Location: `/api/auth/sign-in/social?provider=google&callbackURL=${encodeURIComponent(callback)}` }).end();
+    }
+    if (method === "GET" && path === "/desktop-auth/done") {
+      // Better Auth has finished with Google — this browser now holds a
+      // CLOUD session. Trade its identity for a one-time code and bounce
+      // to the loopback redirect the desktop asked for.
+      const session = await getSession(req);
+      if (!session) return html(res, 403, "<body style=\"font:14px -apple-system,sans-serif;padding:2rem\">Sign-in did not complete. Close this window and try again.</body>");
+      // SAFETY: the getSession wrapper narrows to {userId}; the auth record
+      // itself carries email/name, and a missing row means a stale cookie.
+      const user = findUserById(session.userId);
+      if (!user?.email) return html(res, 403, "<body style=\"font:14px -apple-system,sans-serif;padding:2rem\">Sign-in did not complete. Close this window and try again.</body>");
+      const grant = url.searchParams.get("grant") ?? "";
+      const handoff = issueHandoffCode(grant, {
+        userId: session.userId,
+        email: user.email,
+        name: user.name ?? "",
+      });
+      if (!handoff) return html(res, 400, "<body style=\"font:14px -apple-system,sans-serif;padding:2rem\">This desktop sign-in link expired. Start again from Muster.</body>");
+      // Code rides in the FRAGMENT: browsers never send #... to servers, so
+      // it can't leak into access logs or Referrer headers anywhere.
+      return res.writeHead(302, { Location: `${handoff.redirect}/oauth/finish#code=${encodeURIComponent(handoff.code)}` }).end();
+    }
+    if (method === "POST" && path === "/api/desktop-auth/exchange") {
+      // Server-to-server: a desktop's LOCAL server burns the one-time code
+      // for the identity. 90-second TTL, single-use, memory-only.
+      const body = await readBody(req);
+      const code = isText(body?.code) ? body.code.trim() : "";
+      const identity = redeemHandoffCode(code);
+      if (!identity) return json(res, 400, { error: "that sign-in code expired or was already used — start again from Muster" });
+      return json(res, 200, { email: identity.email, name: identity.name });
+    }
+
+    // ── desktop side of the OAuth handoff ──────────────────────────────
+    // The loopback page the cloud redirects back to after Google. It reads
+    // the one-time code out of the URL fragment (fragments never reach any
+    // server) and hands it to the local server below, which exchanges it
+    // server-to-server and signs the user in exactly like a redeemed pair.
+    if (method === "GET" && path === "/oauth/finish") {
+      return html(res, 200, `<!doctype html>
+<html><head><meta charset="utf-8"><title>Signing in to Muster</title>
+<style>body{font:15px -apple-system,BlinkMacSystemFont,sans-serif;display:grid;place-items:center;height:100vh;margin:0;color:#1a1a1a}
+.card{text-align:center}.spin{width:28px;height:28px;border:3px solid #e5e5e5;border-top-color:#666;border-radius:50%;margin:0 auto 14px;animation:s .8s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}.err{color:#b91c1c}</style></head>
+<body><div class="card"><div class="spin"></div><div id="msg">Finishing sign-in…</div></div>
+<script>
+(async () => {
+  const m = location.hash.match(/code=([A-Za-z0-9_-]+)/);
+  const msg = document.getElementById("msg");
+  if (!m) { msg.textContent = "No sign-in code found — start again from Muster."; msg.className = "err"; return; }
+  try {
+    const r = await fetch("/oauth/finish/exchange", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify({ code: m[1] }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "sign-in failed");
+    msg.innerHTML = "Signed in as <b>" + (data.email || "your account") + "</b>.<br>You can close this window and return to Muster.";
+    setTimeout(() => window.close(), 1200);
+  } catch (e) {
+    msg.textContent = e.message; msg.className = "err";
+  }
+})();
+</script></body></html>`);
+    }
+    if (method === "POST" && path === "/oauth/finish/exchange") {
+      // Local only: burn the one-time code against the configured cloud,
+      // bridge the user locally, set the SAME signed session cookie shape
+      // pair/redeem sets. No session exists yet — that is the point.
+      const cloudUrl = pairCloudUrl();
+      if (!cloudUrl) return json(res, 501, { error: "desktop sign-in is not configured on this install" });
+      const body = await readBody(req);
+      const code = isText(body.code) ? body.code : "";
+      let upstream: Response;
+      try {
+        upstream = await fetch(`${cloudUrl.replace(/\/$/, "")}/api/desktop-auth/exchange`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ code }),
+          redirect: "error",
+          signal: AbortSignal.timeout(10_000),
+        });
+      } catch {
+        return json(res, 502, { error: `could not reach ${cloudUrl} — check your connection` });
+      }
+      // SAFETY: exchange success is JSON {email,name}; failure {error};
+      // non-JSON bodies resolve null through the catch.
+      const errBody = (await upstream.json().catch(() => null)) as
+        { email?: string; name?: string; error?: string } | null;
+      if (!upstream.ok || !errBody?.email) {
+        return json(res, upstream.status === 200 ? 502 : upstream.status, {
+          error: errBody?.error ?? "the cloud rejected that sign-in",
+        });
+      }
+      const userId = createBridgedUser(errBody.email, errBody.name ?? "");
+      const { token, expiresAt } = mintSession(userId, {
+        ip: req.socket.remoteAddress ?? undefined,
+        userAgent: req.headers["user-agent"],
+      });
+      res.setHeader(
+        "Set-Cookie",
+        `better-auth.session_token=${signedSessionCookieValue(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}`,
+      );
+      return json(res, 200, { ok: true, email: errBody.email });
     }
 
     // ── cloud ↔ desktop identity pairing ───────────────────────────────

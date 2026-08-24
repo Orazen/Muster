@@ -41,6 +41,9 @@ export interface AuthCapabilities {
   googleOnlySignup: boolean;
   /** Desktop Google sign-in: this server knows a cloud to pair against. */
   cloudPairing: boolean;
+  /** Real Google sign-in on the desktop via the cloud OAuth handoff
+   * (cloud does the Google dance, identity arrives over loopback). */
+  desktopOAuth?: boolean;
   /** The cloud base URL the pairing flow opens in the system browser. */
   pairingCloudUrl: string | null;
 }
