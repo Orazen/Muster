@@ -48,6 +48,7 @@ import {
   type Runtime,
 } from "./container-computer.ts";
 import {
+  channelTurnCapMinutes,
   ensureDirs,
   instanceConfigs,
   loadConfig,
@@ -59,6 +60,7 @@ import {
   EVENTS_DIR,
   NATIVE_DIR,
 } from "./config.ts";
+import { collectDiagnostics } from "./diagnostics.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import {
   customMcpForBot,
@@ -717,8 +719,9 @@ const turnUsage = new Map<string, { input: number; output: number }>();
 const repeats = new RepeatDetector({ thresholds: [5, 10, 20], maxKeysPerThread: 256 });
 
 // ── stall watchdog ─────────────────────────────────────────────────────
-// ask_bot has a 4-minute ceiling and room turns a 5-minute one; the main
-// 1:1 path had none, so a wedged CLI left its bot busy forever. The
+// ask_bot has a 4-minute ceiling and channel turns a configurable one
+// (channels.turnCapMinutes, default 5); the main 1:1 path had none, so a
+// wedged CLI left its bot busy forever. The
 // watchdog stops a turn whose thread has emitted NOTHING for stallMs —
 // activity-based, so an hour-long turn that keeps streaming is never
 // touched, and turns parked on a human approval are exempt.
@@ -2226,16 +2229,19 @@ async function runGroupMemberTurn(
       if (e.type === "item.completed" && e.itemType === "assistant_text") replyText += `\n${e.text}`;
       else if (e.type === "turn.completed") finish("settled");
     });
+    const capMinutes = channelTurnCapMinutes(cfg);
     const timer = setTimeout(() => {
+      // Graceful stop: interrupt first (the driver unwinds its process),
+      // then record why — the channel must show the turn ended on purpose.
       void instance.adapter.interruptTurn(group.threadId).catch(() => {});
       store.appendMessage(group.threadId, {
         role: "bot",
         kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: `${bot.name}'s room turn exceeded 5 minutes and was stopped`, ok: false },
+        tool: { name: `Turn stopped: exceeded ${capMinutes}-minute limit.`, ok: false },
       });
       finish("timed_out");
-    }, 5 * 60_000);
+    }, capMinutes * 60_000);
     watchdog.watch(group.threadId, bot.id);
     instance.adapter
       .sendTurn({
@@ -2498,6 +2504,20 @@ function stderrOf(err: { stderr?: unknown }): string {
   return isText(s) ? s : Buffer.isBuffer(s) ? s.toString("utf8") : "";
 }
 
+/** App version for the diagnostics export — best effort: a packaged layout
+ * without a readable package.json reports "unknown" instead of failing the
+ * whole export over one cosmetic field. */
+function appVersion(): string {
+  try {
+    // SAFETY: parsing this repo's own package.json; any surprise shape or IO
+    // error falls through to the "unknown" fallback below.
+    const parsed = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 function configStatus(userId?: string, userName?: string, userEmail?: string) {
   // Per-user scoping: non-operators read their own vault flags and their own
   // auth profile. The operator (first account / desktop user) keeps global
@@ -2541,6 +2561,8 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
     profile,
     // desktop isolation is a setting, not a secret; the Local VM panel reads it
     localVm: { mode: localVmMode(cfg), maxInstances: localVmMaxInstances(cfg) },
+    // same for the channel turn cap; the General panel's minutes input reads it
+    channels: { turnCapMinutes: channelTurnCapMinutes(cfg) },
   };
 }
 
@@ -4628,6 +4650,20 @@ let requestUserEmail = "";
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configStatus(requestUserId, requestUserName, requestUserEmail));
+    }
+    if (method === "GET" && path === "/api/diagnostics") {
+      // Bug-report bundle: versions, boolean-only config flags and a redacted
+      // native log tail. Redaction lives in server/diagnostics.ts so it stays
+      // unit-testable away from the HTTP layer.
+      return json(
+        res,
+        200,
+        collectDiagnostics({
+          nativeDir: NATIVE_DIR,
+          configStatus: configStatus(requestUserId, requestUserName, requestUserEmail),
+          appVersion: appVersion(),
+        }),
+      );
     }
     if (method === "GET" && path === "/api/providers") {
       const flags: Record<string, { configured: boolean }> = {};

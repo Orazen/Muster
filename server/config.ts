@@ -17,6 +17,12 @@ export type LocalVmIsolationMode = "shared" | "perBot";
 // desktops x 4 GB is already the RAM of a well-appointed machine.
 const LOCAL_VM_MAX_INSTANCES_MIN = 1;
 const LOCAL_VM_MAX_INSTANCES_MAX = 16;
+/** Channel turn cap bounds, in minutes. One minute is the shortest useful
+ * ceiling; two hours covers a long unattended build without pinning a bot
+ * forever if its driver wedges. */
+const CHANNEL_TURN_CAP_MIN_MINUTES = 1;
+const CHANNEL_TURN_CAP_MAX_MINUTES = 120;
+const DEFAULT_CHANNEL_TURN_CAP_MINUTES = 5;
 const instanceConfigSchema = z.object({
   driver: z.string().min(1),
   displayName: optionalText,
@@ -54,6 +60,14 @@ const appConfigSchema = z.object({
       maxInstances: z.number().int().min(LOCAL_VM_MAX_INSTANCES_MIN).max(LOCAL_VM_MAX_INSTANCES_MAX).optional(),
     })
     .optional(),
+  /** Server-side ceiling for every bot turn in a channel (rooms and
+   * bot⇄bot channels). Direct chats are exempt — they already stop on
+   * silence via the stall watchdog. */
+  channels: z
+    .object({
+      turnCapMinutes: z.number().int().min(CHANNEL_TURN_CAP_MIN_MINUTES).max(CHANNEL_TURN_CAP_MAX_MINUTES).optional(),
+    })
+    .optional(),
   /** Per-provider API keys — write-only, only configured-or-not flags exposed. */
   providers: z.record(z.string(), z.object({ apiKey: optionalText })).optional(),
   instances: instanceConfigMapSchema.optional(),
@@ -81,6 +95,8 @@ export interface AppConfig {
   tts?: { key?: string; voice?: string };
   /** Desktop isolation mode and the global per-bot desktop cap. */
   localVm?: { mode?: LocalVmIsolationMode; maxInstances?: number };
+  /** Channel settings; see the channels schema note for the turn cap. */
+  channels?: { turnCapMinutes?: number };
   profile?: { name?: string; email?: string };
   providers?: Record<string, { apiKey?: string }>;
   instances?: InstanceConfigMap;
@@ -134,6 +150,14 @@ export function localVmMaxInstances(cfg: AppConfig): number {
   return cfg.localVm?.maxInstances ?? envMaxPerBotDesktops(process.env.OMB_MAX_PER_BOT_DESKTOPS) ?? DEFAULT_LOCAL_VM_MAX_INSTANCES;
 }
 
+/** Minutes before a channel turn is stopped server-side. Config wins over
+ * the built-in default so the Settings input is authoritative once saved.
+ * Out-of-range stored values cannot happen (the schema clamps at parse),
+ * but hand-edited files pass through parseStoredConfig too. */
+export function channelTurnCapMinutes(cfg: AppConfig): number {
+  return cfg.channels?.turnCapMinutes ?? DEFAULT_CHANNEL_TURN_CAP_MINUTES;
+}
+
 export function ensureDirs() {
   // one-time migration from the pre-rename data dir — bots, transcripts,
   // config and keys all carry over
@@ -175,7 +199,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
-  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm"] as const) {
+  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm", "channels"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

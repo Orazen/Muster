@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, CreditCard, KeyRound, Monitor, Palette, Plug, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud } from "lucide-react";
+import { Coins, CreditCard, Download, KeyRound, Monitor, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
@@ -21,19 +21,26 @@ import { McpServersSection } from "./McpServersSection";
 import { AuditPanel, type AuditPage } from "./AuditPanel";
 import { cn } from "@/lib/cn";
 
-const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
-  { id: "general", label: "General", icon: User },
-  { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "connections", label: "Connections", icon: KeyRound },
-  { id: "engines", label: "Engines", icon: Terminal },
-  { id: "providers", label: "Providers", icon: Cloud },
-  { id: "mcp", label: "MCP Servers", icon: Plug },
-  { id: "companion", label: "Companion", icon: Smartphone },
-  { id: "computer", label: "Local VM", icon: Monitor },
-  { id: "voice", label: "Voice", icon: Volume2 },
-  { id: "usage", label: "Usage", icon: Coins },
-  { id: "billing", label: "Billing", icon: CreditCard },
+const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User; keywords: string[] }> = [
+  { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "account", "updates", "turn cap", "diagnostics"] },
+  { id: "appearance", label: "Appearance", icon: Palette, keywords: ["skin", "theme", "colors", "dark mode"] },
+  { id: "connections", label: "Connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "connected apps", "opensandbox", "muster cloud"] },
+  { id: "engines", label: "Engines", icon: Terminal, keywords: ["models", "claude", "grok", "cli", "xai", "opencode"] },
+  { id: "providers", label: "Providers", icon: Cloud, keywords: ["provider api keys", "llm", "deepseek", "openai", "anthropic"] },
+  { id: "mcp", label: "MCP Servers", icon: Plug, keywords: ["mcp", "tools", "stdio", "servers"] },
+  { id: "companion", label: "Companion", icon: Smartphone, keywords: ["phone", "mobile", "ios", "pair"] },
+  { id: "computer", label: "Local VM", icon: Monitor, keywords: ["vm", "virtual machine", "desktop", "sandbox", "isolation"] },
+  { id: "voice", label: "Voice", icon: Volume2, keywords: ["tts", "speech", "elevenlabs", "speak"] },
+  { id: "usage", label: "Usage", icon: Coins, keywords: ["tokens", "cost", "spend", "history"] },
+  { id: "billing", label: "Billing", icon: CreditCard, keywords: ["subscription", "payment", "plan", "invoice"] },
 ];
+
+/** Live filter for the section nav. The label and a handful of aliases both
+ * match, so "theme" finds Appearance and "phone" finds Companion. */
+function sectionMatches(section: (typeof SECTIONS)[number], query: string): boolean {
+  if (!query) return true;
+  return [section.label, ...section.keywords].some((part) => part.toLowerCase().includes(query));
+}
 
 /** Name + email, persisted to /api/config {profile} on blur. Pre-fills from
  * the signed-in account when the local profile override hasn't been set
@@ -172,6 +179,87 @@ function useAuditBotId(): string | null {
   return auditBotId;
 }
 
+/** Channel turn cap — the one server-side knob in this modal. Saved on blur
+ * or Enter; clamped client-side so a typo saves something legal instead of
+ * surfacing a 400 from the config schema. */
+function ChannelTurnCapCard() {
+  const { state, dispatch } = useStore();
+  const savedMinutes = state.config?.channels?.turnCapMinutes ?? 5;
+  const [minutes, setMinutes] = useState(String(savedMinutes));
+  useEffect(() => {
+    setMinutes(String(savedMinutes));
+  }, [savedMinutes]);
+
+  const save = () => {
+    const parsed = Number.parseInt(minutes, 10);
+    const clamped = Number.isFinite(parsed) ? Math.min(120, Math.max(1, parsed)) : savedMinutes;
+    if (clamped === savedMinutes) return;
+    void fetch("/api/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channels: { turnCapMinutes: clamped } }),
+    })
+      .then((r) => r.json())
+      .then((config) => dispatch({ type: "configStatus", config }))
+      .catch(() => {});
+  };
+
+  return (
+    <Card title="Channel turns" subtitle="Every bot turn in a channel stops after this many minutes. Direct chats are untouched — they already stop when the bot goes quiet.">
+      <label className="flex items-center gap-3 text-[13.5px] text-ink-secondary">
+        Turn limit (minutes)
+        <input
+          type="number"
+          min={1}
+          max={120}
+          value={minutes}
+          onChange={(e) => setMinutes(e.target.value)}
+          onBlur={save}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          className="w-24 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink focus:border-hairline focus:outline-none"
+        />
+      </label>
+    </Card>
+  );
+}
+
+/** Downloads GET /api/diagnostics verbatim as a JSON file. The server has
+ * already redacted everything — the client just names the download. */
+function DiagnosticsCard() {
+  const [busy, setBusy] = useState(false);
+  const exportDiagnostics = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/diagnostics");
+      if (!res.ok) return;
+      const blob = new Blob([await res.text()], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `muster-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      /* unreachable server — nothing to export */
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card title="Diagnostics" subtitle="Versions, configuration flags (booleans only) and a redacted log tail. Safe to attach to a bug report.">
+      <button
+        onClick={() => void exportDiagnostics()}
+        disabled={busy}
+        className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-3.5 py-2 text-[13.5px] text-ink transition-colors hover:bg-raised disabled:opacity-60"
+      >
+        <Download size={15} />
+        {busy ? "Exporting…" : "Export Diagnostics"}
+      </button>
+    </Card>
+  );
+}
+
 export function SettingsModal() {
   const { state, dispatch } = useStore();
   const section = state.appSettingsSection;
@@ -179,7 +267,20 @@ export function SettingsModal() {
   const auditBotId = useAuditBotId();
   // Audit sits before Billing; present only when the selected bot has history.
   const sections = [...SECTIONS];
-  if (auditBotId) sections.splice(sections.length - 1, 0, { id: "audit", label: "Audit", icon: ShieldCheck });
+  if (auditBotId)
+    sections.splice(sections.length - 1, 0, { id: "audit", label: "Audit", icon: ShieldCheck, keywords: ["decisions", "ledger", "history"] });
+
+  // Section nav search: typing filters live, Esc clears first. When the
+  // current section is filtered out, jump to the first match so the right
+  // pane never shows a section the list no longer offers.
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const visibleSections = sections.filter((entry) => sectionMatches(entry, q));
+  useEffect(() => {
+    if (visibleSections.some((entry) => entry.id === section)) return;
+    const first = visibleSections[0];
+    if (first) dispatch({ type: "toggleAppSettings", open: true, section: first.id });
+  }, [dispatch, q, section]);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -244,7 +345,26 @@ export function SettingsModal() {
           <div id="app-settings-title" className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink">
             Settings
           </div>
-          {sections.map(({ id, label, icon: Icon }) => (
+          <div className="mb-1.5 flex items-center gap-2 rounded-lg bg-control/70 px-2.5 py-1.5">
+            <Search size={14} className="shrink-0 text-ink-secondary" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Escape") return;
+                e.stopPropagation();
+                if (query) setQuery("");
+                else dispatch({ type: "toggleAppSettings", open: false });
+              }}
+              placeholder="Search"
+              aria-label="Search settings"
+              className="w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
+            />
+          </div>
+          {visibleSections.length === 0 && (
+            <div className="px-2.5 py-4 text-[12.5px] leading-relaxed text-ink-secondary">Nothing matches “{query.trim()}”</div>
+          )}
+          {visibleSections.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: id })}
@@ -280,6 +400,8 @@ export function SettingsModal() {
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
                   <ProfileFields />
                 </Card>
+                <ChannelTurnCapCard />
+                <DiagnosticsCard />
                 <AccountSection />
                 <UpdatesRow />
               </>
