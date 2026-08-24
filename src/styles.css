@@ -114,6 +114,12 @@ body {
   0%, 100% { opacity: 0.45; }
   50% { opacity: 1; }
 }
+/* execution timeline: newest action breathes once around its border */
+@keyframes timeline-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-accent) 35%, transparent); }
+  50% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-accent) 35%, transparent); }
+}
+.timeline-pulse { animation: timeline-pulse 2s ease-in-out infinite; }
 .thinking-shimmer {
   background: linear-gradient(90deg, var(--color-ink-secondary) 40%, var(--color-ink) 50%, var(--color-ink-secondary) 60%);
   background-size: 200% 100%;
@@ -122,7 +128,7 @@ body {
   color: transparent;
 }
 @media (prefers-reduced-motion: reduce) {
-  .animate-caret, .animate-msg-in, .animate-shimmer { animation: none; }
+  .animate-caret, .animate-msg-in, .animate-shimmer, .timeline-pulse { animation: none; }
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
   /* The drawer still moves, it just arrives instantly. */
   aside { transition: none; }

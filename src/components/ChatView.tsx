@@ -42,6 +42,7 @@ import { PrivacyNotice } from "./PrivacyNotice";
 import { OptionCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { Composer } from "./Composer";
+import { TimelineStrip } from "./TimelineStrip";
 import { ConnectorCard } from "./ConnectorCard";
 import { ModelPicker } from "./ModelPicker";
 import { RenameTitle } from "./RenameTitle";
@@ -1093,6 +1094,9 @@ export function ChatView({ bot }: { bot: Bot }) {
           the previous bot's half-written message over. ArrowUp-to-edit is
           gated on busy like the pencil button — editing rewinds the thread,
           which a live turn forbids (the server 409s it). */}
+      {/* Execution timeline: what the bot just did / is doing, only while
+          a turn runs — idle renders nothing, so no layout shift. */}
+      <TimelineStrip bot={bot} messages={messages} />
       <Composer
         key={bot.id}
         bot={bot}
