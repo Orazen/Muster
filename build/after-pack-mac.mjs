@@ -24,13 +24,30 @@
 // "damaged" (a hard block) to "unidentified developer" (the normal,
 // expected, resolvable unsigned-app prompt).
 import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 
 export default async function afterPack(context) {
   if (context.electronPlatformName !== "darwin") return;
+
+  // Real Developer ID signing in play: drop the marker electron/updater.mjs
+  // looks for, which unlocks Squirrel.Mac's in-place restart updates. Its
+  // absence is what routes unsigned builds to the direct-download flow.
+  if (process.env.CSC_IDENTITY_AUTO_DISCOVERY === "true" && process.env.MAC_SIGNING_IDENTITY) {
+    const markerPath = `${context.appOutDir}/${context.packager.appInfo.productFilename}.app/Contents/Resources/trusted-mac-updates`;
+    writeFileSync(markerPath, `identity: ${process.env.MAC_SIGNING_IDENTITY}\n`);
+    console.log(`[afterPack] trusted-mac-updates marker written (${markerPath})`);
+    return;
+  }
+
   // Never fight a real Apple Developer identity — this hook exists only
   // for the "no cert configured" path CI already detects and handles via
   // CSC_IDENTITY_AUTO_DISCOVERY=false.
-  if (process.env.CSC_IDENTITY_AUTO_DISCOVERY === "true") return;
+  if (process.env.CSC_IDENTITY_AUTO_DISCOVERY === "true") {
+    // Signed by an outside mechanism but no identity name passed to us:
+    // conservative default is still the manual-update flow; the marker
+    // only appears through the explicit branch above.
+    return;
+  }
 
   const appPath = `${context.appOutDir}/${context.packager.appInfo.productFilename}.app`;
   console.log(`[afterPack] re-sealing ${appPath} with a clean ad-hoc signature`);

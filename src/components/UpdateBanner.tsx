@@ -67,6 +67,11 @@ export function UpdateBanner() {
   const installing = s.status === "installing" && !stuckInstalling;
   const busy = s.status === "downloading" || installing;
 
+  // Unsigned mac builds never enter the download/restart pipeline at all:
+  // one honest button that opens the release page. Everything Squirrel can't
+  // guarantee stays out of the state machine rather than patched over.
+  const manualMac = Boolean(s.manualOnly);
+
   const title =
     s.status === "available"
       ? `Muster ${s.version} is available`
@@ -81,7 +86,9 @@ export function UpdateBanner() {
               : "Update check failed";
   const subtitle =
     s.status === "available"
-      ? "A newer version is ready to download."
+      ? manualMac
+        ? "Install by downloading the new app and replacing this one."
+        : "A newer version is ready to download."
       : s.status === "downloading"
         ? // no percent yet means the transfer hasn't reported in — don't imply 0
           s.percent == null
@@ -145,7 +152,26 @@ export function UpdateBanner() {
 
       {!busy && (
         <div className="mt-2.5 flex gap-2">
-          {s.status === "available" && (
+          {s.status === "available" && manualMac && (
+            <a
+              href={`https://github.com/Orazen/Muster/releases/tag/v${encodeURIComponent(s.version ?? "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                // system browser, not a second electron window
+                if (window.ogb?.openExternal) {
+                  e.preventDefault();
+                  // SAFETY: this handler is attached to the <a> itself, so
+                  // currentTarget is that anchor at click time.
+                  window.ogb.openExternal((e.currentTarget as HTMLAnchorElement).href);
+                }
+              }}
+              className={primaryAction}
+            >
+              <ArrowDownToLine size={13} /> Get Muster {s.version}
+            </a>
+          )}
+          {s.status === "available" && !manualMac && (
             <button
               onClick={() => {
                 setPending("download");
@@ -165,7 +191,7 @@ export function UpdateBanner() {
               )}
             </button>
           )}
-          {s.status === "downloaded" && (
+          {s.status === "downloaded" && !manualMac && (
             <button
               onClick={() => {
                 setPending("install");

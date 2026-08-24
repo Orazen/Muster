@@ -287,3 +287,41 @@ test("an updater error event and rejected promise produce one deterministic stat
   assert.equal(errorStates(download.states).length, 1);
   assert.deepEqual(download.getState(), { status: "error", message: "download failed once" });
 });
+
+// ── manual mac updates (unsigned builds) ───────────────────────────────
+test("manualOnly rides on update-available and download is refused", async () => {
+  const updater = new EventEmitter();
+  let checkForUpdates;
+  updater.checkForUpdates = () => {
+    checkForUpdates = deferred();
+    return checkForUpdates.promise;
+  };
+  const states = [];
+  const coordinator = createUpdaterCoordinator(updater, (patch) => states.push(patch), {
+    manualMacUpdates: true,
+  });
+
+  const checking = coordinator.check(false);
+  updater.emit("update-available", { version: "9.9.9" });
+  checkForUpdates.resolve();
+  await checking;
+
+  const available = states.find((s) => s.status === "available");
+  assert.equal(available.version, "9.9.9");
+  assert.equal(available.manualOnly, true);
+
+  // the renderer never shows the button here; a stale window calling
+  // download must not kick off a Squirrel transfer that can only hang later
+  await coordinator.download();
+  assert.ok(!states.some((s) => s.status === "downloading"), "no downloading state in manual mode");
+});
+
+test("signed mac builds keep the normal pipeline", async () => {
+  const updater = new EventEmitter();
+  updater.checkForUpdates = () => new Promise(() => {});
+  const states = [];
+  createUpdaterCoordinator(updater, (patch) => states.push(patch), { manualMacUpdates: false });
+  updater.emit("update-available", { version: "1.2.3" });
+  const available = states.find((s) => s.status === "available");
+  assert.equal(available.manualOnly, undefined);
+});

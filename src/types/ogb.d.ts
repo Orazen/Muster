@@ -90,4 +90,7 @@ export interface UpdaterState {
   version?: string;
   percent?: number;
   message?: string;
+  /** Set on macOS builds without Developer ID signing: no in-app restart
+   * exists; the UI offers a direct download of the new release instead. */
+  manualOnly?: boolean;
 }

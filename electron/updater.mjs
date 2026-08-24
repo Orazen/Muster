@@ -17,8 +17,22 @@
 // electron-updater is vendored (electron/vendor/electron-updater.cjs) because
 // the packaged app ships no node_modules.
 import { app, ipcMain } from "electron";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
+
+// macOS updates are only allowed to use Squirrel.Mac's in-place swap when
+// the build was Developer ID signed — the packaging step drops a marker
+// resource in exactly that case (see build/after-pack-mac.mjs). Ad-hoc
+// builds (everything today) fail or hang on APPLY, which is the
+// "Restart didn't finish" dead end users saw on 0.5.14. No marker means
+// the renderer gets a direct-download flow that always works.
+function macUpdatesTrusted() {
+  if (process.platform !== "darwin") return true;
+  const resources = process.resourcesPath ?? join(process.execPath, "..", "..", "Resources");
+  return existsSync(join(resources, "trusted-mac-updates"));
+}
 
 const require = createRequire(import.meta.url);
 
@@ -42,6 +56,14 @@ export function registerUpdaterIpc() {
   ipcMain.handle("update:check", () => updaterCoordinator?.check(true));
   ipcMain.handle("update:download", () => updaterCoordinator?.download());
   ipcMain.handle("update:install", () => {
+    // Unsigned mac builds must never enter Squirrel's swap — it is the
+    // exact path that produced "Restart didn't finish". A stale window
+    // (or future bug in the renderer gate) gets a loud error state instead
+    // of a silent hang.
+    if (!macUpdatesTrusted()) {
+      setState({ status: "error", message: "in-app restart is unavailable on unsigned macOS builds — download the new version instead" });
+      return;
+    }
     if (!autoUpdater) return;
     // Tearing down the window and relaunching takes a beat; announce it so the
     // button greys out instead of looking like the click was swallowed.
@@ -74,7 +96,9 @@ export function startUpdater(mainWindow) {
   autoUpdater.autoInstallOnAppQuit = false; // button-driven install
   autoUpdater.logger = null;
 
-  updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState);
+  updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState, {
+    manualMacUpdates: !macUpdatesTrusted(),
+  });
 
   // first check ~15s after launch (let the app settle), then hourly — both
   // silent on failure, hence the arrow: a bare `check` would receive the
