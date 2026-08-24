@@ -18,7 +18,7 @@ import { BillingSection } from "./BillingSection";
 import { VoiceSettings } from "./VoiceSettings";
 import { ProvidersSection } from "./ProvidersSection";
 import { McpServersSection } from "./McpServersSection";
-import { AuditPanel, type AuditPage } from "./AuditPanel";
+import { AuditPanel } from "./AuditPanel";
 import { cn } from "@/lib/cn";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User; keywords: string[] }> = [
@@ -257,7 +257,7 @@ function useAuditBotId(): { botId: string | null; reachable: boolean } {
     if (!selectedBotId) return;
     let cancelled = false;
     void api(`/api/bots/${selectedBotId}/audit?limit=1`)
-      .then((page: AuditPage) => {
+      .then(() => {
         // Reachable beats non-empty: an empty ledger used to hide the nav
         // item entirely, which read as "the feature is missing". Now the
         // section appears with an honest empty state instead.
@@ -430,10 +430,10 @@ export function SettingsModal() {
   const audit = useAuditBotId();
   const auditBotId = audit.botId;
 
-  if (audit.reachable && auditBotId)
-  // Audit sits before Billing; present only when the selected bot has history.
+  // Audit sits before Billing; present whenever the endpoint answers — an
+  // empty ledger shows its honest empty state instead of hiding the feature.
   const sections = [...SECTIONS];
-  if (auditBotId)
+  if (audit.reachable && auditBotId)
     sections.splice(sections.length - 1, 0, { id: "audit", label: "Audit", icon: ShieldCheck, keywords: ["decisions", "ledger", "history"] });
 
   // Section nav search: typing filters live, Esc clears first. When the
