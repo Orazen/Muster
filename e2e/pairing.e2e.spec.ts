@@ -56,6 +56,7 @@ async function waitHealthy(base: string): Promise<void> {
     try {
       const res = await fetch(`${base}/api/health`);
       if (res.ok) {
+        // SAFETY: /api/health is this repo's own endpoint; it replies {app:"muster"}.
         const body = (await res.json()) as { app?: string };
         if (body.app === "muster") return;
       }
@@ -104,6 +105,7 @@ const test = baseTest.extend<{ pairCodeFromCloud: string }>({
     let code = "";
     pageB.on("response", async (res) => {
       if (res.url().includes("/api/pair/create")) {
+        // SAFETY: /api/pair/create is this repo's own endpoint; it replies {code}.
         const body = (await res.json().catch(() => null)) as { code?: string } | null;
         if (body?.code) code = body.code;
       }

@@ -134,6 +134,7 @@ function MergeAccountsCard() {
     setBusy(true);
     setNote("");
     try {
+      // SAFETY: /api/account/merge/start is this repo's own endpoint; it replies {token}.
       const r = (await api("/api/account/merge/start", { method: "POST" })) as { token: string };
       setCode(r.token);
     } catch {
@@ -148,6 +149,8 @@ function MergeAccountsCard() {
     setBusy(true);
     setNote("");
     try {
+      // SAFETY: /api/account/merge/complete is this repo's own endpoint; its
+      // reply shape is the merge summary rendered below.
       const r = (await api("/api/account/merge/complete", {
         method: "POST",
         body: JSON.stringify({ token: paste.trim() }),
@@ -345,7 +348,9 @@ function VpsCard() {
     if (!alias.trim() || reach === "checking") return;
     setReach("checking");
     try {
+      // SAFETY: /api/vps/status is this repo's own endpoint; it replies {daemonUp}.
       const res = await fetch("/api/vps/status", { headers: { "content-type": "application/json" } });
+      // SAFETY: /api/vps/status is this repo's own endpoint; it replies {daemonUp}.
       const body = (await res.json().catch(() => null)) as { daemonUp?: boolean } | null;
       setReach(body?.daemonUp ? "up" : "down");
     } catch {

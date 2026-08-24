@@ -21,10 +21,8 @@ describe("ssh alias validation", () => {
   }
 
   it("degrades an invalid stored alias to not-configured", () => {
-    // SAFETY: constructing a narrow object literal instead of casting a
-    // dictionary keeps this a compile-checked AppConfig shape.
     const cfg = { vps: { sshAlias: "not;an alias" } };
-    expect(vpsSshAlias(cfg as Parameters<typeof vpsSshAlias>[0])).toBeNull();
+    expect(vpsSshAlias(cfg)).toBeNull();
   });
 });
 
@@ -60,6 +58,9 @@ describe("remote status guard rails", () => {
       workspaceDir: "/tmp/muster-vps-test",
       viewerPort: 5999,
     };
+    // SAFETY: the alias "muster-test.invalid" can never resolve, so the call
+    // must fail before any target field is touched; `as never` only satisfies
+    // the compiler for this deliberately minimal fixture.
     const status = await vpsComputerStatus("muster-test.invalid", target as never);
     expect(status.ready).toBe(false);
     expect(status.problem ?? "").toMatch(/VPS computer:/);

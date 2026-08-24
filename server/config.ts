@@ -171,7 +171,9 @@ export function channelTurnCapMinutes(cfg: AppConfig): number {
  * as a single argv element and into a DOCKER_HOST URL — never through a
  * shell — but keeping it to this charset also makes config files, logs and
  * error messages unambiguous. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- stored config values arrive untyped off disk; this guard IS the I/O-boundary parser for the alias field.
 export function isValidSshAlias(value: unknown): value is string {
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON values carry no tag; typeof is the only discriminator for a bare string.
   return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value) && value.length <= 128;
 }
 

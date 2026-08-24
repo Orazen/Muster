@@ -31,20 +31,36 @@ export interface DiagnosticsReport {
  * a pasted report actually gets read for. */
 const LOG_TAIL_BYTES = 32 * 1024;
 
+/** A decoded JSON subtree: booleans are the leaves the walker keeps,
+ * nested objects are the branches it recurses into. Values that can never
+ * reach the report (strings, numbers, arrays, null) are filtered at runtime. */
+interface JsonBranch {
+  [key: string]: boolean | JsonBranch;
+}
+
 /** Deep walk that keeps only boolean leaves, flattened to dotted paths.
  * Objects recurse; arrays are skipped wholesale (a list's entries have no
  * stable meaning once flattened); strings and numbers are dropped even when
- * their key looks harmless — profile.name proves why. */
-function booleanFlagsOnly(value: unknown, prefix = "", depth = 0, out: Record<string, boolean> = {}): Record<string, boolean> {
-  if (value === null || typeof value !== "object" || depth > 4) return out;
-  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+ * their key looks harmless — profile.name proves why.
+ *
+ * `branch` is a JSON subtree already decoded by the caller (collectDiagnostics
+ * receives configStatus from the config module's own parse). */
+function booleanFlagsOnly(
+  branch: JsonBranch,
+  prefix = "",
+  depth = 0,
+  out: Record<string, boolean> = {},
+): Record<string, boolean> {
+  if (depth > 4) return out;
+  for (const [key, entry] of Object.entries(branch)) {
     const path = prefix ? `${prefix}.${key}` : key;
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON leaves carry no tag; typeof is the only discriminator for a bare boolean leaf.
     if (typeof entry === "boolean") {
       out[path] = entry;
       continue;
     }
     // nested objects only — arrays and scalars never reach the report
-    if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) {
+    if (entry !== null && !Array.isArray(entry) && entry instanceof Object) {
       booleanFlagsOnly(entry, path, depth + 1, out);
     }
   }
@@ -73,7 +89,7 @@ function newestNativeLog(nativeDir: string): string | null {
   return newest?.file ?? null;
 }
 
-function tailBytes(file: string, bytes: number): { buffer: Buffer; truncated: boolean } {
+function tailBytes(file: string, bytes: number) {
   const fd = openSync(file, "r");
   try {
     const size = fstatSync(fd).size;
@@ -110,7 +126,9 @@ export function collectDiagnostics(input: { nativeDir: string; configStatus: unk
       node: process.version,
       platform: `${process.platform} ${process.arch}`,
     },
-    config: booleanFlagsOnly(input.configStatus),
+    // SAFETY: configStatus() assembles this object locally from known keys; the walker
+    // keeps only boolean leaves, so any other value type is dropped, never read.
+    config: booleanFlagsOnly(input.configStatus as JsonBranch),
     logTail: logTailFrom(input.nativeDir),
   };
 }

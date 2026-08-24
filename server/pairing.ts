@@ -11,6 +11,8 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
+
 import { DATA_DIR } from "./config.ts";
 
 const CODE_TTL_MS = 5 * 60_000;
@@ -45,6 +47,14 @@ interface StoreFile {
   attempts: Record<string, { count: number; windowStart: number }>;
 }
 
+const storeFileSchema = z.object({
+  version: z.literal(1),
+  pending: z.record(z.string(), z.object({ userId: z.string(), expiresAt: z.number() })).default({}),
+  attempts: z
+    .record(z.string(), z.object({ count: z.number(), windowStart: z.number() }))
+    .default({}),
+}) satisfies z.ZodType<StoreFile>;
+
 function storePath(): string {
   return join(DATA_DIR, "pairing-codes.json");
 }
@@ -72,19 +82,15 @@ function loadStore(): void {
   try {
     const p = storePath();
     if (!existsSync(p)) return;
-    // SAFETY: written only by persistStore above; malformed content falls
-    // back to empty maps rather than throwing into route handlers.
-    const raw = JSON.parse(readFileSync(p, "utf8")) as Partial<StoreFile> | null;
-    if (!raw || raw.version !== 1) return;
-    for (const [code, entry] of Object.entries(raw.pending ?? {})) {
-      if (entry && typeof entry.userId === "string" && typeof entry.expiresAt === "number") {
-        pending.set(code, entry);
-      }
+    // Decode the persisted envelope at the I/O boundary; anything malformed
+    // falls back to empty maps rather than throwing into route handlers.
+    const decoded = storeFileSchema.safeParse(JSON.parse(readFileSync(p, "utf8")));
+    if (!decoded.success) return;
+    for (const [code, entry] of Object.entries(decoded.data.pending)) {
+      pending.set(code, entry);
     }
-    for (const [ip, win] of Object.entries(raw.attempts ?? {})) {
-      if (win && typeof win.count === "number" && typeof win.windowStart === "number") {
-        verifyAttempts.set(ip, win);
-      }
+    for (const [ip, win] of Object.entries(decoded.data.attempts)) {
+      verifyAttempts.set(ip, win);
     }
   } catch {
     // Corrupt file → start from clean memory state.
