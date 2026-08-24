@@ -147,6 +147,18 @@ export function LoginPage() {
                 {pairBusy ? "…" : "Connect"}
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const url = `${(capabilities.pairingCloudUrl ?? "https://muster.orazen.online").replace(/\/$/, "")}/pair`;
+                if (window.ogb?.openExternal) window.ogb.openExternal(url);
+                else window.open(url, "_blank", "noopener");
+              }}
+              className="text-center text-[12px] font-medium text-[#f0460e] hover:text-[#f0460e]/80"
+            >
+              Open muster.orazen.online/pair ↗
+            </button>
           </div>
         )}
 

@@ -130,6 +130,7 @@ export function createCode(userId: string, now = Date.now()) {
   const expiresAt = now + CODE_TTL_MS;
   pending.set(code, { userId, expiresAt });
   persistStore();
+  console.log(`[pair] created ${code.slice(0, 2)}*** for user ${userId.slice(0, 6)}***`);
   return { code, expiresAt };
 }
 
@@ -184,6 +185,7 @@ export function consumeCode(code: string, ip = "unknown", now = Date.now()): str
   }
   pending.delete(normalized);
   persistStore();
+  console.log(`[pair] consumed ${normalized.slice(0, 2)}*** from ip ${ip}`);
   return entry.userId;
 }
 
