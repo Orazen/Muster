@@ -2552,13 +2552,23 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
   // Per-user scoping: non-operators read their own vault flags and their own
   // auth profile. The operator (first account / desktop user) keeps global
   // config — self-host is always the operator.
-  const isOperator = !userId || userId === primaryUserId();
-  const vaultFlags = !isOperator && userId ? userProviderFlags(DATA_DIR, userId) : null;
+  // Any signed-in cloud user reads their own vault — INCLUDING the operator,
+  // whose saves go to the vault like everyone else's on a cloud deployment.
+  // Desktop/self-host without sessions stays global-config-only.
+  const vaultFlags = userId ? userProviderFlags(DATA_DIR, userId) : null;
 
   const providerFlags: Record<string, { configured: boolean }> = {};
+  if (vaultFlags) {
+    for (const [id, entry] of Object.entries(vaultFlags)) {
+      providerFlags[id] = { configured: Boolean(entry?.configured) };
+    }
+  }
   if (cfg.providers) {
     for (const [id, entry] of Object.entries(cfg.providers)) {
-      providerFlags[id] = { configured: vaultFlags ? Boolean(vaultFlags[id]?.configured) : Boolean(entry.apiKey) };
+      // A live vault answer wins for this user; global config fills the rest
+      // (desktop shares one config, so this is also the desktop path).
+      if (providerFlags[id]) continue;
+      providerFlags[id] = { configured: Boolean(entry.apiKey) };
     }
   }
 
