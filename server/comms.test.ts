@@ -14,13 +14,20 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 
 import { mentionedBots, normalizeGroupDefaultResponder, roomResponders } from "./store.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
+
+// CI runners can be slow enough that the fake ACP fleet takes >45s to
+// settle a turn. Raise the default for every test in this file so they
+// fail with their own rich diagnostic error instead of vitest's generic
+// "timed out in 45000ms" — the internal poll loops already carry deadlines
+// and helpful failure payloads.
+vi.setConfig({ testTimeout: 150_000 });
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -774,7 +781,7 @@ describe("comms e2e (fake ACP fleet)", () => {
           m.role === "bot" && m.kind === "text" && m.text?.includes("hello from fake acp"),
       ),
     ).toBe(false);
-  }, 50_000);
+  }, 150_000);
 
   // ── depth guard regression ───────────────────────────────────────────
   // A bot invoked via ask_bot or delegate_bot runs at depth=1, which equals
@@ -831,5 +838,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     expect(reply.text).toContain("hello from fake acp");
     expect(reply.text).not.toContain("one hop");
     expect(reply.text).not.toContain("peer error");
-  }, 45_000);
+    // Timeout must exceed the 90s internal settle deadline or CI runners
+    // kill the test before its diagnostic error can explain the failure.
+  }, 150_000);
 });
