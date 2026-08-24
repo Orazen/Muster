@@ -663,9 +663,9 @@ jobs:
         run: |
           set -euo pipefail
           # These exact filenames are what README.md and www link to.
-          [ -f assets/macos-artifacts/Muster.dmg ] \
+          [ -f assets/Muster.dmg ] \
             || { echo "::error::Muster.dmg missing — the README download button would 404"; exit 1; }
-          [ -f assets/windows-artifacts/Muster-setup.exe ] \
+          [ -f assets/Muster-setup.exe ] \
             || { echo "::error::Muster-setup.exe missing — the README download button would 404"; exit 1; }
 
       - name: Create GitHub Release
@@ -682,7 +682,4 @@ jobs:
           generate_release_notes: true
           body: Built by the Release workflow from Orazen/Muster@${{ needs.prepare.outputs.sha }}.
           files: |
-            assets/macos-artifacts/*
-            assets/macos-x64-artifacts/*
-            assets/windows-artifacts/*
-            assets/linux-artifacts/*
+            assets/*
