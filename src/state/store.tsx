@@ -281,6 +281,7 @@ export interface InstanceInfo {
 
 export type AppSettingsSection =
   | "general"
+  | "appearance"
   | "connections"
   | "engines"
   | "providers"

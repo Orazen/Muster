@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, CreditCard, KeyRound, Monitor, Plug, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud } from "lucide-react";
+import { Coins, CreditCard, KeyRound, Monitor, Palette, Plug, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
@@ -12,6 +12,7 @@ import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
 import { Card } from "./SettingsPrimitives";
+import { SkinPicker } from "./SkinPicker";
 import { UsageSection } from "./UsageSection";
 import { BillingSection } from "./BillingSection";
 import { VoiceSettings } from "./VoiceSettings";
@@ -22,6 +23,7 @@ import { cn } from "@/lib/cn";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
   { id: "general", label: "General", icon: User },
+  { id: "appearance", label: "Appearance", icon: Palette },
   { id: "connections", label: "Connections", icon: KeyRound },
   { id: "engines", label: "Engines", icon: Terminal },
   { id: "providers", label: "Providers", icon: Cloud },
@@ -281,6 +283,12 @@ export function SettingsModal() {
                 <AccountSection />
                 <UpdatesRow />
               </>
+            )}
+
+            {section === "appearance" && (
+              <Card title="Appearance" subtitle="Applies instantly and is remembered on this machine.">
+                <SkinPicker />
+              </Card>
             )}
 
             {section === "connections" && (

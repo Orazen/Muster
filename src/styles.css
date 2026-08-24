@@ -34,6 +34,96 @@
   --radius-xl: 10px;
 }
 
+/* Skins. Every surface already paints itself from the palette custom
+   properties above, so a skin is just a block that re-points those variables
+   under a [data-theme] attribute — nothing else needs to know a skin exists.
+   The attribute selector is deliberately bare (not html[data-theme]) so any
+   element can open a theme context for its own subtree, which is how the
+   picker draws honest swatches. Midnight restates the @theme values exactly:
+   with no attribute set the app renders byte-for-byte as before. */
+[data-theme="midnight"] {
+  --color-app: #070707;
+  --color-panel: #111111;
+  --color-raised: #2f2f2f;
+  --color-raised-hover: #3d3d3d;
+  --color-card: #262626;
+  --color-inset: #191919;
+  --color-hairline: #333333;
+  --color-ink: #fcfcfc;
+  --color-ink-secondary: #fcfcfc99;
+  --color-accent: #1084fe;
+  --color-accent-border: #459ffe;
+  --color-focus: #459ffe;
+  --color-bubble-user: #5a5a5a;
+  --color-success: #38d591;
+  --color-danger: #ff5667;
+  --color-warning: #ff9800;
+  --color-scrollbar-thumb: #3d3d3d;
+}
+
+/* Atelier. Daylight on paper, warm and quiet. */
+[data-theme="atelier"] {
+  --color-app: #f4efe4;
+  --color-panel: #ece5d6;
+  --color-raised: #ddd3bf;
+  --color-raised-hover: #cfc4ac;
+  --color-card: #faf7ef;
+  --color-inset: #e6dfcf;
+  --color-hairline: #d6cbb4;
+  --color-ink: #3b3427;
+  --color-ink-secondary: #3b342799;
+  --color-accent: #a94e26;
+  --color-accent-border: #c4683d;
+  --color-focus: #c4683d;
+  --color-bubble-user: #ded2b8;
+  --color-success: #25774a;
+  --color-danger: #ab3327;
+  --color-warning: #96610a;
+  --color-scrollbar-thumb: #c9bda4;
+}
+
+/* Foundry. Night shift. Dark, warm, lit in brass. */
+[data-theme="foundry"] {
+  --color-app: #16110c;
+  --color-panel: #1f1811;
+  --color-raised: #382c1e;
+  --color-raised-hover: #47392a;
+  --color-card: #291f15;
+  --color-inset: #1a140e;
+  --color-hairline: #3c2f21;
+  --color-ink: #f2e7d3;
+  --color-ink-secondary: #f2e7d399;
+  --color-accent: #aa6418;
+  --color-accent-border: #d89136;
+  --color-focus: #d89136;
+  --color-bubble-user: #4a3b28;
+  --color-success: #4cc48c;
+  --color-danger: #ff6f61;
+  --color-warning: #ffb02e;
+  --color-scrollbar-thumb: #3a2f22;
+}
+
+/* Lagoon. Cool daylight. Porcelain and deep teal. */
+[data-theme="lagoon"] {
+  --color-app: #edf2f3;
+  --color-panel: #e2eaec;
+  --color-raised: #cfdce0;
+  --color-raised-hover: #bccfd4;
+  --color-card: #f8fbfb;
+  --color-inset: #dde7e9;
+  --color-hairline: #c2d3d8;
+  --color-ink: #14333c;
+  --color-ink-secondary: #14333c99;
+  --color-accent: #0e6e80;
+  --color-accent-border: #2a8fa1;
+  --color-focus: #2a8fa1;
+  --color-bubble-user: #cddfe3;
+  --color-success: #1d7a4e;
+  --color-danger: #b23440;
+  --color-warning: #8f6004;
+  --color-scrollbar-thumb: #b4c8cd;
+}
+
 html,
 body,
 #root {
@@ -73,7 +163,8 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #3d3d3d;
+  /* var + fallback: identical to the old literal when no skin sets it */
+  background: var(--color-scrollbar-thumb, #3d3d3d);
   border-radius: 4px;
 }
 /* the thumb was inert — it never acknowledged the pointer */
@@ -210,7 +301,7 @@ body {
 }
 
 .agent-speed-line--two {
-  stroke: #fcfcfc;
+  stroke: var(--color-ink);
   stroke-width: 2.5px;
 }
 
