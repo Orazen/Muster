@@ -125,6 +125,7 @@ import {
   pairCloudUrl,
   createBridgedUser,
   mintSession,
+  signedSessionCookieValue,
 } from "./auth.ts";
 import { consumeCode, getOrCreateCode, VerifyError } from "./pairing.ts";
 import {
@@ -3099,12 +3100,14 @@ let requestUserEmail = "";
         ip: req.socket.remoteAddress ?? undefined,
         userAgent: req.headers["user-agent"],
       });
-      // Same cookie name/shape Better Auth itself sets — getSession()
-      // resolves it identically. No Secure flag: the desktop serves plain
-      // loopback HTTP.
+      // Same cookie NAME/shape Better Auth itself sets, but the value must be
+      // the SIGNED form `<token>.<hmac>` — get-session verifies the signature
+      // with the auth secret before touching the DB, and a bare token verified
+      // to null on every redeem (pairing "worked" while logging nobody in).
+      // No Secure flag: the desktop serves plain loopback HTTP.
       res.setHeader(
         "Set-Cookie",
-        `better-auth.session_token=${token}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}`,
+        `better-auth.session_token=${signedSessionCookieValue(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}`,
       );
       return json(res, 200, { ok: true, email: identity.email, name: identity.name ?? "" });
     }

@@ -3,7 +3,7 @@ import { betterAuth } from "better-auth";
 import { organization } from "better-auth/plugins";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { DATA_DIR } from "./config.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { isEmailConfigured, sendPasswordResetEmail, sendVerificationEmail } from "./email.ts";
@@ -253,6 +253,16 @@ export function createBridgedUser(email: string, name: string): string {
   ).run(userId, name || normalized.split("@")[0], normalized, now, now);
   provisionOrganizationFor(userId, name || normalized);
   return userId;
+}
+
+/** What. The exact Set-Cookie value Better Auth itself would write for this
+ * session token: `<token>.<base64(hmac-sha256(secret, token))>`, URI-encoded.
+ * Why. get-session verifies the signature with the secret before it ever
+ * looks at the DB — a bare token in the cookie verified to null on EVERY
+ * redeem, so desktop pairing "succeeded" while logging nobody in. */
+export function signedSessionCookieValue(token: string): string {
+  const signature = createHmac("sha256", resolveSecret()).update(token).digest("base64");
+  return encodeURIComponent(`${token}.${signature}`);
 }
 
 /** Mint a real session row + token for an already-provisioned user. The
