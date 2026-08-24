@@ -1317,6 +1317,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // gap before that connection opened.
     const hydrationFallback = setTimeout(hydrate, 1_000);
 
+    // Missed SSE frames used to leave ghosts: a bot shown "Working…" long
+    // after its turn settled server-side (a deploy restart mid-turn was the
+    // repeat offender). A tiny periodic reconciliation over /api/bots with
+    // messages=0 carries no transcripts — just live busy/activity/model
+    // truth — and quietly corrects whatever the stream failed to deliver.
+    const reconcile = () => {
+      api("/api/bots?messages=0")
+        .then(({ bots, groups }) => {
+          if (!alive) return;
+          rawDispatch({ type: "hydrate", bots, groups: groups ?? [] });
+        })
+        .catch(() => {});
+    };
+    const reconcileTimer = setInterval(reconcile, 30_000);
+
     const es = new EventSource("/api/events");
     // The hydrate decision belongs to the hello frame, not to onopen: the
     // server replays what we missed when it can, and re-downloading every
@@ -1489,6 +1504,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => {
       alive = false;
       clearTimeout(hydrationFallback);
+      clearInterval(reconcileTimer);
       es.close();
     };
   }, []);
