@@ -71,6 +71,28 @@ that fails.
 | `POST /api/billing/portal` | session | Returns a Stripe Billing Portal URL |
 | `POST /api/billing/webhook` | signature | Stripe events. Exempt from the session gate — it authenticates with a signature, not a cookie |
 
+## Live deployment state (2026-08-24)
+
+Production (muster.orazen.online, Dokploy app `projects-muster-qu8stt`) is wired to Stripe **live mode**:
+
+| Object | ID |
+|---|---|
+| Product "Muster Cloud" | `prod_V81y4AhZC2lgpF` |
+| Monthly price — $20 / cloud computer / mo | `price_1U7luIILRstkvDu5dU7wIcBJ` |
+| Annual price — $192 / cloud computer / yr | `price_1U7luIILRstkvDu5VxQxrmad` |
+| Webhook endpoint → `/api/billing/webhook` | `we_1U7luJILRstkvDu5tTouTxV7` |
+
+Secrets (`sk_live_…`, `whsec_…`) live in macOS Keychain on the operator's machine
+(`muster-stripe-secret`, `muster-stripe-webhook-secret`) and are injected into the app's env via
+Dokploy. They are never committed to the repository.
+
+**To rotate the secret key:** roll it in the Stripe dashboard, then update both the Keychain entry
+and the Dokploy environment (`docker service update --env-add STRIPE_SECRET_KEY=… projects-muster-qu8stt`
+for an immediate fix, plus the Dokploy UI/DB for persistence).
+
+**Smoke-testing without a card:** `POST /v1/checkout/sessions` with the live key and a price ID must
+return a hosted `url`. A session expires unused; creating one moves no money.
+
 ## Design decisions
 
 **Stripe is the source of truth.** Subscription state is never mirrored into our database. Every
