@@ -1,39 +1,162 @@
-# Release workflow — triggered by v* tags, builds all platforms, creates
-# a GitHub Release with every artifact and the auto-update YML files.
+# ═════════════════════════════════════════════════════════════════════════════
+# Release pipeline — gate pattern ported from OpenMausBot's signed release flow
 #
-# macOS code signing: set these repository secrets if you have an Apple
-# Developer certificate. The build still works without them (unsigned),
-# but auto-update on macOS requires a signed+notarized build.
+# One commit → every platform → verified → assembled → published. Triggered by
+# v* tag pushes, or run manually from Actions → Release → Run workflow:
+# leave "dry_run" TICKED (the default) to exercise the entire pipeline — every
+# build, every gate, every artifact — without creating a release. Untick it to
+# cut a real one (equivalent to pushing a v* tag).
 #
-# Required secrets (Settings → Secrets → Actions):
-#   APPLE_CERTIFICATE          — Base64-encoded .p12 certificate
-#   APPLE_CERTIFICATE_PASSWORD — Password for the .p12
-#   APPLE_ID                   — Apple ID email for notarization
-#   APPLE_APP_PASSWORD         — App-specific password for notarization
-#   APPLE_TEAM_ID              — 10-char team identifier
+# Every gate below exists because its absence shipped (or nearly shipped) a
+# broken build. Ordering matters:
+#   clean output dirs         → stale dist/ would ride along into the sealed
+#                               app (the "damaged app" class of incident)
+#   codesign gate BEFORE      → notarization ACCEPTS invalid signatures;
+#                               notarize                  verifying first is the only thing that catches them
+#   packaged-server smoke     → index.js EXISTING ≠ index.js RUNNING; a bare
+#                               import kills the packaged server while every
+#                               existence check stays green
+#   staple, THEN checksums    → stapling rewrites bytes; hashes computed
+#                               earlier describe files nobody ships
+#   assemble-then-publish     → a partial platform set publishes as a DRAFT
+#                               for human review, never silently
+#   feed-vs-bytes verify      → a latest*.yml whose sha512 doesn't match the
+#                               shipped bytes makes electron-updater reject
+#                               every update
+#
+# Deliberate scope limit: the macOS ZIP is never modified after electron-
+# builder writes latest-mac.yml (no re-zipping a stapled .app here). Restapling
+# into the zip invalidates the feed hash and strands every installed Mac —
+# fixing that properly needs a feed-regeneration script (see OpenMausBot's
+# scripts/regenerate-mac-feed.mjs) and is tracked as a follow-up, not faked
+# with stale hashes.
+#
+# REQUIRED SECRETS (Settings → Secrets and variables → Actions; names only,
+# values never in this file). Absent-secret behavior is stated per group so
+# unsigned forks still get artifacts:
+#
+#   macOS code signing — BOTH absent → fully unsigned builds (forced clean
+#   unsigned state, not the broken half-signed one; users get the normal
+#   "unidentified developer" right-click-open flow):
+#     APPLE_CERTIFICATE            Base64-encoded .p12 Developer ID certificate
+#     APPLE_CERTIFICATE_PASSWORD   Export password for that .p12
+#
+#   macOS notarization — ANY absent → skip notarize/staple; signed-but-
+#   unstapled (or unsigned) artifacts still upload:
+#     APPLE_ID                     Apple ID email for notarytool
+#     APPLE_APP_PASSWORD           App-specific password for notarytool
+#     APPLE_TEAM_ID                10-char Apple team identifier
+#
+#   Windows signing — BOTH absent → unsigned NSIS (SmartScreen "unknown
+#   publisher", documented in README); BOTH present → electron-builder signs
+#   at pack time and the packaged-tree gate then REQUIRES publisherName in
+#   app-update.yml (its absence would make electron-updater reject updates):
+#     CSC_LINK                     Base64 .p12 (standard electron-builder name)
+#     CSC_KEY_PASSWORD             Password for that .p12
+#
+#   Nothing else. Publishing uses the workflow's own GITHUB_TOKEN (contents:
+#   write on the publish job only). No Google/Play secrets: Muster ships no
+#   Android target.
+#
+# Idempotence: overlapping runs on the same ref queue (concurrency), every
+# build job wipes generated output first, installs are --frozen-lockfile, and
+# a non-draft release is refused if v<version> is already published.
+# ═════════════════════════════════════════════════════════════════════════════
 name: Release
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit/tag/branch to build (defaults to the branch this runs from)"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run — build everything, run every gate, upload artifacts, but DO NOT create a release"
+        required: false
+        type: boolean
+        default: true
 
-# Least privilege: only the publish job writes back. Build jobs read.
 permissions:
   contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
 
 env:
   NODE_VERSION: "24"
 
 jobs:
-  # ── macOS ──────────────────────────────────────────────────────────────
+  # ── Pin the release commit ────────────────────────────────────────────────
+  # All build legs check out THIS sha, so every artifact provably comes from
+  # one commit even if refs move mid-run.
+  prepare:
+    name: Pin the release commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.pin.outputs.sha }}
+      version: ${{ steps.pin.outputs.version }}
+      dry_run: ${{ steps.pin.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - id: pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # Dry run only ever comes from a manual dispatch; a tag push IS a
+          # release. Empty input on other events resolves to false.
+          dry="${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}"
+          [ "$dry" = "true" ] || dry="false"
+          echo "dry_run=$dry" >> "$GITHUB_OUTPUT"
+
+          # A tag that disagrees with package.json releases the wrong version
+          # number under the right name. Refuse.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            if [ "${{ github.ref_name }}" != "v$version" ]; then
+              echo "::error::tag ${{ github.ref_name }} does not match package.json version v$version — rerun scripts/bump-version.mjs"
+              exit 1
+            fi
+          fi
+
+          # Never overwrite something users can already see. Drafts are fine
+          # to refill (that's how a retried release completes itself).
+          if [ "$dry" = "false" ]; then
+            if gh release view "v$version" --json isDraft --jq .isDraft 2>/dev/null | grep -q '^false$'; then
+              echo "::error::v$version is already published — bump the version first"
+              exit 1
+            fi
+          fi
+
+  # ── macOS arm64 ───────────────────────────────────────────────────────────
+  # Order: clean → sign-config → package → SIGNATURE GATE → packaged smoke →
+  # notarize+staple → post-staple hashes. Notarization is last because it
+  # accepts signatures that codesign rejects, and checksums are last because
+  # stapling rewrites bytes.
   macos:
-    name: macOS (arm64)
+    name: macOS arm64 (sign, notarize, staple)
+    needs: prepare
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     # Job-level env, NOT step-level: a step's own `env:` block is out of scope
-    # for that step's `if:` expression, so testing it there silently skipped
-    # signing and notarization on every run.
+    # for that step's `if:` expression, so testing secrets there silently
+    # skipped signing on every run.
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -43,26 +166,40 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.2.0
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: macos-electron-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: macos-electron-
       - run: pnpm install --frozen-lockfile
+
+      # Generated output must be rebuilt, never inherited: a stale dist/ or
+      # dist-server/ gets sealed into the app and the smoke below can't tell
+      # fresh-from-source from leftover.
+      - name: Clean generated output
+        run: |
+          set -euo pipefail
+          rm -rf dist dist-server dist-companion dist-native release
 
       # Code signing (optional — skipped if secrets are not set)
       - name: Import Apple certificate
         if: ${{ env.APPLE_CERTIFICATE != '' }}
         run: |
-          # Create a temporary keychain
+          set -euo pipefail
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          # Import the certificate
           CERT_PATH=$RUNNER_TEMP/certificate.p12
           echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
           security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" \
@@ -71,81 +208,111 @@ jobs:
             -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychain -d user -s "$KEYCHAIN_PATH"
-
+          rm "$CERT_PATH"
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
       # electron-builder auto-discovers keychain identities by default. On a
-      # bare runner (no APPLE_CERTIFICATE imported) that still produces a
-      # broken partial/ad-hoc signature — hardenedRuntime+entitlements in
-      # electron-builder.yml need a real identity to apply correctly, and
-      # without one the result is a *worse* state than fully unsigned: macOS
-      # reports "code has no resources but signature indicates they must be
-      # present" and Gatekeeper's "damaged" message, even after xattr -cr.
-      # Force a clean, fully unsigned build when there's no real cert, so
-      # users hit the one well-understood "unsigned app" flow instead.
-      - name: Build (macOS)
+      # bare runner (no APPLE_CERTIFICATE imported) that produces a broken
+      # partial/ad-hoc signature — hardenedRuntime+entitlements need a real
+      # identity, and without one the result is a *worse* state than fully
+      # unsigned: Gatekeeper reports the app as damaged. Force a clean, fully
+      # unsigned build when there's no real cert.
+      - name: Build (macOS arm64)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.APPLE_CERTIFICATE != '' && 'true' || 'false' }}
-        run: pnpm package:mac
+        run: pnpm package:mac:arm64
 
-      # Notarization (optional — skipped if secrets are not set)
-      - name: Notarize
-        if: ${{ env.APPLE_ID != '' }}
-        run: |
-          set -euo pipefail
-          DMG=$(ls release/*.dmg | head -1)
-          # `notarytool` is an xcrun subcommand, not a bare executable.
-          xcrun notarytool submit "$DMG" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait
-          xcrun stapler staple "$DMG"
-
-      # Fail loudly if signing was configured but did not take, rather than
-      # shipping a build that Gatekeeper rejects and auto-update cannot apply.
-      - name: Verify signature
+      - name: "Gate: signature must verify BEFORE notarization"
         if: ${{ env.APPLE_CERTIFICATE != '' }}
         run: |
           set -euo pipefail
+          # notarytool ACCEPTS binaries codesign rejects — this gate is the
+          # only chance to catch a bad seal before it's notarized
           APP=$(ls -d release/mac*/Muster.app | head -1)
-          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --verify --deep --strict "$APP"
           spctl --assess --type exec -vv "$APP"
+          echo "ok: signature verifies ($APP)"
 
-      # Clean up keychain
+      - name: "Gate: packaged server starts with no node_modules in reach"
+        run: |
+          set -euo pipefail
+          APP=$(ls -d release/mac*/Muster.app | head -1)
+          res="$APP/Contents/Resources"
+          [ -f "$res/server/index.js" ] || { echo "::error::missing packaged server/index.js"; exit 1; }
+          [ -f "$res/ui/index.html" ] || { echo "::error::missing packaged ui/index.html"; exit 1; }
+          [ -x "$res/cua-driver" ] || { echo "::error::missing staged cua-driver"; exit 1; }
+          lipo -archs "$res/cua-driver" | grep -q "arm64" || {
+            echo "::error::cua-driver lacks arm64 slice"; exit 1; }
+          # Copy OUT of the bundle before running: inside the app a bare
+          # import could resolve through stray paths and mask a dead tree.
+          staging="$RUNNER_TEMP/smoke-server"
+          rm -rf "$staging"
+          cp -R "$res/server" "$staging"
+          port=$((21000 + RANDOM % 9000))
+          HOME="$RUNNER_TEMP/smoke-home" OMB_PORT=$port \
+            node "$staging/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 2 "http://127.0.0.1:$port/api/health" >/dev/null 2>&1; then
+              echo "packaged server answered /api/health ✓"
+              kill $pid 2>/dev/null || true
+              exit 0
+            fi
+            kill -0 $pid 2>/dev/null || break
+            sleep 1
+          done
+          echo "::error::packaged server never served /api/health"
+          cat "$RUNNER_TEMP/server.log" || true
+          kill $pid 2>/dev/null || true
+          exit 1
+
+      # Notarization (optional — skipped if secrets are not set)
+      - name: Notarize and staple
+        if: ${{ env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
+        run: |
+          set -euo pipefail
+          for f in release/*.dmg release/*.zip; do
+            [ -e "$f" ] || continue
+            out=$(xcrun notarytool submit "$f" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait 2>&1)
+            echo "$out" | tail -2
+            echo "$out" | grep -q "status: Accepted" || {
+              echo "::error::notarization not Accepted for $f"; exit 1; }
+          done
+          # Staple AFTER acceptance. The .zip is NOT rebuilt from the stapled
+          # app — see the scope-limit note at the top of this file.
+          for f in release/*.dmg; do
+            [ -e "$f" ] || continue
+            xcrun stapler staple "$f"
+          done
+          APP=$(ls -d release/mac*/Muster.app | head -1)
+          xcrun stapler staple "$APP"
+
       - name: Clean up keychain
         if: always() && env.KEYCHAIN_PATH != ''
         run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
 
-      # electron-builder emits Muster-${version}.dmg, but the README and the
-      # landing page link to /releases/latest/download/Muster.dmg — a STABLE
-      # name. Without this copy that button is a 404.
-      - name: Copy to stable download name
+      # Stable name for the README's /releases/latest/download/Muster.dmg
+      # link, and checksums LAST — stapling rewrote the bytes above, so any
+      # hash taken before this point describes a file nobody ships.
+      - name: Stable-named copy and post-staple checksums
         run: |
           set -euo pipefail
-          VERSION=$(node -p "require('./package.json').version")
+          VERSION=${{ needs.prepare.outputs.version }}
+          [ -f "release/Muster-${VERSION}.dmg" ] || {
+            echo "::error::expected release/Muster-${VERSION}.dmg (electron-builder.yml dmg.artifactName)"; exit 1; }
           cp "release/Muster-${VERSION}.dmg" release/Muster.dmg
+          (cd release && shasum -a 256 *.dmg *.zip > SHA256SUMS-macos-arm64.txt)
 
       - name: Verify artifacts
         run: |
           set -euo pipefail
-          echo "=== macOS artifacts ==="
-          ls -lh release/*.dmg release/*.zip release/*.yml 2>/dev/null
-          # Ensure latest-mac.yml exists (required for auto-update)
-          [ -f "release/latest-mac.yml" ] || { echo "::error::missing latest-mac.yml"; exit 1; }
-          # Ensure the stable download name the README points at exists
-          [ -f "release/Muster.dmg" ] || { echo "::error::missing Muster.dmg"; exit 1; }
-
-      - name: Add stable-filename copy for the /latest/download/ badge
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          src="release/Muster-${VERSION}.dmg"
-          if [ -f "$src" ]; then
-            cp "$src" release/Muster.dmg
-          else
-            echo "::error::expected $src (from electron-builder.yml dmg.artifactName) — README/Homebrew cask 'latest' link will 404"
-            exit 1
-          fi
+          ls -lh release/
+          [ -f "release/latest-mac.yml" ] || { echo "::error::missing latest-mac.yml (auto-update feed)"; exit 1; }
+          [ -f "release/Muster.dmg" ] || { echo "::error::missing Muster.dmg (stable download name)"; exit 1; }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -153,51 +320,91 @@ jobs:
           path: |
             release/*.dmg
             release/*.zip
+            release/*.blockmap
             release/latest-mac.yml
+            release/SHA256SUMS-macos-arm64.txt
           if-no-files-found: error
           retention-days: 14
 
-  # ── macOS (Intel / x64) ──────────────────────────────────────────────────
-  # Same afterPack ad-hoc re-sign as arm64 (build/after-pack-mac.mjs); no
-  # Developer ID cert here either, so this deliberately skips notarization
-  # and does NOT merge into latest-mac.yml — that file drives in-app auto-
-  # update, and merging a second architecture into it needs its own
-  # verification pass so it can't silently break arm64's auto-update, which
-  # already works. This ships x64 as a real, direct download only; wiring it
-  # into auto-update is a separate, scoped follow-up.
+  # ── macOS (Intel / x64) ───────────────────────────────────────────────────
+  # Unsigned direct download only, by policy: no Developer ID cert is applied
+  # here, and it deliberately does NOT touch latest-mac.yml — that feed drives
+  # arm64 auto-update, and merging a second architecture into it needs its own
+  # verification pass so it can't silently break the update channel that
+  # already works.
   macos-x64:
-    name: macOS (x64 / Intel)
+    name: macOS x64 / Intel
+    needs: prepare
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.2.0
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: macos-electron-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: macos-electron-
       - run: pnpm install --frozen-lockfile
       - name: Install the x64 CUA native package
         run: pnpm add -D @trycua/cua-driver-darwin-x64@0.20.0
+      - name: Clean generated output
+        run: |
+          set -euo pipefail
+          rm -rf dist dist-server dist-companion dist-native release
       - name: Build (macOS x64)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: pnpm package:mac:x64
 
-      - name: Verify artifacts
+      - name: "Gate: packaged server starts with no node_modules in reach"
         run: |
           set -euo pipefail
-          echo "=== macOS x64 artifacts ==="
-          ls -lh release/*.dmg release/*.zip 2>/dev/null
-          VERSION=$(node -p "require('./package.json').version")
-          [ -f "release/Muster-${VERSION}-intel.dmg" ] || { echo "::error::missing Muster-${VERSION}-intel.dmg"; exit 1; }
+          APP=$(ls -d release/mac*/Muster.app | head -1)
+          res="$APP/Contents/Resources"
+          [ -f "$res/server/index.js" ] || { echo "::error::missing packaged server/index.js"; exit 1; }
+          [ -f "$res/ui/index.html" ] || { echo "::error::missing packaged ui/index.html"; exit 1; }
+          [ -x "$res/cua-driver" ] || { echo "::error::missing staged cua-driver"; exit 1; }
+          lipo -archs "$res/cua-driver" | grep -q "x86_64" || {
+            echo "::error::cua-driver lacks x86_64 slice"; exit 1; }
+          staging="$RUNNER_TEMP/smoke-server"
+          rm -rf "$staging"
+          cp -R "$res/server" "$staging"
+          port=$((21000 + RANDOM % 9000))
+          HOME="$RUNNER_TEMP/smoke-home" OMB_PORT=$port \
+            node "$staging/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 2 "http://127.0.0.1:$port/api/health" >/dev/null 2>&1; then
+              echo "packaged server answered /api/health ✓"
+              kill $pid 2>/dev/null || true
+              exit 0
+            fi
+            kill -0 $pid 2>/dev/null || break
+            sleep 1
+          done
+          echo "::error::packaged server never served /api/health"
+          cat "$RUNNER_TEMP/server.log" || true
+          kill $pid 2>/dev/null || true
+          exit 1
 
-      - name: Add stable-filename copy
+      - name: Stable-named copy and checksums
         run: |
           set -euo pipefail
-          cp "release/Muster-$(node -p "require('./package.json').version")-intel.dmg" release/Muster-intel.dmg
+          VERSION=${{ needs.prepare.outputs.version }}
+          [ -f "release/Muster-${VERSION}-intel.dmg" ] || {
+            echo "::error::expected release/Muster-${VERSION}-intel.dmg (package:mac:x64 override)"; exit 1; }
+          cp "release/Muster-${VERSION}-intel.dmg" release/Muster-intel.dmg
+          (cd release && shasum -a 256 *.dmg *.zip > SHA256SUMS-macos-x64.txt)
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -205,43 +412,77 @@ jobs:
           path: |
             release/*.dmg
             release/*.zip
+            release/SHA256SUMS-macos-x64.txt
           if-no-files-found: error
           retention-days: 14
 
-  # ── Windows ────────────────────────────────────────────────────────────
+  # ── Windows ───────────────────────────────────────────────────────────────
   windows:
-    name: Windows (x64)
+    name: Windows x64 (NSIS)
+    needs: prepare
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.2.0
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: windows-electron-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: windows-electron-
       - run: pnpm install --frozen-lockfile
-      - name: clean build outputs
-        shell: bash
-        run: rm -rf dist dist-server release
+      - name: Clean generated output
+        run: rm -rf dist dist-server dist-companion dist-native release
       - run: pnpm package:win
 
-      - name: Verify packaged tree
-        shell: bash
+      # Three silent failure modes produce an installer that builds fine and
+      # breaks in the field; assert them where the unpacked tree exists.
+      - name: "Gate: verify the packaged tree"
         run: |
+          set -euo pipefail
           res=release/win-unpacked/resources
-          [ -f "$res/server/index.js" ] || { echo "::error::missing server/index.js"; exit 1; }
-          [ -f "$res/ui/index.html" ] || { echo "::error::missing ui/index.html"; exit 1; }
-          [ -f "$res/app-update.yml" ] || { echo "::error::missing app-update.yml"; exit 1; }
+          fail=0
+          # missing → utilityProcess.fork fails → "couldn't start the server"
+          [ -f "$res/server/index.js" ] || { echo "::error::missing $res/server/index.js"; fail=1; }
+          # missing → the server has nothing to serve → black window
+          [ -f "$res/ui/index.html" ] || { echo "::error::missing $res/ui/index.html"; fail=1; }
+          [ -f "$res/app-update.yml" ] || { echo "::error::missing $res/app-update.yml"; fail=1; }
+          if [ -f "$res/app-update.yml" ]; then
+            grep -q "Orazen/Muster" "$res/app-update.yml" || {
+              echo "::error::app-update.yml does not point at Orazen/Muster"; fail=1; }
+            if [ -n "$CSC_LINK" ]; then
+              grep -q "publisherName" "$res/app-update.yml" || {
+                echo "::error::signed build but app-update.yml lacks publisherName — electron-updater would trust nothing"; fail=1; }
+            else
+              # publisherName on an UNSIGNED build makes electron-updater
+              # reject every update as untrusted
+              if grep -q "publisherName" "$res/app-update.yml"; then
+                echo "::error::app-update.yml carries publisherName on an unsigned build"; fail=1
+              fi
+            fi
+          fi
+          exit $fail
 
-      - name: Start packaged server
-        shell: bash
+      # index.js EXISTING is not the same as index.js RUNNING. Start the real
+      # packaged copy where node_modules genuinely is not reachable.
+      - name: "Gate: packaged server starts and serves /api/health"
         run: |
+          set -euo pipefail
           res=release/win-unpacked/resources
-          HOME="$RUNNER_TEMP/omb-smoke" USERPROFILE="$RUNNER_TEMP/omb-smoke" \
-            OMB_PORT=21987 node "$res/server/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
+          HOME="$RUNNER_TEMP/smoke-home" USERPROFILE="$RUNNER_TEMP/smoke-home" OMB_PORT=21987 \
+            node "$res/server/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
           pid=$!
           for _ in $(seq 1 90); do
             if curl -fsS --max-time 2 http://127.0.0.1:21987/api/health >/dev/null 2>&1; then
@@ -257,26 +498,20 @@ jobs:
           kill $pid 2>/dev/null || true
           exit 1
 
-      # nsis.artifactName is Muster-${version}-setup.exe — there is no "-x64-"
-      # segment. The old copy referenced one, failed every run, and `|| true`
-      # hid it, so Muster-setup.exe was never published and the README's
-      # download button 404'd. No error suppression here: a mismatch must fail.
-      - name: Copy to stable download name
-        shell: bash
+      # nsis.artifactName is Muster-${version}-setup.exe — no "-x64-" segment.
+      # A past copy referenced one and silently no-op'd; a mismatch must fail.
+      - name: Stable-named copy and checksums
         run: |
           set -euo pipefail
-          VERSION=$(node -p "require('./package.json').version")
-          # electron-builder.yml's win.nsis.artifactName is
-          # "Muster-${version}-setup.${ext}" (no "-x64" — do not add one here,
-          # a previous version of this step silently no-op'd on a wrong glob).
+          VERSION=${{ needs.prepare.outputs.version }}
           src="release/Muster-${VERSION}-setup.exe"
-          if [ -f "$src" ]; then
-            cp "$src" release/Muster-setup.exe
-          else
-            echo "::error::expected $src (from electron-builder.yml nsis.artifactName) — README's 'latest' download badge will 404"
+          [ -f "$src" ] || {
+            echo "::error::expected $src (electron-builder.yml nsis.artifactName) — README badge will 404"
             ls -lh release/*.exe 2>/dev/null || true
             exit 1
-          fi
+          }
+          cp "$src" release/Muster-setup.exe
+          (cd release && sha256sum *.exe > SHA256SUMS-windows-x64.txt)
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -285,77 +520,125 @@ jobs:
             release/*.exe
             release/*.exe.blockmap
             release/latest.yml
+            release/SHA256SUMS-windows-x64.txt
           if-no-files-found: error
           retention-days: 14
 
-  # ── Linux ──────────────────────────────────────────────────────────────
+  # ── Linux ─────────────────────────────────────────────────────────────────
   linux:
-    name: Linux (x64)
+    name: Linux x64 (deb + AppImage)
+    needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.2.0
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: linux-electron-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: linux-electron-
+      - name: Install package validation and smoke tools
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          desktop-file-utils xvfb dbus-x11
       - run: pnpm install --frozen-lockfile
-      - name: Install desktop utilities
-        run: sudo apt-get update && sudo apt-get install -y desktop-file-utils
+      - name: Clean generated output
+        run: |
+          set -euo pipefail
+          rm -rf dist dist-server dist-companion dist-native release
       - run: pnpm package:linux
 
-      - name: Verify artifacts
+      - name: "Gate: validate the packages"
         run: |
-          echo "=== Linux artifacts ==="
-          ls -lh release/*.AppImage release/*.deb 2>/dev/null
+          set -euo pipefail
+          node scripts/verify-linux-package.mjs
+          # Chromium sandbox needs root-owned setuid in the unpacked tree or
+          # the packaged app cannot launch browsers at all
+          sudo chown root:root release/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 release/linux-unpacked/chrome-sandbox
+          test "$(stat -c '%U:%G %a' release/linux-unpacked/chrome-sandbox)" = "root:root 4755"
 
-      - name: Add stable-filename copies for the /latest/download/ links
+      - name: "Gate: launch the packaged app end-to-end"
+        run: dbus-run-session -- xvfb-run -a node scripts/smoke-linux-package.mjs
+
+      - name: Stable-named copies and checksums
         run: |
+          set -euo pipefail
+          VERSION=${{ needs.prepare.outputs.version }}
           deb=$(ls release/*.deb | head -1)
           appimage=$(ls release/*.AppImage | head -1)
-          [ -f "$deb" ] && cp "$deb" release/Muster.deb
-          [ -f "$appimage" ] && cp "$appimage" release/Muster.AppImage
+          [ -n "$deb" ] || { echo "::error::no .deb produced"; exit 1; }
+          [ -n "$appimage" ] || { echo "::error::no .AppImage produced"; exit 1; }
+          cp "$deb" release/Muster.deb
+          cp "$appimage" release/Muster.AppImage
+          (cd release && sha256sum *.deb *.AppImage > SHA256SUMS-linux-x64.txt)
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux-artifacts
           path: |
-            release/*.AppImage
             release/*.deb
+            release/*.AppImage
+            release/latest-linux.yml
+            release/SHA256SUMS-linux-x64.txt
           if-no-files-found: error
           retention-days: 14
 
-  # ── Create GitHub Release ──────────────────────────────────────────────
+  # ── Assemble + publish ────────────────────────────────────────────────────
+  # Skipped entirely on dry runs. A partial platform set becomes a DRAFT so a
+  # human confirms it — an invisible-looking release beats a broken-looking
+  # one. macos-x64 alone failing does NOT force a draft (same policy as
+  # before); the release just ships without the Intel dmg.
   publish:
-    name: Create Release
-    needs: [macos, macos-x64, windows, linux]
-    if: ${{ !cancelled() && (needs.macos.result == 'success' || needs.linux.result == 'success') }}
-    runs-on: ubuntu-latest
+    name: Verify feeds and create the release
+    needs: [prepare, macos, macos-x64, windows, linux]
+    # Single line on purpose: folded scalars embed real newlines into the
+    # ${{ }} expression, which is fragile.
+    if: ${{ !cancelled() && needs.prepare.outputs.dry_run == 'false' && (needs.macos.result == 'success' || needs.linux.result == 'success') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # The only job that needs write access.
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          path: artifacts
+          path: assets
+          merge-multiple: true
 
-      - name: List all artifacts
-        run: find artifacts -type f | sort
+      - name: "Gate: every feed entry matches the actual bytes"
+        run: |
+          set -euo pipefail
+          cd assets
+          node --input-type=module - <<'EOF'
+          import { createHash } from "node:crypto";
+          import { readFileSync, statSync, existsSync } from "node:fs";
+          const sha512 = (f) => createHash("sha512").update(readFileSync(f)).digest("base64");
+          let bad = 0;
+          for (const feed of ["latest-mac.yml", "latest.yml", "latest-linux.yml"]) {
+            if (!existsSync(feed)) continue;
+            const text = readFileSync(feed, "utf8");
+            for (const [, url, hash, size] of text.matchAll(/url:\s+(\S+)[\s\S]*?sha512:\s+(\S+)\n\s+size:\s+(\d+)/g)) {
+              if (!existsSync(url)) { console.error(`MISSING ${url} (listed in ${feed})`); bad++; continue; }
+              const okHash = sha512(url) === hash;
+              const okSize = statSync(url).size === Number(size);
+              if (!okHash || !okSize) { console.error(`MISMATCH ${url} in ${feed}`); bad++; }
+              else console.log(`ok ${url} (${feed})`);
+            }
+          }
+          if (bad) process.exit(1);
+          console.log("all feeds verified against the bytes on disk");
+          EOF
 
-      # A partial release is allowed, but installed clients on the missing
-      # platform would poll a release with no latest*.yml manifest and fail
-      # their update check. Publish those as a draft so a human confirms.
-      # macos-x64 is deliberately NOT one of the required platforms here —
-      # it's the newest, least-proven leg of this workflow, and a failure
-      # in it alone shouldn't turn every release into a draft the way a
-      # failure in the three platforms every release has always needed
-      # would. It's still fetched below and included in the release when
-      # it succeeded; when it didn't, the release just ships without an
-      # Intel build that checkpoint, same as any other best-effort artifact.
       - name: Decide draft state
         id: draft
         run: |
@@ -376,22 +659,27 @@ jobs:
         if: ${{ steps.draft.outputs.value == 'false' }}
         run: |
           set -euo pipefail
-          # These exact filenames are what README.md and www/index.html link to.
-          [ -f artifacts/macos-artifacts/Muster.dmg ] \
+          # These exact filenames are what README.md and www link to.
+          [ -f assets/macos-artifacts/Muster.dmg ] \
             || { echo "::error::Muster.dmg missing — the README download button would 404"; exit 1; }
-          [ -f artifacts/windows-artifacts/Muster-setup.exe ] \
+          [ -f assets/windows-artifacts/Muster-setup.exe ] \
             || { echo "::error::Muster-setup.exe missing — the README download button would 404"; exit 1; }
 
       - name: Create GitHub Release
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SHA: ${{ needs.prepare.outputs.sha }}
         uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2.3.2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag_name: v${{ needs.prepare.outputs.version }}
+          target_commitish: ${{ needs.prepare.outputs.sha }}
+          name: Muster ${{ needs.prepare.outputs.version }}
           draft: ${{ steps.draft.outputs.value }}
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(needs.prepare.outputs.version, '-') }}
           generate_release_notes: true
+          body: Built by the Release workflow from Orazen/Muster@${{ needs.prepare.outputs.sha }}.
           files: |
-            artifacts/macos-artifacts/*
-            artifacts/macos-x64-artifacts/*
-            artifacts/windows-artifacts/*
-            artifacts/linux-artifacts/*
+            assets/macos-artifacts/*
+            assets/macos-x64-artifacts/*
+            assets/windows-artifacts/*
+            assets/linux-artifacts/*
