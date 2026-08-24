@@ -48,6 +48,13 @@ export interface DecisionLogOptions {
   maxEntries?: number;
 }
 
+/** Exactly what GET /api/bots/:id/audit serializes. */
+export interface AuditPageResponse {
+  entries: DecisionEntry[];
+  /** Pass back as ?before= for the next, older page. Absent at the end. */
+  nextBefore?: string;
+}
+
 const MAX_ENTRIES = 5000;
 
 export class DecisionLog {
@@ -89,7 +96,7 @@ export class DecisionLog {
   /** One bot's verdicts, newest first. `before` is a cursor: only entries
    * strictly older than that id. A dead cursor yields an empty page instead
    * of silently restarting the walk, so a client can never loop. */
-  page(botId: string, opts: { limit: number; before?: string }): { entries: DecisionEntry[]; nextBefore?: string } {
+  page(botId: string, opts: { limit: number; before?: string }): AuditPageResponse {
     const newestFirst = this.entries.filter((e) => e.botId === botId).reverse();
     let start = 0;
     if (opts.before) {
@@ -98,11 +105,12 @@ export class DecisionLog {
       start = idx + 1;
     }
     const window = newestFirst.slice(start, start + opts.limit);
-    const more = start + opts.limit < newestFirst.length;
-    return {
+    const result: AuditPageResponse = {
       entries: window.map((e) => ({ id: e.id, at: e.at, action: e.action, decision: e.decision, rule: e.rule, summary: e.summary })),
-      ...(more && window.length > 0 ? { nextBefore: window[window.length - 1].id } : {}),
     };
+    const oldest = window[window.length - 1];
+    if (start + opts.limit < newestFirst.length && oldest) result.nextBefore = oldest.id;
+    return result;
   }
 
   private save(): void {
@@ -120,11 +128,6 @@ function parseAuditLimit(raw: string | null): number {
   const n = Number(raw ?? "");
   if (!Number.isFinite(n)) return DEFAULT_AUDIT_LIMIT;
   return Math.min(Math.max(Math.trunc(n), 1), AUDIT_MAX_LIMIT);
-}
-
-export interface AuditPageResponse {
-  entries: DecisionEntry[];
-  nextBefore?: string;
 }
 
 /** The audit endpoint's whole brain, factored out of index.ts so tests can
