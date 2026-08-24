@@ -65,6 +65,7 @@ import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type C
 import { searchMessages } from "./message-db.ts";
 import { _loadPending, discardDelegations, drainDelegations, pendingThreads, queueDelegation } from "./delegations.ts";
 import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
+import { DecisionLog, queryAudit } from "./decision-log.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
@@ -965,6 +966,9 @@ bus.subscribe((event: RuntimeEvent) => {
               kind: "activity",
               tool: { name: `${settled}: ${summary.slice(0, 120)}`, ok: true },
             });
+            // recorded only AFTER the provider took the allow — a rule that
+            // failed to answer belongs in no ledger as a decision made
+            decisions.record(asker.id, { action: tool, decision: "auto", rule: settled, summary });
           } catch {
             // couldn't answer it for them — hand it back to the human
             // rather than leaving the bot waiting on nobody
@@ -1965,7 +1969,30 @@ const commsBus: CommsBus = { store, broadcast };
 // approval bus: peer-approval.ts only needs to push cards and broadcast
 // them — its pending map lives in the module so the two respond endpoints
 // can call resolvePeerComms without holding a reference back to here.
-const approvalBus: ApprovalBus = { store, broadcast };
+// ── trust gateway ledger ──────────────────────────────────────────
+// Every verdict a bot's gated actions get — human allow/deny, an
+// auto-mode rule that fired, a peer-contact gate — lands here once, at
+// the moment of decision, and survives restarts (see decision-log.ts).
+const decisions = new DecisionLog({ file: join(DATA_DIR, "decisions.json") });
+
+/** Record an answer a person just gave on a permission card. Looked up
+ * BEFORE delivery: answering settles the card, and the pending map forgets
+ * the requestId as soon as the resolved event folds. */
+function recordHumanAnswer(botId: string, threadId: string, requestId: string, behavior: "allow" | "deny"): void {
+  const messageId = askMessageByRequest.get(`${threadId}:${requestId}`);
+  const card = messageId ? store.messagesFor(threadId).find((m) => m.id === messageId)?.card : undefined;
+  decisions.record(botId, {
+    action: card?.tool ?? "approval",
+    decision: behavior === "allow" ? "approved" : "denied",
+    summary: card?.subtitle ?? "",
+  });
+}
+
+const approvalBus: ApprovalBus = {
+  store,
+  broadcast,
+  recordDecision: (entry) => decisions.record(entry.botId, entry),
+};
 
 // Approvals live only in memory, so any peer card still open on disk is one
 // whose resolver died with the previous process. Left alone it can never be
@@ -3782,6 +3809,14 @@ let requestUserEmail = "";
       broadcast({ kind: "bot", bot: visible });
       return json(res, 200, { bot: visible });
     }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/audit$/);
+    if (m && method === "GET") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      // Trust gateway: one bot's decided actions, newest first. Session auth
+      // and owner scoping are the shared guards above this block.
+      return json(res, 200, queryAudit(decisions, bot.id, url.searchParams));
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)$/);
     if (m && method === "PATCH") {
       const body = await readBody(req);
@@ -4049,6 +4084,7 @@ let requestUserEmail = "";
       if (resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
+      if (behavior === "allow" || behavior === "deny") recordHumanAnswer(bot.id, bot.threadId, String(body.requestId), behavior);
       const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message);
       return json(res, 200, { ok: true, outcome });
     }
@@ -4068,6 +4104,7 @@ let requestUserEmail = "";
       if (resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
+      if (behavior === "allow" || behavior === "deny") recordHumanAnswer(owner.id, threadId, String(body.requestId), behavior);
       const outcome = await answerRequest(threadId, owner.modelSelection.instanceId, String(body.requestId), behavior, body.message);
       return json(res, 200, { ok: true, outcome });
     }

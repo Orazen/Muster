@@ -18,14 +18,18 @@ const FILE = () => join(DATA_DIR, "decisions.json");
 
 /** Deterministic clock + ids so page cursors and ordering are exact.
  * Ids stay strings — the same type production newId() emits. */
-const tick = (start = 1_000) => {
+const tick = (start = 10_000) => {
+  let n = start;
+  return () => ++n;
+};
+const idTick = (start = 1_000) => {
   let n = start;
   return () => String(++n);
 };
 
 describe("DecisionLog", () => {
   it("records entries newest-last and pages them newest-first", () => {
-    const nextId = tick();
+    const nextId = idTick();
     const at = tick(10_000);
     const log = new DecisionLog({ file: FILE(), now: at, makeId: nextId });
     log.record("bot-1", { action: "Bash", decision: "approved", summary: "git status" });
@@ -37,7 +41,7 @@ describe("DecisionLog", () => {
   });
 
   it("keeps the public shape exactly: no botId leaks into an entry", () => {
-    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: tick() });
+    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: idTick() });
     log.record("bot-1", { action: "Bash", decision: "auto", rule: "auto-approved Bash:git (always allowed)", summary: "git status" });
     const [entry] = log.page("bot-1", { limit: 1 }).entries;
     // SAFETY: page just returned at least the one entry recorded above.
@@ -48,7 +52,7 @@ describe("DecisionLog", () => {
   });
 
   it("scopes every page to one bot", () => {
-    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: tick() });
+    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: idTick() });
     log.record("bot-1", { action: "Bash", decision: "approved", summary: "mine" });
     log.record("bot-2", { action: "Bash", decision: "denied", summary: "theirs" });
     expect(log.page("bot-1", { limit: 50 }).entries.map((e) => e.summary)).toEqual(["mine"]);
@@ -56,7 +60,7 @@ describe("DecisionLog", () => {
   });
 
   it("walks backwards with ?before= and refuses dead cursors", () => {
-    const makeId = tick();
+    const makeId = idTick();
     const log = new DecisionLog({ file: FILE(), now: tick(), makeId });
     for (let i = 0; i < 5; i += 1) log.record("bot-1", { action: `tool-${i}`, decision: "approved", summary: `${i}` });
 
@@ -71,14 +75,14 @@ describe("DecisionLog", () => {
   });
 
   it("round-trips through the file so a restart keeps the ledger", () => {
-    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: tick() });
+    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: idTick() });
     log.record("bot-1", { action: "ask_bot", decision: "denied", rule: "no answer within 15 minutes", summary: "@peer" });
     const revived = new DecisionLog({ file: FILE() });
     expect(revived.page("bot-1", { limit: 50 }).entries[0]?.rule).toBe("no answer within 15 minutes");
   });
 
   it("caps the ledger by dropping oldest entries first", () => {
-    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: tick(), maxEntries: 3 });
+    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: idTick(), maxEntries: 3 });
     for (let i = 0; i < 5; i += 1) log.record("bot-1", { action: `tool-${i}`, decision: "auto", summary: "" });
     expect(log.page("bot-1", { limit: 50 }).entries.map((e) => e.action)).toEqual(["tool-4", "tool-3", "tool-2"]);
   });
@@ -91,10 +95,10 @@ describe("queryAudit (the endpoint's factored logic)", () => {
       if (limit !== undefined) p.set("limit", limit);
       return p;
     };
-    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: tick() });
+    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: idTick() });
     expect(queryAudit(log, "bot-1", params()).entries).toEqual([]);
     // clamping is observable through a bot that HAS more than the cap:
-    const fat = new DecisionLog({ file: FILE(), now: tick(), makeId: tick(), maxEntries: AUDIT_MAX_LIMIT + 10 });
+    const fat = new DecisionLog({ file: FILE(), now: tick(), makeId: idTick(), maxEntries: AUDIT_MAX_LIMIT + 10 });
     for (let i = 0; i < AUDIT_MAX_LIMIT + 10; i += 1) fat.record("bot-1", { action: "t", decision: "auto", summary: "" });
     expect(queryAudit(fat, "bot-1", params("9999")).entries.length).toBe(AUDIT_MAX_LIMIT);
     expect(queryAudit(fat, "bot-1", params("not-a-number")).entries.length).toBe(Math.min(DEFAULT_AUDIT_LIMIT, AUDIT_MAX_LIMIT));
@@ -102,7 +106,7 @@ describe("queryAudit (the endpoint's factored logic)", () => {
   });
 
   it("threads the before cursor straight through to the page walk", () => {
-    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: tick() });
+    const log = new DecisionLog({ file: FILE(), now: tick(), makeId: idTick() });
     for (let i = 0; i < 3; i += 1) log.record("bot-1", { action: `t${i}`, decision: "approved", summary: "" });
     const first = queryAudit(log, "bot-1", new URLSearchParams("limit=1"));
     const second = queryAudit(log, "bot-1", new URLSearchParams(`limit=1&before=${first.nextBefore}`));

@@ -23,13 +23,27 @@ export { peerAllowKey } from "./peer-approval-key.ts";
 /** SSE envelopes on this server are keyed: every frame leads with `kind`. */
 export type KeyedFrame = { kind: string };
 
+/** One settled peer-contact gate, handed to the trust gateway's ledger by
+ * whoever constructs the bus. botId is always the ASKER: the action being
+ * gated is theirs, whoever answers it. */
+export interface PeerDecisionInput {
+  botId: string;
+  action: PeerAction;
+  decision: "approved" | "denied";
+  rule?: string;
+  summary: string;
+}
+
 /** What a peer-approval helper needs from the outside world: the store
  * for thread append + persist, and the SSE broadcaster so the chat
- * updates without waiting for a refresh. */
+ * updates without waiting for a refresh. recordDecision is optional so
+ * tests (and any deployment without the audit surface) can omit it. */
 export interface ApprovalBus {
   store: Store;
   /** SSE broadcast (kind: "message" envelope). */
   broadcast: (payload: KeyedFrame) => void;
+  /** Trust-gateway ledger hook, called when a card settles. */
+  recordDecision?: (entry: PeerDecisionInput) => void;
 }
 
 interface Pending {
@@ -39,6 +53,8 @@ interface Pending {
   fromBotId: string;
   toBotId: string;
   message: string;
+  /** Which peer action was gated — the audit entry's `action` field. */
+  action: PeerAction;
   /** Where the card lives, so answering it can settle it. A card that is
    * never settled keeps matching the client's "unanswered" filter, and the
    * composer stays disabled behind it — the thread is unusable from then on. */
@@ -125,6 +141,15 @@ export function requestPeerApproval(
       if (!pending) return;
       pendingComms.delete(requestId);
       settleCard(pending, "deny", "system");
+      // A timeout IS a decision — deny-by-default keeps an unattended bot
+      // from stalling forever, so the ledger must say the rule fired.
+      pending.bus.recordDecision?.({
+        botId: pending.fromBotId,
+        action: pending.action,
+        decision: "denied",
+        rule: "no answer within 15 minutes",
+        summary: pending.message,
+      });
       resolve("deny");
     }, APPROVAL_TIMEOUT_MS);
     timer.unref?.(); // a waiting card must never hold the process open
@@ -134,6 +159,7 @@ export function requestPeerApproval(
       fromBotId: from.id,
       toBotId: target.id,
       message,
+      action,
       threadId: sourceThreadId,
       messageId: card.id,
       bus,
@@ -156,6 +182,12 @@ export function resolvePeerComms(
   clearTimeout(pending.timer);
   const allow = behavior === "allow";
   settleCard(pending, allow ? "allow" : "deny", "user");
+  pending.bus.recordDecision?.({
+    botId: pending.fromBotId,
+    action: pending.action,
+    decision: allow ? "approved" : "denied",
+    summary: pending.message,
+  });
   pending.resolve(allow ? "allow" : "deny");
   return true;
 }
