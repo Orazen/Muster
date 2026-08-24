@@ -181,6 +181,12 @@ export function consumeCode(code: string, ip = "unknown", now = Date.now()): str
   if (!entry || entry.expiresAt <= now) {
     pending.delete(normalized);
     persistStore();
+    // Why. Silent rejections made "isn't valid" undebuggable — we couldn't
+    // tell a typo from a restart race from a stale tab. Log enough to tell
+    // them apart without ever logging a full redeemable code.
+    console.log(
+      `[pair] rejected ${normalized.slice(0, 2)}*** len=${normalized.length} ip=${ip} pending=${pending.size}`,
+    );
     throw new VerifyError("that code isn't valid — generate a fresh one on muster.orazen.online/pair");
   }
   pending.delete(normalized);
