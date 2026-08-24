@@ -123,8 +123,8 @@ export function LoginPage() {
           // deliberately NOT inside a <form>: nested forms are illegal HTML.
           // This bridge is how the packaged desktop app signs in with Google:
           // authenticate on the web, type the one-time code here.
-          <div className="space-y-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
-            <p className="text-center text-[12px] leading-relaxed text-[#a1a1a6]">
+          <div className="space-y-2.5 rounded-xl border border-neutral-300 bg-white p-4 shadow-sm">
+            <p className="text-center text-[12px] font-medium leading-relaxed text-neutral-700">
               Sign in once on muster.orazen.online with Google, then type the
               code it shows here. Codes last five minutes.
             </p>
@@ -136,7 +136,7 @@ export function LoginPage() {
                 aria-label="Pairing code"
                 maxLength={8}
                 autoComplete="off"
-                className="w-full rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 font-mono text-sm uppercase tracking-[0.25em] text-[#f5f5f5] placeholder:text-[#6b6b70]/60 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
+                className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 font-mono text-sm uppercase tracking-[0.25em] text-black placeholder:text-neutral-400 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
               />
               <button
                 type="button"
