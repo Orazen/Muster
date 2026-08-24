@@ -123,7 +123,7 @@ const Transcript = memo(function Transcript({
                 <div
                   className={cn(
                     "max-w-[70%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
-                    user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
+                    user ? "whitespace-pre-wrap border border-bubble-user-border bg-bubble-user text-ink" : "bg-card text-ink",
                   )}
                   title={new Date(m.at).toLocaleString()}
                 >

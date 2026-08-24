@@ -333,7 +333,7 @@ function Bubble({
             user && webhookView
               ? "overflow-hidden border border-accent/25 bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
               : user
-                ? "bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
+                ? "border border-bubble-user-border bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
                 : "bg-card px-4 py-2.5 text-ink",
           )}
           title={new Date(message.at).toLocaleString()}
