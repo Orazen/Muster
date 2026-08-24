@@ -53,6 +53,17 @@ import {
   NATIVE_DIR,
 } from "./config.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
+import {
+  customMcpForBot,
+  mergeWireEnv,
+  parseAndValidateCustomMcp,
+  parseWireEnvPatch,
+  removeCustomMcpServer,
+  toWire,
+  upsertCustomMcpServer,
+  validateMcpCommand,
+} from "./custom-mcp.ts";
+import { connectMcpStdio } from "./mcp-client.ts";
 import { describeSpawnFailure, deathsSince, describeProcessDeath, execCli } from "./procs.ts";
 import { LivenessReaper } from "./liveness.ts";
 import type { WatchedTurn } from "./turn-watchdog.ts";
@@ -1727,6 +1738,14 @@ async function startTurn(
         store.bots.filter((b) => b.id !== bot.id && !b.hidden).length > 0
       ) {
         integrations.agents = agentsIntegration(bot.id, threadId, commsDepth);
+      }
+      // user-registered MCP servers (Settings → MCP Servers): enabled ones,
+      // scoped to this bot when they name an audience — and only to a driver
+      // that can actually mount stdio servers (same rule as agentsMcp:
+      // never hand a bot tools its engine cannot reach)
+      const customMcp = customMcpForBot(cfg.mcpServers, bot.id);
+      if (customMcp.length && instance.adapter.capabilities.customMcp === true) {
+        integrations.custom = customMcp;
       }
       // @mentions in the user's message (the composer's tagging UI) become
       // an explicit delegation nudge — the agent still does the ask_bot call
@@ -3407,6 +3426,7 @@ let requestUserEmail = "";
       const infraPath =
         path === "/api/instances" ||
         path.startsWith("/api/local-computer") ||
+        path.startsWith("/api/mcp-servers") ||
         path.startsWith("/api/bots/") && /\/computer(\/|$)/.test(path);
       if (infraPath) return json(res, 404, { error: "no such resource" });
       if ((method === "PUT" || method === "PATCH" || method === "DELETE") && path === "/api/config") {
@@ -4426,6 +4446,73 @@ let requestUserEmail = "";
         return json(res, 200, { instances: await registry.describe() });
       } finally {
         providerConfigBusy = false;
+      }
+    }
+
+    // ── custom MCP servers (Settings → MCP Servers) ──
+    // Machine-level config: behind the same operator guard as /api/config.
+    // Env values never leave this process — GET and save replies redact them
+    // to `true`, and a save's `true` means "keep the stored value".
+    if (method === "GET" && path === "/api/mcp-servers") {
+      return json(res, 200, { servers: (cfg.mcpServers ?? []).map(toWire) });
+    }
+    if (method === "POST" && path === "/api/mcp-servers") {
+      const body = await readBody(req);
+      const id = isText(body?.id) ? body.id : crypto.randomUUID();
+      // One parse boundary: shape via zod, meaning via the command-safety
+      // rules — a hostile body and a typo meet the same gates.
+      let parsed;
+      try {
+        parsed = parseAndValidateCustomMcp(body);
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+      const stored = (cfg.mcpServers ?? []).find((s) => s.id === id);
+      const result = upsertCustomMcpServer(cfg.mcpServers ?? [], {
+        id,
+        ...parsed,
+        // absent checkbox = enabled: a saved server is live unless turned off
+        enabled: body?.enabled !== false,
+        env: mergeWireEnv(parseWireEnvPatch(parsed.env), stored?.env ?? {}),
+      });
+      if (!result.ok) return json(res, 400, { error: result.error });
+      saveConfig({ mcpServers: result.next });
+      Object.assign(cfg, loadConfig());
+      return json(res, 200, { servers: (cfg.mcpServers ?? []).map(toWire) });
+    }
+    const mcpServerDelete = /^\/api\/mcp-servers\/([\w-]+)$/.exec(path);
+    if (method === "DELETE" && mcpServerDelete) {
+      const next = removeCustomMcpServer(cfg.mcpServers ?? [], mcpServerDelete[1]!);
+      saveConfig({ mcpServers: next });
+      Object.assign(cfg, loadConfig());
+      return json(res, 200, { servers: (cfg.mcpServers ?? []).map(toWire) });
+    }
+    // Test-connection: spawn the server exactly as a turn would, list its
+    // tools, shut it down. Validation runs BEFORE the spawn — a bad command
+    // is refused, never executed.
+    if (method === "POST" && path === "/api/mcp-servers/test") {
+      const body = await readBody(req);
+      if (!isText(body?.command)) return json(res, 400, { error: "command must be a string" });
+      try {
+        validateMcpCommand(body.command);
+      } catch (e) {
+        return json(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) });
+      }
+      if (!Array.isArray(body?.args)) return json(res, 400, { error: "args must be an array of strings" });
+      const stored = isText(body?.id) ? (cfg.mcpServers ?? []).find((s) => s.id === body.id) : undefined;
+      let env: Record<string, string>;
+      try {
+        env = mergeWireEnv(parseWireEnvPatch(body?.env), stored?.env ?? {});
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+      try {
+        const client = await connectMcpStdio(body.command, body.args, env, { timeoutMs: 10_000 });
+        const tools = client.tools.map((t) => ({ name: t.name, description: t.description }));
+        client.close();
+        return json(res, 200, { ok: true, tools });
+      } catch (e) {
+        return json(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) });
       }
     }
 

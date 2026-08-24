@@ -259,7 +259,7 @@ export const OpenAIDriver: ProviderDriver<OpenAIConfig> = {
       snapshot,
       adapter: {
         provider: DRIVER_KIND,
-        capabilities: { sessionModelSwitch: "in-session", computerMcp: true, composioMcp: true },
+        capabilities: { sessionModelSwitch: "in-session", computerMcp: true, composioMcp: true, customMcp: true },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.abort.abort(),
         respondToRequest: async () => "unavailable" as const,

@@ -264,6 +264,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             env: acpEnv(local.env ?? {}),
           });
         }
+        // User-registered servers (Settings → MCP Servers): validated at save
+        // time, mounted verbatim like every built-in integration above.
+        for (const s of turn.integrations?.custom ?? []) {
+          servers.push({ name: s.name, command: s.command, args: [...s.args], env: acpEnv(s.env) });
+        }
         return servers;
       };
 
@@ -693,6 +698,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             agentsMcp: true,
             computerMcp: true,
             composioMcp: true,
+            customMcp: true,
             images: true,
             effortLevels: support.effortLevels,
           },

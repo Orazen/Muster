@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { customMcpServerSchema, type CustomMcpServer } from "./custom-mcp.ts";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 
@@ -42,8 +43,16 @@ const appConfigSchema = z.object({
   /** Per-provider API keys — write-only, only configured-or-not flags exposed. */
   providers: z.record(z.string(), z.object({ apiKey: optionalText })).optional(),
   instances: instanceConfigMapSchema.optional(),
+  /** User-registered stdio MCP servers (Settings → MCP Servers). Validated
+   * field-by-field at save time; parsed here so a hand-edited config.json
+   * cannot smuggle an unvalidated command into a spawn. Replaced wholesale,
+   * never merged — see saveConfig. */
+  mcpServers: z.array(customMcpServerSchema).optional(),
 });
-const appConfigPatchSchema = appConfigSchema.omit({ instances: true });
+// instances and mcpServers have whole-map write semantics (their own routes),
+// not section-merge semantics — the generic /api/config patch must not touch
+// them or a profile edit could clobber a registry saved a second earlier.
+const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true });
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig {
@@ -59,6 +68,7 @@ export interface AppConfig {
   profile?: { name?: string; email?: string };
   providers?: Record<string, { apiKey?: string }>;
   instances?: InstanceConfigMap;
+  mcpServers?: CustomMcpServer[];
 }
 export type ConfigPatch = z.output<typeof appConfigPatchSchema>;
 
@@ -152,6 +162,11 @@ export function saveConfig(patch: Partial<AppConfig>): void {
       diskProviders[providerId] = merged;
     }
     disk.providers = diskProviders;
+  }
+  // The MCP registry replaces as one array: entries carry identity (id) and
+  // unique-name invariants that a per-key merge would silently break.
+  if (checkedPatch.mcpServers) {
+    disk.mcpServers = checkedPatch.mcpServers;
   }
   mkdirSync(DATA_DIR, { recursive: true });
   writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });

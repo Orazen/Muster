@@ -526,6 +526,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         };
         allowed.push("mcp__dweb");
       }
+      // user-registered servers (Settings → MCP Servers): names are already
+      // CLI-safe and commands already validated at save time, so they mount
+      // verbatim and their tools pre-allow like every built-in integration's
+      for (const s of turn.integrations?.custom ?? []) {
+        mcpServers[s.name] = { command: s.command, args: [...s.args], env: { ...s.env } };
+        allowed.push(`mcp__${s.name}`);
+      }
       // permission broker: anything acceptEdits would silently deny becomes
       // an Allow/Deny card in chat, and the agent gets ask_user. Skipped in
       // bypassPermissions (fullAuto) — nothing would ever ask.
@@ -776,6 +783,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           agentsMcp: true,
           computerMcp: true,
           composioMcp: true,
+          customMcp: true,
           images: true,
           effortLevels: ["low", "medium", "high", "xhigh", "max"],
         },

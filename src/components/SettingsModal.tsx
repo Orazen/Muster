@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, CreditCard, KeyRound, Monitor, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud } from "lucide-react";
+import { Coins, CreditCard, KeyRound, Monitor, Plug, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
@@ -16,6 +16,7 @@ import { UsageSection } from "./UsageSection";
 import { BillingSection } from "./BillingSection";
 import { VoiceSettings } from "./VoiceSettings";
 import { ProvidersSection } from "./ProvidersSection";
+import { McpServersSection } from "./McpServersSection";
 import { AuditPanel, type AuditPage } from "./AuditPanel";
 import { cn } from "@/lib/cn";
 
@@ -24,6 +25,7 @@ const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User
   { id: "connections", label: "Connections", icon: KeyRound },
   { id: "engines", label: "Engines", icon: Terminal },
   { id: "providers", label: "Providers", icon: Cloud },
+  { id: "mcp", label: "MCP Servers", icon: Plug },
   { id: "companion", label: "Companion", icon: Smartphone },
   { id: "computer", label: "Local VM", icon: Monitor },
   { id: "voice", label: "Voice", icon: Volume2 },
@@ -330,6 +332,8 @@ export function SettingsModal() {
                 <ProvidersSection />
               </Card>
             )}
+
+            {section === "mcp" && <McpServersSection />}
 
             {section === "companion" && <CompanionSection />}
 

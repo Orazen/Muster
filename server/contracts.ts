@@ -182,6 +182,11 @@ export interface SendTurnInput {
     /** dweb network daemon: an MCP proxy exposing dweb status, repo, and
      * opencode model access as tools. url is the dweb HTTP base. */
     dweb?: { url: string };
+    /** User-registered stdio MCP servers (Settings → MCP Servers), already
+     * command-safety validated at save time and filtered to this bot.
+     * Mounted verbatim by drivers whose capabilities.customMcp is true;
+     * ignored by the rest — never half-mounted. */
+    custom?: Array<{ name: string; command: string; args: string[]; env: Record<string, string> }>;
   };
   cwd?: string;
 }
@@ -213,6 +218,11 @@ export interface ProviderAdapter {
      * paste/drop affordance — without it the UI refuses politely rather
      * than silently degrading the bot's understanding. */
     images?: boolean;
+    /** True when the driver mounts turn.integrations.custom — the
+     * user-registered stdio MCP servers from Settings → MCP Servers. Same
+     * rule as computerMcp/composioMcp: a saved server must not be advertised
+     * to a bot whose engine cannot mount it. */
+    customMcp?: boolean;
     /** API drivers only: sendTurn consumes turn.images as multimodal
      * content parts (OpenAI-shaped chat APIs). Always paired with `images`
      * true — one switch, two flags — so the composer affordance and the

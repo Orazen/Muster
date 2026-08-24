@@ -284,6 +284,7 @@ export type AppSettingsSection =
   | "connections"
   | "engines"
   | "providers"
+  | "mcp"
   | "companion"
   | "voice"
   | "computer"

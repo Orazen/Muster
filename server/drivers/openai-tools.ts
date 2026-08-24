@@ -96,6 +96,12 @@ export async function connectIntegrations(
   if (integrations?.composio) {
     specs.push({ key: "composio", ...integrations.composio });
   }
+  // User-registered servers (Settings → MCP Servers): validated at save time;
+  // names are the tool-source prefix, so they ride the same collision-proof
+  // scheme as the built-ins.
+  for (const s of integrations?.custom ?? []) {
+    specs.push({ key: s.name, command: s.command, args: [...s.args], env: { ...s.env } });
+  }
 
   await Promise.all(
     specs.map(async (spec) => {
