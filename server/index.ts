@@ -3717,6 +3717,24 @@ let requestUserEmail = "";
       const result = await vault.backup(body.localPath, body.vaultPath);
       return json(res, 200, result);
     }
+    if (path === "/api/vault/drive-sync" && method === "POST") {
+      const body = await readBody(req);
+      const result = await vault.driveSync(
+        {
+          // SAFETY: readBody fields are optional overrides of env credentials.
+          clientId: isText(body.clientId) ? body.clientId : undefined,
+          clientSecret: isText(body.clientSecret) ? body.clientSecret : undefined,
+          refreshToken: isText(body.refreshToken) ? body.refreshToken : undefined,
+        },
+        body.seedFull === true,
+      );
+      return json(res, 200, result);
+    }
+    if (path === "/api/vault/takeout" && method === "POST") {
+      const body = await readBody(req);
+      if (!isText(body.dirPath)) return json(res, 400, { error: "dirPath is required" });
+      return json(res, 200, await vault.takeoutImport(body.dirPath));
+    }
     if (path === "/api/vault/restore" && method === "POST") {
       const body = await readBody(req);
       if (!isText(body.vaultPath)) return json(res, 400, { error: "vaultPath is required" });

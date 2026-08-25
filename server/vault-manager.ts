@@ -3,7 +3,7 @@
 // shelled out; the passphrase still only comes from the daemon environment
 // (VAULTGRAM_PASSPHRASE) and is never accepted over any API.
 
-import { openIndex, backupFile, restoreFile, loadConfig, vaultgramHome } from "vaultgram";
+import { openIndex, backupFile, restoreFile, loadConfig, loadKey, syncDrive, importTakeout, vaultgramHome, type DriveCredentials } from "vaultgram";
 import { join } from "node:path";
 
 export interface VaultStatus {
@@ -87,6 +87,30 @@ export class VaultManager {
       .prepare("SELECT path, size, snapshot FROM files ORDER BY created_at DESC LIMIT ?")
       .all(limit) as Array<{ path: string; size: number; snapshot: string }>;
     return rows;
+  }
+
+  /** Incremental Google Drive sync. Credentials come from the environment
+   * (VAULTGRAM_GOOGLE_CLIENT_ID/SECRET/REFRESH) or the local request body. */
+  async driveSync(creds: Partial<DriveCredentials>, seedFull = false): Promise<{ backedUp: number; failed: number; skippedTrashed: number }> {
+    const db = this.index();
+    if (!db) throw new Error("Vaultgram is not paired");
+    const resolved: DriveCredentials = {
+      clientId: creds.clientId ?? process.env.VAULTGRAM_GOOGLE_CLIENT_ID ?? "",
+      clientSecret: creds.clientSecret ?? process.env.VAULTGRAM_GOOGLE_CLIENT_SECRET ?? "",
+      refreshToken: creds.refreshToken ?? process.env.VAULTGRAM_GOOGLE_REFRESH_TOKEN ?? "",
+    };
+    if (!resolved.clientId || !resolved.clientSecret || !resolved.refreshToken) {
+      throw new Error("Google credentials missing — set VAULTGRAM_GOOGLE_* or pass clientId/clientSecret/refreshToken");
+    }
+    const result = await syncDrive(db, await loadKey(), await this.sink(), resolved, { seedFull });
+    return { backedUp: result.backedUp, failed: result.failed.length, skippedTrashed: result.skippedTrashed };
+  }
+
+  async takeoutImport(dirPath: string): Promise<{ imported: number; skippedUnchanged: number; failed: number }> {
+    const db = this.index();
+    if (!db) throw new Error("Vaultgram is not paired");
+    const result = await importTakeout(db, await loadKey(), await this.sink(), dirPath);
+    return { imported: result.imported, skippedUnchanged: result.skippedUnchanged, failed: result.failed.length };
   }
 
   private async sink() {

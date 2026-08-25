@@ -64,7 +64,7 @@ importers:
         version: 3.6.0
       vaultgram:
         specifier: github:tharunramagiri/vaultgram
-        version: https://codeload.github.com/tharunramagiri/vaultgram/tar.gz/ca01b39f8c3b8f061797e09c6c9fcbc206c45efb
+        version: https://codeload.github.com/tharunramagiri/vaultgram/tar.gz/759a31f74242d2af5553eadbb7b25aa9f1714c10
       zod:
         specifier: 4.4.3
         version: 4.4.3
@@ -3585,8 +3585,8 @@ packages:
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
 
-  vaultgram@https://codeload.github.com/tharunramagiri/vaultgram/tar.gz/ca01b39f8c3b8f061797e09c6c9fcbc206c45efb:
-    resolution: {tarball: https://codeload.github.com/tharunramagiri/vaultgram/tar.gz/ca01b39f8c3b8f061797e09c6c9fcbc206c45efb}
+  vaultgram@https://codeload.github.com/tharunramagiri/vaultgram/tar.gz/759a31f74242d2af5553eadbb7b25aa9f1714c10:
+    resolution: {tarball: https://codeload.github.com/tharunramagiri/vaultgram/tar.gz/759a31f74242d2af5553eadbb7b25aa9f1714c10}
     version: 0.1.0
     hasBin: true
 
@@ -7309,7 +7309,7 @@ snapshots:
 
   util-deprecate@1.0.2: {}
 
-  vaultgram@https://codeload.github.com/tharunramagiri/vaultgram/tar.gz/ca01b39f8c3b8f061797e09c6c9fcbc206c45efb:
+  vaultgram@https://codeload.github.com/tharunramagiri/vaultgram/tar.gz/759a31f74242d2af5553eadbb7b25aa9f1714c10:
     dependencies:
       telegraf: 4.16.3
     transitivePeerDependencies:

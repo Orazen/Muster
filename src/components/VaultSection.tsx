@@ -31,6 +31,7 @@ export function VaultSection() {
   const [localPath, setLocalPath] = useState("");
   const [vaultPath, setVaultPath] = useState("");
   const [busy, setBusy] = useState(false);
+  const [takeoutDir, setTakeoutDir] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -64,6 +65,49 @@ export function VaultSection() {
       const data = (await res.json()) as { size?: number; chunks?: number; error?: string };
       setMessage(
         res.ok ? `Backed up ${formatBytes(data.size ?? 0)} in ${data.chunks} sealed chunk(s).` : data.error ?? "backup failed",
+      );
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const driveSync = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      // SAFETY: /api/vault/drive-sync returns counts or {error} from our own server.
+      const res = await fetch("/api/vault/drive-sync", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      // SAFETY: our server returns counts or {error} — fixed shape.
+      const data = (await res.json()) as { backedUp?: number; failed?: number; skippedTrashed?: number; error?: string };
+      setMessage(
+        res.ok
+          ? `Drive sync: ${data.backedUp ?? 0} backed up, ${data.skippedTrashed ?? 0} trashed skipped, ${data.failed ?? 0} failed.`
+          : data.error ?? "Drive sync failed",
+      );
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const takeout = async () => {
+    if (!takeoutDir) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      // SAFETY: /api/vault/takeout returns counts or {error} from our own server.
+      const res = await fetch("/api/vault/takeout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dirPath: takeoutDir }),
+      });
+      // SAFETY: our server returns import counts or {error} — fixed shape.
+      const data = (await res.json()) as { imported?: number; skippedUnchanged?: number; error?: string };
+      setMessage(
+        res.ok
+          ? `Takeout import: ${data.imported ?? 0} new, ${data.skippedUnchanged ?? 0} unchanged.`
+          : data.error ?? "Takeout import failed",
       );
       await refresh();
     } finally {
@@ -128,6 +172,31 @@ export function VaultSection() {
               className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
             >
               Back up
+            </button>
+          </div>
+          <div className="mb-3 flex gap-2">
+            <input
+              value={takeoutDir}
+              onChange={(e) => setTakeoutDir(e.target.value)}
+              placeholder="/path/to/extracted-google-takeout"
+              className="min-w-0 flex-1 rounded-md border border-hairline bg-transparent px-2 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
+            />
+            <button
+              type="button"
+              onClick={() => void takeout()}
+              disabled={busy || !takeoutDir}
+              className="rounded-md border border-hairline px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-hairline/20 disabled:opacity-40"
+            >
+              Import Takeout
+            </button>
+            <button
+              type="button"
+              onClick={() => void driveSync()}
+              disabled={busy}
+              title="Incremental Google Drive backup — needs VAULTGRAM_GOOGLE_CLIENT_ID / _SECRET / _REFRESH_TOKEN in the environment"
+              className="rounded-md border border-hairline px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-hairline/20 disabled:opacity-40"
+            >
+              Sync Drive
             </button>
           </div>
           {files.length > 0 && (
