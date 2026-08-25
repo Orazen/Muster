@@ -67,7 +67,8 @@ RUN useradd --system --uid 10001 --create-home muster \
   && chown -R muster:muster /data
 USER muster
 
-COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# chmod must happen while still root — after USER muster it fails with
+# "Operation not permitted" and every Dokploy build dies here.
+COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist-server/index.js"]
