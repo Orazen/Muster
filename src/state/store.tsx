@@ -472,26 +472,24 @@ function patchCard(state: AppState, botId: string, messageId: string, patch: Par
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate": {
-      // Reconcile polls (/api/bots?messages=0) carry EMPTY transcripts by
-      // design — busy/activity truth only. They must never erase what the
-      // SSE stream already delivered, so an incoming thread with no messages
-      // keeps the transcript already in state; a snapshot WITH messages
-      // (initial load, explicit refresh) replaces it as before.
-      const prevBotById = new Map(state.bots.map((b) => [b.id, b]));
+      // Reconciliation snapshots (?messages=0) carry NO transcripts — they
+      // exist only to refresh busy/activity truth. Merging them naively used
+      // to WIPE every loaded transcript thirty seconds after load: the
+      // "empty log while Working…" plague. When an incoming bot has no
+      // messages, keep the ones already held; messages only grow server-side,
+      // so a held transcript is never stale in the harmful direction.
+      const prevById = new Map(state.bots.map((b) => [b.id, b]));
       const prevGroupById = new Map(state.groups.map((g) => [g.id, g]));
-      const bots = action.bots.map((b) => {
-        const prev = prevBotById.get(b.id);
-        return prev && b.messages.length === 0 && prev.messages.length > 0
-          ? { ...b, messages: prev.messages }
-          : b;
-      });
-      const groups = action.groups.map((g) => {
-        const prev = prevGroupById.get(g.id);
-        return prev && g.messages.length === 0 && prev.messages.length > 0
-          ? { ...g, messages: prev.messages }
-          : g;
-      });
-      const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
+      // SAFETY: T is constrained to carry a messages array; the spread only
+      // substitutes prev.messages (same shape) when incoming has none.
+      const keepTranscripts = <T extends { id: string; messages?: unknown[] }>(
+        incoming: T,
+        prev?: T,
+      ): T =>
+        !incoming.messages?.length && prev?.messages?.length ? ({ ...incoming, messages: prev.messages } as T) : incoming;
+      const bots = action.bots.map((b) => keepTranscripts(b, prevById.get(b.id)));
+      const groups = (action.groups ?? []).map((g) => keepTranscripts(g, prevGroupById.get(g.id)));
+      const known = (id: string) => bots.some((b) => b.id === id) || groups.some((g) => g.id === id);
       const selectedId =
         state.selectedId && known(state.selectedId) ? state.selectedId : (bots[0]?.id ?? "");
       return { ...state, bots, groups, selectedId };

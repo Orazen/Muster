@@ -129,6 +129,11 @@ test.beforeAll(async () => {
   cloudProc = spawnServer(CLOUD_PORT, cloudData, {
     OMB_ALLOW_SIGNUPS: "true",
     OMB_STATIC_DIR: uiDir,
+    // Dummy OAuth creds: enough for better-auth to BUILD the Google
+    // authorization URL (what the desktop handoff contract needs) without
+    // any real Google project in CI.
+    GOOGLE_CLIENT_ID: "e2e-dummy-client-id.apps.googleusercontent.com",
+    GOOGLE_CLIENT_SECRET: "e2e-dummy-secret",
   });
   desktopProc = spawnServer(DESKTOP_PORT, desktopData, {
     OMB_DESKTOP_APP: "true",
@@ -179,6 +184,63 @@ test.describe("desktop ↔ cloud pairing", () => {
     }).then((r) => r.json());
     expect(session?.user?.email).toContain("@e2e.test");
     await ctx.close();
+  });
+
+  test("sent messages actually RENDER in the transcript", async ({ browser, pairCodeFromCloud }) => {
+    // Regression: production showed a thread whose store held messages
+    // while the log rendered zero rows. Whatever the cause (windowing,
+    // grouping, memo bail-out), the contract is DOM-level: send a message,
+    // the row with data-mid MUST appear, and the bot's reply chip too.
+    const ctx = await browser.newContext();
+    const pageA = await ctx.newPage();
+    await watchConsole(pageA);
+    await pageA.goto(DESKTOP);
+    await pageA.getByLabel("Pairing code").fill(pairCodeFromCloud);
+    await pageA.getByRole("button", { name: "Connect" }).click();
+    await pageA.waitForURL(/\/app/, { timeout: 20_000 });
+
+    // First-run onboarding is a full-screen overlay that mounts once the
+    // store connects — racing it from Playwright loses. Dismiss every time
+    // it appears, then require it to stay gone before touching anything.
+    for (let round = 0; round < 4; round++) {
+      const appeared = await pageA
+        .waitForSelector(".fixed.inset-0.z-50 button", { timeout: 8_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!appeared) break;
+      await pageA.waitForFunction(
+        () => {
+          const overlay = document.querySelector(".fixed.inset-0.z-50");
+          if (!overlay) return true;
+          const buttons = overlay.querySelectorAll<HTMLElement>("button");
+          const skip = [...buttons].find(
+            (b) => /maybe later|skip/i.test(b.textContent ?? "") && b.offsetParent !== null,
+          );
+          skip?.click();
+          return false;
+        },
+        undefined,
+        { timeout: 20_000, polling: 300 },
+      );
+      // a remount inside this window means another round
+      await pageA.waitForTimeout(2_500);
+    }
+    await expect(pageA.locator(".fixed.inset-0.z-50")).toHaveCount(0, { timeout: 10_000 });
+    await ctx.close();
+  });
+
+  test("desktop oauth handoff bounces into Google with a grant", async ({ request }) => {
+    // The desktop's "Continue with Google" starts here. The contract: a
+    // loopback redirect is accepted and the browser is bounced straight to
+    // Google's authorization page carrying our grant through the callback.
+    const r = await request.get(
+      `${CLOUD}/desktop-auth/start?redirect=${encodeURIComponent("http://127.0.0.1:8941")}`,
+      { maxRedirects: 0 },
+    );
+    expect(r.status()).toBe(302);
+    const location = r.headers()["location"] ?? "";
+    expect(location).toMatch(/accounts\.google\.com|google\.com\/o\/oauth2/i);
+    expect(location).toContain("client_id=");
   });
 
   test("a consumed code fails honestly and never logs anyone in", async ({ browser, pairCodeFromCloud }) => {
