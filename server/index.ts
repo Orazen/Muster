@@ -171,6 +171,7 @@ import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
 import { VaultManager } from "./vault-manager.ts";
 import { buildBriefing } from "./briefing.ts";
+import { buildReceipt, renderReceiptText } from "./receipts.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { readTeamContext, teamContextSystemPrompt, writeTeamContext } from "./team-context.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
@@ -3734,6 +3735,30 @@ let requestUserEmail = "";
           vault: { fileCount: vaultStatus.fileCount, lastSnapshot, daysStale },
         }),
       });
+    }
+
+    // ── Job receipts ─────────────────────────────────────────────────────
+    // Proof-of-work for one settled task: who, what, how long, how much.
+    // GET /api/receipts/:botId/:threadId — session-authed like every route.
+    const receiptMatch = path.match(/^\/api\/receipts\/([^/]+)\/([^/]+)$/);
+    if (receiptMatch && method === "GET") {
+      const botId = decodeURIComponent(receiptMatch[1]!);
+      const threadId = decodeURIComponent(receiptMatch[2]!);
+      // SAFETY: store lookups return undefined for unknown ids; guarded below.
+      const bot = store.bot(botId);
+      const task = store.taskByThread(botId, threadId);
+      if (!bot || !task) return json(res, 404, { error: "no such task" });
+      const msgs = store.messagesFor(threadId);
+      const lastBotWord = [...msgs].reverse().find((m) => m.role === "bot" && m.kind === "text" && m.text?.trim());
+      const receipt = buildReceipt({
+        botName: bot.name,
+        taskTitle: task.title,
+        createdAt: task.createdAt,
+        finishedAt: Date.now(),
+        usage: task.usage,
+        finalWord: lastBotWord?.text ?? null,
+      });
+      return json(res, 200, { receipt, text: renderReceiptText(receipt) });
     }
 
     if (path === "/api/briefing/schedule" && method === "POST") {

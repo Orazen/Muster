@@ -1,6 +1,7 @@
 import { Component, memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
+  ReceiptText,
   ArrowDown,
   Brain,
   Check,
@@ -903,6 +904,7 @@ export function ChatView({ bot }: { bot: Bot }) {
   // on Windows the frameless window's min/max/close overlay sits at the
   // top-right: the header becomes the drag strip and clears room for it
   const isWin = window.ogb?.platform === "win32";
+  const [receiptOpen, setReceiptOpen] = useState(false);
   // SAFETY: -webkit-app-region is an Electron-only property absent from React's CSSProperties.
   const drag = isWin ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined;
   // SAFETY: same Electron-only property as the drag style above.
@@ -963,6 +965,14 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
           <TaskPicker bot={bot} />
           <UsageChip bot={bot} />
+          <button
+            onClick={() => setReceiptOpen(true)}
+            aria-label="Job receipt"
+            className={cn("rounded-md p-1.5 hover:bg-raised", receiptOpen ? "text-accent" : "text-ink-secondary hover:text-ink")}
+            title="Job receipt — proof of work for this task"
+          >
+            <ReceiptText size={18} />
+          </button>
           <WorkingFolderChip bot={bot} />
           <ModelPicker bot={bot} />
           <CallButton bot={bot} />
@@ -1004,6 +1014,7 @@ export function ChatView({ bot }: { bot: Bot }) {
       </div>
 
       {findOpen && <ChatFindBar threadId={bot.threadId} onClose={() => setFindOpen(false)} />}
+      {receiptOpen && <JobReceiptModal bot={bot} onClose={() => setReceiptOpen(false)} />}
 
       {/* Error banner */}
       {state.error && (
@@ -1181,5 +1192,71 @@ function WorkingFolderChip({ bot }: { bot: Bot }) {
       <Folder size={12} />
       <span className="truncate font-mono">{name}</span>
     </button>
+  );
+}
+
+/** Proof-of-work card for the active task: who, what, how long, how much. */
+function JobReceiptModal({ bot, onClose }: { bot: Bot; onClose: () => void }) {
+  const [state, setState] = useState<{ loading: boolean; text: string | null; error: string | null }>({
+    loading: true,
+    text: null,
+    error: null,
+  });
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        // SAFETY: fetch may fail on a closed server; guarded by catch below.
+        const r = await fetch(`/api/receipts/${encodeURIComponent(bot.id)}/${encodeURIComponent(bot.threadId)}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        // SAFETY: wire JSON is untyped; coerce the one field we render to text.
+        const data: unknown = await r.json();
+        if (!alive) return;
+        // SAFETY: wire JSON has exactly one rendered field, `text`; assert its container shape.
+        const raw = (data ?? {}) as { text?: unknown };
+        // SAFETY: single-line assertion on the parsed record shape above.
+        const text = raw.text == null ? null : String(raw.text);
+        setState({ loading: false, text, error: null });
+      } catch (e) {
+        if (alive) setState({ loading: false, text: null, error: String(e instanceof Error ? e.message : e) });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [bot.id, bot.threadId]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-xl border border-hairline/60 bg-app p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center gap-2">
+          <ReceiptText size={16} className="text-accent" />
+          <h2 className="text-[15px] font-semibold text-ink">Job receipt</h2>
+          <button onClick={onClose} aria-label="Close receipt" className="ml-auto rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink">
+            ✕
+          </button>
+        </div>
+        {state.loading && <p className="text-sm text-ink-secondary">Sealing receipt…</p>}
+        {state.error && <p className="text-sm text-danger">Couldn't build a receipt: {state.error}</p>}
+        {state.text && (
+          <>
+            <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap rounded-lg bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink">
+              {state.text}
+            </pre>
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <CopyButton text={state.text} className="opacity-100" />
+              <button
+                onClick={() => void navigator.clipboard?.writeText(state.text ?? "")}
+                className="rounded-lg border border-hairline/60 px-3 py-1.5 text-[13px] text-ink hover:bg-raised"
+              >
+                Copy receipt
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
