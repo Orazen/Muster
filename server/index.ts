@@ -3720,6 +3720,28 @@ let requestUserEmail = "";
       });
     }
 
+    if (path === "/api/briefing/schedule" && method === "POST") {
+      const body = await readBody(req);
+      const bot = isText(body.botId) ? store.bot(body.botId) : undefined;
+      if (!bot) return json(res, 400, { error: "botId must reference an existing bot" });
+      const time = isText(body.time) && /^\d{2}:\d{2}$/.test(body.time) ? body.time : "08:00";
+      // The bot fetches its own harness's briefing endpoint on loopback —
+      // no keys cross anything; the port is the one this server already
+      // serves on.
+      const base = `http://127.0.0.1:${process.env.OMB_PORT ?? PORT}`;
+      const routine = routines!.create({
+        name: "Daily Brief",
+        botId: bot.id,
+        schedule: { type: "daily", time, weekdays: [1, 2, 3, 4, 5] },
+        durationMinutes: 5,
+        prompt:
+          `Deliver Muster's morning brief. Fetch ${base}/api/briefing ` +
+          `(plain JSON with a "briefing" string — use curl or your shell tool on this machine). ` +
+          `Present its lines verbatim as a short list, then add ONE priority suggestion for the day based on the brief. No preamble.`,
+      });
+      return json(res, 201, { routine });
+    }
+
     // ── Vault (Vaultgram) ────────────────────────────────────────────────
     // Session-authed like every /api route above; the passphrase never
     // crosses this boundary — it lives in the daemon environment only.

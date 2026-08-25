@@ -16,6 +16,7 @@ import {
   Trash2,
   Webhook,
   X,
+  Sunrise,
 } from "lucide-react";
 
 import { AgentAvatar } from "@/components/Avatar";
@@ -667,7 +668,28 @@ export function RoutinesPage() {
             {running > 0 && <span className="flex items-center gap-1.5 rounded-full border border-accent/25 bg-accent/10 px-2.5 py-1.5 text-[11px] text-accent"><Loader2 size={12} className="animate-spin" />{running} active</span>}
             {unseenFailures > 0 && <span className="flex items-center gap-1.5 rounded-full border border-danger/25 bg-danger/10 px-2.5 py-1.5 text-[11px] text-danger"><CircleAlert size={12} />{unseenFailures} need attention</span>}
             {paused.length > 0 && <button onClick={() => setPausedOpen(true)} className="flex items-center gap-1.5 rounded-full border border-hairline/50 bg-panel px-2.5 py-1.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink"><Pause size={12} />{paused.length} paused</button>}
-            {section === "calendar" && <button onClick={() => setEditor("new")} disabled={visibleBots.length === 0} className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2 text-[13px] font-medium text-white shadow-lg shadow-accent/10 hover:brightness-110 disabled:opacity-40"><Plus size={15} />New schedule</button>}
+            {section === "calendar" && (
+              <>
+                <button
+                  onClick={async () => {
+                    const bot = visibleBots[0];
+                    if (!bot) return;
+                    try {
+                      const response = await api("/api/briefing/schedule", { method: "POST", body: JSON.stringify({ botId: bot.id }) });
+                      dispatch({ type: "routinePatched", routine: response.routine });
+                    } catch {
+                      // surfaced via the calendar: a failed create simply doesn't appear
+                    }
+                  }}
+                  disabled={visibleBots.length === 0}
+                  title={`Every weekday at 08:00, ${visibleBots[0]?.name ?? "your first bot"} posts the morning brief`}
+                  className="flex items-center gap-2 rounded-xl border border-hairline/50 bg-panel px-3.5 py-2 text-[13px] font-medium text-ink hover:bg-raised disabled:opacity-40"
+                >
+                  <Sunrise size={15} />Daily brief
+                </button>
+                <button onClick={() => setEditor("new")} disabled={visibleBots.length === 0} className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2 text-[13px] font-medium text-white shadow-lg shadow-accent/10 hover:brightness-110 disabled:opacity-40"><Plus size={15} />New schedule</button>
+              </>
+            )}
           </div>
         </div>
         <div className="mt-4 flex items-center gap-1 rounded-xl bg-panel p-1 sm:w-fit">
