@@ -35,7 +35,21 @@ const ENTRY_POINTS = [
   "drivers/dweb-proxy.ts",
 ];
 
+// better-sqlite3 carries a native .node addon — esbuild cannot inline it,
+// and bundling its JS produces "Dynamic require of fs" crashes at boot
+// (shipped once as the muster.orazen.online outage). Externalize it and
+// ship a real copy next to the bundle instead; Node resolves
+// dist-server/node_modules before falling back further up the tree.
+const NATIVE_EXTERNALS = ["better-sqlite3"];
+
 await build({
+  external: NATIVE_EXTERNALS,
+  // Bundled CJS deps (telegraf, vaultgram's internals) call require() at
+  // runtime; under ESM output esbuild's stub throws "Dynamic require".
+  // Give it a real require via createRequire so those calls resolve.
+  banner: {
+    js: `import { createRequire as __creq } from "node:module"; const require = __creq(import.meta.url);`,
+  },
   entryPoints: ENTRY_POINTS.map((entry) => join(server, entry)),
   bundle: true,
   platform: "node",
@@ -47,3 +61,29 @@ await build({
   allowOverwrite: true,
   logLevel: "info",
 });
+
+
+// Copy each native external's real package directory (pnpm layout included)
+// into dist-server/node_modules so the externalized import still resolves in
+// the packaged tree, where no other node_modules exist.
+import { cpSync, mkdirSync, existsSync } from "node:fs";
+import { createRequire } from "node:module";
+
+function reqResolveVaultgram() {
+  const rootReq = createRequire(join(root, "package.json"));
+  return rootReq.resolve("vaultgram");
+}
+
+// Resolve from vaultgram's context: better-sqlite3 is its dependency, not
+// ours, and pnpm hides transitive packages from the root resolver.
+const req = createRequire(reqResolveVaultgram());
+mkdirSync(join(root, "dist-server", "node_modules"), { recursive: true });
+for (const name of NATIVE_EXTERNALS) {
+  const resolved = req.resolve(`${name}/package.json`);
+  const srcDir = dirname(resolved);
+  const dest = join(root, "dist-server", "node_modules", name);
+  if (!existsSync(dest)) {
+    cpSync(srcDir, dest, { recursive: true });
+    console.log(`bundled native dep: ${name} -> ${dest}`);
+  }
+}
