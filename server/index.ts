@@ -170,6 +170,7 @@ import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
 import { VaultManager } from "./vault-manager.ts";
+import { buildBriefing } from "./briefing.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { readTeamContext, teamContextSystemPrompt, writeTeamContext } from "./team-context.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
@@ -3700,6 +3701,25 @@ let requestUserEmail = "";
     // Management stays on the app-only server. Actual deliveries land on a
     // second, webhook-only loopback listener so Funnel or a future hosted
     // relay never has to expose the rest of Muster's control surface.
+    // ── Daily briefing ──────────────────────────────────────────────────
+    // Proactivity layer step one: a deterministic "what needs me today"
+    // composer over roster + vault state. The scheduler and any bot can
+    // call it; the format is pinned by server/briefing.test.ts.
+    if (path === "/api/briefing" && method === "GET") {
+      const vaultStatus = vault.status();
+      const lastSnapshot = vaultStatus.lastSnapshot;
+      const daysStale = lastSnapshot
+        ? Math.max(0, Math.floor((Date.now() - Date.parse(`${lastSnapshot}T00:00:00Z`)) / 86_400_000))
+        : null;
+      return json(res, 200, {
+        briefing: buildBriefing({
+          // SAFETY: store.bots is the live roster array on Store (server/store.ts).
+          bots: store.bots.map((b) => ({ name: b.name, activity: String(b.activity), unread: Boolean(b.unread) })),
+          vault: { fileCount: vaultStatus.fileCount, lastSnapshot, daysStale },
+        }),
+      });
+    }
+
     // ── Vault (Vaultgram) ────────────────────────────────────────────────
     // Session-authed like every /api route above; the passphrase never
     // crosses this boundary — it lives in the daemon environment only.
