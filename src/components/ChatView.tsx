@@ -716,7 +716,7 @@ const MessagesList = memo(function MessagesList({
           </div>
         );
         })
-      })}
+      })()}
     </>
   );
 });

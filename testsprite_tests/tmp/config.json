@@ -1,0 +1,18 @@
+{
+  "projectName": "muster",
+  "projectLanguage": "typescript",
+  "framework": "react-vite-electron",
+  "type": "frontend",
+  "localEndpoint": "http://127.0.0.1:8799",
+  "testScope": "frontend",
+  "executionArgs": {
+    "projectName": "muster",
+    "projectPath": "/Users/ramagiritharun/.openmausbot/workspaces/muster",
+    "testIds": [],
+    "additionalInstruction": "",
+    "serverMode": "development",
+    "envs": {},
+    "envsFile": "/Users/ramagiritharun/.testsprite/mcp/session-fa11db37c09e7d04.json"
+  },
+  "serverPort": 53882
+}
