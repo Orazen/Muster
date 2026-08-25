@@ -129,6 +129,11 @@ test.beforeAll(async () => {
   cloudProc = spawnServer(CLOUD_PORT, cloudData, {
     OMB_ALLOW_SIGNUPS: "true",
     OMB_STATIC_DIR: uiDir,
+    // Dummy OAuth creds: enough for better-auth to BUILD the Google
+    // authorization URL (what the desktop handoff contract needs) without
+    // any real Google project in CI.
+    GOOGLE_CLIENT_ID: "e2e-dummy-client-id.apps.googleusercontent.com",
+    GOOGLE_CLIENT_SECRET: "e2e-dummy-secret",
   });
   desktopProc = spawnServer(DESKTOP_PORT, desktopData, {
     OMB_DESKTOP_APP: "true",
@@ -221,6 +226,20 @@ test.describe("desktop ↔ cloud pairing", () => {
     }
     await expect(pageA.locator(".fixed.inset-0.z-50")).toHaveCount(0, { timeout: 10_000 });
     await ctx.close();
+  });
+
+  test("desktop oauth handoff bounces into Google with a grant", async ({ request }) => {
+    // The desktop's "Continue with Google" starts here. The contract: a
+    // loopback redirect is accepted and the browser is bounced straight to
+    // Google's authorization page carrying our grant through the callback.
+    const r = await request.get(
+      `${CLOUD}/desktop-auth/start?redirect=${encodeURIComponent("http://127.0.0.1:8941")}`,
+      { maxRedirects: 0 },
+    );
+    expect(r.status()).toBe(302);
+    const location = r.headers()["location"] ?? "";
+    expect(location).toMatch(/accounts\.google\.com|google\.com\/o\/oauth2/i);
+    expect(location).toContain("client_id=");
   });
 
   test("a consumed code fails honestly and never logs anyone in", async ({ browser, pairCodeFromCloud }) => {

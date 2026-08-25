@@ -3169,7 +3169,19 @@ let requestUserEmail = "";
       }
       const grant = issueDesktopGrant(redirect);
       const callback = `/desktop-auth/done?grant=${encodeURIComponent(grant)}`;
-      return res.writeHead(302, { Location: `/api/auth/sign-in/social?provider=google&callbackURL=${encodeURIComponent(callback)}` }).end();
+      // Better Auth's social endpoint is POST-only — a browser 302 at a GET
+      // URL 404s. Resolve the Google URL server-side and bounce there.
+      // SAFETY: signInSocial returns {url} for OAuth providers when
+      // configured; an unconfigured provider throws into the catch below.
+      try {
+        const social = await auth.api.signInSocial({
+          body: { provider: "google", callbackURL: callback },
+        });
+        if (!social?.url) throw new Error("provider did not return an authorization url");
+        return res.writeHead(302, { Location: social.url }).end();
+      } catch (e) {
+        return html(res, 500, `<body style="font:14px -apple-system,sans-serif;padding:2rem">Google sign-in is not available on this deployment (${String((e as Error)?.message ?? e).slice(0, 120)}).</body>`);
+      }
     }
     if (method === "GET" && path === "/desktop-auth/done") {
       // Better Auth has finished with Google — this browser now holds a
