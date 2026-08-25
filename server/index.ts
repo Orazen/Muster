@@ -2,10 +2,10 @@
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFileSync, unlinkSync } from "node:fs";
+import { readFileSync, statSync, unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
-import { extname, join } from "node:path";
+import { extname, isAbsolute, join } from "node:path";
 
 import { z } from "zod";
 
@@ -171,6 +171,7 @@ import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { readTeamContext, teamContextSystemPrompt, writeTeamContext } from "./team-context.ts";
+import { scoutProject, suggestTeam } from "./project-scout.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -4984,6 +4985,27 @@ let requestUserEmail = "";
       } catch (error) {
         return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
       }
+    }
+    // ── Project scout ─────────────────────────────────────────────────
+    // Reads a folder and answers with a suggested agent lineup — it creates
+    // nothing. Bots come into being only when the human sends the suggestion
+    // through the existing create endpoints, so "the agent proposes, the
+    // person imports" is enforced by the route split itself. Deliberately
+    // offline and bounded: well-known files by name, no recursion.
+    if (method === "POST" && path === "/api/scout") {
+      const body = await readBody(req);
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- the request body is untyped JSON off the wire; this is the boundary decode for the single cwd field.
+      const cwd = typeof body?.cwd === "string" ? body.cwd.trim() : "";
+      if (!cwd || !isAbsolute(cwd)) return json(res, 400, { error: "scout needs an absolute folder path" });
+      let stat;
+      try {
+        stat = statSync(cwd);
+      } catch {
+        return json(res, 400, { error: "that folder does not exist" });
+      }
+      if (!stat.isDirectory()) return json(res, 400, { error: "that path is not a folder" });
+      const profile = scoutProject(cwd);
+      return json(res, 200, { profile, suggestion: suggestTeam(profile) });
     }
     // ── BYO VPS (SSH alias) ───────────────────────────────────────────
     // Reachability probe for the Settings card: does the alias resolve and

@@ -20,6 +20,7 @@ import { MusterbotMark } from "@/components/MusterbotMark";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AuthGate } from "@/components/AuthGate";
 import { LoginPage } from "@/pages/LoginPage";
+import { ProjectScout } from "@/components/ProjectScout";
 import { SignupPage } from "@/pages/SignupPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
@@ -46,6 +47,7 @@ function Shell() {
   const { state, dispatch } = useStore();
   const { user, loading: authLoading } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [scoutOpen, setScoutOpen] = useState(false);
   const [firstRun, setFirstRun] = useState(true);
   // Web audit 2026-08-23: the wizard must not render until the identity is
   // resolved — its dismissal is persisted under the per-user gate key, and
@@ -149,12 +151,24 @@ function Shell() {
             {state.connected ? "Your roster is empty — muster your first teammate" : "Connecting to the bot server…"}
           </div>
           {state.connected && (
-            <button
-              onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "general" })}
-              className="rounded-lg bg-[#f0460e] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(240,70,14,.28)] transition-all hover:-translate-y-px hover:bg-[#f0460e]/90"
-            >
-              New bot
-            </button>
+            <div className="flex flex-col items-center gap-3">
+              <button
+                onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "general" })}
+                className="rounded-lg bg-[#f0460e] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(240,70,14,.28)] transition-all hover:-translate-y-px hover:bg-[#f0460e]/90"
+              >
+                New bot
+              </button>
+              {scoutOpen ? (
+                <ProjectScout onDone={() => setScoutOpen(false)} />
+              ) : (
+                <button
+                  onClick={() => setScoutOpen(true)}
+                  className="text-[13px] text-ink-secondary underline decoration-hairline underline-offset-4 transition-colors hover:text-ink"
+                >
+                  or scout a project folder for a suggested team
+                </button>
+              )}
+            </div>
           )}
           {!state.connected && (
             <div className="text-[12px]">
