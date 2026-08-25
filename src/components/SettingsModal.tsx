@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, CreditCard, Download, KeyRound, Monitor, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
+import { Brain, Coins, CreditCard, Download, KeyRound, Monitor, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
@@ -24,6 +24,7 @@ import { cn } from "@/lib/cn";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User; keywords: string[] }> = [
   { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "account", "updates", "turn cap", "diagnostics"] },
+  { id: "brain", label: "Brain", icon: Brain, keywords: ["brain", "team context", "shared knowledge", "memory", "brief", "goals"] },
   { id: "appearance", label: "Appearance", icon: Palette, keywords: ["skin", "theme", "colors", "dark mode"] },
   { id: "connections", label: "Connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "connected apps", "opensandbox", "muster cloud"] },
   { id: "engines", label: "Engines", icon: Terminal, keywords: ["models", "claude", "grok", "cli", "xai", "opencode"] },
@@ -73,8 +74,8 @@ function TeamContextCard() {
 
   return (
     <Card
-      title="Team context"
-      subtitle="Shared reference for every agent — goals, conventions, links. Read-only to bots; only you can edit it here."
+      title="Shared brain"
+      subtitle="Everything every bot should know — goals, conventions, links, preferences. Read-only to bots; only you can edit it here."
     >
       <textarea
         value={text}
@@ -621,12 +622,23 @@ export function SettingsModal() {
           </div>
 
           <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 pb-5">
+            {section === "brain" && (
+              <>
+                <TeamContextCard />
+                <Card title="How bots use the Brain" subtitle="Every bot reads this shared brief on every turn — it is how your whole roster stays on the same page.">
+                  <ul className="list-disc space-y-1 pl-5 text-[13px] text-ink-secondary">
+                    <li>Put company facts, goals, conventions, links, and standing preferences here.</li>
+                    <li>Bots can read it but never edit it — only you write through this panel.</li>
+                    <li>Each bot also keeps its own private memory in its workspace; the Brain is the team-wide layer above that.</li>
+                  </ul>
+                </Card>
+              </>
+            )}
             {section === "general" && (
               <>
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
                   <ProfileFields />
                 </Card>
-                <TeamContextCard />
                 <ChannelTurnCapCard />
                 <VpsCard />
                 <DiagnosticsCard />

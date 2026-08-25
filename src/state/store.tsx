@@ -286,6 +286,7 @@ export interface InstanceInfo {
 
 export type AppSettingsSection =
   | "general"
+  | "brain"
   | "appearance"
   | "connections"
   | "engines"
