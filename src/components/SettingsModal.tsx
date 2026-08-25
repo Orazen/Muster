@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, CreditCard, Download, KeyRound, Monitor, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud } from "lucide-react";
+import { Coins, CreditCard, Download, KeyRound, Monitor, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
@@ -14,6 +14,7 @@ import { CompanionSection } from "./CompanionSection";
 import { Card } from "./SettingsPrimitives";
 import { SkinPicker } from "./SkinPicker";
 import { UsageSection } from "./UsageSection";
+import { VaultSection } from "./VaultSection";
 import { BillingSection } from "./BillingSection";
 import { VoiceSettings } from "./VoiceSettings";
 import { ProvidersSection } from "./ProvidersSection";
@@ -32,6 +33,7 @@ const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User
   { id: "computer", label: "Local VM", icon: Monitor, keywords: ["vm", "virtual machine", "desktop", "sandbox", "isolation"] },
   { id: "voice", label: "Voice", icon: Volume2, keywords: ["tts", "speech", "elevenlabs", "speak"] },
   { id: "usage", label: "Usage", icon: Coins, keywords: ["tokens", "cost", "spend", "history"] },
+  { id: "vault", label: "Vault", icon: Vault, keywords: ["backup", "restore", "telegram", "google", "vaultgram"] },
   { id: "billing", label: "Billing", icon: CreditCard, keywords: ["subscription", "payment", "plan", "invoice"] },
 ];
 
@@ -699,6 +701,7 @@ export function SettingsModal() {
             {section === "computer" && <LocalComputerSection />}
 
             {section === "usage" && <UsageSection />}
+            {section === "vault" && <VaultSection />}
 
             {section === "audit" && audit.botId && (
               <Card title="Audit" subtitle="Every action this bot takes gets decided before it happens. Newest first.">

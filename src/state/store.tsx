@@ -295,6 +295,7 @@ export type AppSettingsSection =
   | "voice"
   | "computer"
   | "usage"
+  | "vault"
   | "audit"
   | "billing";
 

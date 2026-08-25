@@ -169,6 +169,7 @@ import { readThreadEvents } from "./thread-events.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
+import { VaultManager } from "./vault-manager.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { readTeamContext, teamContextSystemPrompt, writeTeamContext } from "./team-context.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
@@ -2131,6 +2132,8 @@ routines.start();
 // Webhook definitions are independent from calendar schedules, but every
 // delivery joins the same RoutineManager queue. That keeps unattended work
 // ordered behind a busy AGENT and gives webhook runs the same durable receipts.
+const vault = new VaultManager();
+
 const webhooks = new WebhookManager({
   emit: broadcast,
   botState: (botId) => {
@@ -3697,6 +3700,31 @@ let requestUserEmail = "";
     // Management stays on the app-only server. Actual deliveries land on a
     // second, webhook-only loopback listener so Funnel or a future hosted
     // relay never has to expose the rest of Muster's control surface.
+    // ── Vault (Vaultgram) ────────────────────────────────────────────────
+    // Session-authed like every /api route above; the passphrase never
+    // crosses this boundary — it lives in the daemon environment only.
+    if (path === "/api/vault/status" && method === "GET") {
+      return json(res, 200, vault.status());
+    }
+    if (path === "/api/vault/files" && method === "GET") {
+      return json(res, 200, { files: vault.list() });
+    }
+    if (path === "/api/vault/backup" && method === "POST") {
+      const body = await readBody(req);
+      if (!isText(body.localPath) || !isText(body.vaultPath)) {
+        return json(res, 400, { error: "localPath and vaultPath are required" });
+      }
+      const result = await vault.backup(body.localPath, body.vaultPath);
+      return json(res, 200, result);
+    }
+    if (path === "/api/vault/restore" && method === "POST") {
+      const body = await readBody(req);
+      if (!isText(body.vaultPath)) return json(res, 400, { error: "vaultPath is required" });
+      const outDir = isText(body.outDir) ? body.outDir : `${process.env.TMPDIR ?? "/tmp"}/vaultgram-restore`;
+      const result = await vault.restore(body.vaultPath, outDir);
+      return json(res, 200, result);
+    }
+
     if (path === "/api/webhooks" && method === "GET") {
       return json(res, 200, { webhooks: webhooks.list(), attempts: webhooks.listAttempts(), ingress: webhookIngressStatus() });
     }
