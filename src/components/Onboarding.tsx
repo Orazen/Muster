@@ -21,7 +21,7 @@ import type { InstanceInfo } from "@/state/store";
 
 type InstanceRow = InstanceInfo;
 
-const STEP_LABELS = ["Welcome", "Engines", "Teammate", "Personality", "Permissions", "First task"] as const;
+const STEP_LABELS = ["Welcome", "Engines", "Teammate", "Permissions", "First task"] as const;
 
 function StatusRow({
   ok,
@@ -165,6 +165,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
   // personality state
   const [axes, setAxes] = useState<Axes>(NEUTRAL_AXES);
+  const [showPersonality, setShowPersonality] = useState(false);
   const about = useMemo(() => personalityAbout(axes), [axes]);
 
   // first task
@@ -235,7 +236,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   }, [step]);
 
   useEffect(() => {
-    if (step === 4 && capabilities.dictation.available) {
+    if (step === 3 && capabilities.dictation.available) {
       const poll = () => window.ogb?.permStatus?.().then(setPerms).catch(() => {});
       poll();
       // keep polling — the user may grant in System Settings and come back
@@ -245,7 +246,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   }, [step, capabilities.dictation.available]);
 
   useEffect(() => {
-    if (step !== 4 || isDesktop) return;
+    if (step !== 3 || isDesktop) return;
     navigator.permissions
       ?.query(
         // SAFETY: "microphone" is valid at runtime in every browser that
@@ -378,6 +379,18 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           className="mt-3 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
         >
           Continue
+        </button>
+        {/* Vellum-style express path: one click from welcome into a working
+            app — finish() plants the default greeting bot and skips every
+            optional screen. The full wizard stays available via Continue. */}
+        <button
+          onClick={() => {
+            track("onboarding_quick_start");
+            finish();
+          }}
+          className="mt-2 w-full rounded-lg border border-hairline/60 bg-raised py-2 text-[13.5px] font-medium text-ink transition-colors hover:bg-raised-hover"
+        >
+          Quick start — skip setup, just get me in
         </button>
         <button
           onClick={() => {
@@ -540,8 +553,43 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             value={botRole}
             onChange={(e) => setBotRole(e.target.value)}
             placeholder="Role — research, writing, ops… (optional)"
-            className="w-full max-w-sm rounded-lg border border-hairline/40 bg-inset px-3.5 py-2 text-center text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+            className="w-full max-w-sm rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-center text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
           />
+
+          {/* Collapsed in from the old dedicated Personality step: optional,
+              off by default so the default path stays one screen shorter. */}
+          <button
+            onClick={() => setShowPersonality((s) => !s)}
+            className="mt-1 flex items-center gap-1.5 text-[12.5px] text-ink-secondary hover:text-ink"
+          >
+            <Sparkles size={12} /> {showPersonality ? "Hide personality" : "Tune its personality (optional)"}
+          </button>
+          {showPersonality && (
+            <div className="w-full max-w-sm rounded-xl bg-card p-3.5">
+              <div className="flex flex-col gap-2.5">
+                {AXES.map(({ key, left, right }) => (
+                  <div key={key}>
+                    <div className="flex items-center justify-between text-[11.5px] text-ink-secondary">
+                      <span>{left}</span>
+                      <span>{right}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={axes[key]}
+                      aria-label={`${left} to ${right}`}
+                      onChange={(e) => setAxes((a) => ({ ...a, [key]: Number(e.target.value) }))}
+                      className="mt-0.5 w-full accent-[var(--color-accent)]"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 border-t border-hairline/30 pt-2 text-[12px] leading-relaxed text-ink-secondary">
+                {about}
+              </div>
+            </div>
+          )}
 
           <div className="mt-2 flex w-full max-w-sm gap-3">
             <button
@@ -557,54 +605,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               {botName.trim() ? "Continue" : "Skip — no teammate yet"}
             </button>
           </div>
-        </div>
-      </div>
-    ),
-
-    (
-      <div className="flex min-h-0 flex-col">
-        <h1 className="text-[18px] font-semibold text-ink">How should {botName.trim() || "your teammate"} behave?</h1>
-        <p className="mt-1 text-[13.5px] text-ink-secondary">
-          This becomes its personality — it writes how the bot thinks and talks.
-        </p>
-        <div className="mt-4 flex flex-col gap-3">
-          {AXES.map(({ key, left, right }) => (
-            <div key={key}>
-              <div className="flex items-center justify-between text-[12px] text-ink-secondary">
-                <span>{left}</span>
-                <span>{right}</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={axes[key]}
-                aria-label={`${left} to ${right}`}
-                onChange={(e) => setAxes((a) => ({ ...a, [key]: Number(e.target.value) }))}
-                className="mt-1 w-full accent-[var(--color-accent)]"
-              />
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 rounded-xl bg-card p-3.5 text-[13px] leading-relaxed text-ink-secondary">
-          <span className="mb-1 flex items-center gap-1.5 text-[11.5px] font-medium uppercase tracking-wide">
-            <Sparkles size={12} /> What your bot gets
-          </span>
-          {about}
-        </div>
-        <div className="mt-5 flex gap-3">
-          <button
-            onClick={() => setStep(2)}
-            className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[15px] text-ink-secondary hover:bg-raised hover:text-ink"
-          >
-            Back
-          </button>
-          <button
-            onClick={() => setStep(4)}
-            className="flex-1 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
-          >
-            Continue
-          </button>
         </div>
       </div>
     ),
@@ -671,13 +671,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         </div>
         <div className="mt-5 flex gap-3">
           <button
-            onClick={() => setStep(3)}
+            onClick={() => setStep(2)}
             className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[15px] text-ink-secondary hover:bg-raised hover:text-ink"
           >
             Back
           </button>
           <button
-            onClick={() => setStep(5)}
+            onClick={() => setStep(4)}
             className="flex-1 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
           >
             Continue
@@ -724,7 +724,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         </div>
         <div className="mt-5 flex gap-3">
           <button
-            onClick={() => setStep(4)}
+            onClick={() => setStep(3)}
             className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[15px] text-ink-secondary hover:bg-raised hover:text-ink"
           >
             Back
@@ -772,7 +772,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             {stepContent[step]}
           </motion.div>
         </AnimatePresence>
-        {step > 0 && step !== 5 && (
+        {step > 0 && step !== STEP_LABELS.length - 1 && (
           <button
             onClick={() => setStep(step - 1)}
             className="mt-4 flex items-center gap-1 self-center text-[12px] text-ink-secondary hover:text-ink"
