@@ -73,6 +73,59 @@ function nextRunLabel(at: number | null) {
   return `${sameDay ? "Today" : date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
+/** Who is driving this bot's computer — the person or the bot. Polls the
+ * control endpoint; while the person holds the wheel the bot's computer
+ * tools are refused at the stdio bridge, so this button is the wheel. */
+function ControlHold({ botId }: { botId: string }) {
+  const [snapshot, setSnapshot] = useState<{ held: boolean; helpReason: string | null } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const read = () =>
+      api(`/api/control?botId=${encodeURIComponent(botId)}`)
+        // SAFETY: /api/control is this repo's own endpoint; its reply is the ControlSnapshot shape read below.
+        .then((body: { held?: boolean; helpReason?: string | null }) => {
+          if (alive) setSnapshot({ held: body?.held === true, helpReason: body?.helpReason ?? null });
+        })
+        .catch(() => {});
+    read();
+    const timer = setInterval(read, 2000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [botId]);
+  if (!snapshot) return null;
+  const act = async (action: "take" | "release") => {
+    await api(`/api/control/${action}`, { method: "POST", body: JSON.stringify({ botId }) }).catch(() => {});
+    setSnapshot((s) => (s ? { ...s, held: action === "take" } : s));
+  };
+  if (snapshot.held) {
+    return (
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-hairline/40 bg-raised px-3 py-2 mx-5 mt-3">
+        <span className="text-[12.5px] text-ink-secondary">You are driving — the bot's hands are refused.</span>
+        <button
+          onClick={() => void act("release")}
+          className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white"
+        >
+          Release
+        </button>
+      </div>
+    );
+  }
+  if (!snapshot.helpReason) return null;
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-hairline/40 bg-raised px-3 py-2 mx-5 mt-3">
+      <span className="min-w-0 truncate text-[12.5px] text-ink-secondary">{snapshot.helpReason}</span>
+      <button
+        onClick={() => void act("take")}
+        className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white"
+      >
+        Take control
+      </button>
+    </div>
+  );
+}
+
 export function ComputerPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
@@ -358,7 +411,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           <X size={18} />
         </button>
       </div>
-
+      <ControlHold botId={bot.id} />
       <div className="flex-1 overflow-y-auto px-5 pb-5">
           {/* Screen preview */}
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">

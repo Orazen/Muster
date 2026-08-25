@@ -174,6 +174,7 @@ import { buildBriefing } from "./briefing.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { readTeamContext, teamContextSystemPrompt, writeTeamContext } from "./team-context.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
+import { ComputerControl, type ControlSnapshot } from "./computer-control.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -1809,7 +1810,10 @@ async function startTurn(
         if (!localVm.ready || !localVm.runtime) {
           throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (App Settings → Local VM)`);
         }
-        integrations.localComputer = containerComputerMcp(localVm.runtime, target);
+        integrations.localComputer = containerComputerMcp(localVm.runtime, target, {
+          MUSTER_CONTROL_URL: `http://127.0.0.1:${PORT}/api/control/state`,
+          MUSTER_CONTROL_TOKEN: CONTROL_TOKEN,
+        });
         computerKind = "vm";
       } else if (wants === "vps") {
         if (!mountsComputerMcp || instance.driverKind === "boxAgent") {
@@ -1837,6 +1841,8 @@ async function startTurn(
         // land on the same remote daemon.
         integrations.localComputer = containerComputerMcp("docker", target, {
           DOCKER_HOST: vpsDockerHost(alias),
+          MUSTER_CONTROL_URL: `http://127.0.0.1:${PORT}/api/control/state`,
+          MUSTER_CONTROL_TOKEN: CONTROL_TOKEN,
         });
         computerKind = "vps";
       } else if (wants === "local") {
@@ -2134,6 +2140,16 @@ routines.start();
 // delivery joins the same RoutineManager queue. That keeps unattended work
 // ordered behind a busy AGENT and gives webhook runs the same durable receipts.
 const vault = new VaultManager();
+
+// Who is driving each bot's computer — the person or the bot. Per-boot and
+// in-memory on purpose (a stale hold would silently brick a computer across
+// a restart). The per-boot token guards the loopback control endpoints the
+// stdio bridge's gate client calls; it rides to spawned bridges in env, not
+// argv — argv is world-readable through `ps`.
+export const computerControl = new ComputerControl((botId) => {
+  broadcast({ kind: "control", botId, control: computerControl.snapshot(botId) });
+});
+const CONTROL_TOKEN = randomBytes(24).toString("hex");
 
 const webhooks = new WebhookManager({
   emit: broadcast,
@@ -3740,6 +3756,56 @@ let requestUserEmail = "";
           `Present its lines verbatim as a short list, then add ONE priority suggestion for the day based on the brief. No preamble.`,
       });
       return json(res, 201, { routine });
+    }
+
+    // ── Who is driving (computer control gate) ─────────────────────────
+    // The person-facing half: take/release from the computer panel. The
+    // bot/bridge-facing half (state polls + help pleas) is token-guarded —
+    // the same per-boot token handed to spawned MCP bridges in env.
+    const controlTokenOk = (() => {
+      // SAFETY: header may be string[] when repeated; only a single plain
+      // string can match the expected Bearer value.
+      const header = req.headers.authorization;
+      const got = Buffer.from(Array.isArray(header) ? "" : (header ?? ""));
+      const expected = Buffer.from(`Bearer ${CONTROL_TOKEN}`);
+      return got.length === expected.length && timingSafeEqual(got, expected);
+    })();
+    if (path === "/api/control/state" && method === "GET") {
+      if (!controlTokenOk) return json(res, 401, { error: "control token required" });
+      const botId = url.searchParams.get("botId") ?? "";
+      return json(res, 200, computerControl.snapshot(botId));
+    }
+    if (path === "/api/control/help" && method === "POST") {
+      if (!controlTokenOk) return json(res, 401, { error: "control token required" });
+      const body = await readBody(req);
+      const botId = isText(body.botId) ? body.botId : "";
+      if (!botId) return json(res, 400, { error: "botId required" });
+      // Cap a shouted help reason card-sized here at the boundary; the
+      // transcript keeps the rest.
+      const reason = isText(body.reason) ? body.reason.trim().slice(0, 280) : "";
+      const lease = computerControl.requestHelpLease(botId, reason);
+      return json(res, 200, { requestId: lease.requestId });
+    }
+    if (path === "/api/control/help" && method === "DELETE") {
+      if (!controlTokenOk) return json(res, 401, { error: "control token required" });
+      const body = await readBody(req);
+      const botId = isText(body.botId) ? body.botId : "";
+      if (!botId) return json(res, 400, { error: "botId required" });
+      const requestId = isText(body.requestId) ? body.requestId : "";
+      return json(res, 200, computerControl.expireHelp(botId, requestId));
+    }
+    if (path === "/api/control" && method === "GET") {
+      const botId = url.searchParams.get("botId") ?? "";
+      return json(res, 200, computerControl.snapshot(botId));
+    }
+    if ((path === "/api/control/take" || path === "/api/control/release") && method === "POST") {
+      const body = await readBody(req);
+      const botId = isText(body.botId) ? body.botId : "";
+      const bot = botId ? store.bot(botId) : undefined;
+      if (!bot) return json(res, 400, { error: "botId must reference an existing bot" });
+      const snapshot: ControlSnapshot =
+        path === "/api/control/take" ? computerControl.take(bot.id) : computerControl.release(bot.id);
+      return json(res, 200, snapshot);
     }
 
     // ── Vault (Vaultgram) ────────────────────────────────────────────────

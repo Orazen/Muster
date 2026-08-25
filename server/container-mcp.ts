@@ -1,8 +1,8 @@
 // Transparent stdio bridge into Cua Driver's official MCP server inside the
-// Local VM. This process defines no tools and parses no MCP messages.
-import { spawn } from "node:child_process";
-
-import { augmentedPath } from "./env-path.ts";
+// Local VM. This process defines no tools and parses no MCP messages —
+// piping, drain-safe exit, and the who-is-driving gate live in mcp-bridge.ts,
+// shared with every other computer entry point.
+import { runMcpBridge, type BridgeOptions } from "./mcp-bridge.ts";
 
 const [runtime, container, socket] = process.argv.slice(2);
 if (!runtime || !["docker", "podman", "container"].includes(runtime)) {
@@ -14,9 +14,15 @@ if (!container || !/^[a-zA-Z0-9_.-]+$/.test(container) || !socket?.startsWith("/
   process.exit(2);
 }
 
-const child = spawn(
-  runtime,
-  [
+// The who-is-driving pair rides in env, not argv — argv is world-readable
+// through `ps`, and the token guards a loopback endpoint. Absent → the
+// bridge stays fully transparent (no harness control configured).
+const controlUrl = process.env.MUSTER_CONTROL_URL ?? "";
+const controlToken = process.env.MUSTER_CONTROL_TOKEN ?? "";
+
+const bridge: BridgeOptions = {
+  command: runtime,
+  args: [
     "exec",
     "-i",
     "-u",
@@ -35,25 +41,9 @@ const child = spawn(
     "--socket",
     socket,
   ],
-  {
-    env: { ...process.env, PATH: augmentedPath() },
-    stdio: ["pipe", "pipe", "pipe"],
-  },
-);
-
-process.stdin.pipe(child.stdin);
-child.stdout.pipe(process.stdout);
-child.stderr.pipe(process.stderr);
-
-child.on("error", (error) => {
-  process.stderr.write(`could not connect to Cua Driver: ${error.message}\n`);
-  process.exit(1);
-});
-child.on("close", (code, signal) => {
-  if (signal) process.stderr.write(`Cua Driver connection ended with ${signal}\n`);
-  process.exit(code ?? 1);
-});
-
-for (const signal of ["SIGTERM", "SIGINT"] as const) {
-  process.on(signal, () => child.kill(signal));
-}
+  label: "Cua Driver",
+  // The Local VM's runtime CLI talks to a local daemon and fails fast on
+  // its own, so no dead-transport watchdog here.
+};
+if (controlUrl && controlToken) bridge.gate = { url: controlUrl, token: controlToken };
+runMcpBridge(bridge);
