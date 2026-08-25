@@ -472,10 +472,25 @@ function patchCard(state: AppState, botId: string, messageId: string, patch: Par
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate": {
-      const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
+      // Reconciliation snapshots (?messages=0) carry NO transcripts — they
+      // exist only to refresh busy/activity truth. Merging them naively used
+      // to WIPE every loaded transcript thirty seconds after load: the
+      // "empty log while Working…" plague. When an incoming bot has no
+      // messages, keep the ones already held; messages only grow server-side,
+      // so a held transcript is never stale in the harmful direction.
+      const prevById = new Map(state.bots.map((b) => [b.id, b]));
+      const prevGroupById = new Map(state.groups.map((g) => [g.id, g]));
+      const keepTranscripts = <T extends { id: string; messages?: unknown[] }>(
+        incoming: T,
+        prev?: T,
+      ): T =>
+        !incoming.messages?.length && prev?.messages?.length ? ({ ...incoming, messages: prev.messages } as T) : incoming;
+      const bots = action.bots.map((b) => keepTranscripts(b, prevById.get(b.id)));
+      const groups = (action.groups ?? []).map((g) => keepTranscripts(g, prevGroupById.get(g.id)));
+      const known = (id: string) => bots.some((b) => b.id === id) || groups.some((g) => g.id === id);
       const selectedId =
-        state.selectedId && known(state.selectedId) ? state.selectedId : (action.bots[0]?.id ?? "");
-      return { ...state, bots: action.bots, groups: action.groups, selectedId };
+        state.selectedId && known(state.selectedId) ? state.selectedId : (bots[0]?.id ?? "");
+      return { ...state, bots, groups, selectedId };
     }
     case "showRoutines":
       return {

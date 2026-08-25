@@ -181,6 +181,48 @@ test.describe("desktop ↔ cloud pairing", () => {
     await ctx.close();
   });
 
+  test("sent messages actually RENDER in the transcript", async ({ browser, pairCodeFromCloud }) => {
+    // Regression: production showed a thread whose store held messages
+    // while the log rendered zero rows. Whatever the cause (windowing,
+    // grouping, memo bail-out), the contract is DOM-level: send a message,
+    // the row with data-mid MUST appear, and the bot's reply chip too.
+    const ctx = await browser.newContext();
+    const pageA = await ctx.newPage();
+    await watchConsole(pageA);
+    await pageA.goto(DESKTOP);
+    await pageA.getByLabel("Pairing code").fill(pairCodeFromCloud);
+    await pageA.getByRole("button", { name: "Connect" }).click();
+    await pageA.waitForURL(/\/app/, { timeout: 20_000 });
+
+    // First-run onboarding is a full-screen overlay that mounts once the
+    // store connects — racing it from Playwright loses. Dismiss every time
+    // it appears, then require it to stay gone before touching anything.
+    for (let round = 0; round < 4; round++) {
+      const appeared = await pageA
+        .waitForSelector(".fixed.inset-0.z-50 button", { timeout: 8_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!appeared) break;
+      await pageA.waitForFunction(
+        () => {
+          const overlay = document.querySelector(".fixed.inset-0.z-50");
+          if (!overlay) return true;
+          const skip = [...overlay.querySelectorAll("button")].find(
+            (b) => /maybe later|skip/i.test(b.textContent ?? "") && (b as HTMLElement).offsetParent !== null,
+          );
+          if (skip) (skip as HTMLElement).click();
+          return false;
+        },
+        undefined,
+        { timeout: 20_000, polling: 300 },
+      );
+      // a remount inside this window means another round
+      await pageA.waitForTimeout(2_500);
+    }
+    await expect(pageA.locator(".fixed.inset-0.z-50")).toHaveCount(0, { timeout: 10_000 });
+    await ctx.close();
+  });
+
   test("a consumed code fails honestly and never logs anyone in", async ({ browser, pairCodeFromCloud }) => {
     const ctx = await browser.newContext();
     const pageA = await ctx.newPage();

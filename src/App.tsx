@@ -51,10 +51,17 @@ function Shell() {
   // resolved — its dismissal is persisted under the per-user gate key, and
   // rendering earlier let a pre-auth Escape write the legacy key while the
   // wizard kept reappearing for the signed-in account on every reload.
-  const [authResolvedOnce, setAuthResolvedOnce] = useState(false);
+  // The wizard gate decides ONCE per session. `user` flickers (better-auth
+  // refetches flip it to undefined and back), and re-deriving the per-user
+  // gate key on every render flipped the key between legacy and real id —
+  // the dismissed wizard resurrected mid-session, covering the whole app
+  // ("Step 1 of 6" over a chat you were typing into). A session-sticky
+  // decision keeps dismissal sticky; reloads still re-check per account.
+  const [gateDecision, setGateDecision] = useState<"pending" | "show" | "hide">("pending");
   useEffect(() => {
-    if (!authLoading) setAuthResolvedOnce(true);
-  }, [authLoading]);
+    if (gateDecision !== "pending" || authLoading || !user) return;
+    setGateDecision(!emailGateDone(user.id) ? "show" : "hide");
+  }, [authLoading, user, gateDecision]);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
@@ -166,8 +173,13 @@ function Shell() {
       {state.pluginsOpen && <PluginsPanel />}
       <CommandPalette />
       <NotificationStack />
-      {firstRun && authResolvedOnce && !emailGateDone(user?.id) && (
-        <Onboarding onDone={() => setFirstRun(false)} />
+      {gateDecision === "show" && firstRun && (
+        <Onboarding
+          onDone={() => {
+            setFirstRun(false);
+            setGateDecision("hide");
+          }}
+        />
       )}
       </div>
       <SignOutButton />
