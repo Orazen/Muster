@@ -58,6 +58,15 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # hosting panels' "set an env var" API doesn't reliably propagate to the
 # running service, so this entrypoint self-generates and persists one to
 # the /data volume on first boot instead of depending on that path.
+# Run unprivileged: the image binds 0.0.0.0 and serves a public site, so a
+# compromised process must not own the container. /data is chowned because
+# the entrypoint persists BETTER_AUTH_SECRET and runtime state there; named
+# volumes inherit this ownership on first use.
+RUN useradd --system --uid 10001 --create-home muster \
+  && mkdir -p /data \
+  && chown -R muster:muster /data
+USER muster
+
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

@@ -472,10 +472,29 @@ function patchCard(state: AppState, botId: string, messageId: string, patch: Par
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate": {
+      // Reconcile polls (/api/bots?messages=0) carry EMPTY transcripts by
+      // design — busy/activity truth only. They must never erase what the
+      // SSE stream already delivered, so an incoming thread with no messages
+      // keeps the transcript already in state; a snapshot WITH messages
+      // (initial load, explicit refresh) replaces it as before.
+      const prevBotById = new Map(state.bots.map((b) => [b.id, b]));
+      const prevGroupById = new Map(state.groups.map((g) => [g.id, g]));
+      const bots = action.bots.map((b) => {
+        const prev = prevBotById.get(b.id);
+        return prev && b.messages.length === 0 && prev.messages.length > 0
+          ? { ...b, messages: prev.messages }
+          : b;
+      });
+      const groups = action.groups.map((g) => {
+        const prev = prevGroupById.get(g.id);
+        return prev && g.messages.length === 0 && prev.messages.length > 0
+          ? { ...g, messages: prev.messages }
+          : g;
+      });
       const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
       const selectedId =
-        state.selectedId && known(state.selectedId) ? state.selectedId : (action.bots[0]?.id ?? "");
-      return { ...state, bots: action.bots, groups: action.groups, selectedId };
+        state.selectedId && known(state.selectedId) ? state.selectedId : (bots[0]?.id ?? "");
+      return { ...state, bots, groups, selectedId };
     }
     case "showRoutines":
       return {
@@ -1045,7 +1064,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/bots/${action.botId}/messages`, {
             method: "POST",
             body: JSON.stringify({ text: action.text }),
-          }).catch(showError);
+          })
+            .then(({ message }: { message?: Message }) => {
+              // Belt-and-braces echo: the SSE frame normally delivers the
+              // user's bubble, but a missed or replayed frame must not hide
+              // the send. messageAdded dedupes by id, so a later stream
+              // copy of the same message is a no-op.
+              if (!message) return;
+              const bot = stateRef.current.bots.find((b) => b.id === action.botId);
+              if (bot) rawDispatch({ type: "messageAdded", threadId: bot.threadId, message });
+            })
+            .catch(showError);
           break;
         case "editMessage":
           api(`/api/bots/${action.botId}/messages/${action.messageId}/edit`, {
@@ -1186,7 +1215,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/groups/${action.groupId}/messages`, {
             method: "POST",
             body: JSON.stringify({ text: action.text }),
-          }).catch(showError);
+          })
+            .then(({ message }: { message?: Message }) => {
+              // same echo contract as the 1:1 "send" case above
+              if (!message) return;
+              const group = stateRef.current.groups.find((g) => g.id === action.groupId);
+              if (group) rawDispatch({ type: "messageAdded", threadId: group.threadId, message });
+            })
+            .catch(showError);
           break;
         case "patchGroup":
           api(`/api/groups/${action.groupId}`, {
@@ -1291,6 +1327,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let rehydrateRequested = false;
     const pendingFrames: any[] = [];
     let handleFrame: (frame: any) => void;
+    // A `message` frame can outrun the announcement of its own thread when
+    // a bot or room is created from another client/tab: folding it right
+    // away found no carrier and dropped it silently. Park such frames
+    // briefly and replay once the carrier lands, or discard after the
+    // grace window (the old drop behavior, just delayed).
+    const PARK_GRACE_MS = 2_000;
+    const parkedMessages: { frame: any; timer: ReturnType<typeof setTimeout> }[] = [];
+    const replayParked = () => {
+      if (parkedMessages.length === 0) return;
+      const entries = parkedMessages.splice(0);
+      for (const entry of entries) {
+        clearTimeout(entry.timer);
+        // still-unknown threads re-park themselves inside the message case
+        handleFrame(entry.frame);
+      }
+    };
     const hydrate = () => {
       if (hydrating) {
         // A second non-resumable hello means this snapshot may have started
@@ -1310,6 +1362,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         hydrated = true;
         for (const frame of pendingFrames.splice(0)) handleFrame(frame);
+        // a fresh snapshot may carry threads that parked frames were waiting on
+        replayParked();
       });
     };
     // If SSE is unavailable, the app should still show its saved state. A
@@ -1341,6 +1395,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     handleFrame = (frame) => {
       switch (frame.kind) {
         case "message": {
+          const threadKnown =
+            stateRef.current.bots.some((b) => b.threadId === frame.threadId) ||
+            stateRef.current.groups.some((g) => g.threadId === frame.threadId);
+          if (!threadKnown) {
+            const timer = setTimeout(() => {
+              const idx = parkedMessages.findIndex((p) => p.frame === frame);
+              if (idx !== -1) {
+                parkedMessages.splice(idx, 1);
+                // grace expired: one last try, then the reducer's unknown-
+                // thread guard decides (same as pre-parking behavior)
+                handleFrame(frame);
+              }
+            }, PARK_GRACE_MS);
+            parkedMessages.push({ frame, timer });
+            break;
+          }
           rawDispatch({ type: "messageAdded", threadId: frame.threadId, message: frame.message });
           // a settled assistant bubble replaces the in-flight stream
           if (frame.message?.role === "bot" && frame.message?.kind === "text") {
@@ -1373,32 +1443,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // SAFETY: a `bot` stream frame always carries the full announcement
           // payload — the stream's own envelope contract for kind "bot".
           const bot = frame.bot as BotAnnouncement;
+          let announcedBot = bot;
           // reading the selected chat clears its badge immediately
           if (bot.unread && bot.id === stateRef.current.selectedId) {
-            bot.unread = false;
+            // clone before clearing: mutating the frame object poisons any
+            // other consumer of it (replay buffers, logging)
+            announcedBot = { ...bot, unread: false };
             fetch(`/api/bots/${bot.id}`, {
               method: "PATCH",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ unread: false }),
             }).catch(() => {});
           }
-          rawDispatch({ type: "botPatched", bot });
+          rawDispatch({ type: "botPatched", bot: announcedBot });
+          // a new/updated thread may be what parked message frames await
+          replayParked();
           break;
         }
         case "group": {
           // SAFETY: a `group` stream frame carries the group record with its
           // id; only the fields read below are depended on.
           const group = frame.group as Partial<Group> & { id: string };
+          let announcedGroup = group;
           // reading the selected room clears its badge immediately
           if (group.unread && group.id === stateRef.current.selectedId) {
-            group.unread = false;
+            announcedGroup = { ...group, unread: false };
             fetch(`/api/groups/${group.id}`, {
               method: "PATCH",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ unread: false }),
             }).catch(() => {});
           }
-          rawDispatch({ type: "groupPatched", group });
+          rawDispatch({ type: "groupPatched", group: announcedGroup });
+          replayParked();
           break;
         }
         // the harness decided this was worth interrupting for; the toggle
@@ -1505,6 +1582,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       alive = false;
       clearTimeout(hydrationFallback);
       clearInterval(reconcileTimer);
+      for (const entry of parkedMessages) clearTimeout(entry.timer);
       es.close();
     };
   }, []);

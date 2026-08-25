@@ -2420,7 +2420,17 @@ function startGroupTurn(groupId: string, text: string) {
     const last = members.find((b) => b.id === lastSpeakerId) ?? members[0];
     responders = last ? [last] : [];
   }
-  if (!responders.length) return;
+  if (!responders.length) {
+    // Nobody was addressed: returning silently reads as "the room ignored
+    // me". Mirror failVisible's activity-chip convention so the gap is
+    // visible next to the user's message instead of dead air.
+    store.appendMessage(group.threadId, {
+      role: "bot",
+      kind: "activity",
+      tool: { name: "no member was addressed — tag someone (@name) to get a reply", ok: false },
+    });
+    return;
+  }
 
   const prev = groupQueues.get(groupId) ?? Promise.resolve();
   const next = prev.then(async () => {
@@ -4154,7 +4164,13 @@ let requestUserEmail = "";
       const body = await readBody(req);
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
+      // echo contract: same as the 1:1 messages route above
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such room" });
+      const before = store.messagesFor(group.threadId).length;
       startGroupTurn(m[1], text);
+      const message = store.messagesFor(group.threadId)[before];
+      if (message) return json(res, 202, { ok: true, message });
       return json(res, 202, { ok: true });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/interrupt$/);
@@ -4425,9 +4441,15 @@ let requestUserEmail = "";
       // queue insert, so a settle can't slip between them and strand it.
       if (bot.busy) {
         const message = queueSteeredMessage(store, bot, text);
-        return json(res, 202, { ok: true, queued: true, messageId: message.id });
+        return json(res, 202, { ok: true, queued: true, messageId: message.id, message });
       }
+      // Echo the stored user message back: clients fold it on ack so the
+      // sender sees their own bubble even when the SSE frame is lost or
+      // replayed. Client-side id-dedupe makes the stream copy harmless.
+      const before = store.messagesFor(bot.threadId).length;
       await startTurn(bot.id, text);
+      const message = store.messagesFor(bot.threadId)[before];
+      if (message) return json(res, 202, { ok: true, message });
       return json(res, 202, { ok: true });
     }
 

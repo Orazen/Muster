@@ -19,6 +19,10 @@ import { modelAcceptsImages } from "../../server/contracts";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 
+/** Room id -> text parked while the room was busy. Lives at module scope so
+ * switching rooms (which unmounts the Composer) cannot lose a queued send. */
+const queuedSends = new Map<string, string>();
+
 /** The active @mention query at the caret: the text between an `@` that
  * starts a word and the caret. null = no mention being typed. */
 function mentionQueryAt(text: string, caret: number): { start: number; query: string } | null {
@@ -193,14 +197,27 @@ export function Composer({
   // the moment the room settles. 1:1 sends go straight to the server even
   // mid-turn — the harness queues them (steer-queue), so the message shows
   // in the transcript immediately with a queued affordance.
-  const [queued, setQueued] = useState<string | null>(null);
+  const [queued, setQueued] = useState<string | null>(() =>
+    group ? (queuedSends.get(group.id) ?? null) : null,
+  );
+  // The queued text used to live only in this component's state, so
+  // switching rooms mid-turn unmounted it into thin air. Parking it in a
+  // module-level map keyed by room id keeps it across remounts until the
+  // settle effect flushes it (or the user navigates away for good — same
+  // lifetime as the draft store, minus restarts).
+  const parkQueued = (value: string | null) => {
+    setQueued(value);
+    if (!group) return;
+    if (value) queuedSends.set(group.id, value);
+    else queuedSends.delete(group.id);
+  };
   // a chip on its own is a message: the send control has to appear for it
   const hasContent = Boolean(text.trim()) || attachments.length > 0;
   const send = () => {
     const t = composeMessage(text, attachments);
     if (!t) return;
     if (busy && group) {
-      setQueued(t);
+      parkQueued(t);
       setText("");
       setAttachments([]);
       return;
@@ -219,7 +236,7 @@ export function Composer({
     if (!busy && queued && group) {
       dispatch({ type: "sendGroup", groupId: group.id, text: queued });
       track("message_sent", { room: true, queued: true });
-      setQueued(null);
+      parkQueued(null);
     }
   }, [busy, queued, group, dispatch]);
 

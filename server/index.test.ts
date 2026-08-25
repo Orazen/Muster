@@ -978,7 +978,10 @@ describe("message pages", () => {
 
   it("returns the whole transcript when nothing is asked for", async () => {
     const room = await seedRoom(6);
-    expect(room.messages).toHaveLength(6);
+    // an unaddressed post in a mentions-only room appends the user message
+    // AND a visible "no member was addressed" activity chip — two rows each
+    expect(room.messages).toHaveLength(12);
+    expect(room.messages.filter((m: { role: string }) => m.role === "user")).toHaveLength(6);
     // the original shape carries no pagination fields at all
     expect(room).not.toHaveProperty("hasMore");
   });
@@ -1012,7 +1015,8 @@ describe("message pages", () => {
     // walking back far enough reaches the top and says so
     const top = await api("GET", `/api/threads/${full.threadId}/messages?limit=200`);
     expect(top.body.hasMore).toBe(false);
-    expect(top.body.messages).toHaveLength(6);
+    // six posts + their six unaddressed chips
+    expect(top.body.messages).toHaveLength(12);
   });
 
   it("returns a bounded transcript window around a search result", async () => {
