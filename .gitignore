@@ -19,3 +19,5 @@ release
 .dev.vars.*
 cloudflare/composio-broker/worker-configuration.d.ts
 .claude/worktrees/
+testsprite_tests/TC*.py
+testsprite_tests/tmp/
