@@ -418,6 +418,24 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             ? "Bots run on AI tools installed on this computer — here's what we found."
             : "Web bots run on API-key providers — Claude, GPT, Gemini and more. Paste a key now, or set it up later in Settings → Providers."}
         </p>
+        {/* Subscription path (free-trial spec): most people already pay for
+            ChatGPT Plus or Claude Pro — say out loud that those count, and
+            point desktop users at the CLI engines that use them directly.
+            No hosted inference, no new billing surface needed. */}
+        <div className="mt-3 rounded-lg border border-accent/25 bg-accent/8 px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-secondary">
+          {isDesktop ? (
+            <>
+              <span className="font-medium text-ink">Already have ChatGPT Plus or Claude Pro?</span> The
+              engines below log in with your existing subscription — no API key required for those.
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-ink">Already have ChatGPT Plus or Claude Pro?</span> Download
+              the Muster desktop app to use your subscription directly through its CLI engines — no API
+              key needed. Or paste a provider key to stay on the web.
+            </>
+          )}
+        </div>
         <div className="mt-4 flex min-h-0 flex-col gap-2.5 overflow-y-auto pr-1 [scrollbar-width:thin]">
           {!instances ? (
             <div className="flex items-center gap-2 py-6 text-ink-secondary">
