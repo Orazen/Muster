@@ -905,6 +905,27 @@ export function ChatView({ bot }: { bot: Bot }) {
   // top-right: the header becomes the drag strip and clears room for it
   const isWin = window.ogb?.platform === "win32";
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [watermark, setWatermark] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        // SAFETY: tier endpoint is optional; a failed read just hides the badge.
+        const r = await fetch("/api/tier");
+        if (!r.ok) return;
+        // SAFETY: wire JSON is untyped; only the boolean flag is consumed.
+        const data: unknown = await r.json();
+        // SAFETY: single-line container-shape assertion for the tier payload.
+        const raw = (data ?? {}) as { watermark?: unknown };
+        if (alive) setWatermark(raw.watermark === true);
+      } catch {
+        /* badge stays hidden offline */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
   // SAFETY: -webkit-app-region is an Electron-only property absent from React's CSSProperties.
   const drag = isWin ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined;
   // SAFETY: same Electron-only property as the drag style above.
@@ -948,6 +969,11 @@ export function ChatView({ bot }: { bot: Bot }) {
           {bot.chiefOfStaff && (
             <span className="flex items-center gap-1 rounded-full bg-accent/12 px-2 py-0.5 text-[11px] font-medium text-accent">
               <Crown size={11} /> Chief of Staff
+            </span>
+          )}
+          {watermark && (
+            <span className="rounded-full bg-raised px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary" title="Muster Free — upgrade to Pro to remove">
+              Free
             </span>
           )}
           {bot.busy && <Loader2 size={14} className="animate-spin text-ink-secondary" />}

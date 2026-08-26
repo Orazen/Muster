@@ -172,10 +172,12 @@ import { WebhookManager } from "./webhooks.ts";
 import { VaultManager } from "./vault-manager.ts";
 import { buildBriefing } from "./briefing.ts";
 import { buildReceipt, renderReceiptText } from "./receipts.ts";
+import { canAddBot, FREE_BOT_CAP, loadTierFile, vaultFileAllowed, type TierState } from "./license.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { readTeamContext, teamContextSystemPrompt, writeTeamContext } from "./team-context.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
 import { ComputerControl, type ControlSnapshot } from "./computer-control.ts";
+import { DATA_DIR } from "./config.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -2142,6 +2144,10 @@ routines.start();
 // ordered behind a busy AGENT and gives webhook runs the same durable receipts.
 const vault = new VaultManager();
 
+// Tier & trial state — re-read from disk per request (tiny file) so a
+// license drop takes effect without a restart.
+const tierState = (): TierState => loadTierFile(DATA_DIR);
+
 // Who is driving each bot's computer — the person or the bot. Per-boot and
 // in-memory on purpose (a stale hold would silently brick a computer across
 // a restart). The per-boot token guards the loopback control endpoints the
@@ -3722,6 +3728,19 @@ let requestUserEmail = "";
     // Proactivity layer step one: a deterministic "what needs me today"
     // composer over roster + vault state. The scheduler and any bot can
     // call it; the format is pinned by server/briefing.test.ts.
+    // Tier & trial — the client reads this for the watermark badge and the
+    // upgrade nudges. Caps are enforced server-side at the action sites.
+    if (path === "/api/tier" && method === "GET") {
+      const state = tierState();
+      return json(res, 200, {
+        tier: state.tier,
+        trialActive: state.trialActive,
+        trialEndsAt: state.trialEndsAt,
+        freeBotCap: FREE_BOT_CAP,
+        watermark: state.tier === "free",
+      });
+    }
+
     if (path === "/api/briefing" && method === "GET") {
       const vaultStatus = vault.status();
       const lastSnapshot = vaultStatus.lastSnapshot;
@@ -3846,6 +3865,14 @@ let requestUserEmail = "";
       const body = await readBody(req);
       if (!isText(body.localPath) || !isText(body.vaultPath)) {
         return json(res, 400, { error: "localPath and vaultPath are required" });
+      }
+      // Tier gate: Free caps new uploads at 1k files. Restores stay open
+      // always — the data escape hatch is never gated (license.ts rule 3).
+      if (!vaultFileAllowed(vault.status().fileCount, tierState().tier)) {
+        return json(res, 402, {
+          error: "Muster Free caps vault uploads at 1,000 files. Upgrade to Pro for unlimited backups — restoring your existing files always stays free.",
+          code: "TIER_VAULT_CAP",
+        });
       }
       const result = await vault.backup(body.localPath, body.vaultPath);
       return json(res, 200, result);
@@ -4387,6 +4414,13 @@ let requestUserEmail = "";
       return json(res, 200, { message: patched });
     }
     if (method === "POST" && path === "/api/bots") {
+      // Tier gate: Free caps the roster at 2 bots (trial and licenses lift it).
+      if (!canAddBot(store.bots.length, tierState().tier)) {
+        return json(res, 402, {
+          error: `Muster Free includes ${FREE_BOT_CAP} teammates. Upgrade to Pro for unlimited bots — your existing bots are untouched.`,
+          code: "TIER_BOT_CAP",
+        });
+      }
       const bot = store.createBot(requestUserId ? { ownerId: requestUserId } : {});
       store.patchBot(bot.id, { modelSelection: await defaultSelection(requestUserId) });
       return json(res, 201, {
