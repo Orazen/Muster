@@ -172,6 +172,7 @@ import { WebhookManager } from "./webhooks.ts";
 import { VaultManager } from "./vault-manager.ts";
 import { buildBriefing } from "./briefing.ts";
 import { buildReceipt, renderReceiptText } from "./receipts.ts";
+import { buildWrapped, renderWrappedText } from "./wrapped.ts";
 import { canAddBot, FREE_BOT_CAP, loadTierFile, vaultFileAllowed, type TierState } from "./license.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { readTeamContext, teamContextSystemPrompt, writeTeamContext } from "./team-context.ts";
@@ -3730,6 +3731,27 @@ let requestUserEmail = "";
     // call it; the format is pinned by server/briefing.test.ts.
     // Tier & trial — the client reads this for the watermark badge and the
     // upgrade nudges. Caps are enforced server-side at the action sites.
+    // Wrapped — weekly fleet review, shareable text (PNG export later).
+    if (path === "/api/wrapped" && method === "GET") {
+      const bots = store.bots.map((b) => {
+        const tasks = store.tasks(b.id) ?? [];
+        let turns = 0;
+        let tokensIn = 0;
+        let tokensOut = 0;
+        let costUsd: number | null = null;
+        for (const t of tasks) {
+          if (!t.usage) continue;
+          turns += t.usage.turns;
+          tokensIn += t.usage.input;
+          tokensOut += t.usage.output;
+          if (t.usage.costUsd !== null) costUsd = (costUsd ?? 0) + t.usage.costUsd;
+        }
+        return { name: b.name, turns, tokensIn, tokensOut, costUsd };
+      });
+      const card = buildWrapped({ bots });
+      return json(res, 200, { wrapped: card, text: renderWrappedText(card) });
+    }
+
     if (path === "/api/tier" && method === "GET") {
       const state = tierState();
       return json(res, 200, {
