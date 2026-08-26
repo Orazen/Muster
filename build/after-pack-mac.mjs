@@ -24,9 +24,25 @@
 // "damaged" (a hard block) to "unidentified developer" (the normal,
 // expected, resolvable unsigned-app prompt).
 import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, cpSync, existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 export default async function afterPack(context) {
+  // electron-builder prunes node_modules dirs even inside extraResources,
+  // which silently dropped dist-server/node_modules/better-sqlite3 — the one
+  // native external the packaged server needs (vaultgram's index store).
+  // Re-stage it on EVERY platform before any signing/re-sealing below.
+  {
+    const resources = join(context.appOutDir, "Contents", "Resources");
+    const serverDir = join(resources, "server");
+    const src = join(context.packager.projectDir, "dist-server", "node_modules");
+    if (existsSync(serverDir) && existsSync(src)) {
+      const dest = join(serverDir, "node_modules");
+      cpSync(src, dest, { recursive: true });
+      console.log(`[afterPack] staged server node_modules (${readdirSync(dest).length} pkgs)`);
+    }
+  }
+
   if (context.electronPlatformName !== "darwin") return;
 
   // Real Developer ID signing in play: drop the marker electron/updater.mjs
