@@ -38,8 +38,11 @@ export default async function afterPack(context) {
     const src = join(context.packager.projectDir, "dist-server", "node_modules");
     if (existsSync(serverDir) && existsSync(src)) {
       const dest = join(serverDir, "node_modules");
-      cpSync(src, dest, { recursive: true });
-      console.log(`[afterPack] staged server node_modules (${readdirSync(dest).length} pkgs)`);
+      // dereference: pnpm installs are symlink farms — copying links verbatim
+      // yields a dangling tree inside the app. Embed real files instead.
+      cpSync(src, dest, { recursive: true, dereference: true });
+      const pkg = join(dest, "better-sqlite3");
+      console.log(`[afterPack] staged server node_modules (${readdirSync(dest).length} pkgs) better-sqlite3=${existsSync(pkg) ? "present" : "MISSING"}`);
     }
   }
 
