@@ -683,3 +683,92 @@ jobs:
           body: Built by the Release workflow from Orazen/Muster@${{ needs.prepare.outputs.sha }}.
           files: |
             assets/*
+
+  # ── Deploy download files to VPS ─────────────────────────────────────────
+  # rsyncs stable-named artifacts + latest.json to the VPS so the landing
+  # page's /download.html can link directly to muster.orazen.online/downloads/
+  # instead of GitHub's private release page. Skipped on dry runs.
+  #
+  # REQUIRED SECRETS:
+  #   VPS_SSH_KEY   Private SSH key (Ed25519/RSA) for tarun@<VPS_HOST>
+  #   VPS_HOST       VPS IP/hostname (default: 173.249.38.101)
+  deploy-downloads:
+    name: Deploy downloads to VPS
+    needs: [prepare, publish]
+    if: ${{ !cancelled() && needs.prepare.outputs.dry_run == 'false' && needs.publish.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Build latest.json manifest
+        run: |
+          set -euo pipefail
+          cd artifacts
+          VERSION="${{ needs.prepare.outputs.version }}"
+          SHA="${{ needs.prepare.outputs.sha }}"
+
+          # Build latest.json with checksums for every stable-named artifact
+          python3 -c "
+          import json, hashlib, os
+          from datetime import datetime, timezone
+
+          version = '$VERSION'
+          sha = '$SHA'
+          files_list = 'Muster.dmg Muster-intel.dmg Muster-setup.exe Muster.deb Muster.AppImage'.split()
+
+          result = {
+              'version': version,
+              'sha': sha,
+              'published': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+              'files': {},
+              'checksums': {}
+          }
+
+          for f in files_list:
+              if not os.path.exists(f):
+                  continue
+              size = os.path.getsize(f)
+              h = hashlib.sha256(open(f, 'rb').read()).hexdigest()
+              result['files'][f] = {'size': size, 'sha256': h}
+              result['checksums'][f] = h
+
+          json.dump(result, open('latest.json', 'w'), indent=2)
+          print('latest.json built:', json.dumps(result, indent=2))
+          "
+
+      - name: Deploy to VPS
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST || '173.249.38.101' }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          echo "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          DEST="tarun@$VPS_HOST:/opt/muster-downloads/"
+
+          # Create remote dir if it doesn't exist
+          ssh -i ~/.ssh/deploy_key tarun@$VPS_HOST "sudo mkdir -p /opt/muster-downloads && sudo chown tarun:tarun /opt/muster-downloads" 2>/dev/null || true
+
+          # rsync only stable-named artifacts + metadata
+          rsync -avz --checksum \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            artifacts/Muster.dmg \
+            artifacts/Muster-intel.dmg \
+            artifacts/Muster-setup.exe \
+            artifacts/Muster.deb \
+            artifacts/Muster.AppImage \
+            artifacts/latest.json \
+            "$DEST"
+
+          echo "deployed to $DEST"
+
+          # Verify remote files
+          ssh -i ~/.ssh/deploy_key tarun@$VPS_HOST \
+            "ls -lh /opt/muster-downloads/ && cat /opt/muster-downloads/latest.json | python3 -m json.tool"
