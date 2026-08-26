@@ -178,7 +178,6 @@ import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { readTeamContext, teamContextSystemPrompt, writeTeamContext } from "./team-context.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
 import { ComputerControl, type ControlSnapshot } from "./computer-control.ts";
-import { DATA_DIR } from "./config.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
