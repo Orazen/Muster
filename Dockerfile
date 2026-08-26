@@ -19,6 +19,14 @@ ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
+# better-sqlite3's prebuild-install occasionally fails to resolve its own npx
+# cache path in a fresh build container and falls back to compiling from
+# source via node-gyp — node:24-slim ships neither Python nor a C++ toolchain,
+# so that fallback needs to actually work.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY tsconfig.json tsconfig.server.json tsconfig.server.build.json vite.config.ts index.html ./
 COPY src src
