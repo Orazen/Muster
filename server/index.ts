@@ -5516,11 +5516,18 @@ let requestUserEmail = "";
       }
     }
 
-    // public marketing landing page at "/" — only exact "/" (and its two
-    // small local assets), never intercepts the app itself or deep links.
-    if (method === "GET" && MARKETING_DIR && (path === "/" || path === "/hero.png")) {
+    // public marketing pages at "/" — the landing itself plus any real
+    // file that exists in the marketing dir (teams.html, images, css).
+    // Never intercepts /api or the app's deep links; SPA fallback below.
+    if (
+      method === "GET" &&
+      MARKETING_DIR &&
+      (path === "/" || (!path.startsWith("/api/") && !path.startsWith("/app") && /\.[a-z0-9]+$/i.test(path)))
+    ) {
       try {
-        const file = join(MARKETING_DIR, path === "/" ? "index.html" : path.slice(1));
+        // SAFETY: strip any ".." segments so only files inside MARKETING_DIR resolve.
+        const rel = (path === "/" ? "index.html" : path.slice(1)).replace(/\.\./g, "");
+        const file = join(MARKETING_DIR, rel);
         const data = readFileSync(file);
         res.writeHead(200, { "content-type": MIME.get(extname(file)) ?? "text/html" });
         return res.end(data);
