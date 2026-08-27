@@ -1,0 +1,33 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Build Docker image
+        run: |
+          docker build -t muster-plus:${{ github.sha }} .
+          docker tag muster-plus:${{ github.sha }} muster-plus:latest
+      - name: Push to registry
+        run: |
+          echo ${{ secrets.DOCKER_TOKEN }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
+          docker push muster-plus:latest
+      - name: Deploy to Dokploy
+        run: |
+          curl -X POST ${{ secrets.DOKPLOY_WEBHOOK }}

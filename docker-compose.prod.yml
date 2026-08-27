@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  muster:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8799:8799"
+    environment:
+      - NODE_ENV=production
+      - OMB_HOST=0.0.0.0
+      - OMB_PORT=8799
+      - OMB_PUBLIC_HOST=${DOMAIN}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+    volumes:
+      - muster-data:/data
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8799/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.muster.rule=Host(${DOMAIN})"
+      - "traefik.http.routers.muster.tls=true"
+
+volumes:
+  muster-data:
