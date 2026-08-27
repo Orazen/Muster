@@ -20,10 +20,18 @@ export interface ModelPricing {
 
 export class ModelIntegration {
   private baseUrl: string = 'https://openrouter.ai/api/v1';
-  private apiKey: string;
+  private apiKey: string = '';
 
   constructor(apiKey?: string) {
-    this.apiKey = apiKey || process.env.OPENROUTER_API_KEY || '';
+    this.apiKey = apiKey || '';
+  }
+
+  setApiKey(key: string): void {
+    this.apiKey = key;
+  }
+
+  getApiKey(): string {
+    return this.apiKey;
   }
 
   async getModels(): Promise<ModelInfo[]> {

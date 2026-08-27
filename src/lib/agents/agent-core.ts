@@ -4,7 +4,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { MemoryManager } from './memory';
+import { MemoryManager } from '../memory/memory-store';
 
 export interface Agent {
   id: string;
@@ -146,9 +146,9 @@ export class AgentSystem {
 
   async getTask(taskId: string): Promise<Task | null> {
     for (const agent of this.agents.values()) {
-      const task = await agent.memory.get(`task:${taskId}`);
-      if (task) {
-        return task;
+      const item = await agent.memory.get(`task:${taskId}`);
+      if (item && item.value) {
+        return item.value as Task;
       }
     }
     return null;

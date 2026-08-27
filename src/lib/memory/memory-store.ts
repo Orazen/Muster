@@ -1,79 +1,150 @@
-# Memory Store
+/**
+ * Memory Store - 8 Memory Types for Muster+
+ * Based on Vellum's memory architecture
+ */
 
-Core memory management system for Muster+
+export type MemoryType =
+  | 'episodic'
+  | 'semantic'
+  | 'procedural'
+  | 'emotional'
+  | 'prospective'
+  | 'behavioral'
+  | 'narrative'
+  | 'shared'
+  | 'temporal';
 
-## Memory Types
+export interface MemoryItem {
+  key: string;
+  value: any;
+  type: MemoryType;
+  timestamp: number;
+  metadata?: Record<string, any>;
+}
 
-1. **Episodic** - Conversation history and events
-2. **Semantic** - Facts and knowledge
-3. **Procedural** - Task patterns and workflows
-3. **Emotional** - User preferences and mood
-4. **Prospective** - Future plans and goals
-5. **Behavioral** - User behavior patterns
-6. **Narrative** - Personal narrative and context
-7. **Shared** - Shared team knowledge
-8. **Temporal** - Time-based events
+export interface MemoryStats {
+  total: number;
+  byType: Record<MemoryType, number>;
+}
 
-## Memory Operations
+export class MemoryManager {
+  private agentId: string;
+  private storage: Map<string, MemoryItem> = new Map();
 
-### Storage
-- Uses SQLCipher (encrypted SQLite)
-- Each memory type has dedicated tables
-- Row-level locking for concurrent access
+  constructor(agentId: string) {
+    this.agentId = agentId;
+    this.load();
+  }
 
-### Operations
-- `get(key: string): MemoryItem | null`
-- `set(key: string, value: any): boolean`
-- `delete(key: string): boolean`
-- `list(): Record<string, any>`
-- `clear(): boolean`
-- `export(): JSON`
-- `import(data: JSON): void`
+  private load() {
+    const key = `memory_${this.agentId}`;
+    const data = localStorage.getItem(key);
+    if (data) {
+      try {
+        const items = JSON.parse(data);
+        items.forEach((item: MemoryItem) => {
+          this.storage.set(item.key, item);
+        });
+      } catch (e) {
+        console.error('Failed to load memory:', e);
+      }
+    }
+  }
 
-### Memory Types
+  private save() {
+    const key = `memory_${this.agentId}`;
+    const items = Array.from(this.storage.values());
+    localStorage.setItem(key, JSON.stringify(items));
+  }
 
-#### Episodic Memory
-- Stores conversation history
-- Includes timestamps, user/bot identifiers
-- Supports filtering by time range
+  async add(type: MemoryType, key: string, value: any, metadata?: Record<string, any>): Promise<boolean> {
+    const item: MemoryItem = {
+      key,
+      value,
+      type,
+      timestamp: Date.now(),
+      metadata,
+    };
+    this.storage.set(key, item);
+    this.save();
+    return true;
+  }
 
-### Semantic Memory
-- Stores facts and knowledge
-- Uses vector embeddings for retrieval
-- Supports semantic search
+  async get(key: string): Promise<MemoryItem | null> {
+    return this.storage.get(key) || null;
+  }
 
-### Procedural Memory
-- Stores task patterns and workflows
-- Supports execution triggers
-- Can be invoked by user actions
+  async set(key: string, value: any): Promise<boolean> {
+    const item = this.storage.get(key);
+    if (item) {
+      item.value = value;
+      item.timestamp = Date.now();
+      this.storage.set(key, item);
+      this.save();
+      return true;
+    }
+    return false;
+  }
 
-### Emotional Memory
-- Stores user preferences and mood states
-- Tracks emotional responses to interactions
-- Supports mood-based agent behavior
+  async delete(key: string): Promise<boolean> {
+    const deleted = this.storage.delete(key);
+    if (deleted) this.save();
+    return deleted;
+  }
 
-### Prospective Memory
-- Stores future plans and intentions
-- Supports time-based triggers
-- Integrates with calendar systems
+  async list(): Promise<Record<MemoryType, MemoryItem[]>> {
+    const result: Record<MemoryType, MemoryItem[]> = {
+      episodic: [],
+      semantic: [],
+      procedural: [],
+      emotional: [],
+      prospective: [],
+      behavioral: [],
+      narrative: [],
+      shared: [],
+      temporal: [],
+    };
+    this.storage.forEach((item) => {
+      result[item.type].push(item);
+    });
+    return result;
+  }
 
-### Behavioral Memory
-- Tracks user behavior patterns
-- Supports predictive modeling
-- Used for personalized recommendations
+  async clear(): Promise<boolean> {
+    this.storage.clear();
+    this.save();
+    return true;
+  }
 
-### Narrative Memory
-- Stores personal narrative and context
-- Helps build consistent identity
-- Supports storytelling features
+  async getStats(): Promise<MemoryStats> {
+    const stats: MemoryStats = {
+      total: this.storage.size,
+      byType: {
+        episodic: 0,
+        semantic: 0,
+        procedural: 0,
+        emotional: 0,
+        prospective: 0,
+        behavioral: 0,
+        narrative: 0,
+        shared: 0,
+        temporal: 0,
+      },
+    };
+    this.storage.forEach((item) => {
+      stats.byType[item.type]++;
+    });
+    return stats;
+  }
+}
 
-### Shared Memory
-- Stores team or group knowledge
-- Supports collaborative memory
-- Integrates with team management
+export const memoryStore = {
+  managers: new Map<string, MemoryManager>(),
 
-### Memory Management
-- Automatic cleanup of old/unused items
-- Memory health monitoring
-- Storage optimization
-- Memory backup/restore functionality
+  getManager(agentId: string): MemoryManager {
+    if (!this.managers.has(agentId)) {
+      this.managers.set(agentId, new MemoryManager(agentId));
+    }
+    return this.managers.get(agentId)!;
+  },
+};
