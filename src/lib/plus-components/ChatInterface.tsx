@@ -2,8 +2,8 @@
  * Chat Interface - Main chat component
  */
 import React, { useState, useRef, useEffect } from 'react';
-import { agentSystem } from '../lib/agents/agent-core';
-import { modelIntegration } from '../lib/providers/openrouter';
+import { agentSystem } from '../../lib/agents/agent-core';
+import { modelIntegration } from '../../lib/providers/openrouter';
 
 interface Message {
   id: string;

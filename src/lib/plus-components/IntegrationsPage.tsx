@@ -2,7 +2,7 @@
  * Integrations - Connect with external services
  */
 import React from 'react';
-import { integrationHub, Integration } from '../lib/integrations/integration-hub';
+import { integrationHub, Integration } from '../../lib/integrations/integration-hub';
 
 export const IntegrationsPage: React.FC = () => {
   const integrations = integrationHub.getAll();

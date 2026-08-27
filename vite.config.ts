@@ -1,55 +1,50 @@
-/**
- * Vite Configuration for Muster+
- * PWA + React + TypeScript setup
- */
-
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import { VitePWA } from 'vite-plugin-pwa';
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vitest/config";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
-  plugins: [
-    react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['assets/icons/*', 'favicon.ico'],
-      manifest: {
-        name: 'Muster+',
-        short_name: 'Muster+',
-        description: 'The world\'s best AI assistant',
-        theme_color: '#00bbff',
-        background_color: '#030711',
-        display: 'standalone',
-        icons: [
-          { src: 'assets/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: 'assets/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
-        ],
-      },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/api\.openrouter\.ai\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'openrouter-cache',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24, // 24 hours
-              },
-            },
-          },
-        ],
-      },
-    }),
-  ],
-  server: {
-    port: 5173,
-    open: true,
+  plugins: [react(), tailwindcss()],
+  test: {
+    environment: "node",
+    include: [
+      "server/**/*.test.ts",
+      "electron/**/*.test.mjs",
+      "src/**/*.test.ts",
+      "companion/**/*.test.ts",
+    ],
+    setupFiles: ["server/testing/setup.ts"],
+    // the suite spawns fake provider CLIs and a real harness server;
+    // parallel files introduce load-sensitive flakes for no win
+    fileParallelism: false,
+    testTimeout: 20_000,
+    // Spawn-heavy e2e (fake ACP fleet, real harness server) starve on
+    // slow/loaded runners and fail on timing, not logic. Retry those
+    // flakes in CI only; locally keep the fast signal.
+    retry: process.env.CI ? 2 : 0,
+    hookTimeout: 30_000,
   },
-  build: {
-    outDir: 'dist',
-    sourcemap: true,
-    target: 'es2020',
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
+  server: {
+    // IPv4 explicitly — a bare ::1 bind makes localhost a coin-flip for
+    // clients that resolve IPv4 first
+    host: "127.0.0.1",
+    port: Number(process.env.OMB_UI_PORT) || 5199,
+    // packager output lands inside the repo — its HTML files must never
+    // trigger dev full-page reloads
+    watch: {
+      ignored: ["**/release/**", "**/build/**", "**/dist/**", "**/electron/resources/**"],
+    },
+    // the harness server owns every provider process; the app only ever
+    // talks to /api — clients hold no transports
+    proxy: {
+      "/api": {
+        target: `http://127.0.0.1:${process.env.OMB_PORT || process.env.OGB_PORT || 8799}`,
+      },
+    },
   },
 });

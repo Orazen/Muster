@@ -1,36 +1,63 @@
 {
-  "name": "muster-plus",
+  "name": "muster",
   "private": true,
-  "version": "2.0.0",
-  "description": "The world's best AI assistant - privacy-first, viral-friendly, proactive",
-  "homepage": "https://muster-plus.heyworld.ai",
+  "version": "1.0.0",
+  "description": "A local-first chat app for running a team of AI agents.",
+  "homepage": "https://github.com/Orazen/Muster",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Orazen/Muster-plus.git"
+    "url": "https://github.com/Orazen/Muster.git"
   },
   "author": {
-    "name": "Muster Team",
-    "email": "team@muster-plus.heyworld.ai",
-    "url": "https://muster-plus.heyworld.ai"
+    "name": "Tharun Ramagiri",
+    "email": "ramagiritharun.in@gmail.com",
+    "url": "https://ramagiritharun.in"
   },
+  "license": "SEE LICENSE IN LICENSE",
+  "desktopName": "com.muster.app.desktop",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@10.33.0",
   "scripts": {
+    "bump": "node scripts/bump-version.mjs",
+    "clean": "node scripts/clean.mjs",
+    "lint": "oxlint .",
     "dev": "vite",
-    "build": "tsc && vite build",
+    "companion": "node --experimental-strip-types companion/src/index.ts",
+    "dev:server": "node --experimental-strip-types server/index.ts",
+    "dev:desktop": "electron .",
+    "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
+    "typecheck": "tsc -b && tsc -p tsconfig.server.json",
+    "test": "vitest run && pnpm broker:test && pnpm test:updater && pnpm test:packaged-server",
+    "test:updater": "node --test electron/updater-coordinator.node-test.mjs",
+    "bench:observation": "node --experimental-strip-types scripts/bench-observation.ts",
+    "test:watch": "vitest",
+    "test:cua": "pnpm build:cua && node scripts/smoke-cua.mjs",
+    "test:cua-container": "node scripts/smoke-cua-container.mjs",
+    "check:electron": "node --check electron/main.mjs && node --check electron/companion.mjs && node --check electron/terminal-launch.mjs && node --check electron/preload.cjs && node --check electron/capabilities.cjs && node --check electron/cua-connection.cjs && node --check electron/cua.mjs && node --check electron/speech.mjs",
     "preview": "vite preview",
-    "test": "vitest",
-    "test:ui": "vitest --ui",
-    "lint": "oxlint",
-    "format": "prettier --write .",
-    "typecheck": "tsc --noEmit",
-    "docs:dev": "next dev -p 3001",
-    "docs:build": "next build",
-    "docs:preview": "next start -p 3001",
-    "migration": "tsx scripts/migration.ts",
-    "deploy:prod": "tsx scripts/deploy/prod.ts",
-    "deploy:staging": "tsx scripts/deploy/staging.ts",
-    "features:add": "tsx scripts/features/add.ts",
-    "providers:add": "tsx scripts/providers/add.ts",
-    "integration:test": "tsx scripts/integration/test.ts"
+    "build:server": "tsc -p tsconfig.server.build.json && node scripts/bundle-server.mjs",
+    "build:companion": "tsc -p tsconfig.companion.build.json",
+    "build:speech": "node electron/build-speech-helper.mjs",
+    "build:cua": "node scripts/prepare-cua.mjs",
+    "build:updater": "node scripts/bundle-updater.mjs",
+    "package:prepare": "pnpm build && pnpm build:server && pnpm build:companion && pnpm build:updater",
+    "package:mac": "pnpm package:mac:arm64",
+    "package:mac:arm64": "pnpm package:prepare && pnpm build:speech && CUA_TARGET_ARCH=arm64 pnpm build:cua && electron-builder --mac --arm64 --publish never",
+    "package:mac:x64": "pnpm package:prepare && pnpm build:speech && CUA_TARGET_ARCH=x64 pnpm build:cua && electron-builder --mac --x64 --publish never -c.dmg.artifactName=Muster-\\${version}-intel.dmg",
+    "package:win": "pnpm package:prepare && electron-builder --win --publish never",
+    "package:linux": "pnpm package:prepare && electron-builder --linux --x64 --publish never",
+    "package:linux:dir": "pnpm package:prepare && electron-builder --linux dir --x64 --publish never",
+    "package": "pnpm package:mac",
+    "test:packaged-server": "pnpm build:server && node scripts/smoke-packaged-server.mjs",
+    "broker:types": "wrangler types --config cloudflare/composio-broker/wrangler.jsonc cloudflare/composio-broker/worker-configuration.d.ts",
+    "broker:check": "pnpm broker:types && tsc -p cloudflare/composio-broker/tsconfig.json",
+    "broker:test": "vitest run --config cloudflare/composio-broker/vitest.config.ts",
+    "broker:deploy": "wrangler deploy --config cloudflare/composio-broker/wrangler.jsonc",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@alibaba-group/opensandbox": "^0.1.11",
@@ -48,16 +75,11 @@
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.2",
-    "react-use": "^17.4.0",
     "remark-gfm": "^4.0.1",
     "shiki": "^4.4.3",
     "tailwind-merge": "^3.3.1",
-    "use-clipboard": "^1.0.1",
-    "zustand": "^5.0.0",
-    "date-fns": "^4.1.0",
-    "crypto-js": "^4.2.0",
-    "uuid": "^10.0.0",
-    "websocket": "^1.0.34"
+    "vaultgram": "github:tharunramagiri/vaultgram",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.78.0",
@@ -79,11 +101,7 @@
     "tailwindcss": "^4.1.11",
     "typescript": "^5.8.3",
     "vite": "^7.1.0",
-    "vitest": "^4.1.10"
-  },
-  "overrides": {
-    "es-toolkit": "1.46.1",
-    "lodash": "4.18.1",
-    "path-to-regexp": "8.4.2"
+    "vitest": "^4.1.10",
+    "wrangler": "4.123.0"
   }
 }

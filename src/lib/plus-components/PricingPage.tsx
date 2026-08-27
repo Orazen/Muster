@@ -2,7 +2,7 @@
  * Pricing Page - Subscription tiers
  */
 import React from 'react';
-import { PRICING_PLANS, subscriptionSystem, SubscriptionTier } from '../lib/billing/subscription-system';
+import { PRICING_PLANS, subscriptionSystem, SubscriptionTier } from '../../lib/billing/subscription-system';
 
 export const PricingPage: React.FC = () => {
   const handleSubscribe = async (tier: SubscriptionTier) => {

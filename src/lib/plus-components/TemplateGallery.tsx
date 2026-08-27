@@ -2,7 +2,7 @@
  * Template Gallery - Browse and install templates
  */
 import React, { useState, useEffect } from 'react';
-import { templateMarketplace, AgentTemplate } from '../lib/templates/template-marketplace';
+import { templateMarketplace, AgentTemplate } from '../../lib/templates/template-marketplace';
 
 export const TemplateGallery: React.FC<{ onInstall: (template: AgentTemplate) => void }> = ({ onInstall }) => {
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);

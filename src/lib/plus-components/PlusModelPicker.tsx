@@ -90,7 +90,7 @@ function ModelSearch({
   );
 }
 
-export function ModelPicker({ bot, className }: { bot: Bot; className?: string }) {
+export function PlusModelPicker({ bot, className }: { bot: Bot; className?: string }) {
   const { state, dispatch, refreshInstances } = useStore();
   const [open, setOpen] = useState(false);
   const [railId, setRailId] = useState<string | null>(null);

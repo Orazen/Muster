@@ -2,7 +2,7 @@
  * Viral Share - Referral program and sharing
  */
 import React, { useState } from 'react';
-import { viralMechanics } from '../lib/viral/viral-mechanics';
+import { viralMechanics } from '../../lib/viral/viral-mechanics';
 
 export const ViralShare: React.FC<{ userId: string }> = ({ userId }) => {
   const [stats, setStats] = useState(viralMechanics.getReferralStats(userId));

@@ -2,7 +2,7 @@
  * Memory Viewer - Visualize 8 memory types
  */
 import React, { useState, useEffect } from 'react';
-import { MemoryManager, MemoryType } from '../lib/memory/memory-store';
+import { MemoryManager, MemoryType } from '../../lib/memory/memory-store';
 
 const MEMORY_COLORS: Record<string, string> = {
   episodic: '#fbbf24', semantic: '#60a5fa', procedural: '#34d399',
