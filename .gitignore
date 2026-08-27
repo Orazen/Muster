@@ -33,3 +33,9 @@ node_modules/
 dist/
 .env
 .env.local
+
+# Claude AI tool artifacts (Muster+ additions)
+.claude/
+.claude-flow/
+musterbot-background/
+commit-audit-fixes.sh
