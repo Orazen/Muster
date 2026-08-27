@@ -21,3 +21,15 @@ cloudflare/composio-broker/worker-configuration.d.ts
 .claude/worktrees/
 testsprite_tests/TC*.py
 testsprite_tests/tmp/
+
+# Muster+ additions - prevent these from being committed
+.claude-flow/
+.claude/
+musterbot-background/
+commit-audit-fixes.sh
+.DS_Store
+*.log
+node_modules/
+dist/
+.env
+.env.local
