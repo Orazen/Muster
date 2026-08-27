@@ -3,7 +3,7 @@
 # ── build stage: compile the web UI (dist/) and the self-contained server
 #    bundle (dist-server/). Electron is a devDependency and is discarded here —
 #    only the web client and the bundled Node server reach the final image.
-FROM node:24-slim AS build
+FROM node:22-slim AS build
 WORKDIR /app
 
 # pnpm needs these to reify the lockfile exactly.
@@ -26,7 +26,7 @@ RUN pnpm build \
   && pnpm build:server
 
 # ── runtime stage: slim Node image with just the built artifacts.
-FROM node:24-slim AS runtime
+FROM node:22-slim AS runtime
 WORKDIR /app
 
 ENV NODE_ENV=production \
