@@ -6,6 +6,16 @@
 FROM node:22-slim AS build
 WORKDIR /app
 
+# Install Python and build tools so node-gyp can rebuild native addons (e.g.
+# better-sqlite3) when prebuilt binaries are unavailable for the target
+# platform/arch. Without these, the bundle-server step fails with
+# "Could not find any Python installation to use".
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+  && rm -rf /var/lib/apt/lists/*
+
 # pnpm needs these to reify the lockfile exactly.
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
