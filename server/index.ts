@@ -19,6 +19,7 @@ import {
 } from "./attachments.ts";
 import type { JsonValue } from "./schema.ts";
 import { modelAcceptsImages } from "./contracts.ts";
+import { isSameOrigin, needsSameOriginMutationCheck } from "./origin-gate.ts";
 import {
   forgetShieldSession,
   rememberScrub,
@@ -3086,6 +3087,23 @@ let requestUserEmail = "";
     const origin = req.headers.origin;
     if (origin && !isAllowedOrigin(origin, req.headers.host)) {
       return json(res, 403, { error: "forbidden: cross-origin request" });
+    }
+    // Desktop CSRF tightening: the loopback-Origin rule above trusts every
+    // local web context. State-changing requests on desktop installs must
+    // additionally be same-origin (or token-authenticated) — see
+    // server/origin-gate.ts for the reasoning and the exemptions.
+    if (
+      needsSameOriginMutationCheck({
+        selfHosted: SELF_HOSTED,
+        method,
+        hasOrigin: Boolean(origin),
+        hasAuthorization: Boolean(req.headers.authorization),
+      }) &&
+      // SAFETY: needsSameOriginMutationCheck returned true only because
+      // `origin` is a present string, so the cast cannot erase undefined.
+      !isSameOrigin(origin as string, req.headers.host)
+    ) {
+      return json(res, 403, { error: "forbidden: cross-origin mutation" });
     }
     // ── security headers, every response ─────────────────────────────────
     // Web audit 2026-08-23: the deployment shipped none of these. HSTS is
