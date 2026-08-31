@@ -6,6 +6,14 @@
 FROM node:22-slim AS build
 WORKDIR /app
 
+# better-sqlite3 rebuilds from source via node-gyp when its prebuilt
+# binding download fails — node-gyp needs python3, make and g++, none of
+# which ship in node:*-slim. Without these every Dokploy build dies in
+# pnpm install.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
+
 # pnpm needs these to reify the lockfile exactly.
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
