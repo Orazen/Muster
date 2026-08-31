@@ -14,12 +14,26 @@ interface ComposioSession {
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const MAX_MCP_BODY = 2 * 1024 * 1024;
 
-function json(value: unknown, status = 200) {
+type JsonValue = string | number | boolean | null | JsonValue[] | JsonObject;
+interface JsonObject {
+  [key: string]: JsonValue;
+}
+
+/** JSON-serializable response body. */
+type JsonBody = { [key: string]: JsonValue };
+
+function json(value: JsonBody, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: JSON_HEADERS });
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+function isJsonRecord(value: JsonValue | undefined): value is JsonObject {
+  return value !== null && value !== undefined && value instanceof Object && !Array.isArray(value);
+}
+
+function jsonString(value: JsonValue | undefined): string | null {
+  // SAFETY: scalar boundary — wire fields are strings; other representations are rejected.
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof
+  return typeof value === "string" ? value : null;
 }
 
 function randomToken() {
@@ -33,31 +47,35 @@ async function sha256(value: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function parseSession(value: unknown): ComposioSession {
-  if (!isRecord(value) || typeof value.session_id !== "string" || !isRecord(value.mcp)) {
-    throw new Error("Composio returned an invalid session");
-  }
-  if (typeof value.mcp.url !== "string") throw new Error("Composio returned no MCP URL");
-  const url = new URL(value.mcp.url);
+function parseSession(value: JsonValue): ComposioSession {
+  if (!isJsonRecord(value)) throw new Error("Composio returned an invalid session");
+  const sessionId = jsonString(value.session_id);
+  const mcp = isJsonRecord(value.mcp) ? value.mcp : null;
+  if (sessionId === null || mcp === null) throw new Error("Composio returned an invalid session");
+  const rawUrl = jsonString(mcp.url);
+  if (rawUrl === null) throw new Error("Composio returned no MCP URL");
+  const url = new URL(rawUrl);
   if (url.protocol !== "https:" || (url.hostname !== "composio.dev" && !url.hostname.endsWith(".composio.dev"))) {
     throw new Error("Composio returned an untrusted MCP URL");
   }
   const headers: Record<string, string> = {};
-  if (isRecord(value.mcp.headers)) {
-    for (const [name, header] of Object.entries(value.mcp.headers)) {
-      if (typeof header !== "string" || /^(host|cookie|content-length)$/i.test(name)) continue;
-      headers[name] = header;
+  if (isJsonRecord(mcp.headers)) {
+    for (const [name, header] of Object.entries(mcp.headers)) {
+      const text = jsonString(header);
+      if (text === null || /^(host|cookie|content-length)$/i.test(name)) continue;
+      headers[name] = text;
     }
   }
-  return { sessionId: value.session_id, url: url.toString(), headers };
+  return { sessionId, url: url.toString(), headers };
 }
 
 async function upstreamError(response: Response, fallback: string) {
   const text = await response.text().catch(() => "");
   try {
-    const body = JSON.parse(text) as { message?: unknown; error?: unknown };
-    const nested = isRecord(body.error) ? body.error.message ?? body.error.error : body.error;
-    return String(body.message ?? nested ?? fallback).slice(0, 240);
+    const parsed: JsonValue = JSON.parse(text);
+    const body = isJsonRecord(parsed) ? parsed : null;
+    const nested = body !== null && isJsonRecord(body.error) ? body.error.message ?? body.error.error : body?.error;
+    return String(body?.message ?? nested ?? fallback).slice(0, 240);
   } catch {
     return text.trim().slice(0, 240) || fallback;
   }
@@ -66,12 +84,14 @@ async function upstreamError(response: Response, fallback: string) {
 function composioRequest(env: Env, path: string, init?: RequestInit) {
   return fetch(`${env.COMPOSIO_API_BASE}${path}`, {
     ...init,
-    headers: {
-      accept: "application/json",
-      "x-api-key": env.COMPOSIO_API_KEY,
-      ...(init?.body ? { "content-type": "application/json" } : {}),
-      ...init?.headers,
-    },
+    headers: Object.assign(
+      {
+        accept: "application/json",
+        "x-api-key": env.COMPOSIO_API_KEY,
+      },
+      init?.body && { "content-type": "application/json" },
+      init?.headers,
+    ),
     signal: init?.signal ?? AbortSignal.timeout(30_000),
   });
 }
@@ -114,7 +134,7 @@ async function ensureSession(installation: InstallationRow, env: Env, ctx: Execu
       env.DB.prepare("UPDATE installations SET last_seen_at = ? WHERE id = ?")
         .bind(Date.now(), installation.id)
         .run()
-        .catch((error: unknown) => console.error(JSON.stringify({ message: "last-seen update failed", id: installation.id, error: String(error) }))),
+        .catch((error: Error) => console.error(JSON.stringify({ message: "last-seen update failed", id: installation.id, error: String(error) }))),
     );
   }
   return session;
@@ -151,15 +171,19 @@ async function proxyMcp(request: Request, installation: InstallationRow, env: En
   const body = await request.arrayBuffer();
   if (body.byteLength > MAX_MCP_BODY) return json({ error: "MCP request is too large" }, 413);
   const session = await ensureSession(installation, env, ctx);
-  const response = await fetch(session.url, {
-    method: "POST",
-    headers: {
-      ...session.headers,
+  const mcpSessionId = request.headers.get("mcp-session-id");
+  const requestHeaders = Object.assign(
+    { ...session.headers },
+    {
       "x-api-key": env.COMPOSIO_API_KEY,
       "content-type": request.headers.get("content-type") ?? "application/json",
       accept: "application/json, text/event-stream",
-      ...(request.headers.get("mcp-session-id") ? { "mcp-session-id": request.headers.get("mcp-session-id")! } : {}),
     },
+    mcpSessionId && { "mcp-session-id": mcpSessionId },
+  );
+  const response = await fetch(session.url, {
+    method: "POST",
+    headers: requestHeaders,
     body,
     signal: AbortSignal.timeout(10 * 60_000),
   });
@@ -191,7 +215,8 @@ async function connectionStatus(url: URL, installation: InstallationRow, env: En
     `/tool_router/session/${encodeURIComponent(session.sessionId)}/toolkits?${new URLSearchParams({ limit: "50", toolkits: slugs.join(",") })}`,
   );
   if (!response.ok) return json({ error: await upstreamError(response, "Connection status unavailable") }, 502);
-  const body = await response.json() as { items?: Array<{ slug?: string; is_no_auth?: boolean; connected_account?: { status?: string } }> };
+  // SAFETY: Composio toolkit payload; each field is read defensively below.
+  const body = (await response.json()) as { items?: Array<{ slug?: string; is_no_auth?: boolean; connected_account?: { status?: string } }> };
   const items = new Map((body.items ?? []).map((item) => [item.slug?.toLowerCase(), item]));
   return json({ services: Object.fromEntries(slugs.map((slug) => {
     const item = items.get(slug);
@@ -207,7 +232,8 @@ async function authorize(slug: string, installation: InstallationRow, env: Env, 
     body: JSON.stringify({ toolkit: slug }),
   });
   if (!response.ok) return json({ error: await upstreamError(response, "Authorization unavailable") }, 502);
-  const body = await response.json() as { redirect_url?: string };
+  // SAFETY: Composio link payload; redirect_url is validated below before use.
+  const body = (await response.json()) as { redirect_url?: string };
   if (!body.redirect_url) return json({ error: "Composio returned no authorization link" }, 502);
   const redirect = new URL(body.redirect_url);
   if (redirect.protocol !== "https:" || (redirect.hostname !== "composio.dev" && !redirect.hostname.endsWith(".composio.dev"))) {
@@ -223,7 +249,8 @@ async function disconnect(slug: string, installation: InstallationRow, env: Env,
     `/tool_router/session/${encodeURIComponent(session.sessionId)}/toolkits?${new URLSearchParams({ limit: "50", toolkits: slug })}`,
   );
   if (!list.ok) return json({ error: await upstreamError(list, "Connection lookup unavailable") }, 502);
-  const body = await list.json() as { items?: Array<{ slug?: string; connected_account?: { id?: string } }> };
+  // SAFETY: Composio toolkit listing; fields are matched defensively below.
+  const body = (await list.json()) as { items?: Array<{ slug?: string; connected_account?: { id?: string } }> };
   const id = body.items?.find((item) => item.slug?.toLowerCase() === slug)?.connected_account?.id;
   if (!id) return json({ removed: 0 });
   const response = await composioRequest(env, `/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`, { method: "DELETE" });

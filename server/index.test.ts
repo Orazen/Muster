@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
+import type { JsonValue } from "./schema.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
@@ -29,7 +30,7 @@ let home: string;
 let staticDir: string;
 let stderr = "";
 
-const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+const api = async (method: string, path: string, body?: JsonValue): Promise<{ status: number; body: any }> => {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: body ? { "content-type": "application/json" } : undefined,
@@ -112,21 +113,23 @@ beforeAll(async () => {
     res.end(JSON.stringify(ok ? { ok: true, boxes: [] } : { ok: false, code: "unauthorized" }));
   });
   await new Promise<void>((r) => boxStub.listen(0, "127.0.0.1", r));
+  // SAFETY: the stub listens on the loopback wildcard with port 0, so the OS assigned an AddressInfo port.
   boxStubPort = (boxStub.address() as { port: number }).port;
 
+  const childEnv: NodeJS.ProcessEnv = {
+    HOME: home,
+    USERPROFILE: home,
+    OMB_PORT: String(PORT),
+    OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
+    OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
+    OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
+    OMB_STATIC_DIR: staticDir,
+  };
+  if (process.env.PATH) childEnv.PATH = process.env.PATH;
+  if (process.env.SystemRoot) childEnv.SystemRoot = process.env.SystemRoot;
   child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: ROOT,
-    env: {
-      ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-      ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      HOME: home,
-      USERPROFILE: home,
-      OMB_PORT: String(PORT),
-      OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
-      OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
-      OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
-      OMB_STATIC_DIR: staticDir,
-    },
+    env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stderr!.on("data", (c) => (stderr += c));
@@ -167,7 +170,7 @@ describe("harness HTTP API", () => {
     const { status, body } = await api("GET", "/api/health");
     expect(status).toBe(200);
     expect(body.app).toBe("muster");
-    expect(typeof body.pid).toBe("number");
+    expect(body.pid).toBeTypeOf("number");
     expect(body.static).toBe(true);
   });
 
@@ -285,6 +288,64 @@ describe("harness HTTP API", () => {
     await api("DELETE", `/api/bots/${bot.id}`);
     const after = await api("GET", "/api/search?q=nice%20to%20meet");
     expect(after.body.hits.find((h: { botId?: string }) => h.botId === bot.id)).toBeUndefined();
+  });
+
+  it("answers a query nothing matches with an empty hit list, not an error", async () => {
+    const res = await api("GET", "/api/search?q=xyzzy-q9z-nothing-embeds-this");
+    expect(res.status).toBe(200);
+    expect(res.body.hits).toEqual([]);
+  });
+
+  it("searches across bots, attributing each hit to its own conversation", async () => {
+    const first = (await api("POST", "/api/bots")).body.bot;
+    const second = (await api("POST", "/api/bots")).body.bot;
+    // each fresh bot seeds the same greeting, so one query must surface
+    // both threads — each under its own bot id and name
+    const res = await api("GET", "/api/search?q=nice%20to%20meet");
+    expect(res.status).toBe(200);
+    const forBot = (botId: string) => res.body.hits.filter((h: { botId?: string }) => h.botId === botId);
+    const left = forBot(first.id);
+    const right = forBot(second.id);
+    expect(left).toHaveLength(1);
+    expect(right).toHaveLength(1);
+    expect(left[0]).toMatchObject({ threadId: first.threadId, name: first.name, kind: "text" });
+    expect(right[0]).toMatchObject({ threadId: second.threadId, name: second.name, kind: "text" });
+    // cleanup keeps later assertions about the fleet deterministic, and
+    // doubles as proof that both hits really belonged to these bots
+    await api("DELETE", `/api/bots/${first.id}`);
+    await api("DELETE", `/api/bots/${second.id}`);
+    const gone = await api("GET", "/api/search?q=nice%20to%20meet");
+    expect(gone.body.hits.filter((h: { botId?: string }) => h.botId === first.id)).toHaveLength(0);
+    expect(gone.body.hits.filter((h: { botId?: string }) => h.botId === second.id)).toHaveLength(0);
+  });
+
+  it("treats LIKE wildcards and backslashes as literal characters over HTTP", async () => {
+    const { body } = await api("GET", "/api/bots");
+    const created = await api("POST", "/api/groups", { name: "Char probe", memberIds: [body.bots[0].id] });
+    expect(created.status).toBe(201);
+    const groupId = created.body.group.id;
+    // mentions-only room: the user message lands without any bot answering,
+    // so the transcript this test searches is exactly what it posted
+    const quiet = await api("PATCH", `/api/groups/${groupId}`, { defaultResponder: { kind: "mentions" } });
+    expect(quiet.status).toBe(200);
+    const text = "budget zzprobe is 50%_over the a_b\\c limit";
+    const posted = await api("POST", `/api/groups/${groupId}/messages`, { text });
+    expect(posted.status).toBe(202);
+
+    // % _ and \\ all reach SQL literally; a wildcard reading of "%" would
+    // have matched every message in every transcript instead
+    for (const needle of ["50%_", "a_b", "b\\c"]) {
+      const res = await api("GET", `/api/search?q=${encodeURIComponent(needle)}`);
+      expect(res.status).toBe(200);
+      const mine = res.body.hits.filter((h: { groupId?: string }) => h.groupId === groupId);
+      expect(mine).toHaveLength(1);
+      const hit = mine[0];
+      expect(hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength).toLowerCase()).toBe(needle);
+    }
+
+    await api("DELETE", `/api/groups/${groupId}`);
+    const dropped = await api("GET", `/api/search?q=${encodeURIComponent("a_b")}`);
+    expect(dropped.body.hits.filter((h: { groupId?: string }) => h.groupId === groupId)).toHaveLength(0);
   });
 
   it("creates, patches, and deletes a bot", async () => {
@@ -665,6 +726,7 @@ describe("harness HTTP API", () => {
     });
     const first = await deliver();
     expect(first.status).toBe(202);
+    // SAFETY: webhook acceptance responses are the server's { runId, accepted, duplicate } envelope.
     const accepted = await first.json() as { runId: string; accepted: boolean; duplicate: boolean };
     expect(accepted).toMatchObject({ accepted: true, duplicate: false });
     const retry = await deliver();
@@ -916,7 +978,10 @@ describe("message pages", () => {
 
   it("returns the whole transcript when nothing is asked for", async () => {
     const room = await seedRoom(6);
-    expect(room.messages).toHaveLength(6);
+    // an unaddressed post in a mentions-only room appends the user message
+    // AND a visible "no member was addressed" activity chip — two rows each
+    expect(room.messages).toHaveLength(12);
+    expect(room.messages.filter((m: { role: string }) => m.role === "user")).toHaveLength(6);
     // the original shape carries no pagination fields at all
     expect(room).not.toHaveProperty("hasMore");
   });
@@ -950,7 +1015,8 @@ describe("message pages", () => {
     // walking back far enough reaches the top and says so
     const top = await api("GET", `/api/threads/${full.threadId}/messages?limit=200`);
     expect(top.body.hasMore).toBe(false);
-    expect(top.body.messages).toHaveLength(6);
+    // six posts + their six unaddressed chips
+    expect(top.body.messages).toHaveLength(12);
   });
 
   it("returns a bounded transcript window around a search result", async () => {
@@ -990,6 +1056,7 @@ describe("message pages", () => {
     const before = (await api("GET", "/api/bots")).body.bots.length;
     const res = await fetch(`${BASE}/api/threads/not-a-thread/messages/not-a-message/image`);
     expect(res.status).toBe(404);
+    // SAFETY: API problem responses are always a JSON envelope with an `error` string.
     expect(((await res.json()) as { error: string }).error).toBe("no such conversation");
     // and the phantom thread is not now answerable as an empty conversation
     expect((await api("GET", "/api/threads/not-a-thread/messages")).status).toBe(404);

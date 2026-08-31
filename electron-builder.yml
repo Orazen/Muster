@@ -10,7 +10,7 @@ artifactName: Muster-${version}-${arch}.${ext}
 # leaves every Windows install stranded on its installed version.
 publish:
   - provider: github
-    owner: tharunramagiri
+    owner: Orazen
     repo: Muster
 
 directories:
@@ -34,6 +34,14 @@ files:
 
 asar: true
 
+# Re-seals the .app with a clean, internally consistent ad-hoc signature
+# when there is no real Apple Developer identity — fixes the packaged
+# build going from Gatekeeper's hard-block "is damaged and can't be
+# opened" to the normal, resolvable "unidentified developer" prompt.
+# See build/after-pack-mac.mjs for the full diagnosis. Root-level, not
+# under mac: — electron-builder's schema rejects it there.
+afterPack: build/after-pack-mac.mjs
+
 extraResources:
   - from: dist
     to: ui
@@ -45,11 +53,19 @@ extraResources:
     to: companion
 
 mac:
+  # No arch here on purpose — the CLI's --arm64/--x64 flag (see package.json's
+  # package:mac:arm64 / package:mac:x64 scripts) decides which one builds.
+  # An explicit arch list here, tested live, made electron-builder build
+  # BOTH regardless of the CLI flag, and both landed on the exact same
+  # Muster-${version}.dmg filename (artifactName has no arch placeholder)
+  # — the second build silently overwrote the first. Leaving arch unset
+  # here and letting the CLI flag be the only source of truth avoids both
+  # problems; each arch still needs its own scripts/prepare-cua.mjs run
+  # first to stage the matching native binary, so the two are never
+  # invoked together as a bare --mac.
   target:
     - target: dmg
-      arch: arm64
     - target: zip
-      arch: arm64
   icon: build/icon.icns
   category: public.app-category.productivity
   hardenedRuntime: true
@@ -78,6 +94,22 @@ mac:
 dmg:
   sign: true
   artifactName: Muster-${version}.dmg
+  # electron-builder's bare default (no window size, no icon layout) opens
+  # as a near-empty Finder window — nothing wrong with it technically, but
+  # it doesn't read as a normal macOS app installer at first glance. This
+  # is the standard "drag the app onto the Applications shortcut" layout
+  # every other macOS installer uses.
+  window:
+    width: 540
+    height: 380
+  contents:
+    - x: 140
+      y: 190
+      type: file
+    - x: 400
+      y: 190
+      type: link
+      path: /Applications
 
 win:
   target:

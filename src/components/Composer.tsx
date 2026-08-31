@@ -12,10 +12,16 @@ import {
   pasteAttachment,
   type Attachment,
 } from "@/lib/composer-attachments";
+import { MAX_IMAGE_BYTES, uploadImageAttachment } from "@/lib/image-upload";
 import { normalizeState } from "@/lib/mascot";
 import { groupComposerHint } from "@/lib/group-routing";
+import { modelAcceptsImages } from "../../server/contracts";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
+
+/** Room id -> text parked while the room was busy. Lives at module scope so
+ * switching rooms (which unmounts the Composer) cannot lose a queued send. */
+const queuedSends = new Map<string, string>();
 
 /** The active @mention query at the caret: the text between an `@` that
  * starts a word and the caret. null = no mention being typed. */
@@ -73,6 +79,65 @@ export function Composer({
   const removeAttachment = useCallback(
     (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id)),
     [setAttachments],
+  );
+
+  // ── image gating ──
+  // An engine that cannot open an image by path must never be handed one:
+  // the paste/drop affordance checks the driver's declared capability, and
+  // refusal says so plainly instead of silently degrading what the bot sees.
+  // In a room, any vision-capable member unlocks it — routing picks who
+  // answers, and a path tag is inert text to anyone who can't read it.
+  const engineSupportsImages = useCallback(
+    (b?: Bot) => {
+      if (!b) return false;
+      const inst = state.instances.find((i) => i.instanceId === b.modelSelection.instanceId);
+      // Same rule dispatch applies before sending parts (server/contracts
+      // modelAcceptsImages): driver capability first, then per-model gating
+      // on mixed catalogs so a text-only model can't be handed an image it
+      // would 4xx on.
+      return modelAcceptsImages(inst?.models, inst?.capabilities, b.modelSelection.model);
+    },
+    [state.instances],
+  );
+  const allowImages = group
+    ? (members ?? []).some((m) => engineSupportsImages(m))
+    : engineSupportsImages(bot);
+  const engineLabel = group ? group.name : (bot?.name ?? "This engine");
+  // refusals + upload failures for pasted images (drops report through the
+  // attachment strip's own notice)
+  const [imageNotice, setImageNotice] = useState<string | null>(null);
+  const attachPastedImages = useCallback(
+    async (files: File[]) => {
+      let refused = false;
+      const results = await Promise.all(
+        files.map(async (file): Promise<{ ok: true; chip: Attachment } | { ok: false; message: string }> => {
+          if (!allowImages) {
+            refused = true;
+            return { ok: false, message: file.name };
+          }
+          if (file.size > MAX_IMAGE_BYTES) {
+            return { ok: false, message: `${file.name} is over the image size limit` };
+          }
+          try {
+            return { ok: true, chip: await uploadImageAttachment(file) };
+          } catch (e) {
+            return {
+              ok: false,
+              message: `${file.name}: ${e instanceof Error ? e.message : "upload failed"}`,
+            };
+          }
+        }),
+      );
+      if (refused) {
+        setImageNotice(`${engineLabel}'s engine can't read images yet.`);
+        return;
+      }
+      const chips = results.flatMap((r) => (r.ok ? [r.chip] : []));
+      const failures = results.flatMap((r) => (r.ok ? [] : [r.message]));
+      if (chips.length) addAttachments(chips);
+      setImageNotice(failures.length ? failures.join(" ") : null);
+    },
+    [allowImages, engineLabel, addAttachments],
   );
   const [recording, setRecording] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
@@ -132,14 +197,27 @@ export function Composer({
   // the moment the room settles. 1:1 sends go straight to the server even
   // mid-turn — the harness queues them (steer-queue), so the message shows
   // in the transcript immediately with a queued affordance.
-  const [queued, setQueued] = useState<string | null>(null);
+  const [queued, setQueued] = useState<string | null>(() =>
+    group ? (queuedSends.get(group.id) ?? null) : null,
+  );
+  // The queued text used to live only in this component's state, so
+  // switching rooms mid-turn unmounted it into thin air. Parking it in a
+  // module-level map keyed by room id keeps it across remounts until the
+  // settle effect flushes it (or the user navigates away for good — same
+  // lifetime as the draft store, minus restarts).
+  const parkQueued = (value: string | null) => {
+    setQueued(value);
+    if (!group) return;
+    if (value) queuedSends.set(group.id, value);
+    else queuedSends.delete(group.id);
+  };
   // a chip on its own is a message: the send control has to appear for it
   const hasContent = Boolean(text.trim()) || attachments.length > 0;
   const send = () => {
     const t = composeMessage(text, attachments);
     if (!t) return;
     if (busy && group) {
-      setQueued(t);
+      parkQueued(t);
       setText("");
       setAttachments([]);
       return;
@@ -158,7 +236,7 @@ export function Composer({
     if (!busy && queued && group) {
       dispatch({ type: "sendGroup", groupId: group.id, text: queued });
       track("message_sent", { room: true, queued: true });
-      setQueued(null);
+      parkQueued(null);
     }
   }, [busy, queued, group, dispatch]);
 
@@ -173,7 +251,9 @@ export function Composer({
     }
     setSpeechError(null);
     const offTranscript = bridge.onSpeechTranscript((line) => {
-      if (typeof line.text === "string") {
+      // ogb.d.ts declares text as an optional string, so truthiness is the
+      // whole contract — no representation sniffing needed.
+      if (line.text) {
         const base = baseText.current;
         setText(base ? `${base} ${line.text}` : line.text);
       }
@@ -284,8 +364,13 @@ export function Composer({
           items={attachments}
           onAdd={addAttachments}
           onRemove={removeAttachment}
+          allowImages={allowImages}
+          engineLabel={engineLabel}
+          externalNotice={imageNotice}
+          onDismissExternalNotice={() => setImageNotice(null)}
         />
-        <div className="flex items-end gap-2 rounded-3xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2">
+        {/* Gaia composer: soft elevated shell, hairline ring, generous radius */}
+        <div className="flex items-end gap-2 rounded-[26px] border border-hairline/50 bg-card py-2.5 pl-4 pr-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.06),0_8px_24px_-8px_rgba(0,0,0,0.08)] transition-colors focus-within:border-accent/50">
         <textarea
           ref={inputRef}
           rows={1}
@@ -296,6 +381,16 @@ export function Composer({
             setDismissedAt(null);
           }}
           onPaste={(e) => {
+            // A screenshot paste arrives as clipboard FILES, not text — route
+            // it before the text branch can swallow the event.
+            const imageFiles = Array.from(e.clipboardData.files).filter((f) =>
+              f.type.startsWith("image/"),
+            );
+            if (imageFiles.length) {
+              e.preventDefault();
+              void attachPastedImages(imageFiles);
+              return;
+            }
             // a wall of text becomes a chip instead of burying the input
             const pasted = e.clipboardData.getData("text/plain");
             if (!isLongPaste(pasted)) return;
@@ -310,8 +405,8 @@ export function Composer({
             }
             setAttachments((prev) => [...prev, pasteAttachment(pasted)]);
           }}
-          onKeyUp={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
-          onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
+          onKeyUp={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+          onClick={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
           onKeyDown={(e) => {
             if (pickerOpen) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -395,8 +490,10 @@ export function Composer({
             aria-label={busy ? "Queue message" : "Send message"}
             title={busy ? "Sends when the current turn finishes" : "Send"}
             className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              busy ? "bg-raised text-ink-secondary hover:bg-raised-hover" : "bg-accent hover:brightness-110",
+              "flex size-9 shrink-0 items-center justify-center rounded-full text-white",
+              busy
+                ? "bg-raised text-ink-secondary hover:bg-raised-hover"
+                : "bg-accent shadow-[0_4px_14px_rgba(240,70,14,0.32)] hover:brightness-110",
             )}
           >
             {busy ? <Clock size={15} /> : <ArrowUp size={17} />}

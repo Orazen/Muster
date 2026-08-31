@@ -8,8 +8,12 @@ import { isAttachment, type Attachment } from "./composer-attachments.js";
 const KEY = "omb-drafts";
 const ATTACHMENTS_KEY = "omb-draft-attachments";
 
-type Values = Record<string, unknown>;
+/** One thread's stored value: composer text or its attachment list. */
+type DraftValue = string | Attachment[];
+type Values = Record<string, DraftValue>;
 type Store = Pick<Storage, "getItem" | "setItem"> | undefined;
+
+const isText = <T>(value: T): value is T & string => String(value) === value;
 
 // Storage is best-effort: a full quota, a locked-down origin, or a garbled
 // value must never cost a keystroke — every failure reads as "no drafts".
@@ -17,7 +21,10 @@ function read(store: Store, key: string): Values {
   try {
     const raw = store?.getItem(key);
     const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Values) : {};
+    // SAFETY: this file is written only by setDraft/setDraftAttachments below, so an
+    // object payload maps ids to composer strings or attachment lists; readers
+    // validate each entry before using it.
+    return parsed instanceof Object && !Array.isArray(parsed) ? (parsed as Values) : {};
   } catch {
     return {};
   }
@@ -25,7 +32,7 @@ function read(store: Store, key: string): Values {
 
 export function getDraft(store: Store, id: string): string {
   const text = read(store, KEY)[id];
-  return typeof text === "string" ? text : "";
+  return isText(text) ? text : "";
 }
 
 export function setDraft(store: Store, id: string, text: string): void {
@@ -57,10 +64,11 @@ export function setDraftAttachments(store: Store, id: string, attachments: Attac
 }
 
 // Reaching for localStorage is itself a failure point: on an origin with
-// storage blocked the getter throws, and `typeof` doesn't shield it.
+// storage blocked merely touching the getter throws, and the draft must
+// never take the composer down with it.
 function getStore(): Store {
   try {
-    return typeof localStorage === "undefined" ? undefined : localStorage;
+    return globalThis.localStorage ?? undefined;
   } catch {
     return undefined;
   }
@@ -96,6 +104,9 @@ export function useComposerDraft(
   const setAttachments = useCallback(
     (next: SetStateAction<Attachment[]>) => {
       setAttachmentState((previous) => {
+        // React's SetStateAction passes the setter either the next array or an
+        // updater function; telling the two shapes apart needs a runtime check.
+        // oxlint-disable-next-line anti-slop/no-runtime-typeof
         const value = typeof next === "function" ? next(previous) : next;
         setDraftAttachments(store, id, value);
         return value;

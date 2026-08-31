@@ -53,6 +53,22 @@ export const MAX_DEVICES = 20;
 /** lastSeen is a UI nicety, not an audit log — don't write on every request. */
 const LAST_SEEN_WRITE_MS = 60_000;
 
+/** C0 control characters and DEL — never legitimate in display text. */
+const CONTROL_CHARS = new RegExp(
+  `[${String.fromCharCode(0x00)}-${String.fromCharCode(0x1f)}${String.fromCharCode(0x7f)}]`,
+  "g",
+);
+
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
+/** devices.json is third-party-editable JSON; its fields arrive unparsed. */
+type JsonField = string | number | boolean | null | JsonField[] | { [key: string]: JsonField };
+
+/** A JSON record, or null for every other wire shape (scalars, arrays). */
+function jsonRecordOf(value: JsonField): { [key: string]: JsonField } | null {
+  return value instanceof Object && !Array.isArray(value) ? value : null;
+}
+
 /** Hex digest. Tokens live on disk as one of these and never in the clear. */
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -78,9 +94,9 @@ function sameCredential(a: string, b: string): boolean {
 
 /** Device names come from the phone, so they are untrusted display text:
  * clamp the length and drop control characters before they reach a UI. */
-export function cleanDeviceName(raw: unknown): string {
+export function cleanDeviceName(raw?: string): string {
   const name = String(raw ?? "")
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(CONTROL_CHARS, " ")
     .trim()
     .slice(0, 60);
   return name || "Companion";
@@ -89,8 +105,17 @@ export function cleanDeviceName(raw: unknown): string {
 /** A timestamp we are willing to render, or a stand-in. `0` and the negatives
  * are as wrong as a missing field and read worse: they date a device to 1970
  * in the UI, where "now" is at least true of when we learned of it. */
-const timestamp = (value: unknown, fallback: number): number =>
-  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+const timestamp = (value: number | undefined, fallback: number): number =>
+  value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback;
+
+/** id and tokenHash decide whether a stored row is a device at all — without
+ * them it can neither be revoked nor authenticate. Everything else normalizes. */
+const isStorableDevice = (
+  d: JsonField,
+): d is Partial<DeviceRecord> & { id: string; tokenHash: string } => {
+  const record = jsonRecordOf(d);
+  return record !== null && isText(record.id) && isText(record.tokenHash);
+};
 
 /** Complete a stored record, whatever shape the file had. `lastSeenAt` falls
  * back to `createdAt` rather than to the clock: a device we have never heard
@@ -125,15 +150,10 @@ export class DeviceRegistry {
    * either dropping the device or teaching every reader to doubt the type. */
   constructor() {
     try {
-      const parsed = JSON.parse(readFileSync(DEVICES_FILE, "utf8"));
-      if (Array.isArray(parsed?.devices)) {
-        this.devices = parsed.devices
-          .filter(
-            (d: unknown): d is Partial<DeviceRecord> & { id: string; tokenHash: string } =>
-              typeof (d as DeviceRecord)?.id === "string" &&
-              typeof (d as DeviceRecord)?.tokenHash === "string",
-          )
-          .map(normalizeDevice);
+      const parsed: JsonField = JSON.parse(readFileSync(DEVICES_FILE, "utf8"));
+      const fleet = jsonRecordOf(parsed)?.devices;
+      if (Array.isArray(fleet)) {
+        this.devices = fleet.filter(isStorableDevice).map(normalizeDevice);
       }
     } catch {
       /* first run, or a file we can't read — start with no paired devices */
@@ -141,15 +161,17 @@ export class DeviceRegistry {
   }
 
   /** Write the fleet to disk. Atomic, because a torn file reads as empty and
-   * would sign every phone out with no way to tell why. */
-  private persist() {
+   * would sign every phone out with no way to tell why.
+   * Internal: only the registry itself writes; control.test.ts overrides it
+   * to simulate a failing disk, which is why this is not `private`. */
+  persist() {
     ensureDataDir();
     writeFileAtomic(DEVICES_FILE, JSON.stringify({ devices: this.devices }, null, 2));
   }
 
   /** Every paired device, without the hash — this is what the page renders. */
   list(): PublicDevice[] {
-    return this.devices.map(({ tokenHash, ...rest }) => rest);
+    return this.devices.map(({ tokenHash: _tokenHash, ...rest }) => rest);
   }
 
   /** How many phones are paired, against MAX_DEVICES. */
@@ -184,7 +206,11 @@ export class DeviceRegistry {
    *
    * The token is returned exactly once, here. There is no endpoint that can
    * read it back — a phone that loses it pairs again. */
-  redeem(credential: string, name: unknown): { device: PublicDevice; token: string } | { error: string } {
+  redeem(
+    credential: string,
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- proxy.ts's RedeemOptions forwards the request body verbatim; cleanDeviceName below is the sanitizer.
+    name: unknown,
+  ): { device: PublicDevice; token: string } | { error: string } {
     const window = this.pairing();
     if (!window) return { error: "no pairing is in progress — open Companion settings on your computer" };
     const presented = String(credential ?? "");
@@ -209,7 +235,7 @@ export class DeviceRegistry {
     const token = `omb_${randomBytes(32).toString("base64url")}`;
     const device: DeviceRecord = {
       id: randomUUID(),
-      name: cleanDeviceName(name),
+      name: cleanDeviceName(String(name ?? "")),
       tokenHash: sha256(token),
       createdAt: Date.now(),
       lastSeenAt: Date.now(),
@@ -225,9 +251,10 @@ export class DeviceRegistry {
       this.persist();
     } catch (e) {
       this.devices.pop();
-      return { error: `could not save the pairing: ${(e as Error).message}` };
+      const why = e instanceof Error ? e.message : String(e);
+      return { error: `could not save the pairing: ${why}` };
     }
-    const { tokenHash, ...pub } = device;
+    const { tokenHash: _tokenHash, ...pub } = device;
     return { device: pub, token };
   }
 

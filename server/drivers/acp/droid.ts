@@ -20,6 +20,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
+import type { JsonObject, JsonValue } from "../../schema.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
 // FACTORY_HOME_OVERRIDE replaces the HOME the CLI resolves, NOT the data root:
@@ -86,9 +87,11 @@ export function ensureDroidInjectModel(
   const dir = join(factoryHome(env), ".factory");
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "settings.json");
-  let settings: FactorySettings & Record<string, unknown> = {};
+  let settings: FactorySettings = {};
   try {
-    settings = JSON.parse(readFileSync(path, "utf8")) as FactorySettings & Record<string, unknown>;
+    // SAFETY: settings.json is user-owned JSON; only the customModels rows
+    // this module reads are interpreted, and unknown keys survive the write-back
+    settings = JSON.parse(readFileSync(path, "utf8")) as FactorySettings;
   } catch (error) {
     if (existsSync(path)) throw error;
   }
@@ -119,6 +122,8 @@ export function ensureDroidInjectModel(
 }
 
 function readSettings(env: Record<string, string | undefined>): FactorySettings {
+  // SAFETY: same user-owned settings.json contract as ensureDroidInjectModel;
+  // fields outside FactorySettings are ignored by every reader here
   return JSON.parse(readFileSync(join(factoryHome(env), ".factory", "settings.json"), "utf8")) as FactorySettings;
 }
 
@@ -156,15 +161,21 @@ async function resolveModels(env: Record<string, string | undefined>) {
 // droid answers a rejected setting with a bare JSON-RPC message ("Model not
 // recognized", "Method not found") that reaches the error card verbatim,
 // naming neither the engine nor the setting that failed. Say what we asked for.
+// session/set_mode and session/set_model each carry a flat payload: the
+// sessionId plus the one setting being pinned.
+type SettingPayload = JsonObject & { sessionId: string; modeId?: string; modelId?: string };
+
 async function applySetting(
-  request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>,
+  request: (method: string, params: JsonValue, timeoutMs?: number) => Promise<any>,
   method: string,
-  params: Record<string, unknown>,
+  params: SettingPayload,
   what: string,
 ) {
   try {
     await request(method, params);
   } catch (e) {
+    // SAFETY: ACP request rejections are Error instances from the protocol
+    // runtime's timeout/failure paths, so the CLI's words ride on .message
     throw new Error(
       `Droid rejected ${what} via ${method}: ${(e as Error).message}. ` +
         `Check that \`droid\` is current (0.196.0+ supports it) and that this account can use that value.`,

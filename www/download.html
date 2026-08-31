@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Download Muster — macOS, Windows, Ubuntu</title>
+<meta name="description" content="Download Muster for macOS, Windows, or Ubuntu. Self-host for free on your own machine." />
+<link rel="icon" type="image/svg+xml" href="/app-icon.svg" />
+<style>
+  :root {
+    --page: #0a0a0a;
+    --surface: #131314;
+    --surface-raised: #1a1a1c;
+    --ink: #f6f6f7;
+    --body: #cfcfd2;
+    --muted: #98989e;
+    --muted-2: #75757b;
+    --line: rgba(255, 255, 255, 0.08);
+    --line-2: rgba(255, 255, 255, 0.16);
+    --accent: #f0460e;
+    --accent-soft: #ff7a45;
+    --accent-line: rgba(240, 70, 14, 0.34);
+    --accent-wash: rgba(240, 70, 14, 0.09);
+    --accent-wash-2: rgba(240, 70, 14, 0.16);
+    --shadow-soft: 0 2px 16px rgba(0, 0, 0, 0.35);
+    --radius-card: 20px;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-width: 320px;
+    background: var(--page); color: var(--body);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16px; line-height: 1.6;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  .container { width: min(1100px, calc(100% - 48px)); margin: 0 auto; }
+
+  /* ---------- header ---------- */
+  .site-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 24px; padding: 22px 0;
+  }
+  .site-header__left { display: flex; align-items: center; gap: 40px; }
+  .brand-lockup { display: inline-flex; align-items: center; gap: 9px; }
+  .brand-lockup__mark { width: 30px; height: 30px; border-radius: 8px; }
+  .brand-lockup__word { color: var(--ink); font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
+  .site-nav { display: flex; align-items: center; gap: 26px; color: var(--muted); font-size: 15px; }
+  .site-nav a { transition: color 150ms ease; }
+  .site-nav a:hover, .site-nav a:focus-visible { color: var(--ink); }
+  @media (max-width: 760px) { .site-nav { display: none; } }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 48px 0 0; text-align: center; }
+  .hero h1 {
+    color: var(--ink); font-weight: 600; letter-spacing: -0.025em;
+    font-size: clamp(2.5rem, 6vw, 52px); line-height: 1.1;
+  }
+  .lead {
+    max-width: 620px; margin: 16px auto 0;
+    color: var(--muted); font-size: 19px; line-height: 1.55; text-wrap: pretty;
+  }
+  .detected-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-top: 20px; padding: 6px 14px;
+    border: 1px solid var(--accent-line); border-radius: 999px;
+    background: linear-gradient(to bottom, var(--accent-wash), var(--accent-wash-2));
+    color: var(--accent-soft); font-size: 13px; font-weight: 500;
+  }
+  .detected-badge__dot {
+    width: 7px; height: 7px; border-radius: 999%;
+    background: var(--accent); animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* ---------- cards ---------- */
+  .cards { display: flex; flex-direction: column; gap: 16px; max-width: 720px; margin: 40px auto 0; }
+  .dl-card {
+    display: flex; align-items: center; justify-content: space-between; gap: 20px;
+    border: 1px solid var(--line); border-radius: 18px; padding: 24px 28px;
+    background: var(--surface); transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+  }
+  .dl-card:hover { border-color: var(--accent-line); transform: translateY(-1px); box-shadow: 0 12px 32px -14px rgba(0,0,0,0.55); }
+  .dl-card--primary {
+    border-color: rgba(240,70,14,0.3);
+    background: linear-gradient(135deg, rgba(240,70,14,0.06) 0%, var(--surface) 100%);
+  }
+  .dl-card--hidden { display: none; }
+  .dl-card__os { color: var(--ink); font-weight: 600; font-size: 18px; }
+  .dl-card__meta { margin-top: 3px; color: var(--muted); font-size: 14px; }
+  .dl-card__btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    min-height: 48px; padding: 0 24px; border: none; border-radius: 14px;
+    font-size: 16px; font-weight: 600; color: #fff; cursor: pointer;
+    background: linear-gradient(to bottom, var(--accent-soft), var(--accent));
+    box-shadow: 0 2px 10px rgba(240,70,14,0.24);
+    transition: transform 180ms ease, box-shadow 180ms ease;
+    text-decoration: none; white-space: nowrap;
+  }
+  .dl-card__btn:hover { transform: translateY(-1px); box-shadow: 0 12px 30px rgba(240,70,14,0.32); }
+  .dl-card__btn--secondary {
+    color: var(--body); background: var(--surface-raised);
+    border: 1px solid var(--line); box-shadow: var(--shadow-soft);
+  }
+  .dl-card__btn--secondary:hover { border-color: var(--line-2); color: var(--ink); box-shadow: 0 8px 24px rgba(0,0,0,0.45); }
+  .dl-card__icon { width: 20px; height: 20px; flex: none; }
+
+  /* ---------- checksums ---------- */
+  .checksums { max-width: 720px; margin: 28px auto 0; text-align: center; }
+  .checksums__label {
+    color: var(--muted-2); font-size: 13px; cursor: pointer;
+    background: none; border: none; font: inherit; padding: 0;
+  }
+  .checksums__label:hover { color: var(--muted); }
+  .checksums__list {
+    display: none; margin-top: 10px;
+    font: 500 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: var(--muted); word-break: break-all;
+  }
+  .checksums[open] .checksums__list { display: block; }
+
+  /* ---------- docker ---------- */
+  .docker-section {
+    max-width: 720px; margin: 56px auto 0;
+    border: 1px solid var(--line); border-radius: 18px;
+    padding: 28px 32px; background: var(--surface);
+  }
+  .docker-section h2 {
+    color: var(--ink); font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin: 0;
+  }
+  .docker-section p {
+    margin-top: 10px; color: var(--muted); font-size: 15px; line-height: 1.55;
+  }
+  .docker-section code {
+    display: block; margin-top: 16px; padding: 14px 18px;
+    border-radius: 12px; background: var(--page);
+    border: 1px solid var(--line);
+    font: 500 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: var(--accent-soft); overflow-x: auto; white-space: pre;
+  }
+  .docker-section a {
+    color: var(--accent-soft); font-weight: 600;
+  }
+  .docker-section a:hover { text-decoration: underline; }
+
+  /* ---------- note ---------- */
+  .note {
+    max-width: 720px; margin: 24px auto 0;
+    padding: 16px 20px; border-radius: 14px;
+    background: rgba(255,255,255,0.03); border: 1px solid var(--line);
+    color: var(--muted); font-size: 14px; line-height: 1.55; text-align: center;
+  }
+  .note strong { color: var(--body); }
+
+  /* ---------- footer ---------- */
+  .site-footer {
+    margin-top: 80px; padding: 40px 0 50px;
+    border-top: 1px solid var(--line);
+    text-align: center; color: var(--muted-2); font-size: 14px;
+  }
+  .site-footer a { color: var(--muted); }
+  .site-footer a:hover { color: var(--ink); }
+
+  @media (max-width: 600px) {
+    .dl-card { flex-direction: column; align-items: flex-start; gap: 14px; }
+    .dl-card__btn { width: 100%; justify-content: center; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header class="site-header">
+    <div class="site-header__left">
+      <a class="brand-lockup" href="/" aria-label="Muster home">
+        <img class="brand-lockup__mark" src="/app-icon.svg" width="30" height="30" alt="" aria-hidden="true" />
+        <span class="brand-lockup__word">Muster</span>
+      </a>
+    </div>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="/">Home</a>
+      <a href="/#features">Product</a>
+      <a href="/teams.html">Teams</a>
+      <a href="/switch.html">Switch</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>Download Muster</h1>
+      <p class="lead">The open desktop app for running a team of AI agents. Self-host free on your own machine.</p>
+      <div class="detected-badge" id="detected-badge" style="display:none;">
+        <span class="detected-badge__dot"></span>
+        <span id="detected-label">Detected: macOS</span>
+      </div>
+    </section>
+
+    <div class="cards" id="download-cards">
+      <!-- macOS arm64 (Apple Silicon) -->
+      <div class="dl-card dl-card--primary" data-os="mac-arm64">
+        <div>
+          <div class="dl-card__os">macOS</div>
+          <div class="dl-card__meta">Apple Silicon (M1 / M2 / M3 / M4) &middot; .dmg &middot; <a href="/#local-first" style="color:var(--accent-soft);font-weight:500;">unsigned build — right-click → Open</a></div>
+        </div>
+        <a class="dl-card__btn" id="dl-mac-arm64" href="/downloads/Muster.dmg">
+          <svg class="dl-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download .dmg
+        </a>
+      </div>
+
+      <!-- macOS x64 (Intel) -->
+      <div class="dl-card" data-os="mac-x64">
+        <div>
+          <div class="dl-card__os">macOS Intel</div>
+          <div class="dl-card__meta">Intel Macs &middot; .dmg &middot; <a href="/#local-first" style="color:var(--accent-soft);font-weight:500;">unsigned build — right-click → Open</a></div>
+        </div>
+        <a class="dl-card__btn dl-card__btn--secondary" id="dl-mac-x64" href="/downloads/Muster-intel.dmg">
+          <svg class="dl-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download .dmg (Intel)
+        </a>
+      </div>
+
+      <!-- Windows -->
+      <div class="dl-card" data-os="windows">
+        <div>
+          <div class="dl-card__os">Windows</div>
+          <div class="dl-card__meta">64-bit &middot; one-click installer, no admin rights needed</div>
+        </div>
+        <a class="dl-card__btn" id="dl-windows" href="/downloads/Muster-setup.exe">
+          <svg class="dl-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download .exe
+        </a>
+      </div>
+
+      <!-- Linux deb -->
+      <div class="dl-card" data-os="linux">
+        <div>
+          <div class="dl-card__os">Ubuntu / Debian</div>
+          <div class="dl-card__meta">x64 &middot; .deb package &middot; <code style="background:none;padding:0;color:var(--accent-soft);font-size:13px;">sudo dpkg -i Muster.deb</code></div>
+        </div>
+        <a class="dl-card__btn dl-card__btn--secondary" id="dl-linux-deb" href="/downloads/Muster.deb">
+          <svg class="dl-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download .deb
+        </a>
+      </div>
+
+      <!-- Linux AppImage -->
+      <div class="dl-card" data-os="linux">
+        <div>
+          <div class="dl-card__os">Linux (any distro)</div>
+          <div class="dl-card__meta">x64 &middot; AppImage, no install needed &middot; <code style="background:none;padding:0;color:var(--accent-soft);font-size:13px;">chmod +x Muster.AppImage && ./Muster.AppImage</code></div>
+        </div>
+        <a class="dl-card__btn dl-card__btn--secondary" id="dl-linux-appimage" href="/downloads/Muster.AppImage">
+          <svg class="dl-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download AppImage
+        </a>
+      </div>
+    </div>
+
+    <details class="checksums" id="checksums">
+      <summary class="checksums__label">SHA-256 checksums</summary>
+      <div class="checksums__list" id="checksums-list">Loading…</div>
+    </details>
+
+    <div class="docker-section">
+      <h2>Self-host with Docker</h2>
+      <p>Run the web UI and harness server in a container — all features, unlimited bots, free forever. Your machine, your data.</p>
+      <code>docker run -d --name muster \
+  -p 3010:3010 \
+  -v ~/.muster:/root/.muster \
+  ghcr.io/orazen/muster:latest</code>
+      <p style="margin-top:16px;"><a href="https://github.com/Orazen/Muster/blob/main/docs/self-host.md" target="_blank" rel="noreferrer">Full self-hosting guide →</a></p>
+    </div>
+
+    <div class="note">
+      <strong>First launch on macOS?</strong> Unsigned builds show "unidentified developer" — right-click the app → Open, then click Open again. It's a one-time gate, not a block.
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <a href="/">muster.orazen.online</a> &nbsp;·&nbsp; <a href="/teams.html">Teams</a> &nbsp;·&nbsp; <a href="/switch.html">Switch</a>
+  </footer>
+</div>
+
+<script>
+(function() {
+  var ua = navigator.userAgent;
+  var plat = navigator.platform || '';
+  var macLike = /Mac/i.test(plat) || /Mac OS X/i.test(ua);
+  var intel = /Intel Mac/i.test(plat) || /Intel/i.test(plat);
+  // Modern Macs on Apple Silicon report "arm" or "arm64" in navigator.platform
+  var arm = /arm/i.test(plat) || /Apple Silicon/i.test(ua) || /Macintosh.*ARM/i.test(ua);
+  // If mac but not definitively Intel → default to Apple Silicon (most common now)
+  var isMacArm = macLike && arm;
+  var isMacIntel = macLike && intel;
+  var isWindows = /Win/i.test(ua);
+  var isLinux = /Linux/i.test(ua);
+
+  var cards = document.querySelectorAll('.dl-card');
+  var badge = document.getElementById('detected-badge');
+  var label = document.getElementById('detected-label');
+  var detected = null;
+
+  if (isMacArm) {
+    detected = 'mac-arm64';
+    label.textContent = 'Detected: macOS (Apple Silicon)';
+    badge.style.display = '';
+  } else if (isMacIntel) {
+    detected = 'mac-x64';
+    label.textContent = 'Detected: macOS (Intel)';
+    badge.style.display = '';
+  } else if (isWindows) {
+    detected = 'windows';
+    label.textContent = 'Detected: Windows';
+    badge.style.display = '';
+  } else if (isLinux) {
+    detected = 'linux';
+    label.textContent = 'Detected: Linux';
+    badge.style.display = '';
+  }
+
+  // Move the detected platform card to the top
+  if (detected) {
+    var target = document.querySelector('.dl-card[data-os="' + detected + '"]');
+    if (target) {
+      target.parentNode.insertBefore(target, target.parentNode.firstChild);
+      target.classList.add('dl-card--primary');
+      // Remove primary from others if we just moved a non-primary
+      cards.forEach(function(c) {
+        if (c !== target) c.classList.remove('dl-card--primary');
+      });
+    }
+  }
+
+  // Fetch latest.json for checksums (non-blocking)
+  fetch('/downloads/latest.json').then(function(r) {
+    if (!r.ok) throw 0;
+    return r.json();
+  }).then(function(meta) {
+    var list = document.getElementById('checksums-list');
+    if (!meta.checksums) return;
+    list.textContent = Object.keys(meta.checksums).map(function(f) {
+      return meta.checksums[f] + '  ' + f;
+    }).join('\n');
+  }).catch(function() {
+    // latest.json not yet deployed — fall back to static links
+    var list = document.getElementById('checksums-list');
+    list.textContent = 'Checksums will be available after the next release.';
+  });
+})();
+</script>
+
+</body>
+</html>

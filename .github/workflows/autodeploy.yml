@@ -1,0 +1,90 @@
+# Auto-deploy: every push to main ships.
+#
+# Dokploy only redeploys when `.deploy-trigger` changes (its dockerWebhook
+# endpoint rejects external calls with "Branch Not Match" regardless of
+# payload, so the trigger-file commit is the only working mechanism). This
+# workflow appends a timestamp to that file and pushes, which fires the
+# Dokploy GitHub webhook — the same thing a manual `chore: trigger
+# deployment` commit does.
+#
+# Loop protection (two independent guards):
+# 1. The job skips itself when the head commit is its own ("chore:
+#    autodeploy trigger").
+# 2. It also skips when the incoming push already touched
+#    `.deploy-trigger`, so manual trigger commits never double-fire.
+name: autodeploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: autodeploy
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    # NOTE: folded scalar, not a bare multiline value — a continuation line
+    # starting with `!` parses as a YAML tag and kills the whole workflow.
+    if: >-
+      github.event.head_commit.message != 'chore: autodeploy trigger' &&
+      !contains(github.event.head_commit.message, '[skip deploy]')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 2
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip when this push already bumped .deploy-trigger
+        id: check
+        run: |
+          before="${{ github.event.before }}"
+          if git cat-file -e "$before" 2>/dev/null; then
+            base="$before"
+          else
+            base="$(git rev-parse HEAD^)"
+          fi
+          if git diff --name-only "$base" "${{ github.sha }}" | grep -qx '.deploy-trigger'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump .deploy-trigger
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" >> .deploy-trigger
+          git config user.name "muster-autodeploy"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .deploy-trigger
+          git commit -m "chore: autodeploy trigger"
+          git push origin main
+
+      # Belt and braces: the trigger commit also fires Dokploy's GitHub App
+      # webhook, but that delivery is unreliable for bot-authored pushes —
+      # so we call the dockerWebhook endpoint directly with a GitHub-shaped
+      # payload. The URL lives in a repo secret; the endpoint requires the
+      # real push shape (body.ref must match the app branch) or it answers
+      # 301 "Branch Not Match".
+      - name: Trigger Dokploy build
+        if: steps.check.outputs.skip == 'false'
+        env:
+          DOKPLOY_WEBHOOK_URL: ${{ secrets.DOKPLOY_WEBHOOK_URL }}
+        run: |
+          SHA="$(git rev-parse origin/main)"
+          curl -fsS -X POST "$DOKPLOY_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -H 'X-GitHub-Event: push' \
+            -d "{
+              \"ref\": \"refs/heads/main\",
+              \"after\": \"$SHA\",
+              \"repository\": {\"full_name\": \"Orazen/Muster\"},
+              \"commits\": [{\"id\": \"$SHA\", \"message\": \"chore: autodeploy trigger\", \"modified\": [\".deploy-trigger\"], \"added\": [], \"removed\": []}],
+              \"head_commit\": {\"id\": \"$SHA\", \"message\": \"chore: autodeploy trigger\"}
+            }"
+          echo "Dokploy deploy triggered for $SHA"

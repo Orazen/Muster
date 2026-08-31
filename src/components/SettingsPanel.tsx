@@ -15,6 +15,7 @@ import { cn } from "@/lib/cn";
 import { requestNotificationPermission } from "@/lib/notify";
 import { botUsage, costCaption, formatTokens, formatUsd } from "@/lib/usage";
 import { shortPath } from "@/lib/short-path";
+import { MemoryTab } from "./bot-profile/MemoryTab";
 
 function Field({
   label,
@@ -161,8 +162,6 @@ interface MemoryTopic {
   bytes: number;
 }
 
-const formatBytes = (bytes: number) => (bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 102.4) / 10} KB`);
-
 /** MEMORY.md + memory/ topic files, surfaced so the user can read and fix
  * what the bot believes. Fetched on expand, not on mount: settings opens for
  * every bot and most visits never look at memory — and an expand also
@@ -288,25 +287,7 @@ function MemoryCard({ bot }: { bot: Bot }) {
               </span>
             )}
           </div>
-          {topics.length > 0 && (
-            <div className="mt-3">
-              <div className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-                Topic files
-              </div>
-              <div className="overflow-hidden rounded-lg border border-hairline/40">
-                {topics.map((entry) => (
-                  <button
-                    key={entry.name}
-                    onClick={() => void openTopic(entry.name)}
-                    className="flex w-full items-center justify-between gap-2 border-b border-hairline/40 px-3 py-2 text-left last:border-b-0 hover:bg-raised/60"
-                  >
-                    <span className="truncate font-mono text-[12.5px] text-ink">{entry.name}</span>
-                    <span className="shrink-0 text-[11.5px] text-ink-secondary">{formatBytes(entry.bytes)}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          {topics.length > 0 && <MemoryTab topics={topics} onOpen={(name) => void openTopic(name)} />}
         </div>
       )}
 
@@ -337,6 +318,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "chiefOfStaff"
         | "approvePeerComms"
         | "composio"
+        | "privacyShield"
         | "modelSelection"
       >
     >,
@@ -404,7 +386,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 Bot
               </span>
               <button
-                onClick={() => patch({ color: "green", character: "cursor", mascotExpression: null })}
+                onClick={() => patch({ color: "orange", character: "star", mascotExpression: null })}
                 className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
               >
                 Reset
@@ -422,9 +404,9 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                     onClick={() => patch({ character })}
                     className={cn(
                       "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-raised",
-                      (bot.character ?? "cursor") === character && "ring-2 ring-accent-border",
+                      (bot.character ?? "star") === character && "ring-2 ring-accent-border",
                     )}
-                    title={character === "cursor" ? "Cursor mascot" : character === "star" ? "Star teammate" : "Lottie bot"}
+                    title={character.charAt(0).toUpperCase() + character.slice(1)}
                     aria-label={`Use the ${character} character`}
                   >
                     <AgentAvatar
@@ -561,8 +543,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                   ? "This bot will stop and ask before it reaches out to another bot."
                   : "Let this bot talk to teammates on its own, without a confirmation step."}
               </div>
-            </div>
-            <button
+            </div>            <button
               role="switch"
               aria-checked={Boolean(bot.approvePeerComms)}
               aria-label="Ask me before contacting other bots"
@@ -578,6 +559,34 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 className={cn(
                   "absolute top-[3px] size-5 rounded-full bg-white transition-all",
                   bot.approvePeerComms ? "left-[21px]" : "left-[3px]",
+                )}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
+            <div>
+              <div className="text-[15px] font-medium text-ink">Privacy Shield</div>
+              <div className="mt-0.5 text-[13px] text-ink-secondary">
+                {bot.privacyShield
+                  ? "Secrets, emails, and phone numbers are masked before anything reaches the cloud model."
+                  : "Mask secrets and personal details before this bot's prompts leave for a cloud model."}
+              </div>
+            </div>
+            <button
+              role="switch"
+              aria-checked={Boolean(bot.privacyShield)}
+              aria-label="Privacy Shield"
+              onClick={() => patch({ privacyShield: !bot.privacyShield })}
+              className={cn(
+                "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors",
+                bot.privacyShield ? "bg-accent" : "bg-raised",
+              )}
+            >
+              <span
+                className={cn(
+                  "absolute top-[3px] size-5 rounded-full bg-white transition-all",
+                  bot.privacyShield ? "left-[21px]" : "left-[3px]",
                 )}
               />
             </button>

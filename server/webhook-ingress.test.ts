@@ -4,14 +4,14 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { listenWebhookIngress, MAX_WEBHOOK_BODY_BYTES, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
-import { WebhookManager } from "./webhooks.ts";
+import { WebhookManager, type WebhookManagerOptions } from "./webhooks.ts";
 
 let dir: string;
 let ingress: WebhookIngress;
 let endpointId: string;
 let secret: string;
 let manager: WebhookManager;
-const queued: Array<Record<string, unknown>> = [];
+const queued: Array<Parameters<WebhookManagerOptions["enqueue"]>[0]> = [];
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "omb-webhook-ingress-"));

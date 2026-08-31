@@ -8,6 +8,7 @@ import {
   githubManifestUrls,
   parseTeamCatalog,
 } from "./team-library.ts";
+import type { JsonValue } from "./schema.ts";
 
 const manifest = {
   format: "muster.team",
@@ -44,7 +45,7 @@ const catalog = {
   ],
 };
 
-function response(value: unknown, status = 200): Response {
+function response(value: JsonValue, status = 200): Response {
   return new Response(JSON.stringify(value), {
     status,
     headers: { "content-type": "application/json" },
@@ -68,7 +69,7 @@ describe("team library", () => {
       if (target === TEAM_LIBRARY_CATALOG_URL) return response(catalog);
       if (target === `${TEAM_LIBRARY_RAW_ROOT}/teams/engineering/team.musterteam.json`) return response(manifest);
       return response({}, 404);
-    }) as unknown as typeof fetch;
+    });
 
     const loaded = await fetchLibraryTeam("engineering", fetcher);
     expect(loaded.team.name).toBe("Engineering");
@@ -93,7 +94,7 @@ describe("team library", () => {
   it("falls back from main to master for a repository link", async () => {
     const fetcher = vi.fn(async (url: string | URL | Request) =>
       String(url).includes("/main/") ? response({}, 404) : response(manifest),
-    ) as unknown as typeof fetch;
+    );
 
     const loaded = await fetchGithubTeam("https://github.com/acme/team", fetcher);
     expect(loaded.team.members[0]?.name).toBe("Ada");

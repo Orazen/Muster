@@ -18,11 +18,12 @@ interface ProviderMeta {
 }
 
 function ProviderRow({ provider }: { provider: ProviderMeta }) {
-  const { state, dispatch } = useStore();
+  const { state, dispatch, refreshInstances } = useStore();
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
 
   const configured = state.config?.providers?.[provider.id]?.configured ?? provider.configured ?? false;
   const clearing = !value.trim() && configured;
@@ -31,13 +32,30 @@ function ProviderRow({ provider }: { provider: ProviderMeta }) {
     if (saving || (!value.trim() && !configured)) return;
     setSaving(true);
     setError(null);
-    api("/api/config", {
-      method: "PUT",
-      body: JSON.stringify({ providers: { [provider.id]: { apiKey: value.trim() } } }),
-    })
+    // Cloud deployments route provider keys into the signed-in user's own
+    // encrypted vault (/api/user-keys) — your DeepSeek key powers only your
+    // bots. Self-host keeps the single shared config path.
+    api("/api/user-keys", {
+      method: value.trim() ? "PUT" : "DELETE",
+      body: JSON.stringify({ providerId: provider.id, apiKey: value.trim() }),
+    }).catch(() =>
+      // Vault endpoint absent (older server / desktop build) — fall back to
+      // the global config path.
+      api("/api/config", {
+        method: "PUT",
+        body: JSON.stringify({ providers: { [provider.id]: { apiKey: value.trim() } } }),
+      })
+    )
       .then((status: ConfigStatus) => {
         dispatch({ type: "configStatus", config: status });
+        // Vault save registers new instances server-side; refresh the
+        // client's instance list so the model picker sees them immediately.
+        void refreshInstances();
         setValue("");
+        // Keys are write-only — nothing echoes back, so say plainly that the
+        // save landed before the field goes quiet again.
+        setJustSaved(true);
+        setTimeout(() => setJustSaved(false), 4000);
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setSaving(false));
@@ -49,6 +67,7 @@ function ProviderRow({ provider }: { provider: ProviderMeta }) {
         <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
         <span className="text-[13px] font-medium text-ink">{provider.label}</span>
         {configured && <span className="text-[11px] text-success">Connected</span>}
+        {justSaved && <span className="text-[11px] font-medium text-success">Saved ✓</span>}
         <div className="relative ml-auto">
           <button
             type="button"

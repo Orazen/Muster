@@ -11,6 +11,8 @@ import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { EventBus } from "./bus.ts";
 
 const testEvent = (over: Partial<RuntimeEvent> = {}): RuntimeEvent =>
+  // SAFETY: the fixture below fills every mandatory RuntimeEvent field and
+  // `over` overrides a subset of them, keeping the result a RuntimeEvent.
   ({
     eventId: "ev-1",
     provider: "fake",

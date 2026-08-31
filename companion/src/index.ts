@@ -87,6 +87,8 @@ async function refreshMachineName(): Promise<void> {
       signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) return;
+    // SAFETY: the harness config envelope; only profile.name is read and any
+    // other shape degrades to the default machine name.
     const config = (await res.json()) as { profile?: { name?: string } };
     const owner = config.profile?.name?.trim();
     if (owner) cachedName = `${owner}'s computer`;
@@ -207,8 +209,8 @@ async function main(): Promise<void> {
   // another responder, multicast off, a guest network that isolates its
   // clients. Pairing by typed address still works, and the control page says
   // so rather than pretending the list will fill in.
-  await mdns.advertise(service()).catch((error: unknown) => {
-    console.warn(`bonjour unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  await mdns.advertise(service()).catch((cause: unknown) => {
+    console.warn(`bonjour unavailable: ${cause instanceof Error ? cause.message : String(cause)}`);
   });
 
   const addresses = lanAddresses();
@@ -245,7 +247,7 @@ const shutdown = async (signal: string): Promise<void> => {
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : String(error));
+main().catch((cause: unknown) => {
+  console.error(cause instanceof Error ? cause.message : String(cause));
   process.exit(1);
 });

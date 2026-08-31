@@ -11,6 +11,7 @@ import { join } from "node:path";
 import type { ModelCatalog } from "../../contracts.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import type { JsonObject, JsonValue } from "../../schema.ts";
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
 
@@ -88,15 +89,15 @@ async function resolveModels(env: Record<string, string | undefined>): Promise<M
 }
 
 async function applySetting(
-  request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>,
+  request: (method: string, params: JsonValue, timeoutMs?: number) => Promise<any>,
   method: string,
-  params: Record<string, unknown>,
+  params: JsonObject,
   what: string,
 ) {
   try {
     await request(method, params);
   } catch (e) {
-    throw new Error(`Hermes rejected ${what} via ${method}: ${(e as Error).message}`);
+    throw new Error(`Hermes rejected ${what} via ${method}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 

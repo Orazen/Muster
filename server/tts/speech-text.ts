@@ -105,11 +105,11 @@ export function speakable(input: string): string {
   text = shortenPaths(text);
 
   // emoji and the pictographic ranges: a voice either ignores them or,
-  // worse, announces them by name
-  text = text.replace(
-    /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu,
-    "",
-  );
+  // worse, announces them by name. Variation selectors are combining
+  // marks, so they get their own pass — mixing them into one class would
+  // pair them with the preceding character instead of stripping cleanly.
+  text = text.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu, "");
+  text = text.replace(/[\u{FE00}-\u{FE0F}]/gu, "");
 
   // a blank line is a paragraph break — make it an audible one
   text = text.replace(/\n{2,}/g, ". ");

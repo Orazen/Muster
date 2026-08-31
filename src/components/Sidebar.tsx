@@ -1,5 +1,6 @@
 import { track } from "@/lib/analytics";
 import { useEffect, useRef, useState } from "react";
+import { useAuth } from "@/lib/auth";
 import { createPortal } from "react-dom";
 import {
   Archive,
@@ -232,7 +233,7 @@ function RoomContextMenu({
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest("[data-room-menu]")) onClose();
+      if (e.target instanceof Element && !e.target.closest("[data-room-menu]")) onClose();
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("mousedown", onDown);
@@ -365,7 +366,7 @@ function BotContextMenu({
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest("[data-bot-menu]")) onClose();
+      if (e.target instanceof Element && !e.target.closest("[data-bot-menu]")) onClose();
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("mousedown", onDown);
@@ -739,6 +740,14 @@ function ArchivedBotsPanel({
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
+  // Signing up with an account (cloud or self-hosted auth) sets the auth
+  // user's name/email, but that's a separate identity from the local
+  // ~/.muster/config.json "profile" field this sidebar historically showed
+  // — so a freshly created account's name never appeared here, falling
+  // back to a bare "You". The local profile field still wins when set
+  // (it's the explicit override), but an authenticated session is now a
+  // real fallback instead of being ignored entirely.
+  const { user: authUser } = useAuth();
   const importReturnRef = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
@@ -917,6 +926,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       {/* macOS owns inset traffic lights; Linux/Windows use native chrome. */}
       <div
         className="flex items-center justify-between px-4 pt-3.5 pb-1"
+        // SAFETY: Electron honors the non-standard -webkit-app-region drag
+        // style, which React's CSSProperties does not declare.
         style={macInset ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined}
       >
         {macInset ? (
@@ -930,6 +941,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         ) : <div />}
         <div
           className="relative"
+          // SAFETY: Electron honors the non-standard -webkit-app-region drag
+          // style, which React's CSSProperties does not declare.
           style={macInset ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined}
         >
           <button
@@ -1079,9 +1092,19 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             onClick={() => dispatch({ type: "toggleAppSettings" })}
             className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-raised/50"
           >
-            <InitialsAvatar initials={profileInitials(state.config?.profile)} size={28} />
+            <InitialsAvatar
+              initials={profileInitials({
+                name: state.config?.profile?.name || authUser?.name,
+                email: state.config?.profile?.email || authUser?.email,
+              })}
+              size={28}
+            />
             <span className="truncate text-[14px] text-ink">
-              {state.config?.profile?.name?.trim() || state.config?.profile?.email?.trim() || "You"}
+              {state.config?.profile?.name?.trim() ||
+                authUser?.name?.trim() ||
+                state.config?.profile?.email?.trim() ||
+                authUser?.email?.trim() ||
+                "You"}
             </span>
           </button>
           <UpdateButton />

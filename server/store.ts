@@ -33,8 +33,14 @@ export type AgentColor =
  */
 export type AgentExpression = string;
 
-/** Which mascot body a bot uses: the procedural cursor, the .lottie character, or the star teammate. */
-export type AgentCharacter = "cursor" | "lottie" | "star";
+/** Which mascot body a bot uses: the procedural cursor, the .lottie
+ * character, the star teammate, or one of the shape-pack bodies (rendered
+ * through the same cursor engine client-side). */
+export type AgentCharacter = "cursor" | "lottie" | "star" | "hexagon" | "triangle" | "egg" | "drop" | "heart" | "pebble" | "squircle" | "capsule" | "cloud" | "ball" | "sparkle" | "circle";
+export const AGENT_CHARACTERS: readonly AgentCharacter[] = [
+  "star", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
+  "pebble", "squircle", "capsule", "cloud", "ball", "sparkle", "circle",
+];
 
 export interface OptionCardData {
   title: string;
@@ -69,7 +75,7 @@ export interface ConnectorCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "compaction" | "privacy";
   text?: string;
   card?: OptionCardData;
   connector?: ConnectorCardData;
@@ -82,6 +88,13 @@ export interface Message {
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
   /** screen messages: a frame of the bot's computer (base64 image) */
   png?: string;
+  /** compaction messages: a model-context summary covering everything
+   * before firstKeptId. Lives in the tree like any message — removes
+   * nothing behind it (the two-transcripts rule). */
+  compaction?: import("./model-context.ts").CompactionData;
+  /** privacy messages: what Privacy Shield masked before this turn left
+   * for a cloud model. Counts only — never the masked values. */
+  privacy?: { secrets: number; emails: number; phones: number };
   mime?: string;
   at: number;
   /** the message this one follows; null = thread root. Edited messages
@@ -119,6 +132,10 @@ export interface GroupRecord {
   bulletin: string;
   unread: boolean;
   createdAt: number;
+  /** owning user (multi-tenant guard, SELF_HOSTED only). Absent on records
+   * from before it existed — the boot migration stamps those with the
+   * deployment's primary user. */
+  ownerId?: string;
   /** true for auto-created bot⇄bot channels (ask_bot exchanges live here;
    * the user can open the channel and chip in) */
   dm?: boolean;
@@ -147,7 +164,7 @@ export interface TaskRecord {
   title: string;
   createdAt: number;
   /** provider-native continuation per instance, for THIS task only */
-  resumeCursors: Record<string, unknown>;
+  resumeCursors: Record<string, string>;
   /** which instance dispatched the most recent turn. A cursor alone can't
    * say whether an engine's session is current — another engine may have
    * taken turns since — so this is what decides an inline replay. Absent
@@ -181,13 +198,15 @@ export interface TaskUsage {
 function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number }>(message: T): T {
   if (message.role !== "bot") return message;
   const out = { ...message };
-  if (typeof out.text === "string") out.text = redactSecretsInText(out.text);
+  if (out.text !== undefined) out.text = redactSecretsInText(out.text);
   if (out.tool?.name) out.tool = { ...out.tool, name: redactSecretsInText(out.tool.name) };
   if (out.card) {
-    const card = { ...out.card } as OptionCardData & { summary?: string };
+    // SAFETY: cards saved by older builds may carry a summary field that
+    // OptionCardData no longer declares; redaction must still cover it.
+    const card: OptionCardData & { summary?: string } = { ...out.card };
     card.title = redactSecretsInText(card.title);
-    if (typeof card.subtitle === "string") card.subtitle = redactSecretsInText(card.subtitle);
-    if (typeof card.summary === "string") card.summary = redactSecretsInText(card.summary);
+    if (card.subtitle !== undefined) card.subtitle = redactSecretsInText(card.subtitle);
+    if (card.summary !== undefined) card.summary = redactSecretsInText(card.summary);
     out.card = card;
   }
   if (out.connector) {
@@ -234,6 +253,10 @@ export interface BotRecord {
   id: string;
   /** the ACTIVE task's thread — everything that runs a turn reads this */
   threadId: ThreadId;
+  /** owning user (multi-tenant guard, SELF_HOSTED only). Absent on records
+   * from before it existed — the boot migration stamps those with the
+   * deployment's primary user. */
+  ownerId?: string;
   /** every task this bot has, newest first */
   tasks?: TaskRecord[];
   name: string;
@@ -246,10 +269,10 @@ export interface BotRecord {
   unread: boolean;
   modelSelection: ModelSelection;
   /** provider-native continuation per instance (e.g. claude session id) */
-  resumeCursors: Record<string, unknown>;
+  resumeCursors: Record<string, string>;
   /** which computer the bot acts on: its cloud box, this Mac (local CUA),
    * or none. Unset = auto (box when it exists, else local when available). */
-  computer?: "cloud" | "vm" | "local" | "off";
+  computer?: "cloud" | "vm" | "local" | "opensandbox" | "vps" | "off";
   /** where NEW tasks run their shell tools; each task pins its own copy
    * on its first turn (TaskRecord.cwd). Absent = the home folder. */
   cwd?: string;
@@ -286,6 +309,12 @@ export interface BotRecord {
    * start false — a shared persona must not reach the user's Gmail on
    * turn one. */
   composio?: boolean;
+  /** Privacy Shield: rewrite this bot's prompts (and replayed history)
+   * through scrubForCloud() before any cloud API driver sees them —
+   * credential shapes and PII become [SECRET_N]/[EMAIL_N]/[PHONE_N]
+   * placeholders. Opt-in per bot; CLI engines that never leave the machine
+   * don't need it, so the default is off. */
+  privacyShield?: boolean;
   /** Derived from `activity` — kept so the 200+ readers across the app and
    * tests keep working unchanged. Write through setActivity(), never here. */
   busy?: boolean;
@@ -299,19 +328,6 @@ export interface BotRecord {
 const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
-
-const COLORS: AgentColor[] = [
-  "green",
-  "blue",
-  "red",
-  "orange",
-  "purple",
-  "cyan",
-  "pink",
-  "yellow",
-  "teal",
-  "coral",
-];
 
 /** Resolve @mentions in a message against a bot roster: `@` must start a
  * word, the name must end on a word boundary (so "@New Bottle" never matches
@@ -343,21 +359,22 @@ export function mentionedBots<T extends { name: string; hidden?: boolean }>(text
  * field; giving them their first member as lead fixes the old silent-send
  * behavior without making every prompt fan out to every model. */
 export function normalizeGroupDefaultResponder(
-  value: unknown,
+  value: GroupDefaultResponder,
   memberIds: string[],
   dm = false,
 ): GroupDefaultResponder {
   if (dm) return { kind: "mentions" };
-  if (value && typeof value === "object") {
-    const candidate = value as { kind?: unknown; botId?: unknown };
-    if (candidate.kind === "everyone") return { kind: "everyone" };
-    if (candidate.kind === "mentions") return { kind: "mentions" };
+  // Persisted rooms may predate this field's shape; only plain JSON objects
+  // carry a decodable policy.
+  if (value instanceof Object && value.constructor === Object) {
+    if (value.kind === "everyone") return { kind: "everyone" };
+    if (value.kind === "mentions") return { kind: "mentions" };
     if (
-      candidate.kind === "member" &&
-      typeof candidate.botId === "string" &&
-      memberIds.includes(candidate.botId)
+      value.kind === "member" &&
+      String(value.botId) === value.botId &&
+      memberIds.includes(value.botId)
     ) {
-      return { kind: "member", botId: candidate.botId };
+      return { kind: "member", botId: value.botId };
     }
   }
   if (memberIds.length === 0) return { kind: "mentions" };
@@ -400,6 +417,9 @@ export class Store {
   bots: BotRecord[] = [];
   groups: GroupRecord[] = [];
   private threads = new Map<string, ThreadState>();
+  /** Bots that were mid-turn when the previous process exited; consumed by
+   * takeStartupLosses() so the server can reconcile them visibly. */
+  private startupLosses: string[] = [];
   private defaultSelection: () => ModelSelection;
   private listeners = new Set<(change: StoreChange) => void>();
 
@@ -418,6 +438,8 @@ export class Store {
     }
     // busy never survives a restart — no turn does either. Rooms saved
     // before default responders existed adopt their first member as lead.
+    // Bots that were mid-turn are remembered (takeStartupLosses) so the
+    // server can say so in their thread instead of silently idling them.
     let botsMigrated = false;
     let chiefSeen = false;
     let groupsMigrated = false;
@@ -425,7 +447,10 @@ export class Store {
       // transient state never survives a restart — and if a previous
       // process died mid-turn, bots.json still says busy/working; persist
       // the reset so the next load does not read it again
-      if (b.busy || (b.activity !== undefined && b.activity !== "idle")) botsMigrated = true;
+      if (b.busy || (b.activity !== undefined && b.activity !== "idle")) {
+        botsMigrated = true;
+        this.startupLosses.push(b.id);
+      }
       b.busy = false;
       b.activity = "idle";
     }
@@ -454,6 +479,7 @@ export class Store {
         const candidates = this.bots.filter((candidate) => candidate.name === match[2]);
         if (candidates.length !== 1) return key;
         changed = true;
+        // SAFETY: the regex above only matches ask_bot / delegate_bot prefixes.
         return peerAllowKey(match[1] as PeerAction, candidates[0]!.id);
       });
       if (changed) {
@@ -495,12 +521,14 @@ export class Store {
     }
   }
 
-  private saveBots() {
+  /** Persist bots after an out-of-band mutation (the ownership boot
+   * migration mutates records in place). */
+  saveBots() {
     writeFileAtomic(BOTS_FILE, JSON.stringify(this.bots, null, 2));
   }
 
-  private saveGroups() {
-    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId, ...g }) => g), null, 2));
+  saveGroups() {
+    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, ...g }) => g), null, 2));
   }
 
   // ── groups ────────────────────────────────────────────────────────────
@@ -512,7 +540,7 @@ export class Store {
   }
 
   private emit(change: StoreChange) {
-    for (const listener of [...this.listeners]) {
+    for (const listener of Array.from(this.listeners)) {
       try {
         listener(change);
       } catch (error) {
@@ -529,7 +557,7 @@ export class Store {
     return this.groups.find((g) => g.threadId === threadId);
   }
 
-  createGroup(name: string, memberIds: string[], dm = false): GroupRecord {
+  createGroup(name: string, memberIds: string[], dm = false, ownerId?: string): GroupRecord {
     const group: GroupRecord = {
       id: newId(),
       threadId: newId(),
@@ -542,6 +570,7 @@ export class Store {
       dm: dm || undefined,
       busyBotId: null,
     };
+    if (ownerId) group.ownerId = ownerId;
     this.groups.unshift(group);
     this.saveGroups();
     this.emit({ type: "group", groupId: group.id });
@@ -735,7 +764,7 @@ export class Store {
 
   createBot(
     profile: Partial<
-      Pick<BotRecord, "name" | "title" | "description" | "color" | "character" | "mascotExpression" | "modelSelection">
+      Pick<BotRecord, "name" | "title" | "description" | "color" | "character" | "mascotExpression" | "modelSelection" | "ownerId" | "privacyShield">
     > = {},
     opts: {
       /** false = no greeting/onboarding seed. Imported bots must not open
@@ -751,14 +780,22 @@ export class Store {
       title: profile.title ?? "",
       description: profile.description ?? "",
       notifications: true,
-      color: profile.color ?? COLORS[this.bots.length % COLORS.length],
-      ...(profile.character ? { character: profile.character } : {}),
-      ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
+      // Privacy Shield defaults ON: new bots scrub PII and secrets out of any
+      // transcript replay before it reaches a cloud model (the shield is a
+      // no-op for local drivers, so self-hosters lose nothing). Existing bots
+      // keep whatever their owner chose — this only moves the starting point.
+      privacyShield: profile.privacyShield ?? true,
+      // Brand defaults: every teammate musters in as the orange star unless a
+      // caller (onboarding wizard, team import) says otherwise.
+      color: profile.color ?? "orange",
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},
       createdAt: Date.now(),
     };
+    if (profile.ownerId) bot.ownerId = profile.ownerId;
+    bot.character = profile.character ?? "star";
+    if (profile.mascotExpression) bot.mascotExpression = profile.mascotExpression;
     bot.tasks = [{ threadId: bot.threadId, title: UNTITLED_TASK, createdAt: bot.createdAt, resumeCursors: {} }];
     this.bots.unshift(bot);
     this.saveBots();
@@ -803,6 +840,14 @@ export class Store {
     return bot;
   }
 
+  /** Bots that were persisted mid-turn when this process loaded. Returned
+   * once; the server appends a visible reconciliation note to each thread. */
+  takeStartupLosses(): string[] {
+    const lost = this.startupLosses;
+    this.startupLosses = [];
+    return lost;
+  }
+
   /** The one way runtime state changes. Sets `activity` and derives `busy`
    * from it, so a reader that only knows busy sees the same truth. */
   setActivity(botId: string, activity: BotActivity): BotRecord | null {
@@ -840,7 +885,7 @@ export class Store {
     return changed;
   }
 
-  setResumeCursor(botId: string, instanceId: string, cursor: unknown, threadId?: string) {
+  setResumeCursor(botId: string, instanceId: string, cursor: string, threadId?: string) {
     const bot = this.bot(botId);
     if (!bot) return;
     // the cursor belongs to the task that produced it, not to the bot
@@ -874,11 +919,11 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task) return null;
     const prev: TaskUsage = { input: 0, output: 0, costUsd: null, turns: 0, ...task.usage };
-    const cost = typeof turn.costUsd === "number" && Number.isFinite(turn.costUsd) ? turn.costUsd : null;
-    const prevCost = typeof prev.costUsd === "number" ? prev.costUsd : null;
+    const cost = turn.costUsd !== null && Number.isFinite(turn.costUsd) ? turn.costUsd : null;
+    const prevCost = prev.costUsd !== null ? prev.costUsd : null;
     // providers occasionally report NaN or a negative on a partial turn —
     // never let that poison a running tally
-    const clean = (n: number | undefined) => (typeof n === "number" && Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0);
+    const clean = (n: number | undefined) => (n !== undefined && Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0);
     task.usage = {
       input: prev.input + clean(turn.input),
       output: prev.output + clean(turn.output),

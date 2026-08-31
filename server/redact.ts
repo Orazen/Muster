@@ -10,6 +10,7 @@
 // So the log keeps the SHAPE and loses the VALUES: a redacted entry still
 // tells you a token was passed, under which name, and how long it was —
 // enough to debug "the proxy got no token" without the token being there.
+import type { JsonObject, JsonValue } from "./schema.ts";
 
 /** Key names whose value is a credential. Matched case-insensitively as a
  * substring, so KEY catches ANTHROPIC_API_KEY and x-api-key. */
@@ -61,39 +62,46 @@ export function redactSecretsInText(text: string): string {
   return out;
 }
 
+/** True only for primitive strings — what JSON decoding yields for text fields. */
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
 /** Deep copy with credential VALUES replaced. Handles the two shapes that
  * actually carry them: a plain object of env vars ({KEY: "v"}) and the ACP
  * wire shape (env: [{name, value}]). Anything unrecognised is copied as-is. */
-export function redactSecrets(input: unknown, depth = 0): unknown {
-  if (typeof input === "string") return redactSecretsInText(input);
-  if (depth > 12 || input === null || typeof input !== "object") return input;
+export function redactSecrets<T>(value: T, depth = 0): T {
+  // SAFETY: callers hand over JSON-serializable payloads (native messages,
+  // runtime events), so the recursive pass can read them as their JSON shape
+  // and returns a value of exactly the type it was given.
+  return redactJsonValue(value as JsonValue, depth) as T;
+}
+
+function redactJsonValue(input: JsonValue, depth: number): JsonValue {
+  if (isText(input)) return redactSecretsInText(input);
+  if (depth > 12 || input === null || !(input instanceof Object)) return input;
 
   if (Array.isArray(input)) {
     return input.map((item) => {
       // ACP env entries: {name: "OMB_COMMS_TOKEN", value: "…"}
-      if (
-        item !== null &&
-        typeof item === "object" &&
-        !Array.isArray(item) &&
-        typeof (item as { name?: unknown }).name === "string" &&
-        typeof (item as { value?: unknown }).value === "string"
-      ) {
-        const entry = item as { name: string; value: string };
-        return isSecretName(entry.name) ? { ...entry, value: mask(entry.value) } : entry;
+      if (item !== null && item instanceof Object && !Array.isArray(item)) {
+        // SAFETY: the entry is decoded JSON; its name/value shape is proven below
+        const candidate = item as { name?: JsonValue; value?: JsonValue };
+        if (isText(candidate.name) && isText(candidate.value)) {
+          return isSecretName(candidate.name) ? { ...item, value: mask(candidate.value) } : item;
+        }
       }
-      return redactSecrets(item, depth + 1);
+      return redactJsonValue(item, depth + 1);
     });
   }
 
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
-    if (typeof value === "string" && isSecretName(key)) {
+  const out: JsonObject = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (isText(value) && isSecretName(key)) {
       out[key] = mask(value);
       continue;
     }
     // any other string may still CONTAIN a credential (a command line, a
     // header value, a bot's reply) — the content pass catches those
-    out[key] = redactSecrets(value, depth + 1);
+    out[key] = redactJsonValue(value, depth + 1);
   }
   return out;
 }

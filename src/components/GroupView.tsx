@@ -3,7 +3,7 @@
 // does not become a wall of competing motion. Plain messages go to the room's
 // default responder; @mentions override that routing.
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ChevronDown, Folder, FolderOpen, Pin } from "lucide-react";
+import { ArrowDown, ChevronDown, Folder, FolderOpen, Pin, Search } from "lucide-react";
 import {
   api,
   useStore,
@@ -18,6 +18,9 @@ import { AgentAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
 import { effectiveDefaultResponder, groupResponseHint } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { MessageBody } from "./MessageBody";
+import { CompactionDivider } from "./CompactionDivider";
+import { PrivacyNotice } from "./PrivacyNotice";
 import { Composer } from "./Composer";
 import { ConnectorCard } from "./ConnectorCard";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
@@ -25,6 +28,8 @@ import { ReactionBar, ReactionChips } from "./Reactions";
 import { ApprovalCard } from "./ApprovalCard";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { cn } from "@/lib/cn";
+
+import { ChatFindBar } from "./ChatFindBar";
 import { useFocusMessage } from "@/lib/focus-message";
 import { shortPath } from "@/lib/short-path";
 import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "@/lib/bottom-follow";
@@ -49,11 +54,13 @@ function dayLabel(at: number): string {
 
 /** 16px agent + name, shown once per sender cluster. */
 function ClusterLabel({ bot, name, color }: { bot?: Bot; name: string; color: string }) {
+  // SAFETY: the fallback comes from the same sender palette as Bot["color"]
+  const avatarColor = (bot?.color ?? color) as Bot["color"];
   return (
     <div className="mt-1 flex items-center gap-1.5 pl-0.5">
       <AgentAvatar
         character={bot?.character}
-        color={(bot?.color ?? color) as Bot["color"]}
+        color={avatarColor}
         state={normalizeState(bot?.mascotExpression) ?? "happy"}
         size={16}
         motion="none"
@@ -92,6 +99,10 @@ const Transcript = memo(function Transcript({
           // Allow the broker rejects
           m.kind === "connector" && m.connector && m.from?.botId ? (
             <ConnectorCard botId={m.from.botId} threadId={group.threadId} message={m} />
+          ) : m.kind === "compaction" && m.compaction ? (
+            <CompactionDivider data={m.compaction} />
+          ) : m.kind === "privacy" && m.privacy ? (
+            <PrivacyNotice privacy={m.privacy} />
           ) : m.kind === "options" && m.card?.requestId && m.card.tool ? (
             <div className="flex justify-start">
               <ApprovalCard bot={memberOf(m.from?.botId)} message={m} />
@@ -114,11 +125,11 @@ const Transcript = memo(function Transcript({
                 <div
                   className={cn(
                     "max-w-[70%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
-                    user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
+                    user ? "whitespace-pre-wrap border border-bubble-user-border bg-bubble-user text-ink" : "bg-card text-ink",
                   )}
                   title={new Date(m.at).toLocaleString()}
                 >
-                  {user ? m.text : <ChatMarkdown text={m.text} />}
+                  {user ? <MessageBody text={m.text} /> : <MessageBody text={m.text} markdown />}
                 </div>
                 {!user && <ReactionBar threadId={group.threadId} message={m} />}
                 <span className="self-end pb-1 text-[11px] tabular-nums text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100">
@@ -336,6 +347,19 @@ export function GroupView({ group }: { group: Group }) {
   const [bulletinOpen, setBulletinOpen] = useState(false);
   const [bulletinDraft, setBulletinDraft] = useState(group.bulletin);
   const [folderOpen, setFolderOpen] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+
+  useEffect(() => setFindOpen(false), [group.threadId]);
+  useEffect(() => {
+    const onFind = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onFind);
+    return () => window.removeEventListener("keydown", onFind);
+  }, []);
 
   const members = useMemo(
     () => group.memberIds.map((id) => state.bots.find((b) => b.id === id)).filter((b): b is Bot => Boolean(b)),
@@ -443,7 +467,9 @@ export function GroupView({ group }: { group: Group }) {
   };
 
   const isWin = window.ogb?.platform === "win32";
+  // SAFETY: WebkitAppRegion is Electron's non-standard drag style; it is absent from the DOM CSSProperties type
   const drag = isWin ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined;
+  // SAFETY: WebkitAppRegion is Electron's non-standard drag style; it is absent from the DOM CSSProperties type
   const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined;
 
   return (
@@ -461,6 +487,18 @@ export function GroupView({ group }: { group: Group }) {
       >
         <span className="text-[15px] font-semibold text-ink">{group.name}</span>
         <div className="flex items-center gap-1.5" style={noDrag}>
+          <button
+            onClick={() => setFindOpen((open) => !open)}
+            aria-label="Find in conversation"
+            aria-pressed={findOpen}
+            className={cn(
+              "rounded-md p-1.5 hover:bg-raised",
+              findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+            )}
+            title="Find in conversation (⌘F)"
+          >
+            <Search size={16} />
+          </button>
           <GroupCallButton group={group} members={members} />
           {!group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
           {!group.dm && <DefaultResponderSelect group={group} members={members} />}
@@ -487,6 +525,8 @@ export function GroupView({ group }: { group: Group }) {
           ))}
         </div>
       </div>
+
+      {findOpen && <ChatFindBar threadId={group.threadId} onClose={() => setFindOpen(false)} />}
 
       {/* Bulletin: one pinned line; click to edit */}
       <div className="mx-auto w-full max-w-[900px] px-5">

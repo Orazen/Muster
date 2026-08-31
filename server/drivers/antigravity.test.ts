@@ -112,16 +112,20 @@ describe("Antigravity turns (fake CLI)", () => {
     expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "antigravityAgent")).toBe(true);
 
     const session = recorder.events.find((e) => e.type === "session.started")!;
-    expect((session as any).sessionId).toBe("conv-fake-123");
+    expect(session).toMatchObject({ sessionId: "conv-fake-123" });
 
-    const tool = recorder.events.find((e) => e.type === "item.completed" && (e as any).itemType === "tool")!;
-    expect((tool as any).ok).toBe(true);
+    const tool = recorder.events.find(
+      (e) => e.type === "item.completed" && "itemType" in e && e.itemType === "tool",
+    )!;
+    expect(tool).toMatchObject({ ok: true });
 
     const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated")!;
     expect(usage).toMatchObject({ input: 105, output: 20 });
 
-    const text = recorder.events.find((e) => e.type === "item.completed" && (e as any).itemType === "assistant_text")!;
-    expect((text as any).text).toBe("done from fake agy");
+    const text = recorder.events.find(
+      (e) => e.type === "item.completed" && "itemType" in e && e.itemType === "assistant_text",
+    )!;
+    expect(text).toMatchObject({ text: "done from fake agy" });
 
     const done = recorder.events.at(-1)!;
     // result.usage is the turn total (the per-step figures precede it)
@@ -150,7 +154,9 @@ describe("Antigravity snapshot", () => {
     expect(snap.version).toBe("1.1.12");
     // agy auth is keyring-backed with no reliable file marker, so the snapshot
     // must NOT claim signed-in from a mere directory — authenticated stays unset.
-    expect((snap as any).authenticated).toBeUndefined();
+    // SAFETY: the snapshot type leaves `authenticated` off entirely in that
+    // case; the cast only lets the test pin that absence.
+    expect((snap as { authenticated?: unknown }).authenticated).toBeUndefined();
     await instance.dispose();
   });
 

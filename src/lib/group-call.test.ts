@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { Bot } from "@/state/store";
 import { routeSpokenGroupMessage } from "./group-call";
 
+// SAFETY: partial test double — routing only reads id and name from each
+// member, so the rest of the Bot shape is irrelevant here.
 const members = [
   { id: "atlas", name: "Atlas" },
   { id: "alex", name: "Alex" },

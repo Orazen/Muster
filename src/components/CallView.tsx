@@ -296,7 +296,7 @@ function Call({ bot }: { bot: Bot }) {
         setNote("Dictation stopped unexpectedly. Check Microphone and Speech Recognition access.");
         return;
       }
-      if (typeof line.text !== "string") return;
+      if (line.text === undefined) return;
       setHeard(line.text);
       if (line.partial !== false) return;
       // final result — Apple's recognizer decided the turn ended

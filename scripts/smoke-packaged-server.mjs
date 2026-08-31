@@ -24,15 +24,19 @@ const port = 21000 + Math.floor(Math.random() * 9000);
 
 cpSync(join(root, "dist-server"), join(staging, "server"), { recursive: true });
 
+// PATH and SystemRoot pass through only when present: a stripped env is part
+// of what this smoke exercises, so missing vars must stay missing.
+const childEnv = {
+  HOME: home,
+  USERPROFILE: home,
+  OMB_PORT: String(port),
+};
+if (process.env.PATH) childEnv.PATH = process.env.PATH;
+if (process.env.SystemRoot) childEnv.SystemRoot = process.env.SystemRoot;
+
 const child = spawn(process.execPath, [join(staging, "server", "index.js")], {
   cwd: staging,
-  env: {
-    ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-    ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-    HOME: home,
-    USERPROFILE: home,
-    OMB_PORT: String(port),
-  },
+  env: childEnv,
   stdio: ["ignore", "pipe", "pipe"],
 });
 

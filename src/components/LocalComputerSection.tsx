@@ -1,4 +1,5 @@
-// One-place setup and lifecycle for the shared, isolated Local VM.
+// One-place setup and lifecycle for the shared, isolated Local VM, plus the
+// desktop isolation setting (shared singleton vs one desktop per bot).
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -14,7 +15,7 @@ import {
 import { Card, CommandLine } from "./SettingsPrimitives";
 import { cn } from "@/lib/cn";
 
-type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
+type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate" | "runtimeStart";
 
 interface Status {
   platform: string;
@@ -39,6 +40,8 @@ interface Status {
   workspace_guest_path: string;
   viewer_url: string;
   idle_timeout_ms: number;
+  mode?: "shared" | "perBot";
+  max_instances?: number;
   commands: {
     install: string | null;
     runtimeStart: string | null;
@@ -98,6 +101,128 @@ function ActionButton({
   );
 }
 
+type IsolationMode = NonNullable<Status["mode"]>;
+const MAX_DESKTOPS_MIN = 1;
+const MAX_DESKTOPS_MAX = 16;
+
+function clampMaxDesktops(value: number): number {
+  if (!Number.isFinite(value)) return 4;
+  return Math.min(MAX_DESKTOPS_MAX, Math.max(MAX_DESKTOPS_MIN, Math.trunc(value)));
+}
+
+/** Radio pair + cap input persisted to /api/config {localVm}. The server
+ * refuses a per-bot → shared switch while bots still hold their own desktops,
+ * so its error text is surfaced verbatim here. */
+function DesktopIsolationCard({ status }: { status: Status | null }) {
+  const [mode, setMode] = useState<IsolationMode>("shared");
+  const [maxInstances, setMaxInstances] = useState(4);
+  const [hydrated, setHydrated] = useState(false);
+  const [editingMax, setEditingMax] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Poll refreshes must not stomp in-progress edits; only the server's saved
+  // values flow back in while the user is not typing or saving.
+  useEffect(() => {
+    if (!status?.mode || saving || editingMax) return;
+    setMode(status.mode);
+    setMaxInstances(status.max_instances ?? 4);
+    setHydrated(true);
+  }, [status?.mode, status?.max_instances, saving, editingMax]);
+
+  const save = async (nextMode: IsolationMode, nextMax: number) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/config", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ localVm: { mode: nextMode, maxInstances: nextMax } }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? `Saving failed (${response.status})`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const options: Array<{ value: IsolationMode; label: string; detail: string }> = [
+    {
+      value: "shared",
+      label: "Shared",
+      detail: "One desktop all bots lease one at a time — cheapest, and everyone sees the same screen.",
+    },
+    {
+      value: "perBot",
+      label: "Per-bot",
+      detail:
+        "Each bot gets its own dedicated desktop — container, workspace, viewer and lease. Desktops are created when a bot starts working and recycled after 8 idle hours.",
+    },
+  ];
+
+  return (
+    <Card
+      title="Isolation"
+      subtitle="Choose whether bots share one Local VM or each gets their own. Every desktop is capped at 4 GB memory and 2 CPUs."
+    >
+      <div className="flex flex-col gap-2">
+        {options.map((option) => (
+          <label
+            key={option.value}
+            className={cn(
+              "flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors",
+              mode === option.value ? "border-accent/50 bg-accent/5" : "border-hairline/40 hover:bg-raised",
+            )}
+          >
+            <input
+              type="radio"
+              name="desktop-isolation"
+              className="mt-0.5 accent-[var(--color-accent)]"
+              checked={mode === option.value}
+              disabled={saving || !hydrated}
+              onChange={() => {
+                setMode(option.value);
+                void save(option.value, clampMaxDesktops(maxInstances));
+              }}
+            />
+            <span className="min-w-0">
+              <span className="block text-[13.5px] text-ink">{option.label}</span>
+              <span className="block text-[12px] leading-relaxed text-ink-secondary">{option.detail}</span>
+            </span>
+          </label>
+        ))}
+        <div className="flex items-center gap-3 pl-1 pt-1">
+          <label htmlFor="max-per-bot-desktops" className={cn("text-[13px]", mode === "perBot" ? "text-ink" : "text-ink-secondary")}>
+            Maximum per-bot desktops
+          </label>
+          <input
+            id="max-per-bot-desktops"
+            type="number"
+            min={MAX_DESKTOPS_MIN}
+            max={MAX_DESKTOPS_MAX}
+            step={1}
+            value={maxInstances}
+            disabled={saving || !hydrated}
+            onFocus={() => setEditingMax(true)}
+            onBlur={() => {
+              setEditingMax(false);
+              const clamped = clampMaxDesktops(maxInstances);
+              setMaxInstances(clamped);
+              if (clamped !== (status?.max_instances ?? 4)) void save(mode, clamped);
+            }}
+            onChange={(e) => setMaxInstances(e.target.valueAsNumber)}
+            className="w-20 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-center text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
+          />
+          {saving && <Loader2 size={13} className="animate-spin text-ink-secondary" />}
+        </div>
+        {error && <div className="rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
+      </div>
+    </Card>
+  );
+}
+
 export function LocalComputerSection() {
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
@@ -109,6 +234,8 @@ export function LocalComputerSection() {
     const response = await fetch("/api/local-computer", { signal });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `Status request failed (${response.status})`);
+    // SAFETY: /api/local-computer serves the Status shape by contract; a
+    // malformed body falls back to {} above and renders as an idle panel.
     setStatus(body as Status);
     setError(null);
   }, []);
@@ -149,6 +276,8 @@ export function LocalComputerSection() {
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `${action} failed`);
+    // SAFETY: the action endpoints answer with the same Status shape the
+    // poll endpoint serves; the UI re-polls, so a stale body self-heals.
     setStatus(body as Status);
   };
 
@@ -180,6 +309,45 @@ export function LocalComputerSection() {
     }
   };
 
+  const [autoSetupRunning, setAutoSetupRunning] = useState(false);
+
+  // Steps 2-4 chained into one click, in order, stopping and reporting
+  // exactly where it failed if any step does. Step 1 (installing the
+  // runtime itself) is never included here — that's new software on the
+  // user's machine, the one thing this can't quietly do on their behalf,
+  // same category as the Apple/Google developer-account limitations
+  // elsewhere in this app.
+  const runAutoSetup = async () => {
+    setAutoSetupRunning(true);
+    setError(null);
+    try {
+      let current = status;
+      if (current?.runtime && !current.daemonUp) {
+        if (current.runtime === "docker" && current.platform === "linux") {
+          throw new Error("Starting docker on Linux needs sudo — run the command shown below yourself, then continue.");
+        }
+        await post("runtimeStart");
+        current = await (await fetch("/api/local-computer")).json();
+        setStatus(current);
+      }
+      if (current && !current.image) {
+        await post("pull");
+        current = await (await fetch("/api/local-computer")).json();
+        setStatus(current);
+      }
+      if (current && current.container === "missing" && current.image) {
+        await post("run");
+        current = await (await fetch("/api/local-computer")).json();
+        setStatus(current);
+      }
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAutoSetupRunning(false);
+    }
+  };
+
   const c = status?.commands;
   const ready = status?.ready === true;
   const existing = status?.container !== "missing";
@@ -197,6 +365,7 @@ export function LocalComputerSection() {
 
   return (
     <>
+      <DesktopIsolationCard status={status} />
       <Card
         title="Local VM"
         subtitle={`A shared Cua Linux sandbox on this ${host} for bots to browse and work in — isolated, backed by one durable workspace, and automatically recycled after 8 hours without activity.`}
@@ -237,6 +406,21 @@ export function LocalComputerSection() {
 
       <Card title="Setup" subtitle="Once a container runtime is open, Muster prepares Cua and the VM for you.">
         <div className="flex flex-col gap-4">
+          {status?.runtime && !status.ready && !needsRecreate && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-accent/25 bg-accent/5 px-3.5 py-3">
+              <div className="text-[13px] text-ink-secondary">
+                Runtime installed — start it, prepare the desktop, and create the VM in one step.
+              </div>
+              <button
+                onClick={() => void runAutoSetup()}
+                disabled={autoSetupRunning || pending !== null}
+                className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+              >
+                {autoSetupRunning && <Loader2 size={13} className="animate-spin" />}
+                Set up automatically
+              </button>
+            </div>
+          )}
           <Step n={1} title="Install a container runtime" done={Boolean(status?.runtime)}>
             <div className="text-[13px] leading-relaxed text-ink-secondary">
               Podman and Colima are free. Docker Desktop may require a paid licence for larger companies and government use.
@@ -255,10 +439,31 @@ export function LocalComputerSection() {
             title={status?.runtime && !status.daemonUp ? `Open and start ${status.runtime}` : "Start the container runtime"}
             done={Boolean(status?.daemonUp)}
           >
-            {!status?.runtime ? null : c?.runtimeStart ? (
-              <CommandLine command={c.runtimeStart} />
-            ) : (
-              <div className="text-[13px] text-ink-secondary">Open the installed runtime and start its engine, then re-check.</div>
+            {!status?.runtime ? null : (
+              <>
+                {
+                  // Every case except docker-on-linux is a plain user-level
+                  // command (launch a GUI app, start a VM manager) — Muster
+                  // can just run it. docker-on-linux needs sudo, a password
+                  // prompt Muster has no way to satisfy programmatically, so
+                  // that one case still shows the command to run by hand.
+                  !(status?.runtime === "docker" && status?.platform === "linux") ? (
+                    <ActionButton action="runtimeStart" pending={pending} onClick={() => void act("runtimeStart")}>
+                      Start {status?.runtime}
+                    </ActionButton>
+                  ) : c?.runtimeStart ? (
+                    <CommandLine command={c.runtimeStart} />
+                  ) : (
+                    <div className="text-[13px] text-ink-secondary">Open the installed runtime and start its engine, then re-check.</div>
+                  )
+                }
+                {c?.runtimeStart && !(status?.runtime === "docker" && status?.platform === "linux") && (
+                  <details className="text-[12px] text-ink-secondary">
+                    <summary className="cursor-pointer">Show command</summary>
+                    <div className="mt-2"><CommandLine command={c.runtimeStart} /></div>
+                  </details>
+                )}
+              </>
             )}
           </Step>
 

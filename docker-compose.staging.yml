@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  muster:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8799:8799"
+    environment:
+      - NODE_ENV=staging
+      - OMB_HOST=0.0.0.0
+      - OMB_PORT=8799
+    volumes:
+      - muster-data:/data
+    restart: unless-stopped
+
+volumes:
+  muster-data:

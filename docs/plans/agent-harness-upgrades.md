@@ -519,6 +519,20 @@ may mean turns never end — no `turn.completed`, bot stuck indefinitely.
 **Verify the CLI's EOF semantics before designing the queue**, and do not attempt
 this before item 6 exists to catch a hung turn.
 
+> **Verified 2026-08-23 (claude CLI 2.1.236, macOS).** Headless
+> `claude -p --input-format stream-json --output-format stream-json` was run
+> twice with the same single user message: once closing stdin after the write,
+> once leaving it open. Closed → `result: success` immediately. Open → **no
+> result event at all after 45 s**; the process sat waiting for more input.
+> Conclusion: EOF *is* the turn-completion signal, and the CLI emits nothing
+> per-message while stdin stays open — so live mid-turn injection into a
+> running claude/codex-style CLI turn is structurally impossible in headless
+> mode. The design answer is therefore NOT a persistent-session injection
+> queue; it is the existing stop-then-steer queue (interrupt → replay with the
+> steering message appended), which the rewind/replay machinery already
+> implements, plus item 9's enforcement for the API drivers whose tool loop
+> the harness owns end-to-end.
+
 **Design.**
 
 - `ProviderAdapter.steer(threadId, text)` and `.followUp(threadId, text)`, plus

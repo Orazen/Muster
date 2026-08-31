@@ -14,7 +14,7 @@ installed builds do not require Node, pnpm, Swift, or a terminal at runtime.
 The first beta intentionally does **not** claim Linux dictation, local screen preview, or control of this
 computer. Those controls are unavailable in the UI and fail closed in the Electron and server layers. Use a
 Cloud box when a bot needs a computer. Xorg computer control, Wayland validation, bundled CUA, dictation, and
-ARM64 are follow-ups in [issue #29](https://github.com/tharunramagiri/Muster/issues/29).
+ARM64 are follow-ups in [issue #29](https://github.com/Orazen/Muster/issues/29).
 
 ## Build packages
 
@@ -25,7 +25,7 @@ Requirements for building from source:
 - pnpm 10.33.0 (Corepack can install the version declared by the project)
 
 ```sh
-git clone https://github.com/tharunramagiri/Muster.git
+git clone https://github.com/Orazen/Muster.git
 cd Muster
 corepack enable
 pnpm install --frozen-lockfile

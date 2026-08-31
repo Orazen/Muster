@@ -19,6 +19,7 @@
 // that lookup is unaffected.
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
+import childProcess from "node:child_process";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -35,7 +36,21 @@ const ENTRY_POINTS = [
   "drivers/dweb-proxy.ts",
 ];
 
+// better-sqlite3 carries a native .node addon — esbuild cannot inline it,
+// and bundling its JS produces "Dynamic require of fs" crashes at boot
+// (shipped once as the muster.orazen.online outage). Externalize it and
+// ship a real copy next to the bundle instead; Node resolves
+// dist-server/node_modules before falling back further up the tree.
+const NATIVE_EXTERNALS = ["better-sqlite3"];
+
 await build({
+  external: NATIVE_EXTERNALS,
+  // Bundled CJS deps (telegraf, vaultgram's internals) call require() at
+  // runtime; under ESM output esbuild's stub throws "Dynamic require".
+  // Give it a real require via createRequire so those calls resolve.
+  banner: {
+    js: `import { createRequire as __creq } from "node:module"; const require = __creq(import.meta.url);`,
+  },
   entryPoints: ENTRY_POINTS.map((entry) => join(server, entry)),
   bundle: true,
   platform: "node",
@@ -47,3 +62,78 @@ await build({
   allowOverwrite: true,
   logLevel: "info",
 });
+
+
+// Copy each native external's real package directory (pnpm layout included)
+// into dist-server/node_modules so the externalized import still resolves in
+// the packaged tree, where no other node_modules exist.
+import { cpSync, mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
+
+function reqResolveVaultgram() {
+  const rootReq = createRequire(join(root, "package.json"));
+  return rootReq.resolve("vaultgram");
+}
+
+// Resolve from vaultgram's context: better-sqlite3 is its dependency, not
+// ours, and pnpm hides transitive packages from the root resolver.
+const req = createRequire(reqResolveVaultgram());
+// Vendor under a name electron-builder never prunes ("node_modules" dirs are
+// silently dropped from extraResources), then rewrite the bare specifier in
+// the emitted bundle to the vendored relative path.
+const VENDOR_DIR = "_native";
+mkdirSync(join(root, "dist-server", VENDOR_DIR), { recursive: true });
+for (const name of NATIVE_EXTERNALS) {
+  const resolved = req.resolve(`${name}/package.json`);
+  const srcDir = dirname(resolved);
+  const dest = join(root, "dist-server", VENDOR_DIR, name);
+  // dereference: pnpm installs are symlink farms — links would dangle in app bundles
+  cpSync(srcDir, dest, { recursive: true, dereference: true });
+  // better-sqlite3 resolves its helpers via plain node_modules lookup — give
+  // the vendored copy its own nested node_modules with real files.
+  if (name === "better-sqlite3") {
+    const nested = join(dest, "node_modules");
+    mkdirSync(nested, { recursive: true });
+    for (const helper of ["bindings", "file-uri-to-path"]) {
+      try {
+        const helperSrc = dirname(req.resolve(`${helper}/package.json`));
+        cpSync(helperSrc, join(nested, helper), { recursive: true, dereference: true });
+      } catch {
+        console.log(`helper ${helper} not resolvable from vaultgram context — skipped`);
+      }
+    }
+  }
+  // pnpm (and CI npm config) often skips install scripts, leaving no
+  // better_sqlite3.node. Fetch the prebuilt binary; fall back to source build.
+  const { execSync } = childProcess;
+  if (!existsSync(join(dest, "build", "Release", "better_sqlite3.node")) &&
+      !existsSync(join(dest, "prebuilds"))) {
+    try {
+      execSync("npx --yes prebuild-install", { cwd: dest, stdio: "inherit" });
+      console.log(`prebuilt binary fetched for ${name}`);
+    } catch {
+      console.log(`prebuild-install failed for ${name} — building from source`);
+      execSync("npx --yes node-gyp rebuild", { cwd: dest, stdio: "inherit" });
+    }
+  }
+  console.log(`bundled native dep: ${name} -> ${dest}`);
+}
+
+// Rewrite every remaining bare "better-sqlite3" specifier in dist-server/**/*.js
+// to the vendored copy, relative to the importing file's depth.
+function rewriteSpecifiers(dir, relPrefix) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      rewriteSpecifiers(full, relPrefix + "../");
+    } else if (entry.name.endsWith(".js")) {
+      let text = readFileSync(full, "utf8");
+      if (!text.includes('"better-sqlite3"') && !text.includes("'better-sqlite3'")) continue;
+      text = text.replaceAll('"better-sqlite3"', `"${relPrefix}${VENDOR_DIR}/better-sqlite3/lib/index.js"`);
+      text = text.replaceAll("'better-sqlite3'", `'${relPrefix}${VENDOR_DIR}/better-sqlite3/lib/index.js'`);
+      writeFileSync(full, text);
+      console.log(`rewrote better-sqlite3 specifier -> ${full}`);
+    }
+  }
+}
+rewriteSpecifiers(join(root, "dist-server"), "./");

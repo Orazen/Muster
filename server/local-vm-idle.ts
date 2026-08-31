@@ -43,3 +43,39 @@ export class LocalVmIdleTimer {
     }
   }
 }
+
+/** One recycle deadline per desktop target. Shared mode holds a single
+ * entry and behaves exactly like the bare timer; per-bot mode gives every
+ * desktop its own countdown so an unused bot's container is recycled
+ * without touching anyone else's. */
+export class LocalVmIdleTimerPool {
+  private readonly timers = new Map<string, LocalVmIdleTimer>();
+  private readonly idleMs: number;
+  private readonly isBusy: (targetKey: string) => boolean;
+  private readonly suspend: (targetKey: string) => Promise<void>;
+
+  constructor(
+    idleMs: number,
+    isBusy: (targetKey: string) => boolean,
+    suspend: (targetKey: string) => Promise<void>,
+  ) {
+    if (!Number.isFinite(idleMs) || idleMs <= 0) throw new Error("Local VM idle timeout must be positive");
+    this.idleMs = idleMs;
+    this.isBusy = isBusy;
+    this.suspend = suspend;
+  }
+
+  forTarget(targetKey: string): LocalVmIdleTimer {
+    let timer = this.timers.get(targetKey);
+    if (!timer) {
+      timer = new LocalVmIdleTimer(this.idleMs, () => this.isBusy(targetKey), () => this.suspend(targetKey));
+      this.timers.set(targetKey, timer);
+    }
+    return timer;
+  }
+
+  cancelAll(): void {
+    for (const timer of this.timers.values()) timer.cancel();
+    this.timers.clear();
+  }
+}

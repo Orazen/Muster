@@ -32,7 +32,11 @@ export function initAnalytics() {
   posthog.capture("app_opened", { platform });
 }
 
-export function track(event: string, props?: Record<string, unknown>) {
+/** Analytics event properties: scalars only — PostHog renders these as
+ * event columns and complex values would be stringified opaquely. */
+export type AnalyticsProps = Record<string, string | number | boolean | null | undefined>;
+
+export function track(event: string, props?: AnalyticsProps) {
   if (!ready) return;
   posthog.capture(event, props);
 }
@@ -43,11 +47,17 @@ export function identifyEmail(email: string) {
   posthog.capture("email_submitted");
 }
 
-// first-run email gate state
-const GATE_KEY = "omb-email-gate";
-export function emailGateDone(): boolean {
-  return Boolean(localStorage.getItem(GATE_KEY));
+// First-run onboarding state, keyed BY USER ID: a browser-shared flag made
+// every later sign-in on the same browser — including a brand-new Google
+// account — silently skip the wizard. Per-account keys fix that; a stale
+// pre-account key at most costs an existing user one extra wizard pass.
+export function emailGateDone(userId?: string): boolean {
+  return Boolean(localStorage.getItem(gateKey(userId)));
 }
-export function setEmailGateDone(status: "submitted" | "skipped") {
-  localStorage.setItem(GATE_KEY, status);
+export function setEmailGateDone(userId: string | undefined, status: "submitted" | "skipped") {
+  localStorage.setItem(gateKey(userId), status);
+}
+
+function gateKey(userId?: string): string {
+  return userId ? `omb-email-gate.${userId}` : "omb-email-gate.legacy";
 }

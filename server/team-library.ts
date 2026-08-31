@@ -1,4 +1,4 @@
-import { parseJson, type JsonValue } from "./schema.ts";
+import { parseJson, type JsonObject, type JsonValue } from "./schema.ts";
 import { parseTeamManifest, type ParsedTeamManifest } from "./team-manifest.ts";
 
 export const TEAM_LIBRARY_REPOSITORY = "https://github.com/tharunramagiri/muster-teams";
@@ -29,17 +29,22 @@ export interface TeamCatalog {
 
 type Fetcher = typeof fetch;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+/** True only for primitive strings — what JSON decoding yields for text fields. */
+const isText = <T>(value: T): value is T & string => String(value) === value;
+/** True only for safe integers — what JSON decoding yields for count fields. */
+const isCount = <T>(value: T): value is T & number => Number.isSafeInteger(value);
 
-function text(value: unknown, field: string, max: number): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required`);
+const isRecord = (value: JsonValue): value is JsonObject =>
+  Boolean(value) && value instanceof Object && !Array.isArray(value);
+
+function text(value: JsonValue, field: string, max: number): string {
+  if (!isText(value) || !value.trim()) throw new Error(`${field} is required`);
   const normalized = value.trim();
   if (normalized.length > max) throw new Error(`${field} is too long`);
   return normalized;
 }
 
-function relativeFile(value: unknown, field: string, suffix: string, prefix: string): string {
+function relativeFile(value: JsonValue, field: string, suffix: string, prefix: string): string {
   const path = text(value, field, 300);
   if (
     path.startsWith("/") ||
@@ -53,13 +58,13 @@ function relativeFile(value: unknown, field: string, suffix: string, prefix: str
   return path;
 }
 
-function stringList(value: unknown, field: string, maxItems: number): string[] {
+function stringList(value: JsonValue, field: string, maxItems: number): string[] {
   if (!Array.isArray(value) || value.length > maxItems) throw new Error(`${field} is invalid`);
   return value.map((item, index) => text(item, `${field}[${index}]`, 100));
 }
 
 /** Validate the remotely maintained index before any of it reaches the renderer. */
-export function parseTeamCatalog(value: unknown): TeamCatalog {
+export function parseTeamCatalog(value: JsonValue): TeamCatalog {
   if (!isRecord(value) || value.format !== "muster.catalog" || value.version !== 1) {
     throw new Error("The team library catalog is not supported");
   }
@@ -85,7 +90,7 @@ export function parseTeamCatalog(value: unknown): TeamCatalog {
       manifest: relativeFile(raw.manifest, `${field}.manifest`, ".musterteam.json", prefix),
       readme: relativeFile(raw.readme, `${field}.readme`, "README.md", prefix),
       members:
-        typeof raw.members === "number" && Number.isSafeInteger(raw.members) && raw.members > 0 && raw.members <= 200
+        isCount(raw.members) && raw.members > 0 && raw.members <= 200
           ? raw.members
           : (() => { throw new Error(`${field}.members is invalid`); })(),
       skills: Array.isArray(raw.skills)
@@ -187,6 +192,8 @@ export async function fetchGithubTeam(input: string, fetcher: Fetcher = fetch): 
       return parseTeamManifest(await fetchJson(url, MAX_MANIFEST_BYTES, fetcher));
     } catch (error) {
       lastError = error;
+      // SAFETY: fetchJson stamps the errors it throws with a numeric HTTP status;
+      // other failures here have no status property and read undefined.
       if ((error as { status?: number }).status !== 404) throw error;
     }
   }

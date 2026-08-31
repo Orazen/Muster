@@ -23,6 +23,9 @@ const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approv
 const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it)\b/i;
 const CALL_ENDPOINT_MS = 850;
 
+/** Speech-helper stdout is line-delimited JSON; only primitive strings are transcript text. */
+const isText = (v: string | undefined): v is string => Object.is(String(v), v);
+
 type Phase = "listening" | "sending" | "working" | "speaking";
 
 export function GroupCallButton({ group, members }: { group: Group; members: Bot[] }) {
@@ -202,7 +205,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         setNote("Dictation stopped unexpectedly. Check Microphone and Speech Recognition access.");
         return;
       }
-      if (typeof line.text !== "string") return;
+      if (!isText(line.text)) return;
       setHeard(line.text);
       if (line.partial !== false) return;
       const said = line.text.trim();

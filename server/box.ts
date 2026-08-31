@@ -12,10 +12,14 @@
 //   - the dedicated IP rotates across archive/resume — never persist it.
 import type { AppConfig } from "./config.ts";
 import { ensureRemoteCuaCommand, remoteComputerBootstrapCommand } from "./remote-computer.ts";
+import type { JsonValue } from "./schema.ts";
 
 // overridable so tests can point at a stub instead of the live provider
 const BOX_API = process.env.OMB_BOX_API || "https://ascii.dev/api/box/v1";
 const READY = new Set(["idle", "ready", "running"]);
+
+/** Wire text fields decode as primitive strings and nothing else. */
+const isText = (v: JsonValue): v is string => Object.is(String(v), v);
 
 function boxFetch(cfg: AppConfig, path: string, opts: RequestInit = {}) {
   return fetch(`${BOX_API}${path}`, {
@@ -156,8 +160,8 @@ export async function verifyToken(token: string): Promise<{ ok: true } | { ok: f
  * the plan, the limit and the link — so prefer it and only fall back to
  * our own wording when it says nothing useful. */
 export function boxErrorMessage(status: number, what: string, body?: any): string {
-  const theirs = typeof body?.message === "string" ? body.message.trim() : "";
-  const link = typeof body?.error?.details?.billingUrl === "string" ? body.error.details.billingUrl : "";
+  const theirs = isText(body?.message) ? body.message.trim() : "";
+  const link = isText(body?.error?.details?.billingUrl) ? body.error.details.billingUrl : "";
   if (status === 402) {
     // e.g. "Start the $20/month Box plan to create sandboxes."
     return [theirs || "ascii.dev needs a paid Box plan before it will create a computer.", link].filter(Boolean).join(" ");
@@ -318,7 +322,7 @@ async function readFileBase64(cfg: AppConfig, boxId: string, path: string): Prom
   }
   const { ok, body } = await boxJson(cfg, `/boxes/${boxId}/files?path=${encodeURIComponent(path)}&encoding=base64`);
   const content = body?.content;
-  return ok && typeof content === "string" && content ? content : null;
+  return ok && isText(content) && content ? content : null;
 }
 
 /** `knownBoxId` skips box resolution entirely — the screen poller holds
@@ -329,6 +333,8 @@ export async function screenshotBox(cfg: AppConfig, botId: string, knownBoxId?: 
     const box = await findBox(cfg, botId);
     if (!box) throw new Error("no computer for this bot yet");
     if (!READY.has(box.state)) throw new Error(`box is ${box.state}`);
+    // SAFETY: a box that passed the READY gate carries its provider id —
+    // findBox only resolves records it read .id from.
     boxId = box.id as string;
   }
   const out = await runCommand(cfg, boxId, SHOT_CMD, { timeoutMs: 60_000 });

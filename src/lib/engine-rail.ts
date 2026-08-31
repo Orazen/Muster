@@ -7,13 +7,18 @@ export function isCustomOnly(instance: { access?: InstanceInfo["access"] } | und
   return instance?.access === "custom";
 }
 
-export function splitEngineRail<T>(instances: readonly T[]): {
+/** The two rail groups, in display order. */
+export interface EngineRailSplit<T> {
   subscription: T[];
   custom: T[];
-} {
+}
+
+export function splitEngineRail<T>(instances: readonly T[]): EngineRailSplit<T> {
   const subscription: T[] = [];
   const custom: T[] = [];
   for (const instance of instances) {
+    // SAFETY: rail rows are engine records carrying the optional access tag;
+    // absence means Cloud, which isCustomOnly already reports as false.
     if (isCustomOnly(instance as { access?: InstanceInfo["access"] })) custom.push(instance);
     else subscription.push(instance);
   }

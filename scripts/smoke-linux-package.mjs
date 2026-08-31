@@ -102,6 +102,17 @@ try {
   console.log("[smoke-linux-package] OK: renderer, capabilities, embedded harness, and shutdown");
 } finally {
   await stopProcess();
-  if (process.env.OMB_KEEP_SMOKE_DIR !== "1") rmSync(sandbox, { recursive: true, force: true });
-  else console.log(`[smoke-linux-package] kept ${sandbox}`);
+  // Best-effort cleanup only: a sandboxed Electron/Chromium helper can leave
+  // root-owned files under the temp dir on some CI runners (observed as
+  // EACCES here), which must never turn an already-passed smoke test into a
+  // reported failure — the assertions above already ran and logged success.
+  if (process.env.OMB_KEEP_SMOKE_DIR !== "1") {
+    try {
+      rmSync(sandbox, { recursive: true, force: true });
+    } catch (err) {
+      console.warn(`[smoke-linux-package] cleanup of ${sandbox} failed (non-fatal): ${err.message}`);
+    }
+  } else {
+    console.log(`[smoke-linux-package] kept ${sandbox}`);
+  }
 }

@@ -50,6 +50,7 @@ export function useFocusMessage(threadId: string, ready: boolean) {
     const attempt = () => {
       if (cancelled) return;
       const wrapper = document.querySelector<HTMLElement>(`[data-mid="${CSS.escape(focus.messageId)}"]`);
+      // SAFETY: message rows render as HTML elements, so the wrapper's element child is one of ours.
       target = wrapper?.lastElementChild as HTMLElement | null;
       if (!target) {
         if (tries++ < 20) retryTimer = setTimeout(attempt, 100);

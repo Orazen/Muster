@@ -15,8 +15,10 @@ async function listen(handler: RequestListener) {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("test server did not bind");
-  return `http://127.0.0.1:${address.port}`;
+  if (!address) throw new Error("test server did not bind");
+  // SAFETY: bound to an explicit 127.0.0.1 host, so address() is AddressInfo
+  // with the assigned port — never a pipe-path string.
+  return `http://127.0.0.1:${(address as { port: number }).port}`;
 }
 
 function start(env: Record<string, string>) {
@@ -27,8 +29,16 @@ function start(env: Record<string, string>) {
   return readline.createInterface({ input: child.stdout });
 }
 
+/** JSON-RPC reply frame the bridge writes on stdout; only the fields the
+ * assertions read are declared. */
+interface BridgeReply {
+  jsonrpc?: string;
+  id?: number;
+  result?: { content?: Array<{ text?: string }> };
+}
+
 function nextJson(lines: readline.Interface) {
-  return new Promise<Record<string, any>>((resolve, reject) => {
+  return new Promise<BridgeReply>((resolve, reject) => {
     lines.once("line", (line) => {
       try { resolve(JSON.parse(line)); } catch (error) { reject(error); }
     });
@@ -68,7 +78,7 @@ describe("connector MCP bridge", () => {
     })}\n`);
     const reply = await nextJson(lines);
     expect(reply.id).toBe(7);
-    expect(reply.result.content[0].text).toMatch(/secure connection card/i);
+    expect(reply.result?.content?.[0]?.text).toMatch(/secure connection card/i);
     expect(received.authorization).toBe("Bearer bridge-secret");
     expect(received.body).toMatchObject({ botId: "bot-1", threadId: "thread-1", slugs: ["gmail"] });
     expect(received.body.resumeKey).toMatch(/^[\w-]{8,100}$/);

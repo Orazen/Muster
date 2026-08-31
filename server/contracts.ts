@@ -34,8 +34,8 @@ export const EFFORT_LEVELS = ["none", "low", "medium", "high", "xhigh", "max"] a
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 
 /** Narrow untrusted API/config input before it becomes a model selection. */
-export function isEffortLevel(value: unknown): value is EffortLevel {
-  return typeof value === "string" && (EFFORT_LEVELS as readonly string[]).includes(value);
+export function isEffortLevel(value: string): value is EffortLevel {
+  return EFFORT_LEVELS.some((level) => level === value);
 }
 
 // ── model selection ────────────────────────────────────────────────────
@@ -85,6 +85,15 @@ export type RuntimeEvent = RuntimeEventBase &
     | { type: "session.started"; sessionId: string | null; model?: string | null }
     | { type: "session.exited"; reason?: string }
     | { type: "turn.started" }
+    | {
+        type: "turn.retrying";
+        /** 1-based number of the attempt that just failed; the next try is
+         * attempt + 1 of maxAttempts + 1 total. */
+        attempt: number;
+        maxAttempts: number;
+        /** Why the failure looked transient — shown on the retry chip. */
+        reason: string;
+      }
     | {
         type: "turn.completed";
         ok: boolean;
@@ -144,6 +153,11 @@ export interface SendTurnInput {
   resumeCursor?: unknown;
   /** Prior turns for transcript-replay providers (API-backed drivers). */
   transcript?: Array<{ role: "user" | "assistant"; text: string }>;
+  /** Images attached to THIS turn, base64-encoded. Only API drivers whose
+   * capabilities carry visionParts consume these — CLI drivers ignore the
+   * field entirely because their prompt already carries <attached-image/>
+   * file paths they open themselves. */
+  images?: Array<{ mediaType: string; dataBase64: string }>;
   /** Bot persona (name/title/description) as a system prompt. */
   system?: string;
   /** Per-bot integrations the driver may hand to the agent as tools. */
@@ -152,8 +166,13 @@ export interface SendTurnInput {
      * bridge harness-controlled lets it turn connection requests into trusted
      * chat cards consistently across provider CLIs. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
-    /** Cloud computer, reached through Muster's REST-to-MCP adapter. */
-    computer?: { kind?: "box"; boxId: string; token: string };
+    /** Cloud computer, reached through Muster's REST-to-MCP adapter. Two
+     * backends share this one adapter (server/computer-proxy.ts dispatches
+     * internally) — "box" is box.ascii.dev, "opensandbox" is a self-hosted
+     * OpenSandbox deployment (server/opensandbox-lifecycle.ts). */
+    computer?:
+      | { kind?: "box"; boxId: string; token: string }
+      | { kind: "opensandbox"; sandboxId: string; url: string; apiKey: string };
     /** Direct stdio connection to a Cua Driver MCP server (host or sandbox). */
     localComputer?: { command: string; args: string[]; env: Record<string, string> };
     /** Peer-agent comms: an MCP proxy (list_bots / ask_bot) that routes back
@@ -163,6 +182,11 @@ export interface SendTurnInput {
     /** dweb network daemon: an MCP proxy exposing dweb status, repo, and
      * opencode model access as tools. url is the dweb HTTP base. */
     dweb?: { url: string };
+    /** User-registered stdio MCP servers (Settings → MCP Servers), already
+     * command-safety validated at save time and filtered to this bot.
+     * Mounted verbatim by drivers whose capabilities.customMcp is true;
+     * ignored by the rest — never half-mounted. */
+    custom?: Array<{ name: string; command: string; args: string[]; env: Record<string, string> }>;
   };
   cwd?: string;
 }
@@ -188,10 +212,33 @@ export interface ProviderAdapter {
      * connected apps). Same rule again: a key in the config says the user
      * HAS those connections, not that this driver can reach them. */
     composioMcp?: boolean;
+    /** True when the driver's engine can take an image: CLI engines get
+     * the path inside <attached-image/> and open it themselves; vision API
+     * drivers receive turn.images parts instead. Gates the composer's
+     * paste/drop affordance — without it the UI refuses politely rather
+     * than silently degrading the bot's understanding. */
+    images?: boolean;
+    /** True when the driver mounts turn.integrations.custom — the
+     * user-registered stdio MCP servers from Settings → MCP Servers. Same
+     * rule as computerMcp/composioMcp: a saved server must not be advertised
+     * to a bot whose engine cannot mount it. */
+    customMcp?: boolean;
+    /** API drivers only: sendTurn consumes turn.images as multimodal
+     * content parts (OpenAI-shaped chat APIs). Always paired with `images`
+     * true — one switch, two flags — so the composer affordance and the
+     * wire behavior can never disagree. */
+    visionParts?: boolean;
     /** Effort levels this driver can pass to its CLI, ascending. Absent =
      * the driver cannot set effort, so the app never offers the control —
      * same rule as computerMcp: never show a knob the driver cannot turn. */
     effortLevels?: readonly EffortLevel[];
+    /** True when the engine consumes SendTurnInput.transcript directly (the
+     * OpenAI-shaped chat-completions drivers). For these, rewind/fresh
+     * history is delivered structurally as transcript entries and the
+     * turn text must NOT also embed a prose replay of it — double delivery.
+     * Drivers that ignore the transcript field (CLI/session engines) leave
+     * this off and get the inline replay wrapper instead. */
+    transcriptReplay?: boolean;
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;
@@ -249,7 +296,39 @@ export interface EngineInstall {
 // a rejection to an unavailable shadow snapshot.
 export interface ModelCatalog {
   default: string;
-  options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean }>;
+  options: Array<{
+    id: string;
+    label: string;
+    custom?: boolean;
+    loaded?: boolean;
+    /** Declared context window in tokens. Absent = unknown; context sizing
+     * falls back to a conservative default (see server/model-context.ts). */
+    contextWindow?: number;
+    /** Declared max output tokens, when the provider publishes one. */
+    maxTokens?: number;
+    /** This specific model accepts image parts. Gates the composer's
+     * attach affordance per model on providers whose catalogs mix text and
+     * vision entries — the driver-wide `capabilities.images` unlocks the
+     * affordance only for drivers where EVERY model can see. */
+    vision?: boolean;
+  }>;
+}
+
+/** The one rule for "may THIS bot's composer accept an image right now",
+ * shared by the UI (Composer) and dispatch (server/index.ts) so the two can
+ * never disagree. Driver-wide capability unlocks the affordance; when any
+ * catalog entry is flagged, a mixed catalog applies and only flagged models
+ * pass — attaching to a text-only model would 4xx mid-turn. */
+export function modelAcceptsImages(
+  catalog: Pick<ModelCatalog, "options"> | undefined,
+  capabilities: { images?: boolean } | undefined,
+  selectedModel: string | undefined,
+): boolean {
+  if (capabilities?.images !== true) return false;
+  const options = catalog?.options ?? [];
+  const hasVisionEntries = options.some((o) => o.vision === true);
+  if (!hasVisionEntries) return true;
+  return options.some((o) => o.id === selectedModel && o.vision === true);
 }
 
 export interface DriverCreateInput<Config> {
@@ -290,7 +369,11 @@ export interface ProviderDriver<Config = unknown> {
   /** How to get this engine installed. Omit for engines that need no local
    * binary (API-key drivers), which is what makes it optional. */
   readonly install?: EngineInstall;
-  /** Decode the opaque config envelope; throw on invalid (→ shadow). */
+  /** Decode the opaque config envelope; throw on invalid (→ shadow). The
+   * envelope is driver-owned by design — each decodeConfig is its own parse
+   * boundary, and the persisted shape is deliberately untyped here so no
+   * single engine's schema leaks into the registry. */
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the raw envelope is the named contract; drivers own its decode
   decodeConfig(raw: unknown): Config;
   defaultConfig(): Config;
   readonly models: ModelCatalog;

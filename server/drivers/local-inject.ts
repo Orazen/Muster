@@ -6,7 +6,10 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { z } from "zod";
+
 import type { ModelCatalog } from "../contracts.ts";
+import { parseJson, type JsonObject, type JsonValue } from "../schema.ts";
 
 export interface LocalHost {
   id: string;
@@ -27,6 +30,10 @@ export const LOCAL_HOSTS: LocalHost[] = [
 ];
 
 export const INJECT_SEP = "::";
+
+/** A process environment as the injectors see it: a present key means the
+ * variable is set, an absent key means unset. */
+export type ProviderEnvironment = Record<string, string | undefined>;
 
 const HOST_BY_ID = new Map(LOCAL_HOSTS.map((host) => [host.id, host]));
 const MODEL_ID = /^[\w][\w./:+-]*$/;
@@ -67,7 +74,7 @@ export function anthropicBaseUrl(host: LocalHost): string {
   return host.baseUrl.replace(/\/v1\/?$/, "");
 }
 
-export function hostApiKey(host: LocalHost, env: Record<string, string | undefined> = process.env): string {
+export function hostApiKey(host: LocalHost, env: ProviderEnvironment = process.env): string {
   if (host.apiKeyEnv && env[host.apiKeyEnv]) return env[host.apiKeyEnv]!;
   if (host.apiKey) return host.apiKey;
   if (host.id === "unsloth" || host.id === "unsloth_api") {
@@ -85,7 +92,7 @@ const CODEX_RESERVED_PROVIDERS = new Set(["openai", "ollama", "lmstudio"]);
  * environment; argv only contains the corresponding environment key name.
  */
 export function codexLocalProviderArgs(
-  env: Record<string, string | undefined>,
+  env: ProviderEnvironment,
   modelId: string | null | undefined,
 ): string[] {
   const inject = decodeInjectId(modelId);
@@ -104,31 +111,57 @@ export function codexLocalProviderArgs(
   ];
 }
 
-function readUnslothKey(env: Record<string, string | undefined>): string | null {
+/** Result of pointing a CLI environment at an injected local host. */
+export interface InjectApplication {
+  model: string | null;
+  injected: boolean;
+}
+
+const JSON_RECORD = z.record(z.string(), z.unknown());
+
+/** View a decoded JSON value as a string-keyed record, or null when it is not an object. */
+function jsonRecord(value: JsonValue): JsonObject | null {
+  // SAFETY: zod verified value is a non-null object; entries came from JSON.parse so they are JSON-compatible.
+  return JSON_RECORD.safeParse(value).success ? (value as JsonObject) : null;
+}
+
+/** Decode a JSON wire value into text, or null when it is not a string. */
+function jsonText(value: JsonValue | undefined): string | null {
+  const decoded = z.string().safeParse(value);
+  return decoded.success ? decoded.data : null;
+}
+
+const UNSLOTH_KEY_FILE = z.object({ api_key: z.string().min(1) });
+
+function readUnslothKey(env: ProviderEnvironment): string | null {
   const home = env.HOME || env.USERPROFILE || homedir();
   try {
-    const raw = JSON.parse(readFileSync(join(home, ".unsloth", "studio", "auth", "agent_api_key.json"), "utf8")) as {
-      api_key?: unknown;
-    };
-    return typeof raw.api_key === "string" && raw.api_key ? raw.api_key : null;
+    const raw = UNSLOTH_KEY_FILE.parse(
+      parseJson(readFileSync(join(home, ".unsloth", "studio", "auth", "agent_api_key.json"), "utf8")),
+    );
+    return raw.api_key;
   } catch {
     return null;
   }
 }
 
-function idsFromModelsPayload(payload: unknown): string[] {
+/** Model ids from any of the /models payload dialects local servers speak. */
+function idsFromModelsPayload(payload: JsonValue): string[] {
+  const record = jsonRecord(payload);
   const records = Array.isArray(payload)
     ? payload
-    : payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
-      ? (payload as { data: unknown[] }).data
-      : payload && typeof payload === "object" && Array.isArray((payload as { models?: unknown }).models)
-        ? (payload as { models: unknown[] }).models
+    : Array.isArray(record?.data)
+      ? record.data
+      : Array.isArray(record?.models)
+        ? record.models
         : [];
-  return records.flatMap((record) => {
-    if (typeof record === "string") return MODEL_ID.test(record) ? [record] : [];
-    if (!record || typeof record !== "object") return [];
-    const id = (record as { id?: unknown; name?: unknown }).id ?? (record as { name?: unknown }).name;
-    if (typeof id !== "string" || !MODEL_ID.test(id)) return [];
+  return records.flatMap((entry): string[] => {
+    const asText = jsonText(entry);
+    if (asText !== null) return MODEL_ID.test(asText) ? [asText] : [];
+    const fields = jsonRecord(entry);
+    if (!fields) return [];
+    const id = jsonText(fields.id ?? fields.name) ?? "";
+    if (!MODEL_ID.test(id)) return [];
     const low = id.toLowerCase();
     if (low.includes("embed") || low.includes("bge-") || low.includes("nomic")) return [];
     return [id];
@@ -137,10 +170,10 @@ function idsFromModelsPayload(payload: unknown): string[] {
 
 async function timedJson(
   url: string,
-  env: Record<string, string | undefined>,
+  env: ProviderEnvironment,
   host: LocalHost,
   fetchImpl: typeof fetch,
-): Promise<unknown | null> {
+): Promise<JsonValue | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 1200);
   timer.unref?.();
@@ -150,7 +183,7 @@ async function timedJson(
       headers: { Authorization: `Bearer ${hostApiKey(host, env)}` },
     });
     if (!response.ok) return null;
-    return await response.json();
+    return parseJson(await response.text());
   } catch {
     return null;
   } finally {
@@ -159,7 +192,7 @@ async function timedJson(
 }
 
 /** Which of this host's models are actually in memory / running. */
-export function loadedIdsFromPayloads(_host: LocalHost, catalog: unknown, extra: unknown): Set<string> {
+export function loadedIdsFromPayloads(_host: LocalHost, catalog: JsonValue, extra: JsonValue): Set<string> {
   const loaded = new Set<string>();
   const catalogIds = new Set(idsFromModelsPayload(catalog));
   const add = (id: string) => {
@@ -170,38 +203,35 @@ export function loadedIdsFromPayloads(_host: LocalHost, catalog: unknown, extra:
     if (catalogIds.has(base)) loaded.add(base);
   };
 
-  if (extra && typeof extra === "object") {
-    const rec = extra as {
-      default_model?: unknown;
-      models?: unknown;
-      data?: unknown;
-    };
-    const running = Array.isArray(rec.models)
-      ? rec.models
-      : Array.isArray(rec.data)
-        ? rec.data
+  const extraFields = jsonRecord(extra);
+  if (extraFields) {
+    const running = Array.isArray(extraFields.models)
+      ? extraFields.models
+      : Array.isArray(extraFields.data)
+        ? extraFields.data
         : [];
     // oMLX /v1/models/status lists every model with loaded:true/false.
     // /health only has default_model, which is the configured default — not
     // necessarily what is in memory. Prefer explicit flags when present.
-    const hasLoadedFlags = running.some(
-      (row) => row && typeof row === "object" && ("loaded" in row || "state" in row),
-    );
-    if (!hasLoadedFlags && typeof rec.default_model === "string") add(rec.default_model);
+    const hasLoadedFlags = running.some((row) => {
+      const rowRecord = jsonRecord(row);
+      return rowRecord !== null && ("loaded" in rowRecord || "state" in rowRecord);
+    });
+    if (!hasLoadedFlags) {
+      const defaultModel = jsonText(extraFields.default_model);
+      if (defaultModel !== null) add(defaultModel);
+    }
     for (const row of running) {
-      if (typeof row === "string") {
-        if (!hasLoadedFlags) add(row);
+      const rowText = jsonText(row);
+      if (rowText !== null) {
+        if (!hasLoadedFlags) add(rowText);
         continue;
       }
-      if (!row || typeof row !== "object") continue;
-      const item = row as { name?: unknown; model?: unknown; id?: unknown; state?: unknown; loaded?: unknown };
-      const id =
-        (typeof item.name === "string" && item.name) ||
-        (typeof item.model === "string" && item.model) ||
-        (typeof item.id === "string" && item.id) ||
-        "";
+      const item = jsonRecord(row);
+      if (!item) continue;
+      const id = jsonText(item.name) || jsonText(item.model) || jsonText(item.id) || "";
       if (!id) continue;
-      const state = typeof item.state === "string" ? item.state.toLowerCase() : "";
+      const state = jsonText(item.state)?.toLowerCase() ?? "";
       if (item.loaded === false || state === "not-loaded" || state === "unloaded") continue;
       if (item.loaded === true || state === "loaded" || state === "idle" || !hasLoadedFlags) {
         add(id);
@@ -209,16 +239,20 @@ export function loadedIdsFromPayloads(_host: LocalHost, catalog: unknown, extra:
     }
   }
 
-  if (!loaded.size && catalog && typeof catalog === "object") {
-    const rec = catalog as { default_model?: unknown; data?: unknown };
-    if (typeof rec.default_model === "string") add(rec.default_model);
-    const records = Array.isArray(rec.data) ? rec.data : [];
-    for (const row of records) {
-      if (!row || typeof row !== "object") continue;
-      const item = row as { id?: unknown; state?: unknown; loaded?: unknown };
-      if (typeof item.id !== "string") continue;
-      const state = typeof item.state === "string" ? item.state.toLowerCase() : "";
-      if (item.loaded === true || state === "loaded") add(item.id);
+  if (!loaded.size) {
+    const catalogFields = jsonRecord(catalog);
+    if (catalogFields) {
+      const defaultModel = jsonText(catalogFields.default_model);
+      if (defaultModel !== null) add(defaultModel);
+      const records = Array.isArray(catalogFields.data) ? catalogFields.data : [];
+      for (const row of records) {
+        const item = jsonRecord(row);
+        if (!item) continue;
+        const id = jsonText(item.id);
+        if (id === null) continue;
+        const state = jsonText(item.state)?.toLowerCase() ?? "";
+        if (item.loaded === true || state === "loaded") add(id);
+      }
     }
   }
 
@@ -235,7 +269,7 @@ function loadedProbeUrl(host: LocalHost): string | null {
 
 /** Live models from the same local hosts the sidecar probed. */
 export async function probeLocalInjects(
-  env: Record<string, string | undefined> = process.env,
+  env: ProviderEnvironment = process.env,
   fetchImpl: typeof fetch = fetch,
 ): Promise<InjectedModel[]> {
   const seenHosts = new Set<string>();
@@ -278,7 +312,7 @@ export async function probeLocalInjects(
 /** Append live local models as custom rows. Official rows stay first. */
 export async function mergeLocalInject(
   catalog: ModelCatalog,
-  env: Record<string, string | undefined> = process.env,
+  env: ProviderEnvironment = process.env,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ModelCatalog> {
   const vitest = env.VITEST ?? process.env.VITEST;
@@ -295,16 +329,18 @@ export async function mergeLocalInject(
       continue;
     }
     seen.add(extra.id);
-    options.push({ id: extra.id, label: extra.label, custom: true, ...(extra.loaded ? { loaded: true } : {}) });
+    const option: ModelCatalog["options"][number] = { id: extra.id, label: extra.label, custom: true };
+    if (extra.loaded) option.loaded = true;
+    options.push(option);
   }
   return { default: catalog.default, options };
 }
 
 /** Point an OpenAI-compatible CLI at the injected host. */
 export function applyOpenAIInject(
-  env: Record<string, string | undefined>,
+  env: ProviderEnvironment,
   modelId: string | null | undefined,
-): { model: string | null; injected: boolean } {
+): InjectApplication {
   const inject = decodeInjectId(modelId);
   if (!inject) return { model: modelId ?? null, injected: false };
   const host = localHost(inject.host);
@@ -317,9 +353,9 @@ export function applyOpenAIInject(
 
 /** Point Claude Code at the injected host instead of Anthropic cloud. */
 export function applyClaudeInject(
-  env: Record<string, string | undefined>,
+  env: ProviderEnvironment,
   modelId: string | null | undefined,
-): { model: string | null; injected: boolean } {
+): InjectApplication {
   const inject = decodeInjectId(modelId);
   if (!inject) return { model: modelId ?? null, injected: false };
   const host = localHost(inject.host);

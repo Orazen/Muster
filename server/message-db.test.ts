@@ -121,8 +121,8 @@ describe("message-db", () => {
 
   it("search reports the match offset for highlighting, and finds activity chips by tool name", () => {
     insertMessage("t7", msg("m1", "please\n\n   run   the migration now"));
-    insertMessage("t7", { ...msg("m2", ""), kind: "activity", role: "bot", tool: { name: "Bash: alembic upgrade head", ok: true } } as Message);
-    insertMessage("t7", { ...msg("m3", "we spoke about it"), from: { botId: "b2", name: "Scout", color: "green" } } as Message);
+    insertMessage("t7", { ...msg("m2", ""), kind: "activity", role: "bot", tool: { name: "Bash: alembic upgrade head", ok: true } });
+    insertMessage("t7", { ...msg("m3", "we spoke about it"), from: { botId: "b2", name: "Scout", color: "green" } });
 
     const text = searchMessages("the migration")[0];
     expect(text.messageId).toBe("m1");

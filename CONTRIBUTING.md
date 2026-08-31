@@ -23,7 +23,7 @@ and logged in. macOS is the primary release platform and Ubuntu 24.04 x64 is the
 the harness server itself is portable Node and the test suite runs on macOS, Linux, and Windows.
 
 ```sh
-git clone https://github.com/tharunramagiri/Muster && cd Muster
+git clone https://github.com/Orazen/Muster && cd Muster
 pnpm install
 
 pnpm dev:server    # harness server → 127.0.0.1:8799

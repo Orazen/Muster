@@ -51,7 +51,8 @@ describe("cloud computer provisioning cleanup", () => {
       });
     });
     await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
-    const port = (api.address() as any).port;
+    // SAFETY: listen(0, "127.0.0.1") always resolves to an AddressInfo with a port.
+    const port = (api.address() as { port: number }).port;
     vi.stubEnv("OMB_BOX_API", `http://127.0.0.1:${port}/api/box/v1`);
     vi.resetModules();
     ({ provisionBox } = await import("./box.ts"));
@@ -66,6 +67,7 @@ describe("cloud computer provisioning cleanup", () => {
     scenario = "rename-failure";
     requests.length = 0;
 
+    // SAFETY: partial config double; provisionBox only reads cfg.box.token here.
     await expect(provisionBox({ box: { token: "box_test" } } as any, "new-bot", "New Bot")).rejects.toThrow(
       /box naming failed: rename rejected/,
     );
@@ -81,6 +83,7 @@ describe("cloud computer provisioning cleanup", () => {
     scenario = "existing-desktop-failure";
     requests.length = 0;
 
+    // SAFETY: partial config double; provisionBox only reads cfg.box.token here.
     await expect(
       provisionBox({ box: { token: "box_test" } } as any, "existing-bot", "Existing Bot"),
     ).rejects.toThrow(/desktop link could not be created/);

@@ -36,6 +36,8 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     try {
       const res = await fetch(`/api/threads/${threadId}/events?limit=400`, { signal: controller.signal });
       if (!res.ok) throw new Error(`${res.status}`);
+      // SAFETY: /api/threads/:id/events answers with this panel's own
+      // InspectorPage envelope; fields are rendered as stored.
       const next = (await res.json()) as InspectorPage;
       if (controller.signal.aborted) return;
       setPage(next);

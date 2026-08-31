@@ -167,14 +167,12 @@ export function TeamLibraryPanel({
 
   const readFile = async (file: File) => {
     if (file.size > MAX_TEAM_FILE_BYTES) throw new Error("That team file is too large.");
-    let manifest: unknown;
     try {
-      manifest = JSON.parse(await file.text());
+      previewManifest(teamImportPreview(JSON.parse(await file.text())), "file");
     } catch (cause) {
       if (cause instanceof SyntaxError) throw new Error("That team file is not valid JSON.");
       throw cause;
     }
-    previewManifest(teamImportPreview(manifest), "file");
   };
 
   const loadLibraryTeam = async (entry: TeamCatalogEntry) => {

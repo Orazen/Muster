@@ -29,7 +29,14 @@ let child: ChildProcess;
 let home: string;
 let stderr = "";
 
-const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+/** A JSON request payload: exactly what JSON.stringify can serialize. */
+type JsonBody = string | number | boolean | null | JsonBody[] | { [key: string]: JsonBody };
+
+const api = async (
+  method: string,
+  path: string,
+  body?: JsonBody,
+): Promise<{ status: number; body: any }> => {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: body ? { "content-type": "application/json" } : undefined,
@@ -59,8 +66,8 @@ async function waitForRunThread(runId: string, ms = 20_000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
     const { body } = await api("GET", "/api/routines");
-    const run = (body.runs ?? []).find((r: { id: string }) => r.id === runId);
-    if (run?.threadId) return run.threadId as string;
+    const run = (body.runs ?? []).find((r: { id: string; threadId?: string }) => r.id === runId);
+    if (run?.threadId) return run.threadId;
     await new Promise((r) => setTimeout(r, 250));
   }
   return null;
@@ -98,15 +105,18 @@ posixOnly("unattended turns keep asking", () => {
         },
       }),
     );
+    // Undefined entries are dropped when the child environment is built, so
+    // the host PATH and SystemRoot are inherited only when defined.
+    const env = {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      HOME: home,
+      USERPROFILE: home,
+      OMB_PORT: String(PORT),
+    };
     child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
-      env: {
-        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-        HOME: home,
-        USERPROFILE: home,
-        OMB_PORT: String(PORT),
-      },
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stderr!.on("data", (c) => (stderr += c));
@@ -156,6 +166,7 @@ posixOnly("unattended turns keep asking", () => {
         body: JSON.stringify({ status: "failed" }),
       });
       expect(delivered.status).toBe(202);
+      // SAFETY: the webhook delivery's fixed 202 body; only runId is asserted.
       const { runId } = (await delivered.json()) as { runId: string };
 
       const threadId = await waitForRunThread(runId);

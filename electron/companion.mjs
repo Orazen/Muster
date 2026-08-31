@@ -196,7 +196,10 @@ async function stop() {
  * than an absence — the panel should never have to guess. */
 export async function companionState() {
   if (!proc) {
-    return { enabled: false, port: COMPANION_PORT, devices: [], pairing: null, ...(lastError ? { error: lastError } : {}) };
+    const state = { enabled: false, port: COMPANION_PORT, devices: [], pairing: null };
+    // a complete answer names why the companion is off when it is known
+    if (lastError) state.error = lastError;
+    return state;
   }
   try {
     const state = await control("GET", "/state");

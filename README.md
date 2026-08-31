@@ -12,27 +12,29 @@ Every bot in the sidebar is a real agent — a model running locally under the h
 personality, its own model, its own cloud computer, and its own connected apps.
 Talk to them like contacts. Watch them work. Approve what matters.
 
-<sub>Built and maintained by [Orazen](https://orazen.online) — AI, Web, Automation & Digital Agency.</sub>
+<sub>Muster was built by [Tharun Ramagiri](https://ramagiritharun.in) at [Orazen](https://orazen.online) — an AI, Web, Automation & Digital Agency. · [LinkedIn](https://www.linkedin.com/in/ramagiritharun)</sub>
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Electron](https://img.shields.io/badge/Electron-macOS%20%C2%B7%20Windows%20%C2%B7%20Ubuntu-2B2E3A?logo=electron&logoColor=9FEAF9)
 ![Agents](https://img.shields.io/badge/agents-10%2B%20engines-d97757)
-![License](https://img.shields.io/badge/license-MIT-38d591)
+[![Star History Chart](https://api.star-history.com/svg?repos=Orazen/Muster&type=Date)](https://star-history.com/#Orazen/Muster&Date)
+> **Own your agents.** A roster of AI teammates you actually own — each with its own face, memory, model, and a real computer to work on. Bring your own Claude, Codex, Grok or Gemini. No subscription, no seat count.
+![License](https://img.shields.io/badge/license-BSL%201.1-38d591)
 ![PRs](https://img.shields.io/badge/PRs-welcome-38d591)
 ![Source](https://img.shields.io/badge/source-available-d97757)
 
 <br>
 
-<a href="https://github.com/tharunramagiri/Muster/releases/latest/download/Muster.dmg">
-  <img src="https://img.shields.io/github/v/release/tharunramagiri/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe&cacheSeconds=300" alt="Download the latest Muster for macOS (.dmg)" height="40">
+<a href="https://github.com/Orazen/Muster/releases/latest/download/Muster.dmg">
+  <img src="https://img.shields.io/github/v/release/Orazen/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe&cacheSeconds=300" alt="Download the latest Muster for macOS (.dmg)" height="40">
 </a>
 &nbsp;
-<a href="https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-setup.exe">
-  <img src="https://img.shields.io/github/v/release/tharunramagiri/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Windows&labelColor=070707&color=4cc2ff&cacheSeconds=300" alt="Download the latest Muster for Windows (.exe)" height="40">
+<a href="https://github.com/Orazen/Muster/releases/latest/download/Muster-setup.exe">
+  <img src="https://img.shields.io/github/v/release/Orazen/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Windows&labelColor=070707&color=4cc2ff&cacheSeconds=300" alt="Download the latest Muster for Windows (.exe)" height="40">
 </a>
 
-<sub>macOS: Apple silicon · signed & notarized · one-click .dmg &nbsp;·&nbsp; Windows: 64-bit · one-click installer, no admin rights &nbsp;·&nbsp; both always the latest · [all releases](https://github.com/tharunramagiri/Muster/releases)</sub>
+<sub>macOS: Apple silicon · unsigned build (see note below) &nbsp;·&nbsp; Windows: 64-bit · one-click installer, no admin rights &nbsp;·&nbsp; both always the latest · [all releases](https://github.com/Orazen/Muster/releases)</sub>
 
 <br>
 <br>
@@ -55,6 +57,9 @@ model, computer, and connected apps — open, local-first, and running on the ag
   versioned build or wrapper) in **Settings → Engines**.
 - **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
   events live in `~/.muster`, not a cloud.
+- **Privacy Shield built in.** When a transcript is replayed to a cloud model, emails, phone numbers, and
+  secrets are scrubbed first — deterministically, with a counts-only receipt in the thread. Your bot keeps
+  context; the cloud never sees the raw data.
 - **Agents with hands.** Each bot can get a real computer — a cloud Linux desktop it drives while you watch
   live, or your own Mac — plus 500+ connected apps through Composio.
 
@@ -186,6 +191,30 @@ models) and a custom rail (bring a CLI, inject a model).
 Unknown drivers degrade to "unavailable" shadows — a config from a newer build round-trips safely and
 never crashes the fleet.
 
+### Providers (no CLI required)
+
+Paste an API key in **Settings → Providers** and a matching engine appears automatically, no CLI install
+needed — the same fleet a bot picks from, just credential-driven instead of CLI-driven. Useful if you
+already have a key and don't want to install/auth a separate CLI for it.
+
+| Provider | Driver kind | Env var | Notes |
+|---|---|---|---|
+| OpenAI | `openai` | `OPENAI_API_KEY` | GPT-4o, GPT-4.1, o3, and family. |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | Claude Opus/Sonnet/Haiku via the Messages API. |
+| Google | `google` | `GOOGLE_API_KEY` | Gemini 2.5 Pro/Flash via `generateContent`. |
+| xAI (Grok) | `grok` | `XAI_API_KEY` | Same driver as the Grok engine above, API-key mode. |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | DeepSeek V3/R1, OpenAI-compatible API. |
+| Mistral | `mistral` | `MISTRAL_API_KEY` | Mistral Large/Medium/Codestral. |
+| Cohere | `cohere` | `COHERE_API_KEY` | Command R/R+ via the v2 Chat API. |
+| Groq | `groq` | `GROQ_API_KEY` | Llama/Mixtral/Gemma at high inference speed. |
+| Together AI | `together` | `TOGETHER_API_KEY` | Open-source models via Together's API. |
+| Fireworks AI | `fireworks` | `FIREWORKS_API_KEY` | Fast inference for open-source models. |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | 200+ models (GPT, Claude, Gemini, open-source) through one key. |
+| OpenCode Zen | `opencodeZen` | `OPENCODE_API_KEY` | Free and paid models via OpenCode's hosted gateway — same key as OpenCode Go above. |
+
+All twelve share one architecture: streaming SSE, transcript-replay, token-level `content.delta` events,
+same as every CLI-driven engine — a bot can't tell the difference between a CLI and an API-key provider.
+
 ## How it works
 
 Two processes. The app holds no transports of its own — it sends typed commands over HTTP and folds one SSE
@@ -230,15 +259,18 @@ flowchart LR
 
 | | Download | Install |
 |---|---|---|
-| **macOS** (Apple silicon) | [Muster.dmg](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster.dmg) | Drag it to Applications, open it. Signed & notarized. |
-| **Windows** (x64) | [Muster-setup.exe](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
-| **Linux** (x64) | [Muster-x86_64.deb](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-x86_64.deb) · [Muster-x86_64.AppImage](https://github.com/tharunramagiri/Muster/releases/latest/download/Muster-x86_64.AppImage) | `.deb`: `sudo dpkg -i Muster-x86_64.deb` · AppImage: `chmod +x Muster*.AppImage && ./Muster*.AppImage` |
-| **Android** | [Play Store](https://play.google.com/store/apps/details?id=com.muster.companion) (coming soon) | Pair with your computer's companion service |
-| **iOS** | [App Store](https://apps.apple.com/app/muster-mobile/id1234567890) (coming soon) | Pair with your computer's companion service |
+| **macOS** (Apple silicon) — **recommended: Homebrew** | `brew tap orazen/muster && brew install --cask muster` | Homebrew clears the quarantine flag automatically on install, so it just works — no Gatekeeper "damaged" message. |
+| **macOS** (Apple silicon) — direct download | [Muster.dmg](https://github.com/Orazen/Muster/releases/latest/download/Muster.dmg) | Drag it to Applications, open it. **Not yet signed/notarized** — macOS Gatekeeper will say *"Muster is damaged and can't be opened. You should move it to the Bin."* This is not real damage, it's an unsigned-app quarantine flag. Fix: open Terminal and run `xattr -cr /Applications/Muster.app`, then open it again — or just use Homebrew above, which avoids this entirely. (Proper Developer ID signing + notarization is tracked, see below.) |
+| **macOS** (Intel) | [Muster-intel.dmg](https://github.com/Orazen/Muster/releases/latest/download/Muster-intel.dmg) | Same app, built for Intel Macs. Same unsigned-quarantine note and fix as above. |
+| **Windows** (x64) | [Muster-setup.exe](https://github.com/Orazen/Muster/releases/latest/download/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
+| **Linux** (x64) | [Muster.deb](https://github.com/Orazen/Muster/releases/latest/download/Muster.deb) · [Muster.AppImage](https://github.com/Orazen/Muster/releases/latest/download/Muster.AppImage) | `.deb`: `sudo dpkg -i Muster.deb` · AppImage: `chmod +x Muster.AppImage && ./Muster.AppImage` |
+| **Android** | Play Store (coming soon — app is built, listing needs a Play developer account) | Pair with your computer's companion service |
+| **iOS** | App Store (coming soon — app is built, listing needs an Apple Developer account) | Pair with your computer's companion service |
 
 **Homebrew (macOS):**
 
 ```sh
+brew tap orazen/muster
 brew install --cask muster
 ```
 
@@ -247,7 +279,7 @@ Requires [Homebrew](https://brew.sh). Auto-updates via `brew upgrade --cask must
 **From source:**
 
 ```sh
-git clone https://github.com/tharunramagiri/Muster && cd Muster
+git clone https://github.com/Orazen/Muster && cd Muster
 pnpm install
 
 pnpm dev:server    # harness server → 127.0.0.1:8799
@@ -278,7 +310,7 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage; no Swift required
 
 Unavailable native features fail closed on Ubuntu without blocking chat or cloud features. Linux local computer
 control, Wayland capture/automation, dictation, and ARM64 are tracked in
-[#29](https://github.com/tharunramagiri/Muster/issues/29) and are not claimed by the baseline package.
+[#29](https://github.com/Orazen/Muster/issues/29) and are not claimed by the baseline package.
 
 ### Self-host (web)
 
@@ -293,6 +325,11 @@ Bring your own agent CLIs (or engine keys), and reverse-proxy with TLS if you
 expose it beyond your machine. There are **no accounts** — see
 [docs/self-host.md](docs/self-host.md) for configuration, security, and model
 setup.
+
+> **Don't want to run anything?** [Muster Cloud](https://muster.orazen.online)
+> is this same app, hosted — from **$20/month per cloud computer**, with the
+> Privacy Shield included. Self-hosting stays free forever; the hosted tier pays
+> for the computers, not the software.
 
 ### Optional credentials
 
@@ -363,7 +400,7 @@ small; adding a provider is one file in [`server/drivers/`](server/drivers/) plu
 
 ## License
 
-[Business Source License 1.1](LICENSE) © 2026 Ramagiritharun (Tharun Ramagiri) / Orazen and contributors.
+[Business Source License 1.1](LICENSE) © 2026 Tharun Ramagiri / Orazen and contributors.
 
 Source-available. You may use, modify, and redistribute for personal, internal,
 and non-commercial purposes. You may **not** offer Muster (or a substantially

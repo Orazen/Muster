@@ -6,7 +6,7 @@
 // `cua-driver mcp` inside the container; this module never reimplements clicks,
 // typing, screenshots, accessibility, or window discovery.
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -49,13 +49,59 @@ export const CUA_EXECUTABLE = "/usr/local/libexec/muster/cua-driver";
 
 const RUNTIMES = ["docker", "podman", "container"] as const;
 export type Runtime = (typeof RUNTIMES)[number];
-export type LifecycleAction = "pull" | "run" | "start" | "stop" | "remove";
+export type LifecycleAction = "pull" | "run" | "start" | "stop" | "remove" | "runtimeStart";
+
+/** Set when a runtime refused --memory/--cpus outright and the container was
+ * started without resource caps instead of failing the desktop entirely. */
+export const LIMITS_LABEL = "com.muster.resource-limits";
 
 const INTERNAL_VIEWER_PORT = 6901;
 const HOST_VIEWER_PORT = 6080;
 const MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
 const NANO_CPUS = 2_000_000_000;
 const PIDS_LIMIT = 512;
+
+/** One addressable desktop instance: shared keeps the historical singleton,
+ * per-bot targets carry their own container name, durable workspace and
+ * loopback viewer port so bots never share a pointer or a filesystem. */
+export interface LocalVmTarget {
+  /** Stable, non-secret identity used for leases, idle timers and fences. */
+  key: string;
+  containerName: string;
+  workspaceDir: string;
+  viewerPort: number;
+  label: string;
+}
+
+export const SHARED_LOCAL_VM_TARGET: LocalVmTarget = {
+  key: "shared",
+  containerName: CONTAINER,
+  workspaceDir: VM_WORKSPACE_DIR,
+  viewerPort: HOST_VIEWER_PORT,
+  label: "shared",
+};
+
+// Per-bot viewers fan out above the fixed shared port; a digest-derived
+// offset needs no allocation state and survives server restarts.
+export const PER_BOT_VIEWER_PORT_BASE = HOST_VIEWER_PORT + 1;
+export const PER_BOT_VIEWER_PORT_RANGE = 128;
+
+/** Derive a bot's desktop identities from a SHA-256 digest, never from its
+ * display name or any caller-controlled path fragment. */
+export function perBotLocalVmTarget(botId: string): LocalVmTarget {
+  const digest = createHash("sha256").update(botId).digest("hex");
+  const short = digest.slice(0, 16);
+  // SAFETY: digest slices are fixed-width lowercase hex, so parseInt always
+  // yields a non-negative integer well inside the modulo range.
+  const offset = parseInt(digest.slice(24, 28), 16) % PER_BOT_VIEWER_PORT_RANGE;
+  return {
+    key: `bot:${digest}`,
+    containerName: `${CONTAINER}-${short}`,
+    workspaceDir: join(DATA_DIR, "vm-homes", short),
+    viewerPort: PER_BOT_VIEWER_PORT_BASE + offset,
+    label: digest,
+  };
+}
 
 const LINUX_WHEELS = {
   x86_64: {
@@ -192,7 +238,7 @@ export interface ContainerComputerStatus {
   viewer_url: string;
 }
 
-function emptyStatus(platform: NodeJS.Platform): ContainerComputerStatus {
+function emptyStatus(platform: NodeJS.Platform, target: LocalVmTarget): ContainerComputerStatus {
   return {
     platform,
     runtime: null,
@@ -213,10 +259,10 @@ function emptyStatus(platform: NodeJS.Platform): ContainerComputerStatus {
     image_id: null,
     base_image_ref: BASE_IMAGE,
     driver_version: CUA_DRIVER_VERSION,
-    container_name: CONTAINER,
-    workspace_path: VM_WORKSPACE_DIR,
+    container_name: target.containerName,
+    workspace_path: target.workspaceDir,
     workspace_guest_path: VM_WORKSPACE_GUEST,
-    viewer_url: `http://127.0.0.1:${HOST_VIEWER_PORT}/vnc.html`,
+    viewer_url: `http://127.0.0.1:${target.viewerPort}/vnc.html`,
   };
 }
 
@@ -253,10 +299,17 @@ function normalizeImageId(id: string | undefined): string | null {
   return id?.trim().replace(/^sha256:/, "") || null;
 }
 
-function inspectedImage(stdout: string): {
-  labels: Record<string, string> | undefined;
-  id: string | null;
-} {
+/** Apple's `container inspect` reports the image either as a bare reference
+ * string or as a descriptor object; this is the boundary that tells them apart. */
+function imageIsBareName(
+  image: string | { reference?: string; descriptor?: { digest?: string } } | undefined,
+): image is string {
+  return Object.prototype.toString.call(image) === "[object String]";
+}
+
+function inspectedImage(stdout: string) {
+  // SAFETY: stdout is the engine's `image inspect` JSON array; unknown engines
+  // omit fields, so every field stays optional and is coalesced below.
   const parsed = JSON.parse(stdout) as Array<{
     Id?: string;
     id?: string;
@@ -279,14 +332,14 @@ function viewerPassword(env: string[] | Record<string, string> | undefined): str
   return env?.VNC_PW || null;
 }
 
-function viewerUrl(password: string | null): string {
-  const base = `http://127.0.0.1:${HOST_VIEWER_PORT}/vnc.html`;
+function viewerUrl(password: string | null, hostPort = HOST_VIEWER_PORT): string {
+  const base = `http://127.0.0.1:${hostPort}/vnc.html`;
   if (!password) return base;
   const fragment = new URLSearchParams({ autoconnect: "true", resize: "scale", password });
   return `${base}#${fragment.toString()}`;
 }
 
-function cuaExecArgs(args: string[], interactive = false): string[] {
+function cuaExecArgs(args: string[], interactive = false, containerName: string = CONTAINER): string[] {
   return [
     "exec",
     ...(interactive ? ["-i"] : []),
@@ -300,7 +353,7 @@ function cuaExecArgs(args: string[], interactive = false): string[] {
     "CUA_DRIVER_INSTALL_CHANNEL=python_package",
     "-e",
     "CUA_DRIVER_RS_TELEMETRY_ENABLED=0",
-    CONTAINER,
+    containerName,
     CUA_EXECUTABLE,
     ...args,
   ];
@@ -309,8 +362,9 @@ function cuaExecArgs(args: string[], interactive = false): string[] {
 export async function containerComputerStatus(
   runner: CommandRunner = sh,
   platform: NodeJS.Platform = process.platform,
+  target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
 ): Promise<ContainerComputerStatus> {
-  const status = emptyStatus(platform);
+  const status = emptyStatus(platform, target);
   // Apple's `container` CLI is macOS-only. Ignoring an unrelated executable
   // with that generic name off macOS avoids false detection.
   const candidates = RUNTIMES.filter((runtime) => runtime !== "container" || platform === "darwin");
@@ -349,8 +403,10 @@ export async function containerComputerStatus(
   }
 
   try {
-    const { stdout } = await runner(status.runtime, ["inspect", CONTAINER]);
+    const { stdout } = await runner(status.runtime, ["inspect", target.containerName]);
     if (status.runtime === "container") {
+      // SAFETY: stdout is the engine's `container inspect` JSON array; fields
+      // absent on older engines stay optional and are defaulted below.
       const inspected = JSON.parse(stdout) as Array<{
         configuration?: {
           image?: string | { reference?: string; descriptor?: { digest?: string } };
@@ -366,25 +422,31 @@ export async function containerComputerStatus(
       const detail = inspected[0];
       status.container = detail?.status?.state === "running" ? "running" : "stopped";
       status.network = applePortsAreLocal(detail?.configuration?.publishedPorts) ? "loopback" : "unsafe";
-      const appleImage =
-        typeof detail?.configuration?.image === "string"
-          ? detail.configuration.image
-          : detail?.configuration?.image?.reference ?? detail?.configuration?.imageReference;
-      const appleImageId =
-        typeof detail?.configuration?.image === "object"
-          ? normalizeImageId(detail.configuration.image.descriptor?.digest)
-          : null;
+      const appleImage = imageIsBareName(detail?.configuration?.image)
+        ? detail.configuration.image
+        : detail?.configuration?.image?.reference ?? detail?.configuration?.imageReference;
+      const appleImageId = imageIsBareName(detail?.configuration?.image)
+        ? null
+        : normalizeImageId(detail?.configuration?.image?.descriptor?.digest);
       status.imageMatches =
         appleImage === IMAGE && status.image_id !== null && appleImageId === status.image_id;
       status.managed = containerLabelsMatch(detail?.configuration?.labels);
-      status.persistence = appleWorkspaceMountIsSafe(detail?.configuration?.mounts, platform)
+      status.persistence = appleWorkspaceMountIsSafe(detail?.configuration?.mounts, platform, target)
         ? "durable"
         : "unsafe";
       const resources = detail?.configuration?.resources;
+      // The limits label is the escape hatch for runtimes that reject
+      // --memory/--cpus outright: caps dropped stays mandatory, but numeric
+      // limits may be absent without marking the desktop unsafe.
+      const limitsWaived = detail?.configuration?.labels?.[LIMITS_LABEL] === "none";
       status.security =
-        (resources?.memoryInBytes ?? 0) >= MEMORY_BYTES && resources?.cpus === 2 ? "hardened" : "unsafe";
-      status.viewer_url = viewerUrl(viewerPassword(detail?.configuration?.environment));
+        ((resources?.memoryInBytes ?? 0) >= MEMORY_BYTES && resources?.cpus === 2) || limitsWaived
+          ? "hardened"
+          : "unsafe";
+      status.viewer_url = viewerUrl(viewerPassword(detail?.configuration?.environment), target.viewerPort);
     } else {
+      // SAFETY: stdout is the engine's `container inspect` JSON array; fields
+      // absent on older engines stay optional and are defaulted below.
       const inspected = JSON.parse(stdout) as Array<{
         Config?: { Image?: string; Labels?: Record<string, string>; Env?: string[] };
         HostConfig?: {
@@ -414,9 +476,9 @@ export async function containerComputerStatus(
         status.image_id !== null &&
         normalizeImageId(detail?.Image) === status.image_id;
       status.managed = containerLabelsMatch(detail?.Config?.Labels);
-      status.persistence = dockerWorkspaceMountIsSafe(detail?.Mounts, platform) ? "durable" : "unsafe";
-      status.security = dockerSecurityIsHardened(detail?.HostConfig) ? "hardened" : "unsafe";
-      status.viewer_url = viewerUrl(viewerPassword(detail?.Config?.Env));
+      status.persistence = dockerWorkspaceMountIsSafe(detail?.Mounts, platform, target) ? "durable" : "unsafe";
+      status.security = dockerSecurityIsHardened(detail?.HostConfig, detail?.Config?.Labels) ? "hardened" : "unsafe";
+      status.viewer_url = viewerUrl(viewerPassword(detail?.Config?.Env), target.viewerPort);
     }
   } catch {
     // No container with this name.
@@ -432,14 +494,15 @@ export async function containerComputerStatus(
   if (canProbe) {
     try {
       const expected = `cua-driver ${CUA_DRIVER_VERSION}`;
-      const version = await runner(status.runtime, cuaExecArgs(["--version"]), 8000);
+      const version = await runner(status.runtime, cuaExecArgs(["--version"], false, target.containerName), 8000);
       if (version.stdout.trim() !== expected) throw new Error(`expected ${expected}`);
-      await runner(status.runtime, cuaExecArgs(["status", "--socket", CUA_SOCKET]), 8000);
+      await runner(status.runtime, cuaExecArgs(["status", "--socket", CUA_SOCKET], false, target.containerName), 8000);
       const health = await runner(
         status.runtime,
-        cuaExecArgs(["call", "health_report", "{}", "--socket", CUA_SOCKET]),
+        cuaExecArgs(["call", "health_report", "{}", "--socket", CUA_SOCKET], false, target.containerName),
         15_000,
       );
+      // SAFETY: the cua-driver health_report contract; any missing field fails validation below.
       const report = JSON.parse(health.stdout) as { schema_version?: string; overall?: string; checks?: unknown[] };
       if (
         report.schema_version !== "1" ||
@@ -451,20 +514,24 @@ export async function containerComputerStatus(
       const readinessShot = "/tmp/muster-readiness.png";
       await runner(
         status.runtime,
-        cuaExecArgs([
-          "call",
-          "get_desktop_state",
-          "{}",
-          "--socket",
-          CUA_SOCKET,
-          "--screenshot-out-file",
-          readinessShot,
-        ]),
+        cuaExecArgs(
+          [
+            "call",
+            "get_desktop_state",
+            "{}",
+            "--socket",
+            CUA_SOCKET,
+            "--screenshot-out-file",
+            readinessShot,
+          ],
+          false,
+          target.containerName,
+        ),
         20_000,
       );
       const captured = await runner(
         status.runtime,
-        ["exec", CONTAINER, "base64", "-w0", readinessShot],
+        ["exec", target.containerName, "base64", "-w0", readinessShot],
         20_000,
       );
       if (!wholeScreenshot(Buffer.from(captured.stdout.trim(), "base64")).ok) {
@@ -479,7 +546,7 @@ export async function containerComputerStatus(
       try {
         const errorLog = await runner(
           status.runtime,
-          ["exec", CONTAINER, "tail", "-n", "4", "/var/log/supervisor/cua-driver.error.log"],
+          ["exec", target.containerName, "tail", "-n", "4", "/var/log/supervisor/cua-driver.error.log"],
           4000,
         );
         status.desktop_error =
@@ -518,10 +585,10 @@ function applePortsAreLocal(
   );
 }
 
-function sameWorkspaceSource(source: string | undefined, platform: NodeJS.Platform): boolean {
+function sameWorkspaceSource(source: string | undefined, platform: NodeJS.Platform, expectedDir: string): boolean {
   if (!source) return false;
   const actual = resolve(source);
-  const expected = resolve(VM_WORKSPACE_DIR);
+  const expected = resolve(expectedDir);
   return platform === "win32" ? actual.toLowerCase() === expected.toLowerCase() : actual === expected;
 }
 
@@ -530,11 +597,12 @@ function dockerWorkspaceMountIsSafe(
     | Array<{ Type?: string; Source?: string; Destination?: string; RW?: boolean }>
     | undefined,
   platform: NodeJS.Platform,
+  target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
 ): boolean {
   return Boolean(
     mounts?.length === 1 &&
       mounts[0]?.Type === "bind" &&
-      sameWorkspaceSource(mounts[0]?.Source, platform) &&
+      sameWorkspaceSource(mounts[0]?.Source, platform, target.workspaceDir) &&
       mounts[0]?.Destination === VM_WORKSPACE_GUEST &&
       mounts[0]?.RW !== false,
   );
@@ -543,11 +611,12 @@ function dockerWorkspaceMountIsSafe(
 function appleWorkspaceMountIsSafe(
   mounts: Array<{ source?: string; destination?: string; options?: string[] }> | undefined,
   platform: NodeJS.Platform,
+  target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
 ): boolean {
   const options = mounts?.[0]?.options ?? [];
   return Boolean(
     mounts?.length === 1 &&
-      sameWorkspaceSource(mounts[0]?.source, platform) &&
+      sameWorkspaceSource(mounts[0]?.source, platform, target.workspaceDir) &&
       mounts[0]?.destination === VM_WORKSPACE_GUEST &&
       !options.some((option) => option === "ro" || option === "readonly"),
   );
@@ -564,25 +633,36 @@ function dockerSecurityIsHardened(
         CapAdd?: string[] | null;
       }
     | undefined,
+  labels: Record<string, string> | undefined,
 ): boolean {
   if (!config) return false;
+  // Runtimes that reject --memory/--cpus outright record the waiver label at
+  // run time; capability drops are never waived.
+  if (labels?.[LIMITS_LABEL] !== "none") {
+    if (
+      (config.Memory ?? 0) < MEMORY_BYTES ||
+      (config.MemorySwap ?? 0) !== MEMORY_BYTES ||
+      (config.NanoCpus ?? 0) !== NANO_CPUS ||
+      (config.PidsLimit ?? 0) <= 0 ||
+      (config.PidsLimit ?? Infinity) > PIDS_LIMIT
+    ) {
+      return false;
+    }
+  }
   const capDrop = (config.CapDrop ?? []).map((cap) => cap.toLowerCase());
   const capAdd = (config.CapAdd ?? [])
     .map((cap) => cap.toLowerCase().replace(/^cap_/, ""))
     .sort();
-  return (
-    (config.Memory ?? 0) >= MEMORY_BYTES &&
-    (config.MemorySwap ?? 0) === MEMORY_BYTES &&
-    (config.NanoCpus ?? 0) === NANO_CPUS &&
-    (config.PidsLimit ?? 0) > 0 &&
-    (config.PidsLimit ?? Infinity) <= PIDS_LIMIT &&
-    capDrop.includes("all") &&
-    capAdd.join(",") === "setgid,setuid"
-  );
+  return capDrop.includes("all") && capAdd.join(",") === "setgid,setuid";
 }
 
-export function containerRunArgs(runtime: Runtime, password = "CHANGE_ME"): string[] {
-  const common = ["run", "-d", "--name", CONTAINER];
+export function containerRunArgs(
+  runtime: Runtime,
+  password = "CHANGE_ME",
+  target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+  applyResourceLimits = true,
+): string[] {
+  const common = ["run", "-d", "--name", target.containerName];
   common.push(
     "--label",
     `${MANAGED_LABEL}=1`,
@@ -594,62 +674,61 @@ export function containerRunArgs(runtime: Runtime, password = "CHANGE_ME"): stri
     `${IMAGE_LAYER_LABEL}=${IMAGE_LAYER_VERSION}`,
     "--label",
     `${WORKSPACE_LABEL}=1`,
+    // Recorded either way so a later status check can tell "limits were
+    // deliberately waived by the runtime" from "someone stripped the caps".
+    "--label",
+    `${LIMITS_LABEL}=${applyResourceLimits ? "1" : "none"}`,
   );
   if (runtime === "container") {
     // Apple container already places each Linux container in a lightweight VM.
-    common.push(
-      "--memory",
-      "4g",
-      "--cpus",
-      "2",
-      "--cap-drop",
-      "ALL",
-      "--cap-add",
-      "SETUID",
-      "--cap-add",
-      "SETGID",
-      "--shm-size",
-      "512m",
-    );
+    common.push(...resourceFlags(runtime, applyResourceLimits));
   } else {
-    common.push(
-      "--hostname",
-      CONTAINER,
-      "--memory",
-      "4g",
-      "--memory-swap",
-      "4g",
-      "--cpus",
-      "2",
-      "--pids-limit",
-      String(PIDS_LIMIT),
-      "--cap-drop",
-      "ALL",
-      "--cap-add",
-      "SETUID",
-      "--cap-add",
-      "SETGID",
-      "--shm-size",
-      "512m",
-    );
+    common.push("--hostname", target.containerName, ...resourceFlags(runtime, applyResourceLimits));
   }
   common.push(
     "--mount",
     runtime === "podman"
-      ? `type=bind,source=${VM_WORKSPACE_DIR},target=${VM_WORKSPACE_GUEST},relabel=private,U=true`
-      : `type=bind,source=${VM_WORKSPACE_DIR},target=${VM_WORKSPACE_GUEST}`,
+      ? `type=bind,source=${target.workspaceDir},target=${VM_WORKSPACE_GUEST},relabel=private,U=true`
+      : `type=bind,source=${target.workspaceDir},target=${VM_WORKSPACE_GUEST}`,
     "-e",
     `VNC_PW=${password}`,
     "-p",
-    `127.0.0.1:${HOST_VIEWER_PORT}:${INTERNAL_VIEWER_PORT}`,
+    `127.0.0.1:${target.viewerPort}:${INTERNAL_VIEWER_PORT}`,
     IMAGE,
   );
   return common;
 }
 
-async function ensureVmWorkspace(platform: NodeJS.Platform): Promise<void> {
-  await mkdir(VM_WORKSPACE_DIR, { recursive: true, mode: 0o700 });
-  if (platform !== "win32") await chmod(VM_WORKSPACE_DIR, 0o700);
+/** The 4 GB memory / 2 CPU ceiling every managed desktop runs under — the
+ * same caps in shared and per-bot mode — plus runtime-specific hardening.
+ * When a runtime rejects limits outright, only the numeric flags are
+ * stripped; the capability drops stay in every variant. */
+function resourceFlags(runtime: Runtime, applyResourceLimits: boolean): string[] {
+  const caps = ["--cap-drop", "ALL", "--cap-add", "SETUID", "--cap-add", "SETGID"];
+  if (!applyResourceLimits) {
+    return runtime === "container" ? caps : [...caps, "--shm-size", "512m"];
+  }
+  if (runtime === "container") {
+    return ["--memory", "4g", "--cpus", "2", ...caps, "--shm-size", "512m"];
+  }
+  return [
+    "--memory",
+    "4g",
+    "--memory-swap",
+    "4g",
+    "--cpus",
+    "2",
+    "--pids-limit",
+    String(PIDS_LIMIT),
+    ...caps,
+    "--shm-size",
+    "512m",
+  ];
+}
+
+async function ensureVmWorkspace(platform: NodeJS.Platform, workspaceDir: string): Promise<void> {
+  await mkdir(workspaceDir, { recursive: true, mode: 0o700 });
+  if (platform !== "win32") await chmod(workspaceDir, 0o700);
 }
 
 async function prepareManagedImage(runtime: Runtime, runner: CommandRunner): Promise<void> {
@@ -667,11 +746,22 @@ export async function containerComputerAction(
   action: LifecycleAction,
   runner: CommandRunner = sh,
   platform: NodeJS.Platform = process.platform,
+  target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
 ): Promise<ContainerComputerStatus> {
   if (runner === sh && platform === process.platform) screenshotStatusCache = null;
-  const before = await containerComputerStatus(runner, platform);
+  const before = await containerComputerStatus(runner, platform, target);
   const runtime = before.runtime;
   if (!runtime) throw Object.assign(new Error(before.problem ?? "No container runtime is installed"), { status: 409 });
+
+  // The one action that runs BEFORE the daemon is up — that is the whole
+  // point of it, so it has to be checked ahead of the daemonUp gate below,
+  // not after it.
+  if (action === "runtimeStart") {
+    if (before.daemonUp) return before;
+    await startContainerRuntime(runtime, platform);
+    return containerComputerStatus(runner, platform, target);
+  }
+
   if (!before.daemonUp) throw Object.assign(new Error(before.problem ?? `${runtime} is not running`), { status: 409 });
 
   if (action === "run" && before.container !== "missing") {
@@ -693,16 +783,35 @@ export async function containerComputerAction(
   if (action === "pull") {
     await prepareManagedImage(runtime, runner);
   } else {
-    if (action === "run") await ensureVmWorkspace(platform);
+    if (action === "run") await ensureVmWorkspace(platform, target.workspaceDir);
     const args =
       action === "run"
-        ? containerRunArgs(runtime, randomBytes(6).toString("base64url"))
+        ? containerRunArgs(runtime, randomBytes(6).toString("base64url"), target)
         : action === "remove"
-          ? ["rm", runtime === "container" ? "--force" : "-f", CONTAINER]
-          : [action, CONTAINER];
-    await runner(runtime, args, 2 * 60_000);
+          ? ["rm", runtime === "container" ? "--force" : "-f", target.containerName]
+          : [action, target.containerName];
+    try {
+      await runner(runtime, args, 2 * 60_000);
+    } catch (error) {
+      // Guard for runtimes that reject --memory/--cpus outright (some podman
+      // roots and old docker builds): recreate once without numeric caps so a
+      // desktop still comes up. Capability drops are kept in every retry, and
+      // the original failure is surfaced when even the unbounded run refuses.
+      const limitsRejected = action === "run" && args.includes("--memory");
+      if (!limitsRejected) throw error;
+      try {
+        await containerComputerStatus(runner, platform, target).then(async (after) => {
+          if (after.container !== "missing") {
+            await runner(runtime, ["rm", runtime === "container" ? "--force" : "-f", target.containerName], 60_000);
+          }
+        });
+        await runner(runtime, containerRunArgs(runtime, randomBytes(6).toString("base64url"), target, false), 2 * 60_000);
+      } catch {
+        throw error;
+      }
+    }
   }
-  return containerComputerStatus(runner, platform);
+  return containerComputerStatus(runner, platform, target);
 }
 
 type ScreenshotCheck = { ok: boolean; mime: "image/png" | "image/jpeg" };
@@ -726,13 +835,14 @@ function wholeScreenshot(bytes: Buffer): ScreenshotCheck {
 export async function containerComputerScreenshot(
   runner: CommandRunner = sh,
   platform: NodeJS.Platform = process.platform,
+  target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
 ): Promise<string> {
-  const cacheable = runner === sh && platform === process.platform;
+  const cacheable = runner === sh && platform === process.platform && target.key === SHARED_LOCAL_VM_TARGET.key;
   const now = Date.now();
   const status =
     cacheable && screenshotStatusCache && screenshotStatusCache.expiresAt > now
       ? screenshotStatusCache.status
-      : await containerComputerStatus(runner, platform);
+      : await containerComputerStatus(runner, platform, target);
   if (!status.ready || !status.runtime) {
     if (cacheable) screenshotStatusCache = null;
     throw Object.assign(new Error(status.problem ?? "The Local VM is not ready"), { status: 409 });
@@ -742,18 +852,22 @@ export async function containerComputerScreenshot(
     const screenshot = "/tmp/muster-preview.png";
     await runner(
       status.runtime,
-      cuaExecArgs([
-        "call",
-        "get_desktop_state",
-        "{}",
-        "--socket",
-        CUA_SOCKET,
-        "--screenshot-out-file",
-        screenshot,
-      ]),
+      cuaExecArgs(
+        [
+          "call",
+          "get_desktop_state",
+          "{}",
+          "--socket",
+          CUA_SOCKET,
+          "--screenshot-out-file",
+          screenshot,
+        ],
+        false,
+        target.containerName,
+      ),
       30_000,
     );
-    const { stdout } = await runner(status.runtime, ["exec", CONTAINER, "base64", "-w0", screenshot], 30_000);
+    const { stdout } = await runner(status.runtime, ["exec", target.containerName, "base64", "-w0", screenshot], 30_000);
     const data = stdout.trim();
     const checked = wholeScreenshot(Buffer.from(data, "base64"));
     if (!checked.ok) {
@@ -779,12 +893,44 @@ type ContainerMcpLaunch = {
   env: Record<string, string>;
 };
 
-export function containerComputerMcp(runtime: Runtime): ContainerMcpLaunch {
+export function containerComputerMcp(
+  runtime: Runtime,
+  target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+  extraEnv: Record<string, string> = {},
+): ContainerMcpLaunch {
   return {
     command: process.execPath,
-    args: [containerMcpPath, runtime, CONTAINER, CUA_SOCKET],
-    env: { ELECTRON_RUN_AS_NODE: "1" },
+    args: [containerMcpPath, runtime, target.containerName, CUA_SOCKET],
+    env: { ELECTRON_RUN_AS_NODE: "1", ...extraEnv },
   };
+}
+
+/** Cheap existence probe used by the per-bot desktop cap. It deliberately
+ * checks the container only — an inspect hit means the desktop still occupies
+ * a slot whether or not it is currently running. */
+export async function desktopExists(
+  runtime: Runtime,
+  target: LocalVmTarget,
+  runner: CommandRunner = sh,
+): Promise<boolean> {
+  try {
+    await runner(runtime, ["inspect", target.containerName], 8000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** How many of these desktops already exist on this machine. Distinct targets
+ * only — two bots resolving to one target count once. */
+export async function countExistingDesktops(
+  runtime: Runtime,
+  targets: LocalVmTarget[],
+  runner: CommandRunner = sh,
+): Promise<number> {
+  const unique = [...new Map(targets.map((target) => [target.key, target])).values()];
+  const existing = await Promise.all(unique.map((target) => desktopExists(runtime, target, runner)));
+  return existing.filter(Boolean).length;
 }
 
 /** Commands shown as a transparent fallback. Normal setup builds the pinned
@@ -792,6 +938,7 @@ export function containerComputerMcp(runtime: Runtime): ContainerMcpLaunch {
 export function setupCommands(
   runtime: Runtime | null,
   platform: NodeJS.Platform = process.platform,
+  target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
 ) {
   const install =
     platform === "darwin"
@@ -819,7 +966,7 @@ export function setupCommands(
       start: null,
       stop: null,
       remove: null,
-      view: `http://127.0.0.1:${HOST_VIEWER_PORT}/vnc.html`,
+      view: `http://127.0.0.1:${target.viewerPort}/vnc.html`,
     };
   }
   const command = (args: string[]) => [runtime, ...args].join(" ");
@@ -829,19 +976,72 @@ export function setupCommands(
     // This is the inspectable base download. The normal Prepare button also
     // builds the checksum-pinned 0.20.0 derivative automatically.
     pull: command(["pull", BASE_IMAGE]),
-    run: command(containerRunArgs(runtime)),
+    run: command(containerRunArgs(runtime, "CHANGE_ME", target)),
     start: null,
-    stop: command(["stop", CONTAINER]),
-    remove: command(["rm", runtime === "container" ? "--force" : "-f", CONTAINER]),
-    view: `http://127.0.0.1:${HOST_VIEWER_PORT}/vnc.html`,
+    stop: command(["stop", target.containerName]),
+    remove: command(["rm", runtime === "container" ? "--force" : "-f", target.containerName]),
+    view: `http://127.0.0.1:${target.viewerPort}/vnc.html`,
   };
+}
+
+/** Whether runtimeStart's command can be run by Muster itself: every case
+ * except docker-on-linux, which needs sudo — a password prompt Muster has
+ * no way to satisfy programmatically, and running anything as root without
+ * the user watching it happen isn't a line to cross quietly. */
+export function canAutoStartRuntime(runtime: Runtime | null, platform: NodeJS.Platform): boolean {
+  return runtime !== null && !(runtime === "docker" && platform === "linux");
+}
+
+/** Actually run the runtime-start command — only ever called after
+ * canAutoStartRuntime() confirmed it doesn't need sudo. Uses a real shell
+ * (not CommandRunner, which is scoped to "runtime <args>" invocations) since
+ * these are heterogeneous commands: launching a GUI app, a VM manager, or a
+ * system service, not the container runtime CLI itself. */
+export async function startContainerRuntime(
+  runtime: Runtime,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  if (!canAutoStartRuntime(runtime, platform)) {
+    throw Object.assign(new Error(`Starting ${runtime} on Linux needs sudo — run the command shown below yourself.`), {
+      status: 409,
+    });
+  }
+  const command =
+    runtime === "container"
+      ? "container system start"
+      : runtime === "podman"
+        ? "podman machine init 2>/dev/null; podman machine start"
+        : "colima start || open -a Docker";
+  const shellRun = promisify(execFile);
+  // Starting a VM/daemon can genuinely take a while on first run — same
+  // generous timeout the image-prepare and container actions already use.
+  await shellRun("/bin/sh", ["-c", command], { timeout: 2 * 60_000, env: { ...process.env, PATH: augmentedPath() } }).catch(
+    (e) => {
+      // "colima start || open -a Docker" exits 0 either way it succeeds, so
+      // a real failure here means neither worked.
+      throw Object.assign(new Error(`Could not start ${runtime}: ${e instanceof Error ? e.message : String(e)}`), {
+        status: 500,
+      });
+    },
+  );
 }
 
 /** Cloud boxes still use Muster's high-latency REST adapter. Local VMs
  * bypass it and mount Cua Driver's official MCP server through
- * containerComputerMcp(). */
+ * containerComputerMcp(). OpenSandbox rides the same REST-style adapter
+ * as Box — server/computer-proxy.ts dispatches to whichever backend's env
+ * vars are actually present. */
 export function computerProxyEnv(
-  computer: { boxId?: string; token?: string },
+  computer:
+    | { kind?: "box"; boxId?: string; token?: string }
+    | { kind: "opensandbox"; sandboxId?: string; url?: string; apiKey?: string },
 ): NodeJS.ProcessEnv {
+  if (computer.kind === "opensandbox") {
+    return {
+      OGB_OPENSANDBOX_SANDBOX_ID: computer.sandboxId ?? "",
+      OGB_OPENSANDBOX_URL: computer.url ?? "",
+      OGB_OPENSANDBOX_API_KEY: computer.apiKey ?? "",
+    };
+  }
   return { OGB_BOX_ID: computer.boxId ?? "", OGB_BOX_TOKEN: computer.token ?? "" };
 }

@@ -17,7 +17,14 @@ class FakeAudio {
   }
 }
 
-function json(body: unknown): Response {
+/** JSON-shaped payload the speech API stub returns. */
+type ApiPrimitive = string | number | boolean | null;
+interface ApiObject {
+  [key: string]: ApiValue;
+}
+type ApiValue = ApiPrimitive | ApiObject | ApiValue[];
+
+function json(body: ApiValue): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
     headers: { "content-type": "application/json" },

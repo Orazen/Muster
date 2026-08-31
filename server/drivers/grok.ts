@@ -13,7 +13,16 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
+import type { JsonObject, JsonValue } from "../schema.ts";
 import { appendNative } from "./native.ts";
+import {
+  closeAll,
+  connectIntegrations,
+  parseChatToolResponse,
+  runToolLoop,
+  type OpenAiTool,
+} from "./openai-tools.ts";
+import { MAX_RETRIES, abortableSleep, retryDelayMs, transientReason } from "./retry.ts";
 
 const DRIVER_KIND = "grok";
 const DEFAULT_URL = "https://api.x.ai/v1";
@@ -21,9 +30,9 @@ const DEFAULT_URL = "https://api.x.ai/v1";
 const MODELS = {
   default: "grok-4",
   options: [
-    { id: "grok-4", label: "Grok 4" },
-    { id: "grok-4-fast", label: "Grok 4 Fast" },
-    { id: "grok-3-mini", label: "Grok 3 Mini" },
+    { id: "grok-4", label: "Grok 4", contextWindow: 256_000 },
+    { id: "grok-4-fast", label: "Grok 4 Fast", contextWindow: 256_000 },
+    { id: "grok-3-mini", label: "Grok 3 Mini", contextWindow: 131_072 },
   ],
 };
 
@@ -33,11 +42,16 @@ export interface GrokConfig {
   apiKeyEnv: string;
 }
 
-function decodeConfig(raw: unknown): GrokConfig {
-  const o = (raw ?? {}) as Record<string, unknown>;
+/** Wire text fields decode as primitive strings and nothing else. */
+const isText = (v: JsonValue): v is string => Object.is(String(v), v);
+
+function decodeConfig(raw: JsonValue | undefined): GrokConfig {
+  // Non-object configs (null, arrays, primitives) fall back to every default,
+  // matching the previous `raw ?? {}` handling field by field.
+  const o = raw instanceof Object && !Array.isArray(raw) ? raw : {};
   return {
-    url: typeof o.url === "string" ? o.url : DEFAULT_URL,
-    apiKeyEnv: typeof o.apiKeyEnv === "string" ? o.apiKeyEnv : "XAI_API_KEY",
+    url: isText(o.url) ? o.url : DEFAULT_URL,
+    apiKeyEnv: isText(o.apiKeyEnv) ? o.apiKeyEnv : "XAI_API_KEY",
   };
 }
 
@@ -56,7 +70,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
     const active = new Map<string, { abort: AbortController; turnId: string }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of listeners) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -125,6 +139,28 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       return { text, usage };
     };
 
+    /** Non-streaming request carrying integration tools; parsing + the
+     * agentic loop live in ./openai-tools.ts, shared with openai.ts and
+     * the generic compatible factory. */
+    const completeWithTools = async (
+      messages: Array<JsonObject>,
+      model: string,
+      tools: OpenAiTool[],
+      signal?: AbortSignal,
+    ): Promise<ReturnType<typeof parseChatToolResponse>> => {
+      const res = await fetch(`${config.url}/chat/completions`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ model, messages, tools, tool_choice: "auto", stream: false }),
+        signal: signal ?? AbortSignal.timeout(120_000),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`xAI HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
+      }
+      return parseChatToolResponse(await res.json());
+    };
+
     const sendTurn = async (turn: SendTurnInput) => {
       const { threadId } = turn;
       if (!apiKey) throw new Error(`no xAI key — set ${config.apiKeyEnv} or config.json xai.key`);
@@ -146,36 +182,90 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       emit({ ...base(threadId, turnId), type: "turn.started" });
       emit({ ...base(threadId, turnId), type: "session.started", sessionId: null, model: turn.model ?? MODELS.default });
 
+      // Shared endings for both the tool path and the streaming retry loop.
+      const finishOk = (text: string, usage: { input: number; output: number } | null) => {
+        appendNative(threadId, { dir: "in", source: "xai.chat.completions", msg: { text, usage } });
+        if (text.trim()) {
+          emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+        }
+        if (usage) {
+          emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...usage });
+        }
+        active.delete(threadId);
+        emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
+      };
+      const finishErr = (error: Error, aborted: boolean) => {
+        active.delete(threadId);
+        if (!aborted) {
+          emit({ ...base(threadId, turnId), type: "runtime.error", message: error.message });
+        }
+        emit({
+          ...base(threadId, turnId),
+          type: "turn.completed",
+          ok: false,
+          stopReason: aborted ? "interrupted" : "error",
+          cost: null,
+        });
+      };
+
       (async () => {
+        const { clients, tools } = await connectIntegrations(turn.integrations);
         try {
-          const { text, usage } = await complete(messages, turn.model || MODELS.default, {
-            stream: true,
-            signal: abort.signal,
-            onDelta: (delta) =>
-              emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta }),
-          });
-          appendNative(threadId, { dir: "in", source: "xai.chat.completions", msg: { text, usage } });
-          if (text.trim()) {
-            emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+          if (tools.length > 0) {
+            // Tool turns never auto-retry: a retried round would re-run the
+            // model's earlier tool calls — a second click, a second post.
+            // One pass, then success or failure, exactly like a dirty retry.
+            try {
+              const { text, usage } = await runToolLoop({
+                chat: completeWithTools,
+                messages,
+                model: turn.model || MODELS.default,
+                clients,
+                tools,
+                signal: abort.signal,
+              });
+              finishOk(text, usage);
+            } catch (e) {
+              // SAFETY: abort and fetch failures both surface as Error instances.
+              const error = e instanceof Error ? e : new Error(String(e));
+              finishErr(error, error.name === "AbortError");
+            }
+            return;
           }
-          if (usage) {
-            emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...usage });
+          // Bounded auto-retry on transient failures (v2 plan 3.4): a 429/5xx
+          // or dropped socket retries with backoff as long as nothing has been
+          // streamed yet; once deltas reached the chat, a retry would duplicate
+          // them, so the turn fails instead. Abort during backoff = interrupt.
+          for (let attempt = 1; ; attempt++) {
+          let gotDelta = false;
+          try {
+            const { text, usage } = await complete(messages, turn.model || MODELS.default, {
+              stream: true,
+              signal: abort.signal,
+              onDelta: (delta) => {
+                gotDelta = true;
+                emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta });
+              },
+            });
+            finishOk(text, usage);
+            return;
+          } catch (e) {
+            // SAFETY: abort and fetch failures both surface as Error instances;
+            // anything else is normalized so the event still carries a message.
+            const error = e instanceof Error ? e : new Error(String(e));
+            const aborted = error.name === "AbortError";
+            const transient = !aborted && !gotDelta && attempt <= MAX_RETRIES ? transientReason(error.message) : null;
+            if (transient) {
+              emit({ ...base(threadId, turnId), type: "turn.retrying", attempt, maxAttempts: MAX_RETRIES, reason: transient.reason });
+              await abortableSleep(retryDelayMs(attempt), abort.signal);
+              if (!abort.signal.aborted) continue;
+            }
+            finishErr(error, aborted);
+            return;
           }
-          active.delete(threadId);
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
-        } catch (e) {
-          active.delete(threadId);
-          const aborted = (e as Error).name === "AbortError";
-          if (!aborted) {
-            emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
           }
-          emit({
-            ...base(threadId, turnId),
-            type: "turn.completed",
-            ok: false,
-            stopReason: aborted ? "interrupted" : "error",
-            cost: null,
-          });
+        } finally {
+          closeAll(clients);
         }
       })();
 
@@ -201,7 +291,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       snapshot,
       adapter: {
         provider: DRIVER_KIND,
-        capabilities: { sessionModelSwitch: "in-session" },
+        capabilities: { sessionModelSwitch: "in-session", computerMcp: true, composioMcp: true, customMcp: true, transcriptReplay: true },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.abort.abort(),
         respondToRequest: async () => "unavailable" as const, // this engine has no asks to answer

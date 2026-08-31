@@ -6,6 +6,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import type { JsonObject } from "../schema.ts";
+
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "dweb-proxy.ts");
 
 let stub: Server;
@@ -13,11 +15,13 @@ let stubPort = 0;
 let child: ChildProcess;
 let repoStatus = 200;
 let runBody: unknown;
-let runResponse: unknown = { status: "ok", output: "model output" };
+/** Bodies the stub can answer /api/opencode/run with; each test pins its scenario. */
+type RunStubReply = { status: "ok"; output: string } | { status: "error"; error: string };
+let runResponse: RunStubReply = { status: "ok", output: "model output" };
 const pending = new Map<number, (message: any) => void>();
 let nextId = 1;
 
-function rpc(method: string, params?: unknown): Promise<any> {
+function rpc(method: string, params?: JsonObject): Promise<any> {
   return new Promise((resolve, reject) => {
     const id = nextId++;
     pending.set(id, resolve);
@@ -28,7 +32,7 @@ function rpc(method: string, params?: unknown): Promise<any> {
   });
 }
 
-const callTool = (name: string, args: unknown = {}) => rpc("tools/call", { name, arguments: args });
+const callTool = (name: string, args: JsonObject = {}) => rpc("tools/call", { name, arguments: args });
 
 beforeAll(async () => {
   stub = createServer((req, res) => {
@@ -58,6 +62,7 @@ beforeAll(async () => {
     res.end(JSON.stringify({ error: "not found" }));
   });
   await new Promise<void>((resolve) => stub.listen(0, "127.0.0.1", resolve));
+  // SAFETY: listen(0, "127.0.0.1") always resolves to an AddressInfo with a port.
   stubPort = (stub.address() as { port: number }).port;
 
   child = spawn(process.execPath, [PROXY], {

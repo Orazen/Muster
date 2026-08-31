@@ -32,6 +32,7 @@ import { newEventId, newId } from "../contracts.ts";
 import { applyClaudeInject, mergeLocalInject } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { MAX_RETRIES, cancellableSleep, retryDelayMs, transientReason } from "./retry.ts";
 
 /** Whether `claude` has been signed in.
  *
@@ -48,10 +49,9 @@ export function claudeSignedIn(
   return new Promise((resolve) => {
     run(cli, ["auth", "status", "--json"], { timeout: 8000, env }, (_error, stdout) => {
       try {
-        const status: unknown = JSON.parse(stdout);
-        resolve(
-          typeof status === "object" && status !== null && "loggedIn" in status && status.loggedIn === true,
-        );
+        // SAFETY: auth status JSON is an object envelope; only its loggedIn flag is read
+        const status = JSON.parse(stdout) as { loggedIn?: unknown } | null | undefined;
+        resolve(status?.loggedIn === true);
       } catch {
         resolve(false);
       }
@@ -103,26 +103,48 @@ function claudeConfigDir(env: Record<string, string | undefined>): string {
   return join(env.HOME || env.USERPROFILE || homedir(), ".claude");
 }
 
-function extrasFromUnknown(value: unknown): Array<{ id: string; label: string }> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (typeof item === "string") {
-      return CLAUDE_MODEL_ID.test(item) ? [{ id: item, label: item }] : [];
+/** One row of a settings.json model list — plain id string or partial descriptor. */
+interface ClaudeCatalogRow {
+  id?: string;
+  model?: string;
+  slug?: string;
+  name?: string;
+  displayName?: string;
+  label?: string;
+}
+
+function extrasFromUnknown(
+  list: ReadonlyArray<string | ClaudeCatalogRow> | undefined,
+): Array<{ id: string; label: string }> {
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((item) => {
+    if (!(item instanceof Object)) {
+      return item !== undefined && CLAUDE_MODEL_ID.test(item) ? [{ id: item, label: item }] : [];
     }
-    if (!item || typeof item !== "object") return [];
-    const row = item as { id?: unknown; model?: unknown; slug?: unknown; name?: unknown; displayName?: unknown; label?: unknown };
-    const id = [row.id, row.model, row.slug].find((candidate): candidate is string => typeof candidate === "string");
+    const id = [item.id, item.model, item.slug].find((candidate) => candidate !== undefined);
     if (!id || !CLAUDE_MODEL_ID.test(id)) return [];
-    const label = [row.name, row.displayName, row.label].find((candidate): candidate is string => typeof candidate === "string");
+    const label = [item.name, item.displayName, item.label].find(
+      (candidate) => candidate !== undefined,
+    );
     return [{ id, label: label || id }];
   });
 }
 
+/** Model-catalog fields Muster reads from ~/.claude/settings.json. */
+interface ClaudeSettingsFile {
+  availableModels?: ReadonlyArray<string | ClaudeCatalogRow>;
+  customModels?: ReadonlyArray<string | ClaudeCatalogRow>;
+  extraModels?: ReadonlyArray<string | ClaudeCatalogRow>;
+  env?: { ANTHROPIC_MODEL?: string } | null;
+  model?: string;
+}
+
 /** Extra ids from ~/.claude/settings.json. Official cloud rows stay untagged. */
 export function readClaudeModelCatalog(env: Record<string, string | undefined> = process.env) {
-  let settings: Record<string, unknown> = {};
+  let settings: ClaudeSettingsFile = {};
   try {
-    settings = JSON.parse(readFileSync(join(claudeConfigDir(env), "settings.json"), "utf8")) as Record<string, unknown>;
+    // SAFETY: settings.json is a JSON object; only the model-catalog fields are read
+    settings = JSON.parse(readFileSync(join(claudeConfigDir(env), "settings.json"), "utf8")) as ClaudeSettingsFile;
   } catch {
     return STATIC_CLAUDE_MODELS;
   }
@@ -132,10 +154,9 @@ export function readClaudeModelCatalog(env: Record<string, string | undefined> =
     ...extrasFromUnknown(settings.customModels),
     ...extrasFromUnknown(settings.extraModels),
   ];
-  const nestedEnv = settings.env && typeof settings.env === "object" ? (settings.env as Record<string, unknown>) : {};
-  const envModel = nestedEnv.ANTHROPIC_MODEL ?? env.ANTHROPIC_MODEL;
-  if (typeof envModel === "string") extras.push(...extrasFromUnknown([envModel]));
-  if (typeof settings.model === "string") extras.push(...extrasFromUnknown([settings.model]));
+  const envModel = settings.env?.ANTHROPIC_MODEL ?? env.ANTHROPIC_MODEL;
+  if (envModel !== undefined) extras.push(...extrasFromUnknown([envModel]));
+  if (settings.model !== undefined) extras.push(...extrasFromUnknown([settings.model]));
 
   const options = STATIC_CLAUDE_MODELS.options.map((option) => ({ ...option }));
   const seen = new Set(options.map((option) => option.id));
@@ -164,15 +185,31 @@ const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 // the claude CLI) forwards asks over it and waits. Unanswered permission
 // asks deny after timeoutMs with a keep-moving note; unanswered questions
 // answer with "use your best judgment" — guidance, never a block.
+/** Tool input from the CLI permission prompt — prompt fields arrive as strings. */
+type AskInput = {
+  question?: string;
+  command?: string;
+  url?: string;
+  choices?: string[];
+  [key: string]: string | string[] | undefined;
+};
+
 interface Ask {
   id: string;
   kind: "permission" | "question";
   tool: string;
-  input: Record<string, unknown>;
+  input: AskInput;
   at: number;
 }
 type AskBehavior = "allow" | "deny" | "answer";
 type AskResolutionSource = "user" | "timeout" | "system";
+
+/** One stdio entry of the --mcp-config JSON handed to the CLI. */
+interface McpServerSpec {
+  command: string;
+  args?: string[];
+  env?: Record<string, string | undefined>;
+}
 
 const DENY_TIMEOUT_NOTE =
   "Muster: nobody answered this permission request in time. Skip this action and finish what you can without it.";
@@ -181,9 +218,9 @@ const QUESTION_TIMEOUT_NOTE = "Muster: nobody answered in time. Use your best ju
 /** One human-readable line for an ask — what the card subtitle shows. */
 function askSummary(ask: Ask): string {
   const input = ask.input ?? {};
-  if (typeof input.question === "string") return input.question.slice(0, 300);
-  if (typeof input.command === "string") return input.command.slice(0, 200);
-  if (typeof input.url === "string") return input.url.slice(0, 200);
+  if (input.question !== undefined) return input.question.slice(0, 300);
+  if (input.command !== undefined) return input.command.slice(0, 200);
+  if (input.url !== undefined) return input.url.slice(0, 200);
   const text = JSON.stringify(input);
   return text === "{}" ? (ask.tool ?? "tool") : text.slice(0, 200);
 }
@@ -263,7 +300,7 @@ function createPermissionBroker(opts: {
       return true;
     },
     close() {
-      for (const p of [...pending.values()]) {
+      for (const p of pending.values()) {
         if (p.ask.kind === "question") p.finish("answer", "Muster: the turn is ending — wrap up.", "system");
         else p.finish("deny", "Muster: the turn ended", "system");
       }
@@ -277,27 +314,32 @@ function createPermissionBroker(opts: {
   };
 }
 
-function decodeConfig(raw: unknown): ClaudeConfig {
-  const o = (raw ?? {}) as Record<string, unknown>;
-  const mode = o.permissionMode;
+/** Stored driver config — persisted JSON whose fields may be absent or stale. */
+interface ClaudeConfigFile {
+  cli?: string;
+  permissionMode?: string;
+}
+
+function decodeConfig(raw: ClaudeConfigFile | null | undefined): ClaudeConfig {
+  const mode = raw?.permissionMode;
   if (mode !== undefined && mode !== "acceptEdits" && mode !== "auto" && mode !== "bypassPermissions") {
     throw new Error(`claude: invalid permissionMode ${JSON.stringify(mode)}`);
   }
   return {
-    cli: typeof o.cli === "string" ? o.cli : "claude",
-    permissionMode: (mode as ClaudeConfig["permissionMode"]) ?? "acceptEdits",
+    cli: raw?.cli ?? "claude",
+    permissionMode: mode ?? "acceptEdits",
   };
 }
 
-function firstText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter((b) => b?.type === "text" && b.text)
-      .map((b) => b.text)
-      .join("");
-  }
-  return "";
+/** stream-json assistant content: plain text or a list of typed blocks. */
+type StreamContent = string | Array<{ type?: string; text?: string }>;
+
+function firstText(content: StreamContent | null | undefined): string {
+  if (content === null || content === undefined || !Array.isArray(content)) return content ?? "";
+  return content
+    .filter((b) => b?.type === "text" && b.text)
+    .map((b) => b.text)
+    .join("");
 }
 
 export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
@@ -321,7 +363,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
   async create(input: DriverCreateInput<ClaudeConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
-    const catalogEnv: Record<string, string | undefined> = { ...process.env, ...input.environment };
+    const catalogEnv = { ...process.env, ...input.environment };
     let models = STATIC_CLAUDE_MODELS;
     const refreshModels = async () => {
       try {
@@ -337,7 +379,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const active = new Map<string, { stop: () => void; turnId: string; broker?: ReturnType<typeof createPermissionBroker> }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of listeners) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -351,8 +393,77 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const { threadId } = turn;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       const turnId = newId();
-      const sessionId = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+      // SAFETY: resumeCursor carries this driver's own session ids (strings)
+      const sessionId = (turn.resumeCursor as string | undefined) ?? null;
       const newSessionId = sessionId ? null : newId();
+
+      // ── bounded auto-retry (v2 plan item 3.4) ────────────────────────────
+      // Everything below down to startAttempt()'s end runs once PER ATTEMPT:
+      // a fresh CLI process, permission broker, and MCP config file each try.
+      // A clean failure that confidently looks transient (529, rate limit,
+      // dropped socket) retries after backoff; anything user-visible already
+      // emitted, any interruption, or an ambiguous/auth-shaped error does not.
+      let settled = false;
+      let interrupted = false;
+      let attempt = 0;
+      let retrySleep: ReturnType<typeof cancellableSleep> | undefined;
+      // One stable slot the active-map entry reads, so interruptTurn and
+      // respondToRequest always reach whichever attempt is live.
+      interface ClaudeAttempt {
+        child: ReturnType<typeof spawnCli> | null;
+        broker?: ReturnType<typeof createPermissionBroker>;
+        mcpDir: string | null;
+      }
+      const current: ClaudeAttempt = { child: null, mcpDir: null };
+
+      const cleanupAttempt = () => {
+        current.broker?.close();
+        current.broker = undefined;
+        if (current.mcpDir) {
+          // every attempt's config file holds live credentials — none may outlive it
+          try {
+            rmSync(current.mcpDir, { recursive: true, force: true });
+          } catch {}
+          current.mcpDir = null;
+        }
+        current.child = null;
+      };
+
+      const settle = (
+        ok: boolean,
+        stopReason: string | null,
+        cost: number | null = null,
+        usage?: { input: number; output: number },
+      ) => {
+        if (settled) return;
+        settled = true;
+        retrySleep?.cancel();
+        cleanupAttempt();
+        active.delete(threadId);
+        if (usage) emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost, usage });
+        else emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost });
+      };
+
+      async function scheduleRetry(reason: string): Promise<void> {
+        // Tear the failed attempt down quietly — no error chip, no settle.
+        cleanupAttempt();
+        emit({ ...base(threadId, turnId), type: "turn.retrying", attempt, maxAttempts: MAX_RETRIES, reason });
+        retrySleep = cancellableSleep(retryDelayMs(attempt));
+        await retrySleep.promise;
+        if (settled) return;
+        if (interrupted) {
+          settle(false, "interrupted");
+          return;
+        }
+        startAttempt();
+      }
+
+      function startAttempt(): void {
+        attempt += 1;
+        // Anything user-visible this attempt (text deltas, tool chips, asks)
+        // makes it dirty — a retry would duplicate or strand that output, so
+        // dirty attempts fail instead of retrying.
+        let attemptDirty = false;
 
       const args = [
         "-p",
@@ -374,7 +485,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
       // integrations → MCP servers; pre-allow their tools (a headless
       // acceptEdits run silently denies anything unlisted)
-      const mcpServers: Record<string, unknown> = {};
+      const mcpServers: Record<string, McpServerSpec> = {};
       const allowed: string[] = [];
       if (turn.integrations?.composio) {
         mcpServers.composio = { ...turn.integrations.composio };
@@ -415,6 +526,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         };
         allowed.push("mcp__dweb");
       }
+      // user-registered servers (Settings → MCP Servers): names are already
+      // CLI-safe and commands already validated at save time, so they mount
+      // verbatim and their tools pre-allow like every built-in integration's
+      for (const s of turn.integrations?.custom ?? []) {
+        mcpServers[s.name] = { command: s.command, args: [...s.args], env: { ...s.env } };
+        allowed.push(`mcp__${s.name}`);
+      }
       // permission broker: anything acceptEdits would silently deny becomes
       // an Allow/Deny card in chat, and the agent gets ask_user. Skipped in
       // bypassPermissions (fullAuto) — nothing would ever ask.
@@ -423,7 +541,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         const socketPath = permissionSocketPath(threadId);
         broker = createPermissionBroker({
           socketPath,
-          onAsk: (ask) =>
+          onAsk: (ask) => {
+            // an ask reached the chat — this attempt is no longer retryable
+            attemptDirty = true;
             emit({
               ...base(threadId, turnId),
               type: "request.opened",
@@ -431,8 +551,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               requestType: ask.kind,
               tool: ask.tool,
               summary: askSummary(ask),
-              choices: Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
-            }),
+              choices: Array.isArray(ask.input.choices) ? ask.input.choices.slice(0, 5) : undefined,
+            });
+          },
           onResolve: (resolved) =>
             emit({
               ...base(threadId, turnId),
@@ -446,47 +567,29 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: { ...NODE_ENV_FLAG } };
         allowed.push("mcp__ogb");
       }
-      // The MCP config carries credentials — a Composio consumer key in a
-      // header, the box token in the computer proxy's env, the comms token in
-      // the agents proxy's env. On argv every one of those is world-readable
-      // through `ps` for the life of the turn, to any local process. The CLI
-      // accepts a FILE for this flag, so the secrets go in a 0600 file that
-      // is removed when the turn settles.
-      let mcpConfigPath: string | null = null;
-      if (Object.keys(mcpServers).length) {
-        mcpConfigPath = join(mkdtempSync(join(tmpdir(), "omb-mcp-")), "mcp.json");
-        writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
-        args.push("--mcp-config", mcpConfigPath);
-        args.push("--allowedTools", allowed.join(","));
-      }
-
-      const env = claudeEnvironment(turn.model, turnEnvironment);
-
-      const child = spawnCli(config.cli, args, {
-        cwd: turn.cwd ?? homedir(),
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      let settled = false;
-      const settle = (
-        ok: boolean,
-        stopReason: string | null,
-        cost: number | null = null,
-        usage?: { input: number; output: number },
-      ) => {
-        if (settled) return;
-        settled = true;
-        broker?.close();
-        // the config file holds live credentials — it must not outlive the turn
-        if (mcpConfigPath) {
-          try {
-            rmSync(dirname(mcpConfigPath), { recursive: true, force: true });
-          } catch {}
+        // The MCP config carries credentials — a Composio consumer key in a
+        // header, the box token in the computer proxy's env, the comms token in
+        // the agents proxy's env. On argv every one of those is world-readable
+        // through `ps` for the life of the turn, to any local process. The CLI
+        // accepts a FILE for this flag, so the secrets go in a 0600 file that
+        // is removed when the attempt ends.
+        if (Object.keys(mcpServers).length) {
+          const mcpConfigPath = join(mkdtempSync(join(tmpdir(), "omb-mcp-")), "mcp.json");
+          writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
+          args.push("--mcp-config", mcpConfigPath);
+          args.push("--allowedTools", allowed.join(","));
+          current.mcpDir = dirname(mcpConfigPath);
         }
-        active.delete(threadId);
-        emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
-      };
+
+        const env = claudeEnvironment(turn.model, turnEnvironment);
+
+        const child = spawnCli(config.cli, args, {
+          cwd: turn.cwd ?? homedir(),
+          env,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        current.child = child;
+        current.broker = broker;
 
       // token streaming: true while --include-partial-messages is delivering
       // text deltas for the current assistant message, so the whole-message
@@ -515,11 +618,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             if (o.parent_tool_use_id) break;
             const ev = o.event ?? {};
             if (ev.type !== "content_block_delta") break;
-            const d = ev.delta ?? {};
-            if (d.type === "text_delta" && typeof d.text === "string" && d.text) {
+            // SAFETY: stream-json delta frames are { type, text? , thinking? }
+            const d = (ev.delta ?? {}) as { type?: string; text?: string; thinking?: string };
+            if (d.type === "text_delta" && d.text) {
               sawStreamDelta = true;
+              attemptDirty = true;
               emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta: d.text });
-            } else if (d.type === "thinking_delta" && typeof d.thinking === "string" && d.thinking) {
+            } else if (d.type === "thinking_delta" && d.thinking) {
+              attemptDirty = true;
               emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta: d.thinking });
             }
             break;
@@ -528,6 +634,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             const msg = o.message ?? {};
             const text = firstText(msg.content);
             if (text.trim()) {
+              attemptDirty = true;
               // fallback delta for CLIs/paths that never streamed the block
               if (!sawStreamDelta) {
                 emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta: text });
@@ -537,6 +644,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             for (const b of Array.isArray(msg.content) ? msg.content : []) {
               if (b.type === "tool_use") {
+                attemptDirty = true;
                 emit({ ...base(threadId, turnId), type: "item.started", itemType: "tool", itemId: b.id, title: b.name });
               }
             }
@@ -553,6 +661,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           case "user":
             for (const b of Array.isArray(o.message?.content) ? o.message.content : []) {
               if (b.type === "tool_result") {
+                attemptDirty = true;
                 emit({ ...base(threadId, turnId), type: "item.completed", itemType: "tool", itemId: b.tool_use_id, ok: !b.is_error });
               }
             }
@@ -602,25 +711,42 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       });
 
       child.on("close", (code) => {
-        if (!settled) {
-          emit({
-            ...base(threadId, turnId),
-            type: "runtime.error",
-            message: `claude exited ${code} before result${stderr ? `: ${stderr.trim().slice(-300)}` : ""}`,
-          });
-          settle(false, "exit_before_result");
+        if (settled) return;
+        const transient =
+          !interrupted && attempt <= MAX_RETRIES && !attemptDirty ? transientReason(stderr) : null;
+        if (transient) {
+          void scheduleRetry(transient.reason);
+          return;
         }
+        emit({
+          ...base(threadId, turnId),
+          type: "runtime.error",
+          message: `claude exited ${code} before result${stderr ? `: ${stderr.trim().slice(-300)}` : ""}`,
+        });
+        settle(false, "exit_before_result");
       });
 
-      const stop = () => killCliTree(child);
-      active.set(threadId, { stop, turnId, broker });
-      emit({ ...base(threadId, turnId), type: "turn.started" });
+        // prompt over stdin as a stream-json message — never argv (ARG_MAX)
+        const promptMsg = { type: "user", message: { role: "user", content: turn.text } };
+        child.stdin.write(JSON.stringify(promptMsg) + "\n");
+        child.stdin.end();
+        appendNative(threadId, { dir: "out", source: "claude.sdk.message", msg: promptMsg });
+      } // startAttempt
 
-      // prompt over stdin as a stream-json message — never argv (ARG_MAX)
-      const promptMsg = { type: "user", message: { role: "user", content: turn.text } };
-      child.stdin.write(JSON.stringify(promptMsg) + "\n");
-      child.stdin.end();
-      appendNative(threadId, { dir: "out", source: "claude.sdk.message", msg: promptMsg });
+      const stop = () => {
+        interrupted = true;
+        retrySleep?.cancel(); // an interrupt during backoff settles at once
+        if (current.child) killCliTree(current.child);
+      };
+      active.set(threadId, {
+        stop,
+        turnId,
+        get broker() {
+          return current.broker;
+        },
+      });
+      emit({ ...base(threadId, turnId), type: "turn.started" });
+      startAttempt();
 
       return { turnId };
     };
@@ -657,6 +783,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           agentsMcp: true,
           computerMcp: true,
           composioMcp: true,
+          customMcp: true,
+          images: true,
           effortLevels: ["low", "medium", "high", "xhigh", "max"],
         },
         sendTurn,

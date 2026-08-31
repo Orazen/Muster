@@ -17,32 +17,56 @@ export type FileAttachment = {
   size: number;
 };
 
-export type Attachment = PasteAttachment | FileAttachment;
+/** An image on disk, uploaded via POST /api/attachments (pathless pastes and
+ * browser drops) or referenced straight from disk (Electron drops carry a
+ * path). The prompt carries `<attached-image path="…"/>`; every vision-capable
+ * CLI opens files by path itself, so no per-driver encoding exists. */
+export type ImageAttachment = {
+  kind: "image";
+  id: string;
+  path: string;
+  name: string;
+  size: number;
+};
 
-export function isAttachment(value: unknown): value is Attachment {
-  if (!value || typeof value !== "object") return false;
-  const attachment = value as Record<string, unknown>;
-  if (typeof attachment.id !== "string" || !validSize(attachment.size)) return false;
-  if (attachment.kind === "paste") {
-    return (
-      typeof attachment.text === "string" &&
-      typeof attachment.lines === "number" &&
-      Number.isInteger(attachment.lines) &&
-      attachment.lines >= 1
-    );
+export type Attachment = PasteAttachment | FileAttachment | ImageAttachment;
+
+// Wire decoders: attachments arrive untyped from the clipboard and
+// drag-and-drop, so raw values are discriminated exactly here.
+const isText = <T>(value: T): value is T & string => String(value) === value;
+const isCount = <T>(value: T): value is T & number => Number.isInteger(value);
+
+/** Raw attachment fields before validation; every field may be absent or any JSON scalar. */
+type RawFields = {
+  id?: unknown;
+  kind?: unknown;
+  text?: unknown;
+  size?: unknown;
+  lines?: unknown;
+  path?: unknown;
+  name?: unknown;
+};
+
+const isRawAttachment = <T>(value: T): value is T & RawFields =>
+  value instanceof Object && value.constructor === Object;
+
+export function isAttachment<T>(value: T): value is T & Attachment {
+  if (!isRawAttachment(value)) return false;
+  if (!isText(value.id) || !validSize(value.size)) return false;
+  if (value.kind === "paste") {
+    return isText(value.text) && isCount(value.lines) && value.lines >= 1;
   }
-  if (attachment.kind === "file") {
-    return (
-      typeof attachment.path === "string" &&
-      attachment.path.length > 0 &&
-      typeof attachment.name === "string"
-    );
+  if (value.kind === "file") {
+    return isText(value.path) && value.path.length > 0 && isText(value.name);
+  }
+  if (value.kind === "image") {
+    return isText(value.path) && value.path.length > 0 && isText(value.name);
   }
   return false;
 }
 
-function validSize(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+function validSize<T>(value: T): value is T & number {
+  return Number.isFinite(value) && Number(value) >= 0;
 }
 
 /** Past this, a paste stops reading as typing and becomes an attachment.
@@ -64,6 +88,10 @@ function newId(): string {
 
 export function fileAttachment(name: string, path: string, size: number): FileAttachment {
   return { kind: "file", id: newId(), path, name, size };
+}
+
+export function imageAttachment(name: string, path: string, size: number): ImageAttachment {
+  return { kind: "image", id: newId(), path, name, size };
 }
 
 export function pasteAttachment(text: string): PasteAttachment {
@@ -139,12 +167,16 @@ export function formatSize(bytes: number): string {
 /** The prompt the bot receives: what was typed, then one block per
  * attachment. Tagged blocks rather than fences — pasted code and markdown
  * carry fences of their own, and nesting them loses the boundary. A file
- * needs only its path: every driver here is an agent that can open it. */
+ * needs only its path: every driver here is an agent that can open it. An
+ * image gets its own tag so engines that read images by path spot them at a
+ * glance — and so the transcript can re-render them as thumbnails. */
 export function composeMessage(text: string, attachments: Attachment[]): string {
   const parts = [text.trim()];
   attachments.forEach((a, i) => {
     if (a.kind === "paste") {
       parts.push(`<pasted-text index="${i + 1}">\n${a.text}\n</pasted-text>`);
+    } else if (a.kind === "image") {
+      parts.push(`<attached-image path="${escapeAttribute(a.path)}" />`);
     } else {
       parts.push(`<attached-file path="${escapeAttribute(a.path)}" />`);
     }
@@ -163,4 +195,50 @@ export function escapeAttribute(value: string): string {
     .replaceAll("\t", "&#9;")
     .replaceAll("\r", "&#13;")
     .replaceAll("\n", "&#10;");
+}
+
+/** Exact inverse of escapeAttribute — the transcript parser reads tags back
+ * out of message text, so it has to undo every escape above. */
+export function unescapeAttribute(value: string): string {
+  return value
+    .replaceAll("&quot;", '"')
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&#9;", "\t")
+    .replaceAll("&#13;", "\r")
+    .replaceAll("&#10;", "\n")
+    .replaceAll("&amp;", "&"); // last: it escapes the others' syntax
+}
+
+export type TextOrImageSegment = { type: "text"; text: string } | { type: "image"; path: string };
+
+const IMAGE_TAG = /<attached-image\s+path="([^"]*)"\s*\/>(?:\n\n|\n|$)?/g;
+
+/** Split transcript text into plain segments and attached-image references,
+ * left to right. Only exact well-formed tags become images — anything a bot
+ * echoes back half-formed renders as the text it literally is. */
+export function splitAttachedImages(text: string): TextOrImageSegment[] {
+  const segments: TextOrImageSegment[] = [];
+  let last = 0;
+  for (const match of text.matchAll(IMAGE_TAG)) {
+    const index = match.index ?? 0;
+    if (index > last) segments.push({ type: "text", text: text.slice(last, index) });
+    const path = unescapeAttribute(match[1] ?? "");
+    if (path) segments.push({ type: "image", path });
+    last = index + match[0].length;
+  }
+  if (last < text.length) segments.push({ type: "text", text: text.slice(last) });
+  return segments.length ? segments : [{ type: "text", text }];
+}
+
+/** The URL the renderer loads an attached image from — basename into the
+ * GET route. Returns null for anything that is not a bare UUID filename, so
+ * a hand-typed or malformed tag can never make the renderer fetch an
+ * arbitrary path. */
+export function attachmentUrl(path: string): string | null {
+  const name = path.split(/[\\/]/).pop() ?? "";
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|gif|webp)$/i.exec(
+    name,
+  );
+  return uuid ? `/api/attachments/${name}` : null;
 }

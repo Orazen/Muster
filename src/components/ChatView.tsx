@@ -1,6 +1,7 @@
 import { Component, memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
+  ReceiptText,
   ArrowDown,
   Brain,
   Check,
@@ -16,10 +17,13 @@ import {
   Monitor,
   Pencil,
   RefreshCw,
+  Search,
   Square,
   Webhook,
   X,
 } from "lucide-react";
+
+import { ChatFindBar } from "./ChatFindBar";
 import { costCaption, formatTokens, formatUsd, usageChip } from "@/lib/usage";
 import {
   useStore,
@@ -36,9 +40,13 @@ import { AgentAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { MessageBody } from "./MessageBody";
+import { CompactionDivider } from "./CompactionDivider";
+import { PrivacyNotice } from "./PrivacyNotice";
 import { OptionCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { Composer } from "./Composer";
+import { TimelineStrip } from "./TimelineStrip";
 import { ConnectorCard } from "./ConnectorCard";
 import { ModelPicker } from "./ModelPicker";
 import { RenameTitle } from "./RenameTitle";
@@ -329,7 +337,7 @@ function Bubble({
             user && webhookView
               ? "overflow-hidden border border-accent/25 bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
               : user
-                ? "bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
+                ? "border border-bubble-user-border bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
                 : "bg-card px-4 py-2.5 text-ink",
           )}
           title={new Date(message.at).toLocaleString()}
@@ -353,7 +361,7 @@ function Bubble({
               <div
                 className={cn(collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}
               >
-                {text}
+                <MessageBody text={text} />
               </div>
               {collapsible && (
                 <button onClick={() => setExpanded(true)} className="mt-1 text-[12.5px] text-ink-secondary hover:text-ink">
@@ -368,7 +376,7 @@ function Bubble({
             </>
           ) : (
             <MessageBoundary fallbackText={text}>
-              <ChatMarkdown text={text} />
+              <MessageBody text={text} markdown />
             </MessageBoundary>
           )}
         </div>
@@ -479,6 +487,75 @@ function ActivityChip({ message }: { message: Message }) {
   );
 }
 
+/** Status mark for one tool run — shared by the chip and the group header. */
+function ToolStatusMark({ tool }: { tool: NonNullable<Message["tool"]> }) {
+  const failed = tool.ok === false;
+  if (tool.ok === undefined) return <Loader2 size={13} className="animate-spin" />;
+  return failed ? <X size={13} /> : <Check size={13} className="text-success" />;
+}
+
+/** gaia-ui-style collapsed run: consecutive tool calls become one
+ * "Used N tools" section — stacked status marks, expandable to the
+ * individual chips. A long agent turn reads as one calm line instead of a
+ * wall of chips. */
+function ToolRunGroup({ items }: { items: Message[] }) {
+  const [open, setOpen] = useState(false);
+  const running = items.filter((m) => m.tool?.ok === undefined).length;
+  return (
+    <div className="flex justify-start">
+      <div className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-hairline/40 bg-panel">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[13px] text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
+        >
+          <span className="flex -space-x-1.5">
+            {items.slice(-4).map((m) => (
+              <span key={m.id} className="rounded-full border border-hairline/40 bg-panel p-1">
+                {m.tool ? <ToolStatusMark tool={m.tool} /> : null}
+              </span>
+            ))}
+          </span>
+          <span>
+            Used {items.length} tools{running > 0 ? ` · ${running} running` : ""}
+          </span>
+          <ChevronDown size={14} className={cn("ml-auto transition-transform", open && "rotate-180")} />
+        </button>
+        {open && (
+          <div className="flex flex-col gap-1 border-t border-hairline/40 p-2">
+            {items.map((m) => (
+              <ActivityChip key={m.id} message={m} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+type RenderItem = { msg: Message } | { group: Message[] };
+
+/** Collapse consecutive plain tool-run messages into single groups. Bot⇄bot
+ * comm chips, errors, and everything else pass through untouched. */
+function groupToolRuns(messages: Message[]): RenderItem[] {
+  const out: RenderItem[] = [];
+  let buf: Message[] = [];
+  const flush = () => {
+    if (buf.length > 1) out.push({ group: buf });
+    else if (buf.length === 1) out.push({ msg: buf[0] });
+    buf = [];
+  };
+  for (const msg of messages) {
+    if (msg.kind === "activity" && msg.tool && !msg.comm && !msg.tool.name.startsWith("error:")) buf.push(msg);
+    else {
+      flush();
+      out.push({ msg });
+    }
+  }
+  flush();
+  return out;
+}
+
 function ScreenFrame({ png, mime }: { png: string; mime?: string }) {
   return (
     <div className="flex justify-start">
@@ -569,9 +646,23 @@ const MessagesList = memo(function MessagesList({
           </div>
         </div>
       )}
-      {messages.map((m, i) => {
-        const prev = messages[i - 1];
-        const newDay = !prev || new Date(prev.at).toDateString() !== new Date(m.at).toDateString();
+      {(() => {
+        let prevMsg: Message | undefined;
+        return groupToolRuns(messages).map((item) => {
+          if ("group" in item) {
+            const first = item.group[0];
+            const groupNewDay = !prevMsg || new Date(prevMsg.at).toDateString() !== new Date(first.at).toDateString();
+            prevMsg = item.group[item.group.length - 1];
+            return (
+              <div key={first.id} className="contents">
+                {groupNewDay && <DaySeparator at={first.at} />}
+                <ToolRunGroup items={item.group} />
+              </div>
+            );
+          }
+          const m = item.msg;
+          const newDay = !prevMsg || new Date(prevMsg.at).toDateString() !== new Date(m.at).toDateString();
+          prevMsg = m;
         const row = (() => {
           switch (m.kind) {
             case "connector":
@@ -597,6 +688,12 @@ const MessagesList = memo(function MessagesList({
               );
             case "screen":
               return m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null;
+            case "compaction":
+              // The model-context summary marker — quiet, expandable, and
+              // proof that nothing was deleted (scrolling still reaches it).
+              return m.compaction ? <CompactionDivider data={m.compaction} /> : null;
+            case "privacy":
+              return m.privacy ? <PrivacyNotice privacy={m.privacy} /> : null;
             default:
               return (
                 <Bubble
@@ -619,7 +716,8 @@ const MessagesList = memo(function MessagesList({
             {row}
           </div>
         );
-      })}
+        })
+      })()}
     </>
   );
 });
@@ -627,6 +725,19 @@ const MessagesList = memo(function MessagesList({
 export function ChatView({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [findOpen, setFindOpen] = useState(false);
+
+  useEffect(() => setFindOpen(false), [bot.threadId]);
+  useEffect(() => {
+    const onFind = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onFind);
+    return () => window.removeEventListener("keydown", onFind);
+  }, []);
 
   const stream = useStreaming();
   const streaming = stream.streaming[bot.threadId];
@@ -793,7 +904,31 @@ export function ChatView({ bot }: { bot: Bot }) {
   // on Windows the frameless window's min/max/close overlay sits at the
   // top-right: the header becomes the drag strip and clears room for it
   const isWin = window.ogb?.platform === "win32";
+  const [receiptOpen, setReceiptOpen] = useState(false);
+  const [watermark, setWatermark] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        // SAFETY: tier endpoint is optional; a failed read just hides the badge.
+        const r = await fetch("/api/tier");
+        if (!r.ok) return;
+        // SAFETY: wire JSON is untyped; only the boolean flag is consumed.
+        const data: unknown = await r.json();
+        // SAFETY: single-line container-shape assertion for the tier payload.
+        const raw = (data ?? {}) as { watermark?: unknown };
+        if (alive) setWatermark(raw.watermark === true);
+      } catch {
+        /* badge stays hidden offline */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  // SAFETY: -webkit-app-region is an Electron-only property absent from React's CSSProperties.
   const drag = isWin ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined;
+  // SAFETY: same Electron-only property as the drag style above.
   const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined;
 
   return (
@@ -836,6 +971,11 @@ export function ChatView({ bot }: { bot: Bot }) {
               <Crown size={11} /> Chief of Staff
             </span>
           )}
+          {watermark && (
+            <span className="rounded-full bg-raised px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary" title="Muster Free — upgrade to Pro to remove">
+              Free
+            </span>
+          )}
           {bot.busy && <Loader2 size={14} className="animate-spin text-ink-secondary" />}
         </div>
         <div className="flex items-center gap-2" style={noDrag}>
@@ -851,6 +991,14 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
           <TaskPicker bot={bot} />
           <UsageChip bot={bot} />
+          <button
+            onClick={() => setReceiptOpen(true)}
+            aria-label="Job receipt"
+            className={cn("rounded-md p-1.5 hover:bg-raised", receiptOpen ? "text-accent" : "text-ink-secondary hover:text-ink")}
+            title="Job receipt — proof of work for this task"
+          >
+            <ReceiptText size={18} />
+          </button>
           <WorkingFolderChip bot={bot} />
           <ModelPicker bot={bot} />
           <CallButton bot={bot} />
@@ -863,6 +1011,18 @@ export function ChatView({ bot }: { bot: Bot }) {
             title="Bot's computer"
           >
             <Monitor size={18} />
+          </button>
+          <button
+            onClick={() => setFindOpen((open) => !open)}
+            aria-label="Find in conversation"
+            aria-pressed={findOpen}
+            className={cn(
+              "rounded-md p-1.5 hover:bg-raised",
+              findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+            )}
+            title="Find in conversation (⌘F)"
+          >
+            <Search size={18} />
           </button>
           <button
             onClick={() => dispatch({ type: "toggleInspector" })}
@@ -878,6 +1038,9 @@ export function ChatView({ bot }: { bot: Bot }) {
           </button>
         </div>
       </div>
+
+      {findOpen && <ChatFindBar threadId={bot.threadId} onClose={() => setFindOpen(false)} />}
+      {receiptOpen && <JobReceiptModal bot={bot} onClose={() => setReceiptOpen(false)} />}
 
       {/* Error banner */}
       {state.error && (
@@ -998,6 +1161,9 @@ export function ChatView({ bot }: { bot: Bot }) {
           the previous bot's half-written message over. ArrowUp-to-edit is
           gated on busy like the pencil button — editing rewinds the thread,
           which a live turn forbids (the server 409s it). */}
+      {/* Execution timeline: what the bot just did / is doing, only while
+          a turn runs — idle renders nothing, so no layout shift. */}
+      <TimelineStrip bot={bot} messages={messages} />
       <Composer
         key={bot.id}
         bot={bot}
@@ -1052,5 +1218,71 @@ function WorkingFolderChip({ bot }: { bot: Bot }) {
       <Folder size={12} />
       <span className="truncate font-mono">{name}</span>
     </button>
+  );
+}
+
+/** Proof-of-work card for the active task: who, what, how long, how much. */
+function JobReceiptModal({ bot, onClose }: { bot: Bot; onClose: () => void }) {
+  const [state, setState] = useState<{ loading: boolean; text: string | null; error: string | null }>({
+    loading: true,
+    text: null,
+    error: null,
+  });
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        // SAFETY: fetch may fail on a closed server; guarded by catch below.
+        const r = await fetch(`/api/receipts/${encodeURIComponent(bot.id)}/${encodeURIComponent(bot.threadId)}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        // SAFETY: wire JSON is untyped; coerce the one field we render to text.
+        const data: unknown = await r.json();
+        if (!alive) return;
+        // SAFETY: wire JSON has exactly one rendered field, `text`; assert its container shape.
+        const raw = (data ?? {}) as { text?: unknown };
+        // SAFETY: single-line assertion on the parsed record shape above.
+        const text = raw.text == null ? null : String(raw.text);
+        setState({ loading: false, text, error: null });
+      } catch (e) {
+        if (alive) setState({ loading: false, text: null, error: String(e instanceof Error ? e.message : e) });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [bot.id, bot.threadId]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-xl border border-hairline/60 bg-app p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center gap-2">
+          <ReceiptText size={16} className="text-accent" />
+          <h2 className="text-[15px] font-semibold text-ink">Job receipt</h2>
+          <button onClick={onClose} aria-label="Close receipt" className="ml-auto rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink">
+            ✕
+          </button>
+        </div>
+        {state.loading && <p className="text-sm text-ink-secondary">Sealing receipt…</p>}
+        {state.error && <p className="text-sm text-danger">Couldn't build a receipt: {state.error}</p>}
+        {state.text && (
+          <>
+            <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap rounded-lg bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink">
+              {state.text}
+            </pre>
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <CopyButton text={state.text} className="opacity-100" />
+              <button
+                onClick={() => void navigator.clipboard?.writeText(state.text ?? "")}
+                className="rounded-lg border border-hairline/60 px-3 py-1.5 text-[13px] text-ink hover:bg-raised"
+              >
+                Copy receipt
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

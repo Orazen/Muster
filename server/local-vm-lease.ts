@@ -46,3 +46,26 @@ export class LocalVmLease {
     if (this.record?.threadId === threadId) this.record = null;
   }
 }
+
+/** Independent lease lanes keyed by an already-resolved desktop target.
+ * Shared mode uses one key, so behavior is byte-for-byte the historical
+ * singleton; per-bot mode uses one key per bot so separate desktops never
+ * block each other while each desktop stays a strict single-tenant fence. */
+export class LocalVmLeasePool {
+  private readonly leases = new Map<string, LocalVmLease>();
+  private readonly ttlMs: number;
+
+  constructor(ttlMs: number) {
+    if (!Number.isFinite(ttlMs) || ttlMs <= 0) throw new Error("Local VM lease TTL must be positive");
+    this.ttlMs = ttlMs;
+  }
+
+  forTarget(targetKey: string): LocalVmLease {
+    let lease = this.leases.get(targetKey);
+    if (!lease) {
+      lease = new LocalVmLease(this.ttlMs);
+      this.leases.set(targetKey, lease);
+    }
+    return lease;
+  }
+}

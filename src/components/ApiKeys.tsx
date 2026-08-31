@@ -6,33 +6,41 @@ import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "xai";
+export type ConfigSection = "composio" | "box" | "opensandbox" | "opencodeGo" | "xai" | "musterCloud";
 
-const SECTIONS: Record<
-  ConfigSection,
-  { body: (value: string) => unknown; flag: (config: ConfigStatus) => boolean }
-> = {
+/** How one section saves its credential and how its configured flag reads back. */
+interface SectionBinding {
+  body: (value: string) => object;
+  flag: (config: ConfigStatus) => boolean;
+}
+
+/** What each credential row shows next to its input. */
+interface CredentialSpec {
+  label: string;
+  placeholder: string;
+  description: string;
+  href: string;
+  linkLabel: string;
+  optional: boolean;
+  warning?: string;
+}
+
+const SECTIONS = {
   composio: {
     body: (v) => ({ composio: { apiKey: v } }),
     flag: (c) => c.composio.configured,
   },
   box: { body: (v) => ({ box: { token: v } }), flag: (c) => c.box.configured },
+  opensandbox: {
+    body: (v) => ({ opensandbox: { apiKey: v } }),
+    flag: (c) => c.opensandbox?.configured ?? false,
+  },
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
-};
+  musterCloud: { body: (v) => ({ musterCloud: { url: v } }), flag: (c) => c.musterCloud?.configured ?? false },
+} satisfies Record<ConfigSection, SectionBinding>;
 
-const CREDENTIALS: Record<
-  ConfigSection,
-  {
-    label: string;
-    placeholder: string;
-    description: string;
-    href: string;
-    linkLabel: string;
-    optional: boolean;
-    warning?: string;
-  }
-> = {
+const CREDENTIALS = {
   composio: {
     label: "Composio project key",
     placeholder: "ak_…",
@@ -50,6 +58,15 @@ const CREDENTIALS: Record<
     optional: true,
     warning: "Box is a paid service after its trial. Usage may incur charges.",
   },
+  opensandbox: {
+    label: "OpenSandbox API key",
+    placeholder: "Paste your OpenSandbox server API key",
+    description:
+      "Self-hostable sandbox alternative to Box. Saving a key here stores it for future use — bot computer use doesn't run on it yet.",
+    href: "https://github.com/opensandbox-group/OpenSandbox",
+    linkLabel: "OpenSandbox on GitHub",
+    optional: true,
+  },
   opencodeGo: {
     label: "OpenCode Go API key",
     placeholder: "Paste your OpenCode Go API key",
@@ -66,10 +83,20 @@ const CREDENTIALS: Record<
     linkLabel: "Get an xAI API key",
     optional: true,
   },
-};
+  musterCloud: {
+    label: "Muster Cloud account",
+    placeholder: "https://muster.orazen.online",
+    description:
+      "Opt in to one shared identity: the same email and password sign in here and on the Muster Cloud server you point this at. Bots, threads, and messages stay local to this install — only the account itself is shared, nothing syncs.",
+    href: "https://github.com/Orazen/Muster",
+    linkLabel: "How it works",
+    optional: true,
+    warning: "This install will need internet access to sign in once this is set, and trusts that server with your login.",
+  },
+} satisfies Record<ConfigSection, CredentialSpec>;
 
 function CredentialHelp({ section }: { section: ConfigSection }) {
-  const credential = CREDENTIALS[section];
+  const credential: CredentialSpec = CREDENTIALS[section];
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -159,17 +186,33 @@ export function ApiKeyRow({
     if (saving || (!value.trim() && !configured)) return;
     setSaving(true);
     setError(null);
-    const request = section === "composio" && window.ogb?.setCredential
-      ? window.ogb.setCredential("composioApiKey", value.trim())
-      : api("/api/config", {
-          method: "PUT",
-          body: JSON.stringify(SECTIONS[section].body(value.trim())),
-        });
-    request
+    // Cloud: write to the user's own encrypted vault. Desktop/self-host:
+    // keep the existing global config path.
+    const isCloud = !window.ogb; // browser session = cloud deployment
+    const vaultBody = JSON.stringify({ providerId: section, apiKey: value.trim() });
+
+    const request = isCloud
+      ? api("/api/user-keys", {
+          method: value.trim() ? "PUT" : "DELETE",
+          body: vaultBody,
+        }).catch(() =>
+          // Vault route absent (older server) — fall back to global config
+          api("/api/config", {
+            method: "PUT",
+            body: JSON.stringify(SECTIONS[section].body(value.trim())),
+          })
+        )
+      : section === "composio" && window.ogb?.setCredential
+        ? window.ogb.setCredential("composioApiKey", value.trim())
+        : api("/api/config", {
+            method: "PUT",
+            body: JSON.stringify(SECTIONS[section].body(value.trim())),
+          });
+    Promise.resolve(request)
       .then((status: ConfigStatus) => {
         dispatch({ type: "configStatus", config: status });
         setValue("");
-        onSaved?.(SECTIONS[section].flag(status));
+        onSaved?.(true);
       })
       .catch((e) => setError(e.message))
       .finally(() => setSaving(false));

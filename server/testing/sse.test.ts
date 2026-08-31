@@ -12,7 +12,11 @@ describe("SSE recorder", () => {
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
-    if (!address || typeof address === "string") throw new Error("test server did not bind a TCP port");
+    // AddressInfo is the only object member of the union; primitives fail
+    // the instanceof check, and "port" then confirms the TCP variant.
+    if (!(address instanceof Object) || !("port" in address)) {
+      throw new Error("test server did not bind a TCP port");
+    }
 
     try {
       const recorder = await openSse(`http://127.0.0.1:${address.port}`);

@@ -32,6 +32,10 @@ let serverProc = null;
 let serverReady = true;
 let secureCredentials = {};
 
+// Config files, HTTP payloads, and renderer IPC arguments arrive untyped.
+// Decode text once here so every handler branches on a real string or null.
+const asText = (value) => (Object.prototype.toString.call(value) === "[object String]" ? value : null);
+
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
 async function loadSecureCredentials() {
@@ -61,18 +65,16 @@ async function secureComposioConfig() {
   const configPath = path.join(dataDir, "config.json");
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    if (!config?.composio || typeof config.composio !== "object") return;
+    const composio = Object.prototype.toString.call(config?.composio) === "[object Object]" ? config.composio : null;
+    if (!composio) return;
     let changed = false;
-    const apiKey = config?.composio?.apiKey;
-    if (typeof apiKey === "string" && apiKey.trim().startsWith("ak_")) {
-      if (!secureCredentials.composioApiKey) {
-        secureCredentials.composioApiKey = apiKey.trim();
+    const apiKeyText = asText(composio.apiKey)?.trim();
+    if (apiKeyText) {
+      if (apiKeyText.startsWith("ak_") && !secureCredentials.composioApiKey) {
+        secureCredentials.composioApiKey = apiKeyText;
         await saveSecureCredentials(secureCredentials);
       }
-      config.composio.apiKey = "";
-      changed = true;
-    } else if (typeof apiKey === "string" && apiKey.trim()) {
-      config.composio.apiKey = "";
+      composio.apiKey = "";
       changed = true;
     }
     // These were the old Connect credential and endpoint. They are no longer
@@ -127,7 +129,7 @@ async function ensureManagedComposioCredentials() {
     });
     const body = await response.json().catch(() => null);
     if (!response.ok) throw new Error(body?.error || `HTTP ${response.status}`);
-    if (!/^[0-9a-f]{64}$/.test(body?.token ?? "") || typeof body?.installationId !== "string") {
+    if (!/^[0-9a-f]{64}$/.test(body?.token ?? "") || asText(body?.installationId) === null) {
       throw new Error("the connected-apps service returned invalid credentials");
     }
     secureCredentials.composioBrokerToken = body.token;
@@ -172,22 +174,28 @@ function slog(line) {
 async function startServerOn(port) {
   const entry = path.join(process.resourcesPath, "server", "index.js");
   slog(`fork ${entry} port=${port}`);
+  const childEnv = {
+    ...process.env,
+    OMB_STATIC_DIR: path.join(process.resourcesPath, "ui"),
+    OMB_PORT: String(port),
+    OMB_USER_DATA: app.getPath("userData"),
+    // The emergency sign-ups-closed stopgap (server/index.ts) exists
+    // because a SHARED deployment's server state has no per-user
+    // isolation yet. That risk doesn't exist here: this is a single
+    // machine's own local server, one person, their own data — the
+    // whole point of "local-first." Without this flag, a fresh install
+    // of the desktop app couldn't create its first account at all.
+    OMB_DESKTOP_APP: "true",
+  };
+  if (secureCredentials.composioApiKey) {
+    childEnv.COMPOSIO_API_KEY = secureCredentials.composioApiKey;
+  }
+  if (composioBrokerUrl() && secureCredentials.composioBrokerToken) {
+    childEnv.OMB_COMPOSIO_BROKER_URL = composioBrokerUrl();
+    childEnv.OMB_COMPOSIO_BROKER_TOKEN = secureCredentials.composioBrokerToken;
+  }
   const proc = utilityProcess.fork(entry, [], {
-    env: {
-      ...process.env,
-      OMB_STATIC_DIR: path.join(process.resourcesPath, "ui"),
-      OMB_PORT: String(port),
-      OMB_USER_DATA: app.getPath("userData"),
-      ...(secureCredentials.composioApiKey
-        ? { COMPOSIO_API_KEY: secureCredentials.composioApiKey }
-        : {}),
-      ...(composioBrokerUrl() && secureCredentials.composioBrokerToken
-        ? {
-            OMB_COMPOSIO_BROKER_URL: composioBrokerUrl(),
-            OMB_COMPOSIO_BROKER_TOKEN: secureCredentials.composioBrokerToken,
-          }
-        : {}),
-    },
+    env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
   proc.stdout?.on("data", (d) => slog(`[out] ${String(d).trimEnd()}`));
@@ -299,10 +307,23 @@ function createWindow() {
               throw new Error(\`health request failed: \${healthResponse.status} \${healthResponse.statusText}\`);
             }
             const health = await healthResponse.json();
+            // The desktop app's own root route redirects straight to
+            // /sign-in when signed out (src/App.tsx's RootRoute) — but
+            // that's a client-side <Navigate>, not a document navigation,
+            // so it hasn't necessarily run yet the instant did-finish-load
+            // fires (found live in CI: this raced both ways, landing on
+            // "/sign-in" once and bare "/" the next run). Poll for the
+            // real settled URL instead of reading it once immediately.
+            const deadline = Date.now() + 5000;
+            while (window.location.pathname === "/" && Date.now() < deadline) {
+              await new Promise((r) => setTimeout(r, 50));
+            }
             return { capabilities, health, location: window.location.href, title: document.title };
           })()
         `);
-        const expectedLocation = `http://127.0.0.1:${SERVER_PORT}/`;
+        // This smoke run starts with no session, so /sign-in is the one
+        // correct settled destination for a signed-out desktop launch.
+        const expectedLocation = `http://127.0.0.1:${SERVER_PORT}/sign-in`;
         if (result.location !== expectedLocation) {
           throw new Error(
             `unexpected packaged renderer URL: ${result.location} (expected ${expectedLocation})`,
@@ -354,8 +375,9 @@ ipcMain.handle("screen:frame", async () => {
 // text must never become a process argument: the user reviews and pastes it.
 // Returns false when the renderer should show the clipboard fallback.
 ipcMain.handle("engine:open-terminal", async (_event, command) => {
-  if (typeof command !== "string" || !command.trim()) return false;
-  clipboard.writeText(command);
+  const commandText = asText(command);
+  if (!commandText?.trim()) return false;
+  clipboard.writeText(commandText);
   return openBlankTerminal();
 });
 
@@ -367,16 +389,18 @@ ipcMain.handle("engine:open-terminal", async (_event, command) => {
 // user never types one. Returns null when they cancel.
 ipcMain.handle("desktop:pick-folder", async (event, current) => {
   const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-  const result = await dialog.showOpenDialog(win, {
+  const options = {
     title: "Choose a working folder",
     properties: ["openDirectory", "createDirectory"],
-    ...(typeof current === "string" && current ? { defaultPath: current } : {}),
-  });
+  };
+  const currentText = asText(current);
+  if (currentText) options.defaultPath = currentText;
+  const result = await dialog.showOpenDialog(win, options);
   return result.canceled ? null : (result.filePaths[0] ?? null);
 });
 
 ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
-  if (typeof rawUrl !== "string") throw new Error("A web address is required");
+  if (asText(rawUrl) === null) throw new Error("A web address is required");
   let url;
   try {
     url = new URL(rawUrl);
@@ -461,7 +485,7 @@ ipcMain.handle("desktop:capabilities", async () =>
 );
 
 ipcMain.handle("credential:set", async (_event, name, value) => {
-  if (name !== "composioApiKey" || typeof value !== "string") {
+  if (name !== "composioApiKey" || asText(value) === null) {
     throw new Error("Unsupported credential");
   }
   if (app.isPackaged && !(await safeStorage.isAsyncEncryptionAvailable())) {

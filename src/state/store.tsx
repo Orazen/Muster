@@ -53,7 +53,7 @@ export interface ConnectorCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "compaction" | "privacy";
   text?: string;
   card?: OptionCardData;
   connector?: ConnectorCardData;
@@ -64,6 +64,11 @@ export interface Message {
   /** screen messages: a frame of the bot's computer (base64) */
   png?: string;
   mime?: string;
+  /** compaction messages: model-context summary marker (server-generated) */
+  compaction?: { summary: string; firstKeptId: string; tokensBefore: number; at: number };
+  /** privacy messages: what Privacy Shield masked before this turn left
+   * for a cloud model. Counts only — the server never stores values. */
+  privacy?: { secrets: number; emails: number; phones: number };
   at: number;
   /** the message this one follows; null = thread root. Edited messages
    * share a parentId with the version they replace — that's a fork. */
@@ -153,7 +158,7 @@ export interface Bot {
   activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
   modelSelection: ModelSelection;
   /** Where this bot's computer runs; unset = auto (cloud box if one exists, else local). */
-  computer?: "cloud" | "vm" | "local" | "off";
+  computer?: "cloud" | "vm" | "local" | "opensandbox" | "vps" | "off";
   /** where new tasks run their shell tools; absent = the private bot workspace */
   cwd?: string;
   /** auto mode: the bot approves its own tool permissions */
@@ -174,6 +179,9 @@ export interface Bot {
   /** Whether this bot may use the workspace's connected apps. Unset means
    * allowed for existing bots; imported bots start with this disabled. */
   composio?: boolean;
+  /** Privacy Shield: mask secrets/emails/phones before prompts reach a
+   * cloud model (server-side, opt-in per bot). */
+  privacyShield?: boolean;
   messages: Message[];
   /** leaf of the visible conversation branch (see visibleMessages) */
   activeLeafId?: string | null;
@@ -211,7 +219,12 @@ export interface ConfigStatus {
   xai?: { configured: boolean };
   composio: { configured: boolean; mode?: "managed" | "self-hosted" | "unavailable" };
   box: { configured: boolean };
+  opensandbox?: { configured: boolean };
   opencodeGo?: { configured: boolean };
+  /** Opt-in identity bridge — see server/muster-cloud.ts. url is not a
+   * secret (it's a server address, not a credential), shown back so the
+   * Settings row can display what's actually configured. */
+  musterCloud?: { configured: boolean; url: string };
   providers?: Record<string, { configured: boolean }>;
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is
@@ -219,6 +232,11 @@ export interface ConfigStatus {
   tts?: { configured: boolean; ready: boolean; voice: string };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string };
+  /** Server-side cap on every bot turn in a channel, in minutes. Direct
+   * chats are exempt — they stop on silence via the stall watchdog. */
+  channels?: { turnCapMinutes: number };
+  /** BYO VPS computer; the alias is a setting, credentials stay in ssh(1). */
+  vps?: { sshAlias: string };
 }
 
 /** How an engine gets installed — declared by its driver, mirrors
@@ -244,11 +262,14 @@ export interface InstanceInfo {
     /** a reported cost on a subscription is notional; the UI says so */
     billing?: "metered" | "subscription";
   };
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean }> };
+  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; vision?: boolean; contextWindow?: number; maxTokens?: number }> };
   capabilities?: {
     computerMcp?: boolean;
     agentsMcp?: boolean;
     composioMcp?: boolean;
+    /** Engine reads images given by path — gates the composer's paste/drop
+     * image affordance (see server/contracts.ts ProviderAdapter). */
+    images?: boolean;
     effortLevels?: readonly EffortLevel[];
   };
   /** `custom` agents sit below the rail divider — no subscription catalog. */
@@ -265,13 +286,19 @@ export interface InstanceInfo {
 
 export type AppSettingsSection =
   | "general"
+  | "brain"
+  | "appearance"
   | "connections"
   | "engines"
   | "providers"
+  | "mcp"
   | "companion"
   | "voice"
   | "computer"
-  | "usage";
+  | "usage"
+  | "vault"
+  | "audit"
+  | "billing";
 
 export interface AppState {
   bots: Bot[];
@@ -310,6 +337,30 @@ export interface AppState {
 }
 
 type BotAnnouncement = Omit<Bot, "messages"> & { messages?: Message[] };
+
+/** Fields a bot-settings PATCH may change; also what duplicateBot copies. */
+type BotPatch = Partial<
+  Pick<
+    Bot,
+    | "name"
+    | "title"
+    | "description"
+    | "notifications"
+    | "computer"
+    | "color"
+    | "character"
+    | "mascotExpression"
+    | "autoApprove"
+    | "speakReplies"
+    | "voice"
+    | "pinned"
+    | "hidden"
+    | "chiefOfStaff"
+    | "approvePeerComms"
+    | "composio"
+    | "modelSelection"
+  >
+>;
 
 export type Action =
   | { type: "hydrate"; bots: Bot[]; groups: Group[] }
@@ -389,28 +440,7 @@ export type Action =
   | {
       type: "updateBot";
       botId: string;
-      patch: Partial<
-        Pick<
-          Bot,
-          | "name"
-          | "title"
-          | "description"
-          | "notifications"
-          | "computer"
-          | "color"
-          | "character"
-          | "mascotExpression"
-          | "autoApprove"
-          | "speakReplies"
-          | "voice"
-          | "pinned"
-          | "hidden"
-          | "chiefOfStaff"
-          | "approvePeerComms"
-          | "composio"
-          | "modelSelection"
-        >
-      >;
+      patch: BotPatch;
     };
 
 function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot): AppState {
@@ -444,10 +474,27 @@ function patchCard(state: AppState, botId: string, messageId: string, patch: Par
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate": {
-      const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
+      // Reconciliation snapshots (?messages=0) carry NO transcripts — they
+      // exist only to refresh busy/activity truth. Merging them naively used
+      // to WIPE every loaded transcript thirty seconds after load: the
+      // "empty log while Working…" plague. When an incoming bot has no
+      // messages, keep the ones already held; messages only grow server-side,
+      // so a held transcript is never stale in the harmful direction.
+      const prevById = new Map(state.bots.map((b) => [b.id, b]));
+      const prevGroupById = new Map(state.groups.map((g) => [g.id, g]));
+      // SAFETY: T is constrained to carry a messages array; the spread only
+      // substitutes prev.messages (same shape) when incoming has none.
+      const keepTranscripts = <T extends { id: string; messages?: unknown[] }>(
+        incoming: T,
+        prev?: T,
+      ): T =>
+        !incoming.messages?.length && prev?.messages?.length ? ({ ...incoming, messages: prev.messages } as T) : incoming;
+      const bots = action.bots.map((b) => keepTranscripts(b, prevById.get(b.id)));
+      const groups = (action.groups ?? []).map((g) => keepTranscripts(g, prevGroupById.get(g.id)));
+      const known = (id: string) => bots.some((b) => b.id === id) || groups.some((g) => g.id === id);
       const selectedId =
-        state.selectedId && known(state.selectedId) ? state.selectedId : (action.bots[0]?.id ?? "");
-      return { ...state, bots: action.bots, groups: action.groups, selectedId };
+        state.selectedId && known(state.selectedId) ? state.selectedId : (bots[0]?.id ?? "");
+      return { ...state, bots, groups, selectedId };
     }
     case "showRoutines":
       return {
@@ -504,6 +551,9 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "groupPatched": {
       const exists = state.groups.some((g) => g.id === action.group.id);
+      // SAFETY: a group frame for an id the client has not yet seen carries
+      // the full Group record — that is the stream's first-sight contract —
+      // and the messages fallback covers frames that omit them.
       const groups = exists
         ? state.groups.map((g) => (g.id === action.group.id ? { ...g, ...action.group, messages: action.group.messages ?? g.messages } : g))
         : [{ ...(action.group as Group), messages: action.group.messages ?? [] }, ...state.groups];
@@ -590,8 +640,7 @@ export function reducer(state: AppState, action: Action): AppState {
             ),
           }
         : animated;
-      const switchedThread =
-        typeof action.bot.threadId === "string" && action.bot.threadId !== before.threadId;
+      const switchedThread = action.bot.threadId !== before.threadId;
       return updateBot(next, action.bot.id, (b) => ({
         ...b,
         ...action.bot,
@@ -887,7 +936,16 @@ export async function api(path: string, init?: RequestInit): Promise<any> {
     ...init,
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    // An expired session used to 401 every hydrate call into silent
+    // .catch(() => {}) sinks — the user got a permanently EMPTY app
+    // (blank transcript, no bots) instead of a login page. Bounce to
+    // sign-in once, preserving where they were.
+    if (res.status === 401 && !window.location.pathname.startsWith("/sign") && window.location.pathname !== "/pair") {
+      window.location.href = `/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+    }
+    throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+  }
   return body;
 }
 
@@ -962,10 +1020,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   };
 
   // debounced PATCH per bot for text-field edits (name/title/description)
-  const patchTimers = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; patch: Record<string, unknown> }>());
+  const patchTimers = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; patch: BotPatch }>());
 
   const dispatch = useMemo(() => {
-    const showError = (e: unknown) => {
+    const showError = (e: Error) => {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
       setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
     };
@@ -1006,7 +1064,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/bots/${action.botId}/messages`, {
             method: "POST",
             body: JSON.stringify({ text: action.text }),
-          }).catch(showError);
+          })
+            .then(({ message }: { message?: Message }) => {
+              // Belt-and-braces echo: the SSE frame normally delivers the
+              // user's bubble, but a missed or replayed frame must not hide
+              // the send. messageAdded dedupes by id, so a later stream
+              // copy of the same message is a no-op.
+              if (!message) return;
+              const bot = stateRef.current.bots.find((b) => b.id === action.botId);
+              if (bot) rawDispatch({ type: "messageAdded", threadId: bot.threadId, message });
+            })
+            .catch(showError);
           break;
         case "editMessage":
           api(`/api/bots/${action.botId}/messages/${action.messageId}/edit`, {
@@ -1093,18 +1161,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "duplicateBot": {
           const source = stateRef.current.bots.find((b) => b.id === action.botId);
           if (!source) break;
+          const copy: BotPatch = {
+            name: `${source.name} copy`,
+            title: source.title,
+            description: source.description,
+            notifications: source.notifications,
+            modelSelection: source.modelSelection,
+          };
+          // a duplicate keeps the original's computer target, when one is set
+          if (source.computer) copy.computer = source.computer;
           api("/api/bots", { method: "POST" })
             .then(({ bot }) =>
               api(`/api/bots/${bot.id}`, {
                 method: "PATCH",
-                body: JSON.stringify({
-                  name: `${source.name} copy`,
-                  title: source.title,
-                  description: source.description,
-                  notifications: source.notifications,
-                  modelSelection: source.modelSelection,
-                  ...(source.computer ? { computer: source.computer } : {}),
-                }),
+                body: JSON.stringify(copy),
               }).then(({ bot: patched }) =>
                 rawDispatch({ type: "botAdded", bot: { ...bot, ...patched, messages: bot.messages } }),
               ),
@@ -1145,7 +1215,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/groups/${action.groupId}/messages`, {
             method: "POST",
             body: JSON.stringify({ text: action.text }),
-          }).catch(showError);
+          })
+            .then(({ message }: { message?: Message }) => {
+              // same echo contract as the 1:1 "send" case above
+              if (!message) return;
+              const group = stateRef.current.groups.find((g) => g.id === action.groupId);
+              if (group) rawDispatch({ type: "messageAdded", threadId: group.threadId, message });
+            })
+            .catch(showError);
           break;
         case "patchGroup":
           api(`/api/groups/${action.groupId}`, {
@@ -1250,6 +1327,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let rehydrateRequested = false;
     const pendingFrames: any[] = [];
     let handleFrame: (frame: any) => void;
+    // A `message` frame can outrun the announcement of its own thread when
+    // a bot or room is created from another client/tab: folding it right
+    // away found no carrier and dropped it silently. Park such frames
+    // briefly and replay once the carrier lands, or discard after the
+    // grace window (the old drop behavior, just delayed).
+    const PARK_GRACE_MS = 2_000;
+    const parkedMessages: { frame: any; timer: ReturnType<typeof setTimeout> }[] = [];
+    const replayParked = () => {
+      if (parkedMessages.length === 0) return;
+      const entries = parkedMessages.splice(0);
+      for (const entry of entries) {
+        clearTimeout(entry.timer);
+        // still-unknown threads re-park themselves inside the message case
+        handleFrame(entry.frame);
+      }
+    };
     const hydrate = () => {
       if (hydrating) {
         // A second non-resumable hello means this snapshot may have started
@@ -1269,12 +1362,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         hydrated = true;
         for (const frame of pendingFrames.splice(0)) handleFrame(frame);
+        // a fresh snapshot may carry threads that parked frames were waiting on
+        replayParked();
       });
     };
     // If SSE is unavailable, the app should still show its saved state. A
     // later first hello hydrates again because it cannot prove there was no
     // gap before that connection opened.
     const hydrationFallback = setTimeout(hydrate, 1_000);
+
+    // Missed SSE frames used to leave ghosts: a bot shown "Working…" long
+    // after its turn settled server-side (a deploy restart mid-turn was the
+    // repeat offender). A tiny periodic reconciliation over /api/bots with
+    // messages=0 carries no transcripts — just live busy/activity/model
+    // truth — and quietly corrects whatever the stream failed to deliver.
+    const reconcile = () => {
+      api("/api/bots?messages=0")
+        .then(({ bots, groups }) => {
+          if (!alive) return;
+          rawDispatch({ type: "hydrate", bots, groups: groups ?? [] });
+        })
+        .catch(() => {});
+    };
+    const reconcileTimer = setInterval(reconcile, 30_000);
 
     const es = new EventSource("/api/events");
     // The hydrate decision belongs to the hello frame, not to onopen: the
@@ -1285,6 +1395,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     handleFrame = (frame) => {
       switch (frame.kind) {
         case "message": {
+          const threadKnown =
+            stateRef.current.bots.some((b) => b.threadId === frame.threadId) ||
+            stateRef.current.groups.some((g) => g.threadId === frame.threadId);
+          if (!threadKnown) {
+            const timer = setTimeout(() => {
+              const idx = parkedMessages.findIndex((p) => p.frame === frame);
+              if (idx !== -1) {
+                parkedMessages.splice(idx, 1);
+                // grace expired: one last try, then the reducer's unknown-
+                // thread guard decides (same as pre-parking behavior)
+                handleFrame(frame);
+              }
+            }, PARK_GRACE_MS);
+            parkedMessages.push({ frame, timer });
+            break;
+          }
           rawDispatch({ type: "messageAdded", threadId: frame.threadId, message: frame.message });
           // a settled assistant bubble replaces the in-flight stream
           if (frame.message?.role === "bot" && frame.message?.kind === "text") {
@@ -1314,31 +1440,42 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           clearStream(frame.threadId);
           break;
         case "bot": {
+          // SAFETY: a `bot` stream frame always carries the full announcement
+          // payload — the stream's own envelope contract for kind "bot".
           const bot = frame.bot as BotAnnouncement;
+          let announcedBot = bot;
           // reading the selected chat clears its badge immediately
           if (bot.unread && bot.id === stateRef.current.selectedId) {
-            bot.unread = false;
+            // clone before clearing: mutating the frame object poisons any
+            // other consumer of it (replay buffers, logging)
+            announcedBot = { ...bot, unread: false };
             fetch(`/api/bots/${bot.id}`, {
               method: "PATCH",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ unread: false }),
             }).catch(() => {});
           }
-          rawDispatch({ type: "botPatched", bot });
+          rawDispatch({ type: "botPatched", bot: announcedBot });
+          // a new/updated thread may be what parked message frames await
+          replayParked();
           break;
         }
         case "group": {
+          // SAFETY: a `group` stream frame carries the group record with its
+          // id; only the fields read below are depended on.
           const group = frame.group as Partial<Group> & { id: string };
+          let announcedGroup = group;
           // reading the selected room clears its badge immediately
           if (group.unread && group.id === stateRef.current.selectedId) {
-            group.unread = false;
+            announcedGroup = { ...group, unread: false };
             fetch(`/api/groups/${group.id}`, {
               method: "PATCH",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ unread: false }),
             }).catch(() => {});
           }
-          rawDispatch({ type: "groupPatched", group });
+          rawDispatch({ type: "groupPatched", group: announcedGroup });
+          replayParked();
           break;
         }
         // the harness decided this was worth interrupting for; the toggle
@@ -1444,6 +1581,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => {
       alive = false;
       clearTimeout(hydrationFallback);
+      clearInterval(reconcileTimer);
+      for (const entry of parkedMessages) clearTimeout(entry.timer);
       es.close();
     };
   }, []);

@@ -1,4 +1,11 @@
-export function createUpdaterCoordinator(updater, setState) {
+/**
+ * @param manualMacUpdates macOS builds without Developer ID signing cannot
+ *   trust Squirrel.Mac's in-place swap (it downloads fine and then fails or
+ *   hangs on apply). The caller detects this once and the coordinator stops
+ *   offering download/restart states entirely — the UI switches to one
+ *   honest "get the new version" button instead.
+ */
+export function createUpdaterCoordinator(updater, setState, { manualMacUpdates = false } = {}) {
   let checkOperation = null;
   let downloadOperation = null;
 
@@ -19,7 +26,15 @@ export function createUpdaterCoordinator(updater, setState) {
   });
   updater.on("update-available", (info) => {
     if (checkOwnsState()) {
-      setState({ status: "available", version: info?.version, message: undefined });
+      // manualOnly rides along so the renderer picks the right UX in one
+      // render pass instead of asking the platform again. Key is omitted
+      // entirely on trusted platforms so existing state shapes don't grow
+      // an always-undefined field.
+      setState(
+        manualMacUpdates
+          ? { status: "available", version: info?.version, message: undefined, manualOnly: true }
+          : { status: "available", version: info?.version, message: undefined },
+      );
     }
   });
   updater.on("update-not-available", () => {
@@ -58,6 +73,13 @@ export function createUpdaterCoordinator(updater, setState) {
   }
 
   function download() {
+    if (manualMacUpdates) {
+      // Defensive: the renderer never shows the button in this mode, but a
+      // stale window from before an update must not kick off a Squirrel
+      // download whose only possible end is the hang we're avoiding.
+      setState({ status: "available", manualOnly: true });
+      return Promise.resolve();
+    }
     if (checkOperation) checkOperation.supersededByDownload = true;
     if (downloadOperation) return downloadOperation.promise;
 

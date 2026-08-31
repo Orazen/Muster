@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Muster+",
+    "slug": "muster-plus",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "muster-plus",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#030711"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.muster.plus"
+    },
+    "android": {
+      "package": "com.muster.plus"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-splash-screen"
+    ]
+  }
+}

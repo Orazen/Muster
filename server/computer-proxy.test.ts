@@ -15,6 +15,7 @@ import { createServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { JsonValue } from "./schema.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const PROXY = join(SERVER_DIR, "computer-proxy.ts");
@@ -37,7 +38,7 @@ describe("computer proxy (fake box)", () => {
   let browserUrl = "https://example.com/";
   let cropFails = false;
 
-  const rpc = (msg: unknown) => proxy.stdin!.write(JSON.stringify(msg) + "\n");
+  const rpc = (msg: JsonValue) => proxy.stdin!.write(JSON.stringify(msg) + "\n");
   const results = new Map<number, any>();
   const waitFor = async (id: number, ms = 8000) => {
     const deadline = Date.now() + ms;
@@ -93,7 +94,8 @@ describe("computer proxy (fake box)", () => {
       res.writeHead(404).end("{}");
     });
     await new Promise<void>((r) => box.listen(0, "127.0.0.1", r));
-    port = (box.address() as any).port;
+    // SAFETY: listening on an OS-assigned port makes the address an AddressInfo.
+    port = (box.address() as { port: number }).port;
 
     proxy = spawn(process.execPath, ["--experimental-strip-types", PROXY], {
       env: {

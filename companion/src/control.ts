@@ -74,7 +74,7 @@ export function originIsLoopback(origin: string | undefined): boolean {
 }
 
 /** Send a JSON body with its length, the only response shape this API has. */
-const json = (res: ServerResponse, status: number, body: unknown) => {
+const json = <B>(res: ServerResponse, status: number, body: B) => {
   const text = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json", "content-length": Buffer.byteLength(text) });
   res.end(text);
@@ -83,25 +83,41 @@ const json = (res: ServerResponse, status: number, body: unknown) => {
 /** Everything the page shows, in one object: where to connect, whether a
  * pairing window is open, and which phones are paired. Recomputed per request
  * rather than cached — addresses change when you join another network. */
-export function companionState(options: ControlOptions) {
+/** Everything /state reports. The tailnet fields appear only when this
+ * machine actually has that route — the page renders them conditionally. */
+interface CompanionState {
+  pid: number;
+  port: number;
+  addresses: string[];
+  tailscale?: string;
+  tailnetName?: string;
+  /** A LAN address, when one exists alongside the tailnet route. */
+  lan: string | null;
+  pairing: { code: string; token: string; expiresAt: number } | null;
+  devices: ReturnType<DeviceRegistry["list"]>;
+  discovery: { advertising: boolean; name: string };
+}
+
+export function companionState(options: ControlOptions): CompanionState {
   const addresses = lanAddresses();
   const tailscale = tailscaleAddress(addresses);
   const name = tailnetName();
   const pairing = options.devices.pairing();
-  return {
+  const state: CompanionState = {
     // Whoever starts this sidecar as a child process needs to be able to tell
     // it apart from an unrelated one that got to the control port first. An
     // answer on the port proves something is listening, not that it is ours.
     pid: process.pid,
     port: options.companionPort,
     addresses,
-    ...(tailscale ? { tailscale } : {}),
-    ...(tailscale && name ? { tailnetName: name } : {}),
     lan: addresses.find((a) => a !== tailscale) ?? null,
     pairing: pairing ? { code: pairing.code, token: pairing.token, expiresAt: pairing.expiresAt } : null,
     devices: options.devices.list(),
     discovery: options.discovery(),
   };
+  if (tailscale) state.tailscale = tailscale;
+  if (tailscale && name) state.tailnetName = name;
+  return state;
 }
 
 /** The loopback control plane: the page, its state, and the two writes —

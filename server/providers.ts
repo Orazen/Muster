@@ -114,6 +114,15 @@ export const PROVIDERS: ProviderEntry[] = [
     configKey: "openrouter",
   },
   {
+    id: "opencodeZen",
+    label: "OpenCode Zen",
+    placeholder: "sk-…",
+    description: "Free and paid models (DeepSeek, GLM, Kimi, Claude, GPT via Zen) through OpenCode's hosted gateway. Same key as OpenCode Go.",
+    href: "https://opencode.ai/zen",
+    linkLabel: "Get an OpenCode Zen API key",
+    configKey: "opencodeZen",
+  },
+  {
     id: "elevenlabs",
     label: "ElevenLabs",
     placeholder: "…",

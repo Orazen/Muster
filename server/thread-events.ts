@@ -13,6 +13,7 @@
 // thousands of native lines and the panel wants the recent ones first.
 import { closeSync, fstatSync, openSync, readSync, type Stats } from "node:fs";
 import { join } from "node:path";
+import type { JsonObject, JsonValue } from "./schema.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 
 /** One line of native/<threadId>.ndjson (server/drivers/native.ts). */
@@ -95,17 +96,19 @@ function countLines(fd: number, file: string, stat: FileStat): number {
   return complete + Number(trailing);
 }
 
-type RecordGuard<T> = (value: unknown) => value is T;
+/** Decodes one ndjson line's parsed JsonValue into T, or null when the
+ * record does not satisfy the contract. */
+type LineDecoder<T> = (value: JsonValue) => T | null;
 
-function parseRecent<T>(text: string, includeFirst: boolean, limit: number, valid: RecordGuard<T>): T[] {
+function parseRecent<T>(text: string, includeFirst: boolean, limit: number, decode: LineDecoder<T>): T[] {
   const lines = text.split("\n");
   if (!includeFirst) lines.shift();
   const out: T[] = [];
   for (const raw of lines) {
     if (!raw) continue;
     try {
-      const value: unknown = JSON.parse(raw);
-      if (valid(value)) out.push(value);
+      const decoded = decode(JSON.parse(raw));
+      if (decoded !== null) out.push(decoded);
     } catch {
       // A torn line during a write, or a hand-edited record. Keep looking
       // farther back until we still have `limit` valid recent entries.
@@ -114,7 +117,13 @@ function parseRecent<T>(text: string, includeFirst: boolean, limit: number, vali
   return out.slice(-limit);
 }
 
-function readRecentLines<T>(file: string, limit: number, valid: RecordGuard<T>): { lines: T[]; total: number } {
+/** Recent entries read back from one append-only log. */
+interface RecentLines<T> {
+  lines: T[];
+  total: number;
+}
+
+function readRecentLines<T>(file: string, limit: number, decode: LineDecoder<T>): RecentLines<T> {
   let fd: number;
   try {
     fd = openSync(file, "r");
@@ -141,12 +150,12 @@ function readRecentLines<T>(file: string, limit: number, valid: RecordGuard<T>):
       // walking backwards rather than returning fewer valid rows.
       const text = bytes.toString("utf8");
       if (position === 0 || text.split("\n").length - 1 >= limit) {
-        lines = parseRecent(text, position === 0, limit, valid);
+        lines = parseRecent(text, position === 0, limit, decode);
         if (lines.length >= limit || position === 0) break;
       }
     }
     if (lines.length === 0 && bytes.length > 0) {
-      lines = parseRecent(bytes.toString("utf8"), position === 0, limit, valid);
+      lines = parseRecent(bytes.toString("utf8"), position === 0, limit, decode);
     }
     return { lines, total };
   } finally {
@@ -154,20 +163,32 @@ function readRecentLines<T>(file: string, limit: number, valid: RecordGuard<T>):
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-const stringOrMissing = (value: unknown) => value === undefined || typeof value === "string";
-const stringOrNullOrMissing = (value: unknown) => value === undefined || value === null || typeof value === "string";
-const numberOrNullOrMissing = (value: unknown) => value === undefined || value === null || typeof value === "number";
-const stringsOrMissing = (value: unknown) => value === undefined || (Array.isArray(value) && value.every((item) => typeof item === "string"));
+// The ndjson records are JSON.parse output at the read boundary; these
+// predicates establish each field's contract without representation sniffing.
+const isJsonString = (value: JsonValue | undefined): value is string =>
+  Object.is(String(value), value);
+const isJsonBoolean = (value: JsonValue | undefined): value is boolean =>
+  value === true || value === false;
+const isJsonNumber = (value: JsonValue | undefined): value is number => Number.isFinite(value);
 
-function isRuntimeEvent(value: unknown): value is RuntimeEvent {
+const isRecord = (value: JsonValue): value is JsonObject => value instanceof Object && !Array.isArray(value);
+const stringOrMissing = (value: JsonValue | undefined) => value === undefined || isJsonString(value);
+const stringOrNullOrMissing = (value: JsonValue | undefined) => value === undefined || value === null || isJsonString(value);
+const numberOrNullOrMissing = (value: JsonValue | undefined) => value === undefined || value === null || isJsonNumber(value);
+const stringsOrMissing = (value: JsonValue | undefined) =>
+  value === undefined || (Array.isArray(value) && value.every((item) => isJsonString(item)));
+const usageOrMissing = (value: JsonValue | undefined) =>
+  value === undefined || (isRecord(value) && isJsonNumber(value.input) && isJsonNumber(value.output));
+const booleanOrMissing = (value: JsonValue | undefined) => value === undefined || isJsonBoolean(value);
+
+function isRuntimeEventRecord(value: JsonObject): value is RuntimeEvent & JsonObject {
   if (
     !isRecord(value) ||
-    typeof value.eventId !== "string" ||
-    typeof value.provider !== "string" ||
-    typeof value.threadId !== "string" ||
-    typeof value.createdAt !== "string" ||
-    typeof value.type !== "string" ||
+    !isJsonString(value.eventId) ||
+    !isJsonString(value.provider) ||
+    !isJsonString(value.threadId) ||
+    !isJsonString(value.createdAt) ||
+    !isJsonString(value.type) ||
     !stringOrMissing(value.providerInstanceId) ||
     !stringOrMissing(value.turnId) ||
     !stringOrMissing(value.itemId) ||
@@ -175,33 +196,32 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
   ) return false;
   switch (value.type) {
     case "session.started":
-      return (value.sessionId === null || typeof value.sessionId === "string") && stringOrNullOrMissing(value.model);
+      return (value.sessionId === null || isJsonString(value.sessionId)) && stringOrNullOrMissing(value.model);
     case "session.exited":
       return stringOrMissing(value.reason);
     case "turn.started":
       return true;
     case "turn.completed":
       return (
-        typeof value.ok === "boolean" &&
+        isJsonBoolean(value.ok) &&
         stringOrNullOrMissing(value.stopReason) &&
         numberOrNullOrMissing(value.cost) &&
         stringsOrMissing(value.denials) &&
-        (value.usage === undefined ||
-          (isRecord(value.usage) && typeof value.usage.input === "number" && typeof value.usage.output === "number"))
+        usageOrMissing(value.usage)
       );
     case "item.started":
       return (value.itemType === "tool" || value.itemType === "reasoning") && stringOrMissing(value.title);
     case "item.updated":
       return (value.itemType === "tool" || value.itemType === "reasoning") && numberOrNullOrMissing(value.tokens);
     case "item.completed":
-      return value.itemType === "assistant_text" ? typeof value.text === "string" : value.itemType === "tool" && typeof value.ok === "boolean";
+      return value.itemType === "assistant_text" ? isJsonString(value.text) : value.itemType === "tool" && isJsonBoolean(value.ok);
     case "content.delta":
-      return (value.streamKind === "assistant_text" || value.streamKind === "reasoning_text") && typeof value.delta === "string";
+      return (value.streamKind === "assistant_text" || value.streamKind === "reasoning_text") && isJsonString(value.delta);
     case "request.opened":
       return (
         (value.requestType === "permission" || value.requestType === "question") &&
-        typeof value.tool === "string" &&
-        typeof value.summary === "string" &&
+        isJsonString(value.tool) &&
+        isJsonString(value.summary) &&
         stringsOrMissing(value.choices)
       );
     case "request.resolved":
@@ -215,22 +235,31 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
           value.source === "peer")
       );
     case "thread.token-usage.updated":
-      return typeof value.input === "number" && typeof value.output === "number";
+      return isJsonNumber(value.input) && isJsonNumber(value.output);
     case "runtime.error":
-      return typeof value.message === "string" && (value.setup === undefined || typeof value.setup === "boolean");
+      return isJsonString(value.message) && booleanOrMissing(value.setup);
     default:
       return false;
   }
 }
 
-function isNativeRecord(value: unknown): value is NativeRecord {
+function decodeRuntimeEvent(value: JsonValue): RuntimeEvent | null {
+  if (!isRecord(value) || !isRuntimeEventRecord(value)) return null;
+  return value;
+}
+
+function isNativeRecordEntry(value: JsonObject): value is NativeRecord & JsonObject {
   return (
-    isRecord(value) &&
-    typeof value.at === "string" &&
+    isJsonString(value.at) &&
     (value.dir === "in" || value.dir === "out") &&
-    typeof value.source === "string" &&
+    isJsonString(value.source) &&
     Object.hasOwn(value, "msg")
   );
+}
+
+function decodeNativeRecord(value: JsonValue): NativeRecord | null {
+  if (!isRecord(value) || !isNativeRecordEntry(value)) return null;
+  return value;
 }
 
 export function readThreadEvents(input: {
@@ -244,8 +273,8 @@ export function readThreadEvents(input: {
   const requested = input.limit ?? DEFAULT_LIMIT;
   const limit = Number.isFinite(requested) ? Math.max(1, Math.min(Math.trunc(requested), MAX_LIMIT)) : DEFAULT_LIMIT;
 
-  const runtime = readRecentLines(join(eventsDir, `${threadId}.ndjson`), limit, isRuntimeEvent);
-  const native = readRecentLines(join(nativeDir, `${threadId}.ndjson`), limit, isNativeRecord);
+  const runtime = readRecentLines(join(eventsDir, `${threadId}.ndjson`), limit, decodeRuntimeEvent);
+  const native = readRecentLines(join(nativeDir, `${threadId}.ndjson`), limit, decodeNativeRecord);
 
   // cap each log on its own, then merge: the native tee is several times
   // chattier than the runtime stream, and one shared cap would leave the

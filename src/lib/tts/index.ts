@@ -59,7 +59,7 @@ export class Speaker {
 
   private set(next: SpeechSnapshot) {
     this.snapshot = next;
-    for (const watcher of [...this.watchers]) watcher(next);
+    for (const watcher of this.watchers) watcher(next);
   }
 
   /** True while this exact message is the one being spoken. */
@@ -127,7 +127,7 @@ export class Speaker {
     const render = (utterance: string): Promise<Rendered> =>
       this.render(utterance, opts.voiceId, controller.signal).then(
         (blob) => ({ blob }),
-        (error: unknown) => ({ error }),
+        (error: Error) => ({ error }),
       );
     let next: Promise<Rendered> | null = render(utterances[0]);
     for (let i = 0; i < utterances.length; i += 1) {

@@ -43,7 +43,7 @@ export function VoiceSettings() {
     };
   }, [configured]);
 
-  const save = (patch: Record<string, unknown>) => {
+  const save = (patch: { key?: string; voice?: string }) => {
     setSaving(true);
     setError(null);
     return api("/api/config", { method: "PUT", body: JSON.stringify({ tts: patch }) })

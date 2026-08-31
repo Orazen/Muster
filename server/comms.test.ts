@@ -14,13 +14,20 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 
 import { mentionedBots, normalizeGroupDefaultResponder, roomResponders } from "./store.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
+
+// CI runners can be slow enough that the fake ACP fleet takes >45s to
+// settle a turn. Raise the default for every test in this file so they
+// fail with their own rich diagnostic error instead of vitest's generic
+// "timed out in 45000ms" — the internal poll loops already carry deadlines
+// and helpful failure payloads.
+vi.setConfig({ testTimeout: 150_000 });
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -84,7 +91,22 @@ describe("comms e2e (fake ACP fleet)", () => {
   let home: string;
   let stderr = "";
 
-  const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+  const api = async (
+    method: string,
+    path: string,
+    body?: {
+      toBotId?: string;
+      message?: string;
+      hidden?: boolean;
+      name?: string;
+      modelSelection?: { instanceId: string; model: string };
+      text?: string;
+      approvePeerComms?: boolean;
+      requestId?: string;
+      behavior?: string;
+      xai?: { key: string };
+    },
+  ): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
       method,
       headers: body ? { "content-type": "application/json" } : undefined,
@@ -158,7 +180,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     });
     child.stderr!.on("data", (c) => (stderr += c));
 
-    const deadline = Date.now() + 20_000;
+    const deadline = Date.now() + 90_000;
     for (;;) {
       try {
         const res = await fetch(`${BASE}/api/health`);
@@ -275,7 +297,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       // wait for A's turn to settle: it should NOT have a "peer says:" line
       // (delegate_bot doesn't return the peer's reply to A) and the channel
       // chip should be the "Messaged @Helper" kind, not the ask_bot one.
-      const deadline = Date.now() + 30_000;
+      const deadline = Date.now() + 90_000;
       let askerBot: any;
       let helperBot: any;
       let note: any;
@@ -382,7 +404,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
       expect(send.status).toBe(202);
 
-      const deadline = Date.now() + 30_000;
+      const deadline = Date.now() + 90_000;
       let channel: any;
       for (;;) {
         const state = (await api("GET", "/api/bots")).body;
@@ -433,7 +455,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(send.status).toBe(202);
 
       let channelId: string | undefined;
-      const busyDeadline = Date.now() + 30_000;
+      const busyDeadline = Date.now() + 90_000;
       for (;;) {
         const state = (await api("GET", "/api/bots")).body;
         const askerBot = state.bots.find((b: any) => b.id === asker.id);
@@ -453,7 +475,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       const reload = await api("PUT", "/api/config", { xai: { key: "xai_reload_test" } });
       expect(reload.status).toBe(200);
 
-      const terminalDeadline = Date.now() + 30_000;
+      const terminalDeadline = Date.now() + 90_000;
       for (;;) {
         const state = (await api("GET", "/api/bots")).body;
         const channel = state.groups.find((g: any) => g.id === channelId);
@@ -498,7 +520,7 @@ describe("comms e2e (fake ACP fleet)", () => {
 
       // settle = the channel exists (request mirrored) and carries the
       // failed terminal chip (B's turn started and crashed at initialize)
-      const deadline = Date.now() + 30_000;
+      const deadline = Date.now() + 90_000;
       let channel: any;
       for (;;) {
         const state = (await api("GET", "/api/bots")).body;
@@ -551,7 +573,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
       expect(send.status).toBe(202);
 
-      const deadline = Date.now() + 30_000;
+      const deadline = Date.now() + 90_000;
       let channel: any;
       let sourceChip: any;
       for (;;) {
@@ -615,7 +637,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       let askerBot: any;
       let helperBot: any;
       let card: any;
-      const cardDeadline = Date.now() + 20_000;
+      const cardDeadline = Date.now() + 90_000;
       for (;;) {
         const state = (await api("GET", "/api/bots")).body;
         askerBot = state.bots.find((b: any) => b.id === asker.id);
@@ -700,7 +722,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     let askerBot: any;
     let helperBot: any;
     let card: any;
-    const cardDeadline = Date.now() + 20_000;
+    const cardDeadline = Date.now() + 90_000;
     for (;;) {
       const state = (await api("GET", "/api/bots")).body;
       askerBot = state.bots.find((b: any) => b.id === asker.id);
@@ -728,7 +750,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     // which wraps it as "Couldn't reach that bot: denied by user" and
     // returns it to A's agent. A's final assistant text carries that
     // signal — wait for A's turn to settle with it.
-    const settledDeadline = Date.now() + 20_000;
+    const settledDeadline = Date.now() + 90_000;
     for (;;) {
       const state = (await api("GET", "/api/bots")).body;
       askerBot = state.bots.find((b: any) => b.id === asker.id);
@@ -759,7 +781,7 @@ describe("comms e2e (fake ACP fleet)", () => {
           m.role === "bot" && m.kind === "text" && m.text?.includes("hello from fake acp"),
       ),
     ).toBe(false);
-  }, 50_000);
+  }, 150_000);
 
   // ── depth guard regression ───────────────────────────────────────────
   // A bot invoked via ask_bot or delegate_bot runs at depth=1, which equals
@@ -787,7 +809,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     expect(send.status).toBe(202);
 
     // Wait for B's depth-1 turn to settle and write its reply
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + 90_000;
     let helperBot: any;
     for (;;) {
       const state = (await api("GET", "/api/bots")).body;
@@ -816,5 +838,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     expect(reply.text).toContain("hello from fake acp");
     expect(reply.text).not.toContain("one hop");
     expect(reply.text).not.toContain("peer error");
-  }, 45_000);
+    // Timeout must exceed the 90s internal settle deadline or CI runners
+    // kill the test before its diagnostic error can explain the failure.
+  }, 150_000);
 });

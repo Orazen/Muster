@@ -1,8 +1,12 @@
 import { createAuthClient } from "better-auth/client";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
+// The server always serves the API from the same origin/port as the UI
+// (both dev proxy and the packaged/hosted server put them together), so
+// same-origin is correct here. Hardcoding a port breaks any deployment
+// that isn't literally on :8799 (custom OMB_PORT, reverse proxies, etc.).
 export const authClient = createAuthClient({
-  baseURL: `${window.location.protocol}//${window.location.hostname}:8799`,
+  baseURL: window.location.origin,
 });
 
 interface AuthUser {
@@ -24,13 +28,46 @@ interface AuthSession {
   userAgent?: string | null;
 }
 
+/** Which optional auth features the server actually has wired up. */
+export interface AuthCapabilities {
+  /** Email verification is enforced (needs a mail transport). */
+  emailVerification: boolean;
+  /** "Forgot password" can deliver a mail, so the link is worth showing. */
+  passwordReset: boolean;
+  /** Configured social providers, e.g. ["github", "google"]. */
+  socialProviders: string[];
+  /** Manual sign-UP is off — new accounts must use a social provider.
+   * Existing accounts still sign in with a password unaffected. */
+  googleOnlySignup: boolean;
+  /** Desktop Google sign-in: this server knows a cloud to pair against. */
+  cloudPairing: boolean;
+  /** Real Google sign-in on the desktop via the cloud OAuth handoff
+   * (cloud does the Google dance, identity arrives over loopback). */
+  desktopOAuth?: boolean;
+  /** The cloud base URL the pairing flow opens in the system browser. */
+  pairingCloudUrl: string | null;
+}
+
+const NO_CAPABILITIES: AuthCapabilities = {
+  emailVerification: false,
+  passwordReset: false,
+  socialProviders: [],
+  googleOnlySignup: false,
+  cloudPairing: false,
+  pairingCloudUrl: null,
+};
+
 interface AuthContextType {
   user: AuthUser | null;
   session: AuthSession | null;
   loading: boolean;
+  capabilities: AuthCapabilities;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (name: string, email: string, password: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
+  signInWithProvider: (provider: string) => Promise<{ error?: string }>;
+  requestPasswordReset: (email: string) => Promise<{ error?: string }>;
+  resetPassword: (token: string, newPassword: string) => Promise<{ error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -39,15 +76,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<AuthSession | null>(null);
   const [loading, setLoading] = useState(true);
+  const [capabilities, setCapabilities] = useState<AuthCapabilities>(NO_CAPABILITIES);
 
   useEffect(() => {
     fetchSession();
+    fetchCapabilities();
   }, []);
+
+  /** Ask the server which optional flows exist, so the UI never offers a
+   *  button that cannot work — a "forgot password" link that silently drops
+   *  the mail is worse than no link. */
+  async function fetchCapabilities() {
+    try {
+      const base = window.location.origin;
+      const res = await fetch(`${base}/api/auth-capabilities`, { credentials: "include" });
+      if (!res.ok) return;
+      // SAFETY: /api/auth-capabilities serves the AuthCapabilities shape or a
+      // non-2xx status (rejected above); every field below is coerced
+      // individually, so an unexpected payload only hides optional flows.
+      const data = (await res.json()) as Partial<AuthCapabilities>;
+      setCapabilities({
+        emailVerification: Boolean(data.emailVerification),
+        passwordReset: Boolean(data.passwordReset),
+        socialProviders: Array.isArray(data.socialProviders) ? data.socialProviders : [],
+        googleOnlySignup: Boolean(data.googleOnlySignup),
+        cloudPairing: Boolean(data.cloudPairing),
+        pairingCloudUrl: data.pairingCloudUrl ?? null,
+      });
+    } catch {
+      // Server too old or unreachable — leave every optional flow hidden.
+    }
+  }
 
   async function fetchSession() {
     try {
-      const base = `${window.location.protocol}//${window.location.hostname}:8799`;
-      const res = await fetch(`${base}/api/auth/session`, { credentials: "include" });
+      const base = window.location.origin;
+      const res = await fetch(`${base}/api/auth/get-session`, { credentials: "include" });
       const data = await res.json();
       if (data?.user) {
         setUser(data.user);
@@ -88,8 +152,75 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
   }
 
+  /** Hand off to an OAuth provider. On success the browser is redirected, so
+   *  this only ever returns to report a failure.
+   *
+   *  Any existing session is cleared first. Without this, picking a
+   *  different Google account while already signed in bounces straight back
+   *  to the original account — the stale session cookie wins over the
+   *  account chosen in the OAuth flow. Signing out here makes the choice
+   *  real; on the sign-in page that is exactly what the user asked for. */
+  async function signInWithProvider(provider: string): Promise<{ error?: string }> {
+    try {
+      try {
+        await authClient.signOut();
+        setUser(null);
+        setSession(null);
+      } catch {
+        // best effort — proceed with the OAuth handoff regardless
+      }
+      // SAFETY: provider arrives from the sign-in buttons rendered for the
+      // configured socialProviders list ("google" today), which is exactly
+      // the provider union better-auth's social() accepts.
+      const res = await authClient.signIn.social({
+        provider: provider as Parameters<typeof authClient.signIn.social>[0]["provider"],
+        callbackURL: `${window.location.origin}/app`,
+      });
+      if (res.error) return { error: res.error.message ?? `Could not sign in with ${provider}` };
+      return {};
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : `Could not sign in with ${provider}` };
+    }
+  }
+
+  async function requestPasswordReset(email: string): Promise<{ error?: string }> {
+    try {
+      const res = await authClient.requestPasswordReset({
+        email,
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (res.error) return { error: res.error.message ?? "Could not send the reset email" };
+      return {};
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Could not send the reset email" };
+    }
+  }
+
+  async function resetPassword(token: string, newPassword: string): Promise<{ error?: string }> {
+    try {
+      const res = await authClient.resetPassword({ token, newPassword });
+      if (res.error) return { error: res.error.message ?? "Could not reset the password" };
+      return {};
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Could not reset the password" };
+    }
+  }
+
   return (
-    <AuthContext.Provider value={{ user, session, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        loading,
+        capabilities,
+        signIn,
+        signUp,
+        signOut,
+        signInWithProvider,
+        requestPasswordReset,
+        resetPassword,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

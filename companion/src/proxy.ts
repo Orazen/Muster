@@ -17,6 +17,13 @@ import { bearerToken } from "./devices.ts";
 import { denyReason, isCloudDesktopJoin } from "./routes.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
+/** Decoded JSON, mirroring the harness's schema.ts contract. */
+type JsonPrimitive = string | number | boolean | null;
+interface JsonMap {
+  [key: string]: JsonValue;
+}
+type JsonValue = JsonPrimitive | JsonMap | JsonValue[];
+
 /** What the forwarding handler needs from the process around it. */
 export interface ProxyOptions {
   /** Where the harness is listening on loopback. */
@@ -28,7 +35,8 @@ export interface ProxyOptions {
    * own concern, and the one thing a device does before it has a token. */
   redeem: (
     code: string,
-    deviceName: unknown,
+    /** Decoded JSON from the device; validated by the registry. */
+    deviceName: JsonValue | undefined,
   ) => { token: string; device: unknown } | { error: string };
   /** What the phone should call this computer in its connection list. */
   serverName: () => string;
@@ -52,7 +60,7 @@ const MAX_JSON_BODY_BYTES = 32 * 1024 * 1024;
 
 /** Read a JSON body, bounded. An unbounded read on an unauthenticated route
  * is a way to be memory-exhausted by anyone who can reach the port. */
-const readJson = (req: IncomingMessage, limit = 64 * 1024): Promise<Record<string, unknown>> =>
+const readJson = (req: IncomingMessage, limit = 64 * 1024): Promise<JsonMap> =>
   new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
@@ -70,8 +78,10 @@ const readJson = (req: IncomingMessage, limit = 64 * 1024): Promise<Record<strin
       const text = Buffer.concat(chunks).toString("utf8").trim();
       if (!text) return resolve({});
       try {
-        const parsed: unknown = JSON.parse(text);
-        resolve(parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {});
+        // SAFETY: the body is JSON.parse output, so a non-array object here is
+        // a string-keyed record; anything else reads as an empty body.
+        const parsed = JSON.parse(text) as JsonValue;
+        resolve(parsed instanceof Object && !Array.isArray(parsed) ? parsed : {});
       } catch {
         reject(new Error("invalid JSON body"));
       }
@@ -88,7 +98,7 @@ const readJson = (req: IncomingMessage, limit = 64 * 1024): Promise<Record<strin
  * with nothing to catch it. Dropping the socket is the only honest ending
  * left there: the device sees a truncated response and reconnects, which is
  * what it already does for any dropped connection. */
-const sendJson = (res: ServerResponse, status: number, body: unknown): void => {
+const sendJson = (res: ServerResponse, status: number, body: JsonValue): void => {
   if (res.headersSent) {
     res.destroy();
     return;
@@ -105,8 +115,14 @@ const sendJson = (res: ServerResponse, status: number, body: unknown): void => {
  * blocklist: `host` and `origin` must not travel (see above), `authorization`
  * is the sidecar's credential and means nothing to the harness, and hop-by-hop
  * headers are by definition not ours to relay. */
-const forwardHeaders = (req: IncomingMessage): Record<string, string> => {
-  const out: Record<string, string> = { accept: String(req.headers.accept ?? "*/*") };
+type ForwardedHeaders = {
+  accept: string;
+  "content-type"?: string;
+  "last-event-id"?: string;
+};
+
+const forwardHeaders = (req: IncomingMessage): ForwardedHeaders => {
+  const out: ForwardedHeaders = { accept: String(req.headers.accept ?? "*/*") };
   const contentType = req.headers["content-type"];
   if (contentType) out["content-type"] = String(contentType);
   // Last-Event-ID is how a reconnecting client asks for the gap. Dropping it
@@ -162,7 +178,13 @@ export function createProxyHandler(options: ProxyOptions) {
           // `code` remains accepted for manual entry and older mobile builds.
           const result = options.redeem(String(body.credential ?? body.code ?? ""), body.deviceName);
           if ("error" in result) return sendJson(res, 401, { error: result.error });
-          return sendJson(res, 201, { ...result, serverName: options.serverName() });
+          // SAFETY: the device row comes from the registry's store as plain
+          // JSON-shaped data and is forwarded verbatim.
+          return sendJson(res, 201, {
+            token: result.token,
+            device: result.device as JsonValue,
+            serverName: options.serverName(),
+          });
         },
         (error: Error) => sendJson(res, 400, { error: error.message }),
       );

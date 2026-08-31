@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Loader2, Menu, LogOut } from "lucide-react";
+import { Menu, LogOut } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
@@ -15,11 +15,18 @@ import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
+import { NotificationStack } from "@/components/NotificationStack";
+import { MusterbotMark } from "@/components/MusterbotMark";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AuthGate } from "@/components/AuthGate";
-import { LandingPage } from "@/pages/LandingPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { ProjectScout } from "@/components/ProjectScout";
 import { SignupPage } from "@/pages/SignupPage";
+import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
+import { Onboarding } from "@/components/Onboarding";
+import { emailGateDone } from "@/lib/analytics";
+import { PairPage } from "@/pages/PairPage";
 
 function SignOutButton() {
   const { signOut } = useAuth();
@@ -38,7 +45,25 @@ function SignOutButton() {
 
 function Shell() {
   const { state, dispatch } = useStore();
+  const { user, loading: authLoading } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [scoutOpen, setScoutOpen] = useState(false);
+  const [firstRun, setFirstRun] = useState(true);
+  // Web audit 2026-08-23: the wizard must not render until the identity is
+  // resolved — its dismissal is persisted under the per-user gate key, and
+  // rendering earlier let a pre-auth Escape write the legacy key while the
+  // wizard kept reappearing for the signed-in account on every reload.
+  // The wizard gate decides ONCE per session. `user` flickers (better-auth
+  // refetches flip it to undefined and back), and re-deriving the per-user
+  // gate key on every render flipped the key between legacy and real id —
+  // the dismissed wizard resurrected mid-session, covering the whole app
+  // ("Step 1 of 6" over a chat you were typing into). A session-sticky
+  // decision keeps dismissal sticky; reloads still re-check per account.
+  const [gateDecision, setGateDecision] = useState<"pending" | "show" | "hide">("pending");
+  useEffect(() => {
+    if (gateDecision !== "pending" || authLoading || !user) return;
+    setGateDecision(!emailGateDone(user.id) ? "show" : "hide");
+  }, [authLoading, user, gateDecision]);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
@@ -116,16 +141,43 @@ function Shell() {
       ) : bot ? (
         <ChatView bot={bot} />
       ) : (
-        <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
-          <Loader2 size={20} className="animate-spin" />
-          <div className="text-[14px]">
-            {state.connected ? "No bots yet" : "Connecting to the bot server…"}
+        <main
+          className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-6 overflow-hidden bg-app text-ink-secondary"
+          style={{ background: "linear-gradient(180deg, #f9f9f9 0%, #fdf3e7 100%)" }}
+        >
+          {/* musterbot-style empty roster scene: the animated mark carries the screen */}
+          <MusterbotMark size={280} />
+          <div className="text-[15px] font-medium text-[#0a0a0c]">
+            {state.connected ? "Your roster is empty — muster your first teammate" : "Connecting to the bot server…"}
           </div>
+          {state.connected && (
+            <div className="flex flex-col items-center gap-3">
+              <button
+                onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "general" })}
+                className="rounded-lg bg-[#f0460e] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(240,70,14,.28)] transition-all hover:-translate-y-px hover:bg-[#f0460e]/90"
+              >
+                New bot
+              </button>
+              {scoutOpen ? (
+                <ProjectScout onDone={() => setScoutOpen(false)} />
+              ) : (
+                <button
+                  onClick={() => setScoutOpen(true)}
+                  className="text-[13px] text-ink-secondary underline decoration-hairline underline-offset-4 transition-colors hover:text-ink"
+                >
+                  or scout a project folder for a suggested team
+                </button>
+              )}
+            </div>
+          )}
           {!state.connected && (
             <div className="text-[12px]">
               Start it with <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
             </div>
           )}
+          <span aria-hidden="true" className="mt-auto pb-6 text-[11px] uppercase tracking-[0.42em] text-[#f08a24]" style={{ fontWeight: 700 }}>
+            Muster
+          </span>
         </main>
       )}
       {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
@@ -134,6 +186,15 @@ function Shell() {
       {state.appSettingsOpen && <SettingsModal />}
       {state.pluginsOpen && <PluginsPanel />}
       <CommandPalette />
+      <NotificationStack />
+      {gateDecision === "show" && firstRun && (
+        <Onboarding
+          onDone={() => {
+            setFirstRun(false);
+            setGateDecision("hide");
+          }}
+        />
+      )}
       </div>
       <SignOutButton />
     </div>
@@ -150,14 +211,35 @@ function AppShell() {
   );
 }
 
+// The marketing landing page ("/") is meant for a browser visitor who has
+// never used Muster — feature copy, download buttons for every platform,
+// GitHub links. The packaged desktop app is a completely different
+// audience: someone who already downloaded and opened Muster, on a window
+// that only ever shows this one app. Rendering the same marketing page
+// there (as this route did unconditionally before) meant every desktop
+// launch needed an extra click through content the user had already acted
+// on just by opening the app. window.ogb only exists inside Electron's
+// preload bridge — that's the same signal every other desktop-vs-browser
+// check in this codebase already uses (src/lib/desktop.ts).
+function RootRoute() {
+  const { user, loading } = useAuth();
+  // The marketing site is the static www/index.html served at / — the React
+  // app never renders a second landing. Browser root funnels to auth.
+  if (loading) return null;
+  return <Navigate to={user ? "/app" : "/sign-in"} replace />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<RootRoute />} />
           <Route path="/sign-in" element={<LoginPage />} />
           <Route path="/sign-up" element={<SignupPage />} />
+          <Route path="/pair" element={<AuthGate><PairPage /></AuthGate>} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/app/*" element={<AuthGate><AppShell /></AuthGate>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

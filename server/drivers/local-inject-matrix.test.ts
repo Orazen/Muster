@@ -15,6 +15,7 @@ import { ensureKimiInjectAlias, KimiAgentDriver } from "./acp/kimi.ts";
 import { ensureOpenCodeInjectModel } from "./acp/opencode-go.ts";
 import { ensureQwenInjectModel, QwenAgentDriver } from "./acp/qwen.ts";
 import { recordEvents } from "../testing/events.ts";
+import type { JsonObject } from "../schema.ts";
 import {
   applyClaudeInject,
   applyOpenAIInject,
@@ -129,7 +130,8 @@ describe("host credentials", () => {
 
 describe("OpenAI / Anthropic env dialects", () => {
   it.each(UNIQUE_HOSTS)("applyOpenAIInject routes $id without touching official slugs", (host) => {
-    const env: Record<string, string | undefined> = { UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret" };
+    const env: Record<string, string | undefined> = {};
+    env.UNSLOTH_STUDIO_AUTH_TOKEN = "unsloth-secret";
     const applied = applyOpenAIInject(env, encodeInjectId(host.id, "gemma-4-31b-it-bf16"));
     expect(applied).toEqual({ model: "gemma-4-31b-it-bf16", injected: true });
     expect(env.OPENAI_BASE_URL).toBe(host.baseUrl);
@@ -137,14 +139,16 @@ describe("OpenAI / Anthropic env dialects", () => {
   });
 
   it("applyOpenAIInject leaves cloud slugs alone so Hermes cannot auto-openrouter from a leftover key", () => {
-    const env: Record<string, string | undefined> = { OPENAI_API_KEY: "sk-or-user" };
+    const env: Record<string, string | undefined> = {};
+    env.OPENAI_API_KEY = "sk-or-user";
     expect(applyOpenAIInject(env, "claude-sonnet-5")).toEqual({ model: "claude-sonnet-5", injected: false });
     expect(env.OPENAI_BASE_URL).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBe("sk-or-user");
   });
 
   it.each(UNIQUE_HOSTS)("applyClaudeInject strips /v1 for $id (Anthropic-compatible)", (host) => {
-    const env: Record<string, string | undefined> = { UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret" };
+    const env: Record<string, string | undefined> = {};
+    env.UNSLOTH_STUDIO_AUTH_TOKEN = "unsloth-secret";
     const applied = applyClaudeInject(env, encodeInjectId(host.id, "MiniMax-M3-4bit"));
     expect(applied.injected).toBe(true);
     expect(env.ANTHROPIC_BASE_URL).toBe(anthropicBaseUrl(host));
@@ -161,7 +165,7 @@ describe("Codex provider dialect", () => {
   });
 
   it.each(["omlx", "exo", "unsloth"] as const)("emits a -c provider for %s without putting the secret on argv", (hostId) => {
-    const env: Record<string, string | undefined> = { UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret" };
+    const env = { UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret" };
     const args = codexLocalProviderArgs(env, encodeInjectId(hostId, "gemma-4-31b-it-bf16"));
     const rendered = JSON.stringify(args);
     expect(rendered).toContain(`model_providers.${hostId}.base_url`);
@@ -203,6 +207,7 @@ describe("Grok / Kimi / Droid / OpenCode writers × live ids", () => {
     });
     expect(id).toBe(droidInjectId(host.id, "gemma-4-31b-it-bf16"));
     expect(id.startsWith("custom:muster-")).toBe(true);
+    // SAFETY: the Droid driver under test wrote this settings.json with one customModels row.
     const settings = JSON.parse(readFileSync(join(home, ".factory", "settings.json"), "utf8")) as {
       customModels: Array<{ provider: string; baseUrl: string; apiKey: string; model: string }>;
     };
@@ -218,8 +223,9 @@ describe("Grok / Kimi / Droid / OpenCode writers × live ids", () => {
     const home = scratchHome("omb-oc-mx-");
     const native = ensureOpenCodeInjectModel(encodeInjectId(hostId, "qwen/qwen3-coder-next"), { HOME: home });
     expect(native).toBe(`${hostId}/qwen/qwen3-coder-next`);
+    // SAFETY: ensureOpenCodeInjectModel wrote this opencode.json with a provider entry per host.
     const config = JSON.parse(readFileSync(join(home, ".config", "opencode", "opencode.json"), "utf8")) as {
-      provider: Record<string, { options: { baseURL: string }; models: Record<string, unknown> }>;
+      provider: Record<string, { options: { baseURL: string }; models: Record<string, { name: string }> }>;
     };
     expect(config.provider[hostId].options.baseURL).toBe(localHost(hostId)!.baseUrl);
     expect(config.provider[hostId].models["qwen/qwen3-coder-next"]).toBeTruthy();
@@ -235,6 +241,7 @@ describe("Qwen writer × hosts", () => {
       UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret",
     });
     expect(native).toBe("gemma-4-31b-it-bf16");
+    // SAFETY: the Qwen driver under test wrote this settings.json with the injected modelProviders row.
     const settings = JSON.parse(readFileSync(join(home, ".qwen", "settings.json"), "utf8")) as {
       env: Record<string, string>;
       modelProviders: { openai: Array<{ id: string; baseUrl: string; envKey: string; apiKey?: string }> };
@@ -297,7 +304,7 @@ describe("Hermes writer — OpenRouter 401 class", () => {
 });
 
 describe("probe payload dialects", () => {
-  const probe = (payload: unknown) =>
+  const probe = (payload: JsonObject) =>
     mergeLocalInject(
       { default: "keep", options: [{ id: "keep", label: "Keep" }] },
       { VITEST: "true", MUSTER_PROBE_LOCAL_INJECT: "1" },
@@ -408,6 +415,7 @@ describe("Qwen / Hermes ACP turns", () => {
     try {
       await instance.adapter.sendTurn({ threadId: "t-qwen", text: "hi", model: "omlx::gemma-4-31b-it-bf16" });
       await recorder.until((e) => e.type === "turn.completed");
+      // SAFETY: the fake ACP CLI dumps its spawn argv to env.json before the turn completes.
       const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[] };
       expect(seen.argv).toEqual(["--acp", "-m", "gemma-4-31b-it-bf16"]);
     } finally {
@@ -439,10 +447,12 @@ describe("Qwen / Hermes ACP turns", () => {
     try {
       await instance.adapter.sendTurn({ threadId: "t-hermes", text: "hi", model: "omlx::gemma-4-31b-it-bf16" });
       await recorder.until((e) => e.type === "turn.completed");
+      // SAFETY: the fake ACP CLI dumps its spawn argv and env to env.json before the turn completes.
       const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; env: Record<string, string> };
       expect(seen.argv).toEqual(["acp"]);
       expect(seen.env.OPENAI_API_KEY).toBeUndefined();
       expect(seen.env.OPENROUTER_API_KEY).toBeUndefined();
+      // SAFETY: the fake ACP CLI records every session/set_model call in this dump file.
       const configCalls = JSON.parse(readFileSync(`${dump}.config.json`, "utf8")) as Array<{
         method: string;
         params: { modelId?: string };
@@ -475,6 +485,7 @@ describe("room turns must pass the picker model", () => {
     try {
       await instance.adapter.sendTurn({ threadId: "t-qwen-bare", text: "hi" });
       await recorder.until((e) => e.type === "turn.completed");
+      // SAFETY: the fake ACP CLI dumps its spawn argv to env.json before the turn completes.
       const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[] };
       expect(seen.argv).toEqual(["--acp"]);
     } finally {
@@ -499,6 +510,7 @@ describe("room turns must pass the picker model", () => {
       await recorder.until((e) => e.type === "turn.completed");
       let configCalls: Array<{ method: string }> = [];
       try {
+        // SAFETY: the fake ACP CLI records every set_model call in this dump file.
         configCalls = JSON.parse(readFileSync(`${dump}.config.json`, "utf8")) as Array<{ method: string }>;
       } catch {
         // no session/set_model → the dump file is never written

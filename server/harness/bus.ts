@@ -43,7 +43,7 @@ export class EventBus {
     } catch {
       /* logging must never take down the stream */
     }
-    for (const listener of [...this.listeners]) {
+    for (const listener of this.listeners) {
       try {
         listener(event);
       } catch (e) {

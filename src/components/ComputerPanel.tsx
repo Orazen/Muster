@@ -24,6 +24,8 @@ import { cn } from "@/lib/cn";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutineEditor } from "./RoutinesPage";
 
+const isText = <T,>(value: T): value is T & string => String(value) === value;
+
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, { headers: { "content-type": "application/json" }, ...init });
   const body = await res.json().catch(() => ({}));
@@ -71,6 +73,59 @@ function nextRunLabel(at: number | null) {
   return `${sameDay ? "Today" : date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
+/** Who is driving this bot's computer — the person or the bot. Polls the
+ * control endpoint; while the person holds the wheel the bot's computer
+ * tools are refused at the stdio bridge, so this button is the wheel. */
+function ControlHold({ botId }: { botId: string }) {
+  const [snapshot, setSnapshot] = useState<{ held: boolean; helpReason: string | null } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const read = () =>
+      api(`/api/control?botId=${encodeURIComponent(botId)}`)
+        // SAFETY: /api/control is this repo's own endpoint; its reply is the ControlSnapshot shape read below.
+        .then((body: { held?: boolean; helpReason?: string | null }) => {
+          if (alive) setSnapshot({ held: body?.held === true, helpReason: body?.helpReason ?? null });
+        })
+        .catch(() => {});
+    read();
+    const timer = setInterval(read, 2000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [botId]);
+  if (!snapshot) return null;
+  const act = async (action: "take" | "release") => {
+    await api(`/api/control/${action}`, { method: "POST", body: JSON.stringify({ botId }) }).catch(() => {});
+    setSnapshot((s) => (s ? { ...s, held: action === "take" } : s));
+  };
+  if (snapshot.held) {
+    return (
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-hairline/40 bg-raised px-3 py-2 mx-5 mt-3">
+        <span className="text-[12.5px] text-ink-secondary">You are driving — the bot's hands are refused.</span>
+        <button
+          onClick={() => void act("release")}
+          className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white"
+        >
+          Release
+        </button>
+      </div>
+    );
+  }
+  if (!snapshot.helpReason) return null;
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border border-hairline/40 bg-raised px-3 py-2 mx-5 mt-3">
+      <span className="min-w-0 truncate text-[12.5px] text-ink-secondary">{snapshot.helpReason}</span>
+      <button
+        onClick={() => void act("take")}
+        className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-white"
+      >
+        Take control
+      </button>
+    </div>
+  );
+}
+
 export function ComputerPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
@@ -95,6 +150,10 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   );
   const computerToolSupported = selectedInstance?.capabilities?.computerMcp === true;
   const cloudSupported = computerToolSupported || selectedInstance?.driverKind === "boxAgent";
+  // Same tool surface as Cloud box (server/computer-proxy.ts dispatches to
+  // whichever backend), so the same engine-capability gate applies — there
+  // is no boxAgent-equivalent driver for OpenSandbox, so no carve-out.
+  const opensandboxSupported = computerToolSupported;
   const botRoutines = state.routines
     .filter((routine) => routine.botId === bot.id)
     .sort((a, b) => Number(b.enabled) - Number(a.enabled) || (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity));
@@ -165,12 +224,21 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       setPhase("error");
       return;
     }
-    if (bot.computer !== "cloud" && !capabilitiesReady) return;
-    // cloud, or auto (cloud box wins when one exists, else local in-app)
+    if (bot.computer === "opensandbox" && !opensandboxSupported) {
+      setError("This model engine cannot use cloud computer tools. Choose Claude, an ACP engine, or the Computer engine.");
+      setPhase("error");
+      return;
+    }
+    // "auto" (bot.computer unset) is the only mode allowed to fall back to
+    // local — an explicit "cloud" or "opensandbox" selection commits to
+    // that backend and must not silently substitute another one.
+    const isAuto = bot.computer !== "cloud" && bot.computer !== "opensandbox";
+    if (isAuto && !capabilitiesReady) return;
+    // cloud/opensandbox, or auto (cloud box wins when one exists, else local in-app)
     api(`/api/bots/${bot.id}/computer`)
       .then((status) => {
         if (!alive) return;
-        const autoLocal = bot.computer !== "cloud" && capabilitiesReady && localAvailable && computerToolSupported;
+        const autoLocal = isAuto && capabilitiesReady && localAvailable && computerToolSupported;
         if (!status.configured) {
           setPhase(autoLocal ? "local" : "unconfigured");
           return;
@@ -201,7 +269,9 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   const sseFlowing = Boolean(bot.busy && live);
   const inFlight = useRef(false);
   useEffect(() => {
-    if (phase !== "ready" || sseFlowing) return;
+    // OpenSandbox has no screenshot endpoint yet (server 501s it) — don't
+    // poll a route that can never succeed.
+    if (phase !== "ready" || sseFlowing || bot.computer === "opensandbox") return;
     let alive = true;
     const shoot = async () => {
       if (inFlight.current) return;
@@ -221,7 +291,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       alive = false;
       clearInterval(timer);
     };
-  }, [phase, sseFlowing, bot.id]);
+  }, [phase, sseFlowing, bot.id, bot.computer]);
 
   // Local VM preview comes directly from Cua Driver through the harness. It
   // does not use the password-protected noVNC viewer or cloud endpoints.
@@ -234,7 +304,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       vmInFlight.current = true;
       try {
         const { image } = await api("/api/local-computer/screenshot", { method: "POST" });
-        if (alive && typeof image === "string") setVmFrame(image);
+        if (alive && isText(image)) setVmFrame(image);
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -341,7 +411,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           <X size={18} />
         </button>
       </div>
-
+      <ControlHold botId={bot.id} />
       <div className="flex-1 overflow-y-auto px-5 pb-5">
           {/* Screen preview */}
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
@@ -362,7 +432,9 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 <Monitor size={22} />
               )}
               <span className="text-[12px]">
-                {phase === "ready"
+                {phase === "ready" && bot.computer === "opensandbox"
+                  ? "This bot can use shell and desktop-automation tools on its OpenSandbox computer. There is no live screen preview for this backend yet."
+                  : phase === "ready"
                   ? "Waiting for the first frame…"
                   : phase === "vm"
                     ? "Capturing the Local VM screen…"
@@ -409,8 +481,11 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           </div>
         )}
 
-        {/* Cloud-only actions */}
-        {phase === "ready" && (
+        {/* Cloud-only actions — join/sleep are Box's desktop-viewer and
+         * archive-resume surface, not yet built for OpenSandbox (see
+         * docs/plans/opensandbox-integration-and-pricing-decision.md).
+         * Hidden rather than shown-and-always-erroring. */}
+        {phase === "ready" && bot.computer !== "opensandbox" && (
           <div className="mt-3 flex gap-2">
             <button
               onClick={() => run("join")}
@@ -450,6 +525,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             {(
               [
                 ["cloud", "Cloud box"],
+                ["opensandbox", "OpenSandbox"],
                 ["vm", "Local VM"],
                 ["local", "This computer"],
                 ["off", "Off"],
@@ -458,15 +534,28 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               (() => {
                 const disabled =
                   (mode === "cloud" && !cloudSupported) ||
+                  (mode === "opensandbox" && !opensandboxSupported) ||
                   (mode === "vm" && !vmSupported) ||
                   (mode === "local" && (!localAvailable || !computerToolSupported));
+                // Only Claude's own driver and ACP-protocol engines (Codex,
+                // Gemini CLI, and similar) mount MCP tools today — the direct-
+                // API drivers (OpenAI, DeepSeek, OpenCode Zen, and the rest)
+                // don't wire tool-calling at all yet, so every computer option
+                // is correctly disabled for them. Naming that explicitly here
+                // instead of a generic "cannot use" message, since that
+                // generic wording reads as a bug rather than a model-choice
+                // limitation (real user confusion this session's own testing
+                // ran into).
+                const switchEngineHint = " — switch to Claude or an ACP engine (Codex, Gemini CLI) to use it";
                 const unavailableTitle =
                   mode === "vm" && !vmSupported
-                    ? "This model engine cannot use the Local VM"
+                    ? "This model engine's driver doesn't mount computer tools yet" + switchEngineHint
                     : mode === "cloud" && !cloudSupported
-                      ? "This model engine cannot use cloud computer tools"
-                      : mode === "local" && !computerToolSupported
-                        ? "This model engine cannot control this computer"
+                      ? "This model engine's driver doesn't mount computer tools yet" + switchEngineHint
+                      : mode === "opensandbox" && !opensandboxSupported
+                        ? "This model engine's driver doesn't mount computer tools yet" + switchEngineHint
+                        : mode === "local" && !computerToolSupported
+                        ? "This model engine's driver doesn't mount computer tools yet" + switchEngineHint
                         : mode === "local" && !localAvailable
                           ? capabilities.host.platform === "linux"
                             ? "Local computer control isn't available on Linux yet"
@@ -542,7 +631,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[12.5px] font-medium text-ink">{routine.name}</span>
                     <span className="block truncate text-[10.5px] text-ink-secondary">
-                      {routineScheduleLabel(routine)}{routine.runOn === "cloud" ? " · runs on VM" : ""}
+                      {routineScheduleLabel(routine)}{routine.runOn === "cloud" ? " · runs on VM" : routine.runOn === "opensandbox" ? " · runs on OpenSandbox" : ""}
                     </span>
                   </span>
                   <span className="shrink-0 text-[10px] text-ink-secondary">{nextRunLabel(routine.nextRunAt)}</span>

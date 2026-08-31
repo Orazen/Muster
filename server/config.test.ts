@@ -64,6 +64,56 @@ describe("default fleet", () => {
     expect(map.grokApi).toBeUndefined();
     expect(map.grok.driver).toBe("grokAgent");
   });
+
+  it("adds an OpenAI (API) engine when an OpenAI provider key is present", () => {
+    const map = instanceConfigs({ providers: { openai: { apiKey: "sk-secret" } } });
+    expect(map.openaiApi).toEqual({
+      driver: "openai",
+      displayName: "OpenAI (API)",
+      environment: { OPENAI_API_KEY: "sk-secret" },
+    });
+    // the CLI Codex stays the default "codex" instance
+    expect(map.codex.driver).toBe("codex");
+  });
+
+  it("does not add an OpenAI (API) engine without a provider key", () => {
+    const map = instanceConfigs({});
+    expect(map.openaiApi).toBeUndefined();
+  });
+
+  it("adds an Anthropic (API) engine when an Anthropic provider key is present", () => {
+    const map = instanceConfigs({ providers: { anthropic: { apiKey: "sk-ant-secret" } } });
+    expect(map.anthropicApi).toEqual({
+      driver: "anthropic",
+      displayName: "Anthropic (API)",
+      environment: { ANTHROPIC_API_KEY: "sk-ant-secret" },
+    });
+    // the CLI Claude stays the default "claude" instance
+    expect(map.claude.driver).toBe("claudeAgent");
+  });
+
+  it("does not add an Anthropic (API) engine without a provider key", () => {
+    const map = instanceConfigs({});
+    expect(map.anthropicApi).toBeUndefined();
+  });
+
+  it.each([
+    ["google", "googleApi", "google", "GOOGLE_API_KEY"],
+    ["deepseek", "deepseekApi", "deepseek", "DEEPSEEK_API_KEY"],
+    ["mistral", "mistralApi", "mistral", "MISTRAL_API_KEY"],
+    ["cohere", "cohereApi", "cohere", "COHERE_API_KEY"],
+    ["groq", "groqApi", "groq", "GROQ_API_KEY"],
+    ["together", "togetherApi", "together", "TOGETHER_API_KEY"],
+    ["fireworks", "fireworksApi", "fireworks", "FIREWORKS_API_KEY"],
+    ["openrouter", "openrouterApi", "openrouter", "OPENROUTER_API_KEY"],
+    ["opencodeZen", "opencodeZenApi", "opencodeZen", "OPENCODE_API_KEY"],
+  ])("adds a %s (API) engine only when its provider key is present, injecting %s", (providerKey, instanceKey, driverKind, envVar) => {
+    const without = instanceConfigs({});
+    expect(without[instanceKey]).toBeUndefined();
+
+    const withKey = instanceConfigs({ providers: { [providerKey]: { apiKey: "secret" } } });
+    expect(withKey[instanceKey]).toMatchObject({ driver: driverKind, environment: { [envVar]: "secret" } });
+  });
 });
 
 describe("Instance CLI override", () => {
@@ -115,6 +165,37 @@ describe("Instance CLI override", () => {
     const custom = { instances: { claude: { driver: "claudeAgent", environment: { MY_FLAG: "1" } } } };
     const kept = withInstanceCli(custom, "claude", "/x");
     expect(kept.config.instances!.claude.environment).toEqual({ MY_FLAG: "1" });
+  });
+
+  it("never persists OpenAI/Anthropic provider keys either", () => {
+    const cfg: AppConfig = {
+      providers: { openai: { apiKey: "SECRET-OPENAI" }, anthropic: { apiKey: "SECRET-ANTHROPIC" } },
+    };
+    const set = withInstanceCli(cfg, "claude", "/opt/claude");
+    expect(set.ok).toBe(true);
+    for (const entry of Object.values(set.config.instances!)) {
+      expect(entry.environment ?? {}).toEqual({});
+    }
+  });
+
+  it("never persists any of the remaining provider catalog keys either", () => {
+    const cfg: AppConfig = {
+      providers: {
+        google: { apiKey: "SECRET-GOOGLE" },
+        deepseek: { apiKey: "SECRET-DEEPSEEK" },
+        mistral: { apiKey: "SECRET-MISTRAL" },
+        cohere: { apiKey: "SECRET-COHERE" },
+        groq: { apiKey: "SECRET-GROQ" },
+        together: { apiKey: "SECRET-TOGETHER" },
+        fireworks: { apiKey: "SECRET-FIREWORKS" },
+        openrouter: { apiKey: "SECRET-OPENROUTER" },
+      },
+    };
+    const set = withInstanceCli(cfg, "claude", "/opt/claude");
+    expect(set.ok).toBe(true);
+    for (const entry of Object.values(set.config.instances!)) {
+      expect(entry.environment ?? {}).toEqual({});
+    }
   });
 });
 

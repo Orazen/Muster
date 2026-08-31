@@ -3,13 +3,36 @@
 // user's "Restart to update" click. One state object is broadcast to the
 // renderer on every transition; the renderer just renders it.
 //
-// Only runs in the packaged, signed+notarized app (mac auto-update requires
-// signing). In dev it's a no-op so the browser/dev shell is unaffected.
+// Only runs in a packaged app; in dev it's a no-op so the browser/dev shell
+// is unaffected. This comment used to say "signed+notarized" as if that were
+// already true and guarded for — it isn't, Muster's current builds are only
+// ad-hoc signed (no paid Apple Developer certificate; see
+// build/after-pack-mac.mjs). macOS's own update mechanism (Squirrel.Mac,
+// underneath electron-updater) can legitimately fail to APPLY an update it
+// already found and downloaded when the running app isn't Developer ID
+// signed — the check/download/apply pipeline itself is correct and doesn't
+// need special-casing here, but src/components/UpdateBanner.tsx's error
+// state offers a direct link to the release page as the fallback for
+// exactly this, since "Try again" alone can't fix a signing problem.
 // electron-updater is vendored (electron/vendor/electron-updater.cjs) because
 // the packaged app ships no node_modules.
 import { app, ipcMain } from "electron";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
+
+// macOS updates are only allowed to use Squirrel.Mac's in-place swap when
+// the build was Developer ID signed — the packaging step drops a marker
+// resource in exactly that case (see build/after-pack-mac.mjs). Ad-hoc
+// builds (everything today) fail or hang on APPLY, which is the
+// "Restart didn't finish" dead end users saw on 0.5.14. No marker means
+// the renderer gets a direct-download flow that always works.
+function macUpdatesTrusted() {
+  if (process.platform !== "darwin") return true;
+  const resources = process.resourcesPath ?? join(process.execPath, "..", "..", "Resources");
+  return existsSync(join(resources, "trusted-mac-updates"));
+}
 
 const require = createRequire(import.meta.url);
 
@@ -33,6 +56,14 @@ export function registerUpdaterIpc() {
   ipcMain.handle("update:check", () => updaterCoordinator?.check(true));
   ipcMain.handle("update:download", () => updaterCoordinator?.download());
   ipcMain.handle("update:install", () => {
+    // Unsigned mac builds must never enter Squirrel's swap — it is the
+    // exact path that produced "Restart didn't finish". A stale window
+    // (or future bug in the renderer gate) gets a loud error state instead
+    // of a silent hang.
+    if (!macUpdatesTrusted()) {
+      setState({ status: "error", message: "in-app restart is unavailable on unsigned macOS builds — download the new version instead" });
+      return;
+    }
     if (!autoUpdater) return;
     // Tearing down the window and relaunching takes a beat; announce it so the
     // button greys out instead of looking like the click was swallowed.
@@ -65,7 +96,9 @@ export function startUpdater(mainWindow) {
   autoUpdater.autoInstallOnAppQuit = false; // button-driven install
   autoUpdater.logger = null;
 
-  updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState);
+  updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState, {
+    manualMacUpdates: !macUpdatesTrusted(),
+  });
 
   // first check ~15s after launch (let the app settle), then hourly — both
   // silent on failure, hence the arrow: a bare `check` would receive the

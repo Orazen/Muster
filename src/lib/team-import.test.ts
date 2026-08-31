@@ -11,9 +11,10 @@ describe("team import preview", () => {
         name: " Engineering ",
         description: " Ships software ",
         members: [{ name: " Ada ", title: " Tech Lead " }],
-        ...(version === 1
-          ? { room: { name: "Engineering", bulletin: "", defaultResponder: { kind: "everyone" } } }
-          : {}),
+        // version 1 carries a room definition; version 2 dropped it
+        ...(version === 1 && {
+          room: { name: "Engineering", bulletin: "", defaultResponder: { kind: "everyone" } },
+        }),
       },
     });
 

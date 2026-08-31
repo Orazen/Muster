@@ -17,7 +17,7 @@
 //                      inherited-api-key — what `auth status` reports
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 
@@ -27,7 +27,28 @@ const argAfter = (flag: string): string | null => {
   return i === -1 ? null : (argv[i + 1] ?? null);
 };
 
-const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
+/** A stream-json frame: one JSON line of the CLI's stdout protocol. */
+interface StreamJsonFrame {
+  type: string;
+  subtype?: string;
+  session_id?: string;
+  model?: string;
+  parent_tool_use_id?: string;
+  event?: {
+    type: string;
+    delta?: { type?: string; thinking?: string; text?: string };
+  };
+  message?: {
+    content?: Array<{ type: string; text?: string; id?: string; name?: string; is_error?: boolean; tool_use_id?: string }>;
+    usage?: Record<string, number>;
+  };
+  is_error?: boolean;
+  stop_reason?: string;
+  total_cost_usd?: number;
+  usage?: Record<string, number>;
+}
+
+const out = (frame: StreamJsonFrame) => process.stdout.write(JSON.stringify(frame) + "\n");
 
 // Snapshot probes: both answer on argv alone and exit without reading stdin.
 if (argv[0] === "--version") {
@@ -65,7 +86,7 @@ process.stdin.on("end", () => {
 
   if (process.env.FAKE_CLAUDE_DUMP) {
     const configPath = argAfter("--mcp-config");
-    let mcpConfig: unknown = null;
+    let mcpConfig = null;
     if (configPath) {
       try {
         mcpConfig = JSON.parse(readFileSync(configPath, "utf8"));
@@ -84,7 +105,38 @@ process.stdin.on("end", () => {
     process.exit(3);
   }
 
+  // First run exits with a transient upstream error; the marker file's
+  // existence says a retry already happened, so this run succeeds.
+  if (mode === "flaky") {
+    const marker = process.env.FAKE_CLAUDE_FLAKY_FILE ?? "";
+    if (!marker || !existsSync(marker)) {
+      writeFileSync(marker, "attempted");
+      process.stderr.write("API Error: 529 overloaded_error — the server is temporarily overloaded\n");
+      process.exit(1);
+    }
+  }
+
+  if (mode === "auth-error") {
+    process.stderr.write("Invalid API key · please run /login\n");
+    process.exit(1);
+  }
+
+  // Every run fails transiently — lets a test drive the retry cap to
+  // exhaustion and assert the bounded number of attempts.
+  if (mode === "always-overloaded") {
+    process.stderr.write("API Error: 529 overloaded_error\n");
+    process.exit(1);
+  }
+
   out({ type: "system", subtype: "init", session_id: sessionId, model });
+
+  if (mode === "die-after-delta") {
+    // stream some text, THEN die transiently — the driver must not retry
+    // an attempt whose partial output already reached the chat
+    out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "partial" } } });
+    process.stderr.write("API Error: 529 overloaded_error\n");
+    process.exit(1);
+  }
 
   if (mode === "hang") {
     // stay alive until killed — lets tests exercise interrupt + the
@@ -98,7 +150,8 @@ process.stdin.on("end", () => {
   }
 
   if (mode === "stream") {
-    const delta = (d: unknown) => out({ type: "stream_event", event: { type: "content_block_delta", delta: d } });
+    const delta = (d: NonNullable<NonNullable<StreamJsonFrame["event"]>["delta"]>) =>
+      out({ type: "stream_event", event: { type: "content_block_delta", delta: d } });
     delta({ type: "thinking_delta", thinking: "hmm" });
     delta({ type: "text_delta", text: "hello from " });
     delta({ type: "text_delta", text: "fake claude" });

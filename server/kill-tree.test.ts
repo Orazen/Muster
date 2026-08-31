@@ -49,7 +49,7 @@ describe("killCliTree", () => {
         const timer = setTimeout(() => reject(new Error("helper did not report its pid")), 5_000);
         parent.stdout!.once("data", (chunk) => {
           clearTimeout(timer);
-          resolve(Number(String(chunk).trim()));
+          resolve(Number(String(chunk).replace(/\[.*?m/g, "").trim()));
         });
       });
       expect(grandchild).toBeGreaterThan(0);

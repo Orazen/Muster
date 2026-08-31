@@ -7,7 +7,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
+import { z } from "zod";
+
 import type { ModelCatalog } from "../contracts.ts";
+import { parseJson, type JsonValue } from "../schema.ts";
 import { mergeLocalInject } from "./local-inject.ts";
 
 export const STATIC_CODEX_MODELS: ModelCatalog = {
@@ -31,10 +34,7 @@ export function encodeCodexSelection(provider: string, model: string): string {
   return `${provider}${SEP}${model}`;
 }
 
-export function decodeCodexSelection(id: string | null | undefined): {
-  model: string | null;
-  modelProvider: string | null;
-} {
+export function decodeCodexSelection(id: string | null | undefined) {
   if (!id) return { model: null, modelProvider: null };
   if (STATIC_CODEX_MODELS.options.some((option) => option.id === id)) {
     return { model: id, modelProvider: OFFICIAL_CODEX_PROVIDER };
@@ -154,6 +154,36 @@ function niceLabel(model: string, provider: string, known: Map<string, CodexProv
   return host === provider ? model : `${model} (${host})`;
 }
 
+// Catalog payloads are untrusted JSON read from ~/.codex files and live
+// /v1 responses: a bare row array, or an envelope carrying the rows under
+// one well-known key.
+const jsonObject = z.record(z.string(), z.json());
+const jsonRows = z.array(z.json());
+
+/** Rows of a catalog payload, trying envelope `keys` in order. */
+function catalogRecords(payload: JsonValue, keys: readonly [string, string]): JsonValue[] {
+  if (Array.isArray(payload)) return payload;
+  const envelope = jsonObject.safeParse(payload);
+  if (!envelope.success) return [];
+  for (const key of keys) {
+    const rows = jsonRows.safeParse(envelope.data[key]);
+    if (rows.success) return rows.data;
+  }
+  return [];
+}
+
+// Row fields this file reads; any non-string value reads as absent so a
+// garbled field falls through to its sibling exactly like before.
+const catalogRow = z.object({
+  slug: z.string().optional().catch(undefined),
+  id: z.string().optional().catch(undefined),
+  display_name: z.string().optional().catch(undefined),
+  name: z.string().optional().catch(undefined),
+});
+// /v1/models rows pick id first: an id present but not a string yields no
+// model at all (no fallback to slug), matching the wire contract.
+const modelIdRow = z.object({ id: z.string().optional(), slug: z.string().optional() });
+
 function collectCatalogNames(home: string): Map<string, string> {
   const named = new Map<string, string>();
   for (const file of listDir(join(home, "model-catalogs"))) {
@@ -162,44 +192,32 @@ function collectCatalogNames(home: string): Map<string, string> {
     if (!PROVIDER_ID.test(provider)) continue;
     const raw = readText(join(home, "model-catalogs", file));
     if (!raw) continue;
-    let parsed: unknown;
+    let parsed: JsonValue;
     try {
-      parsed = JSON.parse(raw);
+      parsed = parseJson(raw);
     } catch {
       continue;
     }
-    const records = Array.isArray(parsed)
-      ? parsed
-      : parsed && typeof parsed === "object" && Array.isArray((parsed as { models?: unknown }).models)
-        ? (parsed as { models: unknown[] }).models
-        : parsed && typeof parsed === "object" && Array.isArray((parsed as { data?: unknown }).data)
-          ? (parsed as { data: unknown[] }).data
-          : [];
-    for (const record of records) {
-      if (!record || typeof record !== "object") continue;
-      const row = record as { slug?: unknown; id?: unknown; display_name?: unknown; name?: unknown };
-      const slug = typeof row.slug === "string" ? row.slug : typeof row.id === "string" ? row.id : "";
+    for (const record of catalogRecords(parsed, ["models", "data"])) {
+      const row = catalogRow.safeParse(record);
+      if (!row.success) continue;
+      const slug = row.data.slug ?? row.data.id ?? "";
       if (!MODEL_ID.test(slug)) continue;
-      const label = typeof row.display_name === "string" ? row.display_name : typeof row.name === "string" ? row.name : "";
+      const label = row.data.display_name ?? row.data.name ?? "";
       if (label) named.set(encodeCodexSelection(provider, slug), label);
     }
   }
   return named;
 }
 
-function idsFromModelsPayload(payload: unknown): string[] {
-  const records = Array.isArray(payload)
-    ? payload
-    : payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
-      ? (payload as { data: unknown[] }).data
-      : payload && typeof payload === "object" && Array.isArray((payload as { models?: unknown }).models)
-        ? (payload as { models: unknown[] }).models
-        : [];
-  return records.flatMap((record) => {
-    if (typeof record === "string") return MODEL_ID.test(record) ? [record] : [];
-    if (!record || typeof record !== "object") return [];
-    const id = (record as { id?: unknown; slug?: unknown }).id ?? (record as { slug?: unknown }).slug;
-    return typeof id === "string" && MODEL_ID.test(id) ? [id] : [];
+function idsFromModelsPayload(payload: JsonValue): string[] {
+  return catalogRecords(payload, ["data", "models"]).flatMap((record) => {
+    const bare = z.string().safeParse(record);
+    if (bare.success) return MODEL_ID.test(bare.data) ? [bare.data] : [];
+    const row = modelIdRow.safeParse(record);
+    if (!row.success) return [];
+    const id = row.data.id ?? row.data.slug;
+    return id && MODEL_ID.test(id) ? [id] : [];
   });
 }
 
@@ -220,7 +238,7 @@ async function probeProviderModels(
   try {
     const response = await fetchImpl(url, { signal: controller.signal, headers });
     if (!response.ok) return [];
-    return idsFromModelsPayload(await response.json());
+    return idsFromModelsPayload(parseJson(await response.text()));
   } catch {
     return [];
   } finally {

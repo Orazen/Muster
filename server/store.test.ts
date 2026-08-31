@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
-import { Store, type BotRecord } from "./store.ts";
+import { Store, type BotRecord, type OptionCardData, type StoreChange } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
@@ -61,11 +61,14 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.composio).toBe(false);
   });
 
-  it("rotates colors across created bots", () => {
+  it("defaults every new bot to the orange star, the brand's teammate", () => {
     const store = new Store(selection);
     const first = store.createBot();
     const second = store.createBot();
-    expect(first.color).not.toBe(second.color);
+    expect(first.color).toBe("orange");
+    expect(second.color).toBe("orange");
+    expect(first.character).toBe("star");
+    expect(second.character).toBe("star");
   });
 
   it("defaults a room to its first member and repairs the lead when membership changes", () => {
@@ -328,8 +331,8 @@ describe("Store change stream", () => {
   });
 
   const record = (store: Store) => {
-    const events: Array<Record<string, unknown>> = [];
-    store.onChange((e) => events.push(e as unknown as Record<string, unknown>));
+    const events: StoreChange[] = [];
+    store.onChange((e) => events.push(e));
     return events;
   };
 
@@ -349,7 +352,7 @@ describe("Store change stream", () => {
     const bot = store.createBot();
     expect(events.map((event) => event.type)).toEqual(["bot", "message", "message"]);
     expect(events[0]).toEqual({ type: "bot", botId: bot.id });
-    expect(events.slice(1).every((event) => event.threadId === bot.threadId)).toBe(true);
+    expect(events.slice(1).every((event) => "threadId" in event && event.threadId === bot.threadId)).toBe(true);
   });
 
   it("every message-tree write emits a message or thread event", () => {
@@ -482,12 +485,19 @@ describe("Store redacts bot-authored secrets on write", () => {
     expect(reply.text).toContain("«redacted");
     const chip = store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: { name: `Bash: export TOKEN=${key}`, ok: true } });
     expect(chip.tool?.name).not.toContain(key);
-    const card = store.appendMessage(bot.threadId, {
-      role: "bot",
-      kind: "options",
-      card: { title: "Run this?", summary: `curl -H "Authorization: Bearer ${key}"`, options: [], requestId: "r1", tool: "Bash" } as never,
-    });
-    expect((card.card as { summary?: string }).summary).not.toContain(key);
+    // SAFETY: legacy cards carry a summary field OptionCardData no longer
+    // declares; seeding one proves the write path still redacts it.
+    const legacyCard: OptionCardData & { summary?: string } = {
+      title: "Run this?",
+      subtitle: "",
+      options: [],
+      requestId: "r1",
+      tool: "Bash",
+      summary: `curl -H "Authorization: Bearer ${key}"`,
+    };
+    const card = store.appendMessage(bot.threadId, { role: "bot", kind: "options", card: legacyCard });
+    // SAFETY: the stored card keeps the legacy summary field after masking.
+    expect((card.card as OptionCardData & { summary?: string }).summary).not.toContain(key);
     // the user's own words are theirs
     const mine = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: `use ${key} for the api` });
     expect(mine.text).toContain(key);

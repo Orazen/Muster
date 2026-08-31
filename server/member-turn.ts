@@ -4,12 +4,13 @@
 // while Grok silently runs its cloud default.
 import type { EffortLevel, ModelSelection } from "./contracts.ts";
 
-export function memberTurnSelection(selection: ModelSelection): {
+export interface MemberTurnFields {
   model: string;
   effort?: EffortLevel;
-} {
-  return {
-    model: selection.model,
-    ...(selection.effort ? { effort: selection.effort } : {}),
-  };
+}
+
+export function memberTurnSelection(selection: ModelSelection): MemberTurnFields {
+  const out: MemberTurnFields = { model: selection.model };
+  if (selection.effort) out.effort = selection.effort;
+  return out;
 }

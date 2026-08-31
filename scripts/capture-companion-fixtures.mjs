@@ -51,9 +51,12 @@ const write = (name, value) => {
 
 /** Start a process and keep its stderr, so a failure to boot says why. */
 const start = (label, args, env) => {
+  const childEnv = { ...env };
+  // env's own PATH wins; the parent's is only the fallback.
+  if (childEnv.PATH === undefined && process.env.PATH) childEnv.PATH = process.env.PATH;
   const child = spawn(process.execPath, args, {
     cwd: ROOT,
-    env: { ...(process.env.PATH ? { PATH: process.env.PATH } : {}), ...env },
+    env: childEnv,
     stdio: ["ignore", "ignore", "pipe"],
   });
   child.stderr.on("data", (c) => (child.err = (child.err ?? "") + c));
@@ -85,7 +88,7 @@ const json = async (url, init) => {
 let deviceToken = "";
 const asDevice = (init = {}) => ({
   ...init,
-  headers: { ...(init.headers ?? {}), authorization: `Bearer ${deviceToken}` },
+  headers: { ...init.headers, authorization: `Bearer ${deviceToken}` },
 });
 
 /** Read the event stream until it has produced `wanted` frames, running

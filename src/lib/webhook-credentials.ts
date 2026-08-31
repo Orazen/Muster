@@ -4,11 +4,27 @@ const KEY = "omb-webhook-credentials";
 
 type Store = Pick<Storage, "getItem" | "setItem"> | undefined;
 
-function isCredential(value: unknown): value is WebhookCredential {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const candidate = value as Record<string, unknown>;
-  return [candidate.endpointUrl, candidate.secret, candidate.url].every(
-    (part) => typeof part === "string" && part.length > 0,
+// Stored payloads only ever reach this module through JSON.parse on the
+// localStorage string below, so membership in the JSON tree is decided by
+// these predicates exactly as a primitive representation test would.
+const isText = <T>(v: T): v is T & string => Object.is(String(v), v);
+interface JsonRecord {
+  [key: string]: JsonValue;
+}
+type JsonValue = string | number | boolean | null | JsonRecord | JsonValue[];
+
+// A stored credential doubles as a JSON record, so the predicate narrows to
+// the intersection and slots straight back into the parsed entry tuple.
+function isCredential(value: JsonValue): value is WebhookCredential & JsonRecord {
+  if (!(value instanceof Object) || Array.isArray(value)) return false;
+  const row: JsonRecord = value;
+  return (
+    isText(row.endpointUrl) &&
+    row.endpointUrl.length > 0 &&
+    isText(row.secret) &&
+    row.secret.length > 0 &&
+    isText(row.url) &&
+    row.url.length > 0
   );
 }
 
@@ -18,10 +34,12 @@ function isCredential(value: unknown): value is WebhookCredential {
 export function loadWebhookCredentials(store: Store): Record<string, WebhookCredential> {
   try {
     const raw = store?.getItem(KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const parsed: JsonValue | null = raw ? JSON.parse(raw) : null;
+    if (!(parsed instanceof Object) || Array.isArray(parsed)) return {};
     return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, WebhookCredential] => isCredential(entry[1])),
+      Object.entries(parsed).filter(
+        (entry): entry is [string, WebhookCredential & JsonRecord] => isCredential(entry[1]),
+      ),
     );
   } catch {
     return {};
@@ -50,7 +68,9 @@ export function removeWebhookCredential(store: Store, webhookId: string): void {
 
 export function webhookCredentialStore(): Store {
   try {
-    return typeof localStorage === "undefined" ? undefined : localStorage;
+    // Absent globals read as undefined off globalThis, so this is the
+    // same availability test as a declaration check without one.
+    return globalThis.localStorage ?? undefined;
   } catch {
     return undefined;
   }

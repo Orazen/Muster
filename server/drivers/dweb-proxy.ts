@@ -12,6 +12,10 @@
 //   DWEB_URL  base URL of the local dweb daemon (http://127.0.0.1:49737)
 import readline from "node:readline";
 
+import { z } from "zod";
+
+import { parseJson, type JsonObject, type JsonValue } from "../schema.ts";
+
 const DWEB = (process.env.DWEB_URL ?? "http://127.0.0.1:49737").replace(/\/+$/, "");
 const DWEB_DISPLAY = (() => {
   try {
@@ -24,7 +28,14 @@ const DWEB_DISPLAY = (() => {
   }
 })();
 
-const TOOLS = [
+/** Tool manifests are JSON payloads (tools/list results), so their shape is
+ * stated as JSON rather than inferred — optional members would otherwise
+ * widen to `| undefined`, which no JsonValue accepts. */
+const TOOLS: Array<{
+  name: string;
+  description: string;
+  inputSchema: { type: "object"; properties: { [key: string]: JsonObject }; required?: string[] };
+}> = [
   {
     name: "dweb_status",
     description:
@@ -58,11 +69,29 @@ const TOOLS = [
   },
 ];
 
-type Json = Record<string, unknown>;
-const send = (msg: Json) => process.stdout.write(JSON.stringify(msg) + "\n");
-const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
-const rpcErr = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
-const textResult = (id: unknown, text: string, isError = false) =>
+type Json = JsonObject;
+/** Echoed-back request id: whatever JSON value the caller sent, absent for
+ * notifications. */
+type RpcId = JsonValue | undefined;
+
+// Stdio is the trust boundary: a line must be a JSON-RPC object with a
+// string method before anything may read .method/.id/.params off it.
+const jsonObject = z.record(z.string(), z.json());
+const rpcMessageSchema = z.object({
+  id: z.json().optional().catch(undefined),
+  method: z.string(),
+  params: jsonObject.optional().catch({}),
+});
+
+type RpcMessage = z.output<typeof rpcMessageSchema>;
+
+// Wire strings: a JSON string, or absent. Any other value reads as absent.
+const wireText = z.string().optional().catch(undefined);
+
+const send = (msg: Record<string, JsonValue | undefined>) => process.stdout.write(JSON.stringify(msg) + "\n");
+const ok = (id: RpcId, result: JsonValue) => send({ jsonrpc: "2.0", id, result });
+const rpcErr = (id: RpcId, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
+const textResult = (id: RpcId, text: string, isError = false) =>
   ok(id, { content: [{ type: "text", text }], isError });
 
 async function api(path: string, init?: RequestInit): Promise<Json> {
@@ -71,7 +100,11 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
     ...init,
     headers: { "content-type": "application/json", ...init?.headers },
   });
-  const body = (await res.json().catch(() => ({}))) as Json;
+  // A body that is missing or not an object reads as empty, exactly like
+  // the previous catch(() => ({})) fallback, so callers keep seeing their
+  // "unknown" defaults instead of a thrown parse error.
+  const parsed = jsonObject.safeParse(await res.json().catch(() => null));
+  const body: Json = parsed.success ? parsed.data : {};
   if (!res.ok) throw new Error(String(body.error ?? `HTTP ${res.status}`));
   return body;
 }
@@ -108,23 +141,26 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     const models = Array.isArray(r.models) ? r.models : [];
     if (!models.length) return { text: "No models available on dweb's opencode integration." };
     const lines = models.map((model) => {
-      const id = typeof model === "object" && model !== null && "id" in model ? model.id : model;
+      const row = jsonObject.safeParse(model);
+      const id = row.success && "id" in row.data ? row.data.id : model;
       return `- ${String(id)}`;
     });
     return { text: `Models available on dweb's opencode integration:\n${lines.join("\n")}` };
   }
   if (name === "dweb_opencode_run") {
-    if (typeof args.command !== "string" || !args.command.trim()) {
+    const commandArg = wireText.parse(args.command);
+    if (commandArg === undefined || !commandArg.trim()) {
       return { text: "dweb_opencode_run needs a string command.", isError: true };
     }
-    if (args.model !== undefined && typeof args.model !== "string") {
+    const modelArg = wireText.parse(args.model);
+    if (args.model !== undefined && modelArg === undefined) {
       return { text: "dweb_opencode_run model must be a string.", isError: true };
     }
-    const command = args.command.trim();
-    const model = args.model?.trim() || undefined;
+    const command = commandArg.trim();
+    const model = modelArg?.trim() || undefined;
     const r = await api("/api/opencode/run", {
       method: "POST",
-      body: JSON.stringify({ command, ...(model !== undefined ? { model } : {}) }),
+      body: JSON.stringify(model === undefined ? { command } : { command, model }),
       signal: AbortSignal.timeout(300000),
     });
     if (r.status === "error") {
@@ -138,15 +174,14 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
   return { text: `Unknown tool: ${name}`, isError: true };
 }
 
-async function handle(msg: Json) {
+async function handle(msg: RpcMessage) {
   const id = msg.id;
-  const method = msg.method as string | undefined;
-  if (!method) return;
-  const params = (msg.params ?? {}) as Json;
+  const { method } = msg;
+  const params: Json = msg.params ?? {};
   switch (method) {
     case "initialize":
       ok(id, {
-        protocolVersion: (params.protocolVersion as string) ?? "2024-11-05",
+        protocolVersion: wireText.parse(params.protocolVersion) ?? "2024-11-05",
         capabilities: { tools: {} },
         serverInfo: { name: "dweb-proxy", version: "0.1.0" },
       });
@@ -161,11 +196,11 @@ async function handle(msg: Json) {
       ok(id, { tools: TOOLS });
       return;
     case "tools/call": {
-      const name = params.name as string;
+      const name = wireText.parse(params.name) ?? "";
       if (!TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
       try {
-        const rawArgs = params.arguments;
-        const args = typeof rawArgs === "object" && rawArgs !== null && !Array.isArray(rawArgs) ? (rawArgs as Json) : {};
+        const argsParsed = jsonObject.safeParse(params.arguments);
+        const args: Json = argsParsed.success ? argsParsed.data : {};
         const { text, isError } = await callTool(name, args);
         textResult(id, text, isError);
       } catch (e) {
@@ -183,14 +218,11 @@ const rl = readline.createInterface({ input: process.stdin, terminal: false });
 rl.on("line", (line) => {
   const t = line.trim();
   if (!t) return;
-  let msg: Json;
-  try {
-    msg = JSON.parse(t) as Json;
-  } catch {
-    return;
-  }
+  const parsed = rpcMessageSchema.safeParse(parseJson(t));
+  if (!parsed.success) return;
+  const msg = parsed.data;
   void handle(msg).catch((e) => {
-    if (msg.id !== undefined) rpcErr(msg.id, -32603, (e as Error).message);
+    if (msg.id !== undefined) rpcErr(msg.id, -32603, e instanceof Error ? e.message : String(e));
   });
 });
 rl.on("close", () => process.exit(0));

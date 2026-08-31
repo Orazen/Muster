@@ -1,115 +1,67 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { Star } from "lucide-react";
+import { AuthShell, authCardBox } from "@/components/AuthShell";
 
+/** Google-only sign-up: a first Google sign-in creates the account, so this
+ * page is the same single tap as sign-in. Kept as its own route because the
+ * landing page, marketing links and old bookmarks point at /sign-up. */
 export function SignupPage() {
-  const { signUp } = useAuth();
+  const { capabilities, signInWithProvider } = useAuth();
   const navigate = useNavigate();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
-      return;
-    }
-    setLoading(true);
-    const result = await signUp(name, email, password);
-    setLoading(false);
-    if (result.error) {
-      setError(result.error);
-    } else {
-      navigate("/app");
-    }
-  }
+  const [googlePending, setGooglePending] = useState(false);
+  const googleConfigured = capabilities.socialProviders.includes("google");
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-app px-4">
-      <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <Link to="/" className="inline-flex items-center gap-2 text-ink">
-            <Star size={28} className="text-accent fill-accent" />
-            <span className="text-xl font-semibold tracking-tight">Muster</span>
-          </Link>
-          <h1 className="mt-6 text-2xl font-bold text-ink">Create your account</h1>
-          <p className="mt-2 text-sm text-ink-secondary">
-            Get started with your own team of AI agents.
+    <AuthShell
+      title="Muster your team"
+      subtitle="One tap with Google and your first agent is minutes away."
+      footer={
+        <button
+          type="button"
+          onClick={() => navigate("/sign-in")}
+          className="font-medium text-[#ff7a45] hover:text-[#f0460e]"
+        >
+          Back to sign in
+        </button>
+      }
+    >
+      <div className="space-y-4">
+        {error && (
+          <div className={authCardBox} role="alert">
+            <span className="text-[#ff8f6b]">{error}</span>
+          </div>
+        )}
+
+        <button
+          type="button"
+          disabled={googlePending || !googleConfigured}
+          onClick={async () => {
+            setGooglePending(true);
+            const result = await signInWithProvider("google");
+            setGooglePending(false);
+            if (result.error) setError(result.error);
+            else navigate("/app");
+          }}
+          className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-gray-200 bg-white py-2.5 text-sm font-semibold text-[#1f1f1f] shadow-sm transition-all hover:bg-gray-50 disabled:opacity-50"
+        >
+          <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+            <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z" />
+            <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18Z" />
+            <path fill="#FBBC05" d="M3.97 10.72a5.41 5.41 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33Z" />
+            <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.46 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z" />
+          </svg>
+          {googlePending ? "Connecting…" : "Continue with Google"}
+        </button>
+
+        {!googleConfigured && (
+          <p className={`text-center text-[12px] ${authCardBox}`}>
+            This deployment has no Google sign-in configured — ask whoever runs it to set
+            GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.
           </p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-hairline bg-panel p-6">
-          {error && (
-            <div className="rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>
-          )}
-
-          <div>
-            <label htmlFor="name" className="mb-1 block text-sm font-medium text-ink-secondary">
-              Name
-            </label>
-            <input
-              id="name"
-              type="text"
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-ink placeholder-ink-secondary/50 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-              placeholder="Your name"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="email" className="mb-1 block text-sm font-medium text-ink-secondary">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-ink placeholder-ink-secondary/50 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-              placeholder="you@example.com"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="password" className="mb-1 block text-sm font-medium text-ink-secondary">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-hairline bg-inset px-3 py-2 text-ink placeholder-ink-secondary/50 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-              placeholder="8+ characters"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-accent py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:opacity-50"
-          >
-            {loading ? "Creating account…" : "Create account"}
-          </button>
-        </form>
-
-        <p className="mt-6 text-center text-sm text-ink-secondary">
-          Already have an account?{" "}
-          <Link to="/sign-in" className="font-medium text-accent hover:text-accent/80">
-            Sign in
-          </Link>
-        </p>
+        )}
       </div>
-    </div>
+    </AuthShell>
   );
 }

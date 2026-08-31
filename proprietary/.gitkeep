@@ -1,0 +1,11 @@
+This directory is a reserved legal scaffold, mirroring Dokploy's
+/proprietary license structure (see docs/plans/omniroute-gateway-and-licensing.md
+§5 for the audit this is based on).
+
+Nothing lives here yet. If a genuinely paid self-host add-on is ever
+decided (see the design doc), its source goes here under
+LICENSE_PROPRIETARY.md's terms instead of the root BSL 1.1 LICENSE —
+without needing to relicense the rest of the project.
+
+Everything outside this directory remains BSL 1.1 (converting to
+Apache-2.0 on the Change Date in the root LICENSE file), unaffected.

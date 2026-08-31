@@ -16,16 +16,27 @@ const TOKEN = "test-comms-token";
 let stub: Server;
 let stubPort = 0;
 let lastAuth: string | undefined;
+// Scripted harness replies, set per test; every shape below must render as a
+// tool answer rather than a protocol error.
+type StubResponse =
+  | { botName: string; text: string }
+  | { busy: boolean }
+  | { error: string }
+  | { queued: boolean; message: string };
 let lastAskBody: any = null;
-let askResponse: unknown = { botName: "Helper", text: "hi from helper" };
+let askResponse: StubResponse = { botName: "Helper", text: "hi from helper" };
 let lastDelegateBody: any = null;
-let delegateResponse: unknown = { queued: true, message: "Delegation queued." };
+let delegateResponse: StubResponse = { queued: true, message: "Delegation queued." };
 
 let child: ChildProcess;
 const pending = new Map<number, (msg: any) => void>();
 let nextId = 100;
 
-function rpc(method: string, params?: unknown): Promise<any> {
+// JSON-RPC params this suite sends over the proxy's stdio surface.
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+type RpcParams = { protocolVersion: string } | { name: string; arguments: JsonValue };
+
+function rpc(method: string, params?: RpcParams): Promise<any> {
   return new Promise((resolve, reject) => {
     const id = nextId++;
     pending.set(id, resolve);
@@ -35,7 +46,7 @@ function rpc(method: string, params?: unknown): Promise<any> {
     }, 10_000).unref?.();
   });
 }
-const callTool = (name: string, args: unknown) => rpc("tools/call", { name, arguments: args });
+const callTool = (name: string, args: JsonValue) => rpc("tools/call", { name, arguments: args });
 
 beforeAll(async () => {
   stub = createServer((req, res) => {
@@ -76,6 +87,7 @@ beforeAll(async () => {
     res.end(JSON.stringify({ error: "unknown" }));
   });
   await new Promise<void>((r) => stub.listen(0, "127.0.0.1", r));
+  // SAFETY: listen(0, "127.0.0.1") binds TCP, so address() is AddressInfo carrying the ephemeral port
   stubPort = (stub.address() as { port: number }).port;
 
   child = spawn(process.execPath, [PROXY], {

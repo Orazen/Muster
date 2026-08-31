@@ -8,8 +8,14 @@ export const AGENT_STATES = CURSOR_STATES;
 /** Which mascot body a bot uses. `cursor` is the procedural mascot;
  * `lottie` is the bundled .lottie bot character. `star` is the
  * musterbot star: every teammate is a star. */
-export type AgentCharacter = "cursor" | "lottie" | "star";
-export const AGENT_CHARACTERS: AgentCharacter[] = ["cursor", "lottie", "star"];
+export type AgentCharacter =
+  | "cursor" | "lottie" | "star"
+  | "hexagon" | "triangle" | "egg" | "drop" | "heart"
+  | "pebble" | "squircle" | "capsule" | "cloud" | "ball" | "sparkle" | "circle";
+export const AGENT_CHARACTERS: AgentCharacter[] = [
+  "star", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
+  "pebble", "squircle", "capsule", "cloud", "ball", "sparkle", "circle",
+];
 
 /** CursorAvatar ships French group labels; the app shows these instead. The
  * memberships mirror its STATE_GROUPS exactly. */
@@ -67,7 +73,7 @@ export const AGENT_COLOR_NAMES = [
 export type AgentColor = (typeof AGENT_COLOR_NAMES)[number];
 
 export const AGENT_COLORS = {
-  green: "#009957",
+  green: "#009957", // kept for backwards compat,
   blue: "#377FE6",
   red: "#D94B52",
   orange: "#E78531",
@@ -124,7 +130,10 @@ const KNOWN_STATES = new Set<string>(AGENT_STATES);
 /** Resolves any stored value — current, legacy or junk — to a real state. */
 export function normalizeState(value: string | null | undefined): AgentState | null {
   if (!value) return null;
-  if (KNOWN_STATES.has(value)) return value as AgentState;
+  if (KNOWN_STATES.has(value)) {
+    // SAFETY: membership in AGENT_STATES is exactly what defines AgentState.
+    return value as AgentState;
+  }
   return LEGACY_STATES[value] ?? null;
 }
 

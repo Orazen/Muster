@@ -2,7 +2,7 @@ export type RoutineSchedule =
   | { type: "once"; at: number }
   | { type: "daily"; time: string; weekdays: number[] };
 
-export type RoutineRunOn = "agent" | "cloud";
+export type RoutineRunOn = "agent" | "cloud" | "opensandbox";
 
 export type RoutineRunTrigger = "schedule" | "manual" | "webhook";
 
