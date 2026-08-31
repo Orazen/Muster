@@ -3386,9 +3386,23 @@ let requestUserEmail = "";
       const { code, expiresAt } = getOrCreateCode(session.userId);
       return json(res, 201, { code, expiresAt });
     }
-    if (method === "GET" && path === "/api/pair/verify") {
+    // The code is the full credential, so the canonical form is POST with
+    // the code in the body (query strings land in proxy/CDN access logs).
+    // The GET-with-query form is kept as a deprecated fallback for older
+    // desktop builds still redeeming that way.
+    if ((method === "POST" || method === "GET") && path === "/api/pair/verify") {
+      let verifyCode: string;
+      const authHeader = headerString(req.headers, "authorization");
+      if (method === "POST") {
+        const body = await readBody(req);
+        verifyCode = isText(body.code) ? body.code : "";
+      } else if (authHeader?.startsWith("Bearer ")) {
+        verifyCode = authHeader.slice("Bearer ".length).trim();
+      } else {
+        verifyCode = String(url.searchParams.get("code") ?? "");
+      }
       try {
-        const userId = consumeCode(String(url.searchParams.get("code") ?? ""), clientIpForLimiting(req));
+        const userId = consumeCode(verifyCode, clientIpForLimiting(req));
         const user = findUserById(userId);
         if (!user) return json(res, 404, { error: "pairing account no longer exists" });
         return json(res, 200, { email: user.email, name: user.name });
@@ -3410,10 +3424,18 @@ let requestUserEmail = "";
       let identity: { email?: string; name?: string };
       try {
         const upstream = await fetch(
-          `${cloudUrl.replace(/\/$/, "")}/api/pair/verify?code=${encodeURIComponent(code)}`,
+          `${cloudUrl.replace(/\/$/, "")}/api/pair/verify`,
           // a local server redeeming someone else's stolen code is the
-          // threat model — never follow redirects into ambiguity
-          { redirect: "error", signal: AbortSignal.timeout(10_000) },
+          // threat model — never follow redirects into ambiguity. The code
+          // rides in the POST body, not the query, so it never lands in
+          // proxy or CDN access logs.
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ code }),
+            redirect: "error",
+            signal: AbortSignal.timeout(10_000),
+          },
         );
         if (!upstream.ok) {
           // SAFETY: verify's error responses are JSON of the shape

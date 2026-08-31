@@ -66,7 +66,11 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/read$/ },
-  { method: "POST", path: /^\/api\/bots\/[\w-]+\/always-allow$/ },
+  // NOTE: always-allow is deliberately NOT exposed to paired phones. It
+  // turns a pending approval into a permanent auto-approve rule; a phone
+  // token is the weakest credential in the system (device backups, shared
+  // devices), so persistent permission changes stay desktop-only. Phones
+  // can still answer the pending card once via /respond.
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks$/ },
