@@ -674,7 +674,14 @@ export class Store {
     const full: Message = { id: newId(), at: Date.now(), parentId: t.activeLeafId, ...redactBotAuthored(message) };
     t.messages.push(full);
     t.activeLeafId = full.id;
-    mdb.appendMessage(threadId, full);
+    // Memory is authoritative; a failed SQLite write (disk full, WAL
+    // failure) must not abort the caller mid-fold — that would leave the
+    // bot stuck busy past turn.completed's housekeeping until the watchdog.
+    try {
+      mdb.appendMessage(threadId, full);
+    } catch (error) {
+      console.error(`message-db write failed for thread ${threadId} (transcript kept in memory):`, error);
+    }
     if (full.kind === "screen") {
       for (const pruned of this.pruneScreenFrames(t)) {
         mdb.updateMessage(threadId, pruned);

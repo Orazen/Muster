@@ -229,7 +229,7 @@ async function processOne(
   approvalBus: ApprovalBus,
   from: BotRecord,
   sourceThreadId: string,
-  item: DelegationItem,
+  item: PendingDelegationItem,
   runTarget: (
     toBotId: string,
     message: string,
@@ -291,6 +291,14 @@ async function processOne(
     sender = currentSender;
     target = current;
   }
+  // Re-check membership: discardDelegations() may have wiped this queue
+  // while the approval sat (up to 15 minutes) — a "dropped" handoff must
+  // never fire. And acknowledge BEFORE dispatch, not after: removal is
+  // persisted ahead of the target turn so a crash mid-turn re-asks the
+  // delegation instead of silently running it twice (at-most-once; the
+  // drain loop's finally-ack below then no-ops).
+  if (!pendingDelegations.get(sourceThreadId)?.some((queued) => queued.id === item.id)) return;
+  acknowledgeDelegation(sourceThreadId, item.id);
   const channel = getOrCreateChannel(bus.store, sender, target);
   mirrorExchange(bus, sender, target, item.message, channel, sourceThreadId);
   const reasonLine = item.reason ? `\n\n[Reason: ${item.reason}]` : "";

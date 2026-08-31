@@ -461,7 +461,10 @@ describe("delegations survive a restart", () => {
     expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId]).toBeUndefined();
   });
 
-  it("keeps a handoff durable until its approval and dispatch path settles", async () => {
+  it("acknowledges a handoff at dispatch time, not after the target turn settles", async () => {
+    // At-most-once: the queue entry is removed (and persisted) when the
+    // target turn STARTS, so a crash mid-turn re-asks the delegation on
+    // restart instead of silently running it a second time.
     queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "wait for dispatch", depth: 0 }, 1);
     let release!: () => void;
     const dispatchSettled = new Promise<void>((resolve) => {
@@ -474,12 +477,34 @@ describe("delegations survive a restart", () => {
     });
 
     await waitFor(() => started);
-    expect(pendingThreads()).toEqual([from.threadId]);
-    expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId]).toHaveLength(1);
+    // Dispatch began → the entry is already acknowledged and cleared.
+    expect(pendingThreads()).toEqual([]);
+    expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId]).toBeUndefined();
 
     release();
     await waitFor(() => pendingThreads().length === 0);
     expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId]).toBeUndefined();
+  });
+
+  it("never runs a handoff whose queue was discarded while approval was pending", async () => {
+    store.patchBot(from.id, { approvePeerComms: true });
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "dropped mid-approval", depth: 0 }, 1);
+    let fired = false;
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, () => {
+      fired = true;
+    });
+
+    // Wait for the approval card, then drop the queue while the drain is
+    // parked inside requestPeerApproval.
+    await waitFor(() => store.messagesFor(from.threadId).some((m) => m.card?.requestId));
+    const card = store.messagesFor(from.threadId).find((m) => m.card?.requestId)!;
+    discardDelegations(buses.commsBus, from.threadId);
+
+    // The user answers "allow" to the card they still see.
+    resolvePeerComms(buses.approvalBus, card.card!.requestId!, "allow");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fired).toBe(false);
+    expect(pendingThreads()).toEqual([]);
   });
 
   it("drains work queued by a later settled turn while an earlier handoff is waiting", async () => {

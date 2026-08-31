@@ -1,16 +1,19 @@
 // Stall-watchdog contract: activity keeps a turn alive indefinitely, human
-// approvals pause the clock, silence past the ceiling stalls exactly once.
+// approvals pause the clock but not past the hard cap, silence past the
+// ceiling stalls exactly once.
 import { describe, expect, it } from "vitest";
 
 import { TurnWatchdog, type WatchedTurn } from "./turn-watchdog.ts";
 
 const STALL = 10_000;
+const HARD_CAP = 50_000;
 
 function rig() {
   let now = 0;
   const stalls: WatchedTurn[] = [];
   const dog = new TurnWatchdog({
     stallMs: STALL,
+    hardCapMs: HARD_CAP,
     checkMs: 60_000,
     onStall: (turn) => stalls.push(turn),
     now: () => now,
@@ -44,11 +47,12 @@ describe("TurnWatchdog", () => {
     expect(stalls).toHaveLength(0);
   });
 
-  it("never stalls a turn waiting on a human, however long they take", () => {
+  it("waits on a human well past the stall window, but not past the hard cap", () => {
     const { dog, stalls, tick } = rig();
     dog.watch("t1", "bot1");
     dog.setWaitingOnHuman("t1", true);
-    tick(STALL * 100);
+    // Long past the stall window, still under the cap: not a stall.
+    tick(HARD_CAP - 1);
     dog.sweep();
     expect(stalls).toHaveLength(0);
     // the answer restarts the clock rather than inheriting the wait
@@ -57,6 +61,19 @@ describe("TurnWatchdog", () => {
     dog.sweep();
     expect(stalls).toHaveLength(0);
     tick(2);
+    dog.sweep();
+    expect(stalls).toHaveLength(1);
+  });
+
+  it("stalls a wedged permission request once the hard cap passes", () => {
+    const { dog, stalls, tick } = rig();
+    dog.watch("t1", "bot1");
+    dog.setWaitingOnHuman("t1", true);
+    // Far past the cap with no request.resolved ever arriving — the entry
+    // must be reaped instead of holding the busy flag forever.
+    tick(HARD_CAP + 1);
+    dog.sweep();
+    expect(stalls).toEqual([expect.objectContaining({ threadId: "t1" })]);
     dog.sweep();
     expect(stalls).toHaveLength(1);
   });

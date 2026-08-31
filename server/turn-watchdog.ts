@@ -19,6 +19,11 @@ export interface WatchedTurn {
 export interface TurnWatchdogOptions {
   stallMs: number;
   checkMs: number;
+  /** Absolute ceiling for a turn even while waiting on a human. A
+   * permission request with no deadline and no resolving event (dead MCP
+   * child, adapter bug) would otherwise hold the busy flag forever — the
+   * exact wedged state this watchdog exists to clear. */
+  hardCapMs: number;
   /** Called once per stalled turn, after the entry is removed. */
   onStall: (turn: WatchedTurn) => void;
   now?: () => number;
@@ -92,8 +97,14 @@ export class TurnWatchdog {
   sweep(): void {
     const at = this.now();
     for (const turn of this.turns.values()) {
-      if (turn.waitingOnHuman) continue;
-      if (at - turn.lastEventAt < this.opts.stallMs) continue;
+      if (turn.waitingOnHuman) {
+        // Waiting on a person is not a stall, but it is not a license to
+        // hold the turn forever either: past the hard cap the request is
+        // treated as wedged (no resolving event ever arrived).
+        if (at - turn.startedAt < this.opts.hardCapMs) continue;
+      } else if (at - turn.lastEventAt < this.opts.stallMs) {
+        continue;
+      }
       this.turns.delete(turn.threadId);
       this.opts.onStall(turn);
     }

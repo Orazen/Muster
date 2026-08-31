@@ -442,7 +442,6 @@ async function attemptProviderFallback(threadId: string, errorMessage: string): 
     if (!fallbackEligible(threadId, errorMessage)) return;
     const threadBot = store.botByThread(threadId);
     if (!threadBot?.ownerId && !threadBot) return;
-    markAttempted(threadId);
     const current = threadBot.modelSelection?.instanceId ?? "";
     const described = await registry.describe();
     const alt = pickAlternate(
@@ -450,6 +449,9 @@ async function attemptProviderFallback(threadId: string, errorMessage: string): 
       threadBot.ownerId,
       described.map((d) => ({ instanceId: d.instanceId, state: d.snapshot.state })),
     );
+    // Consume the one-shot only when an alternate actually exists — an
+    // owner adding a provider seconds later should not hit the cooldown.
+    markAttempted(threadId);
     if (!alt) return;
     const lastUser = [...store.messagesFor(threadId)].reverse().find((m) => m.role === "user" && m.kind === "text");
     if (!lastUser?.text) return;
@@ -829,12 +831,21 @@ function settleLostTurn(turn: WatchedTurn, note: string): void {
       stopScreenPoller(currentBot.id);
       store.setActivity(currentBot.id, "idle");
     }
+    // The normal turn.completed fold drains steered sends, but a lost turn
+    // may never emit one. Without this, messages queued mid-stall stay
+    // parked (and the queued affordance hides for an idle bot) until some
+    // unrelated later turn fires them.
+    drainQueuedSends();
   }, 6_000);
   release.unref?.();
 }
 
 const watchdog = new TurnWatchdog({
   stallMs: TURN_STALL_MS,
+  // A human approval is exempt from the stall check, but not from this
+  // absolute ceiling: if no resolving event ever arrives (dead MCP child,
+  // adapter bug), the turn must still be reaped eventually.
+  hardCapMs: 24 * 60 * 60_000,
   checkMs: 60_000,
   onStall: (turn) => {
     const instance = (() => {
