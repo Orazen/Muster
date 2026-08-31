@@ -18,11 +18,14 @@ export interface Agent {
   status: 'idle' | 'busy' | 'thinking' | 'paused';
 }
 
+/** Concrete scalar contract so preference values are usable without narrowing. */
+export type AgentPreferenceValue = string | number | boolean;
+
 export interface AgentPersonality {
   tone: 'professional' | 'casual' | 'sarcastic' | 'formal';
   expertise: string[];
   communicationStyle: 'direct' | 'verbose' | 'concise' | 'formal';
-  preferences: Record<string, any>;
+  preferences: Record<string, AgentPreferenceValue>;
 }
 
 export interface Task {
@@ -31,7 +34,7 @@ export interface Task {
   agentId: string;
   status: 'pending' | 'in_progress' | 'completed' | 'rejected';
   createdAt: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, AgentPreferenceValue>;
 }
 
 export interface TaskResult {
@@ -100,7 +103,7 @@ export class AgentSystem {
 
   private async executeTask(agent: Agent, task: Task): Promise<TaskResult> {
     const response = await this.callAgent(agent, task);
-    await agent.memory.set(`task:${task.id}`, response);
+    await agent.memory.set(`task:${task.id}`, task);
     return {
       taskId: task.id,
       agentId: agent.id,
@@ -146,9 +149,10 @@ export class AgentSystem {
 
   async getTask(taskId: string): Promise<Task | null> {
     for (const agent of this.agents.values()) {
-      const item = await agent.memory.get(`task:${taskId}`);
+      // Only executeTask writes `task:<id>` keys, and it stores the Task itself.
+      const item = await agent.memory.get<Task>(`task:${taskId}`);
       if (item && item.value) {
-        return item.value as Task;
+        return item.value;
       }
     }
     return null;

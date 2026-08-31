@@ -41,6 +41,8 @@ export function isLoopbackRedirect(url: string): boolean {
   try {
     const u = new URL(url);
     if (u.protocol !== "http:") return false;
+    // WHATWG URL.hostname keeps brackets on IPv6 hosts ("[::1]"), so both
+    // spellings are needed.
     const h = u.hostname;
     return h === "127.0.0.1" || h === "localhost" || h === "[::1]" || h === "::1";
   } catch {

@@ -12,6 +12,12 @@ describe("isLoopbackRedirect", () => {
     expect(isLoopbackRedirect("http://localhost:8799")).toBe(true);
   });
 
+  it("accepts the bracketed IPv6 loopback form", () => {
+    // WHATWG URL.hostname keeps brackets on IPv6 hosts, so this matches the
+    // "[::1]" branch.
+    expect(isLoopbackRedirect("http://[::1]:8799")).toBe(true);
+  });
+
   it("rejects remote hosts, https, and garbage", () => {
     expect(isLoopbackRedirect("https://evil.example.com")).toBe(false);
     expect(isLoopbackRedirect("http://169.254.169.254/")).toBe(false);

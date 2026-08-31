@@ -2922,9 +2922,13 @@ function readBody(req: IncomingMessage): Promise<any> {
       if (done) return;
       bytes += Buffer.isBuffer(c) ? c.length : Buffer.byteLength(c);
       if (bytes > 1_000_000) {
-        // Keep draining the socket, but stop retaining attacker-controlled
-        // bytes. Destroying the request here prevents the caller from
-        // receiving the useful 413 response.
+        // Stop retaining attacker-controlled bytes and stop draining: pause
+        // the stream just long enough for the caller's 413 to flush, then
+        // destroy so an unauthenticated peer can't stream forever on a
+        // rejected body (mirrors companion/src/proxy.ts, which destroys
+        // outright).
+        req.pause();
+        setTimeout(() => req.destroy(), 1_000).unref();
         return fail(413, "body too large");
       }
       data += c;
@@ -2942,6 +2946,50 @@ function readBody(req: IncomingMessage): Promise<any> {
     });
     req.on("error", (e) => fail(400, e instanceof Error ? e.message : String(e)));
   });
+}
+
+/** Best-effort client identity for rate-limit buckets. Behind the cloud
+ * reverse proxy every socket peers as the proxy's IP, so a socket-keyed
+ * bucket collapses all real clients into one. Prefer proxy-supplied client
+ * headers when present; a direct (unproxied) attacker can spoof these to
+ * rotate buckets, but spoofing only escapes throttling — it cannot bypass
+ * any auth check — and direct installs are loopback-only anyway. */
+function headerString(headers: IncomingMessage["headers"], name: string): string | undefined {
+  const v = headers[name];
+  if (v === undefined) return undefined;
+  // Node types headers as string | string[] | undefined; repeated headers
+  // arrive as arrays, and the first value is what the proxy set.
+  if (Array.isArray(v)) {
+    const first = v.at(0);
+    return first === undefined ? undefined : String(first);
+  }
+  return v;
+}
+
+function clientIpForLimiting(req: IncomingMessage): string {
+  const cf = headerString(req.headers, "cf-connecting-ip");
+  if (cf?.trim()) return cf.trim();
+  const xff = headerString(req.headers, "x-forwarded-for");
+  if (xff?.trim()) return xff.split(",")[0].trim();
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+// Small fixed-window limiter for the few PRE-GATE routes that trigger an
+// outbound fetch (oauth/finish/exchange, pair/redeem). Without it, a single
+// unauthenticated loop can hold hundreds of concurrent upstream requests —
+// a cheap reflection DoS of the cloud and of our own socket pool.
+const egressBuckets = new Map<string, { count: number; windowStart: number }>();
+const EGRESS_WINDOW_MS = 60_000;
+const EGRESS_MAX_PER_WINDOW = 10;
+
+function consumeEgressBucket(key: string, now = Date.now()): boolean {
+  const window = egressBuckets.get(key);
+  if (!window || window.windowStart + EGRESS_WINDOW_MS <= now) {
+    egressBuckets.set(key, { count: 1, windowStart: now });
+    return true;
+  }
+  window.count++;
+  return window.count <= EGRESS_MAX_PER_WINDOW;
 }
 
 // Loopback-only enforcement: the harness runs on 127.0.0.1 but accepts
@@ -3287,6 +3335,9 @@ let requestUserEmail = "";
       // pair/redeem sets. No session exists yet — that is the point.
       const cloudUrl = pairCloudUrl();
       if (!cloudUrl) return json(res, 501, { error: "desktop sign-in is not configured on this install" });
+      if (!consumeEgressBucket(clientIpForLimiting(req))) {
+        return json(res, 429, { error: "too many sign-in attempts — wait a minute and try again" });
+      }
       const body = await readBody(req);
       const code = isText(body.code) ? body.code : "";
       let upstream: Response;
@@ -3337,7 +3388,7 @@ let requestUserEmail = "";
     }
     if (method === "GET" && path === "/api/pair/verify") {
       try {
-        const userId = consumeCode(String(url.searchParams.get("code") ?? ""), req.socket.remoteAddress ?? "unknown");
+        const userId = consumeCode(String(url.searchParams.get("code") ?? ""), clientIpForLimiting(req));
         const user = findUserById(userId);
         if (!user) return json(res, 404, { error: "pairing account no longer exists" });
         return json(res, 200, { email: user.email, name: user.name });
@@ -3351,6 +3402,9 @@ let requestUserEmail = "";
     if (method === "POST" && path === "/api/pair/redeem") {
       const cloudUrl = pairCloudUrl();
       if (!cloudUrl) return json(res, 501, { error: "pairing is not configured on this install" });
+      if (!consumeEgressBucket(clientIpForLimiting(req))) {
+        return json(res, 429, { error: "too many pairing attempts — wait a minute and try again" });
+      }
       const body = await readBody(req);
       const code = isText(body.code) ? body.code : "";
       let identity: { email?: string; name?: string };

@@ -3,11 +3,20 @@
  * Privacy-first analytics (PostHog integration)
  */
 
+/** Analytics payloads are forwarded to PostHog, so keep them JSON-shaped. */
+export type AnalyticsPropertyValue = string | number | boolean | null;
+
 export interface AnalyticsEvent {
   name: string;
-  properties?: Record<string, any>;
+  properties?: Record<string, AnalyticsPropertyValue>;
   timestamp: number;
   userId?: string;
+}
+
+export interface AnalyticsStats {
+  total: number;
+  unique: number;
+  byEvent: Record<string, number>;
 }
 
 export class AnalyticsTracker {
@@ -32,7 +41,7 @@ export class AnalyticsTracker {
     this.enabled = false;
   }
 
-  track(name: string, properties?: Record<string, any>): void {
+  track(name: string, properties?: Record<string, AnalyticsPropertyValue>): void {
     if (!this.enabled) return;
     this.events.push({
       name,
@@ -58,7 +67,7 @@ export class AnalyticsTracker {
     return this.sessionId;
   }
 
-  getStats(): { total: number; unique: number; byEvent: Record<string, number> } {
+  getStats(): AnalyticsStats {
     const unique = new Set(this.events.map(e => e.userId).filter(Boolean)).size;
     const byEvent: Record<string, number> = {};
     this.events.forEach(e => {

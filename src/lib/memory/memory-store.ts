@@ -14,12 +14,15 @@ export type MemoryType =
   | 'shared'
   | 'temporal';
 
-export interface MemoryItem {
+/** Memory payloads are opaque to the store; the caller supplies the domain type. */
+export type MemoryMetadata = Record<string, string | number | boolean>;
+
+export interface MemoryItem<T = unknown> {
   key: string;
-  value: any;
+  value: T;
   type: MemoryType;
   timestamp: number;
-  metadata?: Record<string, any>;
+  metadata?: MemoryMetadata;
 }
 
 export interface MemoryStats {
@@ -57,7 +60,7 @@ export class MemoryManager {
     localStorage.setItem(key, JSON.stringify(items));
   }
 
-  async add(type: MemoryType, key: string, value: any, metadata?: Record<string, any>): Promise<boolean> {
+  async add<T>(type: MemoryType, key: string, value: T, metadata?: MemoryMetadata): Promise<boolean> {
     const item: MemoryItem = {
       key,
       value,
@@ -70,11 +73,12 @@ export class MemoryManager {
     return true;
   }
 
-  async get(key: string): Promise<MemoryItem | null> {
-    return this.storage.get(key) || null;
+  async get<T = unknown>(key: string): Promise<MemoryItem<T> | null> {
+    // SAFETY: the storage Map only ever holds MemoryItem entries keyed by `item.key`.
+    return this.storage.get(key) as MemoryItem<T> | undefined || null;
   }
 
-  async set(key: string, value: any): Promise<boolean> {
+  async set<T>(key: string, value: T): Promise<boolean> {
     const item = this.storage.get(key);
     if (item) {
       item.value = value;
@@ -93,16 +97,16 @@ export class MemoryManager {
   }
 
   async list(): Promise<Record<MemoryType, MemoryItem[]>> {
-    const result: Record<MemoryType, MemoryItem[]> = {
-      episodic: [],
-      semantic: [],
-      procedural: [],
-      emotional: [],
-      prospective: [],
-      behavioral: [],
-      narrative: [],
-      shared: [],
-      temporal: [],
+    const result = {
+      episodic: new Array<MemoryItem>(),
+      semantic: new Array<MemoryItem>(),
+      procedural: new Array<MemoryItem>(),
+      emotional: new Array<MemoryItem>(),
+      prospective: new Array<MemoryItem>(),
+      behavioral: new Array<MemoryItem>(),
+      narrative: new Array<MemoryItem>(),
+      shared: new Array<MemoryItem>(),
+      temporal: new Array<MemoryItem>(),
     };
     this.storage.forEach((item) => {
       result[item.type].push(item);
