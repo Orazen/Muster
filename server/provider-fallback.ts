@@ -21,6 +21,33 @@ const RATE_LIMITED = /\b429\b|\brate.?limit|\bquota\b|\bcredit\b|\bbalance\b|ins
 const COOLDOWN_MS = 10 * 60_000;
 const attempted = new Map<string, number>();
 
+/** Rate-limit observability for the usage dashboard: every detected
+ * provider cap records the provider family + when, bounded like the
+ * attempt map. The dashboard reads this to show "your Claude quota is
+ * getting hot" without scraping provider APIs. */
+export interface RateLimitHit {
+  provider: string;
+  at: number;
+}
+const rateLimitHits: RateLimitHit[] = [];
+const RATE_LIMIT_HISTORY_MAX = 200;
+
+export function recordRateLimitHit(providerFamily: string, at = Date.now()): void {
+  rateLimitHits.push({ provider: providerFamily, at });
+  if (rateLimitHits.length > RATE_LIMIT_HISTORY_MAX) rateLimitHits.shift();
+}
+
+/** Hits in the trailing window (default 24h), oldest last. */
+export function recentRateLimitHits(windowMs = 24 * 60 * 60_000, now = Date.now()): RateLimitHit[] {
+  return rateLimitHits.filter((h) => now - h.at < windowMs);
+}
+
+/** "claude", "codex", "openai" — the first label segment of an instance id
+ * (owner-scoped ids carry `:<ownerId>` after the family). */
+export function providerFamilyOf(instanceId: string): string {
+  return instanceId.split(":")[0]?.split("-")[0] ?? instanceId;
+}
+
 export function fallbackEligible(threadId: string, errorMessage: string, now = Date.now()): boolean {
   if (!RATE_LIMITED.test(errorMessage)) return false;
   const last = attempted.get(threadId);

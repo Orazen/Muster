@@ -15,6 +15,7 @@ import { Card } from "./SettingsPrimitives";
 import { SkinPicker } from "./SkinPicker";
 import { UsageSection } from "./UsageSection";
 import { InviteSection } from "./InviteSection";
+import { ProviderHealthSection } from "./ProviderHealthSection";
 import { VaultSection } from "./VaultSection";
 import { BillingSection } from "./BillingSection";
 import { VoiceSettings } from "./VoiceSettings";
@@ -714,6 +715,7 @@ export function SettingsModal() {
             {section === "computer" && <LocalComputerSection />}
 
             {section === "usage" && <UsageSection />}
+            {section === "usage" && <ProviderHealthSection />}
             {section === "usage" && <InviteSection />}
             {section === "vault" && <VaultSection />}
 

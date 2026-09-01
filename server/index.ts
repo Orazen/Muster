@@ -134,7 +134,7 @@ import {
   signedSessionCookieValue,
   deleteAuthUser,
 } from "./auth.ts";
-import { fallbackEligible, markAttempted, pickAlternate } from "./provider-fallback.ts";
+import { fallbackEligible, markAttempted, pickAlternate, providerFamilyOf, recordRateLimitHit, recentRateLimitHits } from "./provider-fallback.ts";
 import { consumeCode, getOrCreateCode, VerifyError } from "./pairing.ts";
 import {
   IS_CLOUD,
@@ -455,6 +455,9 @@ async function attemptProviderFallback(threadId: string, errorMessage: string): 
     if (!fallbackEligible(threadId, errorMessage)) return;
     const threadBot = store.botByThread(threadId);
     if (!threadBot?.ownerId && !threadBot) return;
+    // Record the hit for the usage dashboard even when no alternate exists:
+    // "your only provider is rate-limited" is exactly what it must show.
+    recordRateLimitHit(providerFamilyOf(threadBot.modelSelection?.instanceId ?? ""));
     const current = threadBot.modelSelection?.instanceId ?? "";
     const described = await registry.describe();
     const alt = pickAlternate(
@@ -4027,6 +4030,70 @@ let requestUserEmail = "";
     if (path === "/api/wrapped" && method === "GET") {
       const card = currentWrappedCard();
       return json(res, 200, { wrapped: card, text: renderWrappedText(card) });
+    }
+    // Provider health & spend — the usage dashboard's data. Per provider
+    // family: which instances serve it, aggregate tokens/cost from every
+    // bot resolved onto it, and recent rate-limit hits. No provider API
+    // scraping: everything here is already known locally.
+    if (path === "/api/usage/providers" && method === "GET") {
+      const hits = recentRateLimitHits();
+      const families = new Map<
+        string,
+        {
+          provider: string;
+          instances: Array<{ instanceId: string; state: string; bots: string[] }>;
+          turns: number;
+          tokensIn: number;
+          tokensOut: number;
+          costUsd: number | null;
+          rateLimitHits24h: number;
+          lastHitAt: number | null;
+        }
+      >();
+      const ensure = (instanceId: string) => {
+        const family = providerFamilyOf(instanceId);
+        if (!families.has(family)) {
+          families.set(family, {
+            provider: family,
+            instances: [],
+            turns: 0,
+            tokensIn: 0,
+            tokensOut: 0,
+            costUsd: null,
+            rateLimitHits24h: 0,
+            lastHitAt: null,
+          });
+        }
+        return families.get(family)!;
+      };
+      for (const bot of store.bots) {
+        const instanceId = bot.modelSelection?.instanceId ?? "";
+        if (!instanceId) continue;
+        const agg = ensure(instanceId);
+        let turns = 0;
+        let tokensIn = 0;
+        let tokensOut = 0;
+        for (const t of store.tasks(bot.id) ?? []) {
+          if (!t.usage) continue;
+          turns += t.usage.turns;
+          tokensIn += t.usage.input;
+          tokensOut += t.usage.output;
+          if (t.usage.costUsd !== null) agg.costUsd = (agg.costUsd ?? 0) + t.usage.costUsd;
+        }
+        agg.turns += turns;
+        agg.tokensIn += tokensIn;
+        agg.tokensOut += tokensOut;
+        const entry = agg.instances.find((i) => i.instanceId === instanceId);
+        if (entry) entry.bots.push(bot.name);
+        else agg.instances.push({ instanceId, state: "active", bots: [bot.name] });
+      }
+      for (const hit of hits) {
+        const agg = families.get(hit.provider);
+        if (!agg) continue;
+        agg.rateLimitHits24h += 1;
+        agg.lastHitAt = Math.max(agg.lastHitAt ?? 0, hit.at);
+      }
+      return json(res, 200, { providers: [...families.values()] });
     }
     // Create a public share link for this week's card. Auth-gated like
     // /api/wrapped; the URL itself carries only an unguessable token —
