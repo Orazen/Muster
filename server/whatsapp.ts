@@ -70,6 +70,13 @@ export interface InboundWhatsAppMessage {
   timestamp?: number;
 }
 
+/** Stable thread key per customer: same number → same thread, so chat
+ * history and per-customer context survive across messages. The prefix
+ * keeps WhatsApp threads separate from any local thread id space. */
+export function customerThreadKey(from: string): string {
+  return `wa:${from.replace(/[^0-9A-Za-z]/g, "")}`;
+}
+
 /** Extract the first customer text message from a webhook payload. Meta
  * batches: entry[].changes[].value.messages[]. Non-text and echo messages
  * (statuses) are ignored. Zod parses the envelope at the boundary — a

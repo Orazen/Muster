@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createHmac } from "node:crypto";
 
 import {
+  customerThreadKey,
   parseInboundMessages,
   sendWhatsAppText,
   verifySignature,
@@ -64,6 +65,18 @@ describe("verifySignature", () => {
     expect(verifySignature(CONFIG.appSecret, body, "sha256=deadbeef")).toBe(false);
     expect(verifySignature(CONFIG.appSecret, body, "not-a-signature")).toBe(false);
     expect(verifySignature(CONFIG.appSecret, body, undefined)).toBe(false);
+  });
+});
+
+describe("customerThreadKey", () => {
+  it("maps a customer number to a stable, sanitized thread key", () => {
+    expect(customerThreadKey("15551234567")).toBe("wa:15551234567");
+    expect(customerThreadKey("+1 (555) 123-4567")).toBe("wa:15551234567");
+    expect(customerThreadKey("15551234567")).toBe(customerThreadKey("+1555 123 4567"));
+  });
+
+  it("never returns an empty key", () => {
+    expect(customerThreadKey("!!!")).toBe("wa:");
   });
 });
 

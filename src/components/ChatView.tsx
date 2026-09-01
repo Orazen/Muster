@@ -71,6 +71,31 @@ import {
 const USER_COLLAPSE_CHARS = 600;
 const USER_COLLAPSE_LINES = 8;
 
+/** GAIA iMessage grouping (vendored from gaia-ui's message-bubble):
+ * consecutive same-role text bubbles read as one run — the first tightens
+ * its stacking-side corner, the last carries the tail, middles tighten both.
+ * Any other row kind (tool chip, card, screen) breaks the run; a run of one
+ * keeps the full round bubble, so it maps to nothing here. */
+function bubbleRunPositions(messages: Message[]): Map<string, "first" | "middle" | "last"> {
+  const out = new Map<string, "first" | "middle" | "last">();
+  let run: Message[] = [];
+  const flush = () => {
+    run.forEach((m, i) => {
+      if (run.length === 1) return;
+      if (i === 0) out.set(m.id, "first");
+      else if (i === run.length - 1) out.set(m.id, "last");
+      else out.set(m.id, "middle");
+    });
+    run = [];
+  };
+  for (const m of messages) {
+    if (m.kind === "text") run.push(m);
+    else flush();
+  }
+  flush();
+  return out;
+}
+
 /** "Today" / "Yesterday" / "Mon, Aug 11" — real dates, not a hardcoded label. */
 function dayLabel(at: number): string {
   const d = new Date(at);
@@ -276,6 +301,7 @@ function Bubble({
   message,
   editing,
   isLastBotText,
+  runPosition,
   onStartEdit,
   onCancelEdit,
   onSubmitEdit,
@@ -285,6 +311,8 @@ function Bubble({
   message: Message;
   editing: boolean;
   isLastBotText: boolean;
+  /** position in a run of consecutive same-role text bubbles (GAIA grouping) */
+  runPosition?: "first" | "middle" | "last";
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onSubmitEdit: (text: string) => void;
@@ -333,12 +361,16 @@ function Bubble({
         {user && <CopyButton text={visibleText} />}
         <div
           className={cn(
-            "max-w-[70%] rounded-2xl text-[15px] leading-relaxed",
+            "muster-bubble max-w-[70%] rounded-2xl text-[15px] leading-relaxed",
             user && webhookView
               ? "overflow-hidden border border-accent/25 bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
               : user
-                ? "border border-bubble-user-border bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
-                : "bg-card px-4 py-2.5 text-ink",
+                ? "muster-from-user px-4 py-2.5 whitespace-pre-wrap text-ink"
+                : "muster-from-bot px-4 py-2.5 text-ink",
+            runPosition && !webhookView ? runPosition : null,
+            // GAIA's tail rides only the last bubble of a run; single
+            // messages keep the full round bubble with its tail.
+            !webhookView && (!runPosition || runPosition === "last") ? "muster-tail" : null,
           )}
           title={new Date(message.at).toLocaleString()}
         >
@@ -574,7 +606,7 @@ function StreamingBubble({ text }: { text: string }) {
   const deferred = useDeferredValue(text);
   return (
     <div className="flex w-full justify-start">
-      <div className="max-w-[70%] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">
+      <div className="muster-bubble muster-from-bot muster-tail max-w-[70%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed text-ink">
         <MessageBoundary fallbackText={deferred}>
           <ChatMarkdown text={deferred} streaming />
         </MessageBoundary>
@@ -630,6 +662,7 @@ const MessagesList = memo(function MessagesList({
   onRegenerate: () => void;
 }) {
   const { dispatch } = useStore();
+  const runPositions = useMemo(() => bubbleRunPositions(messages), [messages]);
   return (
     <>
       {messages.length === 0 && !bot.busy && (
@@ -701,6 +734,7 @@ const MessagesList = memo(function MessagesList({
                   message={m}
                   editing={editingId === m.id}
                   isLastBotText={m.id === lastBotTextId}
+                  runPosition={runPositions.get(m.id)}
                   onStartEdit={() => onStartEdit(m.id)}
                   onCancelEdit={onCancelEdit}
                   onSubmitEdit={(text) => onSubmitEdit(m.id, text)}

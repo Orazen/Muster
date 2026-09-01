@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./components/chat/message-bubble.css";
 
 /* Grok Bot dark palette (pixel-sampled from the real app) */
 @theme {

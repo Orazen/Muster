@@ -1,0 +1,99 @@
+/* Muster message bubbles — adapted from gaia-ui (MIT)
+   https://github.com/theexperiencecompany/gaia-ui
+   registry/new-york/ui/message-bubble.css
+
+   GAIA's iMessage treatment (20px radius, traveling tight corner through a
+   grouped run, two-pseudo tail on the last bubble) re-pointed at Muster's
+   skin-aware palette: user bubbles keep the accent hue (--color-bubble-user),
+   bot bubbles sit on the raised surface (--color-card) behind a hairline.
+   Unlayered rules here deliberately outrank Tailwind utilities, so the
+   grouped-corner radii win over the rounded-2xl fallback on the element. */
+
+.muster-bubble {
+  position: relative;
+  word-wrap: break-word;
+  border-radius: 20px;
+}
+
+/* Surfaces */
+.muster-bubble.muster-from-user {
+  background: var(--color-bubble-user);
+  border: 1px solid var(--color-bubble-user-border);
+  color: var(--color-ink);
+}
+
+.muster-bubble.muster-from-bot {
+  background: var(--color-card);
+  border: 1px solid color-mix(in oklab, var(--color-hairline) 55%, transparent);
+  color: var(--color-ink);
+}
+
+/* Grouped runs: the tight corner travels down the stacking side
+   (bottom → both → top), as in GAIA. Tail corner (bottom, bubble side)
+   is tight on every grouped variant; the tail itself only renders on last. */
+.muster-bubble.muster-first.muster-from-user { border-radius: 20px 20px 5px 20px; }
+.muster-bubble.muster-middle.muster-from-user { border-radius: 20px 5px 5px 20px; }
+.muster-bubble.muster-last.muster-from-user { border-radius: 20px 5px 20px 20px; }
+
+.muster-bubble.muster-first.muster-from-bot { border-radius: 20px 20px 20px 5px; }
+.muster-bubble.muster-middle.muster-from-bot { border-radius: 5px 20px 20px 5px; }
+.muster-bubble.muster-last.muster-from-bot { border-radius: 5px 20px 20px 20px; }
+
+/* Tail: GAIA's nub (::before, bubble fill) + cutout (::after, page fill),
+   scaled down (~12px extent) to stay inside the transcript's 20px gutter.
+   Hidden on first/middle of a run — only the last bubble gets one. */
+.muster-bubble.muster-tail::before,
+.muster-bubble.muster-tail::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  height: 15px;
+}
+
+.muster-bubble.muster-tail.muster-from-user::before {
+  right: -5px;
+  width: 12px;
+  background: var(--color-bubble-user);
+  border-bottom-left-radius: 12px 10px;
+}
+
+.muster-bubble.muster-tail.muster-from-user::after {
+  right: -12px;
+  width: 14px;
+  background: var(--color-app);
+  border-bottom-left-radius: 8px;
+}
+
+.muster-bubble.muster-tail.muster-from-bot::before {
+  left: -5px;
+  width: 12px;
+  background: var(--color-card);
+  border-bottom-right-radius: 12px 10px;
+}
+
+.muster-bubble.muster-tail.muster-from-bot::after {
+  left: -12px;
+  width: 14px;
+  background: var(--color-app);
+  border-bottom-right-radius: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .muster-bubble { transition: none; }
+}
+
+/* Composer shell: rounded bubble-container with a hairline ring and an
+   accent border while the input has focus. */
+.muster-composer {
+  border-radius: 26px;
+  border: 1px solid color-mix(in oklab, var(--color-hairline) 50%, transparent);
+  background: var(--color-inset);
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 0.06),
+    0 8px 24px -8px rgb(0 0 0 / 0.08);
+  transition: border-color 150ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.muster-composer:focus-within {
+  border-color: color-mix(in oklab, var(--color-accent) 50%, transparent);
+}
