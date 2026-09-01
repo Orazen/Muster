@@ -4,6 +4,7 @@ import { organization } from "better-auth/plugins";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
 import { createHmac, randomBytes } from "node:crypto";
+import { z } from "zod";
 import { DATA_DIR } from "./config.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { isEmailConfigured, sendPasswordResetEmail, sendVerificationEmail } from "./email.ts";
@@ -24,6 +25,12 @@ export const SELF_HOSTED =
  * OMB_PUBLIC_HOST is the friendlier form and assumes https on the default
  * port, which is what sits behind a reverse proxy in practice.
  */
+/** Whether an operator explicitly pinned the deployment's public URL via
+ * OMB_PUBLIC_URL or OMB_PUBLIC_HOST. Drives the baseURL strategy: pinned →
+ * static baseURL; unpinned → per-request resolution from proxy headers. */
+export const OMB_PUBLIC_BASE_URL_SET =
+  Boolean(process.env.OMB_PUBLIC_URL?.trim()) || Boolean(process.env.OMB_PUBLIC_HOST?.trim());
+
 export const PUBLIC_BASE_URL = (() => {
   const explicit = process.env.OMB_PUBLIC_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, "");
@@ -548,7 +555,16 @@ export const auth = betterAuth({
   // Verification links, reset links, and OAuth callbacks are absolute URLs, so
   // Better Auth needs to know where it is actually reachable. Getting this
   // wrong sends users a link to localhost from a production deployment.
-  baseURL: PUBLIC_BASE_URL,
+  // When the operator pinned the deployment's public URL, pass it through.
+  // When not (Dokploy runs the Dockerfile directly, so compose env like
+  // OMB_PUBLIC_HOST never arrives), leave baseURL UNSET: Better Auth then
+  // re-resolves the origin from every request's proxy headers, so the
+  // OAuth redirect_uri matches the host the browser actually used instead
+  // of baking the loopback default into Google's redirect_uri_mismatch.
+  // trustedProxyHeaders only takes effect in that unset case.
+  ...(OMB_PUBLIC_BASE_URL_SET
+    ? { baseURL: PUBLIC_BASE_URL }
+    : { advanced: { trustedProxyHeaders: true as const } }),
   trustedOrigins: (request?: Request): Array<string | undefined | null> => {
     // The request's own origin is always trusted. This rescues deployments
     // where OMB_PUBLIC_HOST never made it into the container (e.g. Dokploy
@@ -585,10 +601,31 @@ export const auth = betterAuth({
   plugins: [organization()],
 });
 
+/** The request scheme behind a reverse proxy: the first entry of
+ * X-Forwarded-Proto when the proxy sent one (Node's IncomingHttpHeaders
+ * types it string | string[] | undefined), else http — the loopback
+ * desktop/dev case where the scheme really is plain http. Shared by
+ * toWebRequest and the desktop-auth Google handoff. */
+export function forwardedProtoOf(req: import("node:http").IncomingMessage): string {
+  // Node's IncomingHttpHeaders types X-Forwarded-Proto as string | string[]
+  // | undefined; zod is overkill for one scheme token, so parse the
+  // representation explicitly at this boundary.
+  const parsed = z.union([z.string(), z.array(z.string()), z.undefined()]).safeParse(req.headers["x-forwarded-proto"]);
+  if (!parsed.success) return "http";
+  const entries = parsed.data === undefined ? [] : Array.isArray(parsed.data) ? parsed.data : [parsed.data];
+  const first = entries.map((value) => value.split(",")[0]?.trim() ?? "").find((value) => value.length > 0);
+  return first ?? "http";
+}
+
 /** Convert a Node.js IncomingMessage to a Web Request for Better Auth. */
 export function toWebRequest(req: import("node:http").IncomingMessage): Request {
   const host = req.headers.host ?? "localhost";
-  const url = `http://${host}${req.url ?? "/"}`;
+  // Scheme from X-Forwarded-Proto when the proxy sent one: behind a reverse
+  // proxy the container itself speaks http, and a request URL that says
+  // http:// while the browser used https:// would resolve the wrong origin
+  // wherever Better Auth derives the base URL from the request itself.
+  const proto = forwardedProtoOf(req);
+  const url = `${proto}://${host}${req.url ?? "/"}`;
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (value !== undefined) {

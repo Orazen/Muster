@@ -141,6 +141,7 @@ import * as tts from "./tts/index.ts";
 import {
   auth,
   toWebRequest,
+  forwardedProtoOf,
   getSession,
   getDb,
   isPublicApiPath,
@@ -3577,9 +3578,24 @@ let requestUserEmail = "";
       // SAFETY: signInSocial returns {url} for OAuth providers when
       // configured; an unconfigured provider throws into the catch below.
       try {
-        const social = await auth.api.signInSocial({
-          body: { provider: "google", callbackURL: callback },
+        // Better Auth's social endpoint is POST-only — a browser 302 at a GET
+        // URL 404s. Resolve the Google URL server-side and bounce there.
+        // Routed through auth.handler (not auth.api.signInSocial): the
+        // handler re-resolves the deployment origin from the request's
+        // Host/proxy headers, so the OAuth redirect_uri matches the host the
+        // browser actually used. The direct API call has no request to
+        // resolve from and mints a relative redirect_uri Google rejects.
+        const host = req.headers.host ?? "127.0.0.1:8799";
+        const proto = forwardedProtoOf(req);
+        const socialReq = new Request(`${proto}://${host}/api/auth/sign-in/social`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: `${proto}://${host}` },
+          body: JSON.stringify({ provider: "google", callbackURL: callback }),
         });
+        const socialRes = await auth.handler(socialReq);
+        // SAFETY: the sign-in/social endpoint answers {url, redirect} for an
+        // OAuth provider; an unconfigured provider 404s into the catch below.
+        const social = socialRes.ok ? ((await socialRes.json()) as { url?: string }) : null;
         if (!social?.url) throw new Error("provider did not return an authorization url");
         return res.writeHead(302, { Location: social.url }).end();
       } catch (e) {
