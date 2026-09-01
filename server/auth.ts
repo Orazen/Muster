@@ -144,6 +144,24 @@ function migrate(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS "account_userId_idx" on "account" ("userId");
     CREATE INDEX IF NOT EXISTS "verification_identifier_idx" on "verification" ("identifier");
 
+    -- Viral loop ledger (server/viral.ts). One code per user; redemptions
+    -- are single-use per referee. Banked days convert to local Pro days
+    -- through the pairing/tier bridge on the inviter's own install.
+    CREATE TABLE IF NOT EXISTS "referral" (
+      "userId" text not null primary key references "user" ("id") on delete cascade,
+      "code" text not null unique,
+      "bankedDays" integer not null default 0,
+      "createdAt" date not null
+    );
+    CREATE TABLE IF NOT EXISTS "referralRedemption" (
+      "id" text not null primary key,
+      "codeUsed" text not null,
+      "ownerUserId" text not null references "user" ("id") on delete cascade,
+      "refereeUserId" text not null unique references "user" ("id") on delete cascade,
+      "createdAt" date not null
+    );
+    CREATE INDEX IF NOT EXISTS "referralRedemption_owner_idx" on "referralRedemption" ("ownerUserId");
+
     -- organization plugin (docs/plans/multi-tenancy-design.md's identity
     -- foundation) — schema confirmed via @better-auth/cli migrate against
     -- this exact auth config, same verification method as every table

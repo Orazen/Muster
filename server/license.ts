@@ -27,8 +27,11 @@ export interface TierState {
   tier: Tier;
   /** True during the 14-day Pro trial that starts on first launch. */
   trialActive: boolean;
-  /** ISO date the trial ends (firstLaunch + TRIAL_DAYS), even if lapsed. */
+  /** ISO date the trial ends (firstLaunch + TRIAL_DAYS + bonusDays), even
+   * if lapsed. Referral rewards extend this, they never shorten it. */
   trialEndsAt: string;
+  /** Pro days granted on top of the 14-day trial (referral rewards). */
+  bonusDays: number;
 }
 
 function addDays(iso: string, days: number): string {
@@ -38,22 +41,25 @@ function addDays(iso: string, days: number): string {
 /**
  * Resolve today's tier. `firstLaunchAt` is persisted on first boot so the
  * trial clock never restarts; `license` is the parsed payload of a valid
- * license file (signature verified by the caller before it gets here).
+ * license file (signature verified by the caller before it gets here);
+ * `bonusProDays` are referral rewards persisted in the tier file.
  */
 export function resolveTier(input: {
   firstLaunchAt: string;
   now?: string;
   license?: LicensePayload | null;
+  bonusProDays?: number;
 }): TierState {
   const now = input.now ?? new Date().toISOString();
-  const trialEndsAt = addDays(input.firstLaunchAt, TRIAL_DAYS);
+  const bonus = Math.max(0, Math.floor(input.bonusProDays ?? 0));
+  const trialEndsAt = addDays(input.firstLaunchAt, TRIAL_DAYS + bonus);
   if (input.license && Date.parse(input.license.exp) > Date.parse(now)) {
-    return { tier: "pro", trialActive: false, trialEndsAt };
+    return { tier: "pro", trialActive: false, trialEndsAt, bonusDays: bonus };
   }
   const trialActive = Date.parse(now) < Date.parse(trialEndsAt);
   // During the trial the user gets Pro features; after it lapses without a
   // license they fall back to Free — watermark on, caps on, data intact.
-  return { tier: trialActive ? "pro" : "free", trialActive, trialEndsAt };
+  return { tier: trialActive ? "pro" : "free", trialActive, trialEndsAt, bonusDays: bonus };
 }
 
 /** Effective tier for enforcement: identical to resolveTier's tier field. */
@@ -80,6 +86,10 @@ export function vaultFileAllowed(currentFiles: number, tier: Tier): boolean {
 export interface TierFile {
   firstLaunchAt?: string;
   license?: LicensePayload | null;
+  /** Referral rewards: Pro days banked on this install (granted when this
+   * user's invite code is redeemed by someone else, or when they redeem
+   * someone else's code). Extends the trial; never shortens it. */
+  bonusProDays?: number;
 }
 
 export function loadTierFile(dataDir: string, now?: string): TierState {
@@ -99,5 +109,42 @@ export function loadTierFile(dataDir: string, now?: string): TierState {
       /* read-only data dir: treat trial as not started rather than crash */
     }
   }
-  return resolveTier({ firstLaunchAt, now, license: parsed.license ?? null });
+  return resolveTier({
+    firstLaunchAt,
+    now,
+    license: parsed.license ?? null,
+    bonusProDays: parsed.bonusProDays,
+  });
+}
+
+/** Grant referral Pro days on this install: persists into the tier file so
+ * the bonus survives restarts and stacks across referrals. Returns the new
+ * TierState. */
+export function grantBonusProDays(dataDir: string, days: number, now?: string): TierState {
+  const file = join(dataDir, "license.json");
+  let parsed: TierFile = {};
+  try {
+    // SAFETY: local config owned by the same user as the server process.
+    parsed = JSON.parse(readFileSync(file, "utf8")) as TierFile;
+  } catch {
+    parsed = {};
+  }
+  const firstLaunchAt = parsed.firstLaunchAt ?? new Date().toISOString();
+  parsed.firstLaunchAt = firstLaunchAt;
+  parsed.bonusProDays = clamp(parsed.bonusProDays ?? 0, days);
+  try {
+    writeFileSync(file, JSON.stringify(parsed, null, 2));
+  } catch {
+    /* read-only dir: grant applies to this boot only rather than crash */
+  }
+  return resolveTier({
+    firstLaunchAt,
+    now,
+    license: parsed.license ?? null,
+    bonusProDays: parsed.bonusProDays,
+  });
+}
+
+function clamp(current: number, add: number): number {
+  return Math.min(365, Math.max(0, Math.floor(current)) + Math.max(0, Math.floor(add)));
 }

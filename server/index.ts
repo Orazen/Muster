@@ -3,6 +3,7 @@
 // folds one SSE event stream; every provider process runs here.
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readFileSync, statSync, unlinkSync } from "node:fs";
+import { writeFileAtomic } from "./atomic.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import { extname, isAbsolute, join } from "node:path";
@@ -120,6 +121,7 @@ import {
   auth,
   toWebRequest,
   getSession,
+  getDb,
   isPublicApiPath,
   authCapabilities,
   SELF_HOSTED,
@@ -174,7 +176,17 @@ import { VaultManager } from "./vault-manager.ts";
 import { buildBriefing } from "./briefing.ts";
 import { buildReceipt, renderReceiptText } from "./receipts.ts";
 import { buildWrapped, renderWrappedText } from "./wrapped.ts";
-import { canAddBot, FREE_BOT_CAP, loadTierFile, vaultFileAllowed, type TierState } from "./license.ts";
+import {
+  MAX_REDEEM_PER_INVITEE,
+  newReferralCode,
+  newShareToken,
+  pruneShareTokens,
+  isPlausibleReferralCode,
+  REFERRAL_INVITEE_DAYS,
+  REFERRAL_INVITER_DAYS,
+  type ShareToken,
+} from "./viral.ts";
+import { canAddBot, FREE_BOT_CAP, grantBonusProDays, loadTierFile, vaultFileAllowed, type TierState } from "./license.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { readTeamContext, teamContextSystemPrompt, writeTeamContext } from "./team-context.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
@@ -2160,6 +2172,54 @@ const vault = new VaultManager();
 // license drop takes effect without a restart.
 const tierState = (): TierState => loadTierFile(DATA_DIR);
 
+// ── viral loop state (server/viral.ts) ─────────────────────────────────
+// Wrapped share tokens + their cards. Tokens are unguessable and carry no
+// personal data; the whole map is capped so an authenticated loop can't
+// grow it unboundedly. Persisted so shared links survive restarts.
+interface StoredWrappedShare {
+  card: ReturnType<typeof buildWrapped>;
+  text: string;
+}
+const wrappedShareTokens = new Map<string, ShareToken>();
+const wrappedShareCards = new Map<string, StoredWrappedShare>();
+const WRAPPED_SHARES_FILE = join(DATA_DIR, "wrapped-shares.json");
+
+function loadWrappedShares(): void {
+  try {
+    // SAFETY: DATA_DIR is owned by the same user as this process; the file
+    // is written only by saveWrappedShares below.
+    const parsed = JSON.parse(readFileSync(WRAPPED_SHARES_FILE, "utf8")) as {
+      tokens?: Array<[string, ShareToken]>;
+      cards?: Array<[string, StoredWrappedShare]>;
+    };
+    for (const [key, value] of parsed.tokens ?? []) wrappedShareTokens.set(key, value);
+    for (const [key, value] of parsed.cards ?? []) wrappedShareCards.set(key, value);
+  } catch {
+    /* missing or corrupt file starts the share map empty */
+  }
+  pruneShareTokens(wrappedShareTokens);
+  for (const key of wrappedShareTokens.keys()) {
+    if (!wrappedShareCards.has(key)) {
+      wrappedShareTokens.delete(key);
+      wrappedShareCards.delete(key);
+    }
+  }
+}
+
+function saveWrappedShares(): void {
+  try {
+    // SAFETY: JSON.stringify of plain objects (WrappedCard + strings).
+    writeFileAtomic(
+      WRAPPED_SHARES_FILE,
+      JSON.stringify({ tokens: [...wrappedShareTokens], cards: [...wrappedShareCards] }),
+      { mode: 0o600 },
+    );
+  } catch (error) {
+    console.error("could not persist wrapped shares:", error);
+  }
+}
+loadWrappedShares();
+
 // Who is driving each bot's computer — the person or the bot. Per-boot and
 // in-memory on purpose (a stale hold would silently brick a computer across
 // a restart). The per-boot token guards the loopback control endpoints the
@@ -2849,6 +2909,104 @@ function html(res: ServerResponse, status: number, body: string) {
   res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
   res.end(body);
 }
+
+// ── public viral pages ─────────────────────────────────────────────────
+// Shared pages are self-contained HTML with inline styles: they must look
+// right pasted into any chat with zero external requests. All dynamic
+// values are HTML-escaped — bot names are user input.
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function pageShell(title: string, body: string): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<style>
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#f5f5f5;
+       display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .card{max-width:420px;width:calc(100% - 2rem);padding:2.5rem;border-radius:20px;background:#141419;
+        border:1px solid #26262e;text-align:center}
+  .kicker{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:#8a8a93;margin-bottom:1rem}
+  h1{font-size:2rem;margin:.2em 0;font-weight:800;background:linear-gradient(90deg,#ff7a45,#ffb27d);
+     -webkit-background-clip:text;background-clip:text;color:transparent}
+  .stat{font-size:2.6rem;font-weight:800;margin:.6rem 0 .1rem}
+  .stat-label{font-size:12px;color:#8a8a93;text-transform:uppercase;letter-spacing:.12em}
+  .row{display:flex;gap:1.5rem;justify-content:center;margin:1.5rem 0;flex-wrap:wrap}
+  .muted{color:#a1a1a6;font-size:.95rem;line-height:1.5}
+  pre{text-align:left;background:#0a0a0f;border:1px solid #26262e;border-radius:12px;padding:1rem;
+      font-size:12px;overflow-x:auto;color:#d4d4d8}
+  a.btn{display:inline-block;margin-top:1.25rem;padding:.75rem 1.6rem;border-radius:10px;background:#ff7a45;
+        color:#0a0a0f;font-weight:700;text-decoration:none}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;margin-top:1.5rem;text-align:left}
+  .item{border:1px solid #26262e;border-radius:14px;padding:1rem;background:#141419}
+  .item h3{margin:.1rem 0 .3rem;font-size:1rem}
+  .item p{margin:0;color:#a1a1a6;font-size:.85rem;line-height:1.45}
+</style></head><body>${body}</body></html>`;
+}
+
+function wrappedSharePage(card: { weekOf: string; headline: string; totalTurns: number; totalTokens: number; costUsd: number | null; topBot: string | null; activeBots: number }, text: string): string {
+  const cost = card.costUsd !== null ? `$${card.costUsd.toFixed(2)}` : "—";
+  return pageShell(
+    `Muster Wrapped — week of ${card.weekOf}`,
+    `<div class="card">
+      <div class="kicker">Muster Wrapped · week of ${escapeHtml(card.weekOf)}</div>
+      <h1>${escapeHtml(card.headline)}</h1>
+      <div class="row">
+        <div><div class="stat">${card.totalTurns.toLocaleString()}</div><div class="stat-label">agent turns</div></div>
+        <div><div class="stat">${card.activeBots}</div><div class="stat-label">teammates</div></div>
+      </div>
+      <div class="row">
+        <div><div class="stat" style="font-size:1.6rem">${card.totalTokens.toLocaleString()}</div><div class="stat-label">tokens</div></div>
+        <div><div class="stat" style="font-size:1.6rem">${cost}</div><div class="stat-label">spend</div></div>
+      </div>
+      ${card.topBot ? `<p class="muted">Top teammate: <strong>${escapeHtml(card.topBot)}</strong></p>` : ""}
+      <pre>${escapeHtml(text)}</pre>
+      <p class="muted">Real agents, real receipts — every job shows its work.</p>
+      <a class="btn" href="/">Muster your own agents</a>
+    </div>`,
+  );
+}
+
+function shareNotFoundPage(): string {
+  return pageShell(
+    "Wrapped link expired",
+    `<div class="card">
+      <h1 style="font-size:1.5rem">This share link has expired</h1>
+      <p class="muted">Wrapped links hold the latest shared week. Ask for a fresh one — or better, muster your own agents and post yours.</p>
+      <a class="btn" href="/">Muster your agents</a>
+    </div>`,
+  );
+}
+
+function botsDirectoryPage(teams: Array<{ slug?: string; name?: string; description?: string; bots?: number }>): string {
+  const items = teams
+      .map(
+        (t) => `<div class="item">
+        <h3>${escapeHtml(t.name ?? t.slug ?? "Team")}</h3>
+        <p>${escapeHtml(t.description ?? "")}</p>
+        ${Number.isFinite(t.bots) ? `<p style="margin-top:.4rem"><span class="stat-label">${t.bots} agents</span></p>` : ""}
+      </div>`,
+      )
+    .join("\n");
+  return pageShell(
+    "Muster — hire a finished team",
+    `<div style="max-width:960px;width:calc(100% - 2rem);padding:3rem 0">
+      <div class="kicker">Team library</div>
+      <h1 style="font-size:2.4rem">Hire a finished team.</h1>
+      <p class="muted" style="max-width:560px">Fifteen installable packs — Sales Outbound, Inbox Manager, Bug Triage and more. Review before import; routines put them on a schedule. Import any of these from the Muster app under Teams.</p>
+      <div class="grid">${items || "<p class='muted'>The catalog is warming up — check back shortly.</p>"}</div>
+      <a class="btn" href="/">Open Muster</a>
+    </div>`,
+  );
+}
+
 
 function json<B>(res: ServerResponse, status: number, body: B) {
   const data = JSON.stringify(body);
@@ -3847,8 +4005,8 @@ let requestUserEmail = "";
     // call it; the format is pinned by server/briefing.test.ts.
     // Tier & trial — the client reads this for the watermark badge and the
     // upgrade nudges. Caps are enforced server-side at the action sites.
-    // Wrapped — weekly fleet review, shareable text (PNG export later).
-    if (path === "/api/wrapped" && method === "GET") {
+    // Wrapped — weekly fleet review, shareable (public /w/<token> page).
+    const currentWrappedCard = () => {
       const bots = store.bots.map((b) => {
         const tasks = store.tasks(b.id) ?? [];
         let turns = 0;
@@ -3864,8 +4022,27 @@ let requestUserEmail = "";
         }
         return { name: b.name, turns, tokensIn, tokensOut, costUsd };
       });
-      const card = buildWrapped({ bots });
+      return buildWrapped({ bots });
+    };
+    if (path === "/api/wrapped" && method === "GET") {
+      const card = currentWrappedCard();
       return json(res, 200, { wrapped: card, text: renderWrappedText(card) });
+    }
+    // Create a public share link for this week's card. Auth-gated like
+    // /api/wrapped; the URL itself carries only an unguessable token —
+    // card data stays server-side (see GET /w/:token below).
+    if (path === "/api/wrapped/share" && method === "POST") {
+      const card = currentWrappedCard();
+      const token = newShareToken();
+      wrappedShareTokens.set(token, { token, kind: "wrapped", createdAt: Date.now() });
+      wrappedShareCards.set(token, { card, text: renderWrappedText(card) });
+      pruneShareTokens(wrappedShareTokens);
+      // keep the persisted card map in lockstep with the token map
+      for (const key of wrappedShareCards.keys()) {
+        if (!wrappedShareTokens.has(key)) wrappedShareCards.delete(key);
+      }
+      saveWrappedShares();
+      return json(res, 201, { url: `/w/${token}`, token });
     }
 
     if (path === "/api/tier" && method === "GET") {
@@ -3876,6 +4053,86 @@ let requestUserEmail = "";
         trialEndsAt: state.trialEndsAt,
         freeBotCap: FREE_BOT_CAP,
         watermark: state.tier === "free",
+      });
+    }
+
+    // ── referral program (server/viral.ts) ──────────────────────────────
+    // Every signed-in user (and the single desktop user) has one code.
+    // Redeeming a valid code on this install banks Pro days for the local
+    // user AND the code owner on the cloud — both sides win, which is the
+    // whole viral loop.
+    if (path === "/api/referral/code" && method === "GET") {
+      const db = getDb();
+      const owner = requestUserId ?? primaryUserId();
+      if (!owner) return json(res, 401, { error: "sign in to get a referral code" });
+      // SAFETY: the referral table is created by this server's own migrate()
+      // with exactly these columns; better rows are written only here.
+      let row = db.prepare('SELECT "code", "bankedDays" FROM "referral" WHERE "userId" = ?').get(owner) as
+        | { code: string; bankedDays: number }
+        | undefined;
+      if (!row) {
+        // Retry on the (astronomically unlikely) code collision.
+        for (let attempt = 0; attempt < 5; attempt++) {
+          try {
+            const code = newReferralCode();
+            db.prepare('INSERT INTO "referral" ("userId", "code", "bankedDays", "createdAt") VALUES (?, ?, 0, ?)').run(
+              owner,
+              code,
+              new Date().toISOString(),
+            );
+            row = { code, bankedDays: 0 };
+            break;
+          } catch {
+            /* unique-code collision — draw again */
+          }
+        }
+        if (!row) return json(res, 500, { error: "could not allocate a referral code — try again" });
+      }
+      return json(res, 200, { code: row.code, bankedDays: row.bankedDays, inviteeDays: REFERRAL_INVITEE_DAYS });
+    }
+    if (path === "/api/referral/redeem" && method === "POST") {
+      const body = await readBody(req);
+      // The plausibility regex below is the parse: anything that isn't
+      // exactly 10 unambiguous code characters is rejected.
+      const code = isPlausibleReferralCode(String(body.code ?? "").trim().toUpperCase())
+        ? String(body.code).trim().toUpperCase()
+        : "";
+      if (!code) return json(res, 400, { error: "that referral code isn't valid" });
+      const db = getDb();
+      const referee = requestUserId ?? primaryUserId();
+      if (!referee) return json(res, 401, { error: "sign in before redeeming a referral code" });
+      // SAFETY: referral.ownerUserId is the code's owning user, enforced by
+      // the table's foreign key to "user".
+      const ownerRow = db.prepare('SELECT "userId" FROM "referral" WHERE "code" = ?').get(code) as
+        | { userId: string }
+        | undefined;
+      if (!ownerRow) return json(res, 404, { error: "that referral code doesn't exist" });
+      if (ownerRow.userId === referee) return json(res, 400, { error: "you can't redeem your own code" });
+      // SAFETY: COUNT(*) over the redemption table always yields one row
+      // with a numeric n — the cast only names the known shape.
+      const redeemed = db
+        .prepare('SELECT COUNT(*) AS n FROM "referralRedemption" WHERE "refereeUserId" = ?')
+        .get(referee) as { n: number };
+      if (redeemed.n >= MAX_REDEEM_PER_INVITEE) {
+        return json(res, 429, { error: "this account has already redeemed the maximum number of referral codes" });
+      }
+      const double = db
+        .prepare('SELECT 1 FROM "referralRedemption" WHERE "codeUsed" = ? AND "refereeUserId" = ?')
+        .get(code, referee);
+      if (double) return json(res, 409, { error: "you already redeemed this code" });
+      db.prepare(
+        'INSERT INTO "referralRedemption" ("id", "codeUsed", "ownerUserId", "refereeUserId", "createdAt") VALUES (?, ?, ?, ?, ?)',
+      ).run(`ref_${randomBytes(12).toString("base64url")}`, code, ownerRow.userId, referee, new Date().toISOString());
+      db.prepare('UPDATE "referral" SET "bankedDays" = "bankedDays" + ? WHERE "userId" = ?').run(
+        REFERRAL_INVITER_DAYS,
+        ownerRow.userId,
+      );
+      const state = grantBonusProDays(DATA_DIR, REFERRAL_INVITEE_DAYS);
+      return json(res, 200, {
+        ok: true,
+        daysGranted: REFERRAL_INVITEE_DAYS,
+        tier: state.tier,
+        trialEndsAt: state.trialEndsAt,
       });
     }
 
@@ -5685,6 +5942,30 @@ let requestUserEmail = "";
         }
         case "screenshot":
           return json(res, 200, await box.screenshotBox(cfg, botId));
+      }
+    }
+
+    // Public Wrapped share page — /w/<token>. No auth by design: the token
+    // is the capability (128-bit, unguessable), the card carries no
+    // identity beyond bot names, and this is what makes the weekly
+    // receipt shareable outside the app.
+    m = path.match(/^\/w\/([A-Za-z0-9_-]{16,32})$/);
+    if (m && method === "GET") {
+      const share = wrappedShareCards.get(m[1]!);
+      if (!share) return html(res, 404, shareNotFoundPage());
+      return html(res, 200, wrappedSharePage(share.card, share.text));
+    }
+
+    // Public team-library directory — /bots. Serves the same catalog the
+    // in-app browser shows, as a plain marketing page with install links.
+    if (method === "GET" && path === "/bots") {
+      try {
+        // SAFETY: fetchTeamCatalog resolves the library's JSON shape; the
+        // directory only reads optional display fields off it.
+        const catalog = (await fetchTeamCatalog()) as { teams?: Array<{ slug: string; name: string; description?: string; bots?: number }> };
+        return html(res, 200, botsDirectoryPage(catalog.teams ?? []));
+      } catch {
+        return html(res, 502, "<h1>Team library is unavailable right now</h1>");
       }
     }
 
