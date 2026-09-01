@@ -6,7 +6,7 @@
 // GET /api/rooms → { rooms }, POST /api/rooms and the join/leave routes →
 // { room } (the server module behind them is server/agent-rooms.ts).
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bot, DoorClosed, DoorOpen, Plus, UserRound, X } from "lucide-react";
+import { Bot, DoorClosed, DoorOpen, Plus, Split, UserRound, X } from "lucide-react";
 import { z } from "zod";
 import "./rooms.css";
 
@@ -28,6 +28,25 @@ const roomSchema = z.object({
 });
 
 type Room = z.infer<typeof roomSchema>;
+
+/** One member's slice of a dispatched task, as served by GET /api/dispatch. */
+const assignmentSchema = z.object({
+  memberId: z.string(),
+  subtask: z.string(),
+  status: z.enum(["pending", "assigned", "done", "failed"]),
+  result: z.string().optional(),
+  updatedAt: z.number(),
+});
+
+const planSchema = z.object({
+  roomId: z.string(),
+  taskId: z.string(),
+  assignments: z.array(assignmentSchema).min(1),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+type Plan = z.infer<typeof planSchema>;
 
 const computerKindLabels = {
   box: "Box computer",
@@ -89,13 +108,25 @@ interface RoomRowProps {
   room: Room;
   selfId: string;
   busy: boolean;
+  plan: Plan | undefined;
   onJoin: (room: Room) => void;
   onLeave: (room: Room) => void;
   onClose: (room: Room) => void;
+  onDispatch: (room: Room, title: string, subtaskCount: number) => void;
 }
 
-function RoomRow({ room, selfId, busy, onJoin, onLeave, onClose }: RoomRowProps) {
+const STATUS_LABEL = {
+  pending: "waiting",
+  assigned: "working",
+  done: "done",
+  failed: "failed",
+} as const;
+
+function RoomRow({ room, selfId, busy, plan, onJoin, onLeave, onClose, onDispatch }: RoomRowProps) {
   const joined = room.members.some((m) => m.kind === "human" && m.id === selfId);
+  const botCount = room.members.filter((m) => m.kind === "bot").length;
+  const [dispatchTitle, setDispatchTitle] = useState("");
+  const [showDispatch, setShowDispatch] = useState(false);
   return (
     <li className="rooms-row">
       <div className="rooms-row-head">
@@ -123,6 +154,16 @@ function RoomRow({ room, selfId, busy, onJoin, onLeave, onClose }: RoomRowProps)
               <DoorClosed size={13} /> Join
             </button>
           )}
+          {joined && botCount > 0 && (
+            <button
+              type="button"
+              className="rooms-button"
+              disabled={busy}
+              onClick={() => setShowDispatch((was) => !was)}
+            >
+              <Split size={13} /> Dispatch
+            </button>
+          )}
           <button
             type="button"
             className="rooms-close"
@@ -134,6 +175,46 @@ function RoomRow({ room, selfId, busy, onJoin, onLeave, onClose }: RoomRowProps)
           </button>
         </div>
       </div>
+      {showDispatch && (
+        <form
+          className="rooms-dispatch"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const title = dispatchTitle.trim();
+            if (!title) return;
+            // Split across the bot roster: one slice per bot, minimum two
+            // because a fan-out to one worker is just a delegation.
+            const count = Math.min(6, Math.max(2, botCount));
+            onDispatch(room, title, count);
+            setDispatchTitle("");
+            setShowDispatch(false);
+          }}
+        >
+          <input
+            className="rooms-input"
+            value={dispatchTitle}
+            onChange={(e) => setDispatchTitle(e.target.value)}
+            placeholder={`Task for ${botCount} bot${botCount > 1 ? "s" : ""}…`}
+            aria-label="Task to dispatch"
+          />
+          <button type="submit" className="rooms-button rooms-button-primary" disabled={busy || !dispatchTitle.trim()}>
+            Fan out
+          </button>
+        </form>
+      )}
+      {plan && plan.roomId === room.id && (
+        <div className="rooms-plan" aria-label="Dispatch plan">
+          {plan.assignments.map((a) => (
+            <div key={`${a.memberId}:${a.subtask}`} className="rooms-plan-row">
+              <span className={`rooms-plan-status rooms-plan-${a.status}`}>{STATUS_LABEL[a.status]}</span>
+              <span className="rooms-plan-member">
+                {room.members.find((m) => m.id === a.memberId)?.name ?? a.memberId}
+              </span>
+              <span className="rooms-plan-subtask">{a.subtask}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {room.members.length > 0 && (
         <div className="rooms-members">
           {room.members.map((member) => (
@@ -147,6 +228,7 @@ function RoomRow({ room, selfId, busy, onJoin, onLeave, onClose }: RoomRowProps)
 
 export function RoomsPanel() {
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [newName, setNewName] = useState("");
@@ -157,11 +239,15 @@ export function RoomsPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/rooms");
-      const body: unknown = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const [roomsRes, plansRes] = await Promise.all([fetch("/api/rooms"), fetch("/api/dispatch")]);
+      const roomsBody: unknown = await roomsRes.json().catch(() => ({}));
+      const plansBody: unknown = await plansRes.json().catch(() => ({}));
+      if (!roomsRes.ok) throw new Error(`${roomsRes.status} ${roomsRes.statusText}`);
       if (alive.current) {
-        setRooms(z.object({ rooms: z.array(roomSchema) }).parse(body).rooms);
+        setRooms(z.object({ rooms: z.array(roomSchema) }).parse(roomsBody).rooms);
+        // Dispatch is additive surface: a 404/500 from the plans route must
+        // not blank the room list, so only parse on an OK response.
+        if (plansRes.ok) setPlans(z.object({ plans: z.array(planSchema) }).parse(plansBody).plans);
         setError(null);
       }
     } catch (e) {
@@ -240,6 +326,32 @@ export function RoomsPanel() {
     localStorage.setItem(HUMAN_NAME_KEY, name);
   };
 
+  /** Chief-of-staff fan-out: split a task across the room's bots. The
+   * server returns the created plan; merge/status updates land via the
+   * regular 5s refresh. */
+  const dispatch = (room: Room, title: string, subtaskCount: number) => {
+    setBusy(true);
+    fetch("/api/dispatch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        roomId: room.id,
+        taskId: `task-${crypto.randomUUID()}`,
+        title,
+        subtaskCount,
+      }),
+    })
+      .then(async (res) => {
+        const body: unknown = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        const plan = z.object({ plan: planSchema }).parse(body).plan;
+        if (alive.current) setPlans((current) => [plan, ...current.filter((p) => p.taskId !== plan.taskId)]);
+        setError(null);
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false));
+  };
+
   return (
     <section className="rooms-panel" aria-label="Agent rooms">
       <header className="rooms-header">
@@ -293,17 +405,22 @@ export function RoomsPanel() {
         <p className="rooms-empty">No rooms yet — create one to work alongside your bots.</p>
       ) : (
         <ul className="rooms-list">
-          {rooms.map((room) => (
-            <RoomRow
-              key={room.id}
-              room={room}
-              selfId={human.current.id}
-              busy={busy}
-              onJoin={join}
-              onLeave={leave}
-              onClose={close}
-            />
-          ))}
+          {rooms.map((room) => {
+            const plan = plans.find((p) => p.roomId === room.id);
+            return (
+              <RoomRow
+                key={room.id}
+                room={room}
+                selfId={human.current.id}
+                busy={busy}
+                plan={plan}
+                onJoin={join}
+                onLeave={leave}
+                onClose={close}
+                onDispatch={dispatch}
+              />
+            );
+          })}
         </ul>
       )}
     </section>

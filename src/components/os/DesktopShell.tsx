@@ -1,27 +1,35 @@
 // Muster OS — a desktop-style shell over the agent roster. The dock holds
-// one app icon per visible bot with a live status dot; opening an icon
-// raises a centered agent window (activity, model, "Open chat"). All data
-// is the shared store, so busy/activity truth updates live over the same
-// SSE stream the chat view listens to.
-import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, X } from "lucide-react";
+// one app icon per visible bot plus a Rooms icon; opening an icon raises
+// that window in a small window manager — several windows can be open at
+// once, the last-clicked sits on top, and clicking a focused window's
+// dock icon minimizes it until the icon is clicked again. All data is the
+// shared store, so busy/activity truth updates live over the same SSE
+// stream the chat view listens to.
+import { useEffect, useState } from "react";
+import { ArrowLeft, Users } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "@/components/Avatar";
 import { MusterbotMark } from "@/components/MusterbotMark";
-import { RoomsPanel } from "@/components/os/RoomsPanel";
+import { activityLabel, AgentWindow } from "@/components/os/AgentWindow";
+import { RoomsWindow } from "@/components/os/RoomsWindow";
 import "./os.css";
 import "./os-tokens.css";
 import "./rooms.css";
 
-/** Short human label for what a bot is doing right now. Mirrors the
- * sidebar's preview priority: waiting-on-you outranks busy. */
-function activityLabel(bot: Bot): string {
-  if (bot.activity === "waiting-on-you") return "Waiting for you…";
-  if (bot.busy) return "Working…";
-  if (bot.activity === "no-signal") return "No signal";
-  if (bot.activity === "dead") return "Offline";
-  return "Idle";
+/** Which app a window shows. Agent windows are keyed by bot id, so one
+ * bot has exactly one window; rooms are a singleton app. */
+type WindowTarget =
+  | { kind: "agent"; botId: string }
+  | { kind: "rooms" };
+
+/** One entry in the desktop's window stack. Array order is z-order — the
+ * last non-minimized entry is the focused window. Minimized windows stay
+ * mounted so their drag geometry and inner state survive a restore. */
+interface OpenWindow {
+  id: string;
+  target: WindowTarget;
+  minimized: boolean;
+  cascade: number;
 }
 
 function Clock() {
@@ -33,80 +41,70 @@ function Clock() {
   return <span className="os-clock">{now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>;
 }
 
-interface AgentWindowProps {
-  bot: Bot;
-  engineName: string | null;
-  onClose: () => void;
-}
-
-/** The centered "window" an open dock icon raises. Escape closes; the
- * close button receives focus on open so keyboard users start inside. */
-function AgentWindow({ bot, engineName, onClose }: AgentWindowProps) {
-  const navigate = useNavigate();
-  const closeRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    closeRef.current?.focus();
-  }, []);
-
-  const openChat = () => {
-    navigate("/app");
-  };
-
-  return (
-    <div
-      className="os-overlay"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
-    >
-      <div className="os-window" role="dialog" aria-modal="true" aria-label={`${bot.name} agent window`}>
-        <div className="os-window-titlebar">
-          <span className="os-window-title">{bot.name}</span>
-          <button
-            ref={closeRef}
-            type="button"
-            className="os-window-close"
-            aria-label={`Close ${bot.name} window`}
-            onClick={onClose}
-          >
-            <X size={14} />
-          </button>
-        </div>
-        <div className="os-window-body">
-          <div className="os-window-hero">
-            <AgentAvatar color={bot.color} character={bot.character} state={bot.busy ? "working" : "idle"} size={52} label={bot.name} />
-            <div className="min-w-0">
-              <div className="os-window-name">{bot.name}</div>
-              <div className="os-window-role">{bot.title}</div>
-            </div>
-          </div>
-          <div className="os-window-activity">{activityLabel(bot)}</div>
-          <div className="os-window-meta">
-            <span className="os-chip">{engineName ?? bot.modelSelection.model}</span>
-            <span className="os-chip">{bot.modelSelection.model}</span>
-          </div>
-          <button type="button" className="os-open-chat" onClick={openChat}>
-            Open chat
-            <ArrowLeft size={14} style={{ transform: "rotate(180deg)" }} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /** Full-screen desktop view of the roster. Route: /os. */
 export function DesktopShell() {
   const { state } = useStore();
-  const [openBotId, setOpenBotId] = useState<string | null>(null);
+  const [windows, setWindows] = useState<OpenWindow[]>([]);
   const bots = state.bots.filter((b) => !b.hidden);
-  const openBot = openBotId ? (bots.find((b) => b.id === openBotId) ?? null) : null;
   const engineFor = (bot: Bot) =>
     state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)?.displayName ?? null;
+
+  // Focus follows the stack: the topmost window that isn't minimized.
+  const focusedId = [...windows].reverse().find((w) => !w.minimized)?.id ?? null;
+
+  // A bot hidden from the roster takes its window with it. Returning the
+  // same array when nothing changed keeps this from re-render looping.
+  useEffect(() => {
+    setWindows((current) => {
+      const visible = (target: WindowTarget) =>
+        target.kind === "agent" ? state.bots.some((b) => b.id === target.botId && !b.hidden) : true;
+      const next = current.filter((w) => visible(w.target));
+      return next.length === current.length ? current : next;
+    });
+  }, [state.bots]);
+
+  const openWindow = (target: WindowTarget) => {
+    setWindows((current) => [
+      ...current,
+      {
+        id: target.kind === "agent" ? `window-${target.botId}` : "window-rooms",
+        target,
+        minimized: false,
+        // Stagger each new window so stacked windows cascade visibly.
+        cascade: current.length % 6,
+      },
+    ]);
+  };
+
+  const focusWindow = (id: string) => {
+    setWindows((current) => {
+      const target = current.find((w) => w.id === id);
+      if (!target) return current;
+      return [...current.filter((w) => w.id !== id), { ...target, minimized: false }];
+    });
+  };
+
+  const minimizeWindow = (id: string) => {
+    setWindows((current) => current.map((w) => (w.id === id ? { ...w, minimized: true } : w)));
+  };
+
+  const closeWindow = (id: string) => {
+    setWindows((current) => current.filter((w) => w.id !== id));
+  };
+
+  // Dock behavior mirrors a taskbar: closed → open, minimized → restore,
+  // open-but-unfocused → raise, focused → minimize.
+  const dockClick = (target: WindowTarget) => {
+    const id = target.kind === "agent" ? `window-${target.botId}` : "window-rooms";
+    const existing = windows.find((w) => w.id === id);
+    if (!existing) {
+      openWindow(target);
+    } else if (existing.minimized || focusedId !== id) {
+      focusWindow(id);
+    } else {
+      minimizeWindow(id);
+    }
+  };
 
   return (
     <div className="os-desktop">
@@ -119,10 +117,44 @@ export function DesktopShell() {
       </header>
       <main className="os-body">
         {bots.length === 0 && <div className="os-empty">Your roster is empty — muster a teammate from the app.</div>}
-        <RoomsPanel />
-        {openBot && (
-          <AgentWindow bot={openBot} engineName={engineFor(openBot)} onClose={() => setOpenBotId(null)} />
-        )}
+        <div className="os-windows">
+          {windows.map((win, index) => {
+            const focused = focusedId === win.id;
+            const zIndex = 10 + index;
+            if (win.target.kind === "rooms") {
+              return (
+                <RoomsWindow
+                  key={win.id}
+                  focused={focused}
+                  minimized={win.minimized}
+                  zIndex={zIndex}
+                  cascade={win.cascade}
+                  onFocus={() => focusWindow(win.id)}
+                  onMinimize={() => minimizeWindow(win.id)}
+                  onClose={() => closeWindow(win.id)}
+                />
+              );
+            }
+            if (win.target.kind !== "agent") return null;
+            const botId = win.target.botId;
+            const bot = bots.find((b) => b.id === botId);
+            if (!bot) return null;
+            return (
+              <AgentWindow
+                key={win.id}
+                bot={bot}
+                engineName={engineFor(bot)}
+                focused={focused}
+                minimized={win.minimized}
+                zIndex={zIndex}
+                cascade={win.cascade}
+                onFocus={() => focusWindow(win.id)}
+                onMinimize={() => minimizeWindow(win.id)}
+                onClose={() => closeWindow(win.id)}
+              />
+            );
+          })}
+        </div>
         <button
           type="button"
           className="os-exit"
@@ -142,8 +174,9 @@ export function DesktopShell() {
               type="button"
               className="os-dock-item"
               aria-label={`${bot.name} — ${activityLabel(bot)}`}
-              aria-expanded={openBotId === bot.id}
-              onClick={() => setOpenBotId(bot.id)}
+              aria-expanded={windows.some((w) => w.target.kind === "agent" && w.target.botId === bot.id && !w.minimized)}
+
+              onClick={() => dockClick({ kind: "agent", botId: bot.id })}
             >
               <span className="os-dock-icon">
                 <AgentAvatar color={bot.color} character={bot.character} state={bot.busy ? "working" : "idle"} size={38} label={bot.name} />
@@ -152,6 +185,18 @@ export function DesktopShell() {
               <span className="os-dock-name">{bot.name}</span>
             </button>
           ))}
+          <button
+            type="button"
+            className="os-dock-item"
+            aria-label="Rooms"
+            aria-expanded={windows.some((w) => w.target.kind === "rooms" && !w.minimized)}
+            onClick={() => dockClick({ kind: "rooms" })}
+          >
+            <span className="os-dock-icon">
+              <Users size={22} />
+            </span>
+            <span className="os-dock-name">Rooms</span>
+          </button>
         </div>
       </nav>
     </div>

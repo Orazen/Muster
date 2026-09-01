@@ -173,26 +173,55 @@
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
-/* ── agent window ────────────────────────────────────────────────────── */
+/* ── window layer ────────────────────────────────────────────────────── */
 
-.os-overlay {
+/* Absolute layer above the desktop body content, below the topbar (the
+   topbar paints later in the flex column, so windows can never cover it). */
+.os-windows {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(0, 0, 0, 0.45);
+  pointer-events: none;
 }
 
 .os-window {
-  width: min(420px, 100%);
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 300px;
+  min-height: 180px;
   border: 1px solid var(--color-hairline);
   border-radius: 12px;
   background: var(--color-panel);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
   overflow: hidden;
-  animation: os-window-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: auto;
+  touch-action: none;
+  animation: os-window-in var(--os-motion) var(--os-ease);
+}
+
+/* focused windows sit a shade heavier on the shadow and tint the bar */
+.os-window[data-focused="true"] {
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-hairline));
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+.os-window[data-focused="true"] .os-window-titlebar {
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-inset));
+}
+
+/* minimized windows collapse into the dock strip until their dock icon
+   restores them; the component keeps them mounted so state survives */
+.os-window[data-minimized="true"] {
+  display: none;
+}
+
+/* nothing animates under an active pointer gesture */
+.os-window[data-dragging="true"] {
+  transition: none;
+  cursor: grabbing;
+}
+.os-window[data-dragging="true"] .os-window-titlebar {
+  cursor: grabbing;
+  user-select: none;
 }
 
 @keyframes os-window-in {
@@ -207,6 +236,8 @@
   padding: 10px 12px;
   border-bottom: 1px solid var(--color-hairline);
   background: color-mix(in srgb, var(--color-inset) 70%, transparent);
+  cursor: grab;
+  touch-action: none;
 }
 
 .os-window-title {
@@ -218,6 +249,40 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: inherit;
+}
+
+.os-window-min {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.os-window-min:hover,
+.os-window-min:focus-visible {
+  background: var(--color-raised);
+  color: var(--color-ink);
+}
+
+/* resize affordance: bottom-right corner grip */
+.os-window-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  touch-action: none;
+  border-right: 2px solid var(--color-hairline);
+  border-bottom: 2px solid var(--color-hairline);
+  border-bottom-right-radius: 11px;
 }
 
 .os-window-close {
@@ -240,10 +305,13 @@
 }
 
 .os-window-body {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 18px;
+  overflow-y: auto;
 }
 
 .os-window-hero {
@@ -312,6 +380,7 @@
 .os-dock-item:focus-visible,
 .os-open-chat:focus-visible,
 .os-window-close:focus-visible,
+.os-window-min:focus-visible,
 .os-exit:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;

@@ -34,6 +34,14 @@ import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from 
 import { appendWhy, extractWhyFromReply, WHY_MARKER } from "./why-journal.ts";
 import { closeRoom, createRoom, joinRoom, leaveRoom, listRooms } from "./agent-rooms.ts";
 import {
+  createDispatchPlan,
+  dispatchRequestSchema,
+  getDispatchPlan,
+  listDispatchPlans,
+  mergeDispatchResults,
+  updateAssignment,
+} from "./dispatch.ts";
+import {
   forgetShieldSession,
   rememberScrub,
   scrubForCloud,
@@ -147,6 +155,7 @@ import {
   deleteAuthUser,
 } from "./auth.ts";
 import { fallbackEligible, markAttempted, pickAlternate, providerFamilyOf, recordRateLimitHit, recentRateLimitHits } from "./provider-fallback.ts";
+import { describeFreeBestChain, FREE_BEST_COOLDOWN_MS, pickFreeBest, recordFreeBestFailure, type FreeCandidate } from "./free-best.ts";
 import { consumeCode, getOrCreateCode, VerifyError } from "./pairing.ts";
 import {
   IS_CLOUD,
@@ -457,6 +466,11 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
   return healed;
 }
 
+/** free-best post-failure cooldown ledger, keyed by instanceId. Fed by the
+ * rate-limit rescue path below; read by GET /api/models/free-best so the
+ * picker's recommendation never points at an instance that just tripped. */
+const freeBestFailures = new Map<string, number>();
+
 /** One-shot cross-provider rescue for rate-limited turns. Re-points the bot
  * at another available instance it is allowed to use and re-dispatches the
  * user's message through connectorContinuation so no duplicate bubble is
@@ -470,6 +484,7 @@ async function attemptProviderFallback(threadId: string, errorMessage: string): 
     // Record the hit for the usage dashboard even when no alternate exists:
     // "your only provider is rate-limited" is exactly what it must show.
     recordRateLimitHit(providerFamilyOf(threadBot.modelSelection?.instanceId ?? ""));
+    recordFreeBestFailure(threadBot.modelSelection?.instanceId ?? "", freeBestFailures);
     const current = threadBot.modelSelection?.instanceId ?? "";
     const described = await registry.describe();
     const alt = pickAlternate(
@@ -4181,6 +4196,42 @@ let requestUserEmail = "";
       }
       return json(res, 200, { providers: [...families.values()] });
     }
+    // free-best recommendation (server/free-best.ts): which instance a bot
+    // on the "free-best" profile should ride right now. Ranks the fleet by
+    // cost tier (free > subscription > metered), model breadth, and health;
+    // instances that just tripped a rate limit sit out their cooldown via
+    // freeBestFailures. Read-only — nothing here mutates a bot.
+    if (path === "/api/models/free-best" && method === "GET") {
+      const described = await registry.describe();
+      // "custom" access means owner-supplied CLI keys — cost-free to the
+      // owner in practice, so free-best treats them like free instances.
+      const accessOf = (driverKind: string, access: string | undefined): FreeCandidate["access"] => {
+        if (driverKind === "boxAgent") return "metered";
+        if (access === "custom") return "free";
+        return "subscription";
+      };
+      const candidates: FreeCandidate[] = described.map((d) => ({
+        instanceId: d.instanceId,
+        // boxAgent drives cloud computers — the metered unit this product
+        // bills for; everything else reports its driver's declared access.
+        access: accessOf(d.driverKind, d.access),
+        state: d.snapshot.state,
+        lastFailureAt: freeBestFailures.get(d.instanceId) ?? null,
+        models: d.models.options.length,
+      }));
+      const pick = pickFreeBest(candidates);
+      return json(res, 200, {
+        pick,
+        chain: describeFreeBestChain(candidates),
+        candidates: candidates.map((c) => ({
+          instanceId: c.instanceId,
+          access: c.access,
+          state: c.state,
+          models: c.models,
+          coolingDown: (c.lastFailureAt ?? null) !== null && Date.now() - (c.lastFailureAt ?? 0) < FREE_BEST_COOLDOWN_MS,
+        })),
+      });
+    }
     // Create a public share link for this week's card. Auth-gated like
     // /api/wrapped; the URL itself carries only an unguessable token —
     // card data stays server-side (see GET /w/:token below).
@@ -4429,6 +4480,58 @@ let requestUserEmail = "";
     if (roomMatch && method === "DELETE") {
       const closed = closeRoom(roomMatch[1]!);
       return json(res, closed ? 200 : 404, closed ? { ok: true } : { error: "no such room" });
+    }
+
+    // ── chief-of-staff dispatch (server/dispatch.ts) ────────────────────
+    // The guaca pattern: one orchestrator splits a task across a room's
+    // bot members and merges their results. The module is bookkeeping only
+    // — plans name assignments; the turn engine performs them — so these
+    // routes never execute agent work themselves.
+    if (path === "/api/dispatch" && method === "GET") {
+      return json(res, 200, { plans: listDispatchPlans() });
+    }
+    if (path === "/api/dispatch" && method === "POST") {
+      const body = await readBody(req);
+      const parsed = dispatchRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return json(res, 400, { error: "dispatch needs {roomId, taskId, title, subtaskCount 2..6}" });
+      }
+      const room = listRooms().find((r) => r.id === parsed.data.roomId);
+      if (!room) return json(res, 404, { error: "no such room" });
+      // Only bots receive slices — humans supervise, they are not fanned out to.
+      const members = room.members.filter((m) => m.kind === "bot").map((m) => m.id);
+      const result = createDispatchPlan({ id: room.id, members }, parsed.data, Date.now());
+      if (!result.ok) {
+        return json(res, 400, { error: result.reason });
+      }
+      return json(res, 201, { plan: result.plan });
+    }
+    const dispatchMatch = path.match(/^\/api\/dispatch\/([\w-]+)\/(assignments|merge)$/);
+    if (dispatchMatch && method === "POST") {
+      const [taskId, verb] = [dispatchMatch[1]!, dispatchMatch[2]!];
+      if (verb === "merge") {
+        const plan = getDispatchPlan(taskId);
+        if (!plan) return json(res, 404, { error: "no such plan" });
+        const merged = mergeDispatchResults(plan);
+        if (!merged.ok) return json(res, 409, { error: "plan is not complete yet" });
+        return json(res, 200, { summary: merged.summary });
+      }
+      const body = await readBody(req);
+      const status = isText(body.status) ? body.status : "";
+      const memberId = isText(body.memberId) ? body.memberId : "";
+      const subtask = isText(body.subtask) ? body.subtask : "";
+      if (!memberId || !subtask || (status !== "assigned" && status !== "done" && status !== "failed")) {
+        return json(res, 400, { error: "assignment update needs {memberId, subtask, status: assigned|done|failed}" });
+      }
+      const result = isText(body.result)
+        ? updateAssignment(taskId, memberId, subtask, status, Date.now(), body.result)
+        : updateAssignment(taskId, memberId, subtask, status, Date.now());
+      if (!result.ok) {
+        if (result.reason === "no_plan") return json(res, 404, { error: "no such plan" });
+        if (result.reason === "no_assignment") return json(res, 404, { error: "no such assignment" });
+        return json(res, 409, { error: `cannot move an assignment to ${status}` });
+      }
+      return json(res, 200, { plan: result.plan });
     }
 
     // ── referral program (server/viral.ts) ──────────────────────────────

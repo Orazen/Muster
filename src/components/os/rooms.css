@@ -241,3 +241,93 @@
   font-size: 12px;
   color: var(--color-ink);
 }
+
+/* ── rooms as an OS window ───────────────────────────────────────────── */
+
+/* Inside a window frame the panel drops its own border/shadow — the
+   .os-window chrome takes over; the panel just fills the body. */
+.os-window-body-rooms {
+  padding: 0;
+}
+
+.os-window .rooms-panel {
+  flex: 1;
+  width: 100%;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* ── chief-of-staff dispatch ─────────────────────────────────────────── */
+
+/* The fan-out form mirrors .rooms-new but sits inside a room row. */
+.rooms-dispatch {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.rooms-dispatch .rooms-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Per-assignment ledger: one line per slice, status first. */
+.rooms-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--color-hairline, rgba(128, 128, 128, 0.2));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-ink, #111) 3%, transparent);
+}
+
+.rooms-plan-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.rooms-plan-status {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-ink, #111) 8%, transparent);
+  color: var(--color-ink-secondary, #666);
+}
+
+.rooms-plan-assigned {
+  background: color-mix(in srgb, var(--color-accent, #4a7dff) 18%, transparent);
+  color: var(--color-accent, #4a7dff);
+}
+
+.rooms-plan-done {
+  background: color-mix(in srgb, var(--color-success, #2f9e44) 16%, transparent);
+  color: var(--color-success, #2f9e44);
+}
+
+.rooms-plan-failed {
+  background: color-mix(in srgb, var(--color-danger, #d64545) 16%, transparent);
+  color: var(--color-danger, #d64545);
+}
+
+.rooms-plan-member {
+  flex: none;
+  font-weight: 500;
+  color: var(--color-ink, #111);
+}
+
+.rooms-plan-subtask {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-ink-secondary, #666);
+}
