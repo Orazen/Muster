@@ -6,21 +6,23 @@
 // shared store, so busy/activity truth updates live over the same SSE
 // stream the chat view listens to.
 import { useEffect, useState } from "react";
-import { ArrowLeft, Users } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "@/components/Avatar";
 import { MusterbotMark } from "@/components/MusterbotMark";
 import { activityLabel, AgentWindow } from "@/components/os/AgentWindow";
 import { RoomsWindow } from "@/components/os/RoomsWindow";
+import { OS_SINGLETON_APPS } from "@/components/os/app-manifests";
 import "./os.css";
 import "./os-tokens.css";
 import "./rooms.css";
 
 /** Which app a window shows. Agent windows are keyed by bot id, so one
- * bot has exactly one window; rooms are a singleton app. */
+ * bot has exactly one window; singleton apps are keyed by their manifest
+ * id (src/components/os/app-manifests.ts) — one window per app, ever. */
 type WindowTarget =
   | { kind: "agent"; botId: string }
-  | { kind: "rooms" };
+  | { kind: "app"; appId: string };
 
 /** One entry in the desktop's window stack. Array order is z-order — the
  * last non-minimized entry is the focused window. Minimized windows stay
@@ -67,7 +69,7 @@ export function DesktopShell() {
     setWindows((current) => [
       ...current,
       {
-        id: target.kind === "agent" ? `window-${target.botId}` : "window-rooms",
+        id: target.kind === "agent" ? `window-${target.botId}` : `window-${target.appId}`,
         target,
         minimized: false,
         // Stagger each new window so stacked windows cascade visibly.
@@ -93,9 +95,10 @@ export function DesktopShell() {
   };
 
   // Dock behavior mirrors a taskbar: closed → open, minimized → restore,
-  // open-but-unfocused → raise, focused → minimize.
+  // open-but-unfocused → raise, focused → minimize. Singleton app targets
+  // are keyed by the manifest id; agent targets carry the bot id.
   const dockClick = (target: WindowTarget) => {
-    const id = target.kind === "agent" ? `window-${target.botId}` : "window-rooms";
+    const id = target.kind === "agent" ? `window-${target.botId}` : `window-${target.appId}`;
     const existing = windows.find((w) => w.id === id);
     if (!existing) {
       openWindow(target);
@@ -121,38 +124,24 @@ export function DesktopShell() {
           {windows.map((win, index) => {
             const focused = focusedId === win.id;
             const zIndex = 10 + index;
-            if (win.target.kind === "rooms") {
-              return (
-                <RoomsWindow
-                  key={win.id}
-                  focused={focused}
-                  minimized={win.minimized}
-                  zIndex={zIndex}
-                  cascade={win.cascade}
-                  onFocus={() => focusWindow(win.id)}
-                  onMinimize={() => minimizeWindow(win.id)}
-                  onClose={() => closeWindow(win.id)}
-                />
-              );
+            const windowProps = {
+              focused,
+              minimized: win.minimized,
+              zIndex,
+              cascade: win.cascade,
+              onFocus: () => focusWindow(win.id),
+              onMinimize: () => minimizeWindow(win.id),
+              onClose: () => closeWindow(win.id),
+            };
+            if (win.target.kind === "app") {
+              if (win.target.appId === "rooms") return <RoomsWindow key={win.id} {...windowProps} />;
+              return null;
             }
             if (win.target.kind !== "agent") return null;
             const botId = win.target.botId;
             const bot = bots.find((b) => b.id === botId);
             if (!bot) return null;
-            return (
-              <AgentWindow
-                key={win.id}
-                bot={bot}
-                engineName={engineFor(bot)}
-                focused={focused}
-                minimized={win.minimized}
-                zIndex={zIndex}
-                cascade={win.cascade}
-                onFocus={() => focusWindow(win.id)}
-                onMinimize={() => minimizeWindow(win.id)}
-                onClose={() => closeWindow(win.id)}
-              />
-            );
+            return <AgentWindow key={win.id} bot={bot} engineName={engineFor(bot)} {...windowProps} />;
           })}
         </div>
         <button
@@ -185,18 +174,24 @@ export function DesktopShell() {
               <span className="os-dock-name">{bot.name}</span>
             </button>
           ))}
-          <button
-            type="button"
-            className="os-dock-item"
-            aria-label="Rooms"
-            aria-expanded={windows.some((w) => w.target.kind === "rooms" && !w.minimized)}
-            onClick={() => dockClick({ kind: "rooms" })}
-          >
-            <span className="os-dock-icon">
-              <Users size={22} />
-            </span>
-            <span className="os-dock-name">Rooms</span>
-          </button>
+          {OS_SINGLETON_APPS.map((app) => {
+            const Icon = app.icon;
+            return (
+              <button
+                key={app.id}
+                type="button"
+                className="os-dock-item"
+                aria-label={app.title}
+                aria-expanded={windows.some((w) => w.target.kind === "app" && w.target.appId === app.id && !w.minimized)}
+                onClick={() => dockClick({ kind: "app", appId: app.id })}
+              >
+                <span className="os-dock-icon">
+                  <Icon size={22} />
+                </span>
+                <span className="os-dock-name">{app.title}</span>
+              </button>
+            );
+          })}
         </div>
       </nav>
     </div>

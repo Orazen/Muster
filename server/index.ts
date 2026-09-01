@@ -96,6 +96,7 @@ import {
   validateMcpCommand,
 } from "./custom-mcp.ts";
 import { connectMcpStdio } from "./mcp-client.ts";
+import { buildBootstrapBundle, bootstrapInputSchema } from "./vm-bootstrap.ts";
 import { describeSpawnFailure, deathsSince, describeProcessDeath, execCli } from "./procs.ts";
 import { LivenessReaper } from "./liveness.ts";
 import type { WatchedTurn } from "./turn-watchdog.ts";
@@ -4245,6 +4246,23 @@ let requestUserEmail = "";
           coolingDown: (c.lastFailureAt ?? null) !== null && Date.now() - (c.lastFailureAt ?? 0) < FREE_BEST_COOLDOWN_MS,
         })),
       });
+    }
+    // Obscura VM bootstrap (server/vm-bootstrap.ts): render the hardened
+    // install bundle for one cloud VM — the release URL line plus the
+    // /etc/muster/mcp.json heredoc. POST body is the schema-validated
+    // bootstrap input; the script itself embeds no credentials (bot
+    // credentials arrive separately), so this only ever echoes back a
+    // deterministic artifact for the caller to run on the VM it owns.
+    if (path === "/api/vms/bootstrap" && method === "POST") {
+      const body = await readBody(req);
+      // zod at the I/O boundary, then the bundle builder owns the artifact.
+      const parsed = bootstrapInputSchema.safeParse(body);
+      if (!parsed.success) {
+        return json(res, 400, { error: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ") });
+      }
+      const bundle = buildBootstrapBundle(parsed.data);
+      if (!bundle.ok) return json(res, 400, { error: bundle.reason });
+      return json(res, 200, bundle.bundle);
     }
     // Create a public share link for this week's card. Auth-gated like
     // /api/wrapped; the URL itself carries only an unguessable token —
