@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { evaluateSentryRun, sentryPromptSuffix, shouldSentryNotify } from "./sentry.ts";
+import { whyPromptSuffix } from "./why-journal.ts";
 
 export type RoutineSchedule =
   | { type: "once"; at: number }
@@ -500,8 +501,11 @@ export class RoutineManager {
             continue;
           }
           // Sentry runs carry the watching suffix so the diff policy has a
-          // stable digest line to read at completion.
-          const prompt = routineDef?.sentry ? `${basePrompt}${sentryPromptSuffix()}` : basePrompt;
+          // stable digest line to read at completion. Every run also carries
+          // the why-journal suffix: a routine is exactly the kind of work a
+          // future audit asks WHY about, and the extractor is mechanical —
+          // a bot that skips the block simply produces no journal entry.
+          const prompt = `${basePrompt}${routineDef?.sentry ? sentryPromptSuffix() : ""}${whyPromptSuffix()}`;
           const triggerSource = run.triggerSource ?? (run.manual ? "manual" : "schedule");
           await this.options.startTurn(
             run.botId,

@@ -298,6 +298,7 @@ export type AppSettingsSection =
   | "usage"
   | "vault"
   | "audit"
+  | "why"
   | "billing";
 
 export interface AppState {

@@ -31,7 +31,7 @@ import {
   type WhatsAppConfig,
 } from "./whatsapp.ts";
 import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from "./whatsapp-threads.ts";
-import { appendWhy, extractWhyFromReply, WHY_MARKER } from "./why-journal.ts";
+import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER } from "./why-journal.ts";
 import { closeRoom, createRoom, joinRoom, leaveRoom, listRooms } from "./agent-rooms.ts";
 import {
   createDispatchPlan,
@@ -5384,6 +5384,17 @@ let requestUserEmail = "";
       // Trust gateway: one bot's decided actions, newest first. Session auth
       // and owner scoping are the shared guards above this block.
       return json(res, 200, queryAudit(decisions, bot.id, url.searchParams));
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/why$/);
+    if (m && method === "GET") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      // Why-journal read side (server/why-journal.ts): this bot's settled
+      // runs with their stated intent and key decisions, newest first. Same
+      // auth/owner guards as the audit route above.
+      const limitRaw = Number(url.searchParams.get("limit") ?? "");
+      const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 100) : undefined;
+      return json(res, 200, { entries: listWhy(DATA_DIR, { botId: bot.id, limit }) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)$/);
     if (m && method === "PATCH") {

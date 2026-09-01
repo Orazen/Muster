@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Brain, Coins, CreditCard, Download, KeyRound, Monitor, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
+import { Brain, Coins, CreditCard, Download, KeyRound, Monitor, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
@@ -22,6 +22,7 @@ import { VoiceSettings } from "./VoiceSettings";
 import { ProvidersSection } from "./ProvidersSection";
 import { McpServersSection } from "./McpServersSection";
 import { AuditPanel } from "./AuditPanel";
+import { WhyPanel } from "./WhyPanel";
 import { cn } from "@/lib/cn";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User; keywords: string[] }> = [
@@ -496,8 +497,10 @@ export function SettingsModal() {
   // Audit sits before Billing; present whenever the endpoint answers — an
   // empty ledger shows its honest empty state instead of hiding the feature.
   const sections = [...SECTIONS];
-  if (audit.reachable && auditBotId)
+  if (audit.reachable && auditBotId) {
     sections.splice(sections.length - 1, 0, { id: "audit", label: "Audit", icon: ShieldCheck, keywords: ["decisions", "ledger", "history"] });
+    sections.splice(sections.length - 1, 0, { id: "why", label: "Why", icon: NotebookPen, keywords: ["journal", "decisions", "intent", "reasoning", "runs"] });
+  }
 
   // Section nav search: typing filters live, Esc clears first. When the
   // current section is filtered out, jump to the first match so the right
@@ -722,6 +725,12 @@ export function SettingsModal() {
             {section === "audit" && audit.botId && (
               <Card title="Audit" subtitle="Every action this bot takes gets decided before it happens. Newest first.">
                 <AuditPanel botId={audit.botId} />
+              </Card>
+            )}
+
+            {section === "why" && audit.botId && (
+              <Card title="Why" subtitle="Each journaled run states what it was trying to do and the choices it made. Newest first.">
+                <WhyPanel botId={audit.botId} />
               </Card>
             )}
 

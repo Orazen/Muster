@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { nextOccurrence, RoutineManager, type RoutineManagerOptions } from "./routines.ts";
+import { whyPromptSuffix } from "./why-journal.ts";
 
 const dirs: string[] = [];
 
@@ -109,7 +110,8 @@ describe("RoutineManager", () => {
 
     h.setBot("ready");
     await h.manager.tick();
-    expect(h.started).toEqual([{ botId: "agent-2", threadId: "thread-1", prompt: "Review the queue" }]);
+    // Every run carries the why-journal suffix on top of its base prompt.
+    expect(h.started).toEqual([{ botId: "agent-2", threadId: "thread-1", prompt: `Review the queue${whyPromptSuffix()}` }]);
     expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", threadId: "thread-1" });
     expect(h.manager.activeRunForBot("agent-2")?.threadId).toBe("thread-1");
     expect(h.manager.isActiveThread("thread-1")).toBe(true);
@@ -152,7 +154,7 @@ describe("RoutineManager", () => {
     h.setBot("ready");
     await h.manager.tick();
 
-    expect(h.started[0]?.prompt).toBe("Use the original instructions");
+    expect(h.started[0]?.prompt).toBe(`Use the original instructions${whyPromptSuffix()}`);
     expect(h.manager.listRuns()[0]).toMatchObject({
       routineName: "Original brief",
       prompt: "Use the original instructions",
@@ -203,7 +205,7 @@ describe("RoutineManager", () => {
       scheduledFor: receivedAt,
     });
     expect(queued).not.toHaveProperty("durationMinutes");
-    expect(h.started).toEqual([{ botId: "agent-webhook", threadId: "thread-1", prompt: "Handle ticket 42" }]);
+    expect(h.started).toEqual([{ botId: "agent-webhook", threadId: "thread-1", prompt: `Handle ticket 42${whyPromptSuffix()}` }]);
     expect(h.runOns).toEqual(["cloud"]);
     expect(h.triggerSources).toEqual(["webhook"]);
     expect(h.taskActivations).toEqual([true]);
