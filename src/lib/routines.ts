@@ -27,6 +27,10 @@ export interface Routine {
   nextRunAt: number | null;
   createdAt: number;
   updatedAt: number;
+  /** Watcher mode: notify only when the watched state changes. */
+  sentry?: boolean;
+  /** Last digest the sentry saw (server-side diff memory). */
+  lastDigest?: string | null;
 }
 
 export interface RoutineRun {
@@ -52,6 +56,8 @@ export interface RoutineRun {
   denials?: string[];
   createdAt: number;
   seenAt?: number;
+  /** Sentry runs only: true when this run's watch changed (or failed). */
+  changeDetected?: boolean;
 }
 
 export interface RoutineInput {
@@ -62,4 +68,6 @@ export interface RoutineInput {
   enabled?: boolean;
   schedule: RoutineSchedule;
   durationMinutes?: number;
+  /** Watcher mode: notify only when the watched state changes. */
+  sentry?: boolean;
 }

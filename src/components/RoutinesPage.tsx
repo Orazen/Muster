@@ -8,6 +8,7 @@ import {
   CircleAlert,
   Cloud,
   ExternalLink,
+  Eye,
   Laptop,
   Loader2,
   Pause,
@@ -334,6 +335,7 @@ export function RoutineEditor({
     routine?.schedule.type === "daily" ? routine.schedule.weekdays : [1, 2, 3, 4, 5],
   );
   const [durationMinutes, setDurationMinutes] = useState(routine?.durationMinutes ?? 30);
+  const [sentry, setSentry] = useState(routine?.sentry ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const cloudInstance = state.instances.find((instance) => instance.driverKind === "boxAgent");
@@ -357,6 +359,7 @@ export function RoutineEditor({
       runOn,
       enabled: routine ? undefined : true,
       durationMinutes,
+      sentry,
       schedule:
         kind === "once"
           ? { type: "once", at: new Date(at).getTime() }
@@ -392,6 +395,17 @@ export function RoutineEditor({
           <label className="block">
             <span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">Schedule name</span>
             <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Morning research brief" className="w-full rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none placeholder:text-ink-secondary/60 focus:border-accent/70" />
+          </label>
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-hairline/60 bg-inset p-3.5">
+            <input type="checkbox" checked={sentry} onChange={(event) => setSentry(event.target.checked)} className="mt-0.5 size-4 accent-[#ff7a45]" />
+            <span>
+              <span className="block text-[13.5px] font-medium text-ink">Sentry mode</span>
+              <span className="mt-0.5 block text-[12px] leading-relaxed text-ink-secondary">
+                Watch instead of report: the bot ends each run with a one-line state summary, and you're only notified
+                when that line changes (or the watch fails). Perfect for price watches, tender scouts and "did anything
+                change" checks.
+              </span>
+            </span>
           </label>
           <div>
             <div className="mb-2 text-[12px] font-medium text-ink-secondary">Where does it run?</div>
@@ -548,6 +562,7 @@ function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bo
           {routine && (
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Schedule</div><div className="mt-1 text-[13px] text-ink">{scheduleLabel(routine)}</div></div>
+              <div className="rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Mode</div><div className="mt-1 flex items-center gap-1.5 text-[13px] text-ink">{routine.sentry ? <Eye size={13} className="text-accent" /> : null}{routine.sentry ? "Sentry — alerts on change" : "Report every run"}</div></div>
               <div className="rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Runs on</div><div className="mt-1 flex items-center gap-1.5 text-[13px] text-ink">{routine.runOn === "cloud" || routine.runOn === "opensandbox" ? <Cloud size={13} /> : <Laptop size={13} />}{routine.runOn === "cloud" ? "Cloud VM" : routine.runOn === "opensandbox" ? "OpenSandbox" : "AGENT setup"}</div></div>
               <div className="rounded-xl bg-inset p-3"><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Duration</div><div className="mt-1 text-[13px] text-ink">{routine.durationMinutes} minutes</div></div>
             </div>

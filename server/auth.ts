@@ -609,7 +609,11 @@ export function isPublicApiPath(path: string): boolean {
     // see server/pairing.ts. Creating codes still requires a session.
     path === "/api/pair/verify" ||
     // the desktop's local redeem endpoint — same code-as-credential story
-    path === "/api/pair/redeem"
+    path === "/api/pair/redeem" ||
+    // The public team-directory feed (/bots page): read-only catalog of
+    // installable teams, deliberately consumable without an account so
+    // agents and aggregators can index it (server/viral.ts rationale).
+    path === "/api/directory/teams"
   );
 }
 

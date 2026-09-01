@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
+import { evaluateSentryRun, sentryPromptSuffix, shouldSentryNotify } from "./sentry.ts";
 
 export type RoutineSchedule =
   | { type: "once"; at: number }
@@ -37,6 +38,11 @@ export interface Routine {
   nextRunAt: number | null;
   createdAt: number;
   updatedAt: number;
+  /** Sentry mode: the bot re-watches on this cadence and only notifies
+   * when the digest line changes (server/sentry.ts). */
+  sentry?: boolean;
+  /** Last digest the sentry saw — the baseline for the next diff. */
+  lastDigest?: string | null;
 }
 
 export interface RoutineRun {
@@ -64,6 +70,9 @@ export interface RoutineRun {
   denials?: string[];
   createdAt: number;
   seenAt?: number;
+  /** Sentry runs only: true when this run's digest changed (or the watch
+   * failed) — i.e. the run was worth interrupting the user for. */
+  changeDetected?: boolean;
 }
 
 export interface RoutineInput {
@@ -74,6 +83,9 @@ export interface RoutineInput {
   enabled?: boolean;
   schedule: RoutineSchedule;
   durationMinutes?: number;
+  /** Watcher mode: the run's SENTRY digest is diffed against the previous
+   * one and the user is only notified on change (or run failure). */
+  sentry?: boolean;
 }
 
 interface RoutineFile {
@@ -105,6 +117,10 @@ export interface RoutineManagerOptions {
     onDispatchError: (message: string) => void,
   ) => Promise<void>;
   interruptTurn?: (botId: string, threadId: string, runOn: RoutineRunOn) => Promise<void>;
+  /** Sentry mode delivery: called when a sentry run's digest CHANGED (or
+   * the run failed) — the moments a watcher is worth interrupting for.
+   * Returns the run's task thread so the caller can route a notification. */
+  onSentryAlert?: (run: RoutineRun, verdict: { changed: boolean; digest: string | null }) => void;
 }
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -162,6 +178,7 @@ function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | 
     enabled: input.enabled !== false,
     schedule: cleanSchedule(input.schedule),
     durationMinutes: Math.min(240, Math.max(15, Math.round(Number(input.durationMinutes) || 30))),
+    sentry: input.sentry === true,
   };
 }
 
@@ -476,11 +493,15 @@ export class RoutineManager {
         this.save();
         this.emitRun(run);
         try {
-          const prompt = run.prompt ?? this.routines.find((r) => r.id === run.routineId)?.prompt;
-          if (!prompt) {
+          const routineDef = this.routines.find((r) => r.id === run.routineId);
+          const basePrompt = run.prompt ?? routineDef?.prompt;
+          if (!basePrompt) {
             this.failThread(task.threadId, "The routine was deleted before it could start");
             continue;
           }
+          // Sentry runs carry the watching suffix so the diff policy has a
+          // stable digest line to read at completion.
+          const prompt = routineDef?.sentry ? `${basePrompt}${sentryPromptSuffix()}` : basePrompt;
           const triggerSource = run.triggerSource ?? (run.manual ? "manual" : "schedule");
           await this.options.startTurn(
             run.botId,
@@ -516,6 +537,26 @@ export class RoutineManager {
       run.error = event.ok ? undefined : (event.stopReason ?? run.error ?? "The bot did not complete this run");
       run.cost = event.cost;
       run.denials = event.denials;
+      // Sentry diff: compare this run's digest against the routine's stored
+      // memory. A changed digest (or a failed watch) alerts; the memory
+      // only updates on a successful run with a well-formed digest.
+      const routineDef = this.routines.find((r) => r.id === run.routineId);
+      if (routineDef?.sentry) {
+        const verdict = evaluateSentryRun(routineDef.lastDigest ?? null, run.output ?? null);
+        run.changeDetected = shouldSentryNotify(verdict, event.ok);
+        if (verdict.digest !== null) {
+          routineDef.lastDigest = verdict.digest;
+          this.emitRoutine(routineDef);
+        }
+        if (run.changeDetected) {
+          this.save();
+          this.emitRun(run);
+          queueMicrotask(() =>
+            this.options.onSentryAlert?.({ ...run }, verdict),
+          );
+          return; // tick still needed below for the next scheduling hop
+        }
+      }
     } else {
       return;
     }

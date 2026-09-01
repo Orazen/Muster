@@ -2163,6 +2163,13 @@ routines = new RoutineManager({
         : null;
     await instance?.adapter.interruptTurn(threadId);
   },
+  onSentryAlert: (run) => {
+    // A sentry only speaks when its picture changed (or the watch failed) —
+    // see server/sentry.ts. The run's own thread carries the new finding.
+    const bot = store.bot(run.botId);
+    if (!bot) return;
+    notify(buildNotification("done", bot, run.threadId ?? "", `Sentry "${run.routineName}" spotted a change`));
+  },
 });
 routines.start();
 
