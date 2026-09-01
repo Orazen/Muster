@@ -174,7 +174,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // the provider union better-auth's social() accepts.
       const res = await authClient.signIn.social({
         provider: provider as Parameters<typeof authClient.signIn.social>[0]["provider"],
-        callbackURL: `${window.location.origin}/app`,
+        // relative, not absolute: better-auth allows relative paths for
+        // callbackURL regardless of its trustedOrigins list, so this also
+        // passes on deployments whose PUBLIC_BASE_URL doesn't match the
+        // browser origin (self-hosts that never set OMB_PUBLIC_HOST)
+        callbackURL: "/app",
       });
       if (res.error) return { error: res.error.message ?? `Could not sign in with ${provider}` };
       return {};
@@ -187,7 +191,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await authClient.requestPasswordReset({
         email,
-        redirectTo: `${window.location.origin}/reset-password`,
+        // relative for the same trustedOrigins reason as the OAuth callbackURL
+        redirectTo: "/reset-password",
       });
       if (res.error) return { error: res.error.message ?? "Could not send the reset email" };
       return {};

@@ -33,16 +33,17 @@ export const PUBLIC_BASE_URL = (() => {
 
   const loopback = `http://127.0.0.1:${process.env.OMB_PORT ?? "8799"}`;
   // A self-hosted deploy behind a proxy without a public-host override gets
-  // a loopback PUBLIC_BASE_URL — which then misses its own public origin in
-  // better-auth's trustedOrigins, and every email sign-in fails with 403
-  // INVALID_ORIGIN. Fail loudly at boot instead of silently breaking auth.
+  // a loopback PUBLIC_BASE_URL. Same-origin sign-in still works — the
+  // trustedOrigins function trusts the request's own Host — but emailed
+  // verification/reset links would point at the loopback, so warn: those
+  // flows need OMB_PUBLIC_HOST (or OMB_PUBLIC_URL) to be useful.
   const selfHosted =
     (process.env.OMB_HOST ?? "127.0.0.1") !== "127.0.0.1" || Boolean(process.env.OMB_PUBLIC_HOST);
   if (selfHosted) {
     console.warn(
       "[auth] OMB_HOST is non-loopback but neither OMB_PUBLIC_URL nor OMB_PUBLIC_HOST is set — " +
-        `PUBLIC_BASE_URL defaults to ${loopback}, so email sign-in from the public origin will be ` +
-        "rejected (INVALID_ORIGIN). Set OMB_PUBLIC_HOST (e.g. muster.example.com) to fix.",
+        `PUBLIC_BASE_URL defaults to ${loopback}. Sign-in works (same-origin trust), but emailed ` +
+        "links will carry this loopback base. Set OMB_PUBLIC_HOST (e.g. muster.example.com) to fix.",
     );
   }
   return loopback;
@@ -331,6 +332,34 @@ const EXTRA_TRUSTED_ORIGINS = (process.env.OMB_ALLOWED_ORIGINS ?? "")
   .filter(Boolean);
 
 /**
+ * The origin the request itself came in on, derived from Host + the scheme
+ * better-auth's own origin checks are willing to trust. Returned as a
+ * trusted origin so same-origin browser requests pass even when the static
+ * PUBLIC_BASE_URL doesn't match the deployment (self-hosts that never set
+ * OMB_PUBLIC_HOST). Scheme comes from X-Forwarded-Proto when the proxy sent
+ * it (validated), else https behind a non-loopback Host, else http — the
+ * loopback desktop/dev case. undefined when there is no usable Host.
+ */
+export function requestOwnOrigin(request?: Request): string | undefined {
+  const headers = request?.headers;
+  if (!headers) return undefined;
+  const host = headers.get("x-forwarded-host") ?? headers.get("host");
+  if (!host) return undefined;
+  // Header-injection guard: a Host is one authority token, never a list or
+  // a URL. Anything past the first comma, or carrying a scheme, is not a
+  // Host this server was addressed by.
+  const candidate = host.split(",")[0]?.trim() ?? "";
+  if (!/^[\w.-]+(:\d{1,5})?$/.test(candidate)) return undefined;
+  const proto = headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const scheme = proto === "http" || proto === "https"
+    ? proto
+    : candidate.startsWith("127.0.0.1") || candidate.startsWith("localhost")
+      ? "http"
+      : "https";
+  return `${scheme}://${candidate}`;
+}
+
+/**
  * Social sign-in is opt-in per provider: configured only when both halves of
  * the credential pair are present. A half-configured provider would render a
  * button that always errors, so an incomplete pair is treated as absent.
@@ -520,17 +549,32 @@ export const auth = betterAuth({
   // Better Auth needs to know where it is actually reachable. Getting this
   // wrong sends users a link to localhost from a production deployment.
   baseURL: PUBLIC_BASE_URL,
-  trustedOrigins: [
-    "http://127.0.0.1:5199",
-    "http://localhost:5199",
-    "http://127.0.0.1:8799",
-    "http://localhost:8799",
-    // Self-hosted deployments must trust their own public origin, or every
-    // same-origin browser request gets rejected as untrusted — this was
-    // previously only reachable by manually setting OMB_ALLOWED_ORIGINS.
-    PUBLIC_BASE_URL,
-    ...EXTRA_TRUSTED_ORIGINS,
-  ],
+  trustedOrigins: (request?: Request): Array<string | undefined | null> => {
+    // The request's own origin is always trusted. This rescues deployments
+    // where OMB_PUBLIC_HOST never made it into the container (e.g. Dokploy
+    // building the Dockerfile directly, not docker-compose.prod.yml): the
+    // static list above only knows PUBLIC_BASE_URL, which collapses to a
+    // loopback URL, and every same-origin sign-in failed with 403
+    // INVALID_ORIGIN. The rule is the same-host check Django/Rails use: a
+    // browser sets Host from the URL it is talking to and Origin from the
+    // page it is on, so a cross-site request's Origin can never equal its
+    // Host — trusting the request's own host keeps the CSRF check honest.
+    // Only the origin-header check re-invokes this with a live request;
+    // callbackURL validation uses the boot-time list.
+    const own = requestOwnOrigin(request);
+    return [
+      "http://127.0.0.1:5199",
+      "http://localhost:5199",
+      "http://127.0.0.1:8799",
+      "http://localhost:8799",
+      // Self-hosted deployments must trust their own public origin, or every
+      // same-origin browser request gets rejected as untrusted — this was
+      // previously only reachable by manually setting OMB_ALLOWED_ORIGINS.
+      PUBLIC_BASE_URL,
+      ...EXTRA_TRUSTED_ORIGINS,
+      own,
+    ];
+  },
   // First concrete step toward per-tenant data isolation (see
   // docs/plans/multi-tenancy-design.md): the organization/member/invitation
   // primitives, additive only. Nothing downstream reads

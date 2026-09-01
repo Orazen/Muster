@@ -83,6 +83,48 @@ describe("SELF_HOSTED", () => {
   });
 });
 
+describe("requestOwnOrigin", () => {
+  // The trustedOrigins function trusts a request's own Host — the same-host
+  // CSRF rule — so a deployment whose PUBLIC_BASE_URL doesn't match the
+  // browser origin (Dokploy containers without OMB_PUBLIC_HOST) still passes
+  // same-origin sign-in. Pin the derivation.
+  const req = (headers: Record<string, string>): Request =>
+    new Request("http://127.0.0.1:8799/api/auth/sign-in/email", { headers });
+
+  it("derives the proxied public origin from forwarded headers", async () => {
+    const { requestOwnOrigin } = await import("./auth.ts");
+    expect(
+      requestOwnOrigin(req({ "x-forwarded-host": "muster.orazen.online", "x-forwarded-proto": "https" })),
+    ).toBe("https://muster.orazen.online");
+  });
+
+  it("falls back to https for a public Host without proxy headers", async () => {
+    const { requestOwnOrigin } = await import("./auth.ts");
+    expect(requestOwnOrigin(req({ host: "muster.example.com" }))).toBe("https://muster.example.com");
+  });
+
+  it("keeps http for loopback desktop installs", async () => {
+    const { requestOwnOrigin } = await import("./auth.ts");
+    expect(requestOwnOrigin(req({ host: "127.0.0.1:8799" }))).toBe("http://127.0.0.1:8799");
+    expect(requestOwnOrigin(req({ host: "localhost:5199" }))).toBe("http://localhost:5199");
+  });
+
+  it("takes the first entry of a comma-separated forwarded host", async () => {
+    const { requestOwnOrigin } = await import("./auth.ts");
+    expect(
+      requestOwnOrigin(req({ "x-forwarded-host": "muster.example.com, internal:8799", "x-forwarded-proto": "https" })),
+    ).toBe("https://muster.example.com");
+  });
+
+  it("refuses a Host that is not a single authority token", async () => {
+    const { requestOwnOrigin } = await import("./auth.ts");
+    expect(requestOwnOrigin(req({ host: "https://evil.com" }))).toBeUndefined();
+    expect(requestOwnOrigin(req({ host: "evil.com/path" }))).toBeUndefined();
+    expect(requestOwnOrigin(req({}))).toBeUndefined();
+    expect(requestOwnOrigin(undefined)).toBeUndefined();
+  });
+});
+
 describe("gate composition", () => {
   /** Mirrors the condition in index.ts so a change there without a change
    *  here shows up as a failing test rather than a silent hole. */
