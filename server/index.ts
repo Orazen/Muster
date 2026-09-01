@@ -22,6 +22,7 @@ import type { JsonValue } from "./schema.ts";
 import { modelAcceptsImages } from "./contracts.ts";
 import { isSameOrigin, needsSameOriginMutationCheck } from "./origin-gate.ts";
 import {
+  customerThreadKey,
   parseInboundMessages,
   sendWhatsAppText,
   verifySignature,
@@ -29,6 +30,7 @@ import {
   whatsappConfigFromEnv,
   type WhatsAppConfig,
 } from "./whatsapp.ts";
+import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from "./whatsapp-threads.ts";
 import {
   forgetShieldSession,
   rememberScrub,
@@ -1264,9 +1266,13 @@ bus.subscribe((event: RuntimeEvent) => {
         store.patchBot(bot.id, { unread: true });
         notify(buildNotification("done", bot, event.threadId, reply));
         // WhatsApp channel: the customer's answer goes back over the Graph
-        // API when their bot finishes, then the thread's reply route is
-        // consumed (each customer message opens a fresh task).
-        const waReply = whatsappReplies.get(event.threadId);
+        // API when their bot finishes. The persistent-threads registry is
+        // authoritative (the key embeds the customer number); the in-memory
+        // map is the boot-time fallback.
+        const mapped = mapCustomerReply(DATA_DIR, event.threadId);
+        const waReply = mapped
+          ? { to: mapped.key.replace(/^wa:/, ""), botId: mapped.botId }
+          : whatsappReplies.get(event.threadId);
         if (waReply && whatsappConfig) {
           whatsappReplies.delete(event.threadId);
           void sendWhatsAppText(whatsappConfig, waReply.to, reply || "I finished, but had nothing to report.");
@@ -4264,13 +4270,32 @@ let requestUserEmail = "";
           }
           const task = store.createTask(target.id, `WhatsApp: ${message.from}`, false);
           if (!task) continue;
-          whatsappReplies.set(task.threadId, { to: message.from, botId: target.id });
+          // Persistent customer thread: the SAME thread serves every message
+          // from this number, so the bot keeps the conversation's context.
+          // The registry self-heals when a thread disappears (task deleted).
+          const threadKey = customerThreadKey(message.from);
+          const resolved = resolveCustomerThread(DATA_DIR, threadKey, target.id, {
+            findOpenThread: (searchedBotId, searchedKey) =>
+              store
+                .tasks(searchedBotId)
+                .find((t) => t.title === `WhatsApp: ${searchedKey}`)?.threadId ?? null,
+          });
+          let replyThreadId: string;
+          if (resolved.fresh) {
+            const created = store.createTask(target.id, `WhatsApp: ${threadKey}`, false);
+            if (!created) continue;
+            replyThreadId = created.threadId;
+            registerCustomerThread(DATA_DIR, { key: threadKey, threadId: replyThreadId, botId: target.id });
+          } else {
+            replyThreadId = resolved.threadId;
+          }
+          whatsappReplies.set(replyThreadId, { to: message.from, botId: target.id });
           void startTurn(target.id, message.text, {
-            threadId: task.threadId,
+            threadId: replyThreadId,
             automationSource: "webhook",
             onDispatchError: (errorMessage) => {
               void sendWhatsAppText(whatsappConfig, message.from, `I couldn't start that job: ${errorMessage}`);
-              whatsappReplies.delete(task.threadId);
+              whatsappReplies.delete(replyThreadId);
             },
           });
         }
@@ -4320,6 +4345,21 @@ let requestUserEmail = "";
         };
       });
       return json(res, 200, { schemaVersion: 1, engines: report });
+    }
+    // Doctor auto-repair: executes only the unattended-safe actions
+    // (re-registering provider instances from the vault, refreshing PATH
+    // and model lists). Installs and credentials stay human decisions.
+    if (path === "/api/engines/doctor/repair" && method === "POST") {
+      await reloadUserInstancesAll();
+      const described = await registry.describe();
+      const actions = described.map((d) => ({
+        action: "reload-instances",
+        ok: d.snapshot.state === "available",
+        detail: d.snapshot.state === "available"
+          ? `${d.displayName}: re-registered, ${d.models.options.length} models`
+          : `${d.displayName}: still unavailable after reload — ${d.snapshot.reason ?? "unknown reason"}`,
+      }));
+      return json(res, 200, { actions });
     }
 
     // ── referral program (server/viral.ts) ──────────────────────────────

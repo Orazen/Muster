@@ -60,27 +60,61 @@ interface DoctorEngine {
   repair: string | null;
 }
 
+/** One row of the repair route's {actions: [{action, ok, detail}]} reply. */
+interface RepairOutcome {
+  action: string;
+  ok: boolean;
+  detail: string;
+}
+
 /** TinyFish's doctor pattern, applied to engines: a versioned report that
  * separates "binary reachable" from "models loaded" and names an ordered
- * repair per unhealthy engine. Read-only — repairs stay human decisions. */
+ * repair per unhealthy engine. The executor half runs only the auto-safe
+ * action (re-registering instances from the vault) via the repair route. */
 export function ProviderHealthSection() {
   const [rows, setRows] = useState<ProviderRow[] | null>(null);
   const [error, setError] = useState("");
   const [doctor, setDoctor] = useState<DoctorEngine[] | null>(null);
   const [doctorBusy, setDoctorBusy] = useState(false);
+  const [repairBusy, setRepairBusy] = useState(false);
+  const [repairOutcomes, setRepairOutcomes] = useState<RepairOutcome[] | null>(null);
+
+  async function refreshDoctor(): Promise<DoctorEngine[]> {
+    const r = await fetch("/api/engines/doctor");
+    // SAFETY: the route's documented shape is {schemaVersion, engines};
+    // anything else resolves to an empty report below.
+    const body = (await r.json()) as { engines?: DoctorEngine[] };
+    const engines = body.engines ?? [];
+    setDoctor(engines);
+    return engines;
+  }
 
   async function runDoctor(): Promise<void> {
     setDoctorBusy(true);
     try {
-      const r = await fetch("/api/engines/doctor");
-      // SAFETY: the route's documented shape is {schemaVersion, engines};
-      // anything else resolves to an empty report below.
-      const body = (await r.json()) as { engines?: DoctorEngine[] };
-      setDoctor(body.engines ?? []);
+      await refreshDoctor();
     } catch {
       setDoctor([]);
     } finally {
       setDoctorBusy(false);
+    }
+  }
+
+  async function autoRepair(): Promise<void> {
+    setRepairBusy(true);
+    setRepairOutcomes(null);
+    try {
+      const r = await fetch("/api/engines/doctor/repair", { method: "POST" });
+      // SAFETY: the route's documented shape is {actions: RepairOutcome[]};
+      // anything else resolves to an empty list below.
+      const body = (await r.json()) as { actions?: RepairOutcome[] };
+      setRepairOutcomes(body.actions ?? []);
+    } catch {
+      setRepairOutcomes([{ action: "reload-instances", ok: false, detail: "could not reach the server" }]);
+    } finally {
+      setRepairBusy(false);
+      // The point of the repair is a better doctor report — show it.
+      await runDoctor();
     }
   }
 
@@ -161,7 +195,7 @@ export function ProviderHealthSection() {
             "Rate-limited recently" means a turn hit the provider's cap in the last 24h — Muster automatically re-pointed
             those bots at another provider where one was available.
           </div>
-          <div className="mt-3">
+          <div className="mt-3 flex items-center gap-2">
             <button
               type="button"
               onClick={() => void runDoctor()}
@@ -170,6 +204,28 @@ export function ProviderHealthSection() {
             >
               {doctorBusy ? "Checking…" : "Run doctor"}
             </button>
+            <button
+              type="button"
+              onClick={() => void autoRepair()}
+              disabled={repairBusy}
+              className="rounded-lg border border-hairline/60 px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-raised disabled:opacity-40"
+            >
+              {repairBusy ? "Repairing…" : "Auto-repair"}
+            </button>
+          </div>
+          {repairOutcomes && repairOutcomes.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {repairOutcomes.map((outcome) => (
+                <div key={outcome.action} className="text-[12px] leading-relaxed">
+                  <span className={outcome.ok ? "text-emerald-400" : "text-amber-400"}>
+                    {outcome.ok ? "✓" : "!"}
+                  </span>{" "}
+                  <span className="font-medium capitalize text-ink">{outcome.action}</span>
+                  <span className="text-ink-secondary"> — {outcome.detail}</span>
+                </div>
+              ))}
+            </div>
+          )}
             {doctor && (
               <div className="mt-2 space-y-1.5">
                 {doctor.map((engine) => (
@@ -191,7 +247,6 @@ export function ProviderHealthSection() {
                 ))}
               </div>
             )}
-          </div>
         </div>
       )}
     </Card>

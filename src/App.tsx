@@ -27,6 +27,23 @@ import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone } from "@/lib/analytics";
 import { PairPage } from "@/pages/PairPage";
+import { DesktopShell } from "@/components/os/DesktopShell";
+import { Link } from "react-router-dom";
+
+// A discreet entry point into the desktop-style roster view. Sits beside
+// the sign-out button but only on desktop widths — the mobile chrome
+// stays untouched.
+function OsLink() {
+  return (
+    <Link
+      to="/os"
+      className="fixed bottom-4 right-4 z-50 hidden items-center gap-1.5 rounded-lg border border-hairline bg-panel px-3 py-1.5 text-xs text-ink-secondary transition-colors hover:bg-raised hover:text-ink md:flex"
+      aria-label="Open Muster OS"
+    >
+      OS
+    </Link>
+  );
+}
 
 function SignOutButton() {
   const { signOut } = useAuth();
@@ -197,6 +214,7 @@ function Shell() {
       )}
       </div>
       <SignOutButton />
+      <OsLink />
     </div>
   );
 }
@@ -241,6 +259,7 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/app/*" element={<AuthGate><AppShell /></AuthGate>} />
+          <Route path="/os" element={<AuthGate><StoreProvider><DesktopShell /></StoreProvider></AuthGate>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

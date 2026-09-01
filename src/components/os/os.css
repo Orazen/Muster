@@ -1,0 +1,318 @@
+/* Muster OS shell — a desktop-style view of the agent roster.
+   CSS-first: everything reads the app's theme custom properties, so OS
+   skins and future themes apply here for free. Animations sit in the
+   150–200ms band the rest of the app uses. */
+
+.os-desktop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--color-ink);
+  background:
+    radial-gradient(120% 90% at 20% 0%, color-mix(in srgb, var(--color-accent) 16%, transparent) 0%, transparent 55%),
+    radial-gradient(90% 70% at 85% 100%, color-mix(in srgb, var(--color-warning) 10%, transparent) 0%, transparent 60%),
+    var(--color-app);
+  font-family: var(--font-sans);
+}
+
+/* ── top bar ─────────────────────────────────────────────────────────── */
+
+.os-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--color-hairline);
+  background: color-mix(in srgb, var(--color-panel) 72%, transparent);
+  backdrop-filter: blur(10px);
+  user-select: none;
+}
+
+.os-mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--color-ink);
+}
+
+.os-clock {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-secondary);
+}
+
+/* ── desktop body ────────────────────────────────────────────────────── */
+
+.os-body {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.os-empty {
+  font-size: 13px;
+  color: var(--color-ink-secondary);
+}
+
+.os-exit {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-panel) 80%, transparent);
+  color: var(--color-ink-secondary);
+  font-size: 12px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.os-exit:hover {
+  background: var(--color-raised);
+  color: var(--color-ink);
+}
+
+/* ── dock ────────────────────────────────────────────────────────────── */
+
+.os-dock {
+  display: flex;
+  justify-content: center;
+  padding: 10px 16px 14px;
+  margin: 0 auto 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-panel) 82%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  align-self: center;
+  max-width: calc(100% - 32px);
+}
+
+.os-dock-list {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.os-dock-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 6px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.os-dock-item:hover,
+.os-dock-item:focus-visible {
+  background: color-mix(in srgb, var(--color-raised) 55%, transparent);
+  border-color: var(--color-hairline);
+  transform: translateY(-3px);
+}
+
+.os-dock-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-inset) 85%, transparent);
+}
+
+.os-dock-name {
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--color-ink-secondary);
+}
+
+/* live status dot: pulsing accent while busy, muted while idle */
+.os-status-dot {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--color-ink-secondary);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.os-status-dot[data-busy="true"] {
+  background: var(--color-accent);
+  opacity: 1;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 55%, transparent);
+  animation: os-dot-pulse 1.6s ease-out infinite;
+}
+
+@keyframes os-dot-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 55%, transparent); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* ── agent window ────────────────────────────────────────────────────── */
+
+.os-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.os-window {
+  width: min(420px, 100%);
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: var(--color-panel);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  animation: os-window-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes os-window-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.os-window-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-hairline);
+  background: color-mix(in srgb, var(--color-inset) 70%, transparent);
+}
+
+.os-window-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.os-window-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.os-window-close:hover,
+.os-window-close:focus-visible {
+  background: var(--color-raised);
+  color: var(--color-ink);
+}
+
+.os-window-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+}
+
+.os-window-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.os-window-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.os-window-role {
+  font-size: 12px;
+  color: var(--color-ink-secondary);
+}
+
+.os-window-activity {
+  padding: 12px 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: var(--color-inset);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-ink-secondary);
+}
+
+.os-window-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.os-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 999px;
+  background: var(--color-card);
+  font-size: 11px;
+  color: var(--color-ink-secondary);
+}
+
+.os-open-chat {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.os-open-chat:hover,
+.os-open-chat:focus-visible {
+  filter: brightness(1.1);
+}
+
+/* focus ring matches the app's keyboard ring */
+.os-dock-item:focus-visible,
+.os-open-chat:focus-visible,
+.os-window-close:focus-visible,
+.os-exit:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
