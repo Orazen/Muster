@@ -2176,15 +2176,22 @@ const vault = new VaultManager();
 const tierState = (): TierState => loadTierFile(DATA_DIR);
 
 // ── viral loop state (server/viral.ts) ─────────────────────────────────
-// Wrapped share tokens + their cards. Tokens are unguessable and carry no
-// personal data; the whole map is capped so an authenticated loop can't
-// grow it unboundedly. Persisted so shared links survive restarts.
+// Public share tokens + their payloads. Tokens are unguessable and carry
+// no personal data; the whole map is capped so an authenticated loop
+// can't grow it unboundedly. Persisted so shared links survive restarts.
 interface StoredWrappedShare {
+  kind: "wrapped";
   card: ReturnType<typeof buildWrapped>;
   text: string;
 }
+interface StoredReceiptShare {
+  kind: "receipt";
+  receipt: ReturnType<typeof buildReceipt>;
+  text: string;
+}
+type StoredShare = StoredWrappedShare | StoredReceiptShare;
 const wrappedShareTokens = new Map<string, ShareToken>();
-const wrappedShareCards = new Map<string, StoredWrappedShare>();
+const wrappedShareCards = new Map<string, StoredShare>();
 const WRAPPED_SHARES_FILE = join(DATA_DIR, "wrapped-shares.json");
 
 function loadWrappedShares(): void {
@@ -2193,7 +2200,7 @@ function loadWrappedShares(): void {
     // is written only by saveWrappedShares below.
     const parsed = JSON.parse(readFileSync(WRAPPED_SHARES_FILE, "utf8")) as {
       tokens?: Array<[string, ShareToken]>;
-      cards?: Array<[string, StoredWrappedShare]>;
+      cards?: Array<[string, StoredShare]>;
     };
     for (const [key, value] of parsed.tokens ?? []) wrappedShareTokens.set(key, value);
     for (const [key, value] of parsed.cards ?? []) wrappedShareCards.set(key, value);
@@ -2211,7 +2218,7 @@ function loadWrappedShares(): void {
 
 function saveWrappedShares(): void {
   try {
-    // SAFETY: JSON.stringify of plain objects (WrappedCard + strings).
+    // SAFETY: JSON.stringify of plain objects (WrappedCard/JobReceipt + strings).
     writeFileAtomic(
       WRAPPED_SHARES_FILE,
       JSON.stringify({ tokens: [...wrappedShareTokens], cards: [...wrappedShareCards] }),
@@ -2979,11 +2986,32 @@ function wrappedSharePage(card: { weekOf: string; headline: string; totalTurns: 
 
 function shareNotFoundPage(): string {
   return pageShell(
-    "Wrapped link expired",
+    "Share link expired",
     `<div class="card">
       <h1 style="font-size:1.5rem">This share link has expired</h1>
-      <p class="muted">Wrapped links hold the latest shared week. Ask for a fresh one — or better, muster your own agents and post yours.</p>
+      <p class="muted">Share links hold the latest shared card. Ask for a fresh one — or better, muster your own agents and post yours.</p>
       <a class="btn" href="/">Muster your agents</a>
+    </div>`,
+  );
+}
+
+function receiptSharePage(receipt: { bot: string; job: string; startedAt: string; durationHuman: string; turns: number; tokensIn: number; tokensOut: number; costUsd: number | null; result: string; summary: string }, text: string): string {
+  const cost = receipt.costUsd !== null ? `$${receipt.costUsd.toFixed(4)}` : "—";
+  return pageShell(
+    `Job receipt — ${receipt.job}`,
+    `<div class="card" style="text-align:left">
+      <div class="kicker">Job receipt · Muster</div>
+      <h1 style="font-size:1.5rem">${escapeHtml(receipt.job)}</h1>
+      <p class="muted">Completed by <strong>${escapeHtml(receipt.bot)}</strong> · ${escapeHtml(receipt.durationHuman)} · ${receipt.result === "done" ? "✅ done" : "no reply"}</p>
+      <div class="row">
+        <div><div class="stat" style="font-size:1.6rem">${receipt.turns}</div><div class="stat-label">turns</div></div>
+        <div><div class="stat" style="font-size:1.6rem">${(receipt.tokensIn + receipt.tokensOut).toLocaleString()}</div><div class="stat-label">tokens</div></div>
+        <div><div class="stat" style="font-size:1.6rem">${cost}</div><div class="stat-label">cost</div></div>
+      </div>
+      ${receipt.summary ? `<p class="muted" style="text-align:left">“${escapeHtml(receipt.summary)}”</p>` : ""}
+      <pre>${escapeHtml(text)}</pre>
+      <p class="muted">Proof-of-work, verifiable anywhere. Real agents show their work.</p>
+      <a class="btn" href="/">Muster your own agents</a>
     </div>`,
   );
 }
@@ -4102,7 +4130,7 @@ let requestUserEmail = "";
       const card = currentWrappedCard();
       const token = newShareToken();
       wrappedShareTokens.set(token, { token, kind: "wrapped", createdAt: Date.now() });
-      wrappedShareCards.set(token, { card, text: renderWrappedText(card) });
+      wrappedShareCards.set(token, { kind: "wrapped", card, text: renderWrappedText(card) });
       pruneShareTokens(wrappedShareTokens);
       // keep the persisted card map in lockstep with the token map
       for (const key of wrappedShareCards.keys()) {
@@ -4110,6 +4138,36 @@ let requestUserEmail = "";
       }
       saveWrappedShares();
       return json(res, 201, { url: `/w/${token}`, token });
+    }
+    // Share ONE job receipt — the proof-of-work card, as a public link.
+    // Same token discipline as Wrapped shares; the receipt carries the bot
+    // name and summary the user already sees in-app.
+    if (path === "/api/receipts/share" && method === "POST") {
+      const body = await readBody(req);
+      const botId = isText(body.botId) ? body.botId : "";
+      const threadId = isText(body.threadId) ? body.threadId : "";
+      const bot = botId ? store.bot(botId) : undefined;
+      const task = bot && threadId ? store.taskByThread(bot.id, threadId) : undefined;
+      if (!bot || !task) return json(res, 404, { error: "no such task" });
+      const msgs = store.messagesFor(threadId);
+      const lastBotWord = [...msgs].reverse().find((msg) => msg.role === "bot" && msg.kind === "text" && msg.text?.trim());
+      const receipt = buildReceipt({
+        botName: bot.name,
+        taskTitle: task.title,
+        createdAt: task.createdAt,
+        finishedAt: Date.now(),
+        usage: task.usage,
+        finalWord: lastBotWord?.text ?? null,
+      });
+      const token = newShareToken();
+      wrappedShareTokens.set(token, { token, kind: "receipt", createdAt: Date.now() });
+      wrappedShareCards.set(token, { kind: "receipt", receipt, text: renderReceiptText(receipt) });
+      pruneShareTokens(wrappedShareTokens);
+      for (const key of wrappedShareCards.keys()) {
+        if (!wrappedShareTokens.has(key)) wrappedShareCards.delete(key);
+      }
+      saveWrappedShares();
+      return json(res, 201, { url: `/r/${token}`, token });
     }
 
     if (path === "/api/tier" && method === "GET") {
@@ -6022,15 +6080,28 @@ let requestUserEmail = "";
       }
     }
 
-    // Public Wrapped share page — /w/<token>. No auth by design: the token
-    // is the capability (128-bit, unguessable), the card carries no
-    // identity beyond bot names, and this is what makes the weekly
-    // receipt shareable outside the app.
-    m = path.match(/^\/w\/([A-Za-z0-9_-]{16,32})$/);
-    if (m && method === "GET") {
-      const share = wrappedShareCards.get(m[1]!);
+    // Public share pages — /w/<token> (weekly Wrapped) and /r/<token> (one
+    // job receipt). No auth by design: the token is the capability
+    // (128-bit, unguessable), the payload carries no identity beyond bot
+    // names, and this is what makes receipts shareable outside the app.
+    const shareMatch = path.match(/^\/(?:w|r)\/([A-Za-z0-9_-]{16,32})$/);
+    if (shareMatch && method === "GET") {
+      const share = wrappedShareCards.get(shareMatch[1]!);
       if (!share) return html(res, 404, shareNotFoundPage());
+      if (share.kind === "receipt") return html(res, 200, receiptSharePage(share.receipt, share.text));
       return html(res, 200, wrappedSharePage(share.card, share.text));
+    }
+
+    // Machine-readable directory feed — agents and aggregators consume the
+    // catalog the way llms.txt/JSON-feed directories do. Public by design.
+    if (method === "GET" && path === "/api/directory/teams") {
+      try {
+        // SAFETY: fetchTeamCatalog resolves the library's JSON shape.
+        const catalog = (await fetchTeamCatalog()) as { teams?: unknown[] };
+        return json(res, 200, { teams: catalog.teams ?? [] });
+      } catch {
+        return json(res, 502, { error: "The team library is unavailable" });
+      }
     }
 
     // Public team-library directory — /bots. Serves the same catalog the

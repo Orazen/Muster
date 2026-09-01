@@ -70,7 +70,9 @@ export function clampBonusDays(current: number, add: number): number {
 
 export interface ShareToken {
   token: string;
-  kind: "wrapped";
+  /** Which share surface this token belongs to — Wrapped weeks and single
+   * job receipts share the same token store and caps. */
+  kind: "wrapped" | "receipt";
   createdAt: number;
 }
 

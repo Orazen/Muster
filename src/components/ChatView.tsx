@@ -1279,10 +1279,46 @@ function JobReceiptModal({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               >
                 Copy receipt
               </button>
+              <ReceiptShareButton botId={bot.id} threadId={bot.threadId} />
             </div>
           </>
         )}
       </div>
     </div>
+  );
+}
+
+/** Share this receipt as a public proof-of-work page (/r/<token>), copied
+ * to the clipboard on success. */
+function ReceiptShareButton({ botId, threadId }: { botId: string; threadId: string }) {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  async function share(): Promise<void> {
+    setState("busy");
+    try {
+      const r = await fetch("/api/receipts/share", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ botId, threadId }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      // SAFETY: the share route's 200 body is exactly {url: string}.
+      const body = (await r.json()) as { url: string };
+      await navigator.clipboard?.writeText(`${window.location.origin}${body.url}`).catch(() => {});
+      setState("done");
+      setTimeout(() => setState("idle"), 2000);
+    } catch {
+      setState("error");
+      setTimeout(() => setState("idle"), 2500);
+    }
+  }
+  return (
+    <button
+      onClick={() => void share()}
+      disabled={state === "busy"}
+      className="rounded-lg bg-ink px-3 py-1.5 text-[13px] font-semibold text-app hover:opacity-90 disabled:opacity-40"
+      title="Copy a public proof-of-work link for this job"
+    >
+      {state === "busy" ? "Sharing…" : state === "done" ? "Link copied" : state === "error" ? "Failed" : "Share"}
+    </button>
   );
 }
