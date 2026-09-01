@@ -46,9 +46,43 @@ function sinceCaption(at: number | null): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+interface DoctorCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+interface DoctorEngine {
+  instanceId: string;
+  engine: string;
+  ok: boolean;
+  checks: DoctorCheck[];
+  repair: string | null;
+}
+
+/** TinyFish's doctor pattern, applied to engines: a versioned report that
+ * separates "binary reachable" from "models loaded" and names an ordered
+ * repair per unhealthy engine. Read-only — repairs stay human decisions. */
 export function ProviderHealthSection() {
   const [rows, setRows] = useState<ProviderRow[] | null>(null);
   const [error, setError] = useState("");
+  const [doctor, setDoctor] = useState<DoctorEngine[] | null>(null);
+  const [doctorBusy, setDoctorBusy] = useState(false);
+
+  async function runDoctor(): Promise<void> {
+    setDoctorBusy(true);
+    try {
+      const r = await fetch("/api/engines/doctor");
+      // SAFETY: the route's documented shape is {schemaVersion, engines};
+      // anything else resolves to an empty report below.
+      const body = (await r.json()) as { engines?: DoctorEngine[] };
+      setDoctor(body.engines ?? []);
+    } catch {
+      setDoctor([]);
+    } finally {
+      setDoctorBusy(false);
+    }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -126,6 +160,37 @@ export function ProviderHealthSection() {
           <div className="mt-3 text-[12px] leading-relaxed text-ink-secondary">
             "Rate-limited recently" means a turn hit the provider's cap in the last 24h — Muster automatically re-pointed
             those bots at another provider where one was available.
+          </div>
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => void runDoctor()}
+              disabled={doctorBusy}
+              className="rounded-lg border border-hairline/60 px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-raised disabled:opacity-40"
+            >
+              {doctorBusy ? "Checking…" : "Run doctor"}
+            </button>
+            {doctor && (
+              <div className="mt-2 space-y-1.5">
+                {doctor.map((engine) => (
+                  <div key={engine.instanceId} className="text-[12px] leading-relaxed">
+                    <span className={engine.ok ? "text-emerald-400" : "text-amber-400"}>
+                      {engine.ok ? "✓" : "!"}
+                    </span>{" "}
+                    <span className="font-medium capitalize text-ink">{engine.engine}</span>
+                    {engine.checks
+                      .filter((c) => !c.ok)
+                      .map((c) => (
+                        <span key={c.name} className="text-ink-secondary">
+                          {" "}
+                          — {c.name}: {c.detail}
+                        </span>
+                      ))}
+                    {engine.repair && <div className="pl-4 text-ink-secondary">Repair: {engine.repair}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

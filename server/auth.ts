@@ -613,7 +613,11 @@ export function isPublicApiPath(path: string): boolean {
     // The public team-directory feed (/bots page): read-only catalog of
     // installable teams, deliberately consumable without an account so
     // agents and aggregators can index it (server/viral.ts rationale).
-    path === "/api/directory/teams"
+    path === "/api/directory/teams" ||
+    // WhatsApp Business channel: authenticated by Meta's own signature
+    // (X-Hub-Signature-256 over the raw body, timing-safe compare) plus the
+    // subscription handshake token — not by a user session.
+    path === "/api/whatsapp/webhook"
   );
 }
 

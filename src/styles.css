@@ -149,17 +149,23 @@ body {
 }
 
 /* Keep focus visible after components clear the browser outline. These
-   unlayered rules outrank Tailwind utilities without needing !important. */
+   unlayered rules outrank Tailwind utilities without needing !important.
+   Keyboard users get the ring (:focus-visible); pointer clicks on text
+   controls do NOT draw the box — the control's own border highlights. */
 :focus-visible {
-  outline: 2px solid var(--color-focus);
+  outline: 1.5px solid color-mix(in oklab, var(--color-focus) 70%, transparent);
   outline-offset: 2px;
 }
 
-/* Chromium intentionally matches :focus-visible on text controls after a
-   pointer click too. Make that behavior explicit: every focused editor has
-   a clear inset ring, while retaining each control's own border radius. */
+/* Pointer focus on text controls: quiet, no blue box. The caret plus the
+   control's border change is enough — the loud ring is reserved for
+   keyboard navigation. */
 :is(input, textarea, select):focus {
-  outline: 2px solid var(--color-focus);
+  outline: none;
+}
+
+:is(input, textarea, select):focus-visible {
+  outline: 1.5px solid color-mix(in oklab, var(--color-focus) 70%, transparent);
   outline-offset: -2px;
 }
 

@@ -63,6 +63,41 @@ model, computer, and connected apps — open, local-first, and running on the ag
 - **Agents with hands.** Each bot can get a real computer — a cloud Linux desktop it drives while you watch
   live, or your own Mac — plus 500+ connected apps through Composio.
 
+## What's new
+
+- **Sentries** — watcher-type agents. Give any routine a watching prompt and it re-runs on a cadence,
+  ending each run with a one-line state digest; you're only notified when the watched state actually
+  *changes*. Price watches, tender scouts, "did anything break" checks — a roster of persistent watchers,
+  not one-shot invocations.
+- **Proof-of-work sharing** — every settled job gets a receipt (bot, duration, tokens, cost, final word),
+  and both weekly Wrapped summaries and individual receipts can be published as public share links.
+  Your agents' work is verifiable anywhere.
+- **Referrals** — every account gets an invite link; when a friend joins, you both get Pro days.
+- **Provider health dashboard** — spend, traffic, and rate-limit pressure per provider family, computed
+  from your own turn history, with an engine doctor that distinguishes "binary reachable" from
+  "models loaded" and suggests ordered repairs.
+- **WhatsApp channel** — connect a WhatsApp Business number (env-configured Cloud API credentials) and
+  customer messages become bot turns, with replies returning over the Graph API. The channel local
+  businesses already live in.
+- **Public team directory** — the team-library catalog is served at `/bots` with a JSON feed, so the
+  agent ecosystem can index it.
+
+## Muster OS — the direction
+
+Muster is growing into a **web-based operating system for your AI workforce**, in the spirit of
+[webOS Open Source Edition](https://www.webosose.org/) — where apps are first-class citizens of a
+desktop with a service bus underneath:
+
+- **The dock is the roster** — agents are apps: pinned, running with live badges, minimized-but-working.
+- **The shell is a chat** — the primary interaction surface is conversation, not a file manager.
+- **The file system is the vault** — encrypted, agent-scoped, restored with one click.
+- **The app store is the team library** — install finished teams, rate them, publish your own.
+- **The service bus is the harness** — routines, sentries, webhooks, and computer sessions all speak one
+  typed event stream over HTTP + SSE.
+
+The OS metaphor is not cosmetic: it defines the roadmap — agent manifests and lifecycle, a notification
+center, per-agent file scopes, and a real marketplace with receipts as proof-of-run.
+
 ## Features
 
 <table>
@@ -215,6 +250,13 @@ already have a key and don't want to install/auth a separate CLI for it.
 All twelve share one architecture: streaming SSE, transcript-replay, token-level `content.delta` events,
 same as every CLI-driven engine — a bot can't tell the difference between a CLI and an API-key provider.
 
+**Free options — try Muster with zero spend:** several providers have free tiers that work as the API key
+you paste above: **Google AI Studio** gives Gemini free-tier keys in the browser ([aistudio.google.com](https://aistudio.google.com/apikey));
+**Groq** has a generous free tier for Llama/Mixtral ([console.groq.com](https://console.groq.com/keys));
+**OpenRouter** exposes many `:free` models through one key ([openrouter.ai/keys](https://openrouter.ai/keys));
+and **OpenCode Zen** includes free models with the same key as the OpenCode Go engine. Get a key in the
+browser, paste it in **Settings → Providers**, and your first bot is free.
+
 ## How it works
 
 Two processes. The app holds no transports of its own — it sends typed commands over HTTP and folds one SSE
@@ -342,6 +384,7 @@ in the sidebar footer) when you want to enable its integration:
 | Box API key | Give bots an isolated remote Linux computer with a desktop and terminal | [Box API key guide](https://docs.ascii.dev/box/api-keys) |
 | ElevenLabs key | Read replies aloud, and call your bots | [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys) |
 | OpenCode Go key | Run the OpenCode Go engine | [OpenCode Go docs](https://opencode.ai/docs/go/) |
+| WhatsApp Business API creds | Connect a WhatsApp Business number so customers chat with a bot (`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, optional `WHATSAPP_BOT_ID`) | [Meta WhatsApp Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api) |
 
 Composio and Box are third-party services with their own accounts and terms. Box is a paid service after
 its trial, and using a cloud computer may incur charges.
@@ -388,10 +431,10 @@ The `release.yml` workflow builds macOS, Windows, and Linux in parallel, then cr
 ## Status
 
 Early but real — the loop works end to end: message → agent → streamed reply → tools → approvals →
-computer use. macOS and Windows have released builds; Ubuntu 24.04 x64 packages are in beta with the
-capability limits above. Self-hosting is supported via Docker (single-user, see above); a hosted multi-user
-service and mobile connectivity are still being built, and webhook triggers currently
-use the local receiver rather than an always-on hosted relay.
+computer use → receipts → shares → referrals. macOS and Windows have released builds; Ubuntu 24.04 x64
+packages are in beta with the capability limits above. Self-hosting is supported via Docker; Muster Cloud
+is the hosted tier. Sentries, the WhatsApp Business channel, and the provider health dashboard shipped
+most recently — see **What's new** above.
 Voice needs an ElevenLabs key, and calls are macOS-only for now (they ride the same on-device dictation as
 the composer mic) — see [`docs/voice-mode.md`](docs/voice-mode.md) for the design and the known gaps.
 

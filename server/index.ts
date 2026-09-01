@@ -22,6 +22,14 @@ import type { JsonValue } from "./schema.ts";
 import { modelAcceptsImages } from "./contracts.ts";
 import { isSameOrigin, needsSameOriginMutationCheck } from "./origin-gate.ts";
 import {
+  parseInboundMessages,
+  sendWhatsAppText,
+  verifySignature,
+  verifySubscription,
+  whatsappConfigFromEnv,
+  type WhatsAppConfig,
+} from "./whatsapp.ts";
+import {
   forgetShieldSession,
   rememberScrub,
   scrubForCloud,
@@ -1255,6 +1263,14 @@ bus.subscribe((event: RuntimeEvent) => {
         if (store.bot(bot.id)?.activity !== "dead") store.setActivity(bot.id, "idle");
         store.patchBot(bot.id, { unread: true });
         notify(buildNotification("done", bot, event.threadId, reply));
+        // WhatsApp channel: the customer's answer goes back over the Graph
+        // API when their bot finishes, then the thread's reply route is
+        // consumed (each customer message opens a fresh task).
+        const waReply = whatsappReplies.get(event.threadId);
+        if (waReply && whatsappConfig) {
+          whatsappReplies.delete(event.threadId);
+          void sendWhatsAppText(whatsappConfig, waReply.to, reply || "I finished, but had nothing to report.");
+        }
         if (screenPollers.has(bot.id)) {
           // the last live frame becomes a settled inline screen message —
           // the screenshot-in-chat moment. One fresh capture first, so the
@@ -2181,6 +2197,17 @@ const vault = new VaultManager();
 // Tier & trial state — re-read from disk per request (tiny file) so a
 // license drop takes effect without a restart.
 const tierState = (): TierState => loadTierFile(DATA_DIR);
+
+// ── WhatsApp Business channel (server/whatsapp.ts) ─────────────────────
+// Business packs' customer surface: a WhatsApp number becomes a bot. All
+// credentials come from the environment at boot; an unconfigured deploy
+// never mounts the routes. Threads opened by customers keep a reply route
+// so the bot's answer goes back over the Graph API.
+const whatsappConfig: WhatsAppConfig | null = whatsappConfigFromEnv(process.env);
+const whatsappReplies = new Map<string, { to: string; botId: string }>();
+if (whatsappConfig) {
+  console.log(`whatsapp channel active (phone id ${whatsappConfig.phoneNumberId})`);
+}
 
 // ── viral loop state (server/viral.ts) ─────────────────────────────────
 // Public share tokens + their payloads. Tokens are unguessable and carry
@@ -4186,6 +4213,113 @@ let requestUserEmail = "";
         freeBotCap: FREE_BOT_CAP,
         watermark: state.tier === "free",
       });
+    }
+
+    // ── WhatsApp Business channel (server/whatsapp.ts) ──────────────────
+    // GET: Meta's subscription handshake. POST: signed inbound customer
+    // messages → a bot turn; the reply returns over the Graph API when the
+    // turn completes (see the WhatsApp hook in the turn.completed fold).
+    if (path === "/api/whatsapp/webhook") {
+      if (!whatsappConfig) return json(res, 501, { error: "WhatsApp is not configured on this deployment" });
+      if (method === "GET") {
+        const challenge = verifySubscription(url.searchParams, whatsappConfig);
+        if (challenge === null) return json(res, 403, { error: "verification failed" });
+        res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        return res.end(challenge);
+      }
+      if (method === "POST") {
+        const raw = await new Promise<string>((resolve, reject) => {
+          let data = "";
+          let bytes = 0;
+          req.on("data", (c) => {
+            bytes += Buffer.byteLength(c);
+            if (bytes > 256 * 1024) {
+              req.destroy();
+              return reject(Object.assign(new Error("body too large"), { status: 413 }));
+            }
+            data += c;
+          });
+          req.on("end", () => resolve(data));
+          req.on("error", () => reject(Object.assign(new Error("read failed"), { status: 400 })));
+        });
+        // SAFETY: headerString (defined below with the rate limiter) folds
+        // Meta's possibly-repeated header into a single string.
+        const signature = headerString(req.headers, "x-hub-signature-256");
+        if (!verifySignature(whatsappConfig.appSecret, raw, signature)) {
+          return json(res, 401, { error: "invalid signature" });
+        }
+        // Meta requires a fast 200; the turn runs after we acknowledge.
+        res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        res.end("EVENTS_RECEIVED");
+        const messages = parseInboundMessages(raw);
+        const target =
+          (process.env.WHATSAPP_BOT_ID ? store.bot(process.env.WHATSAPP_BOT_ID) : undefined) ??
+          store.bots.find((b) => !b.hidden) ??
+          null;
+        for (const message of messages) {
+          if (!target) break;
+          if (target.busy) {
+            void sendWhatsAppText(whatsappConfig, message.from, "I'm finishing another job right now — message received, one moment.");
+            continue;
+          }
+          const task = store.createTask(target.id, `WhatsApp: ${message.from}`, false);
+          if (!task) continue;
+          whatsappReplies.set(task.threadId, { to: message.from, botId: target.id });
+          void startTurn(target.id, message.text, {
+            threadId: task.threadId,
+            automationSource: "webhook",
+            onDispatchError: (errorMessage) => {
+              void sendWhatsAppText(whatsappConfig, message.from, `I couldn't start that job: ${errorMessage}`);
+              whatsappReplies.delete(task.threadId);
+            },
+          });
+        }
+        return;
+      }
+    }
+
+    // ── Engine doctor — wire-verified health per engine ─────────────────
+    // TinyFish's doctor pattern: a versioned report distinguishing "binary
+    // reachable" from "models loaded" from "bots assigned", with an ordered
+    // repair suggestion per unhealthy engine. Installing/repairing stays a
+    // human decision; the report never mutates anything.
+    if (path === "/api/engines/doctor" && method === "GET") {
+      const described = await registry.describe();
+      const report = described.map((d) => {
+        const bots = store.bots
+          .filter((b) => b.modelSelection?.instanceId === d.instanceId)
+          .map((b) => b.name);
+        const available = d.snapshot.state === "available";
+        const modelsLoaded = d.models.options.length > 0;
+        const checks = [
+          {
+            name: "binary-reachable",
+            ok: available,
+            detail: available ? "engine binary found and responding" : d.snapshot.reason ?? "unavailable",
+          },
+          { name: "models-loaded", ok: modelsLoaded, detail: `${d.models.options.length} models` },
+          {
+            name: "bots-assigned",
+            ok: bots.length > 0,
+            detail: bots.length ? bots.join(", ") : "no bots use this engine yet",
+          },
+        ];
+        const repair =
+          available && modelsLoaded
+            ? null
+            : (d.install ??
+              `Check that the ${d.cliDefault ?? d.driverKind} CLI is on PATH, or pick another engine in Settings → Engines`);
+        return {
+          schemaVersion: 1 as const,
+          instanceId: d.instanceId,
+          engine: d.displayName,
+          access: d.access,
+          ok: checks.filter((c) => c.name !== "bots-assigned").every((c) => c.ok),
+          checks,
+          repair,
+        };
+      });
+      return json(res, 200, { schemaVersion: 1, engines: report });
     }
 
     // ── referral program (server/viral.ts) ──────────────────────────────
