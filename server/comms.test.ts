@@ -496,7 +496,9 @@ describe("comms e2e (fake ACP fleet)", () => {
         await new Promise((r) => setTimeout(r, 250));
       }
     },
-    60_000,
+    // 60s was enough locally but not on 2-vCPU CI runners running the full
+    // spawn-heavy suite alongside everything else.
+    180_000,
   );
 
   it(
@@ -550,7 +552,8 @@ describe("comms e2e (fake ACP fleet)", () => {
         channel.messages.some((m: any) => m.from?.botId === asker.id && m.text?.includes("delegated task")),
       ).toBe(true);
     },
-    45_000,
+    // Same CI-load consideration as the sibling e2e above.
+    180_000,
   );
 
   it(

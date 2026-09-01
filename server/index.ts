@@ -2937,43 +2937,57 @@ function loadVaultUsers(): string[] {
 
 async function reloadProviders() {
   bus.detachAll();
-  await registry.disposeAll();
-  await registry.load({ ...allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV), ...instanceConfigs(cfg) });
-  bus.attach(registry.instances());
-  // Otherwise bootSelection stays whatever it was at process boot forever —
-  // any bot created after this reload (e.g. right after saving the very
-  // first provider key) would still inherit the stale empty selection from
-  // when zero engines existed, immediately hitting the same
-  // "provider instance \"\" is unavailable" error resolveInstanceForBot()
-  // exists to heal for *existing* bots. New bots deserve the correct
-  // default straight away instead of relying on that lazy heal.
-  bootSelection = await defaultSelection();
-  // A killed turn's terminal events can die with the old fleet (dispose is
-  // async under the hood), stranding the bot busy — and its screen poller —
-  // forever. Settle anything still marked busy.
-  for (const b of store.bots.filter((b) => b.busy)) {
-    const heldKey = threadDesktopTarget.get(b.threadId);
-    if (heldKey !== undefined) {
-      const vmLease = localVmLeases.forTarget(heldKey).current(localVmOwnerBusy);
-      if (vmLease?.botId === b.id) {
-        localVmLeases.forTarget(heldKey).release(vmLease.threadId);
-        if (localVmActiveThreads.get(heldKey) === vmLease.threadId) localVmActiveThreads.delete(heldKey);
-        threadDesktopTarget.delete(vmLease.threadId);
+  // Disposal below kills healthy engines on purpose. The reaper must not
+  // read those exits as crashes: its 5s tick races the settle loop further
+  // down, and a stolen settle stamps "Delegated turn was lost" over the
+  // honest "provider settings changed" chip.
+  reaper.suspend();
+  try {
+    await registry.disposeAll();
+    await registry.load({ ...allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV), ...instanceConfigs(cfg) });
+    bus.attach(registry.instances());
+    // Otherwise bootSelection stays whatever it was at process boot forever —
+    // any bot created after this reload (e.g. right after saving the very
+    // first provider key) would still inherit the stale empty selection from
+    // when zero engines existed, immediately hitting the same
+    // "provider instance \"\" is unavailable" error resolveInstanceForBot()
+    // exists to heal for *existing* bots. New bots deserve the correct
+    // default straight away instead of relying on that lazy heal.
+    bootSelection = await defaultSelection();
+    // A killed turn's terminal events can die with the old fleet (dispose is
+    // async under the hood), stranding the bot busy — and its screen poller —
+    // forever. Settle anything still marked busy.
+    for (const b of store.bots.filter((b) => b.busy)) {
+      const heldKey = threadDesktopTarget.get(b.threadId);
+      if (heldKey !== undefined) {
+        const vmLease = localVmLeases.forTarget(heldKey).current(localVmOwnerBusy);
+        if (vmLease?.botId === b.id) {
+          localVmLeases.forTarget(heldKey).release(vmLease.threadId);
+          if (localVmActiveThreads.get(heldKey) === vmLease.threadId) localVmActiveThreads.delete(heldKey);
+          threadDesktopTarget.delete(vmLease.threadId);
+        }
       }
+      stopScreenPoller(b.id);
+      // Settle the watchdog too: a turn left in the reaper's snapshot could
+      // absorb a later unrelated process death once sweeping resumes.
+      watchdog.settle(b.threadId);
+      finalizeDelegationWatch(
+        b.threadId,
+        false,
+        "",
+        "Delegated turn did not finish — provider settings changed",
+      );
+      store.appendMessage(b.threadId, {
+        role: "bot",
+        kind: "activity",
+        tool: { name: "error: turn interrupted — provider settings changed", ok: false },
+      });
+      store.setActivity(b.id, "idle");
     }
-    stopScreenPoller(b.id);
-    finalizeDelegationWatch(
-      b.threadId,
-      false,
-      "",
-      "Delegated turn did not finish — provider settings changed",
-    );
-    store.appendMessage(b.threadId, {
-      role: "bot",
-      kind: "activity",
-      tool: { name: "error: turn interrupted — provider settings changed", ok: false },
-    });
-    store.setActivity(b.id, "idle");
+  } finally {
+    // Consume every exit journalled during the suspended window — including
+    // the deliberate disposal kills — before crash attribution resumes.
+    reaper.resume();
   }
   // killed turns settle here without a turn.completed event, so anything
   // queued behind them drains now — onto the freshly loaded fleet

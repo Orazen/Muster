@@ -92,6 +92,47 @@ describe("LivenessReaper", () => {
     expect(lost).toHaveLength(0);
   });
 
+  it("attributes a death to the newest matching turn, not the delegating ancestor", () => {
+    const lost: Array<WatchedTurn> = [];
+    const reaper = new LivenessReaper({
+      checkMs: 1_000,
+      deathsSince: () => [
+        // the delegated child's engine died right after its spawn; the
+        // delegating parent's older turn also satisfies the lower bound
+        death({ spawnedAt: 50_000 }),
+      ],
+      snapshotTurns: () => [
+        turn({ threadId: "parent", startedAt: 10_000 }),
+        turn({ threadId: "child", startedAt: 49_800 }),
+      ],
+      onLost: (t) => lost.push(t),
+    });
+    reaper.sweep();
+    expect(lost.map((t) => t.threadId)).toEqual(["child"]);
+  });
+
+  it("suspend() blanks attribution; resume() consumes deaths journalled meanwhile", () => {
+    const lost: Array<WatchedTurn> = [];
+    const journal: ProcessDeath[] = [];
+    let seq = 0;
+    const reaper = new LivenessReaper({
+      checkMs: 1_000,
+      deathsSince: (m) => journal.filter((d) => d.exitedAtSeq > m),
+      snapshotTurns: () => [turn()],
+      onLost: (t) => lost.push(t),
+    });
+    reaper.start();
+    reaper.suspend();
+    // a fleet disposal kill lands while suspended; a manual sweep must
+    // attribute nothing, and resume must swallow it rather than replay it
+    journal.push(death({ exitedAtSeq: ++seq }));
+    reaper.sweep();
+    expect(lost).toHaveLength(0);
+    reaper.resume();
+    reaper.sweep();
+    expect(lost).toHaveLength(0);
+  });
+
   it("start() consumes pre-existing journal entries instead of replaying them", () => {
     let mark = 0;
     const lost: Array<WatchedTurn> = [];

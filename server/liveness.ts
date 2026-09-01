@@ -33,6 +33,7 @@ export class LivenessReaper {
   private timer: ReturnType<typeof setInterval> | null = null;
   /** Journal cursor: exits with a sequence at or below this are consumed. */
   private mark = 0;
+  private suspended = false;
   private readonly opts: LivenessReaperOptions;
 
   // plain field assignment, not a parameter property — Node type-stripping
@@ -56,8 +57,24 @@ export class LivenessReaper {
     this.timer = null;
   }
 
+  /** Silence crash attribution while processes are being killed ON PURPOSE
+   * (fleet disposal on provider reload). Without this the reaper's tick can
+   * beat the disposal path's own settle loop and stamp an honest-looking
+   * "crashed mid-turn" note over a deliberate interruption. The journal is
+   * drained on resume so exits recorded during the window are never
+   * attributed afterwards. */
+  suspend(): void {
+    this.suspended = true;
+  }
+
+  resume(): void {
+    this.suspended = false;
+    this.mark = this.opts.deathsSince(0).at(-1)?.exitedAtSeq ?? this.mark;
+  }
+
   /** Visible for tests; the interval calls this. */
   sweep(): void {
+    if (this.suspended) return;
     const deaths = this.opts.deathsSince(this.mark);
     if (deaths.length === 0) return;
     this.mark = deaths[deaths.length - 1]!.exitedAtSeq;
@@ -66,8 +83,15 @@ export class LivenessReaper {
     // same sweep, and onLost's own settle path may not have run yet.
     const open = this.opts.snapshotTurns();
     for (const death of deaths) {
-      // oldest matching turn wins — the journal is ordered by exit time
-      const index = open.findIndex((t) => death.spawnedAt >= t.startedAt - skew);
+      // newest matching turn wins. A delegating parent's turn started long
+      // before the child's engine process spawned, so both match the
+      // lower-bound rule; the death belongs to the child, whose start sits
+      // right at the spawn — an oldest-first rule would steal it for the
+      // ancestor and kill the delegation mid-flight.
+      let index = -1;
+      for (let i = 0; i < open.length; i++) {
+        if (death.spawnedAt >= open[i]!.startedAt - skew) index = i;
+      }
       if (index === -1) continue;
       const [turn] = open.splice(index, 1);
       this.opts.onLost(turn!, death);
