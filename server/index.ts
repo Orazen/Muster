@@ -4099,7 +4099,17 @@ let requestUserEmail = "";
         : "";
       if (!code) return json(res, 400, { error: "that referral code isn't valid" });
       const db = getDb();
-      const referee = requestUserId ?? primaryUserId();
+      // Resolve the referee from the session — the desktop gate above skips
+      // session resolution, but sign-ins DO exist here (cloud accounts work
+      // on desktop too), and redeeming must be attributable to the actual
+      // account, not collapsed onto the primary user. Falls back to the
+      // primary user only when no session is present at all.
+      let sessionUserId = requestUserId;
+      if (!sessionUserId) {
+        const refereeSession = await getSession(req);
+        sessionUserId = refereeSession?.userId;
+      }
+      const referee = sessionUserId ?? primaryUserId();
       if (!referee) return json(res, 401, { error: "sign in before redeeming a referral code" });
       // SAFETY: referral.ownerUserId is the code's owning user, enforced by
       // the table's foreign key to "user".
