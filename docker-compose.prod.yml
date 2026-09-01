@@ -11,7 +11,11 @@ services:
       - NODE_ENV=production
       - OMB_HOST=0.0.0.0
       - OMB_PORT=8799
-      - OMB_PUBLIC_HOST=${DOMAIN}
+      # DOMAIN must be set in the deployment environment. If it is empty the
+      # public origin never reaches better-auth's trustedOrigins and every
+      # email sign-in 403s with INVALID_ORIGIN — so default to the known
+      # production host rather than silently deploying broken auth.
+      - OMB_PUBLIC_HOST=${DOMAIN:-muster.orazen.online}
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
     volumes:
       - muster-data:/data

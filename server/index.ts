@@ -2313,6 +2313,13 @@ async function runGroupMemberTurn(
     });
     return true;
   }
+  // Claim the busy flag SYNCHRONOUSLY, before the first await below: this
+  // function can run concurrently for the same bot from two groups' queue
+  // chains, and a check-then-act gap across `connectedAppsIntegration`
+  // let both chains pass the busy check and dispatch two provider
+  // processes for one bot. (startTurn claims the same way.) Early returns
+  // after this point must release the claim.
+  store.setActivity(bot.id, "working");
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
   try {
     if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
@@ -2320,6 +2327,7 @@ async function runGroupMemberTurn(
       if (connection) integrations.composio = connection;
     }
   } catch (error) {
+    store.setActivity(bot.id, "idle");
     store.appendMessage(group.threadId, {
       role: "bot",
       kind: "activity",
@@ -2328,7 +2336,6 @@ async function runGroupMemberTurn(
     });
     return true;
   }
-  store.setActivity(bot.id, "working");
 
   store.patchGroup(group.id, { busyBotId: bot.id }); // the store's change stream carries the frame
   groupSpeakers.set(group.threadId, { botId: bot.id, name: bot.name, color: bot.color });
@@ -3273,6 +3280,11 @@ let requestUserEmail = "";
     // These live next to pairing because they serve the same surface and
     // must work on any deployment acting as "the cloud" (prod + e2e twin).
     if (method === "GET" && path === "/desktop-auth/start") {
+      // Pre-gate route that mints server state: throttle per client so an
+      // anonymous loop over this URL can't grow the grants map unboundedly.
+      if (!consumeEgressBucket(clientIpForLimiting(req))) {
+        return json(res, 429, { error: "too many sign-in attempts — wait a minute and try again" });
+      }
       // Browser navigated here from the desktop app. Validate the loopback
       // target BEFORE spending anything, then bounce into Google with the
       // grant riding through better-auth's callbackURL.

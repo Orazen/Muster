@@ -42,8 +42,18 @@ export async function connectMcpStdio(
   opts: { timeoutMs?: number } = {},
 ): Promise<McpClient> {
   const timeoutMs = opts.timeoutMs ?? 15_000;
+  // MCP servers are often third-party binaries from npm; handing them the
+  // whole harness process.env would leak BETTER_AUTH_SECRET, BOX_TOKEN,
+  // COMPOSIO_API_KEY and every other credential to one malicious package.
+  // Spawn with a minimal allowlist plus the entry's own declared env.
   const child: ChildProcess = spawn(command, args, {
-    env: { ...process.env, ...env },
+    env: {
+      PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
+      HOME: process.env.HOME,
+      LANG: process.env.LANG,
+      TMPDIR: process.env.TMPDIR,
+      ...env,
+    },
     stdio: ["pipe", "pipe", "pipe"],
   });
 

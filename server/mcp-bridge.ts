@@ -133,6 +133,9 @@ export interface BridgeOptions {
   /** Enables the who-is-driving gate: the harness's loopback control
    * endpoint plus its per-boot token. Absent → fully transparent bridge. */
   gate?: { url: string; token: string };
+  /** Extra env for the target server (e.g. CUA runtime flags). Merged over
+   * the minimal allowlist base — never over the harness process.env. */
+  env?: Record<string, string>;
 }
 
 /** Collect a byte stream into complete newline-terminated lines. MCP's
@@ -203,9 +206,19 @@ export function createGateInterceptor(options: {
 }
 
 export function runMcpBridge(options: BridgeOptions): void {
+  // Same allowlist discipline as mcp-client.ts: the bridged server is
+  // third-party code and must not inherit harness secrets (BETTER_AUTH_SECRET,
+  // provider tokens) through the environment. The bridge needs PATH so the
+  // command resolves, plus the caller-supplied env for the target.
   const child = spawn(options.command, options.args, {
     shell: false,
-    env: { ...process.env, PATH: augmentedPath() },
+    env: {
+      PATH: augmentedPath(),
+      HOME: process.env.HOME,
+      LANG: process.env.LANG,
+      TMPDIR: process.env.TMPDIR,
+      ...options.env,
+    },
     stdio: ["pipe", "pipe", "pipe"],
   });
 

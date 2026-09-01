@@ -6,7 +6,9 @@
 // configured-flags, never values.
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
 import { join } from "node:path";
-import { readFileSync, writeFileSync, existsSync, renameSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+
+import { writeFileAtomic } from "./atomic.ts";
 
 export interface UserKeyEntry {
   /** base64 iv:ciphertext:authTag */
@@ -69,9 +71,10 @@ function loadVault(dataDir: string): VaultFile {
 
 function saveVault(dataDir: string, vault: VaultFile): void {
   const p = vaultPath(dataDir);
-  const tmp = `${p}.tmp`;
-  writeFileSync(tmp, JSON.stringify(vault));
-  renameSync(tmp, p); // atomic swap — no torn writes
+  // 0600 like config.json: the ciphertext is only as strong as the secret
+  // beside it, and on desktop installs BETTER_AUTH_SECRET sits in the same
+  // directory — a world-readable vault would hand both to any local process.
+  writeFileAtomic(p, JSON.stringify(vault), { mode: 0o600 });
 }
 
 /** Store one provider key for a user. Overwrites silently. */

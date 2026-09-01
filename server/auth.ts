@@ -31,7 +31,21 @@ export const PUBLIC_BASE_URL = (() => {
   const publicHost = process.env.OMB_PUBLIC_HOST?.trim();
   if (publicHost) return `https://${publicHost}`;
 
-  return `http://127.0.0.1:${process.env.OMB_PORT ?? "8799"}`;
+  const loopback = `http://127.0.0.1:${process.env.OMB_PORT ?? "8799"}`;
+  // A self-hosted deploy behind a proxy without a public-host override gets
+  // a loopback PUBLIC_BASE_URL — which then misses its own public origin in
+  // better-auth's trustedOrigins, and every email sign-in fails with 403
+  // INVALID_ORIGIN. Fail loudly at boot instead of silently breaking auth.
+  const selfHosted =
+    (process.env.OMB_HOST ?? "127.0.0.1") !== "127.0.0.1" || Boolean(process.env.OMB_PUBLIC_HOST);
+  if (selfHosted) {
+    console.warn(
+      "[auth] OMB_HOST is non-loopback but neither OMB_PUBLIC_URL nor OMB_PUBLIC_HOST is set — " +
+        `PUBLIC_BASE_URL defaults to ${loopback}, so email sign-in from the public origin will be ` +
+        "rejected (INVALID_ORIGIN). Set OMB_PUBLIC_HOST (e.g. muster.example.com) to fix.",
+    );
+  }
+  return loopback;
 })();
 
 /**
@@ -274,7 +288,9 @@ export function mintSession(
 ) {
   const db = getDb();
   const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60_000);
+  // Match better-auth's session.expiresIn (7 days): a bridged session that
+  // outlives the configured policy escapes refresh handling entirely.
+  const expiresAt = new Date(Date.now() + 60 * 60 * 24 * 7 * 1000);
   db.prepare(
     'INSERT INTO "session" ("id", "expiresAt", "token", "createdAt", "updatedAt", "ipAddress", "userAgent", "userId") VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
   ).run(
