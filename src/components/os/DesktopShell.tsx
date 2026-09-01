@@ -11,6 +11,7 @@ import { AgentAvatar } from "@/components/Avatar";
 import { MusterbotMark } from "@/components/MusterbotMark";
 import { RoomsPanel } from "@/components/os/RoomsPanel";
 import "./os.css";
+import "./os-tokens.css";
 import "./rooms.css";
 
 /** Short human label for what a bot is doing right now. Mirrors the

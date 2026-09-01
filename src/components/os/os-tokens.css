@@ -1,0 +1,28 @@
+/* Muster OS design tokens — gaia-ui (MIT) patterns adapted to Muster's
+   existing variable names. Display tracking and eased motion for the /os
+   shell; loaded after styles.css so these refine, not replace. */
+
+.os-desktop {
+  --os-display-tracking: -0.02em;
+  --os-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --os-motion: 160ms;
+}
+
+/* gaia display tracking on the OS chrome headings */
+.os-topbar,
+.os-window h2,
+.os-empty {
+  letter-spacing: var(--os-display-tracking);
+}
+
+/* eased motion for dock + window surfaces */
+.os-desktop * {
+  transition-timing-function: var(--os-ease);
+  transition-duration: var(--os-motion);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .os-desktop * {
+    transition-duration: 0.01ms !important;
+  }
+}

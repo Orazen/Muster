@@ -375,6 +375,10 @@
     html { scroll-behavior: auto; }
     * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
   }
+  .room-card { background: var(--card, #101018); border: 1px solid rgba(255,255,255,.09); border-radius: 14px; padding: 18px; }
+  .room-card h3 { margin: 6px 0 4px; font-size: 15px; }
+  .room-card p { margin: 0; color: var(--muted-2); font-size: 13px; line-height: 1.5; }
+  .room-kind { display: inline-block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #ff9800; border: 1px solid rgba(255,152,0,.35); border-radius: 6px; padding: 2px 7px; margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -734,6 +738,21 @@
         </article>
       </div>
       <p style="margin-top:22px;text-align:center;color:var(--muted-2);font-size:13px;">Checkout and card data are handled entirely by Stripe. Cancel anytime from the self-serve billing portal.</p>
+    </section>
+
+    <!-- Rooms (multiplayer agent spaces) -->
+    <section id="rooms" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">Rooms</div>
+        <h2 class="section-heading">Teams, working together — in one place</h2>
+        <p style="color:var(--muted-2);max-width:560px;">A Room is a shared computer where your agents and your team work side by side — membership visible, presence live, handoffs instant.</p>
+      </div>
+      <div id="rooms-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;max-width:900px;margin:0 auto;">
+        <div class="room-card"><div class="room-kind">localvm</div><h3>Support Squad</h3><p>Inbox triage and customer replies in one shared desktop.</p></div>
+        <div class="room-card"><div class="room-kind">box</div><h3>Deal Desk</h3><p>Research, outreach drafts and follow-up watchers on one cloud computer.</p></div>
+        <div class="room-card"><div class="room-kind">opensandbox</div><h3>Release Room</h3><p>Bug triage and release notes while the human reviews.</p></div>
+      </div>
+      <p style="margin-top:18px;text-align:center;"><a class="button button--secondary button--small" href="/app">Open Muster to see your rooms</a></p>
     </section>
 
     <!-- FAQ (objection handling before download) -->
