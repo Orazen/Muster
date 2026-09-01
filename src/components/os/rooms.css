@@ -1,0 +1,243 @@
+/* Rooms panel — multiplayer agent rooms on the OS desktop. CSS-first like
+   os.css: everything reads the app's theme custom properties so skins and
+   themes apply here for free; animations sit in the 150–200ms band. */
+
+.rooms-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(420px, 100%);
+  padding: 14px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 12px;
+  background: var(--color-panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+}
+
+.rooms-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rooms-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--color-ink);
+}
+
+.rooms-self-name {
+  width: 120px;
+  padding: 4px 8px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: var(--color-inset);
+  color: var(--color-ink);
+  font-size: 12px;
+}
+.rooms-self-name:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-hairline));
+}
+
+/* ── new-room form ───────────────────────────────────────────────────── */
+
+.rooms-new {
+  display: flex;
+  gap: 6px;
+}
+
+.rooms-input,
+.rooms-select {
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: var(--color-inset);
+  color: var(--color-ink);
+  font-size: 12px;
+}
+.rooms-input {
+  flex: 1;
+}
+.rooms-select {
+  flex: 0 0 auto;
+}
+.rooms-input:focus,
+.rooms-select:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-hairline));
+}
+
+/* ── buttons ─────────────────────────────────────────────────────────── */
+
+.rooms-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-panel) 80%, transparent);
+  color: var(--color-ink-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.rooms-button:hover:not(:disabled),
+.rooms-button:focus-visible {
+  background: var(--color-raised);
+  color: var(--color-ink);
+}
+.rooms-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.rooms-button-primary {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-hairline));
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-ink);
+}
+.rooms-button-primary:hover:not(:disabled),
+.rooms-button-primary:focus-visible {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+.rooms-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.rooms-close:hover:not(:disabled),
+.rooms-close:focus-visible {
+  background: var(--color-raised);
+  color: var(--color-ink);
+}
+.rooms-close:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ── room list ───────────────────────────────────────────────────────── */
+
+.rooms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  max-height: 320px;
+}
+
+.rooms-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-inset) 70%, transparent);
+  animation: rooms-row-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes rooms-row-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.rooms-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.rooms-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rooms-row-computer {
+  font-size: 11px;
+  color: var(--color-ink-secondary);
+}
+
+.rooms-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── member chips ────────────────────────────────────────────────────── */
+
+.rooms-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rooms-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-hairline);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--color-ink-secondary);
+}
+
+.rooms-chip-bot {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-hairline));
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+.rooms-chip-human {
+  border-color: color-mix(in srgb, var(--color-warning) 40%, var(--color-hairline));
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+}
+
+.rooms-chip-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── states ──────────────────────────────────────────────────────────── */
+
+.rooms-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-ink-secondary);
+}
+
+.rooms-error {
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, var(--color-hairline));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  font-size: 12px;
+  color: var(--color-ink);
+}

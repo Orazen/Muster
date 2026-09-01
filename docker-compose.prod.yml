@@ -16,6 +16,9 @@ services:
       # email sign-in 403s with INVALID_ORIGIN — so default to the known
       # production host rather than silently deploying broken auth.
       - OMB_PUBLIC_HOST=${DOMAIN:-muster.orazen.online}
+      # Referral loop needs self-serve accounts. Override with
+      # OMB_ALLOW_SIGNUPS=false to close them again.
+      - OMB_ALLOW_SIGNUPS=${OMB_ALLOW_SIGNUPS:-true}
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
     volumes:
       - muster-data:/data

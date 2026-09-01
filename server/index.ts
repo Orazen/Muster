@@ -31,6 +31,8 @@ import {
   type WhatsAppConfig,
 } from "./whatsapp.ts";
 import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from "./whatsapp-threads.ts";
+import { appendWhy, extractWhyFromReply, WHY_MARKER } from "./why-journal.ts";
+import { closeRoom, createRoom, joinRoom, leaveRoom, listRooms } from "./agent-rooms.ts";
 import {
   forgetShieldSession,
   rememberScrub,
@@ -1276,6 +1278,22 @@ bus.subscribe((event: RuntimeEvent) => {
         if (waReply && whatsappConfig) {
           whatsappReplies.delete(event.threadId);
           void sendWhatsAppText(whatsappConfig, waReply.to, reply || "I finished, but had nothing to report.");
+        }
+        // Why-journal: bots that answer the WHY prompt get their decisions
+        // banked next to the receipt — the "why" layer of the audit trail.
+        if (reply.includes(WHY_MARKER)) {
+          const { intent, decisions } = extractWhyFromReply(reply);
+          if (intent) {
+            appendWhy(DATA_DIR, {
+              runId: randomUUID(),
+              botId: bot.id,
+              threadId: event.threadId,
+              at: Date.now(),
+              intent,
+              decisions,
+              outcome: event.ok ? "done" : "partial",
+            });
+          }
         }
         if (screenPollers.has(bot.id)) {
           // the last live frame becomes a settled inline screen message —
@@ -4360,6 +4378,57 @@ let requestUserEmail = "";
           : `${d.displayName}: still unavailable after reload — ${d.snapshot.reason ?? "unknown reason"}`,
       }));
       return json(res, 200, { actions });
+    }
+
+    // ── Multiplayer agent rooms (server/agent-rooms.ts) ─────────────────
+    // A room = a shared computer with live presence: bots and humans work
+    // in one place, membership visible to everyone in it.
+    if (path === "/api/rooms" && method === "GET") {
+      return json(res, 200, { rooms: listRooms() });
+    }
+    if (path === "/api/rooms" && method === "POST") {
+      const body = await readBody(req);
+      const name = isText(body.name) ? body.name.trim() : "";
+      const computerKind = isText(body.computerKind) ? body.computerKind : "";
+      if (!name || !["box", "localvm", "opensandbox"].includes(computerKind)) {
+        return json(res, 400, { error: "a room needs a name and a computer kind (box, localvm, opensandbox)" });
+      }
+      const computerRef = isText(body.computerRef) ? body.computerRef : "";
+      try {
+        return json(res, 201, { room: createRoom(name, computerKind, computerRef, Date.now()) });
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    let roomMatch = path.match(/^\/api\/rooms\/([\w-]+)\/(join|leave)$/);
+    if (roomMatch && method === "POST") {
+      const [roomId, verb] = [roomMatch[1]!, roomMatch[2]!];
+      const body = await readBody(req);
+      if (verb === "join") {
+        const kind = isText(body.kind) ? body.kind : "";
+        const memberId = isText(body.id) ? body.id : "";
+        const memberName = isText(body.name) ? body.name : "";
+        if (!memberId || (kind !== "bot" && kind !== "human")) {
+          return json(res, 400, { error: "join needs {kind: bot|human, id, name}" });
+        }
+        const result = joinRoom(roomId, { kind, id: memberId, name: memberName }, Date.now());
+        if (result === "full") return json(res, 409, { error: "that room is full" });
+        if (result === "bad_member") return json(res, 400, { error: "bad member shape" });
+        if (result !== "ok") return json(res, 404, { error: "no such room" });
+        const rooms = listRooms();
+        const joined = rooms.find((r) => r.id === roomId);
+        if (!joined) return json(res, 404, { error: "no such room" });
+        return json(res, 200, { room: joined });
+      }
+      const memberId = isText(body.memberId) ? body.memberId : "";
+      if (!memberId) return json(res, 400, { error: "leave needs {memberId}" });
+      const left = leaveRoom(roomId, memberId, Date.now());
+      return json(res, left ? 200 : 404, left ? { ok: true } : { error: "no such room or member" });
+    }
+    roomMatch = path.match(/^\/api\/rooms\/([\w-]+)$/);
+    if (roomMatch && method === "DELETE") {
+      const closed = closeRoom(roomMatch[1]!);
+      return json(res, closed ? 200 : 404, closed ? { ok: true } : { error: "no such room" });
     }
 
     // ── referral program (server/viral.ts) ──────────────────────────────

@@ -9,7 +9,9 @@ import { ArrowLeft, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "@/components/Avatar";
 import { MusterbotMark } from "@/components/MusterbotMark";
+import { RoomsPanel } from "@/components/os/RoomsPanel";
 import "./os.css";
+import "./rooms.css";
 
 /** Short human label for what a bot is doing right now. Mirrors the
  * sidebar's preview priority: waiting-on-you outranks busy. */
@@ -116,6 +118,7 @@ export function DesktopShell() {
       </header>
       <main className="os-body">
         {bots.length === 0 && <div className="os-empty">Your roster is empty — muster a teammate from the app.</div>}
+        <RoomsPanel />
         {openBot && (
           <AgentWindow bot={openBot} engineName={engineFor(openBot)} onClose={() => setOpenBotId(null)} />
         )}
