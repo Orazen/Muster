@@ -8,12 +8,14 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { augmentedPath } from "./env-path.ts";
 import { DATA_DIR } from "./config.ts";
+import { writeFileAtomic } from "./atomic.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 const run = promisify(execFile);
@@ -276,7 +278,7 @@ function statusProblem(status: ContainerComputerStatus): string | null {
   if (status.network === "unsafe") return "The existing Local VM exposes its viewer publicly; recreate it";
   if (status.security === "unsafe") return "The existing Local VM is missing safety limits; recreate it";
   if (status.persistence === "unsafe") return "The existing Local VM is missing its durable workspace; recreate it";
-  if (status.container === "stopped") return "This desktop image cannot safely resume; recreate the Local VM";
+  if (status.container === "stopped") return "The Local VM is stopped — start it again from the previous step";
   if (status.desktop_error) return `The Local VM desktop failed to start: ${status.desktop_error}`;
   if (!status.desktopReady) return "The Local VM started, but Cua Driver is not ready yet";
   return null;
@@ -656,6 +658,35 @@ function dockerSecurityIsHardened(
   return capDrop.includes("all") && capAdd.join(",") === "setgid,setuid";
 }
 
+/** The viewer password for one Local VM target: generated once per VM
+ * lifetime, persisted 0600 under DATA_DIR so (a) the real run command and
+ * (b) the user-facing "Show command" panel always agree, instead of the
+ * panel showing a CHANGE_ME placeholder while the actual container got a
+ * random secret. Recreating the VM rotates the password. */
+export function viewerPasswordFor(target: LocalVmTarget): string {
+  const passwordPath = join(DATA_DIR, "vm-secrets", `${target.containerName}.vnc-pw`);
+  try {
+    const existing = readFileSync(passwordPath, "utf8").trim();
+    if (existing) return existing;
+  } catch {
+    /* first generation for this target */
+  }
+  const password = randomBytes(9).toString("base64url");
+  mkdirSync(join(DATA_DIR, "vm-secrets"), { recursive: true });
+  writeFileAtomic(passwordPath, password, { mode: 0o600 });
+  return password;
+}
+
+/** Rotate the stored password — called when a VM is recreated so the old
+ * viewer credential dies with the old container. */
+export function rotateViewerPassword(target: LocalVmTarget): void {
+  try {
+    rmSync(join(DATA_DIR, "vm-secrets", `${target.containerName}.vnc-pw`));
+  } catch {
+    /* nothing stored yet */
+  }
+}
+
 export function containerRunArgs(
   runtime: Runtime,
   password = "CHANGE_ME",
@@ -779,6 +810,7 @@ export async function containerComputerAction(
     throw Object.assign(new Error("The Local VM is not running"), { status: 409 });
   }
   if (action === "remove" && before.container === "missing") return before;
+  if (action === "remove") rotateViewerPassword(target);
 
   if (action === "pull") {
     await prepareManagedImage(runtime, runner);
@@ -786,7 +818,7 @@ export async function containerComputerAction(
     if (action === "run") await ensureVmWorkspace(platform, target.workspaceDir);
     const args =
       action === "run"
-        ? containerRunArgs(runtime, randomBytes(6).toString("base64url"), target)
+        ? containerRunArgs(runtime, viewerPasswordFor(target), target)
         : action === "remove"
           ? ["rm", runtime === "container" ? "--force" : "-f", target.containerName]
           : [action, target.containerName];
@@ -805,7 +837,7 @@ export async function containerComputerAction(
             await runner(runtime, ["rm", runtime === "container" ? "--force" : "-f", target.containerName], 60_000);
           }
         });
-        await runner(runtime, containerRunArgs(runtime, randomBytes(6).toString("base64url"), target, false), 2 * 60_000);
+        await runner(runtime, containerRunArgs(runtime, viewerPasswordFor(target), target, false), 2 * 60_000);
       } catch {
         throw error;
       }
@@ -976,7 +1008,11 @@ export function setupCommands(
     // This is the inspectable base download. The normal Prepare button also
     // builds the checksum-pinned 0.20.0 derivative automatically.
     pull: command(["pull", BASE_IMAGE]),
-    run: command(containerRunArgs(runtime, "CHANGE_ME", target)),
+    // The displayed command shows the target's REAL stored viewer password
+    // (localhost-only, 0600 secret file) so what the user runs by hand and
+    // what Muster runs agree — previously this was a CHANGE_ME placeholder
+    // while the actual container got a random secret.
+    run: command(containerRunArgs(runtime, viewerPasswordFor(target), target)),
     start: null,
     stop: command(["stop", target.containerName]),
     remove: command(["rm", runtime === "container" ? "--force" : "-f", target.containerName]),

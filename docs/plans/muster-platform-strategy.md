@@ -229,3 +229,81 @@ on-prem).
 7. **Org Connect** — one authenticated MCP/skill gateway URL for teams (OpenWork) — Teams/Enterprise pillar.
 8. **Side-by-side multi-model asks** in chat (Cherry) — dispatch fan-out view.
 9. **Spaces-style team packs** with bound secrets (Eigent) — marketplace SKUs.
+
+## Appendix C — gstack (garrytan/gstack) study, 2026-09-03
+
+Garry Tan's MIT-licensed Claude Code skill pack: 23 specialist slash commands + 8 power
+tools organized as a sprint — Think → Plan → Build → Review → Test → Ship → Reflect.
+His 2026 claim: ~810× his 2013 logical-lines/day pace, 10-15 parallel sprints via Conductor.
+Read the full README end to end; this is the most credible "one person ships like a team"
+workflow ever published, and it is Muster's closest *methodology* competitor (it competes
+for the same promise — "hire a team" — with zero product, only process).
+
+**What gstack is**: /office-hours (YC-style product interrogation), /plan-ceo-review,
+/plan-eng-review, /plan-design-review, /autoplan (full review pipeline), /review (staff eng),
+/qa (real browser, fixes bugs, writes regression tests), /ship, /investigate, /cso
+(OWASP+STRIDE), /retro, /learn (persistent per-project memory), /design-shotgun→/design-html
+(visual iteration loop), /pair-agent (cross-vendor agent coordination in one browser),
+GBrain (persistent cross-machine agent memory), egress receipts, verify gates.
+
+**What Muster already beats it on**: gstack is process-only — it exists inside someone
+else's terminal (Claude Code) and does nothing for a non-developer. Muster ships the actual
+workforce: persistent agents with computers, rooms, receipts, BYOK, four surfaces. gstack
+has no product surface a non-developer can use.
+
+**What gstack does better — and what we take:**
+
+1. **Sprint process as the product spine.** gstack's insight is that parallel agents only
+   work with a process: think → plan → build → review → test → ship → reflect, each step
+   feeding the next. Muster's rooms are the *runtime* for this exact loop but the loop is
+   implicit. Product commitment: make the sprint explicit in rooms — routine/pipeline
+   templates ("office hours" interrogation pack, "plan review" pack) so a Muster user runs
+   the same disciplined loop without knowing gstack exists.
+2. **Per-project persistent memory** (/learn + GBrain). Muster's why-journal is the seed;
+   the gstack lesson is that memory must be *searchable and curated* (review/prune/export),
+   not just appended. Roadmap item: why-journal search UI + export (the read route shipped
+   2026-09-02; curation next).
+3. **Egress receipts.** gstack writes a hash-chained, tamper-evident receipt before every
+   off-machine send. This is Muster's signed-receipts idea applied to the platform itself —
+   adopt the same discipline for Muster's own outbound calls (webhooks, WhatsApp sends,
+   provider fetches) into the audit trail.
+4. **Verify gates.** A Stop hook that blocks session end until the declared verify command
+   passes. For Muster: routine definitions could declare a verify command, and a routine
+   run that can't verify its own work gets flagged in the receipt.
+5. **Auto-updating team installs** (team mode + one-hour throttled upgrade). Muster Cloud
+   already auto-updates; the desktop auto-updater exists. Nothing to build — validation.
+6. **Prompt-injection defense stack** (datamarking, hidden-element stripping, ARIA scrubbing,
+   local ML classifier, verdict combiner). Direct input for the Privacy Shield roadmap: our
+   shield scrubs PII before cloud models see it; injection defense scrubs what comes *back*
+   from web pages the agent browses. Same infra (Muster's shield + Obscura engine), add the
+   classifier layer.
+
+**Positioning note**: gstack is MIT and free — do not compete with it on process tooling for
+developers; *partner conceptually*: Muster is where a gstack-style sprint RUNS (agents with
+computers), not the skill pack itself. The landing already says "hire a team" — gstack
+proves the market says "a team" beats "an assistant," and Muster sells the team.
+
+## Appendix C — gstack (garrytan/gstack) study, 2026-09-02
+
+gstack is YC CEO Garry Tan's MIT-licensed Claude Code setup: 23 slash-command
+"specialists" (CEO planning, eng review, design, QA, /cso security, release, docs) chained
+into a Think → Plan → Build → Review → Test → Ship → Reflect sprint pipeline, plus a
+browser layer and standalone CLIs. Not a competitor — a workflow blueprint worth mining.
+
+**Patterns Muster is adopting:**
+
+1. **Evidence ledger for releases** (gstack-evidence grades test runs FRESH/STALE): release
+   notes in this repo now name the exact commit built and the verification performed (the
+   v1.1.0/v1.2.0 notes already cite the commit; the workflow stamps it automatically).
+2. **Egress receipts** — hash-chained JSONL auditing every off-machine send. Maps directly
+   onto the Privacy Shield's counts-only receipts: a future shield version can append a
+   hash-chained egress line per external model call, making "you see what left" not just a
+   per-turn chip but a tamper-evident ledger the user owns. Queued behind the shield v2.
+3. **Hook self-healing** — canonical-only hook registration, setup heals stale hooks. Applied
+   to this repo's process: one canonical gate set (typecheck → oxlint → vitest), no shadow
+   hooks, everything else is documentation.
+4. **PR pipeline discipline** — /ship's sync-test-PR-merge-verify loop matches the existing
+   autodeploy gate pattern; adopted as the documented release ritual rather than new code.
+5. **Agent-installable configuration** — gstack installs via one clone+script and supports 10
+   agent hosts; the same shape is OpenWork's pasteable install prompt (Appendix A). Muster's
+   docker run command + copyable onboarding already carry this; keep it one-liner-true.

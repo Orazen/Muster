@@ -507,7 +507,11 @@ describe("setupCommands", () => {
     expect(command).toContain("-p 127.0.0.1:6080:6901");
     expect(command).not.toContain(" -p 6080:6901");
     expect(command).not.toContain("5900");
-    expect(command).toContain("VNC_PW=CHANGE_ME");
+    // The displayed command carries the target's REAL stored viewer secret
+    // (never the CHANGE_ME placeholder and never an empty/weak value), so
+    // running it by hand logs into the same VM Muster would create.
+    expect(command).not.toContain("VNC_PW=CHANGE_ME");
+    expect(command).toMatch(/VNC_PW=[A-Za-z0-9_-]{10,}/);
   });
 
   it("does not suggest docker start for an image that must be recreated", () => {

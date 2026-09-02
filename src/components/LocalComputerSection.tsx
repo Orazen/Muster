@@ -351,10 +351,13 @@ export function LocalComputerSection() {
   const c = status?.commands;
   const ready = status?.ready === true;
   const existing = status?.container !== "missing";
+  // A stopped container is a normal pause — one click restarts it and the
+  // workspace is intact. Recreate is only for containers that are wrong
+  // (old image, unmanaged, unsafe network/security/persistence).
   const needsRecreate = Boolean(
     existing &&
-      (status?.container === "stopped" ||
-        !status?.imageMatches ||
+      status?.container !== "stopped" &&
+      (!status?.imageMatches ||
         !status?.managed ||
         status?.network === "unsafe" ||
         status?.security === "unsafe" ||

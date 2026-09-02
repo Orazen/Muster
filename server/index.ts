@@ -6507,6 +6507,21 @@ let requestUserEmail = "";
       // kill in-flight turns with a pointless reload — no driver reads
       // either, and picking a voice mid-turn should be free
       if (Object.keys(patch).some((k) => k !== "profile" && k !== "tts")) await reloadProviders();
+      // Account sync: the profile the onboarding wizard saves used to live
+      // only in config.json — a deployment-wide blob — so the signed-in
+      // account's name stayed whatever it signed up with and the wizard
+      // appeared to "not sync" between email and Google logins. Mirror the
+      // profile onto the signed-in account's better-auth record; the
+      // account is the identity, config is just the display cache.
+      if (patch.profile && requestUserId) {
+        const authApi = auth.api;
+        const name = patch.profile.name?.trim();
+        if (name) {
+          await authApi
+            .updateUser({ body: { name }, headers: toWebRequest(req).headers })
+            .catch((e) => console.error("profile→account name sync failed:", e instanceof Error ? e.message : e));
+        }
+      }
       const status = configStatus();
       broadcast({ kind: "config", ...status });
       return json(res, 200, status);
