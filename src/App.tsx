@@ -25,7 +25,7 @@ import { SignupPage } from "@/pages/SignupPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { Onboarding } from "@/components/Onboarding";
-import { emailGateDone } from "@/lib/analytics";
+import { emailGateDone, serverGateDone } from "@/lib/analytics";
 import { PairPage } from "@/pages/PairPage";
 import { DesktopShell } from "@/components/os/DesktopShell";
 import { Link } from "react-router-dom";
@@ -76,10 +76,19 @@ function Shell() {
   // the dismissed wizard resurrected mid-session, covering the whole app
   // ("Step 1 of 6" over a chat you were typing into). A session-sticky
   // decision keeps dismissal sticky; reloads still re-check per account.
+  // The check consults the SERVER flag first (the gate follows the
+  // account across Google/email sign-ins and browsers), then falls back
+  // to this browser's cached key; onboarding persists to both.
   const [gateDecision, setGateDecision] = useState<"pending" | "show" | "hide">("pending");
   useEffect(() => {
     if (gateDecision !== "pending" || authLoading || !user) return;
-    setGateDecision(!emailGateDone(user.id) ? "show" : "hide");
+    let cancelled = false;
+    void serverGateDone().then((serverDone) => {
+      if (!cancelled) setGateDecision(serverDone || emailGateDone(user.id) ? "hide" : "show");
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [authLoading, user, gateDecision]);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const group = state.groups.find((g) => g.id === state.selectedId);

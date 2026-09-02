@@ -32,6 +32,7 @@ import {
 } from "./whatsapp.ts";
 import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from "./whatsapp-threads.ts";
 import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER } from "./why-journal.ts";
+import { readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
 import { closeRoom, createRoom, joinRoom, leaveRoom, listRooms } from "./agent-rooms.ts";
 import {
   createDispatchPlan,
@@ -3885,6 +3886,25 @@ let requestUserEmail = "";
         const g = store.groupByThread?.(m2[1]);
         if ((b && !ownsRecord(b)) || (g && !ownsRecord(g))) return json(res, 404, { error: "no such conversation" });
       }
+    }
+
+    // ── per-account onboarding gate (server/onboarding-gate.ts) ────────
+    // The wizard's dismissal lives on the ACCOUNT, not the browser: one
+    // completed pass skips every later sign-in for the same user id,
+    // whether it came through email or Google. Desktop installs have no
+    // session — the single local user owns the flag.
+    if (path === "/api/me/onboarding" && (method === "GET" || method === "PUT")) {
+      // Desktop with no account rows has no primary id — one stable bucket.
+      const gateUserId = requestUserId ?? primaryUserId() ?? "local";
+      if (method === "GET") {
+        return json(res, 200, { done: readOnboardingStatus(DATA_DIR, gateUserId) !== undefined });
+      }
+      const body = await readBody(req);
+      if (body?.status !== "submitted" && body?.status !== "skipped") {
+        return json(res, 400, { error: "status must be submitted or skipped" });
+      }
+      setOnboardingStatus(DATA_DIR, gateUserId, body.status);
+      return json(res, 200, { done: true });
     }
 
     // ── internal peer-agent comms (localhost + shared token only) ──────

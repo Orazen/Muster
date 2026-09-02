@@ -3,7 +3,7 @@ import { Check, AlertTriangle, Loader2, Mic, ArrowLeft, Sparkles } from "lucide-
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { MusterbotMark } from "./MusterbotMark";
 import { AgentAvatar } from "./Avatar";
-import { identifyEmail, setEmailGateDone, emailGateDone, track } from "@/lib/analytics";
+import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
 import { ProviderMark } from "./ProviderIcons";
@@ -181,21 +181,31 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   // so a slow SSE doesn't flash the wizard over a populated roster. A fresh
   // install is never empty — seedIfEmpty() plants one greeting-only bot — so
   // "has a user ever said anything" is the real existing-user signal, not
-  // bot count. The old email-gate flag doubles as "has seen onboarding".
+  // bot count. The gate flag doubles as "has seen onboarding" and lives on
+  // the ACCOUNT (server) with this browser's localStorage as the fast path:
+  // an account that finished via email sign-in must not see the wizard
+  // again on its next Google sign-in, or vice versa.
   const [decided, setDecided] = useState(false);
   useEffect(() => {
     if (decided || !state.connected) return;
     setDecided(true);
     const hasRealHistory = state.bots.some((b) => b.messages.some((m) => m.role === "user"));
-    if (emailGateDone(user?.id)) {
-      onDone();
-    } else if (hasRealHistory) {
-      setEmailGateDone(user?.id, "skipped");
-      onDone();
-    } else if (user) {
-      setName(user.name ?? "");
-      setEmail(user.email ?? "");
-    }
+    let cancelled = false;
+    void serverGateDone().then((serverDone) => {
+      if (cancelled) return;
+      if (serverDone || emailGateDone(user?.id)) {
+        onDone();
+      } else if (hasRealHistory) {
+        setEmailGateDone(user?.id, "skipped");
+        onDone();
+      } else if (user) {
+        setName(user.name ?? "");
+        setEmail(user.email ?? "");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [decided, state.connected, state.bots, user, onDone]);
 
   useEffect(() => {

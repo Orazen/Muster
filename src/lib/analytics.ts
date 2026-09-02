@@ -6,6 +6,7 @@
 // of private conversations to a third party. Email submissions call
 // identify(), so PostHog's Persons tab doubles as the collected-email list.
 import posthog from "posthog-js";
+import { z } from "zod";
 
 const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
 
@@ -47,15 +48,46 @@ export function identifyEmail(email: string) {
   posthog.capture("email_submitted");
 }
 
-// First-run onboarding state, keyed BY USER ID: a browser-shared flag made
-// every later sign-in on the same browser — including a brand-new Google
-// account — silently skip the wizard. Per-account keys fix that; a stale
-// pre-account key at most costs an existing user one extra wizard pass.
+// First-run onboarding state — the ACCOUNT is the source of truth, the
+// browser is only a cache. The gate used to live solely in localStorage,
+// keyed by user id, which split the decision along login-method lines: an
+// account that finished onboarding via email sign-in saw the wizard again
+// on its next Google sign-in (different browser, cleared storage, or the
+// auth flicker writing the key under "legacy"). Now a dismissal is
+// persisted server-side per better-auth user id (PUT /api/me/onboarding)
+// and this localStorage key is just the fast path.
 export function emailGateDone(userId?: string): boolean {
   return Boolean(localStorage.getItem(gateKey(userId)));
 }
+
+/** Server check: has this account been through onboarding already? A
+ * failed fetch (offline, old server) resolves false — the wizard shows
+ * and a fresh dismissal re-persists, which is the safe direction. */
+export async function serverGateDone(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/me/onboarding", { credentials: "include" });
+    if (!res.ok) return false;
+    // SAFETY: the endpoint's contract is { done: boolean }; a narrow
+    // shape-check on the parsed JSON replaces an unchecked cast, and any
+    // malformed answer resolves false so it can only re-show the wizard,
+    // never silently skip it.
+    const data = z.object({ done: z.boolean() }).safeParse(await res.json());
+    return data.success && data.data.done;
+  } catch {
+    return false;
+  }
+}
+
+/** Persist the dismissal everywhere: localStorage (instant, same-browser)
+ * and the server (durable, follows the account across logins/browsers). */
 export function setEmailGateDone(userId: string | undefined, status: "submitted" | "skipped") {
   localStorage.setItem(gateKey(userId), status);
+  void fetch("/api/me/onboarding", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ status }),
+  }).catch(() => {});
 }
 
 function gateKey(userId?: string): string {
