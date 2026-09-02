@@ -74,6 +74,10 @@ function modelIdsOf(json: JsonValue): string[] {
 export interface OpenAICompatibleConfig {
   url: string;
   apiKeyEnv: string;
+  /** Per-instance model catalog — the custom BYOK provider driver's list
+   * arrives from instance config (custom-providers.ts) rather than the
+   * driver spec. Undefined keeps the driver-level static list. */
+  models?: { default: string; options: Array<{ id: string; label: string }> };
 }
 
 export interface OpenAICompatibleSpec {
@@ -134,10 +138,25 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
   function decodeConfig(raw: JsonValue | undefined): OpenAICompatibleConfig {
     // Non-object configs fall back to every default, field by field.
     const o: JsonObject = raw instanceof Object && !Array.isArray(raw) ? raw : {};
-    return {
+    const modelsRaw = o.models;
+    const modelsRoot = modelsRaw instanceof Object && !Array.isArray(modelsRaw) ? modelsRaw : null;
+    const rawOptions = modelsRoot && Array.isArray(modelsRoot.options) ? modelsRoot.options : [];
+    const options = rawOptions.flatMap((row) => {
+      const record = row instanceof Object && !Array.isArray(row) ? row : null;
+      if (!record || !isText(record.id)) return [];
+      return [{ id: record.id, label: isText(record.label) ? record.label : record.id }];
+    });
+    const statedDefault = modelsRoot && isText(modelsRoot.default) ? modelsRoot.default : "";
+    const preferred = options.some((m) => m.id === statedDefault) ? statedDefault : options[0]?.id;
+    // Only instances whose config actually carries a models list get one;
+    // built-in twins keep their driver-spec catalog untouched. Built as
+    // statements, not a conditional spread — omission must be explicit.
+    const decoded: OpenAICompatibleConfig = {
       url: isText(o.url) ? o.url : defaultUrl,
       apiKeyEnv: isText(o.apiKeyEnv) ? o.apiKeyEnv : defaultApiKeyEnv,
     };
+    if (options.length > 0) decoded.models = { default: preferred ?? "", options };
+    return decoded;
   }
 
   const driver: ProviderDriver<OpenAICompatibleConfig> = {
@@ -164,8 +183,13 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
       // fallback and is replaced by whatever GET /v1/models actually returns
       // — only models the user pulled should appear in the picker. A failed
       // fetch keeps the last known list; availability is snapshot()'s job.
-      let catalog = staticModels;
-      let quickModel = specQuickModel;
+      // Custom BYOK instances carry their catalog in instance config: the
+      // user picked the exact model list to expose, and it outranks any
+      // driver-spec list. Built-in twins pass no config models and keep
+      // the static spec behavior below, byte for byte.
+      const configModels = input.config.models;
+      let catalog = configModels ?? staticModels;
+      let quickModel = configModels?.default ?? specQuickModel;
       const fetchModelCatalog = async (): Promise<boolean> => {
         try {
           const res = await fetch(`${config.url}/models`, {

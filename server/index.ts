@@ -33,6 +33,14 @@ import {
 import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from "./whatsapp-threads.ts";
 import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER } from "./why-journal.ts";
 import { readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
+import {
+  CUSTOM_MODELS_MIN,
+  CUSTOM_PROVIDER_MAX,
+  customProviderInputSchema,
+  fetchProviderModelIds,
+  sanitizeCustomProviderId,
+  validateProviderBaseUrl,
+} from "./custom-providers.ts";
 import { closeRoom, createRoom, joinRoom, leaveRoom, listRooms } from "./agent-rooms.ts";
 import {
   createDispatchPlan,
@@ -6260,6 +6268,101 @@ let requestUserEmail = "";
         }
       }
       return json(res, 200, { providers: PROVIDERS.map((p) => ({ ...p, configured: flags[p.id]?.configured ?? false })) });
+    }
+
+    // ── BYOK custom model providers (server/custom-providers.ts) ───────
+    // Anyone can add any OpenAI- or Anthropic-compatible endpoint: name,
+    // base URL, key, model list. Each entry becomes a first-class instance
+    // (custom-<id>) riding the chat-completions or Anthropic driver.
+    if (path === "/api/custom-providers" && method === "GET") {
+      const list = (cfg.customProviders ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        baseUrl: p.baseUrl,
+        format: p.format,
+        models: p.models,
+        configured: Boolean(cfg.providers?.[`custom-${p.id}`]?.apiKey),
+        instanceId: `custom-${p.id}`,
+      }));
+      return json(res, 200, { providers: list });
+    }
+    if (path === "/api/custom-providers" && method === "POST") {
+      const body = await readBody(req);
+      // models filter at the wire boundary: strings only, then the schema
+      // enforces count/ordering rules.
+      const rawModels = z.array(z.unknown()).default([]).catch([]).parse(body?.models);
+      const parsed = customProviderInputSchema.safeParse({
+        name: isText(body?.name) ? body.name : "",
+        baseUrl: isText(body?.baseUrl) ? body.baseUrl : "",
+        format: body?.format === "anthropic" ? "anthropic" : body?.format === "openai" ? "openai" : "",
+        models: rawModels.filter((m): m is string => isText(m)),
+      });
+      if (!parsed.success) {
+        return json(res, 400, { error: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ") });
+      }
+      const input = parsed.data;
+      // SSRF: scheme + host rules; self-hosted deployments reject
+      // loopback/private/reserved provider endpoints outright.
+      const check = validateProviderBaseUrl(input.baseUrl, SELF_HOSTED);
+      if (!check.ok) return json(res, 400, { error: check.reason });
+      if (input.models.length < CUSTOM_MODELS_MIN) {
+        return json(res, 400, { error: "Add at least one model before adding the provider" });
+      }
+      if ((cfg.customProviders ?? []).length >= CUSTOM_PROVIDER_MAX) {
+        return json(res, 400, { error: `At most ${CUSTOM_PROVIDER_MAX} custom providers` });
+      }
+      // id from the name; a suffix keeps same-name providers distinct.
+      const base = sanitizeCustomProviderId(input.name);
+      let id = base;
+      let n = 2;
+      while ((cfg.customProviders ?? []).some((p) => p.id === id)) id = `${base}-${n++}`;
+      const next = [...(cfg.customProviders ?? []), { ...input, id }];
+      if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      providerConfigBusy = true;
+      try {
+        saveConfig({ customProviders: next });
+        if (isText(body?.apiKey) && body.apiKey.trim()) {
+          saveConfig({ providers: { [`custom-${id}`]: { apiKey: body.apiKey.trim() } } });
+        }
+        Object.assign(cfg, loadConfig());
+        await reloadProviders();
+        return json(res, 201, { id, instanceId: `custom-${id}` });
+      } finally {
+        providerConfigBusy = false;
+      }
+    }
+    const customDelete = path.match(/^\/api\/custom-providers\/([\w-]+)$/);
+    if (customDelete && method === "DELETE") {
+      const id = customDelete[1];
+      const next = (cfg.customProviders ?? []).filter((p) => p.id !== id);
+      if (next.length === (cfg.customProviders ?? []).length) return json(res, 404, { error: "no such custom provider" });
+      if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      providerConfigBusy = true;
+      try {
+        saveConfig({ customProviders: next });
+        // drop the write-only key record too
+        saveConfig({ providers: { [`custom-${id}`]: { apiKey: "" } } });
+        Object.assign(cfg, loadConfig());
+        await reloadProviders();
+        return json(res, 200, { ok: true });
+      } finally {
+        providerConfigBusy = false;
+      }
+    }
+    if (path === "/api/custom-providers/fetch-models" && method === "POST") {
+      const body = await readBody(req);
+      if (!isText(body?.baseUrl)) return json(res, 400, { error: "baseUrl must be a string" });
+      const check = validateProviderBaseUrl(body.baseUrl, SELF_HOSTED);
+      if (!check.ok) return json(res, 400, { error: check.reason });
+      const apiKey = isText(body?.apiKey) ? body.apiKey : cfg.providers?.[`custom-${isText(body?.id) ? body.id : ""}`]?.apiKey;
+      try {
+        const models = await fetchProviderModelIds(body.baseUrl, apiKey);
+        return json(res, 200, { models });
+      } catch (e) {
+        // SAFETY: fetch refusals surface as Error instances.
+        const message = e instanceof Error ? e.message : String(e);
+        return json(res, 502, { error: `Could not reach ${body.baseUrl}/models: ${message.slice(0, 160)}` });
+      }
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);

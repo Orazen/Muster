@@ -250,6 +250,19 @@ already have a key and don't want to install/auth a separate CLI for it.
 All twelve share one architecture: streaming SSE, transcript-replay, token-level `content.delta` events,
 same as every CLI-driven engine — a bot can't tell the difference between a CLI and an API-key provider.
 
+### Custom providers (bring your own endpoint)
+
+**Settings → Providers → Add model provider** registers *any* OpenAI- or Anthropic-compatible endpoint as a
+first-class engine: a name, a base URL, an API key (optional — keyless local servers like Ollama or LM Studio
+work), the wire format (`/v1/chat/completions` or `/v1/messages`), and the model list to expose. You can fetch
+the model list from the endpoint's `/models` route or type it by hand. Each custom provider becomes a
+`custom-<id>` instance in the same fleet — model picker, health, chat, usage — with its key stored
+write-only in `config.json`.
+
+Self-hosted multi-tenant deployments block loopback/private/reserved provider base URLs (SSRF: one account must
+not probe the deployment's internal network through a provider). Desktop installs allow them, so pointing at
+Ollama on `127.0.0.1` works out of the box.
+
 **Free options — try Muster with zero spend:** several providers have free tiers that work as the API key
 you paste above: **Google AI Studio** gives Gemini free-tier keys in the browser ([aistudio.google.com](https://aistudio.google.com/apikey));
 **Groq** has a generous free tier for Llama/Mixtral ([console.groq.com](https://console.groq.com/keys));

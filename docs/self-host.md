@@ -40,6 +40,7 @@ All settings are environment variables on the `muster` service.
 | `OMB_ALLOWED_ORIGINS` | *(unset)* | Comma-separated extra origins allowed to call the API cross-origin (e.g. `https://app.example.com`). |
 | `BETTER_AUTH_SECRET` | — | **Required when self-hosting.** Signs session tokens. Generate with `openssl rand -base64 32`. The server refuses to boot without it once `OMB_HOST`/`OMB_PUBLIC_HOST` is set. Keep it stable, or every session is invalidated on restart. |
 | `OMB_PUBLIC_URL` | *(derived)* | Absolute base URL including scheme, e.g. `https://muster.example.com`. Used for verification links, password-reset links and OAuth callbacks. Falls back to `https://$OMB_PUBLIC_HOST`, then loopback. Set it if you terminate TLS on a non-default port or serve under a path. |
+| `OMB_ALLOW_SIGNUPS` | *(closed)* | `true` reopens email sign-up on the deployment. Default closed while per-account data isolation is being hardened; sign-in for existing accounts always works. |
 | `RESEND_API_KEY` | *(unset)* | Enables outbound email via [Resend](https://resend.com). Without it, email verification and password reset are hidden in the UI rather than silently failing; links are logged to the console instead. |
 | `EMAIL_FROM` | `Muster <noreply@localhost>` | From address for verification and reset mail. Must be a domain you have verified with Resend. |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | *(unset)* | Enables "Sign in with GitHub". Both halves required, or the provider is treated as absent. Callback URL: `$OMB_PUBLIC_URL/api/auth/callback/github`. |

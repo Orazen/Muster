@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { Cpu, Monitor, Shield, Plug, Users, Key } from "lucide-react";
-import { motion, useReducedMotion, type Variants } from "framer-motion";
+import { motion, useReducedMotion, useScroll, useSpring, type Variants } from "framer-motion";
 import { useAuth } from "@/lib/auth";
 import { MusterbotMark } from "@/components/MusterbotMark";
 
@@ -267,6 +267,10 @@ function HeroMock() {
 export function LandingPage() {
   const { user } = useAuth();
   const reduced = useReducedMotion();
+  // Scroll-linked brand line: a hairline under the header fills with the
+  // accent gradient as the page is read — progress you can feel, no chrome.
+  const { scrollYProgress } = useScroll();
+  const progress = useSpring(scrollYProgress, { stiffness: 120, damping: 26, mass: 0.4 });
 
   // Staggered hero entrance: badge → headline → subcopy → CTAs → screenshot.
   const heroItem = (delay: number) =>
@@ -282,6 +286,13 @@ export function LandingPage() {
     <div className="min-h-screen bg-[#0a0a0a]">
       {/* ── Header ── */}
       <header className="sticky top-0 z-50 border-b border-white/[0.06] backdrop-blur-xl bg-[#0a0a0a]/70">
+        {!reduced && (
+          <motion.div
+            aria-hidden="true"
+            className="absolute inset-x-0 bottom-[-1px] h-px origin-left bg-gradient-to-r from-[#ff7a45] via-[#f0460e] to-[#c93a0b]"
+            style={{ scaleX: progress }}
+          />
+        )}
         <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <Link to="/" className="flex items-center gap-2.5 text-[15px] font-semibold tracking-tight text-[#f5f5f5]">
             <MusterbotMark size={40} />
@@ -427,6 +438,7 @@ export function LandingPage() {
                   </div>
                   <div className="space-y-2.5 text-[13.5px] leading-relaxed text-[#a1a1a6]">
                     <div>→ OpenAI · Anthropic · Google · DeepSeek · Groq + 5 more</div>
+                    <div>→ Any custom endpoint — OpenAI- or Anthropic-compatible: your base URL, your key, your models</div>
                     <div>→ Cloud Linux desktop per bot (OpenSandbox or Box)</div>
                     <div>→ 500+ connected apps via Composio OAuth</div>
                     <div>→ Voice mode with ElevenLabs</div>

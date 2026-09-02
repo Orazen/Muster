@@ -31,6 +31,10 @@ const MODELS = {
 export interface AnthropicConfig {
   url: string;
   apiKeyEnv: string;
+  /** Per-instance model catalog — the custom BYOK provider flow's list
+   * arrives from instance config (custom-providers.ts). Undefined keeps
+   * the built-in Anthropic catalog. */
+  models?: { default: string; options: Array<{ id: string; label: string }> };
 }
 
 const isText = <T>(value: T): value is T & string => String(value) === value;
@@ -40,11 +44,29 @@ function jsonRecordOf(value: JsonValue | undefined): JsonObject | null {
   return value instanceof Object && !Array.isArray(value) ? value : null;
 }
 
+/** Decode an optional per-instance model catalog. Absent or malformed
+ * lists yield undefined — the built-in catalog stays. */
+function decodeModels(raw: JsonValue | undefined): AnthropicConfig["models"] {
+  const models = jsonRecordOf(raw)?.models;
+  const root = jsonRecordOf(models);
+  if (!root || !Array.isArray(root.options)) return undefined;
+  const options = root.options.flatMap((row) => {
+    const record = jsonRecordOf(row);
+    if (!record || !isText(record.id)) return [];
+    return [{ id: record.id, label: isText(record.label) ? record.label : record.id }];
+  });
+  if (options.length === 0) return undefined;
+  const statedDefault = isText(root.default) ? root.default : "";
+  const preferred = options.some((m) => m.id === statedDefault) ? statedDefault : options[0]!.id;
+  return { default: preferred, options };
+}
+
 function decodeConfig(raw: JsonValue | undefined): AnthropicConfig {
   const o = jsonRecordOf(raw) ?? {};
   return {
     url: isText(o.url) ? o.url : DEFAULT_URL,
     apiKeyEnv: isText(o.apiKeyEnv) ? o.apiKeyEnv : "ANTHROPIC_API_KEY",
+    models: decodeModels(raw),
   };
 }
 
@@ -228,7 +250,7 @@ export const AnthropicDriver: ProviderDriver<AnthropicConfig> = {
       driverKind: DRIVER_KIND,
       displayName: input.displayName,
       enabled: input.enabled,
-      models: MODELS,
+      models: config.models ?? MODELS,
       snapshot,
       adapter: {
         provider: DRIVER_KIND,

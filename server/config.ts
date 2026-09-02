@@ -8,6 +8,11 @@ import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { customMcpServerSchema, type CustomMcpServer } from "./custom-mcp.ts";
+import {
+  customProviderInstances,
+  customProviderSchema,
+  type CustomProvider,
+} from "./custom-providers.ts";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 
@@ -32,6 +37,9 @@ const instanceConfigSchema = z.object({
   config: z.json().optional(),
 });
 const instanceConfigMapSchema = z.record(z.string(), instanceConfigSchema);
+// Metadata half of a BYOK custom provider (server/custom-providers.ts);
+// the schema lives there so routes and config share one validation.
+const customProviderEntrySchema = customProviderSchema;
 const appConfigSchema = z.object({
   xai: z.object({ key: optionalText, url: optionalText }).optional(),
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
@@ -75,6 +83,10 @@ const appConfigSchema = z.object({
   vps: z.object({ sshAlias: optionalText }).optional(),
   /** Per-provider API keys — write-only, only configured-or-not flags exposed. */
   providers: z.record(z.string(), z.object({ apiKey: optionalText })).optional(),
+  /** BYOK custom model providers (Settings → Providers → Add model
+   * provider). Metadata only — the key lives in providers["custom-<id>"].
+   * Replaced wholesale by its own route, like instances/mcpServers. */
+  customProviders: z.array(customProviderEntrySchema).optional(),
   instances: instanceConfigMapSchema.optional(),
   /** User-registered stdio MCP servers (Settings → MCP Servers). Validated
    * field-by-field at save time; parsed here so a hand-edited config.json
@@ -82,10 +94,11 @@ const appConfigSchema = z.object({
    * never merged — see saveConfig. */
   mcpServers: z.array(customMcpServerSchema).optional(),
 });
-// instances and mcpServers have whole-map write semantics (their own routes),
-// not section-merge semantics — the generic /api/config patch must not touch
-// them or a profile edit could clobber a registry saved a second earlier.
-const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true });
+// instances, mcpServers, and customProviders have whole-collection write
+// semantics (their own routes), not section-merge semantics — the generic
+// /api/config patch must not touch them or a profile edit could clobber a
+// registry saved a second earlier.
+const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, customProviders: true });
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig {
@@ -106,6 +119,7 @@ export interface AppConfig {
   vps?: { sshAlias?: string };
   profile?: { name?: string; email?: string };
   providers?: Record<string, { apiKey?: string }>;
+  customProviders?: CustomProvider[];
   instances?: InstanceConfigMap;
   mcpServers?: CustomMcpServer[];
 }
@@ -407,6 +421,15 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   }
   if (cfg.providers?.opencodeZen?.apiKey) {
     DEFAULT_FLEET.opencodeZenApi = { driver: "opencodeZen", displayName: "OpenCode Zen (API)" };
+  }
+  // BYOK custom providers (Settings → Providers → Add model provider):
+  // one instance each, wired through the same key discipline — metadata
+  // in cfg.customProviders, key in cfg.providers["custom-<id>"].
+  const apiKeyOf = (id: string): string | undefined =>
+    cfg.providers?.[`custom-${id}`]?.apiKey || undefined;
+  const customEntries = customProviderInstances(cfg.customProviders ?? [], apiKeyOf);
+  for (const [instanceId, entry] of Object.entries(customEntries)) {
+    DEFAULT_FLEET[instanceId] = entry;
   }
   const CUSTOM_ONLY = {
     qwen: { driver: "qwenAgent" },

@@ -7,6 +7,7 @@ import { BoxAgentDriver } from "./boxagent.ts";
 import { ClaudeDriver } from "./claude.ts";
 import { CodexDriver } from "./codex.ts";
 import { CohereDriver } from "./cohere.ts";
+import { CustomOpenaiDriver } from "./custom-openai.ts";
 import { DeepSeekDriver } from "./deepseek.ts";
 import { FireworksDriver } from "./fireworks.ts";
 import { GoogleDriver } from "./google.ts";
@@ -40,6 +41,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   FireworksDriver,
   OpenRouterDriver,
   OpenCodeZenDriver,
+  CustomOpenaiDriver,
   GrokAgentDriver,
   GeminiAgentDriver,
   KimiAgentDriver,

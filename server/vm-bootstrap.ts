@@ -56,7 +56,7 @@ const ALLOWED_HOST_SUFFIXES = ["github.com", "objects.githubusercontent.com"] as
  * zeros are rejected because some resolvers read them as octal — "017.0.0.1"
  * must not sneak past a 127.0.0.0/8 mental model. Returns null for anything
  * that is not exactly four plain decimal octets. */
-function parseIpv4(host: string): [number, number, number, number] | null {
+export function parseIpv4(host: string): [number, number, number, number] | null {
   const parts = host.split(".");
   if (parts.length !== 4) return null;
   const octets: number[] = [];
@@ -73,7 +73,7 @@ function parseIpv4(host: string): [number, number, number, number] | null {
 /** True for every IPv4 range a download must never target: loopback,
  * RFC1918 private, link-local (cloud metadata), CGNAT, benchmarking,
  * multicast, reserved and the unroutable broadcast. */
-function isPrivateOrReservedIpv4(o: [number, number, number, number]): boolean {
+export function isPrivateOrReservedIpv4(o: [number, number, number, number]): boolean {
   const [a, b] = o;
   if (a === 0 || a === 10 || a === 127) return true; // this-network, private, loopback
   if (a === 100 && b >= 64 && b <= 127) return true; // 100.64/10 CGNAT
@@ -88,7 +88,7 @@ function isPrivateOrReservedIpv4(o: [number, number, number, number]): boolean {
 /** Parse an IPv6 literal into its eight 16-bit groups. Accepts the standard
  * "::" elision and a trailing IPv4 tail (::ffff:127.0.0.1). Returns null
  * for anything unparseable. */
-function parseIpv6(literal: string): number[] | null {
+export function parseIpv6(literal: string): number[] | null {
   let text = literal;
   let v4Tail: [number, number, number, number] | null = null;
   const lastColon = text.lastIndexOf(":");
@@ -120,7 +120,7 @@ function parseIpv6(literal: string): number[] | null {
 /** True for loopback (::1), unique-local (fc00::/7), link-local
  * (fe80::/10) and IPv4-mapped forms whose embedded IPv4 is
  * private/reserved — the IPv6 disguises of the ranges above. */
-function isPrivateOrReservedIpv6(groups: number[]): boolean {
+export function isPrivateOrReservedIpv6(groups: number[]): boolean {
   const leadingZeros = groups.findIndex((g) => g !== 0);
   const tail = leadingZeros === -1 ? [] : groups.slice(leadingZeros);
   if (tail.length === 1 && tail[0] === 1) return true; // ::1
