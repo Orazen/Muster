@@ -385,7 +385,7 @@ export type Action =
   | { type: "markRoutineRunSeen"; runId: string }
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
   | { type: "groupDeleted"; groupId: string }
-  | { type: "createGroup"; memberIds: string[]; name?: string }
+  | { type: "createGroup"; memberIds: string[]; name?: string; everyoneAnswers?: boolean }
   | { type: "sendGroup"; groupId: string; text: string }
   | {
       type: "patchGroup";
@@ -1207,7 +1207,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "createGroup":
           api(`/api/groups`, {
             method: "POST",
-            body: JSON.stringify({ memberIds: action.memberIds, name: action.name }),
+            body: JSON.stringify({
+              memberIds: action.memberIds,
+              name: action.name,
+              everyoneAnswers: action.everyoneAnswers,
+            }),
           })
             .then(({ group }) => {
               rawDispatch({ type: "groupPatched", group });

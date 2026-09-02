@@ -561,13 +561,22 @@ export class Store {
     return this.groups.find((g) => g.threadId === threadId);
   }
 
-  createGroup(name: string, memberIds: string[], dm = false, ownerId?: string): GroupRecord {
+  createGroup(
+    name: string,
+    memberIds: string[],
+    dm = false,
+    ownerId?: string,
+    /** Custom BYOK compare flow: "everyone answers" turns the room into a
+     * side-by-side multi-model ask — every human message reaches all
+     * members instead of the first-picked lead. */
+    defaultResponder?: GroupDefaultResponder,
+  ): GroupRecord {
     const group: GroupRecord = {
       id: newId(),
       threadId: newId(),
       name,
       memberIds,
-      defaultResponder: dm ? { kind: "mentions" } : { kind: "member", botId: memberIds[0] },
+      defaultResponder: defaultResponder ?? (dm ? { kind: "mentions" } : { kind: "member", botId: memberIds[0] }),
       bulletin: "",
       unread: false,
       createdAt: Date.now(),

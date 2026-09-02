@@ -5221,7 +5221,17 @@ let requestUserEmail = "";
         isText(body.name) && body.name.trim()
           ? body.name.trim()
           : `${store.bot(memberIds[0])!.name} & co.`;
-      const group = store.createGroup(name, memberIds, false, requestUserId);
+      // "Everyone answers" rooms are the side-by-side multi-model ask: one
+      // question in, every member's answer out (Cherry Studio's compare,
+      // built on the room engine). Single-member rooms keep the lead.
+      const everyoneAnswers = body.everyoneAnswers === true && memberIds.length > 1;
+      const group = store.createGroup(
+        name,
+        memberIds,
+        false,
+        requestUserId,
+        everyoneAnswers ? { kind: "everyone" } : undefined,
+      );
       return json(res, 201, { group: { ...group, messages: [] } });
     }
     if (method === "POST" && path === "/api/teams/export") {

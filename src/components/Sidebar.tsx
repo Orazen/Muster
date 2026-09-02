@@ -280,11 +280,14 @@ function RoomContextMenu({
   );
 }
 
-/** Pick members → Create. The room name is optional; the server defaults it. */
+/** Pick members → Create. The room name is optional; the server defaults it.
+ * "Everyone answers" turns the room into a side-by-side multi-model ask:
+ * one question in, every member's answer out. */
 function NewRoomPanel({ onClose }: { onClose: () => void }) {
   const { state, dispatch } = useStore();
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [everyoneAnswers, setEveryoneAnswers] = useState(false);
   const bots = state.bots.filter((b) => !b.hidden);
   const toggle = (id: string) =>
     setPicked((prev) => {
@@ -295,8 +298,14 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
     });
   const create = () => {
     if (!picked.size) return;
-    dispatch({ type: "createGroup", memberIds: [...picked], name: name.trim() || undefined });
-    track("room_created", { members: picked.size });
+    const compare = everyoneAnswers && picked.size > 1;
+    dispatch({
+      type: "createGroup",
+      memberIds: [...picked],
+      name: name.trim() || undefined,
+      everyoneAnswers: compare,
+    });
+    track("room_created", { members: picked.size, everyoneAnswers: compare });
     onClose();
   };
   return (
@@ -340,12 +349,28 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
             </button>
           ))}
         </div>
+        {picked.size > 1 && (
+          <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-lg bg-raised/50 p-2.5">
+            <input
+              type="checkbox"
+              checked={everyoneAnswers}
+              onChange={(e) => setEveryoneAnswers(e.target.checked)}
+              className="mt-0.5 size-4 accent-[#f0460e]"
+            />
+            <span className="text-[12.5px] leading-relaxed text-ink-secondary">
+              <span className="font-medium text-ink">Everyone answers</span> — one question in,
+              every bot's answer out, side by side. Great for comparing models.
+            </span>
+          </label>
+        )}
         <button
           onClick={create}
           disabled={!picked.size}
           className="mt-3 w-full rounded-lg bg-accent py-2 text-[14px] font-medium text-white hover:brightness-110 disabled:opacity-40"
         >
-          Create Room{picked.size ? ` · ${picked.size} ${picked.size === 1 ? "bot" : "bots"}` : ""}
+          {everyoneAnswers && picked.size > 1
+            ? `Compare ${picked.size} bots`
+            : `Create Room${picked.size ? ` · ${picked.size} ${picked.size === 1 ? "bot" : "bots"}` : ""}`}
         </button>
       </div>
     </div>
