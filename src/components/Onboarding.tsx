@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Check, AlertTriangle, Loader2, Mic, ArrowLeft, Sparkles } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { MusterbotMark } from "./MusterbotMark";
 import { AgentAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, track } from "@/lib/analytics";
@@ -147,7 +146,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const { capabilities } = useDesktopCapabilities();
   const { state, dispatch } = useStore();
   const { user } = useAuth();
-  const reduced = useReducedMotion();
 
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
@@ -207,6 +205,17 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       cancelled = true;
     };
   }, [decided, state.connected, state.bots, user, onDone]);
+
+  // Prefill the profile step from the account identity as soon as it is
+  // known — independent of the decide-effect above, which settles on store
+  // connect and can beat better-auth's session fetch (user still undefined
+  // when the gate resolves), leaving step 1 empty for a signed-in account.
+  // `current ||` keeps anything the user already typed.
+  useEffect(() => {
+    if (!user) return;
+    setName((current) => current || user.name || "");
+    setEmail((current) => current || user.email || "");
+  }, [user]);
 
   useEffect(() => {
     track("onboarding_step", { step, name: STEP_LABELS[step] });
@@ -788,18 +797,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             />
           ))}
         </div>
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={step}
-            initial={reduced ? false : { opacity: 0, x: 18 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={reduced ? undefined : { opacity: 0, x: -18 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex min-h-0 flex-1 flex-col"
-          >
-            {stepContent[step]}
-          </motion.div>
-        </AnimatePresence>
+        {/* No AnimatePresence here: its mode="wait" exit handshake hung on
+            framer-motion v13, leaving the previous step mounted with the
+            new step's label — the wizard became un-navigable mid-funnel.
+            A hard swap is boring and always correct. */}
+        <div key={step} className="flex min-h-0 flex-1 flex-col wizard-step">
+          {stepContent[step]}
+        </div>
         {step > 0 && step !== STEP_LABELS.length - 1 && (
           <button
             onClick={() => setStep(step - 1)}

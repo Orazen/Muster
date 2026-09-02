@@ -1,5 +1,6 @@
 import { createAuthClient } from "better-auth/client";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { z } from "zod";
 
 // The server always serves the API from the same origin/port as the UI
 // (both dev proxy and the packaged/hosted server put them together), so
@@ -140,6 +141,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await authClient.signUp.email({ name, email, password });
       if (res.error) return { error: res.error.message ?? "Sign up failed" };
       await fetchSession();
+      // A proxy/harness failure (wrong port, dead server) surfaces as an
+      // HTTP error with an EMPTY body, which better-auth's client used to
+      // normalize into success-with-no-session — the form just sat there.
+      // A freshly created account must hold a session; verify directly
+      // instead of trusting the empty-looking response.
+      const check = await fetch("/api/auth/get-session", { credentials: "include" });
+      if (!check.ok) {
+        return {
+          error: `Sign-up could not reach a working server (HTTP ${check.status}). Check that the harness is running on the port Vite proxies to.`,
+        };
+      }
+      // SAFETY: get-session's contract is { user, session } | null; the
+      // zod check rejects anything else so a broken proxy can only show
+      // an error, never a false success.
+      const data = z
+        .object({ user: z.object({ id: z.string() }).passthrough() })
+        .nullish()
+        .safeParse(await check.json().catch(() => null));
+      if (!data.success || !data.data?.user) {
+        return { error: "Sign-up did not establish a session — check the harness server." };
+      }
       return {};
     } catch (e) {
       return { error: e instanceof Error ? e.message : "Sign up failed" };

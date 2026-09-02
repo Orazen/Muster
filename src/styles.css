@@ -722,3 +722,24 @@ body {
     animation: reduced-loader-pulse 1.6s ease-in-out infinite !important;
   }
 }
+
+/* Onboarding wizard: gentle step-change entrance (the JS animation lib was
+   pulled from this component after its exit handshake hung the funnel). */
+@keyframes wizard-step-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.wizard-step {
+  animation: wizard-step-in 0.18s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wizard-step {
+    animation: none;
+  }
+}
