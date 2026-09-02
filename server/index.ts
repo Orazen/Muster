@@ -35,6 +35,7 @@ import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER } from "./why-journ
 import { readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
 import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
 import { checkBudget, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
+import { scanBotSecurity } from "./security-scan.ts";
 import {
   CUSTOM_MODELS_MIN,
   CUSTOM_PROVIDER_MAX,
@@ -3970,6 +3971,27 @@ let requestUserEmail = "";
       }
       setOnboardingStatus(DATA_DIR, gateUserId, body.status);
       return json(res, 200, { done: true });
+    }
+
+    // ── Muster Shield (server/security-scan.ts) ────────────────────────
+    // A security-posture scan over the bot roster: auto-approve + always-
+    // allow interactions, missing spend caps, Shield opt-outs. Advisory —
+    // the operator owns the autonomy-vs-blast-radius trade-off.
+    if (path === "/api/security-scan" && method === "GET") {
+      const findings = scanBotSecurity(
+        store.bots.map((bot) => ({
+          id: bot.id,
+          name: bot.name,
+          autoApprove: bot.autoApprove,
+          alwaysAllow: bot.alwaysAllow,
+          tokenBudget: bot.tokenBudget,
+          privacyShield: bot.privacyShield,
+          hidden: bot.hidden,
+          hasComputer: bot.computer !== "off",
+          usesCloudModel: bot.modelSelection.instanceId !== "" && bot.modelSelection.instanceId !== "local",
+        })),
+      );
+      return json(res, 200, { findings, scannedAt: Date.now() });
     }
 
     // ── internal peer-agent comms (localhost + shared token only) ──────
