@@ -33,6 +33,7 @@ import {
 import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from "./whatsapp-threads.ts";
 import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER } from "./why-journal.ts";
 import { readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
+import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
 import {
   CUSTOM_MODELS_MIN,
   CUSTOM_PROVIDER_MAX,
@@ -151,6 +152,7 @@ import {
   auth,
   toWebRequest,
   forwardedProtoOf,
+  deploymentSigningSecret,
   getSession,
   getDb,
   isPublicApiPath,
@@ -2271,6 +2273,10 @@ interface StoredWrappedShare {
 interface StoredReceiptShare {
   kind: "receipt";
   receipt: ReturnType<typeof buildReceipt>;
+  /** HMAC-SHA256 over the canonical receipt JSON (server/receipt-signing
+   * .ts) — lets anyone prove the receipt came from this deployment and was
+   * not edited after the fact. */
+  signature: string;
   text: string;
 }
 type StoredShare = StoredWrappedShare | StoredReceiptShare;
@@ -3093,8 +3099,43 @@ function shareNotFoundPage(): string {
   );
 }
 
-function receiptSharePage(receipt: { bot: string; job: string; startedAt: string; durationHuman: string; turns: number; tokensIn: number; tokensOut: number; costUsd: number | null; result: string; summary: string }, text: string): string {
+function receiptSharePage(
+  receipt: { bot: string; job: string; startedAt: string; durationHuman: string; turns: number; tokensIn: number; tokensOut: number; costUsd: number | null; result: string; summary: string },
+  text: string,
+  signature?: string,
+): string {
   const cost = receipt.costUsd !== null ? `$${receipt.costUsd.toFixed(4)}` : "—";
+  const signedBlock = signature
+    ? `<div class="sig" style="margin-top:1rem">
+        <button id="verify-btn" class="btn" style="background:#1f1f1f" type="button">Verify signature</button>
+        <span id="verify-out" class="muted" style="margin-left:.6rem">HMAC-SHA256, signed at share time</span>
+      </div>
+      <script>
+        (function () {
+          var btn = document.getElementById("verify-btn");
+          var out = document.getElementById("verify-out");
+          if (!btn || !out) return;
+          var payload = ${JSON.stringify({ receipt, signature }).replace(/</g, "\\\\u003c")};
+          btn.addEventListener("click", function () {
+            btn.disabled = true;
+            out.textContent = "Verifying…";
+            fetch("/api/receipts/verify", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(payload),
+            })
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                out.textContent = d.valid
+                  ? "✓ Signature valid — issued by this Muster deployment, unedited since."
+                  : "✗ Signature check failed (" + (d.reason || "unknown") + ") — this receipt may have been tampered with.";
+              })
+              .catch(function () { out.textContent = "Verification unreachable — try again."; })
+              .finally(function () { btn.disabled = false; });
+          });
+        })();
+      </script>`
+    : "";
   return pageShell(
     `Job receipt — ${receipt.job}`,
     `<div class="card" style="text-align:left">
@@ -3108,6 +3149,7 @@ function receiptSharePage(receipt: { bot: string; job: string; startedAt: string
       </div>
       ${receipt.summary ? `<p class="muted" style="text-align:left">“${escapeHtml(receipt.summary)}”</p>` : ""}
       <pre>${escapeHtml(text)}</pre>
+      ${signedBlock}
       <p class="muted">Proof-of-work, verifiable anywhere. Real agents show their work.</p>
       <a class="btn" href="/">Muster your own agents</a>
     </div>`,
@@ -4345,8 +4387,9 @@ let requestUserEmail = "";
         finalWord: lastBotWord?.text ?? null,
       });
       const token = newShareToken();
+      const signature = signReceipt(receipt, deploymentSigningSecret());
       wrappedShareTokens.set(token, { token, kind: "receipt", createdAt: Date.now() });
-      wrappedShareCards.set(token, { kind: "receipt", receipt, text: renderReceiptText(receipt) });
+      wrappedShareCards.set(token, { kind: "receipt", receipt, signature, text: renderReceiptText(receipt) });
       pruneShareTokens(wrappedShareTokens);
       for (const key of wrappedShareCards.keys()) {
         if (!wrappedShareTokens.has(key)) wrappedShareCards.delete(key);
@@ -6623,8 +6666,30 @@ let requestUserEmail = "";
     if (shareMatch && method === "GET") {
       const share = wrappedShareCards.get(shareMatch[1]!);
       if (!share) return html(res, 404, shareNotFoundPage());
-      if (share.kind === "receipt") return html(res, 200, receiptSharePage(share.receipt, share.text));
+      if (share.kind === "receipt")
+        return html(res, 200, receiptSharePage(share.receipt, share.text, "signature" in share ? share.signature : undefined));
       return html(res, 200, wrappedSharePage(share.card, share.text));
+    }
+
+    // Public receipt verification — anyone (a hiring manager, another
+    // agent, an auditor) can POST a receipt + its detached signature and
+    // learn whether this deployment actually issued it. Rate-limit shaped:
+    // verification is cheap HMAC work, but the endpoint is unauthenticated.
+    if (path === "/api/receipts/verify" && method === "POST") {
+      if (!consumeEgressBucket(clientIpForLimiting(req))) {
+        return json(res, 429, { error: "too many verification attempts — wait a minute and try again" });
+      }
+      const body = await readBody(req);
+      const signature = isText(body?.signature) ? body.signature : "";
+      // Parse the receipt at the unauthenticated boundary: every signed
+      // field typed, unknown fields passthrough (excluded from the hash, so
+      // extra data cannot fake a valid signature).
+      const candidate = verifyableReceiptSchema.safeParse(body?.receipt);
+      if (!candidate.success) {
+        return json(res, 400, { valid: false, reason: "malformed" });
+      }
+      const verdict = verifyReceipt(candidate.data, signature, deploymentSigningSecret());
+      return json(res, 200, verdict);
     }
 
     // Machine-readable directory feed — agents and aggregators consume the

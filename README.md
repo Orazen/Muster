@@ -71,7 +71,10 @@ model, computer, and connected apps — open, local-first, and running on the ag
   not one-shot invocations.
 - **Proof-of-work sharing** — every settled job gets a receipt (bot, duration, tokens, cost, final word),
   and both weekly Wrapped summaries and individual receipts can be published as public share links.
-  Your agents' work is verifiable anywhere.
+  Shared receipts are **cryptographically signed** (HMAC-SHA256, detached signature embedded in the page):
+  a one-click "Verify signature" button checks the receipt against the issuing deployment via the public
+  `POST /api/receipts/verify` endpoint — a hiring manager, another agent, or an auditor can prove a receipt
+  is genuine and unedited. Your agents' work is verifiable anywhere.
 - **Referrals** — every account gets an invite link; when a friend joins, you both get Pro days.
 - **Provider health dashboard** — spend, traffic, and rate-limit pressure per provider family, computed
   from your own turn history, with an engine doctor that distinguishes "binary reachable" from

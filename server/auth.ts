@@ -93,6 +93,13 @@ function resolveSecret(): string {
   return generated;
 }
 
+/** The deployment's signing secret, for HMACs beyond auth (signed job
+ * receipts). Same material as session signing: stable across restarts,
+ * never leaves the server. */
+export function deploymentSigningSecret(): string {
+  return resolveSecret();
+}
+
 let _db: DatabaseSync | null = null;
 
 /**
