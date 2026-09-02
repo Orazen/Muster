@@ -34,6 +34,7 @@ import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from 
 import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER } from "./why-journal.ts";
 import { readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
 import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
+import { checkBudget, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import {
   CUSTOM_MODELS_MIN,
   CUSTOM_PROVIDER_MAX,
@@ -1640,6 +1641,20 @@ async function startTurn(
   const bot = store.bot(botId);
   if (!bot) throw Object.assign(new Error("no such bot"), { status: 404 });
   if (bot.busy) throw Object.assign(new Error("the bot is already working — interrupt it first"), { status: 409 });
+  // Muster Vault (lite): a bot with a token budget that is already spent
+  // refuses new turns. The refusal is a normal pre-dispatch error — it
+  // lands as a chip in the thread with the raise-the-cap hint, and the
+  // human decides. Lifetime ledger = settled task tally + in-flight turn.
+  {
+    const inFlight = turnUsage.get(bot.threadId);
+    const check = checkBudget(bot.tokenBudget, {
+      lifetimeTokens: store
+        .tasks(bot.id)
+        .reduce((sum, task) => sum + (task.usage?.input ?? 0) + (task.usage?.output ?? 0), 0),
+      inFlightTokens: (inFlight?.input ?? 0) + (inFlight?.output ?? 0),
+    });
+    if (!check.ok) throw Object.assign(new Error(check.reason), { status: 402 });
+  }
   // Claim the bot NOW, synchronously, before any await: everything between
   // here and the old mid-dispatch setActivity("working") — context rebuild,
   // summarization, MCP spawns — can take seconds, and two messages landing
@@ -5527,6 +5542,15 @@ let requestUserEmail = "";
       const patch: Parameters<typeof store.patchBot>[1] = {};
       for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "character", "mascotExpression", "pinned", "hidden", "speakReplies", "voice"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
+      }
+      // Muster Vault (lite): set/raise/clear the bot's lifetime token
+      // budget. null clears; the schema bounds the number.
+      if (body.tokenBudget !== undefined) {
+        const parsedBudget = tokenBudgetSchema.safeParse(body.tokenBudget);
+        if (!parsedBudget.success) {
+          return json(res, 400, { error: `tokenBudget must be a whole number between ${TOKEN_BUDGET_MIN} and ${TOKEN_BUDGET_MAX}, or null` });
+        }
+        patch.tokenBudget = parsedBudget.data ?? null;
       }
       // per-bot gate on the workspace's connected apps (Composio)
       if (body.composio !== undefined) {

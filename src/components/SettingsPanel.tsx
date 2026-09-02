@@ -320,6 +320,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "composio"
         | "privacyShield"
         | "modelSelection"
+        | "tokenBudget"
       >
     >,
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
@@ -590,6 +591,51 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 )}
               />
             </button>
+          </div>
+
+          {/* Muster Vault (lite): a lifetime token cap this bot may not
+              cross. Empty = unlimited. The server refuses turns past the
+              cap with the raise-the-cap hint, so the number only needs to
+              be honest once. */}
+          <div className="rounded-xl bg-card p-4">
+            <div className="text-[15px] font-medium text-ink">Token budget</div>
+            <div className="mt-0.5 text-[13px] text-ink-secondary">
+              Cap this bot's lifetime token spend. When it crosses the cap, new turns are refused
+              until you raise or clear it. Leave empty for unlimited.
+            </div>
+            <div className="mt-2.5 flex items-center gap-2">
+              <input
+                type="number"
+                min={10_000}
+                step={10_000}
+                defaultValue={bot.tokenBudget ?? ""}
+                key={bot.tokenBudget ?? "unlimited"}
+                aria-label="Token budget"
+                placeholder="Unlimited"
+                className="w-44 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+                onBlur={(e) => {
+                  const raw = e.target.value.trim();
+                  if (raw === "") {
+                    if (bot.tokenBudget != null) patch({ tokenBudget: null });
+                    return;
+                  }
+                  const parsed = Number(raw);
+                  if (Number.isFinite(parsed) && parsed >= 10_000) {
+                    const next = Math.trunc(parsed);
+                    if (next !== bot.tokenBudget) patch({ tokenBudget: next });
+                  }
+                }}
+              />
+              {bot.tokenBudget != null && (
+                <button
+                  type="button"
+                  onClick={() => patch({ tokenBudget: null })}
+                  className="rounded-lg bg-raised px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">

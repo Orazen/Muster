@@ -309,6 +309,10 @@ export interface BotRecord {
    * start false — a shared persona must not reach the user's Gmail on
    * turn one. */
   composio?: boolean;
+  /** Muster Vault (lite): lifetime token budget for this bot. When the
+   * settled task tally crosses it, new turns are refused until a human
+   * raises or clears the cap. Absent/null = unlimited. */
+  tokenBudget?: number | null;
   /** Privacy Shield: rewrite this bot's prompts (and replayed history)
    * through scrubForCloud() before any cloud API driver sees them —
    * credential shapes and PII become [SECRET_N]/[EMAIL_N]/[PHONE_N]

@@ -182,6 +182,9 @@ export interface Bot {
   /** Privacy Shield: mask secrets/emails/phones before prompts reach a
    * cloud model (server-side, opt-in per bot). */
   privacyShield?: boolean;
+  /** Muster Vault (lite): lifetime token budget. New turns are refused
+   * once the bot's settled usage crosses it, until raised or cleared. */
+  tokenBudget?: number | null;
   messages: Message[];
   /** leaf of the visible conversation branch (see visibleMessages) */
   activeLeafId?: string | null;
