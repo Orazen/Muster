@@ -36,6 +36,7 @@ import { readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts"
 import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
 import { checkBudget, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
+import { resolveLocalObscuraMount } from "./obscura.ts";
 import {
   CUSTOM_MODELS_MIN,
   CUSTOM_PROVIDER_MAX,
@@ -2066,6 +2067,20 @@ async function startTurn(
       const customMcp = customMcpForBot(cfg.mcpServers, bot.id);
       if (customMcp.length && instance.adapter.capabilities.customMcp === true) {
         integrations.custom = customMcp;
+      }
+      // Obscura browser (bot.browser opt-in): the 14 browser_* tools as an
+      // additional stdio MCP server, only for drivers that can mount them
+      // and only when the user actually installed the binary — a missing
+      // obscura silently degrades to "no browser tools" rather than
+      // failing every turn with a spawn error.
+      if (bot.browser === true && instance.adapter.capabilities.customMcp === true) {
+        const obscuraMount = resolveLocalObscuraMount((name) => findCliCandidates(name)[0]);
+        if (obscuraMount) {
+          integrations.custom = [
+            ...(integrations.custom ?? []),
+            { name: "browser", command: obscuraMount.command, args: [...obscuraMount.args], env: { ...obscuraMount.env } },
+          ];
+        }
       }
       // @mentions in the user's message (the composer's tagging UI) become
       // an explicit delegation nudge — the agent still does the ask_bot call
@@ -5583,6 +5598,12 @@ let requestUserEmail = "";
           return json(res, 400, { error: `tokenBudget must be a whole number between ${TOKEN_BUDGET_MIN} and ${TOKEN_BUDGET_MAX}, or null` });
         }
         patch.tokenBudget = parsedBudget.data ?? null;
+      }
+      // Obscura browser opt-in: any boolean is valid; the turn path only
+      // mounts when the binary actually exists, so this stays a pure pref.
+      if (body.browser !== undefined) {
+        if (!isFlag(body.browser)) return json(res, 400, { error: "browser must be true or false" });
+        patch.browser = body.browser;
       }
       // per-bot gate on the workspace's connected apps (Composio)
       if (body.composio !== undefined) {

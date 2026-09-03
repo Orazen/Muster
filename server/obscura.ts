@@ -67,6 +67,21 @@ export function buildObscuraMcpMount(opts: ObscuraMountOptions): ObscuraMount {
   return { command: "obscura", args, env: {} };
 }
 
+/** Local desktop mount: resolve the user-installed `obscura` binary on the
+ * augmented PATH and build the stdio mount for one bot's turn. Returns
+ * undefined when the binary is absent — a bot that never installed it
+ * must not be advertised 14 tools that cannot spawn. `command` is the
+ * resolved absolute path so the MCP spawn never depends on the child's
+ * PATH. */
+export function resolveLocalObscuraMount(
+  findFirst: (name: string) => string | undefined,
+): ObscuraMount | undefined {
+  const bin = findFirst("obscura");
+  if (!bin) return undefined;
+  const mount = buildObscuraMcpMount({ mode: "stdio" });
+  return { ...mount, command: bin };
+}
+
 /** The cloud VM bootstrap: install the release binary over https, verify
  * it runs, no credentials embedded. The caller supplies version + arch. */
 export function cloudVmInstallScript(version: string, arch: "x86_64" | "aarch64", build = "stealth"): string {

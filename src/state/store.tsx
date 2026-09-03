@@ -185,6 +185,9 @@ export interface Bot {
   /** Muster Vault (lite): lifetime token budget. New turns are refused
    * once the bot's settled usage crosses it, until raised or cleared. */
   tokenBudget?: number | null;
+  /** Obscura browser: mount the 14 browser_* tools for this bot (local
+   * installs where the `obscura` binary exists). */
+  browser?: boolean;
   messages: Message[];
   /** leaf of the visible conversation branch (see visibleMessages) */
   activeLeafId?: string | null;

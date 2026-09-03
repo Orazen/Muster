@@ -65,3 +65,21 @@ describe("OBSCURA_TOOLS", () => {
     expect(OBSCURA_TOOLS.every((t) => t.startsWith("browser_"))).toBe(true);
   });
 });
+
+describe("resolveLocalObscuraMount", () => {
+  it("resolves the first candidate into the mount command", async () => {
+    const { resolveLocalObscuraMount } = await import("./obscura.ts");
+    // The finder contract: return the FIRST candidate's path (the caller
+    // does findCliCandidates(name)[0]), or undefined when absent.
+    const mount = resolveLocalObscuraMount((name) => (name === "obscura" ? "/usr/local/bin/obscura" : undefined));
+    expect(mount).toBeDefined();
+    expect(mount!.command).toBe("/usr/local/bin/obscura");
+    expect(mount!.args).toEqual(["mcp"]);
+    expect(mount!.env).toEqual({});
+  });
+
+  it("returns undefined when the binary is absent — no tools that cannot spawn", async () => {
+    const { resolveLocalObscuraMount } = await import("./obscura.ts");
+    expect(resolveLocalObscuraMount(() => undefined)).toBeUndefined();
+  });
+});

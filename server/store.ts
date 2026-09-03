@@ -313,6 +313,11 @@ export interface BotRecord {
    * settled task tally crosses it, new turns are refused until a human
    * raises or clears the cap. Absent/null = unlimited. */
   tokenBudget?: number | null;
+  /** Obscura browser: mount the 14 browser_* MCP tools for this bot
+   * (local desktop installs only — the binary must exist on the harness
+   * host). Off by default: a headless browser is a capability you give a
+   * bot, not one it wakes up with. */
+  browser?: boolean;
   /** Privacy Shield: rewrite this bot's prompts (and replayed history)
    * through scrubForCloud() before any cloud API driver sees them —
    * credential shapes and PII become [SECRET_N]/[EMAIL_N]/[PHONE_N]
