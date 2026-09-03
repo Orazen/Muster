@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   instanceConfigs,
@@ -26,6 +26,45 @@ describe("configuration boundaries", () => {
     expect(() => parseStoredConfig({ instances: { claude: { driver: 42 } } })).toThrow("instances.claude.driver");
     expect(() => parseConfigPatch({ opencodeGo: { apiKey: 42 } })).toThrow("opencodeGo.apiKey");
     expect(() => parseConfigPatch({ profile: [] })).toThrow("profile");
+  });
+
+  it("persists customProviders as a whole array (regression: saveConfig dropped the key, BYOK providers vanished on reload)", async () => {
+    // saveConfig is the only path that could lose this key: its section
+    // merge had no branch for customProviders, so the write silently
+    // persisted customProviders:null while the key record survived — the
+    // exact "added a provider, nothing appeared" bug. Round-trip through
+    // the real file on a throwaway DATA_DIR.
+    const { mkdtempSync, rmSync, readFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "config-custom-providers-"));
+    const prevDataDir = process.env.OMB_DATA_DIR;
+    process.env.OMB_DATA_DIR = dir;
+    try {
+      vi.resetModules();
+      const { saveConfig, loadConfig } = await import("./config.ts");
+      const registry = [
+        { id: "mock-gateway", name: "Mock Gateway", baseUrl: "http://127.0.0.1:29111/v1", format: "openai" as const, models: ["test-model-1"] },
+      ];
+      saveConfig({ customProviders: registry });
+      saveConfig({ providers: { "custom-mock-gateway": { apiKey: "sk-test" } } });
+
+      // the on-disk file must carry BOTH halves
+      const disk = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+      expect(disk.customProviders).toHaveLength(1);
+      expect(disk.customProviders[0].id).toBe("mock-gateway");
+      expect(disk.providers["custom-mock-gateway"].apiKey).toBe("sk-test");
+
+      // and loadConfig must hand instanceConfigs() what it needs
+      const cfg = loadConfig();
+      const map = instanceConfigs(cfg);
+      expect(map["custom-mock-gateway"]).toBeDefined();
+      expect(map["custom-mock-gateway"]!.driver).toBe("customOpenai");
+      expect(map["custom-mock-gateway"]!.environment!.CUSTOM_PROVIDER_MOCK_GATEWAY_API_KEY).toBe("sk-test");
+    } finally {
+      process.env.OMB_DATA_DIR = prevDataDir;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

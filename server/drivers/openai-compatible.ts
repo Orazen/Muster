@@ -238,6 +238,22 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
           const body = await res.text().catch(() => "");
           throw new Error(`${displayName} HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
         }
+        // Tolerance for gateways that ignore `stream: true` and answer with
+        // a plain JSON body (no `data:` lines) — previously this path read
+        // zero deltas and returned an EMPTY reply with no error, which made
+        // custom BYOK providers look broken when the endpoint simply
+        // doesn't stream. Content-type is the honest signal; fall back to
+        // the non-streaming parse when it isn't an event stream.
+        const contentType = res.headers.get("content-type") ?? "";
+        if (!contentType.includes("text/event-stream")) {
+          const json: any = await res.json();
+          return {
+            text: json.choices?.[0]?.message?.content ?? "",
+            usage: json.usage
+              ? { input: json.usage.prompt_tokens ?? 0, output: json.usage.completion_tokens ?? 0 }
+              : null,
+          };
+        }
         if (!opts.stream) {
           const json: any = await res.json();
           return {

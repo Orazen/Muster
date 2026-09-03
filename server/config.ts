@@ -268,6 +268,14 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     }
     disk.providers = diskProviders;
   }
+  // The custom-provider registry replaces as one array (same rationale as
+  // mcpServers: entries carry identity ids a per-key merge would break).
+  // Without this branch the generic section merge above DROPPED the key —
+  // saveConfig({customProviders}) silently persisted customProviders:null
+  // and every added provider vanished from the fleet on reload.
+  if (checkedPatch.customProviders) {
+    disk.customProviders = checkedPatch.customProviders;
+  }
   // The MCP registry replaces as one array: entries carry identity (id) and
   // unique-name invariants that a per-key merge would silently break.
   if (checkedPatch.mcpServers) {
