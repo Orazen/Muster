@@ -17,6 +17,9 @@
   "desktopName": "com.muster.app.desktop",
   "type": "module",
   "main": "electron/main.mjs",
+  "bin": {
+    "muster": "cli/muster.mjs"
+  },
   "engines": {
     "node": ">=22"
   },
