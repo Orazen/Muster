@@ -9,7 +9,8 @@ WORKDIR /app
 # better-sqlite3 rebuilds from source via node-gyp when its prebuilt
 # binding download fails — node-gyp needs python3, make and g++, none of
 # which ship in node:*-slim. Without these every Dokploy build dies in
-# pnpm install.
+# pnpm install. (One layer; the second identical apt layer that used to
+# follow defeated this one's cache for zero benefit.)
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
@@ -19,15 +20,12 @@ ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
-# better-sqlite3's prebuild-install occasionally fails to resolve its own npx
-# cache path in a fresh build container and falls back to compiling from
-# source via node-gyp — node:24-slim ships neither Python nor a C++ toolchain,
-# so that fallback needs to actually work.
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ \
-  && rm -rf /var/lib/apt/lists/*
-
+# Dependency layer FIRST: manifests before source. Any source edit used to
+# invalidate this whole stage (including better-sqlite3's node-gyp path) —
+# now pnpm install only re-runs when a manifest or the lockfile changes.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+
 COPY tsconfig.json tsconfig.server.json tsconfig.server.build.json vite.config.ts index.html ./
 COPY src src
 COPY server server
@@ -35,8 +33,6 @@ COPY companion companion
 COPY scripts scripts
 COPY public public
 COPY www www
-
-RUN pnpm install --frozen-lockfile
 
 RUN pnpm build \
   && pnpm build:server

@@ -197,12 +197,36 @@ export type McpConfig = { mcpServers: { obscura: ObscuraMount } };
 export function mcpConfigFor(input: BootstrapInput): McpConfig {
   if (input.mode === "http") {
     // The schema guarantees mcpEndpoint for http mode; derive the listen
-    // port from it so the mount and the bot's client URL agree.
+    // port from it so the mount and the bot's client URL agree. The host is
+    // rejected when it is loopback/private/reserved: this config is written
+    // onto a cloud VM as root, and an endpoint pointing the VM's MCP client
+    // at 169.254.169.254 or a co-located internal service would turn the
+    // bot into a pivot. Local 127.0.0.1 targets are legitimate (the mount
+    // runs inside the same VM), so loopback is allowed here — only
+    // private/reserved ranges beyond the VM's own loopback are refused.
     const endpoint = new URL(input.mcpEndpoint ?? "");
     const port = endpoint.port ? Number(endpoint.port) : 8080;
+    const host = endpoint.hostname;
+    if (!isLoopbackish(host)) {
+      const v4 = parseIpv4(host);
+      if (v4 && isPrivateOrReservedIpv4(v4)) {
+        throw new Error(`mcpEndpoint host is a private or reserved address: ${host}`);
+      }
+      const v6 = parseIpv6(host);
+      if (v6 && isPrivateOrReservedIpv6(v6)) {
+        throw new Error(`mcpEndpoint host is a private or reserved address: ${host}`);
+      }
+    }
     return { mcpServers: { obscura: buildObscuraMcpMount({ mode: "http", port }) } };
   }
   return { mcpServers: { obscura: buildObscuraMcpMount({ mode: "stdio" }) } };
+}
+
+/** Loopback-family host (exact match, not a prefix test): the VM's own
+ * localhost, or a localhost-named host. */
+function isLoopbackish(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "");
+  return h === "127.0.0.1" || h === "localhost" || h === "::1" || h.endsWith(".localhost");
 }
 
 const BOOTSTRAP_CONFIG_PATH = "/etc/muster/mcp.json";

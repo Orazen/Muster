@@ -23,6 +23,13 @@ describe("isPublicApiPath", () => {
     expect(isPublicApiPath("/api/health")).toBe(true);
   });
 
+  it("lets receipt verification through — external verifiers have no session here", async () => {
+    const { isPublicApiPath } = await import("./auth.ts");
+    expect(isPublicApiPath("/api/receipts/verify")).toBe(true);
+    // Sharing is public; creating shares is not.
+    expect(isPublicApiPath("/api/receipts/share")).toBe(false);
+  });
+
   it("does not let privileged routes through", async () => {
     const { isPublicApiPath } = await import("./auth.ts");
     // The routes that make an unauthenticated harness dangerous.

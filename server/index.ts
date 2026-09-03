@@ -6470,6 +6470,11 @@ let requestUserEmail = "";
       }
     }
     if (path === "/api/custom-providers/fetch-models" && method === "POST") {
+      // Rate-limited: this endpoint makes the SERVER fetch a user-chosen
+      // URL — the egress bucket caps how often any one client can aim it.
+      if (!consumeEgressBucket(clientIpForLimiting(req))) {
+        return json(res, 429, { error: "too many fetch-models attempts — wait a minute and try again" });
+      }
       const body = await readBody(req);
       if (!isText(body?.baseUrl)) return json(res, 400, { error: "baseUrl must be a string" });
       const check = validateProviderBaseUrl(body.baseUrl, SELF_HOSTED);

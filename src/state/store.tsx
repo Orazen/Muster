@@ -1387,7 +1387,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // repeat offender). A tiny periodic reconciliation over /api/bots with
     // messages=0 carries no transcripts — just live busy/activity/model
     // truth — and quietly corrects whatever the stream failed to deliver.
+    // Gated on !connected: while the SSE stream is healthy it is the
+    // authority, and a wholesale reconcile every 30s discarded live local
+    // state (e.g. an approval mid-answer) and re-rendered the whole app.
     const reconcile = () => {
+      if (stateRef.current.connected) return;
       api("/api/bots?messages=0")
         .then(({ bots, groups }) => {
           if (!alive) return;

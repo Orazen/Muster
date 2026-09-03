@@ -65,51 +65,78 @@ export class ProviderRegistry {
   }
 
   async load(configs: InstanceConfigMap) {
-    for (const [instanceId, entry] of Object.entries(configs)) {
-      const driver = this.driversByKind.get(entry.driver);
-      if (!driver) {
-        this.byId.set(instanceId, {
-          instanceId,
-          shadow: {
+    // Instances load in PARALLEL: each create() can spawn a process, fetch
+    // models, and run a snapshot — N serial awaits made boot time scale
+    // with fleet size (seconds of socket-dead time on the boot path).
+    //
+    // Deterministic order: entries() / instances() expose byId INSERTION
+    // order, and consumers rely on it (defaultSelection prefers the first
+    // available engine; the unattended-gate e2e pins exactly that). So
+    // creates run concurrently, but every byId/shadow write happens in a
+    // second pass in CONFIG order — the observable map is byte-identical
+    // to the serial version, only faster.
+    const ids = Object.keys(configs);
+    const settled = await Promise.all(
+      ids.map(async (instanceId) => {
+        const entry = configs[instanceId]!;
+        const driver = this.driversByKind.get(entry.driver);
+        if (!driver) {
+          // Unknown driver: recorded as a shadow in the second pass — the
+          // "kept as configured, unavailable here" contract.
+          return { instanceId, entry, live: null, rawCli: cliOfRaw(entry), unknownDriver: entry.driver };
+        }
+        try {
+          const config = entry.config === undefined ? driver.defaultConfig() : driver.decodeConfig(entry.config);
+          // Override detection is on the RAW config, never the decoded one:
+          // decodeConfig fills in the driver default ("claude", "codex", …),
+          // so reading `cli` there would flag every instance as overridden.
+          const rawCli = cliOfRaw(entry);
+          const live = await driver.create({
             instanceId,
-            driverKind: entry.driver,
-            displayName: entry.displayName,
-            cli: cliOfRaw(entry),
-            shadow: true,
-            reason: `unknown driver "${entry.driver}" — kept as configured, unavailable here`,
-          },
-        });
-        continue;
-      }
-      try {
-        const config = entry.config === undefined ? driver.defaultConfig() : driver.decodeConfig(entry.config);
-        // Override detection is on the RAW config, never the decoded one:
-        // decodeConfig fills in the driver default ("claude", "codex", …),
-        // so reading `cli` there would flag every instance as overridden.
-        const rawCli = cliOfRaw(entry);
-        if (rawCli) this.cliByInstance.set(instanceId, rawCli);
-        const live = await driver.create({
-          instanceId,
-          displayName: entry.displayName ?? driver.metadata.displayName,
-          environment: entry.environment ?? {},
-          enabled: entry.enabled ?? true,
-          config,
-        });
-        this.byId.set(instanceId, { instanceId, live });
-      } catch (e) {
-        this.byId.set(instanceId, {
-          instanceId,
-          shadow: {
-            instanceId,
-            driverKind: entry.driver,
             displayName: entry.displayName ?? driver.metadata.displayName,
+            environment: entry.environment ?? {},
+            enabled: entry.enabled ?? true,
+            config,
+          });
+          return { instanceId, entry, live, rawCli };
+        } catch (e) {
+          return {
+            instanceId,
+            entry,
+            live: null,
+            rawCli: cliOfRaw(entry),
+            shadowReason: e instanceof Error ? e.message : String(e),
+          };
+        }
+      }),
+    );
+    // Second pass in config order. A missing driver surfaces its
+    // "unknown driver" shadow here too — create() was never attempted.
+    ids.forEach((instanceId, index) => {
+      const result = settled[index]!;
+      const { entry } = result;
+      if (!result.live) {
+        this.byId.set(instanceId, {
+          instanceId,
+          shadow: {
+            instanceId,
+            driverKind: entry.driver,
+            displayName: entry.displayName ?? this.driversByKind.get(entry.driver)?.metadata.displayName,
             cli: cliOfRaw(entry),
             shadow: true,
-            reason: e instanceof Error ? e.message : String(e),
+            reason:
+              "unknownDriver" in result
+                ? `unknown driver "${result.unknownDriver}" — kept as configured, unavailable here`
+                : "shadowReason" in result
+                  ? result.shadowReason
+                  : "unavailable",
           },
         });
+        return;
       }
-    }
+      if (result.rawCli) this.cliByInstance.set(instanceId, result.rawCli);
+      this.byId.set(instanceId, { instanceId, live: result.live });
+    });
   }
 
   get(instanceId: InstanceId): ProviderInstance | null {

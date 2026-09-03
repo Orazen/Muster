@@ -364,10 +364,14 @@ export function requestOwnOrigin(request?: Request): string | undefined {
   // Host this server was addressed by.
   const candidate = host.split(",")[0]?.trim() ?? "";
   if (!/^[\w.-]+(:\d{1,5})?$/.test(candidate)) return undefined;
+  // Loopback by exact hostname match — a prefix test would let
+  // "127.0.0.1.evil.com" claim the http dev scheme.
+  const hostname = candidate.replace(/:\d{1,5}$/, "").toLowerCase();
+  const isLoopback = hostname === "127.0.0.1" || hostname === "localhost" || hostname.endsWith(".localhost");
   const proto = headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
   const scheme = proto === "http" || proto === "https"
     ? proto
-    : candidate.startsWith("127.0.0.1") || candidate.startsWith("localhost")
+    : isLoopback
       ? "http"
       : "https";
   return `${scheme}://${candidate}`;
@@ -705,7 +709,14 @@ export function isPublicApiPath(path: string): boolean {
     // WhatsApp Business channel: authenticated by Meta's own signature
     // (X-Hub-Signature-256 over the raw body, timing-safe compare) plus the
     // subscription handshake token — not by a user session.
-    path === "/api/whatsapp/webhook"
+    path === "/api/whatsapp/webhook" ||
+    // Receipt verification is the whole point of signed receipts: an
+    // external verifier (hiring manager, another agent, an auditor) has no
+    // session on this deployment. The endpoint is rate-limited and does
+    // exactly one thing — compare an HMAC over the posted payload. It
+    // returns nothing but valid/malformed/signature-mismatch, so it leaks
+    // no data even to a flood (see server/receipt-signing.ts).
+    path === "/api/receipts/verify"
   );
 }
 
