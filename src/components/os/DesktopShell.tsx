@@ -43,6 +43,34 @@ function Clock() {
   return <span className="os-clock">{now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>;
 }
 
+/** Ambient presence (the OmaBot steal): who's waiting on you, longest wait
+ * first, as a glanceable topbar element. "Waiting" = an approval card,
+ * question, or blocked action is holding a bot's turn open — the one state
+ * where a human answer unblocks real work. Clicking a name opens its
+ * window. Nothing here pulls or notifies: it only answers a glance. */
+function Presence({ bots, onOpen }: { bots: Bot[]; onOpen: (botId: string) => void }) {
+  const waiting = bots
+    .filter((b) => b.activity === "waiting-on-you")
+    .sort((a, b) => (a.unread === b.unread ? 0 : a.unread ? -1 : 1));
+  if (waiting.length === 0) return null;
+  return (
+    <div className="os-presence" role="status" aria-label={`${waiting.length} bots waiting on you`}>
+      <span className="os-presence-count">{waiting.length}</span>
+      {waiting.map((bot) => (
+        <button
+          key={bot.id}
+          type="button"
+          className="os-presence-chip"
+          onClick={() => onOpen(bot.id)}
+          title={`${bot.name} is waiting on you`}
+        >
+          {bot.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Full-screen desktop view of the roster. Route: /os. */
 export function DesktopShell() {
   const { state } = useStore();
@@ -116,6 +144,7 @@ export function DesktopShell() {
           <MusterbotMark size={20} />
           Muster
         </div>
+        <Presence bots={bots} onOpen={(botId) => dockClick({ kind: "agent", botId })} />
         <Clock />
       </header>
       <main className="os-body">

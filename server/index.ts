@@ -34,7 +34,7 @@ import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from 
 import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER } from "./why-journal.ts";
 import { readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
 import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
-import { checkBudget, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
+import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
 import { resolveLocalObscuraMount } from "./obscura.ts";
 import {
@@ -1647,6 +1647,8 @@ async function startTurn(
   // refuses new turns. The refusal is a normal pre-dispatch error — it
   // lands as a chip in the thread with the raise-the-cap hint, and the
   // human decides. Lifetime ledger = settled task tally + in-flight turn.
+  // Daily USD cap: same gate on TODAY's cost (settled tasks that finished
+  // today). Providers that report no cost can't trip it.
   {
     const inFlight = turnUsage.get(bot.threadId);
     const check = checkBudget(bot.tokenBudget, {
@@ -1656,6 +1658,14 @@ async function startTurn(
       inFlightTokens: (inFlight?.input ?? 0) + (inFlight?.output ?? 0),
     });
     if (!check.ok) throw Object.assign(new Error(check.reason), { status: 402 });
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const todayUsd = store
+      .tasks(bot.id)
+      .filter((task) => (task.usage?.costUsd ?? null) !== null && (task.createdAt) >= midnight.getTime())
+      .reduce((sum, task) => sum + (task.usage?.costUsd ?? 0), 0);
+    const usdCheck = checkDailyUsdCap(bot.dailyUsdCap, { todayUsd });
+    if (!usdCheck.ok) throw Object.assign(new Error(usdCheck.reason), { status: 402 });
   }
   // Claim the bot NOW, synchronously, before any await: everything between
   // here and the old mid-dispatch setActivity("working") — context rebuild,
@@ -5604,6 +5614,14 @@ let requestUserEmail = "";
       if (body.browser !== undefined) {
         if (!isFlag(body.browser)) return json(res, 400, { error: "browser must be true or false" });
         patch.browser = body.browser;
+      }
+      // Daily USD cap: null clears; the schema bounds the number.
+      if (body.dailyUsdCap !== undefined) {
+        const parsedCap = dailyUsdCapSchema.safeParse(body.dailyUsdCap);
+        if (!parsedCap.success) {
+          return json(res, 400, { error: `dailyUsdCap must be a number between ${DAILY_USD_CAP_MIN} and ${DAILY_USD_CAP_MAX}, or null` });
+        }
+        patch.dailyUsdCap = parsedCap.data ?? null;
       }
       // per-bot gate on the workspace's connected apps (Composio)
       if (body.composio !== undefined) {

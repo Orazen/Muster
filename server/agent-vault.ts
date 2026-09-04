@@ -57,3 +57,38 @@ export function checkBudget(
   }
   return { ok: true };
 }
+
+/** Daily USD cap bounds (the Flayr Max pattern): small enough to be a real
+ * tripwire, large enough for a heavy legit day. 0 = no cap. */
+export const DAILY_USD_CAP_MIN = 0.1;
+export const DAILY_USD_CAP_MAX = 1_000;
+export const dailyUsdCapSchema = z
+  .number()
+  .min(DAILY_USD_CAP_MIN)
+  .max(DAILY_USD_CAP_MAX)
+  .nullable()
+  .optional();
+
+/** Would starting one more turn cross the DAILY USD cap? The figure is the
+ * store's day-scoped ledger of settled turn costs. Cost reporting is
+ * optional per provider — turns that never report a cost bank nothing, so
+ * a provider with no cost data simply never reaches a USD cap (the token
+ * budget still covers it). There is deliberately no in-flight estimate:
+ * turn cost is only known once settled, and a cap that guessed would both
+ * over- and under-block. */
+export function checkDailyUsdCap(
+  cap: number | null | undefined,
+  usage: { todayUsd: number },
+): BudgetCheck {
+  if (!cap || cap <= 0) return { ok: true };
+  const spent = Math.max(0, usage.todayUsd);
+  if (spent >= cap) {
+    return {
+      ok: false,
+      reason:
+        `Daily spend cap reached — this bot has spent $${spent.toFixed(2)} of its $${cap.toFixed(2)} daily cap today. ` +
+        "Raise or clear the cap in the bot's settings (resets at midnight UTC) to continue.",
+    };
+  }
+  return { ok: true };
+}

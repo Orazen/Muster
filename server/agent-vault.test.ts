@@ -3,7 +3,7 @@
 // raise-the-cap hint, and garbage budgets behave as unlimited.
 import { describe, expect, it } from "vitest";
 
-import { checkBudget, tokenBudgetSchema } from "./agent-vault.ts";
+import { checkBudget, checkDailyUsdCap, dailyUsdCapSchema, tokenBudgetSchema } from "./agent-vault.ts";
 
 describe("checkBudget", () => {
   it("passes when no budget is set (null/undefined/0)", () => {
@@ -54,5 +54,40 @@ describe("tokenBudgetSchema", () => {
     expect(tokenBudgetSchema.safeParse(2_000_000_001).success).toBe(false);
     expect(tokenBudgetSchema.safeParse(1.5).success).toBe(false);
     expect(tokenBudgetSchema.safeParse("100000").success).toBe(false);
+  });
+});
+
+describe("checkDailyUsdCap", () => {
+  it("passes when no cap is set (null/undefined/0)", () => {
+    const usage = { todayUsd: 500 };
+    expect(checkDailyUsdCap(null, usage)).toEqual({ ok: true });
+    expect(checkDailyUsdCap(undefined, usage)).toEqual({ ok: true });
+    expect(checkDailyUsdCap(0, usage)).toEqual({ ok: true });
+  });
+
+  it("passes while today's spend stays under the cap", () => {
+    expect(checkDailyUsdCap(5, { todayUsd: 4.99 })).toEqual({ ok: true });
+  });
+
+  it("refuses at exactly the cap and names both figures", () => {
+    const verdict = checkDailyUsdCap(5, { todayUsd: 5 });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) {
+      expect(verdict.reason).toContain("$5.00");
+      expect(verdict.reason).toContain("resets at midnight");
+    }
+  });
+
+  it("caps only TODAY's spend — yesterday's big day does not block", () => {
+    // the store pre-filters to tasks finished today; the check trusts that
+    expect(checkDailyUsdCap(5, { todayUsd: 0.5 })).toEqual({ ok: true });
+  });
+
+  it("clamps garbage to zero and schema-bounds the cap", () => {
+    expect(checkDailyUsdCap(5, { todayUsd: -50 })).toEqual({ ok: true });
+    expect(dailyUsdCapSchema.safeParse(0.1).success).toBe(true);
+    expect(dailyUsdCapSchema.safeParse(null).success).toBe(true);
+    expect(dailyUsdCapSchema.safeParse(1_001).success).toBe(false);
+    expect(dailyUsdCapSchema.safeParse(0).success).toBe(false);
   });
 });

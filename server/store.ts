@@ -318,6 +318,10 @@ export interface BotRecord {
    * host). Off by default: a headless browser is a capability you give a
    * bot, not one it wakes up with. */
   browser?: boolean;
+  /** Daily USD spend cap for this bot (resets each calendar day). When
+   * today's settled cost crosses it, new turns are refused until raised,
+   * cleared, or midnight. Absent/null = uncapped. */
+  dailyUsdCap?: number | null;
   /** Privacy Shield: rewrite this bot's prompts (and replayed history)
    * through scrubForCloud() before any cloud API driver sees them —
    * credential shapes and PII become [SECRET_N]/[EMAIL_N]/[PHONE_N]

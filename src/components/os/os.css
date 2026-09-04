@@ -385,3 +385,41 @@
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
+
+/* ── ambient presence (waiting-on-you) ───────────────────────────────── */
+
+.os-presence {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.os-presence-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #f0460e;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.os-presence-chip {
+  padding: 3px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(240, 70, 14, 0.35);
+  background: rgba(240, 70, 14, 0.08);
+  color: #ff7a45;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.os-presence-chip:hover {
+  background: rgba(240, 70, 14, 0.18);
+}

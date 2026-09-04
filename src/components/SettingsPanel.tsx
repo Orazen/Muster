@@ -321,6 +321,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "privacyShield"
         | "modelSelection"
         | "tokenBudget"
+        | "dailyUsdCap"
         | "browser"
       >
     >,
@@ -668,6 +669,49 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 )}
               />
             </button>
+          </div>
+
+          {/* Daily USD cap (the Flayr Max steal): bounds what this bot can
+              spend in one calendar day. Resets at midnight; empty = no cap. */}
+          <div className="rounded-xl bg-card p-4">
+            <div className="text-[15px] font-medium text-ink">Daily spend cap</div>
+            <div className="mt-0.5 text-[13px] text-ink-secondary">
+              The most this bot may cost in one day (USD, from engines that report cost). Past the cap its turns are
+              refused until you raise or clear it, or midnight resets. Leave empty for no cap.
+            </div>
+            <div className="mt-2.5 flex items-center gap-2">
+              <input
+                type="number"
+                min={0.1}
+                step={1}
+                defaultValue={bot.dailyUsdCap ?? ""}
+                key={bot.dailyUsdCap ?? "uncapped"}
+                aria-label="Daily spend cap (USD)"
+                placeholder="No cap"
+                className="w-36 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+                onBlur={(e) => {
+                  const raw = e.target.value.trim();
+                  if (raw === "") {
+                    if (bot.dailyUsdCap != null) patch({ dailyUsdCap: null });
+                    return;
+                  }
+                  const parsed = Number(raw);
+                  if (Number.isFinite(parsed) && parsed >= 0.1) {
+                    const next = Math.round(parsed * 100) / 100;
+                    if (next !== bot.dailyUsdCap) patch({ dailyUsdCap: next });
+                  }
+                }}
+              />
+              {bot.dailyUsdCap != null && (
+                <button
+                  type="button"
+                  onClick={() => patch({ dailyUsdCap: null })}
+                  className="rounded-lg bg-raised px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
