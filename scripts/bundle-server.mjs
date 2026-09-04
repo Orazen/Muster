@@ -105,11 +105,23 @@ for (const name of NATIVE_EXTERNALS) {
   }
   // pnpm (and CI npm config) often skips install scripts, leaving no
   // better_sqlite3.node. Fetch the prebuilt binary; fall back to source build.
+  // `npx --yes prebuild-install` used to resolve through a global npx cache
+  // path that doesn't exist under pnpm's layout in CI (Cannot find module
+  // .../prebuild-install/bin.js), and its failure fell back to a source
+  // build whose binary the health gate still couldn't serve. Invoke the
+  // package's own bin directly from the pnpm store where it actually
+  // lives — with cwd = the vendored copy so the prebuilt download matches
+  // this exact better-sqlite3 version.
   const { execSync } = childProcess;
   if (!existsSync(join(dest, "build", "Release", "better_sqlite3.node")) &&
       !existsSync(join(dest, "prebuilds"))) {
     try {
-      execSync("npx --yes prebuild-install", { cwd: dest, stdio: "inherit" });
+      const prebuildBin = findUpBin("prebuild-install", "bin.js");
+      if (prebuildBin) {
+        execSync(`"${process.execPath}" "${prebuildBin}"`, { cwd: dest, stdio: "inherit" });
+      } else {
+        execSync("npx --yes prebuild-install@7.1.3", { cwd: dest, stdio: "inherit" });
+      }
       console.log(`prebuilt binary fetched for ${name}`);
     } catch {
       console.log(`prebuild-install failed for ${name} — building from source`);
@@ -117,6 +129,29 @@ for (const name of NATIVE_EXTERNALS) {
     }
   }
   console.log(`bundled native dep: ${name} -> ${dest}`);
+}
+
+/** Walk up from cwd looking for node_modules/.pnpm/prebuild-install@<ver>
+ * /node_modules/prebuild-install/bin.js — the only place pnpm reliably
+ * puts it. Returns undefined when nothing is found; callers fall back to
+ * npx. */
+function findUpBin(packageName, binName) {
+  let dir = process.cwd();
+  for (;;) {
+    try {
+      const pnpmDir = join(dir, "node_modules", ".pnpm");
+      for (const entry of readdirSync(pnpmDir)) {
+        if (!entry.startsWith(`${packageName}@`)) continue;
+        const candidate = join(pnpmDir, entry, "node_modules", packageName, binName);
+        if (existsSync(candidate)) return candidate;
+      }
+    } catch {
+      /* no node_modules/.pnpm here — keep walking */
+    }
+    const parent = join(dir, "..");
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
 }
 
 // Rewrite every remaining bare "better-sqlite3" specifier in dist-server/**/*.js
