@@ -743,3 +743,55 @@ body {
     animation: none;
   }
 }
+
+/* ── Onboarding wizard: ambient field + card (Mercury-inspired) ──────
+    Two slow accent glows drift behind the wizard card; content keeps a
+    solid, readable panel. Disabled under prefers-reduced-motion. */
+
+.onboarding-glow {
+  position: fixed;
+  border-radius: 9999px;
+  filter: blur(90px);
+  opacity: 0.14;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.onboarding-glow-a {
+  width: 520px;
+  height: 520px;
+  left: -120px;
+  top: -140px;
+  background: #f0460e;
+  animation: onboarding-drift-a 26s ease-in-out infinite alternate;
+}
+
+.onboarding-glow-b {
+  width: 460px;
+  height: 460px;
+  right: -140px;
+  bottom: -160px;
+  background: #7c3aed;
+  animation: onboarding-drift-b 32s ease-in-out infinite alternate;
+}
+
+@keyframes onboarding-drift-a {
+  from { transform: translate(0, 0) scale(1); }
+  to { transform: translate(120px, 60px) scale(1.15); }
+}
+
+@keyframes onboarding-drift-b {
+  from { transform: translate(0, 0) scale(1); }
+  to { transform: translate(-90px, -70px) scale(1.1); }
+}
+
+.onboarding-card {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-glow {
+    animation: none;
+  }
+}

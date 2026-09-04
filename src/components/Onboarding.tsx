@@ -782,14 +782,26 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-app px-4">
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-app px-4">
+      {/* Mercury-inspired ambient field: two slow-drifting accent glows give
+          the wizard a sense of place without any notification pull. Pure
+          CSS animation, disabled under prefers-reduced-motion. */}
+      <div aria-hidden="true" className="onboarding-glow onboarding-glow-a" />
+      <div aria-hidden="true" className="onboarding-glow onboarding-glow-b" />
       <div
-        className={`flex max-h-full w-full flex-col rounded-2xl border border-hairline/40 bg-panel p-8 ${
+        className={`onboarding-card flex max-h-full w-full flex-col rounded-2xl border border-hairline/40 bg-panel/90 p-8 backdrop-blur-xl ${
           step === 1 ? "max-w-[680px]" : "max-w-[460px]"
         }`}
       >
-        {/* progress dots — one per step, filled up to the current one */}
-        <div className="mb-5 flex items-center justify-center gap-1.5" aria-label={`Step ${step + 1} of ${STEP_LABELS.length}: ${STEP_LABELS[step]}`}>
+        {/* progress: step label carries the intent ("What are we doing"),
+            the dots just keep count — Mercury's label-first grammar */}
+        <div className="mb-2 text-center text-[11px] font-semibold uppercase tracking-[0.32em] text-ink-secondary">
+          {STEP_LABELS[step]}
+        </div>
+        <div
+          className="mb-6 flex items-center justify-center gap-1.5"
+          aria-label={`Step ${step + 1} of ${STEP_LABELS.length}: ${STEP_LABELS[step]}`}
+        >
           {STEP_LABELS.map((label, i) => (
             <span
               key={label}

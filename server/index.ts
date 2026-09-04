@@ -155,6 +155,7 @@ import {
   auth,
   toWebRequest,
   forwardedProtoOf,
+  requestOwnOrigin,
   deploymentSigningSecret,
   getSession,
   getDb,
@@ -6579,6 +6580,11 @@ let requestUserEmail = "";
       // appeared to "not sync" between email and Google logins. Mirror the
       // profile onto the signed-in account's better-auth record; the
       // account is the identity, config is just the display cache.
+      // Email: better-auth's /change-email is verification-backed (it
+      // mails a confirmation to the new address), so we call it when the
+      // profile email differs — the account syncs once the user confirms,
+      // and a Google-linked account keeps its Google identity unless the
+      // user confirms the change.
       if (patch.profile && requestUserId) {
         const authApi = auth.api;
         const name = patch.profile.name?.trim();
@@ -6586,6 +6592,20 @@ let requestUserEmail = "";
           await authApi
             .updateUser({ body: { name }, headers: toWebRequest(req).headers })
             .catch((e) => console.error("profile→account name sync failed:", e instanceof Error ? e.message : e));
+        }
+        const email = patch.profile.email?.trim().toLowerCase();
+        const currentEmail = requestUserEmail.toLowerCase();
+        if (email && email !== currentEmail) {
+          try {
+            await authApi.changeEmail({
+              body: { newEmail: email, callbackURL: `${requestOwnOrigin(toWebRequest(req)) ?? PUBLIC_BASE_URL}/app` },
+              headers: toWebRequest(req).headers,
+            });
+          } catch (e) {
+            // Google-linked accounts and deployments without a mailer
+            // reject the change — never block the profile save on it.
+            console.error("profile→account email sync skipped:", e instanceof Error ? e.message : e);
+          }
         }
       }
       const status = configStatus();
