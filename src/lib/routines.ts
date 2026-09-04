@@ -31,6 +31,10 @@ export interface Routine {
   sentry?: boolean;
   /** Last digest the sentry saw (server-side diff memory). */
   lastDigest?: string | null;
+  /** Overnight mode: total consecutive runs per firing. */
+  iterations?: number;
+  /** Shared cross-iteration memory file the bot reads and appends to. */
+  notesFile?: string;
 }
 
 export interface RoutineRun {
@@ -58,6 +62,8 @@ export interface RoutineRun {
   seenAt?: number;
   /** Sentry runs only: true when this run's watch changed (or failed). */
   changeDetected?: boolean;
+  /** Overnight chain position (1..iterations); absent on single runs. */
+  iteration?: number;
 }
 
 export interface RoutineInput {
@@ -70,4 +76,8 @@ export interface RoutineInput {
   durationMinutes?: number;
   /** Watcher mode: notify only when the watched state changes. */
   sentry?: boolean;
+  /** Overnight mode: consecutive runs per firing (2-12). */
+  iterations?: number;
+  /** Shared cross-iteration memory file. */
+  notesFile?: string;
 }

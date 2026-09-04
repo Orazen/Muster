@@ -277,3 +277,117 @@ describe("RoutineManager", () => {
     expect(h.started).toHaveLength(0);
   });
 });
+
+describe("overnight chain (iterations)", () => {
+  const eventBase = (threadId: string, startedAt: number) => ({
+    eventId: "event-x",
+    provider: "fake",
+    threadId,
+    createdAt: new Date(startedAt).toISOString(),
+  });
+
+  it("a successful iteration enqueues the next with an incremented counter and chained prompt", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Nightly refactor",
+      prompt: "Refactor the parser",
+      botId: "agent-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 23, 0).getTime() },
+      iterations: 3,
+      notesFile: "~/project/NOTES.md",
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+
+    // Iteration 1 dispatched with the chain preamble.
+    expect(h.started[0]!.prompt).toContain("iteration 1 of 3");
+    expect(h.started[0]!.prompt).toContain("~/project/NOTES.md");
+    expect(h.manager.listRuns()[0]!.iteration).toBe(1);
+
+    // Turn 1 succeeds → iteration 2 enqueues immediately (no calendar hop).
+    h.manager.handleRuntimeEvent({
+      ...eventBase("thread-1", h.manager.listRuns()[0]!.startedAt!),
+      type: "turn.completed",
+      ok: true,
+    });
+    await h.manager.tick();
+    expect(h.started[1]!.prompt).toContain("iteration 2 of 3");
+    expect(h.started[1]!.prompt).toContain("Continue that work from where it stopped");
+    expect(h.manager.listRuns()[0]!.iteration).toBe(2);
+
+    // Iteration 2 succeeds → iteration 3 enqueues and dispatches; after
+    // the FINAL iteration nothing further enqueues (the chain is done).
+    h.manager.handleRuntimeEvent({
+      ...eventBase("thread-2", h.manager.listRuns()[0]!.startedAt!),
+      type: "turn.completed",
+      ok: true,
+    });
+    await h.manager.tick();
+    expect(h.started).toHaveLength(3);
+    expect(h.started[2]!.prompt).toContain("iteration 3 of 3");
+    expect(h.manager.listRuns()[0]!.iteration).toBe(3);
+    // Completing iteration 3 must not enqueue an iteration 4.
+    h.manager.handleRuntimeEvent({
+      ...eventBase("thread-3", h.manager.listRuns()[0]!.startedAt!),
+      type: "turn.completed",
+      ok: true,
+    });
+    await h.manager.tick();
+    expect(h.started).toHaveLength(3);
+    expect(h.manager.listRuns()[0]!.status).toBe("completed");
+  });
+
+  it("a failed iteration stops the chain with an explanatory error", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Nightly refactor",
+      prompt: "Refactor the parser",
+      botId: "agent-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 23, 0).getTime() },
+      iterations: 3,
+      notesFile: "~/project/NOTES.md",
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    h.manager.handleRuntimeEvent({
+      ...eventBase("thread-1", h.manager.listRuns()[0]!.startedAt!),
+      type: "turn.completed",
+      ok: false,
+      stopReason: "engine crashed",
+    });
+    await h.manager.tick();
+    const run = h.manager.listRuns()[0]!;
+    expect(run.status).toBe("failed");
+    expect(run.error).toContain("overnight chain stopped after iteration 1 of 3");
+    expect(h.started).toHaveLength(1); // no iteration 2
+  });
+
+  it("single-iteration routines are untouched (no iteration stamp)", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Plain daily",
+      prompt: "Do the thing",
+      botId: "agent-1",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 9, 0).getTime() },
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    expect(h.started[0]!.prompt).not.toContain("iteration");
+    expect(h.manager.listRuns()[0]!.iteration).toBeUndefined();
+  });
+
+  it("sanitizeInput clamps iterations to 1..12", async () => {
+    const h = harness();
+    const high = h.manager.create({
+      name: "Too many",
+      prompt: "Go",
+      botId: "agent-1",
+      schedule: { type: "daily", time: "02:00", weekdays: [0, 1, 2, 3, 4, 5, 6] },
+      iterations: 999,
+      notesFile: "~/n.md",
+    });
+    expect(high.iterations).toBe(12);
+    const updated = h.manager.update(high.id, { iterations: 0 });
+    expect(updated!.iterations).toBe(1);
+  });
+});

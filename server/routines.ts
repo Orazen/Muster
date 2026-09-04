@@ -44,6 +44,12 @@ export interface Routine {
   sentry?: boolean;
   /** Last digest the sentry saw — the baseline for the next diff. */
   lastDigest?: string | null;
+  /** Overnight mode: total consecutive runs per firing (1 = normal single
+   * run). Each iteration after the first chains through notesFile. */
+  iterations?: number;
+  /** Shared cross-iteration memory the bot reads and appends to — the
+   * gnhf notes.md pattern: each run continues where the last stopped. */
+  notesFile?: string;
 }
 
 export interface RoutineRun {
@@ -69,6 +75,9 @@ export interface RoutineRun {
   error?: string;
   cost?: number | null;
   denials?: string[];
+  /** Overnight chain position: 1..iterations when the routine fires a
+   * multi-run chain. Absent on ordinary single runs. */
+  iteration?: number;
   createdAt: number;
   seenAt?: number;
   /** Sentry runs only: true when this run's digest changed (or the watch
@@ -87,6 +96,11 @@ export interface RoutineInput {
   /** Watcher mode: the run's SENTRY digest is diffed against the previous
    * one and the user is only notified on change (or run failure). */
   sentry?: boolean;
+  /** Overnight mode (the gnhf pattern): the routine fires `iterations`
+   * consecutive runs instead of one, chaining through a shared notes file
+   * so each iteration continues where the last stopped. */
+  iterations?: number;
+  notesFile?: string;
 }
 
 interface RoutineFile {
@@ -180,6 +194,10 @@ function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | 
     schedule: cleanSchedule(input.schedule),
     durationMinutes: Math.min(240, Math.max(15, Math.round(Number(input.durationMinutes) || 30))),
     sentry: input.sentry === true,
+    // Overnight loop: 1 = ordinary single run; 2-12 chains consecutive
+    // runs through the notes file when one fires.
+    iterations: input.iterations === undefined ? undefined : Math.min(12, Math.max(1, Math.round(Number(input.iterations) || 1))),
+    notesFile: input.notesFile?.trim().slice(0, 300) || undefined,
   };
 }
 
@@ -275,6 +293,9 @@ export class RoutineManager {
       enabled: patch.enabled ?? routine.enabled,
       schedule: patch.schedule ?? routine.schedule,
       durationMinutes: patch.durationMinutes ?? routine.durationMinutes,
+      sentry: patch.sentry ?? routine.sentry,
+      iterations: patch.iterations ?? routine.iterations,
+      notesFile: patch.notesFile ?? routine.notesFile,
     });
     if (this.options.botState(clean.botId) === "missing") throw new Error("That bot no longer exists");
     Object.assign(routine, clean, {
@@ -500,12 +521,27 @@ export class RoutineManager {
             this.failThread(task.threadId, "The routine was deleted before it could start");
             continue;
           }
+          // Overnight loop (the gnhf pattern): iteration 2..N of a firing
+          // chains through the shared notes file — the prompt tells the bot
+          // to read it first and continue where the last run stopped, and
+          // to append its progress before finishing. Cross-iteration memory
+          // is a plain file the human can also read and edit.
+          let chainedPrompt = basePrompt;
+          const routineIterations = routineDef?.iterations ?? 1;
+          const notesPath = routineDef?.notesFile;
+          if (routineIterations > 1 && notesPath) {
+            const continuation =
+              run.iteration && run.iteration > 1
+                ? `\n\nThis is iteration ${run.iteration} of ${routineIterations} in an overnight chain. First read the file ${notesPath} — it carries the notes from previous iterations. Continue that work from where it stopped. Before finishing, append a short progress line to ${notesPath} describing what this iteration changed.`
+                : `\n\nThis is iteration 1 of ${routineIterations} in an overnight chain. Work toward the objective, then append a short progress line to ${notesPath} describing what this iteration changed, so the next iteration can continue.`;
+            chainedPrompt = `${basePrompt}${continuation}`;
+          }
           // Sentry runs carry the watching suffix so the diff policy has a
           // stable digest line to read at completion. Every run also carries
           // the why-journal suffix: a routine is exactly the kind of work a
           // future audit asks WHY about, and the extractor is mechanical —
           // a bot that skips the block simply produces no journal entry.
-          const prompt = `${basePrompt}${routineDef?.sentry ? sentryPromptSuffix() : ""}${whyPromptSuffix()}`;
+          const prompt = `${chainedPrompt}${routineDef?.sentry ? sentryPromptSuffix() : ""}${whyPromptSuffix()}`;
           const triggerSource = run.triggerSource ?? (run.manual ? "manual" : "schedule");
           await this.options.startTurn(
             run.botId,
@@ -561,6 +597,39 @@ export class RoutineManager {
           return; // tick still needed below for the next scheduling hop
         }
       }
+      // Overnight chain: a successful iteration enqueues the next one
+      // immediately (bypassing the calendar), so a firing runs its full
+      // iteration count back-to-back. Any failure stops the chain — an
+      // unattended loop must not keep grinding on a broken objective.
+      if (
+        routineDef?.iterations &&
+        routineDef.iterations > 1 &&
+        run.iteration &&
+        run.iteration < routineDef.iterations
+      ) {
+        if (event.ok) {
+          const next: RoutineRun = {
+            id: randomUUID(),
+            routineId: run.routineId,
+            routineName: run.routineName,
+            prompt: run.prompt,
+            durationMinutes: run.durationMinutes,
+            botId: run.botId,
+            runOn: run.runOn,
+            scheduledFor: this.now(),
+            status: "queued",
+            manual: run.manual,
+            triggerSource: run.triggerSource ?? "schedule",
+            iteration: run.iteration + 1,
+            createdAt: this.now(),
+          };
+          this.runs.unshift(next);
+          this.save();
+          this.emitRun(next);
+        } else {
+          run.error = `${run.error ?? "This run failed"} — overnight chain stopped after iteration ${run.iteration} of ${routineDef.iterations}`;
+        }
+      }
     } else {
       return;
     }
@@ -598,6 +667,9 @@ export class RoutineManager {
       status: "queued",
       manual,
       triggerSource: manual ? "manual" : "schedule",
+      // Overnight chain: the calendar-fired run is always iteration 1;
+      // iterations 2..N are enqueued by the completion handler.
+      iteration: routine.iterations && routine.iterations > 1 ? 1 : undefined,
       createdAt: this.now(),
     };
     this.runs.push(run);

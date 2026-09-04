@@ -336,6 +336,9 @@ export function RoutineEditor({
   );
   const [durationMinutes, setDurationMinutes] = useState(routine?.durationMinutes ?? 30);
   const [sentry, setSentry] = useState(routine?.sentry ?? false);
+  const [overnight, setOvernight] = useState((routine?.iterations ?? 1) > 1);
+  const [overnightIterations, setOvernightIterations] = useState(routine?.iterations ?? 3);
+  const [notesFile, setNotesFile] = useState(routine?.notesFile ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const cloudInstance = state.instances.find((instance) => instance.driverKind === "boxAgent");
@@ -360,6 +363,8 @@ export function RoutineEditor({
       enabled: routine ? undefined : true,
       durationMinutes,
       sentry,
+      iterations: overnight && overnightIterations > 1 ? overnightIterations : undefined,
+      notesFile: overnight ? notesFile.trim() || undefined : undefined,
       schedule:
         kind === "once"
           ? { type: "once", at: new Date(at).getTime() }
@@ -405,6 +410,41 @@ export function RoutineEditor({
                 when that line changes (or the watch fails). Perfect for price watches, tender scouts and "did anything
                 change" checks.
               </span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-hairline/60 bg-inset p-3.5">
+            <input
+              type="checkbox"
+              checked={overnight}
+              onChange={(event) => setOvernight(event.target.checked)}
+              className="mt-0.5 size-4 accent-[#ff7a45]"
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13.5px] font-medium text-ink">Overnight mode</span>
+              <span className="mt-0.5 block text-[12px] leading-relaxed text-ink-secondary">
+                When this routine fires, the bot runs up to {overnightIterations} consecutive iterations instead of one.
+                Each iteration reads and appends a shared notes file, so it continues where the last one stopped. A
+                failed iteration stops the chain.
+              </span>
+              {overnight && (
+                <span className="mt-2 flex flex-col gap-1.5">
+                  <input
+                    type="number"
+                    min={2}
+                    max={12}
+                    value={overnightIterations}
+                    onChange={(event) => setOvernightIterations(Math.max(2, Math.min(12, Number(event.target.value) || 2)))}
+                    aria-label="Iterations"
+                    className="w-24 rounded-lg border border-hairline/60 bg-inset px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent/70"
+                  />
+                  <input
+                    value={notesFile}
+                    onChange={(event) => setNotesFile(event.target.value)}
+                    placeholder="notes file path — e.g. ~/project/NOTES.md"
+                    className="w-full rounded-lg border border-hairline/60 bg-inset px-2.5 py-1.5 text-[12.5px] text-ink placeholder:text-ink-secondary/60 outline-none focus:border-accent/70"
+                  />
+                </span>
+              )}
             </span>
           </label>
           <div>
