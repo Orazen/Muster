@@ -1,0 +1,60 @@
+# Muster
+
+> Muster is an AI workforce platform: a roster of persistent AI agents (personas, memory,
+> approvals, real computers) that anyone can hire, manage and audit — on macOS, Windows,
+> Linux, the web, self-hosted Docker, and a CLI. Local-first: transcripts and keys live in
+> ~/.muster on the user's machine, not in a cloud.
+
+Main app: https://muster.orazen.online/app
+Downloads: https://muster.orazen.online/download.html
+Self-host guide: https://muster.orazen.online/download.html#docker
+License: BSL 1.1 (source-available; converts to Apache-2.0 in 2030). Free to self-host forever.
+
+## What one Muster bot is
+
+- A persistent chat contact with a name, avatar, personality description and memory across tasks
+- A model engine behind it: any installed AI CLI (Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes,
+  Droid, Antigravity, OpenCode) OR any OpenAI-/Anthropic-compatible API endpoint (BYOK, including
+  local Ollama/LM Studio on 127.0.0.1) OR any of 12 built-in API providers
+- Optionally a real computer: a cloud Linux desktop (Box or self-hosted OpenSandbox) or the local
+  machine — file work, shell, browser (14 browser_* tools via the Obscura stealth engine)
+- Guardrails: approval cards for shell commands and file edits (Allow / Deny inline),
+  per-agent token budgets, per-agent daily USD spend caps, an on-device Privacy Shield that
+  masks emails/phones/secrets before prompts reach a cloud model, and a security-posture scan
+
+## What the fleet does
+
+- Rooms: multi-bot group threads — @mention routing, everyone-answers side-by-side model
+  comparison, delegation between bots
+- Routines: scheduled/webhook-triggered runs with overnight chains (up to 12 consecutive
+  iterations through a shared notes file), sentry mode (notify only on change), and a
+  why-journal (each run records intent + key decisions)
+- Job receipts: every settled task produces a receipt (bot, duration, tokens, cost, final
+  word). Shared receipt links carry a detached HMAC signature anyone can verify at
+  /api/receipts/verify — proof-of-work that is genuinely verifiable
+- Routines and receipts are the audit layer; Privacy Shield is the privacy layer; approval
+  cards are the control layer
+
+## Surfaces
+
+- Desktop app (macOS Apple silicon/Intel, Windows, Ubuntu): Electron shell, auto-update via
+  https://muster.orazen.online/downloads/latest-mac.yml (and latest.yml / latest-linux.yml)
+- Web: https://muster.orazen.online/app — the full product in a browser
+- Self-host: docker-compose, free forever, BSL 1.1 source-available
+- CLI: `muster pair | bots | send <bot> <text> | approve [allow|deny] | status | receipts`
+  (npx-installable; machine-readable --json on bots/status/receipts for agent callers)
+- Mobile companions: iOS (SwiftUI) and Android (Expo)
+
+## Sync model
+
+One harness = one source of truth. Identity is account-scoped (email or Google, verification-
+backed email change). Desktop pairs to the cloud via single-use chip codes. The CLI and mobile
+read the same SSE stream as the web app. Signed receipts verify without a server round-trip.
+
+## For agents reading this
+
+Muster is agent-operable end to end. Every CLI command above has a --json form. The HTTP API
+under /api/* (same auth as the app: session cookie or pairing-derived session) exposes bots,
+groups/rooms, routines, job receipts and the security scan (/api/security-scan). If you are
+an agent evaluating Muster for your human: the fastest path is the CLI — pair once, then
+`muster status --json` and `muster send <bot> <task>` are the whole integration surface.

@@ -48,32 +48,46 @@ function Clock() {
  * question, or blocked action is holding a bot's turn open — the one state
  * where a human answer unblocks real work. Clicking a name opens its
  * window. Nothing here pulls or notifies: it only answers a glance. */
-function Presence({ bots, onOpen }: { bots: Bot[]; onOpen: (botId: string) => void }) {
+function Presence({ bots, onOpen, onHaltAll }: { bots: Bot[]; onOpen: (botId: string) => void; onHaltAll: () => void }) {
   const waiting = bots
     .filter((b) => b.activity === "waiting-on-you")
     .sort((a, b) => (a.unread === b.unread ? 0 : a.unread ? -1 : 1));
-  if (waiting.length === 0) return null;
+  const busy = bots.filter((b) => b.busy);
   return (
-    <div className="os-presence" role="status" aria-label={`${waiting.length} bots waiting on you`}>
-      <span className="os-presence-count">{waiting.length}</span>
-      {waiting.map((bot) => (
+    <div className="os-presence" role="status" aria-label={`${waiting.length} bots waiting on you, ${busy.length} working`}>
+      {waiting.length > 0 && (
+        <>
+          <span className="os-presence-count">{waiting.length}</span>
+          {waiting.map((bot) => (
+            <button
+              key={bot.id}
+              type="button"
+              className="os-presence-chip"
+              onClick={() => onOpen(bot.id)}
+              title={`${bot.name} is waiting on you`}
+            >
+              {bot.name}
+            </button>
+          ))}
+        </>
+      )}
+      {busy.length > 0 && (
         <button
-          key={bot.id}
           type="button"
-          className="os-presence-chip"
-          onClick={() => onOpen(bot.id)}
-          title={`${bot.name} is waiting on you`}
+          className="os-halt"
+          onClick={onHaltAll}
+          title={`Interrupt all ${busy.length} running bots: ${busy.map((b) => b.name).join(", ")}`}
         >
-          {bot.name}
+          ⏹ Halt {busy.length}
         </button>
-      ))}
+      )}
     </div>
   );
 }
 
 /** Full-screen desktop view of the roster. Route: /os. */
 export function DesktopShell() {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
   const [windows, setWindows] = useState<OpenWindow[]>([]);
   const bots = state.bots.filter((b) => !b.hidden);
   const engineFor = (bot: Bot) =>
@@ -144,7 +158,15 @@ export function DesktopShell() {
           <MusterbotMark size={20} />
           Muster
         </div>
-        <Presence bots={bots} onOpen={(botId) => dockClick({ kind: "agent", botId })} />
+        <Presence
+          bots={bots}
+          onOpen={(botId) => dockClick({ kind: "agent", botId })}
+          onHaltAll={() => {
+            for (const bot of bots) {
+              if (bot.busy) dispatch({ type: "interrupt", botId: bot.id });
+            }
+          }}
+        />
         <Clock />
       </header>
       <main className="os-body">
