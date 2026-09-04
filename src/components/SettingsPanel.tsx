@@ -296,6 +296,57 @@ function MemoryCard({ bot }: { bot: Bot }) {
   );
 }
 
+/** SOUL.md persona card: export the bot's identity as one markdown file,
+ * import one to replace name/role/description (Hermes-style SOUL.md files
+ * accepted). Errors surface inline; a successful import reloads so every
+ * view re-reads the updated persona. */
+function SoulCard({ botId }: { botId: string }) {
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="rounded-xl bg-card p-4">
+      <div className="text-[15px] font-medium text-ink">SOUL.md</div>
+      <div className="mt-0.5 text-[13px] text-ink-secondary">
+        This bot's identity as one portable markdown file — export to edit or share, import to replace
+        name, role and description. Hermes-style SOUL.md files work too.
+      </div>
+      <div className="mt-2.5 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => window.open(`/api/bots/${botId}/soul.md`, "_blank")}
+          className="rounded-lg bg-raised px-2.5 py-1.5 text-[12.5px] text-ink hover:bg-raised-hover"
+        >
+          Export
+        </button>
+        <label className="cursor-pointer rounded-lg bg-raised px-2.5 py-1.5 text-[12.5px] text-ink hover:bg-raised-hover">
+          Import…
+          <input
+            type="file"
+            accept=".md,text/markdown"
+            aria-label="Import SOUL.md"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              try {
+                const text = await file.text();
+                await api(`/api/bots/${botId}/soul.md`, {
+                  method: "PUT",
+                  body: JSON.stringify({ text }),
+                });
+                window.location.reload();
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Import failed");
+              }
+            }}
+          />
+        </label>
+        {error && <span className="ml-1.5 text-[12px] text-danger">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const [voices, setVoices] = useState<Array<{ id: string; label: string; description?: string }>>([]);
@@ -594,6 +645,11 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               />
             </button>
           </div>
+
+          {/* SOUL.md persona card: the identity as one portable file the
+              human owns. Export to share/edit; import replaces name, role
+              and description (Hermes-style SOUL.md files accepted). */}
+          <SoulCard botId={bot.id} />
 
           {/* Muster Vault (lite): a lifetime token cap this bot may not
               cross. Empty = unlimited. The server refuses turns past the

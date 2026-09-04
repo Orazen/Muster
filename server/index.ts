@@ -37,6 +37,7 @@ import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-s
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
 import { resolveLocalObscuraMount } from "./obscura.ts";
+import { exportSoulMd, parseSoulMd } from "./soul-md.ts";
 import {
   CUSTOM_MODELS_MIN,
   CUSTOM_PROVIDER_MAX,
@@ -5729,6 +5730,31 @@ let requestUserEmail = "";
       writeMemoryFile(m[1], parsed.data.text);
       // truncated echoes back so the editor can warn about the load budget
       return json(res, 200, { ok: true, truncated: readMemoryFile(m[1]).truncated });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/soul\.md$/);
+    if (m && (method === "GET" || method === "PUT")) {
+      // SOUL.md persona export/import (server/soul-md.ts). GET returns the
+      // file the owner can edit or share; PUT parses it with zod and maps
+      // the recognized fields back onto the bot. Ownership is enforced by
+      // the shared bot lookup + ownsRecord guard above these routes.
+      const soulBot = store.bot(m[1]);
+      if (!soulBot) return json(res, 404, { error: "no such bot" });
+      if (method === "GET") {
+        res.writeHead(200, { "content-type": "text/markdown; charset=utf-8" });
+        res.end(exportSoulMd(soulBot));
+        return;
+      }
+      const body = await readBody(req);
+      const parsed = parseSoulMd(isText(body?.text) ? body.text : "");
+      if (!parsed) return json(res, 400, { error: "no # name heading found — this does not look like a SOUL.md file" });
+      store.patchBot(m[1], {
+        name: parsed.name,
+        title: parsed.title || soulBot.title,
+        description: parsed.description,
+      });
+      const fresh = store.bot(m[1])!;
+      broadcast({ kind: "bot", bot: fresh });
+      return json(res, 200, { bot: fresh });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/topics\/([^/]+)$/);
     if (m && method === "GET") {
