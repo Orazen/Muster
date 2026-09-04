@@ -81,7 +81,7 @@ on:
         default: true
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -314,17 +314,18 @@ jobs:
           [ -f "release/latest-mac.yml" ] || { echo "::error::missing latest-mac.yml (auto-update feed)"; exit 1; }
           [ -f "release/Muster.dmg" ] || { echo "::error::missing Muster.dmg (stable download name)"; exit 1; }
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: macos-artifacts
-          path: |
-            release/*.dmg
-            release/*.zip
-            release/*.blockmap
-            release/latest-mac.yml
-            release/SHA256SUMS-macos-arm64.txt
-          if-no-files-found: error
-          retention-days: 14
+      # Artifact quota on this private repo is 500MB and each platform's
+      # bundle is ~500MB — upload-artifact can never fit. The feed files and
+      # installer are handed to the publish job through a DRAFT GitHub
+      # release keyed to this run instead (tokenless storage, no quota).
+      - name: "Attach macOS assets to draft release"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION" --draft --prerelease=false --title "Muster $VERSION (staging)" --notes "staging build" --target "$GITHUB_SHA" 2>/dev/null || true
+          gh release upload "v$VERSION" release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml release/SHA256SUMS-macos-arm64.txt --clobber
 
   # ── macOS (Intel / x64) ───────────────────────────────────────────────────
   # Unsigned direct download only, by policy: no Developer ID cert is applied
@@ -406,15 +407,12 @@ jobs:
           cp "release/Muster-${VERSION}-intel.dmg" release/Muster-intel.dmg
           (cd release && shasum -a 256 *.dmg *.zip > SHA256SUMS-macos-x64.txt)
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: macos-x64-artifacts
-          path: |
-            release/*.dmg
-            release/*.zip
-            release/SHA256SUMS-macos-x64.txt
-          if-no-files-found: error
-          retention-days: 14
+      - name: "Attach macOS x64 assets to draft release"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "v${{ needs.prepare.outputs.version }}" release/*.dmg release/*.zip release/SHA256SUMS-macos-x64.txt --clobber
 
   # ── Windows ───────────────────────────────────────────────────────────────
   windows:
@@ -518,16 +516,12 @@ jobs:
           cp "$src" release/Muster-setup.exe
           (cd release && sha256sum *.exe > SHA256SUMS-windows-x64.txt)
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: windows-artifacts
-          path: |
-            release/*.exe
-            release/*.exe.blockmap
-            release/latest.yml
-            release/SHA256SUMS-windows-x64.txt
-          if-no-files-found: error
-          retention-days: 14
+      - name: "Attach Windows assets to draft release"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "v${{ needs.prepare.outputs.version }}" release/*.exe release/*.exe.blockmap release/latest.yml release/SHA256SUMS-windows-x64.txt --clobber
 
   # ── Linux ─────────────────────────────────────────────────────────────────
   linux:
@@ -588,16 +582,12 @@ jobs:
           cp "$appimage" release/Muster.AppImage
           (cd release && sha256sum *.deb *.AppImage > SHA256SUMS-linux-x64.txt)
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: linux-artifacts
-          path: |
-            release/*.deb
-            release/*.AppImage
-            release/latest-linux.yml
-            release/SHA256SUMS-linux-x64.txt
-          if-no-files-found: error
-          retention-days: 14
+      - name: "Attach Linux assets to draft release"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "v${{ needs.prepare.outputs.version }}" release/*.deb release/*.AppImage release/latest-linux.yml release/SHA256SUMS-linux-x64.txt --clobber
 
   # ── Assemble + publish ────────────────────────────────────────────────────
   # Skipped entirely on dry runs. A partial platform set becomes a DRAFT so a
@@ -615,10 +605,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          path: assets
-          merge-multiple: true
+      # Assets arrive via the DRAFT release (each platform job attached its
+      # files directly — workflow artifacts cannot fit the private-repo
+      # quota). Download everything the draft carries into ./assets.
+      - name: Download staging assets from the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh release download "v$VERSION" --dir assets --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: "Gate: every feed entry matches the actual bytes"
         run: |
@@ -701,10 +698,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          path: artifacts
-          merge-multiple: true
+      - name: Download release assets for the VPS mirror
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          gh release download "v$VERSION" --dir artifacts --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Build latest.json manifest
         run: |
