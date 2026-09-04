@@ -755,16 +755,21 @@ jobs:
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
           DEST="tarun@$VPS_HOST:/opt/muster-downloads/"
+          # IdentitiesOnly stops ssh from also offering agent/default
+          # identities — without it the server hits MaxAuthTries and cuts
+          # the connection with "Too many authentication failures" before
+          # deploy_key is ever accepted. BatchMode keeps CI non-interactive.
+          SSH_OPTS="ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes"
 
           # Create remote dir if it doesn't exist
-          ssh -i ~/.ssh/deploy_key tarun@$VPS_HOST "sudo mkdir -p /opt/muster-downloads && sudo chown tarun:tarun /opt/muster-downloads" 2>/dev/null || true
+          $SSH_OPTS tarun@$VPS_HOST "sudo mkdir -p /opt/muster-downloads && sudo chown tarun:tarun /opt/muster-downloads" 2>/dev/null || true
 
           # rsync stable-named artifacts + metadata, PLUS the electron-updater
           # feed (latest-mac.yml / latest.yml / latest-linux.yml + versioned
           # zips): the app's publish provider is generic and points here, so
           # in-app updates are tokenless for everyone on a private repo.
           rsync -avz --checksum \
-            -e "ssh -i ~/.ssh/deploy_key" \
+            -e "$SSH_OPTS" \
             artifacts/Muster.dmg \
             artifacts/Muster-intel.dmg \
             artifacts/Muster-setup.exe \
@@ -781,5 +786,5 @@ jobs:
           echo "deployed to $DEST"
 
           # Verify remote files
-          ssh -i ~/.ssh/deploy_key tarun@$VPS_HOST \
+          $SSH_OPTS tarun@$VPS_HOST \
             "ls -lh /opt/muster-downloads/ && cat /opt/muster-downloads/latest.json | python3 -m json.tool"
