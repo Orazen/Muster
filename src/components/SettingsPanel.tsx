@@ -649,7 +649,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               <div className="mt-0.5 text-[13px] text-ink-secondary">
                 {bot.browser
                   ? "This bot can navigate, click, fill and screenshot real pages (14 browser tools, stealth headless)."
-                  : "Give this bot a real headless browser — navigate, click, fill, screenshot. Requires the obscura binary installed on this machine."}
+                  : "Give this bot a real headless browser — navigate, click, fill, screenshot. Requires the obscura binary installed on this machine and a restart after installing it."}
               </div>
             </div>
             <button
