@@ -3,15 +3,18 @@ productName: Muster
 artifactName: Muster-${version}-${arch}.${ext}
 
 # In-app auto-update reads latest-mac.yml + the .zip (macOS) or latest.yml +
-# the NSIS .exe (Windows) from this repo's own GitHub Releases. Public repo →
-# no token needed on users' machines. Baked into app-update.yml; both metadata
-# files are emitted here even with --publish never, and must be uploaded to
-# the GitHub release alongside the artifacts — a release missing latest.yml
-# leaves every Windows install stranded on its installed version.
+# the NSIS .exe (Windows) from the tokenless download mirror at
+# https://muster.orazen.online/downloads/ — the release workflow rsyncs both
+# metadata files and the versioned artifacts there (see deploy-downloads).
+# The repo is PRIVATE, so the previous GitHub provider 404'd on every
+# unauthenticated check ("Check failed: 404 / releases.atom") and no
+# installation could ever auto-update. A generic provider needs no token on
+# users' machines; both metadata files are emitted here even with
+# --publish never. A release missing latest.yml leaves every Windows install
+# stranded on its installed version.
 publish:
-  - provider: github
-    owner: Orazen
-    repo: Muster
+  - provider: generic
+    url: https://muster.orazen.online/downloads
 
 directories:
   buildResources: build

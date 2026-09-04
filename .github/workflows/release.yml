@@ -756,7 +756,10 @@ jobs:
           # Create remote dir if it doesn't exist
           ssh -i ~/.ssh/deploy_key tarun@$VPS_HOST "sudo mkdir -p /opt/muster-downloads && sudo chown tarun:tarun /opt/muster-downloads" 2>/dev/null || true
 
-          # rsync only stable-named artifacts + metadata
+          # rsync stable-named artifacts + metadata, PLUS the electron-updater
+          # feed (latest-mac.yml / latest.yml / latest-linux.yml + versioned
+          # zips): the app's publish provider is generic and points here, so
+          # in-app updates are tokenless for everyone on a private repo.
           rsync -avz --checksum \
             -e "ssh -i ~/.ssh/deploy_key" \
             artifacts/Muster.dmg \
@@ -765,6 +768,11 @@ jobs:
             artifacts/Muster.deb \
             artifacts/Muster.AppImage \
             artifacts/latest.json \
+            artifacts/latest-mac.yml \
+            artifacts/latest.yml \
+            artifacts/latest-linux.yml \
+            artifacts/Muster-*-arm64.zip \
+            artifacts/Muster-*-x64.zip \
             "$DEST"
 
           echo "deployed to $DEST"
