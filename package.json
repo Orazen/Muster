@@ -1,7 +1,7 @@
 {
   "name": "muster",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/Orazen/Muster",
   "repository": {
