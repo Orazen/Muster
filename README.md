@@ -26,11 +26,11 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 <br>
 
-<a href="https://github.com/Orazen/Muster/releases/latest/download/Muster.dmg">
+<a href="https://muster.orazen.online/downloads/Muster.dmg">
   <img src="https://img.shields.io/github/v/release/Orazen/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe&cacheSeconds=300" alt="Download the latest Muster for macOS (.dmg)" height="40">
 </a>
 &nbsp;
-<a href="https://github.com/Orazen/Muster/releases/latest/download/Muster-setup.exe">
+<a href="https://muster.orazen.online/downloads/Muster-setup.exe">
   <img src="https://img.shields.io/github/v/release/Orazen/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Windows&labelColor=070707&color=4cc2ff&cacheSeconds=300" alt="Download the latest Muster for Windows (.exe)" height="40">
 </a>
 
@@ -318,10 +318,10 @@ flowchart LR
 | | Download | Install |
 |---|---|---|
 | **macOS** (Apple silicon) — **recommended: Homebrew** | `brew tap orazen/muster && brew install --cask muster` | Homebrew clears the quarantine flag automatically on install, so it just works — no Gatekeeper "damaged" message. |
-| **macOS** (Apple silicon) — direct download | [Muster.dmg](https://github.com/Orazen/Muster/releases/latest/download/Muster.dmg) | Drag it to Applications, open it. **Not yet signed/notarized** — macOS Gatekeeper will say *"Muster is damaged and can't be opened. You should move it to the Bin."* This is not real damage, it's an unsigned-app quarantine flag. Fix: open Terminal and run `xattr -cr /Applications/Muster.app`, then open it again — or just use Homebrew above, which avoids this entirely. (Proper Developer ID signing + notarization is tracked, see below.) |
-| **macOS** (Intel) | [Muster-intel.dmg](https://github.com/Orazen/Muster/releases/latest/download/Muster-intel.dmg) | Same app, built for Intel Macs. Same unsigned-quarantine note and fix as above. |
-| **Windows** (x64) | [Muster-setup.exe](https://github.com/Orazen/Muster/releases/latest/download/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
-| **Linux** (x64) | [Muster.deb](https://github.com/Orazen/Muster/releases/latest/download/Muster.deb) · [Muster.AppImage](https://github.com/Orazen/Muster/releases/latest/download/Muster.AppImage) | `.deb`: `sudo dpkg -i Muster.deb` · AppImage: `chmod +x Muster.AppImage && ./Muster.AppImage` |
+| **macOS** (Apple silicon) — direct download | [Muster.dmg](https://muster.orazen.online/downloads/Muster.dmg) | Drag it to Applications, open it. **Not yet signed/notarized** — macOS Gatekeeper will say *"Muster is damaged and can't be opened. You should move it to the Bin."* This is not real damage, it's an unsigned-app quarantine flag. Fix: open Terminal and run `xattr -cr /Applications/Muster.app`, then open it again — or just use Homebrew above, which avoids this entirely. (Proper Developer ID signing + notarization is tracked, see below.) |
+| **macOS** (Intel) | [Muster-intel.dmg](https://muster.orazen.online/downloads/Muster-intel.dmg) | Same app, built for Intel Macs. Same unsigned-quarantine note and fix as above. |
+| **Windows** (x64) | [Muster-setup.exe](https://muster.orazen.online/downloads/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
+| **Linux** (x64) | [Muster.deb](https://muster.orazen.online/downloads/Muster.deb) · [Muster.AppImage](https://muster.orazen.online/downloads/Muster.AppImage) | `.deb`: `sudo dpkg -i Muster.deb` · AppImage: `chmod +x Muster.AppImage && ./Muster.AppImage` |
 | **Android** | Play Store (coming soon — app is built, listing needs a Play developer account) | Pair with your computer's companion service |
 | **iOS** | App Store (coming soon — app is built, listing needs an Apple Developer account) | Pair with your computer's companion service |
 
