@@ -796,15 +796,30 @@ export async function containerComputerAction(
   if (!before.daemonUp) throw Object.assign(new Error(before.problem ?? `${runtime} is not running`), { status: 409 });
 
   if (action === "run" && before.container !== "missing") {
-    throw Object.assign(new Error("A Local VM already exists; remove it before creating a replacement"), { status: 409 });
+    // The classic trap: a previous container still holds the viewer port
+    // (6080), so `docker run` dies with "port is already allocated". If
+    // the existing container is ours, merely stopped, and fully matching
+    // (managed + current image + safe network/security/persistence),
+    // recycle it — remove, then run fresh with the current stored viewer
+    // secret. Anything unsafe still refuses (stop it first or recreate).
+    const recyclable =
+      before.container === "stopped" &&
+      before.managed &&
+      before.imageMatches &&
+      before.network === "loopback" &&
+      before.security === "hardened" &&
+      before.persistence === "durable";
+    if (recyclable) {
+      await runner(runtime, ["rm", runtime === "container" ? "--force" : "-f", target.containerName], 60_000);
+    } else {
+      throw Object.assign(new Error("A Local VM already exists; remove it before creating a replacement"), { status: 409 });
+    }
   }
   if (action === "run" && !before.image) {
     throw Object.assign(new Error("Prepare the Cua desktop image before creating the Local VM"), { status: 409 });
   }
-  if (action === "start") {
-    throw Object.assign(new Error("This desktop image cannot safely resume; remove and recreate the Local VM"), {
-      status: 409,
-    });
+  if (action === "start" && before.container === "missing") {
+    throw Object.assign(new Error("No Local VM exists yet — create one first"), { status: 409 });
   }
   if (action === "stop" && before.container !== "running") {
     throw Object.assign(new Error("The Local VM is not running"), { status: 409 });

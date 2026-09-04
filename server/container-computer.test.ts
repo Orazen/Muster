@@ -34,6 +34,10 @@ function runner(responses: Record<string, string | Error>) {
     calls.push(key);
     const response = responses[key];
     if (response instanceof Error || response === undefined) {
+      // `docker run` (the big generated command) and the versioned artifact
+      // variant are always accepted — tests assert on `calls`, not on the
+      // exact line, and the full arg list embeds a random VNC secret.
+      if (key.startsWith("docker run ")) return { stdout: "container-id\n" };
       throw response ?? new Error(`unexpected command: ${key}`);
     }
     return { stdout: response };
@@ -447,17 +451,50 @@ describe("containerComputerAction", () => {
     expect(fake.calls.some((call) => call.startsWith("docker run "))).toBe(false);
   });
 
-  it("never starts a stopped desktop because its stale X lock makes resume unsafe", async () => {
+  it("recycles a stopped managed desktop on run — never leaves a port-allocating corpse", async () => {
+    // The field bug: docker run died with "port is already allocated"
+    // because a previous (stopped) container still held the viewer port.
+    // run now removes the stopped managed container first, then creates
+    // fresh — with the stored viewer secret, not CHANGE_ME.
     const fake = runner({
       "/usr/bin/which docker": "docker\n",
       "/usr/bin/which podman": new Error("missing"),
       "docker info --format {{.ServerVersion}}": "29\n",
       [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
       [`docker inspect ${CONTAINER}`]: readyInspect({ State: { Running: false } }),
+      [`docker rm -f ${CONTAINER}`]: "",
+      [`docker run -d --name ${CONTAINER}`]: "container-id\n",
     });
 
-    await expect(containerComputerAction("start", fake.run, "linux")).rejects.toThrow("cannot safely resume");
-    expect(fake.calls).not.toContain(`docker start ${CONTAINER}`);
+    await containerComputerAction("run", fake.run, "linux");
+    expect(fake.calls).toContain(`docker rm -f ${CONTAINER}`);
+    expect(fake.calls.some((call) => call.startsWith("docker run ") && call.includes("VNC_PW="))).toBe(true);
+    expect(fake.calls.some((call) => call.includes("CHANGE_ME"))).toBe(false);
+  });
+
+  it("run refuses when an existing container is managed but not recycleable (unsafe config)", async () => {
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: readyInspect({
+        State: { Running: false },
+        HostConfig: {
+          Memory: 0,
+          MemorySwap: 0,
+          NanoCpus: 0,
+          PidsLimit: 128,
+          CapDrop: [],
+          CapAdd: [],
+          PortBindings: { "6901/tcp": [{ HostIp: "127.0.0.1" }] },
+        },
+      }),
+    });
+
+    await expect(containerComputerAction("run", fake.run, "linux")).rejects.toThrow(
+      "A Local VM already exists",
+    );
   });
 
   it("runtimeStart no-ops without touching the runner when the daemon is already up", async () => {
