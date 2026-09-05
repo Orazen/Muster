@@ -117,3 +117,4 @@ Each item is independently shippable; none blocks the others.
   langgraph → smolagents → openclaw).
 - License MIT — concepts and schemas may be adopted freely; this doc
   borrows abstractions only, no code.
+# docs: routine scorecards ship
