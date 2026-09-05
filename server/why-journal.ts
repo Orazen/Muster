@@ -35,8 +35,14 @@ export const MAX_WHY_ENTRIES = 1000;
 /** File name (inside DATA_DIR) of the persisted journal. */
 export const WHY_JOURNAL_FILE = "why-journal.json";
 
-/** The marker a why-enabled prompt asks the bot to state its intent with. */
+/** The markers a why-enabled prompt asks the bot to state its reasoning
+ * with. HYPOTHESIS and FINDINGS follow the ARC reasoning-agent pattern
+ * (action/reason/hypothesis/aggregated_findings): what the run assumed
+ * about the world, and what it learned — the two fields that make a
+ * journal comparable across runs instead of a pile of prose. */
 export const WHY_MARKER = "WHY:";
+export const HYPOTHESIS_MARKER = "HYPOTHESIS:";
+export const FINDINGS_MARKER = "FINDINGS:";
 
 /** The header a why-enabled prompt puts above its decision bullets. */
 export const DECISIONS_HEADER = "DECISIONS:";
@@ -51,7 +57,8 @@ export const MAX_DECISION_CHARS = 200;
  * widened with `partial` for runs that finished but did not fully succeed. */
 export type WhyOutcome = "done" | "failed" | "partial";
 
-/** One settled run: what the bot was trying to do, and the choices it made. */
+/** One settled run: what the bot was trying to do, and the choices it made.
+ * `hypothesis`/`findings` are optional so version-1 files migrate in place. */
 export interface WhyEntry {
   runId: string;
   botId: string;
@@ -61,6 +68,10 @@ export interface WhyEntry {
   intent: string;
   decisions: string[];
   outcome: WhyOutcome;
+  /** What this run assumed about the world (ARC "hypothesis"). */
+  hypothesis?: string;
+  /** What this run learned (ARC "aggregated findings"). */
+  findings?: string;
 }
 
 export interface WhyQuery {
@@ -73,10 +84,12 @@ export interface WhyQuery {
 }
 
 /** What a reply declared about itself. A missing section is a valid
- * answer: `null` intent, no decisions. */
+ * answer: `null` intent, no decisions, null hypothesis/findings. */
 export interface ExtractedWhy {
   intent: string | null;
   decisions: string[];
+  hypothesis: string | null;
+  findings: string | null;
 }
 
 const entrySchema = z.object({
@@ -86,6 +99,8 @@ const entrySchema = z.object({
   at: z.number().finite().nonnegative(),
   intent: z.string(),
   decisions: z.array(z.string()),
+  hypothesis: z.string().optional(),
+  findings: z.string().optional(),
   outcome: z.enum(["done", "failed", "partial"]),
 });
 
@@ -187,12 +202,26 @@ const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
 export function extractWhyFromReply(reply: string): ExtractedWhy {
   let intent: string | null = null;
   let decisions: string[] = [];
+  let hypothesis: string | null = null;
+  let findings: string | null = null;
   let inDecisions = false;
   for (const raw of reply.split("\n")) {
     const line = raw.trim();
     if (line.startsWith(WHY_MARKER)) {
       if (intent === null) {
         intent = oneLine(line.slice(WHY_MARKER.length)) || null;
+      }
+      continue;
+    }
+    if (line.startsWith(HYPOTHESIS_MARKER)) {
+      if (hypothesis === null) {
+        hypothesis = oneLine(line.slice(HYPOTHESIS_MARKER.length)) || null;
+      }
+      continue;
+    }
+    if (line.startsWith(FINDINGS_MARKER)) {
+      if (findings === null) {
+        findings = oneLine(line.slice(FINDINGS_MARKER.length)) || null;
       }
       continue;
     }
@@ -207,8 +236,12 @@ export function extractWhyFromReply(reply: string): ExtractedWhy {
     }
     if (line) inDecisions = false; // prose resumes; blank lines don't end the block
   }
-  return { intent, decisions };
+  return { intent, decisions, hypothesis, findings };
 }
+
+/** Max chars kept for the hypothesis and findings lines. */
+export const MAX_HYPOTHESIS_CHARS = 300;
+export const MAX_FINDINGS_CHARS = 300;
 
 /** The prompt suffix appended to every why-enabled run. Tells the bot
  * exactly what the extractor reads, so a well-behaved model produces a
@@ -217,7 +250,9 @@ export function whyPromptSuffix(): string {
   return (
     `\n\nEnd your reply with a short decision journal so your work can be audited later. ` +
     `First a line starting with ${WHY_MARKER} followed by a ONE-line statement of what this run was ` +
-    `trying to accomplish (max ~120 chars). Then a ${DECISIONS_HEADER} line followed by up to ` +
+    `trying to accomplish (max ~120 chars). Then a ${HYPOTHESIS_MARKER} line with what you assumed about ` +
+    `how things work (max ~${MAX_HYPOTHESIS_CHARS} chars), and a ${FINDINGS_MARKER} line with what you learned ` +
+    `this run (max ~${MAX_FINDINGS_CHARS} chars). Then a ${DECISIONS_HEADER} line followed by up to ` +
     `${MAX_WHY_DECISIONS} bullet lines starting with "- " (each under ${MAX_DECISION_CHARS} chars) naming the ` +
     "key choices you made and why you made them. Keep these the last lines of the reply — " +
     "the journal reads exactly that block, and nothing else."

@@ -55,12 +55,12 @@ async function call(
   const bearer = token();
   if (bearer) headers.authorization = `Bearer ${bearer}`;
   if (body) headers["content-type"] = "application/json";
-  const response = await fetch(`${base}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(30_000),
-  });
+  // GET requests carry no body — only non-GET calls pass one
+  const init: RequestInit =
+    method === "GET"
+      ? { method, headers, signal: AbortSignal.timeout(30_000) }
+      : { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30_000) };
+  const response = await fetch(`${base}${path}`, init);
   const text = await response.text();
   let parsed: Json = {};
   try {

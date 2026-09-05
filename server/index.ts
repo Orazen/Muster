@@ -31,7 +31,7 @@ import {
   type WhatsAppConfig,
 } from "./whatsapp.ts";
 import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from "./whatsapp-threads.ts";
-import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER } from "./why-journal.ts";
+import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER, type WhyEntry } from "./why-journal.ts";
 import { readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
 import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
@@ -1318,10 +1318,12 @@ bus.subscribe((event: RuntimeEvent) => {
         }
         // Why-journal: bots that answer the WHY prompt get their decisions
         // banked next to the receipt — the "why" layer of the audit trail.
+        // Hypothesis/findings ride along when the bot states them (the ARC
+        // reasoning pattern), making runs comparable over time.
         if (reply.includes(WHY_MARKER)) {
-          const { intent, decisions } = extractWhyFromReply(reply);
+          const { intent, decisions, hypothesis, findings } = extractWhyFromReply(reply);
           if (intent) {
-            appendWhy(DATA_DIR, {
+            const entry: WhyEntry = {
               runId: randomUUID(),
               botId: bot.id,
               threadId: event.threadId,
@@ -1329,7 +1331,10 @@ bus.subscribe((event: RuntimeEvent) => {
               intent,
               decisions,
               outcome: event.ok ? "done" : "partial",
-            });
+            };
+            if (hypothesis) entry.hypothesis = hypothesis;
+            if (findings) entry.findings = findings;
+            appendWhy(DATA_DIR, entry);
           }
         }
         if (screenPollers.has(bot.id)) {

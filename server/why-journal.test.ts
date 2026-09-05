@@ -68,6 +68,8 @@ describe("extractWhyFromReply", () => {
     expect(extractWhyFromReply(reply)).toEqual({
       intent: "restore the staging deploy",
       decisions: ["rolled back to the last green image", "pinned the provider to its fallback"],
+      hypothesis: null,
+      findings: null,
     });
   });
 
@@ -83,6 +85,8 @@ describe("extractWhyFromReply", () => {
     expect(extractWhyFromReply(reply)).toEqual({
       intent: "first intent",
       decisions: ["kept choice"],
+      hypothesis: null,
+      findings: null,
     });
   });
 
@@ -106,10 +110,14 @@ describe("extractWhyFromReply", () => {
     expect(extractWhyFromReply("WHY:\t  spaced   out ")).toEqual({
       intent: "spaced out",
       decisions: [],
+      hypothesis: null,
+      findings: null,
     });
     expect(extractWhyFromReply("WHY: first line\ncontinuation prose")).toEqual({
       intent: "first line",
       decisions: [],
+      hypothesis: null,
+      findings: null,
     });
   });
 
@@ -117,18 +125,56 @@ describe("extractWhyFromReply", () => {
     expect(extractWhyFromReply("a plain reply with no journal")).toEqual({
       intent: null,
       decisions: [],
+      hypothesis: null,
+      findings: null,
     });
-    expect(extractWhyFromReply("")).toEqual({ intent: null, decisions: [] });
-    expect(extractWhyFromReply("WHY:")).toEqual({ intent: null, decisions: [] });
+    expect(extractWhyFromReply("")).toEqual({ intent: null, decisions: [], hypothesis: null, findings: null });
+    expect(extractWhyFromReply("WHY:")).toEqual({ intent: null, decisions: [], hypothesis: null, findings: null });
     expect(extractWhyFromReply(`${DECISIONS_HEADER}\nno bullets here`)).toEqual({
       intent: null,
       decisions: [],
+      hypothesis: null,
+      findings: null,
     });
   });
 
   it("ignores malformed bullets outside the header", () => {
     const reply = "- standalone bullet\nWHY: intent\n- another stray bullet";
-    expect(extractWhyFromReply(reply)).toEqual({ intent: "intent", decisions: [] });
+    expect(extractWhyFromReply(reply)).toEqual({
+      intent: "intent",
+      decisions: [],
+      hypothesis: null,
+      findings: null,
+    });
+  });
+
+  it("reads HYPOTHESIS and FINDINGS lines alongside the WHY block", () => {
+    const reply = [
+      "WHY: refresh the price watch",
+      "HYPOTHESIS: the vendor page lists prices in a stable table",
+      "FINDINGS: the table moved to a JSON endpoint; scrape that instead",
+      "DECISIONS:",
+      "- switched to the JSON endpoint",
+    ].join("\n");
+    expect(extractWhyFromReply(reply)).toEqual({
+      intent: "refresh the price watch",
+      decisions: ["switched to the JSON endpoint"],
+      hypothesis: "the vendor page lists prices in a stable table",
+      findings: "the table moved to a JSON endpoint; scrape that instead",
+    });
+  });
+
+  it("keeps the first HYPOTHESIS and FINDINGS lines, ignores later ones", () => {
+    const reply = [
+      "WHY: intent",
+      "HYPOTHESIS: first",
+      "HYPOTHESIS: ignored",
+      "FINDINGS: learned",
+      "FINDINGS: ignored",
+    ].join("\n");
+    const extracted = extractWhyFromReply(reply);
+    expect(extracted.hypothesis).toBe("first");
+    expect(extracted.findings).toBe("learned");
   });
 });
 

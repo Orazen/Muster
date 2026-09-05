@@ -327,7 +327,8 @@ export function stopPanel(botId: string): void {
 }
 
 export function stopAllPanels(): void {
-  for (const botId of [...sessions.keys()]) stopPanel(botId);
+  // stopPanel mutates the map, so iterate a snapshot
+  for (const botId of Array.from(sessions.keys())) stopPanel(botId);
 }
 
 export async function navigatePanel(botId: string, rawUrl: string): Promise<BrowserPanelState> {
