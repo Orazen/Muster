@@ -198,8 +198,10 @@ import {
   readMemoryFile,
   readMemoryTopic,
   writeMemoryFile,
+  workspaceDir,
   MEMORY_FILE_MAX_BYTES,
 } from "./workspace.ts";
+import * as browserPanel from "./browser-panel.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimerPool } from "./local-vm-idle.ts";
 import { LocalVmLeasePool } from "./local-vm-lease.ts";
@@ -1893,7 +1895,11 @@ async function startTurn(
       // fall through to host CUA and accidentally click on the user's Mac.
       if (wants === "vm") {
         if (!mountsComputerMcp || instance.driverKind === "boxAgent") {
-          throw new Error("this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination");
+          throw new Error(
+            instance.driverKind === "anthropic"
+              ? "the Anthropic Messages API engine has no tool loop yet — it can't drive a Local VM. Use Claude (CLI) or an OpenAI-compatible provider, or select another computer destination"
+              : "this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination",
+          );
         }
         const target = desktopTargetForBot(bot.id);
         const desktopLabel = target.key === SHARED_LOCAL_VM_TARGET.key ? "the shared Local VM" : "this bot's Local VM";
@@ -6484,6 +6490,62 @@ let requestUserEmail = "";
         bots: botsWithBrowser,
         tools: OBSCURA_TOOLS.length,
       });
+    }
+
+    // ── Browser panel (human-visible Chromium, per bot) ─────────────────
+    // The chat's Browser side panel: start/stop/navigate a long-lived
+    // Chromium for this bot, stream its frames, and flag human takeover.
+    // Ownership is enforced by the /api/bots/:id guard above; starting is
+    // gated to desktop/loopback installs only (the frames and control
+    // surface ride the same local-only trust boundary as the computer
+    // panel, and cloud multi-user isolation for a shared visible browser
+    // needs its own pass).
+    m = path.match(/^\/api\/bots\/([\w-]+)\/browser-panel$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, browserPanel.panelState(m[1]));
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/browser-panel\/start$/);
+    if (m && method === "POST") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      if (SELF_HOSTED) return json(res, 404, { error: "no such resource" });
+      const body = await readBody(req);
+      const profile = body?.profile === "guest" ? "guest" : "bot";
+      try {
+        return json(res, 200, await browserPanel.startPanel(m[1], { workspaceDir: workspaceDir(m[1]), profile }));
+      } catch (e) {
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/browser-panel\/stop$/);
+    if (m && method === "POST") {
+      browserPanel.stopPanel(m[1]);
+      return json(res, 200, { ok: true });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/browser-panel\/navigate$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      const raw = isText(body?.url) ? body.url : "";
+      try {
+        return json(res, 200, await browserPanel.navigatePanel(m![1], raw));
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/browser-panel\/control$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      browserPanel.setTakeControl(m[1], body?.on === true);
+      return json(res, 200, browserPanel.panelState(m[1]));
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/browser-panel\/frame$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const frame = browserPanel.latestFrame(m[1]);
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(
+        JSON.stringify({ frame: frame ? frame.toString("base64") : null, state: browserPanel.panelState(m[1]) }),
+      );
     }
 
     // ── BYOK custom model providers (server/custom-providers.ts) ───────

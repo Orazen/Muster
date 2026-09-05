@@ -197,7 +197,11 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
     }
     if (bot.computer === "vm") {
       if (!vmSupported) {
-        setError("This model engine cannot use the Local VM. Choose Claude or an ACP engine.");
+        setError(
+          selectedInstance?.driverKind === "anthropic"
+            ? "The Anthropic Messages API engine has no tool loop yet, so it can't drive a computer. Use Claude (CLI) or an OpenAI-compatible provider for Local VM."
+            : "This model engine cannot use the Local VM. Choose Claude or an ACP engine, or select another computer destination.",
+        );
         setPhase("vm-unavailable");
         return;
       }

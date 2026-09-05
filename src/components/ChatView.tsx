@@ -13,6 +13,7 @@ import {
   Copy,
   Crown,
   Folder,
+  Globe,
   Loader2,
   Monitor,
   Pencil,
@@ -1045,6 +1046,18 @@ export function ChatView({ bot }: { bot: Bot }) {
             title="Bot's computer"
           >
             <Monitor size={18} />
+          </button>
+          <button
+            onClick={() => dispatch({ type: "toggleBrowserPanel" })}
+            aria-label="Browser"
+            aria-pressed={state.browserPanelOpen}
+            className={cn(
+              "rounded-md p-1.5 hover:bg-raised",
+              state.browserPanelOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+            )}
+            title="Browser — watch and drive this bot's web"
+          >
+            <Globe size={18} />
           </button>
           <button
             onClick={() => setFindOpen((open) => !open)}

@@ -6,6 +6,12 @@
 // .ts), so a user-registered gateway behaves exactly like DeepSeek or Groq
 // everywhere — picker, health, chat, usage. The factory reads `models` out
 // of instance config, so edits hot-reload with the fleet.
+//
+// computerMcp/composioMcp use the factory defaults (on): the tool-call wire
+// loop is the same one DeepSeek and Groq ride, so a custom endpoint gets
+// computers and connected apps too — this used to be hardcoded off, which
+// surfaced as "this model engine cannot use the Local VM" for any bot on a
+// custom provider.
 import { createOpenAICompatibleDriver } from "./openai-compatible.ts";
 
 export const CustomOpenaiDriver = createOpenAICompatibleDriver({
@@ -17,5 +23,4 @@ export const CustomOpenaiDriver = createOpenAICompatibleDriver({
   // honest — a custom provider with no configured models can't be picked.
   models: { default: "", options: [] },
   quickModel: "",
-  capabilities: { computerMcp: false, composioMcp: false },
 });

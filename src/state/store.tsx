@@ -329,6 +329,8 @@ export interface AppState {
   settingsOpen: boolean;
   pluginsOpen: boolean;
   computerOpen: boolean;
+  /** the per-bot visible browser side panel (human watch/drive) */
+  browserPanelOpen: boolean;
   /** the per-thread event inspector (runtime stream + native protocol tee) */
   inspectorOpen: boolean;
   appSettingsOpen: boolean;
@@ -446,6 +448,7 @@ export type Action =
   | { type: "toggleSettings"; open?: boolean }
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
+  | { type: "toggleBrowserPanel"; open?: boolean }
   | { type: "toggleInspector"; open?: boolean }
   | { type: "focusMessage"; threadId: string; messageId: string }
   | { type: "focusMessageConsumed"; nonce: number }
@@ -515,6 +518,7 @@ export function reducer(state: AppState, action: Action): AppState {
         activeView: "routines",
         settingsOpen: false,
         computerOpen: false,
+        browserPanelOpen: false,
         inspectorOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
@@ -772,6 +776,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         settingsOpen: open,
         computerOpen: open ? false : state.computerOpen,
+        browserPanelOpen: open ? false : state.browserPanelOpen,
         inspectorOpen: open ? false : state.inspectorOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
@@ -797,6 +802,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         computerOpen: open,
         settingsOpen: open ? false : state.settingsOpen,
+        browserPanelOpen: open ? false : state.browserPanelOpen,
         inspectorOpen: open ? false : state.inspectorOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
@@ -808,6 +814,18 @@ export function reducer(state: AppState, action: Action): AppState {
         inspectorOpen: open,
         settingsOpen: open ? false : state.settingsOpen,
         computerOpen: open ? false : state.computerOpen,
+        browserPanelOpen: open ? false : state.browserPanelOpen,
+        appSettingsOpen: open ? false : state.appSettingsOpen,
+      };
+    }
+    case "toggleBrowserPanel": {
+      const open = action.open ?? !state.browserPanelOpen;
+      return {
+        ...state,
+        browserPanelOpen: open,
+        settingsOpen: open ? false : state.settingsOpen,
+        computerOpen: open ? false : state.computerOpen,
+        inspectorOpen: open ? false : state.inspectorOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
@@ -819,6 +837,7 @@ export function reducer(state: AppState, action: Action): AppState {
         appSettingsSection: action.section ?? state.appSettingsSection,
         settingsOpen: open ? false : state.settingsOpen,
         computerOpen: open ? false : state.computerOpen,
+        browserPanelOpen: open ? false : state.browserPanelOpen,
         inspectorOpen: open ? false : state.inspectorOpen,
         pluginsOpen: open ? false : state.pluginsOpen,
       };
@@ -931,6 +950,7 @@ export const initialState: AppState = {
   settingsOpen: false,
   pluginsOpen: false,
   computerOpen: false,
+  browserPanelOpen: false,
   inspectorOpen: false,
   appSettingsOpen: false,
   appSettingsSection: "general",
