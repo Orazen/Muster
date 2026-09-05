@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { z } from "zod";
+
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { evaluateSentryRun, sentryPromptSuffix, shouldSentryNotify } from "./sentry.ts";
@@ -27,6 +29,18 @@ export type RoutineRunStatus =
   | "cancelled"
   | "missed";
 
+/** One scorecard assertion: a deterministic check the harness evaluates
+ * against the settled run's output (the ARC scorecard pattern — objective
+ * pass/fail per run, so routines are comparable across runs and bots). */
+export interface RoutineCheck {
+  id: string;
+  label: string;
+  kind: "contains" | "not_contains" | "matches";
+  /** contains/not_contains: a substring (case-insensitive); matches: a
+   * JavaScript regex source (capped — ReDoS-prone patterns just fail). */
+  value: string;
+}
+
 export interface Routine {
   id: string;
   name: string;
@@ -50,6 +64,17 @@ export interface Routine {
   /** Shared cross-iteration memory the bot reads and appends to — the
    * gnhf notes.md pattern: each run continues where the last stopped. */
   notesFile?: string;
+  /** Scorecard assertions evaluated against the settled output. */
+  checks?: RoutineCheck[];
+}
+
+/** One evaluated assertion on a settled run. */
+export interface ScorecardResult {
+  id: string;
+  label: string;
+  passed: boolean;
+  /** Why it failed, when it did — shown on the run card. */
+  reason?: string;
 }
 
 export interface RoutineRun {
@@ -83,6 +108,9 @@ export interface RoutineRun {
   /** Sentry runs only: true when this run's digest changed (or the watch
    * failed) — i.e. the run was worth interrupting the user for. */
   changeDetected?: boolean;
+  /** Scorecard results evaluated at settle; absent when the routine
+   * defines no checks (or the run never settled with output). */
+  scorecard?: ScorecardResult[];
 }
 
 export interface RoutineInput {
@@ -101,6 +129,8 @@ export interface RoutineInput {
    * so each iteration continues where the last stopped. */
   iterations?: number;
   notesFile?: string;
+  /** Scorecard assertions (1-3) evaluated against each run's output. */
+  checks?: RoutineCheck[];
 }
 
 interface RoutineFile {
@@ -198,7 +228,81 @@ function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | 
     // runs through the notes file when one fires.
     iterations: input.iterations === undefined ? undefined : Math.min(12, Math.max(1, Math.round(Number(input.iterations) || 1))),
     notesFile: input.notesFile?.trim().slice(0, 300) || undefined,
+    checks: sanitizeChecks(input.checks),
   };
+}
+
+const CHECK_KINDS = ["contains", "not_contains", "matches"] as const;
+const MAX_CHECKS = 3;
+const MAX_CHECK_LABEL = 120;
+const MAX_CHECK_VALUE = 300;
+
+const checkSchema = z.object({
+  id: z.string().max(64).optional(),
+  label: z.string().max(MAX_CHECK_LABEL),
+  kind: z.enum(CHECK_KINDS),
+  value: z.string().max(MAX_CHECK_VALUE),
+});
+
+const checksSchema = z.array(checkSchema).max(MAX_CHECKS);
+
+/** Validate 0-3 scorecard assertions: label + kind + value. A regex that
+ * fails to compile is rejected here, not at run time — a broken check
+ * should fail at save, not silently every run. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- the /api/routines I/O boundary: checksSchema.safeParse IS the schema run
+function sanitizeChecks(raw: unknown): RoutineCheck[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (Array.isArray(raw) && raw.length === 0) return undefined;
+  const parsed = checksSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new Error(`checks: ${issue?.message ?? "invalid check"}`);
+  }
+  return parsed.data.map((check) => {
+    if (check.kind === "matches") {
+      try {
+        new RegExp(check.value);
+      } catch {
+        throw new Error(`check "${check.label}": "${check.value}" is not a valid regular expression`);
+      }
+      if (check.value.length > 200) throw new Error(`check "${check.label}": regex too long`);
+    } else if (!check.value.trim()) {
+      throw new Error(`check "${check.label}": give it something to look for`);
+    }
+    return { id: check.id?.trim() || randomUUID(), label: check.label.trim(), kind: check.kind, value: check.value.trim() };
+  });
+}
+
+/** Evaluate a routine's checks against the settled output. Deterministic,
+ * harness-side — the bot never grades itself. A run with no output fails
+ * every check (nothing to pass on). */
+export function evaluateScorecard(checks: RoutineCheck[] | undefined, output: string | undefined): ScorecardResult[] | undefined {
+  if (!checks || checks.length === 0) return undefined;
+  return checks.map((check) => {
+    const text = output ?? "";
+    try {
+      if (check.kind === "contains") {
+        const hit = text.toLowerCase().includes(check.value.toLowerCase());
+        return { id: check.id, label: check.label, passed: hit, reason: hit ? undefined : `output does not contain "${check.value}"` };
+      }
+      if (check.kind === "not_contains") {
+        const clean = !text.toLowerCase().includes(check.value.toLowerCase());
+        return {
+          id: check.id,
+          label: check.label,
+          passed: clean,
+          reason: clean ? undefined : `output contains "${check.value}"`,
+        };
+      }
+      const re = new RegExp(check.value);
+      const hit = re.test(text);
+      return { id: check.id, label: check.label, passed: hit, reason: hit ? undefined : `output does not match /${check.value}/` };
+    } catch {
+      // an invalid regex that slipped through (hand-edited file) fails the
+      // check loudly rather than pretending it passed
+      return { id: check.id, label: check.label, passed: false, reason: "check is misconfigured" };
+    }
+  });
 }
 
 export class RoutineManager {
@@ -296,6 +400,7 @@ export class RoutineManager {
       sentry: patch.sentry ?? routine.sentry,
       iterations: patch.iterations ?? routine.iterations,
       notesFile: patch.notesFile ?? routine.notesFile,
+      checks: patch.checks ?? routine.checks,
     });
     if (this.options.botState(clean.botId) === "missing") throw new Error("That bot no longer exists");
     Object.assign(routine, clean, {
@@ -541,7 +646,15 @@ export class RoutineManager {
           // the why-journal suffix: a routine is exactly the kind of work a
           // future audit asks WHY about, and the extractor is mechanical —
           // a bot that skips the block simply produces no journal entry.
-          const prompt = `${chainedPrompt}${routineDef?.sentry ? sentryPromptSuffix() : ""}${whyPromptSuffix()}`;
+          // Scorecard routines tell the bot what will be checked, so it can
+          // self-verify before finishing (grading is still harness-side).
+          const scorecardHint =
+            routineDef?.checks && routineDef.checks.length > 0
+              ? `\n\nBefore you finish, verify your reply satisfies each of these checks — they are evaluated on your reply text:\n${routineDef.checks
+                  .map((c) => `- ${c.label} (${c.kind === "contains" ? `must contain "${c.value}"` : c.kind === "not_contains" ? `must not contain "${c.value}"` : `must match /${c.value}/`})`)
+                  .join("\n")}`
+              : "";
+          const prompt = `${chainedPrompt}${routineDef?.sentry ? sentryPromptSuffix() : ""}${whyPromptSuffix()}${scorecardHint}`;
           const triggerSource = run.triggerSource ?? (run.manual ? "manual" : "schedule");
           await this.options.startTurn(
             run.botId,
@@ -577,10 +690,18 @@ export class RoutineManager {
       run.error = event.ok ? undefined : (event.stopReason ?? run.error ?? "The bot did not complete this run");
       run.cost = event.cost;
       run.denials = event.denials;
+      const routineDef = this.routines.find((r) => r.id === run.routineId);
+      // Scorecard: evaluate the routine's assertions against the settled
+      // output. Harness-side and deterministic — the bot never grades
+      // itself. Results land on the run so the details view can show
+      // pass/fail chips and runs stay comparable.
+      const checks = routineDef?.checks;
+      if (checks && checks.length > 0) {
+        run.scorecard = evaluateScorecard(checks, run.output);
+      }
       // Sentry diff: compare this run's digest against the routine's stored
       // memory. A changed digest (or a failed watch) alerts; the memory
       // only updates on a successful run with a well-formed digest.
-      const routineDef = this.routines.find((r) => r.id === run.routineId);
       if (routineDef?.sentry) {
         const verdict = evaluateSentryRun(routineDef.lastDigest ?? null, run.output ?? null);
         run.changeDetected = shouldSentryNotify(verdict, event.ok);

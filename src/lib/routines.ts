@@ -15,6 +15,22 @@ export type RoutineRunStatus =
   | "cancelled"
   | "missed";
 
+/** One scorecard assertion (server/routines.ts RoutineCheck). */
+export interface RoutineCheck {
+  id: string;
+  label: string;
+  kind: "contains" | "not_contains" | "matches";
+  value: string;
+}
+
+/** One evaluated assertion on a settled run. */
+export interface ScorecardResult {
+  id: string;
+  label: string;
+  passed: boolean;
+  reason?: string;
+}
+
 export interface Routine {
   id: string;
   name: string;
@@ -35,6 +51,8 @@ export interface Routine {
   iterations?: number;
   /** Shared cross-iteration memory file the bot reads and appends to. */
   notesFile?: string;
+  /** Scorecard assertions evaluated against each run's output. */
+  checks?: RoutineCheck[];
 }
 
 export interface RoutineRun {
@@ -64,6 +82,8 @@ export interface RoutineRun {
   changeDetected?: boolean;
   /** Overnight chain position (1..iterations); absent on single runs. */
   iteration?: number;
+  /** Scorecard results evaluated at settle. */
+  scorecard?: ScorecardResult[];
 }
 
 export interface RoutineInput {
@@ -80,4 +100,6 @@ export interface RoutineInput {
   iterations?: number;
   /** Shared cross-iteration memory file. */
   notesFile?: string;
+  /** Scorecard assertions (1-3) evaluated against each run's output. */
+  checks?: RoutineCheck[];
 }

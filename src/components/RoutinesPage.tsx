@@ -24,7 +24,7 @@ import { AgentAvatar } from "@/components/Avatar";
 import { WebhooksPanel } from "@/components/WebhooksPanel";
 import { cn } from "@/lib/cn";
 import { AGENT_COLORS, type AgentState } from "@/lib/mascot";
-import type { Routine, RoutineInput, RoutineRun, RoutineRunOn, RoutineRunStatus } from "@/lib/routines";
+import type { Routine, RoutineCheck, RoutineInput, RoutineRun, RoutineRunOn, RoutineRunStatus } from "@/lib/routines";
 import { api, useStore, type Bot } from "@/state/store";
 
 const HOUR_HEIGHT = 68;
@@ -339,6 +339,7 @@ export function RoutineEditor({
   const [overnight, setOvernight] = useState((routine?.iterations ?? 1) > 1);
   const [overnightIterations, setOvernightIterations] = useState(routine?.iterations ?? 3);
   const [notesFile, setNotesFile] = useState(routine?.notesFile ?? "");
+  const [checks, setChecks] = useState<RoutineCheck[]>(routine?.checks ?? []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const cloudInstance = state.instances.find((instance) => instance.driverKind === "boxAgent");
@@ -365,6 +366,7 @@ export function RoutineEditor({
       sentry,
       iterations: overnight && overnightIterations > 1 ? overnightIterations : undefined,
       notesFile: overnight ? notesFile.trim() || undefined : undefined,
+      checks: checks.length > 0 ? checks : undefined,
       schedule:
         kind === "once"
           ? { type: "once", at: new Date(at).getTime() }
@@ -447,6 +449,76 @@ export function RoutineEditor({
               )}
             </span>
           </label>
+          {/* Scorecard checks: deterministic pass/fail assertions the harness
+              grades on every run's output — the ARC scorecard pattern. */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-[12px] font-medium text-ink-secondary">Checks (optional — graded every run)</div>
+              {checks.length < 3 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setChecks((current) => [...current, { id: crypto.randomUUID(), label: "", kind: "contains", value: "" }])
+                  }
+                  className="rounded-md bg-raised px-2 py-1 text-[11.5px] text-ink hover:bg-raised-hover"
+                >
+                  + Add check
+                </button>
+              )}
+            </div>
+            {checks.length > 0 && (
+              <div className="flex flex-col gap-2">
+                {checks.map((check, index) => (
+                  <div key={check.id} className="rounded-xl border border-hairline/50 bg-inset p-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        value={check.label}
+                        onChange={(event) =>
+                          setChecks((current) => current.map((c, i) => (i === index ? { ...c, label: event.target.value } : c)))
+                        }
+                        placeholder={`Check ${index + 1} — e.g. "mentions the final total"`}
+                        aria-label={`Check ${index + 1} label`}
+                        className="min-w-0 flex-1 rounded-md border border-hairline/60 bg-panel px-2 py-1 text-[12.5px] text-ink placeholder:text-ink-secondary/60 outline-none focus:border-accent/70"
+                      />
+                      <button
+                        type="button"
+                        aria-label={`Remove check ${index + 1}`}
+                        onClick={() => setChecks((current) => current.filter((_, i) => i !== index))}
+                        className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-danger"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div className="mt-1.5 flex gap-1.5">
+                      <select
+                        value={check.kind}
+                        onChange={(event) => {
+                          // SAFETY: the select's options are exactly the three RoutineCheck kinds
+                          const kind = event.target.value as RoutineCheck["kind"];
+                          setChecks((current) => current.map((c, i) => (i === index ? { ...c, kind } : c)));
+                        }}
+                        aria-label={`Check ${index + 1} kind`}
+                        className="shrink-0 rounded-md border border-hairline/60 bg-panel px-1.5 py-1 text-[11.5px] text-ink outline-none focus:border-accent/70"
+                      >
+                        <option value="contains">contains</option>
+                        <option value="not_contains">doesn't contain</option>
+                        <option value="matches">matches regex</option>
+                      </select>
+                      <input
+                        value={check.value}
+                        onChange={(event) =>
+                          setChecks((current) => current.map((c, i) => (i === index ? { ...c, value: event.target.value } : c)))
+                        }
+                        placeholder={check.kind === "matches" ? "regex — e.g. total:\\s*\\$?[0-9]+" : "text to look for"}
+                        aria-label={`Check ${index + 1} value`}
+                        className="min-w-0 flex-1 rounded-md border border-hairline/60 bg-panel px-2 py-1 font-mono text-[11.5px] text-ink placeholder:text-ink-secondary/60 outline-none focus:border-accent/70"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <div>
             <div className="mb-2 text-[12px] font-medium text-ink-secondary">Where does it run?</div>
             <div className="grid grid-cols-3 gap-2">
@@ -617,6 +689,21 @@ function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bo
           {visibleInstructions && <div><div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-ink-secondary">Instructions</div><div className="whitespace-pre-wrap rounded-xl border border-hairline/40 bg-inset px-3.5 py-3 text-[13px] leading-relaxed text-ink">{visibleInstructions}</div></div>}
           {webhookParts?.eventData && <div><div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-ink-secondary">Webhook event data</div><pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl border border-accent/15 bg-accent/5 px-3.5 py-3 font-mono text-[11.5px] leading-relaxed text-ink-secondary">{webhookParts.eventData}</pre></div>}
           {run?.output && <div><div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-ink-secondary">Last output</div><div className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-xl border border-success/20 bg-success/5 px-3.5 py-3 text-[13px] leading-relaxed text-ink">{run.output}</div></div>}
+          {run?.scorecard && run.scorecard.length > 0 && (
+            <div>
+              <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-ink-secondary">Checks</div>
+              <div className="flex flex-col gap-1 rounded-xl border border-hairline/40 bg-inset px-3.5 py-2.5">
+                {run.scorecard.map((result) => (
+                  <div key={result.id} className="flex items-center justify-between gap-3 text-[12.5px]">
+                    <span className="min-w-0 flex-1 truncate text-ink">{result.label}</span>
+                    <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium", result.passed ? "bg-success/10 text-success" : "bg-danger/10 text-danger")} title={result.reason}>
+                      {result.passed ? "✓ passed" : "✗ failed"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {run?.error && <div className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-3 text-[13px] text-danger"><CircleAlert size={16} className="mt-0.5 shrink-0" /><span>{run.error}</span></div>}
           {error && <div className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-3 text-[13px] text-danger"><CircleAlert size={16} className="mt-0.5 shrink-0" /><span>{error}</span></div>}
           {run?.status === "waiting" && <div className="rounded-xl border border-warning/30 bg-warning/10 px-3.5 py-3 text-[13px] text-warning">This AGENT needs your answer. Open its task to continue the run.</div>}
