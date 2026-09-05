@@ -696,7 +696,9 @@ jobs:
     needs: [prepare, publish]
     if: ${{ !cancelled() && needs.prepare.outputs.dry_run == 'false' && needs.publish.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # v1.9.0's ~1GB rsync hit 10 minutes and the job was canceled with the
+    # updater feeds untransferred — the mirror kept serving the old version.
+    timeout-minutes: 30
     steps:
       - name: Download release assets for the VPS mirror
         env:
