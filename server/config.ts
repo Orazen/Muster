@@ -445,6 +445,14 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   } as const;
   const configured = cfg.instances && Object.keys(cfg.instances).length ? cfg.instances : null;
   const map: InstanceConfigMap = configured ? { ...configured } : { ...DEFAULT_FLEET };
+  // Custom BYOK providers must ride on top of ANY instance map: they were
+  // merged into DEFAULT_FLEET above, but a deployment with a saved
+  // cfg.instances (every desktop that ever touched an engine toggle) uses
+  // that map as-is and the custom entries vanished — "added a provider,
+  // don't see it". Re-merge so registering a provider always lands it.
+  for (const [instanceId, entry] of Object.entries(customEntries)) {
+    map[instanceId] = entry;
+  }
   // Product fleets pick up newly shipped custom-only engines. A one-off
   // test/shadow map (no claude/grok/codex) is left exactly as written.
   if (

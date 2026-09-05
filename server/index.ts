@@ -36,7 +36,7 @@ import { readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts"
 import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
-import { resolveLocalObscuraMount } from "./obscura.ts";
+import { resolveLocalObscuraMount, OBSCURA_TOOLS } from "./obscura.ts";
 import { exportSoulMd, parseSoulMd } from "./soul-md.ts";
 import {
   CUSTOM_MODELS_MIN,
@@ -3580,20 +3580,15 @@ let requestUserEmail = "";
           code: "GOOGLE_ONLY_SIGNUP",
         });
       }
-      // Emergency stopgap: server-side state (config, bots, threads) has no
-      // per-user isolation yet — every signed-in account currently shares
-      // one global fleet. That's a real risk on a SHARED deployment (a
-      // public self-host, muster.orazen.online) where strangers could sign
-      // up into each other's data. It is not a risk at all on the packaged
-      // desktop app — one machine, one person, OMB_DESKTOP_APP=true (set by
-      // electron/main.mjs, never by the Docker image) — so a fresh desktop
-      // install must still be able to create its first account. Set
-      // OMB_SIGNUP_ALLOWLIST to a comma-separated list of emails to let
-      // specific people through on a shared deployment (e.g. your own,
-      // while testing), or OMB_ALLOW_SIGNUPS=true to reopen it there once
-      // real isolation lands.
+      // Sign-up gate. Per-user isolation landed (bot.ownerId + ownsRecord
+      // guards on every bot/thread/group route, per-user SSE filtering,
+      // owner-scoped instance lists, infra gated to the operator), so
+      // sign-ups are OPEN by default now. The operator can still close a
+      // deployment with OMB_SIGNUPS_CLOSED=true, optionally keeping an
+      // OMB_SIGNUP_ALLOWLIST of emails that get through anyway. The
+      // packaged desktop app (one machine, one person) is always open.
       if (method === "POST" && path === "/api/auth/sign-up/email") {
-        const allowAll = process.env.OMB_ALLOW_SIGNUPS === "true" || process.env.OMB_DESKTOP_APP === "true";
+        const allowAll = process.env.OMB_SIGNUPS_CLOSED !== "true" || process.env.OMB_DESKTOP_APP === "true";
         const allowlist = (process.env.OMB_SIGNUP_ALLOWLIST ?? "")
           .split(",")
           .map((e) => e.trim().toLowerCase())
@@ -3611,7 +3606,7 @@ let requestUserEmail = "";
           const requestedEmail = isText(bodyForGate?.email) ? bodyForGate.email.trim().toLowerCase() : "";
           if (!requestedEmail || !allowlist.includes(requestedEmail)) {
             return json(res, 403, {
-              message: "Sign-ups are closed on this deployment while account data isolation is being fixed.",
+              message: "Sign-ups are closed on this deployment.",
               code: "SIGNUPS_CLOSED",
             });
           }
@@ -4228,14 +4223,24 @@ let requestUserEmail = "";
     }
 
     // ── routines calendar ────────────────────────────────────────────────
+    // A routine belongs to whoever owns its bot; the helper guards every
+    // route below (list, run, patch, delete) the same way.
+    const ownsRoutine = (r: { botId: string }) => {
+      const b = store.bot(r.botId);
+      return !b || ownsRecord(b);
+    };
     if (path === "/api/routines" && method === "GET") {
       const fromParam = url.searchParams.get("from");
       const toParam = url.searchParams.get("to");
       const from = fromParam == null ? undefined : Number(fromParam);
       const to = toParam == null ? undefined : Number(toParam);
+      // Isolation: without the filter, any signed-in user could list
+      // every other account's routines — names, prompts and all.
       return json(res, 200, {
-        routines: routines!.listRoutines(),
-        runs: routines!.listRuns(from != null && Number.isFinite(from) ? from : undefined, to != null && Number.isFinite(to) ? to : undefined),
+        routines: routines!.listRoutines().filter(ownsRoutine),
+        runs: routines!
+          .listRuns(from != null && Number.isFinite(from) ? from : undefined, to != null && Number.isFinite(to) ? to : undefined)
+          .filter(ownsRoutine),
       });
     }
     if (path === "/api/routines" && method === "POST") {
@@ -4243,15 +4248,21 @@ let requestUserEmail = "";
     }
     let routineMatch = path.match(/^\/api\/routines\/([\w-]+)\/run$/);
     if (routineMatch && method === "POST") {
+      const target = routines!.listRoutines().find((r) => r.id === routineMatch![1]);
+      if (target && !ownsRoutine(target)) return json(res, 404, { error: "no such routine" });
       const run = routines!.runNow(routineMatch[1]);
       return run ? json(res, 201, { run }) : json(res, 404, { error: "no such routine" });
     }
     routineMatch = path.match(/^\/api\/routines\/([\w-]+)$/);
     if (routineMatch && method === "PATCH") {
+      const target = routines!.listRoutines().find((r) => r.id === routineMatch![1]);
+      if (target && !ownsRoutine(target)) return json(res, 404, { error: "no such routine" });
       const routine = routines!.update(routineMatch[1], await readBody(req));
       return routine ? json(res, 200, { routine }) : json(res, 404, { error: "no such routine" });
     }
     if (routineMatch && method === "DELETE") {
+      const target = routines!.listRoutines().find((r) => r.id === routineMatch![1]);
+      if (target && !ownsRoutine(target)) return json(res, 404, { error: "no such routine" });
       return routines!.remove(routineMatch[1])
         ? json(res, 200, { ok: true })
         : json(res, 404, { error: "no such routine" });
@@ -6435,6 +6446,22 @@ let requestUserEmail = "";
       return json(res, 200, { providers: PROVIDERS.map((p) => ({ ...p, configured: flags[p.id]?.configured ?? false })) });
     }
 
+    // ── Browser (Obscura) status ────────────────────────────────────────
+    // The settings card needs ground truth, not a prayer: is the obscura
+    // binary actually on this machine, and which bots have it on? Without
+    // this the toggle happily reads ON while every turn silently runs with
+    // zero browser tools (the mount is skipped when the binary is absent).
+    if (path === "/api/browser-status" && method === "GET") {
+      const mount = resolveLocalObscuraMount((name) => findCliCandidates(name)[0]);
+      const botsWithBrowser = store.bots.filter((b) => b.browser === true && !b.hidden).map((b) => ({ id: b.id, name: b.name }));
+      return json(res, 200, {
+        available: Boolean(mount),
+        command: mount?.command ?? null,
+        bots: botsWithBrowser,
+        tools: OBSCURA_TOOLS.length,
+      });
+    }
+
     // ── BYOK custom model providers (server/custom-providers.ts) ───────
     // Anyone can add any OpenAI- or Anthropic-compatible endpoint: name,
     // base URL, key, model list. Each entry becomes a first-class instance
@@ -6507,6 +6534,12 @@ let requestUserEmail = "";
         saveConfig({ customProviders: next });
         // drop the write-only key record too
         saveConfig({ providers: { [`custom-${id}`]: { apiKey: "" } } });
+        // scrub a persisted instance entry, or the deleted engine would
+        // keep riding a saved cfg.instances map forever
+        if (cfg.instances && Object.hasOwn(cfg.instances, `custom-${id}`)) {
+          const { [`custom-${id}`]: _gone, ...rest } = cfg.instances;
+          saveConfig({ instances: rest });
+        }
         Object.assign(cfg, loadConfig());
         await reloadProviders();
         return json(res, 200, { ok: true });

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronLeft, Crown, FolderOpen, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, Crown, FolderOpen, Globe, MousePointerClick, Camera, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "./Avatar";
@@ -342,6 +342,97 @@ function SoulCard({ botId }: { botId: string }) {
           />
         </label>
         {error && <span className="ml-1.5 text-[12px] text-danger">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** Obscura browser, redesigned as a status card. Ground truth from
+ * /api/browser-status: is the binary on this machine, what does the bot
+ * actually get, and how do you install it if not. The old bare toggle
+ * happily read ON while every turn silently ran with zero browser tools
+ * (the mount is skipped when the binary is missing) — the status pill
+ * makes that state impossible to miss. */
+function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
+  const [status, setStatus] = useState<{ available: boolean; command: string | null; tools: number } | null>(null);
+
+  useEffect(() => {
+    api("/api/browser-status")
+      .then((data: { available: boolean; command: string | null; tools: number }) => setStatus(data))
+      .catch(() => setStatus(null));
+  }, []);
+
+  const enabled = Boolean(bot.browser);
+  const available = status?.available === true;
+
+  return (
+    <div className="rounded-xl bg-card p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <Globe size={16} className="text-ink-secondary" />
+          <span className="text-[15px] font-medium text-ink">Web browser</span>
+          {status && (
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[10.5px] font-medium",
+                available ? "bg-success/10 text-success" : "bg-warning/10 text-warning",
+              )}
+            >
+              {available ? "Ready on this machine" : "Not installed"}
+            </span>
+          )}
+        </div>
+        <button
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Web browser for this bot"
+          onClick={onToggle}
+          className={cn(
+            "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors",
+            enabled ? "bg-accent" : "bg-raised",
+          )}
+        >
+          <span
+            className={cn(
+              "absolute top-[3px] size-5 rounded-full bg-white transition-all",
+              enabled ? "left-[21px]" : "left-[3px]",
+            )}
+          />
+        </button>
+      </div>
+
+      {enabled && (
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {[
+            { icon: MousePointerClick, label: "Navigate & click" },
+            { icon: Camera, label: "Screenshot" },
+            { icon: FolderOpen, label: "Read pages & files" },
+          ].map(({ icon: Icon, label }) => (
+            <div key={label} className="flex flex-col items-center gap-1.5 rounded-lg bg-inset px-2 py-3 text-center">
+              <Icon size={16} className="text-ink-secondary" />
+              <span className="text-[11.5px] leading-tight text-ink-secondary">{label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-2.5 text-[13px] leading-relaxed text-ink-secondary">
+        {available ? (
+          enabled ? (
+            <>
+              This bot gets {status?.tools ?? 14} browser tools on its next task — it can open real pages, fill forms and
+              screenshot what it sees. Try it in chat: <span className="text-ink">"open example.com and screenshot it."</span>
+            </>
+          ) : (
+            <>Turn on to let this bot drive a real headless browser — navigate, click, fill, screenshot.</>
+          )
+        ) : (
+          <>
+            The browser engine isn't on this machine yet. Install it once, then restart Muster:{" "}
+            <code className="rounded bg-inset px-1.5 py-0.5 font-mono text-[12px] text-ink">npm i -g obscura-browser</code>{" "}
+            — on cloud computers it's already there.
+          </>
+        )}
       </div>
     </div>
   );
@@ -696,36 +787,9 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             </div>
           </div>
 
-          {/* Obscura browser: the 14 browser_* tools as a per-bot opt-in.
-              The server only mounts when the obscura binary exists on this
-              machine, so the toggle is safe everywhere; the copy says so. */}
-          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
-            <div>
-              <div className="text-[15px] font-medium text-ink">Browser</div>
-              <div className="mt-0.5 text-[13px] text-ink-secondary">
-                {bot.browser
-                  ? "This bot can navigate, click, fill and screenshot real pages (14 browser tools, stealth headless)."
-                  : "Give this bot a real headless browser — navigate, click, fill, screenshot. Requires the obscura binary installed on this machine and a restart after installing it."}
-              </div>
-            </div>
-            <button
-              role="switch"
-              aria-checked={Boolean(bot.browser)}
-              aria-label="Browser"
-              onClick={() => patch({ browser: !bot.browser })}
-              className={cn(
-                "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors",
-                bot.browser ? "bg-accent" : "bg-raised",
-              )}
-            >
-              <span
-                className={cn(
-                  "absolute top-[3px] size-5 rounded-full bg-white transition-all",
-                  bot.browser ? "left-[21px]" : "left-[3px]",
-                )}
-              />
-            </button>
-          </div>
+          {/* Obscura browser as a status card: ground truth about the
+              binary, what the bot gets, and the install path when missing. */}
+          <BrowserCard bot={bot} onToggle={() => patch({ browser: !bot.browser })} />
 
           {/* Daily USD cap (the Flayr Max steal): bounds what this bot can
               spend in one calendar day. Resets at midnight; empty = no cap. */}

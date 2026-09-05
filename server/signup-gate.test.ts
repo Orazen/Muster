@@ -65,9 +65,26 @@ async function bootServer(extraEnv: Record<string, string>): Promise<{
   };
 }
 
-describe("sign-up stopgap gate", () => {
-  it("rejects sign-up by default (no OMB_ALLOW_SIGNUPS, no allowlist match)", async () => {
+describe("sign-up gate", () => {
+  it("opens sign-up by default (isolation landed — ownerId guards + filtered streams)", async () => {
     const server = await bootServer({});
+    try {
+      const res = await fetch(`${server.base}/api/auth/sign-up/email`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: server.base },
+        body: JSON.stringify({ name: "Anyone", email: "stranger@example.com", password: "testpassword12345" }),
+      });
+      expect(res.status).toBe(200);
+      // SAFETY: better-auth sign-up response envelope; only user.email is asserted.
+      const body = (await res.json()) as { user?: { email?: string } };
+      expect(body.user?.email).toBe("stranger@example.com");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("OMB_SIGNUPS_CLOSED=true closes sign-up for everyone", async () => {
+    const server = await bootServer({ OMB_SIGNUPS_CLOSED: "true" });
     try {
       const res = await fetch(`${server.base}/api/auth/sign-up/email`, {
         method: "POST",
@@ -83,8 +100,8 @@ describe("sign-up stopgap gate", () => {
     }
   });
 
-  it("allows a sign-up whose email is on OMB_SIGNUP_ALLOWLIST", async () => {
-    const server = await bootServer({ OMB_SIGNUP_ALLOWLIST: "allowed@example.com, Other@Example.com" });
+  it("allowlisted email still gets through while closed", async () => {
+    const server = await bootServer({ OMB_SIGNUPS_CLOSED: "true", OMB_SIGNUP_ALLOWLIST: "allowed@example.com, Other@Example.com" });
     try {
       const res = await fetch(`${server.base}/api/auth/sign-up/email`, {
         method: "POST",
@@ -101,8 +118,8 @@ describe("sign-up stopgap gate", () => {
     }
   });
 
-  it("still rejects an email not on the allowlist", async () => {
-    const server = await bootServer({ OMB_SIGNUP_ALLOWLIST: "allowed@example.com" });
+  it("still rejects an email not on the allowlist while closed", async () => {
+    const server = await bootServer({ OMB_SIGNUPS_CLOSED: "true", OMB_SIGNUP_ALLOWLIST: "allowed@example.com" });
     try {
       const res = await fetch(`${server.base}/api/auth/sign-up/email`, {
         method: "POST",
@@ -115,22 +132,8 @@ describe("sign-up stopgap gate", () => {
     }
   });
 
-  it("OMB_ALLOW_SIGNUPS=true reopens sign-up for everyone", async () => {
-    const server = await bootServer({ OMB_ALLOW_SIGNUPS: "true" });
-    try {
-      const res = await fetch(`${server.base}/api/auth/sign-up/email`, {
-        method: "POST",
-        headers: { "content-type": "application/json", origin: server.base },
-        body: JSON.stringify({ name: "Anyone", email: "anyone@example.com", password: "testpassword12345" }),
-      });
-      expect(res.status).toBe(200);
-    } finally {
-      await server.stop();
-    }
-  });
-
-  it("does not touch sign-in — an existing/allowed account can still authenticate", async () => {
-    const server = await bootServer({ OMB_SIGNUP_ALLOWLIST: "allowed@example.com" });
+  it("does not touch sign-in — an existing account can still authenticate", async () => {
+    const server = await bootServer({});
     try {
       await fetch(`${server.base}/api/auth/sign-up/email`, {
         method: "POST",

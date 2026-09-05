@@ -12,6 +12,7 @@ import { AgentAvatar } from "@/components/Avatar";
 import { MusterbotMark } from "@/components/MusterbotMark";
 import { activityLabel, AgentWindow } from "@/components/os/AgentWindow";
 import { RoomsWindow } from "@/components/os/RoomsWindow";
+import { CommandBar } from "@/components/os/CommandBar";
 import { OS_SINGLETON_APPS } from "@/components/os/app-manifests";
 import "./os.css";
 import "./os-tokens.css";
@@ -89,9 +90,22 @@ function Presence({ bots, onOpen, onHaltAll }: { bots: Bot[]; onOpen: (botId: st
 export function DesktopShell() {
   const { state, dispatch } = useStore();
   const [windows, setWindows] = useState<OpenWindow[]>([]);
+  const [consoleOpen, setConsoleOpen] = useState(false);
   const bots = state.bots.filter((b) => !b.hidden);
   const engineFor = (bot: Bot) =>
     state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)?.displayName ?? null;
+
+  // ⌘K / Ctrl+K summons the command console from anywhere on the desktop
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setConsoleOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Focus follows the stack: the topmost window that isn't minimized.
   const focusedId = [...windows].reverse().find((w) => !w.minimized)?.id ?? null;
@@ -158,6 +172,17 @@ export function DesktopShell() {
           <MusterbotMark size={20} />
           Muster
         </div>
+        <button
+          type="button"
+          className="os-console-trigger"
+          onClick={() => setConsoleOpen(true)}
+          aria-label="Open command console"
+          title="Command console (⌘K)"
+        >
+          <span className="os-console-glow" aria-hidden="true" />
+          Ask Muster…
+          <kbd>⌘K</kbd>
+        </button>
         <Presence
           bots={bots}
           onOpen={(botId) => dockClick({ kind: "agent", botId })}
@@ -231,8 +256,7 @@ export function DesktopShell() {
       </main>
       <nav className="os-dock" aria-label="Agent dock">
         <div className="os-dock-list">
-          {bots.map((bot) => (
-            <button
+          {bots.map((bot) => (            <button
               key={bot.id}
               type="button"
               className="os-dock-item"
@@ -268,6 +292,11 @@ export function DesktopShell() {
           })}
         </div>
       </nav>
+      <CommandBar
+        open={consoleOpen}
+        onClose={() => setConsoleOpen(false)}
+        onOpenRooms={() => dockClick({ kind: "app", appId: "rooms" })}
+      />
     </div>
   );
 }
