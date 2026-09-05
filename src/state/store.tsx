@@ -234,6 +234,9 @@ export interface ConfigStatus {
    * secret (it's a server address, not a credential), shown back so the
    * Settings row can display what's actually configured. */
   musterCloud?: { configured: boolean; url: string };
+  /** hi.new agent-mail: configured = a token is saved; name is the handle
+   * it belongs to (a setting, not a secret). */
+  hiNew?: { configured: boolean; name: string };
   providers?: Record<string, { configured: boolean }>;
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is

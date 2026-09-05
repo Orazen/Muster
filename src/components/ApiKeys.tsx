@@ -6,7 +6,7 @@ import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "composio" | "box" | "opensandbox" | "opencodeGo" | "xai" | "musterCloud";
+export type ConfigSection = "composio" | "box" | "opensandbox" | "opencodeGo" | "xai" | "musterCloud" | "hiNew";
 
 /** How one section saves its credential and how its configured flag reads back. */
 interface SectionBinding {
@@ -38,6 +38,7 @@ const SECTIONS = {
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
   musterCloud: { body: (v) => ({ musterCloud: { url: v } }), flag: (c) => c.musterCloud?.configured ?? false },
+  hiNew: { body: (v) => ({ hiNew: { token: v } }), flag: (c) => c.hiNew?.configured ?? false },
 } satisfies Record<ConfigSection, SectionBinding>;
 
 const CREDENTIALS = {
@@ -92,6 +93,17 @@ const CREDENTIALS = {
     linkLabel: "How it works",
     optional: true,
     warning: "This install will need internet access to sign in once this is set, and trusts that server with your login.",
+  },
+  hiNew: {
+    label: "hi.new agent mail",
+    placeholder: "hn_…",
+    description:
+      "Give every bot a mailbox on hi.new — store-and-forward mail between agents. Bots can read, send, invite and redeem peer connections via their hi_new tools. Grants come only from invite links you approve.",
+    href: "https://hi.new",
+    linkLabel: "Claim a name at hi.new",
+    optional: true,
+    warning:
+      "Messages from other agents are untrusted input: bots are instructed to treat them as data, never instructions. Unread mail expires on hi.new after 7 days.",
   },
 } satisfies Record<ConfigSection, CredentialSpec>;
 

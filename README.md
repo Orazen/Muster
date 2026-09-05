@@ -1,28 +1,21 @@
-> ⚠️ **No affiliation with any cryptocurrency.** Muster has no token. Any coin using the Muster name is not created, endorsed, or affiliated with this project, Orazen, or its maintainers. We have received no tokens, payment, or allocation from anyone, and we will not be endorsing any token.
+> ⚠️ **No affiliation with any cryptocurrency.** Muster has no token. Any coin using the Muster name is not created, endorsed, or affiliated with this project, Orazen, or its maintainers. We have received no tokens, payment, or allocation from anyone.
 
 <div align="center">
 
 # Muster
 
-**Muster your agents.**
+**The agent workforce you can actually own.**
 
-<sub>A local-first roster of AI agents you actually own — bring your own Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, or OpenCode Go CLI, give each one a body, and run your team from a chat app, not a subscription.</sub>
-
-Every bot in the sidebar is a real agent — a model running locally under the hood — with its own
-personality, its own model, its own cloud computer, and its own connected apps.
-Talk to them like contacts. Watch them work. Approve what matters.
+<sub>Persistent, governed, verifiable, self-hostable. Bring your own Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, or OpenCode Go CLI — or any of 12 API providers — give each agent a name, memory, guardrails and a real computer, and run your team from a chat app.</sub>
 
 <sub>Muster was built by [Tharun Ramagiri](https://ramagiritharun.in) at [Orazen](https://orazen.online) — an AI, Web, Automation & Digital Agency. · [LinkedIn](https://www.linkedin.com/in/ramagiritharun)</sub>
 
-![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
-![Electron](https://img.shields.io/badge/Electron-macOS%20%C2%B7%20Windows%20%C2%B7%20Ubuntu-2B2E3A?logo=electron&logoColor=9FEAF9)
-![Agents](https://img.shields.io/badge/agents-10%2B%20engines-d97757)
-[![Star History Chart](https://api.star-history.com/svg?repos=Orazen/Muster&type=Date)](https://star-history.com/#Orazen/Muster&Date)
-> **Own your agents.** A roster of AI teammates you actually own — each with its own face, memory, model, and a real computer to work on. Bring your own Claude, Codex, Grok or Gemini. No subscription, no seat count.
-![License](https://img.shields.io/badge/license-BSL%201.1-38d591)
-![PRs](https://img.shields.io/badge/PRs-welcome-38d591)
-![Source](https://img.shields.io/badge/source-available-d97757)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://github.com/Orazen/Muster)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://github.com/Orazen/Muster)
+[![Electron](https://img.shields.io/badge/Electron-macOS%20%C2%B7%20Windows%20%C2%B7%20Ubuntu-2B2E3A?logo=electron&logoColor=9FEAF9)](https://github.com/Orazen/Muster)
+[![License](https://img.shields.io/badge/license-BSL%201.1-38d591)](LICENSE)
+[![PRs](https://img.shields.io/badge/PRs-welcome-38d591)](https://github.com/Orazen/Muster/pulls)
+[![Source](https://img.shields.io/badge/source-available-d97757)](https://github.com/Orazen/Muster)
 
 <br>
 
@@ -34,12 +27,11 @@ Talk to them like contacts. Watch them work. Approve what matters.
   <img src="https://img.shields.io/github/v/release/Orazen/Muster?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Windows&labelColor=070707&color=4cc2ff&cacheSeconds=300" alt="Download the latest Muster for Windows (.exe)" height="40">
 </a>
 
-<sub>macOS: Apple silicon · unsigned build (see note below) &nbsp;·&nbsp; Windows: 64-bit · one-click installer, no admin rights &nbsp;·&nbsp; both always the latest · [all releases](https://github.com/Orazen/Muster/releases)</sub>
+<sub>macOS · Windows · Ubuntu · Web · Cloud · Docker self-host · CLI · iOS/Android companions — [all downloads](https://muster.orazen.online/download.html)</sub>
 
 <br>
-<br>
 
-<img src="docs/screenshots/hero.png" alt="Muster — a Telegram-style chat app where every chat is a real AI agent" width="900">
+<img src="docs/screenshots/app-chat.png" alt="Muster — a chat app where every conversation is a real AI agent, with a roster in the sidebar" width="900">
 
 </div>
 
@@ -47,195 +39,70 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 ## Why
 
-One assistant in one box is the wrong shape for agents. Muster treats AI the way a real team works: a
-*roster* of agents you chat with like contacts, each with its own personality, memory of its own thread,
-model, computer, and connected apps — open, local-first, and running on the agents you already pay for:
+One assistant in one box is the wrong shape for agents. Muster treats AI the way a real team works:
+a *roster* of agents you chat with like contacts — each with its own personality, memory, model,
+guardrails, computer, and connected apps. Local-first: transcripts, keys and events live in `~/.muster`
+on your machine, not in a cloud. Three results nobody else ships together:
 
-- **Bring your own agents.** Bots run on the CLIs installed on your own machine — `claude`, `codex`, `grok`,
-  `gemini`, `kimi`, `qwen`, `hermes`, `droid`, `agy` (Antigravity), or `opencode` — your existing logins and
-  subscriptions, no new accounts, no proxy in the middle. Point any engine at a custom CLI binary (a
-  versioned build or wrapper) in **Settings → Engines**.
-- **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
-  events live in `~/.muster`, not a cloud.
-- **Privacy Shield built in.** When a transcript is replayed to a cloud model, emails, phone numbers, and
-  secrets are scrubbed first — deterministically, with a counts-only receipt in the thread. Your bot keeps
-  context; the cloud never sees the raw data.
-- **Agents with hands.** Each bot can get a real computer — a cloud Linux desktop it drives while you watch
-  live, or your own Mac — plus 500+ connected apps through Composio.
+- **Persistent** — agents keep their persona, memory and thread across tasks. They're coworkers, not chats.
+- **Governed** — shell commands and file edits surface as approval cards you Allow or Deny; per-agent
+  token budgets and daily USD caps; a Privacy Shield that masks emails/phones/secrets before a cloud
+  model sees them.
+- **Verifiable** — every settled task ends in a job receipt (bot, duration, tokens, cost, final word),
+  and shared receipts carry a detached HMAC signature anyone can verify. Proof-of-work you can paste
+  anywhere.
+
+Recent research puts numbers on why this layer matters: the same frontier model scored ~43% on ARC-AGI-3
+inside a generic coding harness vs ~99% inside a purpose-built process harness
+([Schema harness, 2026](https://schema-harness.github.io/)) — **the harness, not the model, is the product.**
+Muster is that harness for work, not puzzles.
+
+## The product in screenshots
+
+| | |
+|---|---|
+| <img src="docs/screenshots/os-desktop.png" alt="Muster OS — agents as apps on a desktop with a dock, presence bar and ⌘K command console" width="480"> | <img src="docs/screenshots/app-settings.png" alt="App settings — profile, connections, engines, providers, MCP servers" width="480"> |
+| **Muster OS** — the roster as a desktop: dock, presence bar (who's waiting on you), ⌘K "Ask Muster" console. | **Settings** — engines, providers, keys, MCP servers, integrations in one panel. |
+
+More screens: [model picker](docs/screenshots/model-picker.png) ·
+[approval card](docs/screenshots/approval-card.png) ·
+[computer panel](docs/screenshots/computer-panel.png) ·
+[connected apps](docs/screenshots/marketplace.png)
 
 ## What's new
 
-- **Sentries** — watcher-type agents. Give any routine a watching prompt and it re-runs on a cadence,
-  ending each run with a one-line state digest; you're only notified when the watched state actually
-  *changes*. Price watches, tender scouts, "did anything break" checks — a roster of persistent watchers,
-  not one-shot invocations.
-- **Proof-of-work sharing** — every settled job gets a receipt (bot, duration, tokens, cost, final word),
-  and both weekly Wrapped summaries and individual receipts can be published as public share links.
-  Shared receipts are **cryptographically signed** (HMAC-SHA256, detached signature embedded in the page):
-  a one-click "Verify signature" button checks the receipt against the issuing deployment via the public
-  `POST /api/receipts/verify` endpoint — a hiring manager, another agent, or an auditor can prove a receipt
-  is genuine and unedited. Your agents' work is verifiable anywhere.
-- **Referrals** — every account gets an invite link; when a friend joins, you both get Pro days.
-- **Provider health dashboard** — spend, traffic, and rate-limit pressure per provider family, computed
-  from your own turn history, with an engine doctor that distinguishes "binary reachable" from
-  "models loaded" and suggests ordered repairs.
-- **WhatsApp channel** — connect a WhatsApp Business number (env-configured Cloud API credentials) and
-  customer messages become bot turns, with replies returning over the Graph API. The channel local
-  businesses already live in.
-- **Public team directory** — the team-library catalog is served at `/bots` with a JSON feed, so the
-  agent ecosystem can index it.
-
-## Muster OS — the direction
-
-Muster is growing into a **web-based operating system for your AI workforce**, in the spirit of
-[webOS Open Source Edition](https://www.webosose.org/) — where apps are first-class citizens of a
-desktop with a service bus underneath:
-
-- **The dock is the roster** — agents are apps: pinned, running with live badges, minimized-but-working.
-- **The shell is a chat** — the primary interaction surface is conversation, not a file manager.
-- **The file system is the vault** — encrypted, agent-scoped, restored with one click.
-- **The app store is the team library** — install finished teams, rate them, publish your own.
-- **The service bus is the harness** — routines, sentries, webhooks, and computer sessions all speak one
-  typed event stream over HTTP + SSE.
-
-The OS metaphor is not cosmetic: it defines the roadmap — agent manifests and lifecycle, a notification
-center, per-agent file scopes, and a real marketplace with receipts as proof-of-run.
+- **Muster OS** — a web-based operating system for your agent workforce: the dock is the roster, the
+  shell is a chat, and ⌘K ("Ask Muster…") dispatches real work from anywhere. Bots appear as windows
+  with live status, engine and computer.
+- **Agent mail (hi.new)** — give your bots mailboxes on [hi.new](https://hi.new), the store-and-forward
+  mail network for agents. Bots read, send, invite and redeem peer connections through their `hi_new`
+  tools; grants come only from invite links you approve, and inbound mail is treated as untrusted data
+  by design. *(Settings → Connections → hi.new agent mail.)*
+- **Agent setup docs** — [muster.orazen.online/skill.md](https://muster.orazen.online/skill.md): a
+  machine-readable onboarding any agent can follow to pair with an install and operate the roster.
+- **Open sign-ups on Muster Cloud** — create an account in seconds; per-workspace isolation is enforced
+  at the data layer (ownerId on every record, per-user event streams, operator-gated infrastructure).
+- **Interactive mascot** — the musterbot bloom tracks your pointer, reacts to fleet state, and pops
+  when clicked.
+- Earlier: **sentries** (notify-only-on-change watchers), **signed proof-of-work receipts**,
+  **WhatsApp Business channel**, **provider health dashboard**, **referrals**.
 
 ## Features
 
-<table>
-<tr>
-<td width="50%" valign="top">
-
 ### 🧠 Pick a brain per bot
 
-A model picker with a provider rail — engine families side by side, defaults marked, unavailable
-providers dimmed with the reason. Switch a bot's model mid-conversation.
+Every bot runs on the AI CLIs already installed and logged in on your machine — or any of 12 API
+providers, or your own OpenAI/Anthropic-compatible endpoint (Ollama and LM Studio on `127.0.0.1` work
+out of the box). Swap a bot's model mid-conversation: the cheap one triages, the smart one writes.
 
 <img src="docs/screenshots/model-picker.png" alt="Model picker with provider rail" width="100%">
 
-</td>
-<td width="50%" valign="top">
+**10+ engines over their CLIs:** Claude · Codex · Grok · Gemini · Kimi · Qwen · Hermes · Droid ·
+Antigravity · OpenCode Go. Custom binary per engine in **Settings → Engines**.
 
-### 🖥️ Every bot gets a computer
+**12 API providers, no CLI required:**
 
-Open the Computer panel and the bot's cloud desktop spins up on its own — live screen preview while it
-works, "Open desktop" to take over in your browser, or point the bot at *this Mac* instead.
-
-<img src="docs/screenshots/computer-panel.png" alt="Computer panel with live screen preview" width="100%">
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 🙋 Bots ask before they act
-
-Shell commands, file edits, and questions surface as inline cards — Allow / Deny / answer in chat. A
-permission broker turns every risky action into a decision you make, for cloud and local computers alike.
-
-<img src="docs/screenshots/approval-card.png" alt="Approval and question cards in chat" width="100%">
-
-</td>
-<td width="50%" valign="top">
-
-### 🔌 Connected apps
-
-A one-click marketplace over Composio Sessions: Gmail, Slack, GitHub, Notion, Linear and hundreds more.
-OAuth once, and every bot can use them as tools.
-
-<img src="docs/screenshots/marketplace.png" alt="Connected apps marketplace" width="100%">
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 🗂 Manage bots like chats
-
-Right-click any bot: pin, mark unread, edit profile, duplicate, copy conversation ID, hide, delete. It's a
-messaging app — your agents behave like contacts.
-
-<img src="docs/screenshots/context-menu.png" alt="Bot context menu" width="100%">
-
-</td>
-<td width="50%" valign="top">
-
-### 🔑 Keys once, everything lights up
-
-Paste credentials in App Settings — they persist locally and the provider fleet hot-reloads instantly.
-Secrets are write-only: the UI only ever sees "configured" flags.
-
-<img src="docs/screenshots/app-settings.png" alt="App-level settings with API keys" width="100%">
-
-</td>
-</tr>
-</table>
-
-### 🎧 Bots that talk back
-
-Press the speaker on any reply, or switch a bot to read its answers out as they land — so you can listen
-to what ran overnight while you make breakfast. Hit **call** and it's a conversation: it hears you, tells
-you what it's doing while it works, and asks for approvals out loud.
-
-Bring your own ElevenLabs key — paste it once in App Settings, pick a voice, and every bot can talk.
-Give a bot its own voice and a room stops sounding like one person.
-
-**Also in the box:** streaming replies with tool-run activity chips · native macOS dictation from the
-composer mic (on-device Apple speech recognition — desktop app) · Muster agent avatars with role-aware
-expressions · screenshots of the bot's work folded into the transcript.
-
-### 🤝 Bots that work together
-
-Agents aren't silos. Groups put several bots in one room with multi-agent routing, and a **group call**
-arranges a live panel. Bots hand work to peers with **delegation** (`delegate_bot`), and messages sent to a
-busy bot queue and drain into one turn instead of bouncing. A **chief-of-staff** composite can front a set
-of members, and the **team library** lets you import a whole roster — its own `muster.team` manifest with
-members, titles, skills, and required apps — from a catalog or a file, in one click.
-
-### ⏱ Routines, tasks, and webhooks
-
-Schedule a **routine** to run once or on selected weekdays on a bot's model/computer or cloud runner.
-Attach a **webhook trigger** to run a queued task when an external service posts to it — the webhook-only
-receiver on `127.0.0.1:8800` (or `OMB_WEBHOOK_PORT`) exposes just `/health` and secret `/hooks/...`
-endpoints, never the app's broader API. One-time delivery secrets rotate; bearer auth is recommended.
-
-### 🧰 Plugins (MCP) and local computer use
-
-The Plugins panel toggles which MCP servers get injected into each bot's `--mcp-config` — same pattern as
-Claude Desktop. Local computer use ships a bundled `cua-driver` (Rust) behind a single named TCC prompt, so
-bots can drive *this Mac* with no separate installs.
-
-## Engines
-
-Muster ships drivers for a dozen engines. Any CLI on your PATH that speaks the right protocol can be added
-as a custom engine in **Settings → Engines**. Engines split into a subscription rail (first-party catalog
-models) and a custom rail (bring a CLI, inject a model).
-
-| Engine | Driver kind | CLI | Notes |
-|---|---|---|---|
-| Claude | `claudeAgent` | `claude` | Claude Code; stream-JSON, full per-action approvals. |
-| Codex | `codex` | `codex` | OpenAI Codex CLI. |
-| Grok | `grok` | `grok` | xAI Grok CLI (API and Build over ACP stdio). |
-| Gemini | `geminiAgent` | `gemini` | Google Gemini CLI over ACP; **retired from the default fleet** — enable in config. |
-| Kimi | `kimiAgent` | `kimi` | Moonshot Kimi over ACP stdio. |
-| Qwen | `qwenAgent` | `qwen` | Qwen Code over ACP stdio. |
-| Hermes | `hermesAgent` | `hermes` | Nous Research Hermes over ACP stdio. |
-| Droid | `droidAgent` | `droid` | Factory Droid over ACP stdio. |
-| Antigravity | `antigravityAgent` | `agy` | Google Antigravity (`agy --print`); no per-action broker yet. |
-| OpenCode Go | `opencodeGo` | `opencode` | OpenCode CLI over ACP stdio; key injected as `OPENCODE_API_KEY`. |
-| Computer | `boxAgent` | cloud | Cloud Linux computer agent — runs the turn on the bot's own Box (box.ascii.dev), no local CLI. |
-
-Unknown drivers degrade to "unavailable" shadows — a config from a newer build round-trips safely and
-never crashes the fleet.
-
-### Providers (no CLI required)
-
-Paste an API key in **Settings → Providers** and a matching engine appears automatically, no CLI install
-needed — the same fleet a bot picks from, just credential-driven instead of CLI-driven. Useful if you
-already have a key and don't want to install/auth a separate CLI for it.
-
-| Provider | Driver kind | Env var | Notes |
+| Provider | Driver | Env var | Notes |
 |---|---|---|---|
 | OpenAI | `openai` | `OPENAI_API_KEY` | GPT-4o, GPT-4.1, o3, and family. |
 | Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | Claude Opus/Sonnet/Haiku via the Messages API. |
@@ -247,37 +114,77 @@ already have a key and don't want to install/auth a separate CLI for it.
 | Groq | `groq` | `GROQ_API_KEY` | Llama/Mixtral/Gemma at high inference speed. |
 | Together AI | `together` | `TOGETHER_API_KEY` | Open-source models via Together's API. |
 | Fireworks AI | `fireworks` | `FIREWORKS_API_KEY` | Fast inference for open-source models. |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | 200+ models (GPT, Claude, Gemini, open-source) through one key. |
-| OpenCode Zen | `opencodeZen` | `OPENCODE_API_KEY` | Free and paid models via OpenCode's hosted gateway — same key as OpenCode Go above. |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | 200+ models through one key. |
+| OpenCode Zen | `opencodeZen` | `OPENCODE_API_KEY` | Free and paid models via OpenCode's hosted gateway. |
 
-All twelve share one architecture: streaming SSE, transcript-replay, token-level `content.delta` events,
-same as every CLI-driven engine — a bot can't tell the difference between a CLI and an API-key provider.
+All twelve share one architecture — streaming SSE, transcript replay, token-level events — so a bot
+can't tell the difference between a CLI and an API provider. **Free to start:** Google AI Studio,
+Groq, OpenRouter `:free` models, and OpenCode Zen all have free tiers; paste a browser-obtained key
+into **Settings → Providers** and your first bot costs nothing.
 
-### Custom providers (bring your own endpoint)
+**Custom providers (BYO endpoint):** **Settings → Providers → Add model provider** registers *any*
+OpenAI- or Anthropic-compatible endpoint as a first-class engine — name, base URL, optional key,
+wire format, model list. Self-hosted multi-tenant deployments block loopback/private provider URLs
+(SSRF guard); desktop installs allow them, so local Ollama just works.
 
-**Settings → Providers → Add model provider** registers *any* OpenAI- or Anthropic-compatible endpoint as a
-first-class engine: a name, a base URL, an API key (optional — keyless local servers like Ollama or LM Studio
-work), the wire format (`/v1/chat/completions` or `/v1/messages`), and the model list to expose. You can fetch
-the model list from the endpoint's `/models` route or type it by hand. Each custom provider becomes a
-`custom-<id>` instance in the same fleet — model picker, health, chat, usage — with its key stored
-write-only in `config.json`.
+### 🖥️ Every bot gets a computer
 
-Self-hosted multi-tenant deployments block loopback/private/reserved provider base URLs (SSRF: one account must
-not probe the deployment's internal network through a provider). Desktop installs allow them, so pointing at
-Ollama on `127.0.0.1` works out of the box.
+A cloud Linux desktop it drives while you watch live (Box, or self-hosted OpenSandbox), your own Mac,
+a per-bot local VM, or a BYO VPS over SSH. Real files, real shell, real browser.
 
-**Free options — try Muster with zero spend:** several providers have free tiers that work as the API key
-you paste above: **Google AI Studio** gives Gemini free-tier keys in the browser ([aistudio.google.com](https://aistudio.google.com/apikey));
-**Groq** has a generous free tier for Llama/Mixtral ([console.groq.com](https://console.groq.com/keys));
-**OpenRouter** exposes many `:free` models through one key ([openrouter.ai/keys](https://openrouter.ai/keys));
-and **OpenCode Zen** includes free models with the same key as the OpenCode Go engine. Get a key in the
-browser, paste it in **Settings → Providers**, and your first bot is free.
+<img src="docs/screenshots/computer-panel.png" alt="Computer panel with live screen preview" width="100%">
+
+### 🙋 Bots ask before they act
+
+Shell commands and file edits surface as inline cards — Allow, Deny, or answer in the thread. Optional
+auto-mode per bot when you trust the loop. Plus per-agent **token budgets**, per-agent **daily USD
+caps**, and the on-device **Privacy Shield** (deterministic masking with counts-only receipts).
+
+<img src="docs/screenshots/approval-card.png" alt="Approval and question cards in chat" width="100%">
+
+### 🔌 Connected apps + agent mail
+
+500+ apps (Gmail, Slack, GitHub, Notion, Linear…) through Composio OAuth — and now **agent-to-agent
+mail through [hi.new](https://hi.new)**: store-and-forward mail between agents, with grants that come
+only from invite links you approve. See
+[docs/plans/muster-hi-new-agent-mail.md](docs/plans/muster-hi-new-agent-mail.md) for the design.
+
+<img src="docs/screenshots/marketplace.png" alt="Connected apps marketplace" width="100%">
+
+### 🤝 Bots that work together
+
+Rooms (multi-bot group threads with @mention routing), delegation, a Chief of Staff that routes work,
+group calls, and the team library — installable packs, published to a public directory at
+[/bots](https://muster.orazen.online/bots).
+
+### ⏱ Routines, sentries, webhooks
+
+Schedule work, trigger on webhooks, or run **sentries** — watchers that re-check on a cadence and only
+notify when the watched state actually changes. Overnight chains run up to 12 iterations through a
+shared notes file. Every run keeps a why-journal: intent + key decisions.
+See [docs/why-journal.md](docs/why-journal.md).
+
+### 🎧 Voice
+
+Spoken replies and bot calls (bring your own ElevenLabs key), on-device dictation. macOS-first today —
+see [docs/voice-mode.md](docs/voice-mode.md).
+
+## For agents (and their humans)
+
+Muster is agent-operable end to end:
+
+- **[skill.md](https://muster.orazen.online/skill.md)** — the onboarding an agent follows to pair with
+  an install and operate the roster (pairing, roster, tasks, receipts, memory, untrusted-input rules).
+- **CLI** — `muster pair | bots | send <bot> <text> | approve [allow|deny] | status | receipts`, with
+  machine-readable `--json` on `bots`/`status`/`receipts`.
+- **HTTP + SSE** — the whole product under `/api/*` (same auth as the app).
+- **llm.txt** — [muster.orazen.online/llm.txt](https://muster.orazen.online/llm.txt), the platform map.
 
 ## How it works
 
-Two processes. The app holds no transports of its own — it sends typed commands over HTTP and folds one SSE
-event stream into state. The harness server owns every agent process and normalizes each provider's native
-protocol into one canonical runtime event stream (logged per-thread as NDJSON).
+Two processes. The app holds no transports of its own — it sends typed commands over HTTP and folds one
+SSE event stream into state. The harness server owns every agent process and normalizes each provider's
+native protocol into one canonical runtime event stream (logged per-thread as NDJSON).
 
 ```mermaid
 flowchart LR
@@ -287,6 +194,7 @@ flowchart LR
     subgraph server ["Harness server (127.0.0.1:8799)"]
         REG[Driver registry] --> BUS[Event bus → SSE]
         BROKER[Permission broker]
+        MCP[hi.new · computer · connector bridges]
     end
     subgraph agents ["Agents on your computer"]
         CL[claude CLI]
@@ -298,66 +206,109 @@ flowchart LR
     BUS -- "one SSE stream" --> UI
     REG --> CL & CX & GR & OTH
     CL & CX & GR & OTH -- "permission requests" --> BROKER
+    REG --> MCP
+    MCP -- "agent mail" --> HN[("hi.new")]
     server -- "Box API" --> BOX[("Cloud computer<br/>box.ascii.dev")]
     server -- "Composio Session" --> APPS[("Gmail · Slack · GitHub · …")]
 ```
 
 | Layer | Where | What it does |
 |---|---|---|
-| Drivers | `server/drivers/` | One per provider: Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, OpenCode Go over their local CLIs (stream-JSON / JSON-RPC / ACP stdio), plus a cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
+| Drivers | `server/drivers/` | One per provider: CLIs (stream-JSON / JSON-RPC / ACP stdio) + cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
 | Harness | `server/harness/` | Registry (configs → live instances) and the fan-in event bus every client folds. |
 | API | `server/index.ts` | Bots, turns, approvals, model catalog, computer lifecycle, connectors, routines, webhooks, teams, config — HTTP + SSE. |
-| Voice | `server/tts/` | ElevenLabs, bring your own key. Runs on the harness so the key never reaches the UI; markdown is rewritten into something worth hearing before it is spoken. |
-| App | `src/` | The chat shell. Server-backed store, one reducer, zero client-side transports. |
-| Desktop | `electron/` | macOS, Windows, and Ubuntu shells with an embedded harness and explicit platform capabilities; Apple speech, local screen capture, and the current CUA bridge remain macOS-only. |
+| Bridges | `server/*-proxy.ts` | Harness-owned stdio MCP servers: hi.new agent mail, computer proxy, permission broker, connectors, Local VM bridge. |
+| Voice | `server/tts/` | ElevenLabs, bring your own key; runs on the harness so the key never reaches the UI. |
+| App | `src/` | The chat shell + Muster OS. Server-backed store, one reducer, zero client-side transports. |
+| Desktop | `electron/` | macOS, Windows, Ubuntu shells with an embedded harness; Apple speech and screen capture are macOS-only today. |
 
 ## Quick start
 
-**Released builds:** the harness server is embedded, so macOS and Windows need no separate server setup.
+**Released builds:** the harness server is embedded — no separate server setup on macOS/Windows.
 
-| | Download | Install |
+| Platform | Download | Install |
 |---|---|---|
-| **macOS** (Apple silicon) — **recommended: Homebrew** | `brew tap orazen/muster && brew install --cask muster` | Homebrew clears the quarantine flag automatically on install, so it just works — no Gatekeeper "damaged" message. |
-| **macOS** (Apple silicon) — direct download | [Muster.dmg](https://muster.orazen.online/downloads/Muster.dmg) | Drag it to Applications, open it. **Not yet signed/notarized** — macOS Gatekeeper will say *"Muster is damaged and can't be opened. You should move it to the Bin."* This is not real damage, it's an unsigned-app quarantine flag. Fix: open Terminal and run `xattr -cr /Applications/Muster.app`, then open it again — or just use Homebrew above, which avoids this entirely. (Proper Developer ID signing + notarization is tracked, see below.) |
-| **macOS** (Intel) | [Muster-intel.dmg](https://muster.orazen.online/downloads/Muster-intel.dmg) | Same app, built for Intel Macs. Same unsigned-quarantine note and fix as above. |
-| **Windows** (x64) | [Muster-setup.exe](https://muster.orazen.online/downloads/Muster-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
-| **Linux** (x64) | [Muster.deb](https://muster.orazen.online/downloads/Muster.deb) · [Muster.AppImage](https://muster.orazen.online/downloads/Muster.AppImage) | `.deb`: `sudo dpkg -i Muster.deb` · AppImage: `chmod +x Muster.AppImage && ./Muster.AppImage` |
-| **Android** | Play Store (coming soon — app is built, listing needs a Play developer account) | Pair with your computer's companion service |
-| **iOS** | App Store (coming soon — app is built, listing needs an Apple Developer account) | Pair with your computer's companion service |
+| **macOS** (Apple silicon) — **recommended: Homebrew** | `brew tap orazen/muster && brew install --cask muster` | Homebrew clears the quarantine flag automatically — no Gatekeeper "damaged" message. |
+| **macOS** (Apple silicon) — direct | [Muster.dmg](https://muster.orazen.online/downloads/Muster.dmg) | Drag to Applications. Unsigned build: if Gatekeeper says *"damaged"*, run `xattr -cr /Applications/Muster.app` then open. (Proper signing + notarization tracked.) |
+| **macOS** (Intel) | [Muster-intel.dmg](https://muster.orazen.online/downloads/Muster-intel.dmg) | Same as above. |
+| **Windows** (x64) | [Muster-setup.exe](https://muster.orazen.online/downloads/Muster-setup.exe) | One-click, per-user, no admin. SmartScreen: **More info → Run anyway** (installer not code-signed yet). |
+| **Linux** (x64) | [Muster.deb](https://muster.orazen.online/downloads/Muster.deb) · [AppImage](https://muster.orazen.online/downloads/Muster.AppImage) | `sudo dpkg -i Muster.deb` · `chmod +x Muster.AppImage && ./Muster.AppImage` |
+| **Web / Cloud** | [muster.orazen.online/app](https://muster.orazen.online/app) | Nothing to install. Free account; computers from $20/mo. |
+| **Self-host** | Docker | `docker compose up -d --build` → http://localhost:8799 — see [docs/self-host.md](docs/self-host.md). |
+| **iOS / Android** | Built — store listings pending developer accounts | Pair with your computer's companion service. |
 
-**Homebrew (macOS):**
-
-```sh
-brew tap orazen/muster
-brew install --cask muster
-```
-
-Requires [Homebrew](https://brew.sh). Auto-updates via `brew upgrade --cask muster`.
+**Requirements (desktop):** macOS / Windows / Ubuntu 24.04 x64, Node 24+, pnpm, and at least one agent
+CLI (e.g. [`claude`](https://claude.com/claude-code), [`codex`](https://github.com/openai/codex),
+[`grok`](https://x.ai/cli)) installed and logged in — engines appear in the picker automatically.
+No CLI? Paste a free API provider key instead (above).
 
 **From source:**
 
 ```sh
 git clone https://github.com/Orazen/Muster && cd Muster
 pnpm install
-
 pnpm dev:server    # harness server → 127.0.0.1:8799
 pnpm dev           # app → http://127.0.0.1:5199
-pnpm dev:desktop   # Electron shell; keep the two commands above running
+pnpm dev:desktop   # Electron shell (keep the two commands above running)
 ```
 
-Requirements: **macOS, Windows, or Ubuntu 24.04 x64**, **Node 24+**, **pnpm**, and at least one agent CLI
-(e.g. [`claude`](https://claude.com/claude-code), [`codex`](https://github.com/openai/codex), or
-[`grok`](https://x.ai/cli)) installed and logged in. They appear in the model picker automatically.
+### Optional credentials
 
-Package the desktop application:
+All optional — local chat works without them. Paste once in **App Settings**:
+
+| Credential | What it enables | Where |
+|---|---|---|
+| Composio project key (`ak_…`) | Gmail, GitHub, Slack, Notion + 500 more apps | [docs/composio.md](docs/composio.md) |
+| Box API key | Isolated remote Linux computer per bot | [Box API keys](https://docs.ascii.dev/box/api-keys) |
+| hi.new token (`hn_…`) | Agent mail: your bots get a mailbox on hi.new | [hi.new](https://hi.new) |
+| ElevenLabs key | Spoken replies + bot calls | [ElevenLabs keys](https://elevenlabs.io/app/settings/api-keys) |
+| OpenCode Go key | OpenCode Go engine | [OpenCode Go](https://opencode.ai/docs/go/) |
+| WhatsApp Business creds | Customers chat with a bot over WhatsApp | [Meta Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api) |
+
+Composio and Box are third-party services with their own terms; Box is paid after its trial.
+
+### Mobile companions
+
+Thin clients for approvals, streaming replies, messages and transcript search — the phone owns
+nothing; your computer stays the source of truth. [iOS](ios/README.md) and
+[Android](android-companion/README.md) are built; store listings await developer accounts.
+
+## Documentation
+
+| Doc | What's in it |
+|---|---|
+| [docs/self-host.md](docs/self-host.md) | Docker self-host: configuration, security, models |
+| [docs/composio.md](docs/composio.md) | Connected apps setup |
+| [docs/voice-mode.md](docs/voice-mode.md) | Voice design and known gaps |
+| [docs/why-journal.md](docs/why-journal.md) | Run intent + decision journals |
+| [docs/computer-use-integration.md](docs/computer-use-integration.md) | Computer control architecture |
+| [docs/plans/](docs/plans/) | Strategy + design docs (platform, multi-tenancy, agent mail, [win plan](docs/plans/muster-win-plan.md)) |
+| [www/llm.txt](www/llm.txt) | Agent-readable platform map |
+| [www/skill.md](www/skill.md) | Agent onboarding (served live at /skill.md) |
+
+## Development
 
 ```sh
-pnpm package:mac      # macOS: DMG + ZIP; requires Swift/Xcode tools
-pnpm package:win      # Windows: installer + ZIP
-pnpm package:linux    # Ubuntu x64: .deb + AppImage; no Swift required
+pnpm typecheck      # app + server
+pnpm test           # unit, driver, API, and desktop capability tests (1,592 tests)
+pnpm build          # typecheck + production build
+pnpm lint           # oxlint
+pnpm package:mac    # macOS DMG + ZIP
+pnpm package:win    # Windows installer + ZIP
+pnpm package:linux  # Ubuntu x64 .deb + AppImage
 ```
 
-### Desktop capability status
+Releasing: `pnpm bump patch|minor|major|x.y.z [--push]` — the tag triggers the release workflow
+(4 platform builds → gates → GitHub release → download-mirror deploy, unattended).
+
+Contributions welcome — the driver SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately
+small; adding a provider is one file in [`server/drivers/`](server/drivers/) plus a one-line registration.
+
+## Status
+
+Early but real — the loop works end to end: message → agent → streamed reply → tools → approvals →
+computer use → receipts → shares → referrals. macOS and Windows have released builds; Ubuntu 24.04 x64
+is beta with the capability limits below. Voice needs an ElevenLabs key; calls are macOS-only today.
 
 | Capability | macOS | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
 |---|---|---|---|
@@ -366,102 +317,14 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage; no Swift required
 | Local screen preview and computer control | Supported | Planned | Planned after compositor validation |
 | Native on-device dictation | Supported | Planned | Planned |
 
-Unavailable native features fail closed on Ubuntu without blocking chat or cloud features. Linux local computer
-control, Wayland capture/automation, dictation, and ARM64 are tracked in
-[#29](https://github.com/Orazen/Muster/issues/29) and are not claimed by the baseline package.
-
-### Self-host (web)
-
-Muster is local-first, but the same web UI and harness can run as a single-user
-web service in any browser via Docker — no Electron, no macOS requirement:
-
-```sh
-docker compose up -d --build   # then open http://localhost:8799
-```
-
-Bring your own agent CLIs (or engine keys), and reverse-proxy with TLS if you
-expose it beyond your machine. There are **no accounts** — see
-[docs/self-host.md](docs/self-host.md) for configuration, security, and model
-setup.
-
-> **Don't want to run anything?** [Muster Cloud](https://muster.orazen.online)
-> is this same app, hosted — from **$20/month per cloud computer**, with the
-> Privacy Shield included. Self-hosting stays free forever; the hosted tier pays
-> for the computers, not the software.
-
-### Optional credentials
-
-These credentials are optional — local chat works without them. Paste a key once in **App Settings** (gear
-in the sidebar footer) when you want to enable its integration:
-
-| Credential | What it enables | Where to get it |
-|---|---|---|
-| Composio project key (`ak_…`) | Connect Gmail, GitHub, Slack, Notion, and other apps to your bots | [Muster Composio setup](docs/composio.md) |
-| Box API key | Give bots an isolated remote Linux computer with a desktop and terminal | [Box API key guide](https://docs.ascii.dev/box/api-keys) |
-| ElevenLabs key | Read replies aloud, and call your bots | [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys) |
-| OpenCode Go key | Run the OpenCode Go engine | [OpenCode Go docs](https://opencode.ai/docs/go/) |
-| WhatsApp Business API creds | Connect a WhatsApp Business number so customers chat with a bot (`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, optional `WHATSAPP_BOT_ID`) | [Meta WhatsApp Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api) |
-
-Composio and Box are third-party services with their own accounts and terms. Box is a paid service after
-its trial, and using a cloud computer may incur charges.
-
-### Mobile companions
-
-The iOS and Android apps are thin clients that connect to the same companion
-service on your computer. They let you:
-
-- Answer approvals and questions on the go
-- Follow replies as they stream
-- Send messages to bots and rooms
-- Search transcripts and share as Markdown/JSON
-
-The phone owns nothing — your computer is the source of truth for all bot
-data, credentials, and transcripts. See [`ios/README.md`](ios/README.md) and
-[`android-companion/README.md`](android-companion/README.md) for details.
-
-| Platform | Status | Notes |
-|---|---|---|
-| iOS | Built, ready for App Store submission | Needs Apple Developer account |
-| Android | Built (React Native + Expo) | Needs Play Store developer account |
-
-### Development commands
-
-```sh
-pnpm typecheck      # app + server
-pnpm test           # unit, driver, API, and desktop capability tests
-pnpm build          # typecheck + production build
-pnpm check:electron # syntax-check Electron main/preload files
-pnpm package:win    # Windows installer + zip → release/
-pnpm package:linux  # Ubuntu x64 .deb + AppImage → release/
-```
-
-### Releasing
-
-```sh
-pnpm bump patch          # 0.1.27 → 0.1.28 (also: minor, major, or explicit 0.2.0)
-pnpm bump patch --push   # same, but also pushes the tag → triggers release.yml
-```
-
-The `release.yml` workflow builds macOS, Windows, and Linux in parallel, then creates a GitHub Release with all artifacts and the auto-update YML files.
-
-## Status
-
-Early but real — the loop works end to end: message → agent → streamed reply → tools → approvals →
-computer use → receipts → shares → referrals. macOS and Windows have released builds; Ubuntu 24.04 x64
-packages are in beta with the capability limits above. Self-hosting is supported via Docker; Muster Cloud
-is the hosted tier. Sentries, the WhatsApp Business channel, and the provider health dashboard shipped
-most recently — see **What's new** above.
-Voice needs an ElevenLabs key, and calls are macOS-only for now (they ride the same on-device dictation as
-the composer mic) — see [`docs/voice-mode.md`](docs/voice-mode.md) for the design and the known gaps.
-
-Contributions welcome — the driver SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately
-small; adding a provider is one file in [`server/drivers/`](server/drivers/) plus a one-line registration.
+Unavailable native features fail closed on Ubuntu without blocking chat or cloud features. Linux local
+computer control, Wayland capture, dictation and ARM64 are tracked in
+[#29](https://github.com/Orazen/Muster/issues/29).
 
 ## License
 
 [Business Source License 1.1](LICENSE) © 2026 Tharun Ramagiri / Orazen and contributors.
 
-Source-available. You may use, modify, and redistribute for personal, internal,
-and non-commercial purposes. You may **not** offer Muster (or a substantially
-similar product) as a managed service. After 2030-08-19 the license converts
-to [Apache 2.0](LICENSE).
+Source-available: use, modify, and redistribute for personal, internal, and non-commercial purposes.
+You may **not** offer Muster (or a substantially similar product) as a managed service. Converts to
+[Apache 2.0](LICENSE) after 2030-08-19. Self-hosting is free forever.

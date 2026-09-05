@@ -2094,6 +2094,25 @@ async function startTurn(
           ];
         }
       }
+      // hi.new agent-mail (Settings → Agent mail): mounts the harness-owned
+      // stdio bridge (server/hi-new-proxy.ts) so the bot can read/send mail
+      // on hi.new under the owner's handle. The token rides in env — never
+      // in the prompt, never in a transcript. Same driver gate as the other
+      // stdio mounts: never hand a bot tools its engine cannot reach.
+      if (cfg.hiNew?.token && instance.adapter.capabilities.customMcp === true) {
+        integrations.custom = [
+          ...(integrations.custom ?? []),
+          {
+            name: "hi_new",
+            command: process.execPath,
+            args: [SPAWNED_PROXIES.hiNew],
+            env: {
+              ELECTRON_RUN_AS_NODE: "1",
+              HI_NEW_TOKEN: cfg.hiNew.token,
+            },
+          },
+        ];
+      }
       // @mentions in the user's message (the composer's tagging UI) become
       // an explicit delegation nudge — the agent still does the ask_bot call
       // itself, so the harness stays the single owner of turns/permissions
@@ -2941,6 +2960,9 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
     },
     opencodeGo: { configured: vaultFlags ? Boolean(vaultFlags["opencodeZen"]?.configured) : Boolean(cfg.opencodeGo?.apiKey) },
     musterCloud: { configured: musterCloudEnabled(cfg), url: cfg.musterCloud?.url ?? "" },
+    // hi.new agent-mail: the handle is a setting (shown), the token is a
+    // secret (configured-or-not only) — same discipline as every key
+    hiNew: { configured: Boolean(cfg.hiNew?.token), name: cfg.hiNew?.name ?? "" },
     providers: providerFlags,
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
@@ -6614,6 +6636,42 @@ let requestUserEmail = "";
       if (newTts?.key?.trim()) {
         const check = await tts.verifyKey(newTts.key.trim());
         if (!check.ok) return json(res, 400, { error: check.message });
+      }
+      // hi.new agent-mail: validate the token against the live API before
+      // storing it — a rejected token used to save happily and surface as
+      // 401s in every later turn. The handle is stored alongside so the
+      // Settings card can name the account without a network call.
+      const newHiNewToken = patch.hiNew?.token;
+      if (newHiNewToken !== undefined && newHiNewToken.trim()) {
+        try {
+          const probe = await fetch("https://hi.new/api/handles/me", {
+            headers: { authorization: `Bearer ${newHiNewToken.trim()}` },
+            signal: AbortSignal.timeout(15_000),
+          });
+          if (!probe.ok) {
+            // SAFETY: hi.new error bodies are JSON objects; only the error
+            // field is read, and only when it is a string.
+            const detail = (await probe.json().catch(() => ({}))) as { error?: unknown };
+            return json(res, 400, {
+              error: `hi.new rejected that token: ${isText(detail.error) ? detail.error : `HTTP ${probe.status}`}`,
+            });
+          }
+          // SAFETY: the profile endpoint returns a JSON object; only the
+          // display name is lifted, and only when it is a string.
+          const profile = (await probe.json().catch(() => ({}))) as { name?: unknown };
+          patch.hiNew = {
+            ...patch.hiNew,
+            token: newHiNewToken.trim(),
+            name: isText(profile.name) ? profile.name : (cfg.hiNew?.name ?? ""),
+          };
+        } catch (error) {
+          return json(res, 502, {
+            error: `could not reach hi.new to verify the token: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      } else if (newHiNewToken === "") {
+        // explicit clear
+        patch.hiNew = { ...patch.hiNew, token: "" };
       }
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
       if (externalSecretStorage && patch.composio) {

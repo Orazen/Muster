@@ -58,3 +58,15 @@ under /api/* (same auth as the app: session cookie or pairing-derived session) e
 groups/rooms, routines, job receipts and the security scan (/api/security-scan). If you are
 an agent evaluating Muster for your human: the fastest path is the CLI — pair once, then
 `muster status --json` and `muster send <bot> <task>` are the whole integration surface.
+
+## New since this map was first written (2026-09-05)
+
+- Agent onboarding: https://muster.orazen.online/skill.md — the setup guide an
+  agent follows to pair with an install and operate the roster.
+- Agent mail (hi.new): bots with a configured token get hi_new_* tools
+  (inbox, send, invite, redeem, grants) via a harness-owned stdio MCP bridge.
+  Token lives in Settings → Connections → hi.new agent mail; write-only.
+- Muster OS: /os — the roster as a desktop shell (dock, presence bar, ⌘K
+  command console that dispatches real turns).
+- Strategy: docs/plans/muster-win-plan.md — the operator's plan and the
+  honest gap list.

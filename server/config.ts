@@ -46,6 +46,9 @@ const appConfigSchema = z.object({
    * are non-secret local identifiers used to reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
   box: z.object({ token: optionalText }).optional(),
+  /** hi.new agent-mail token (server/hi-new-proxy.ts). Persisted write-only:
+   * GET /api/config reports `configured`, never the value. */
+  hiNew: z.object({ token: optionalText, name: optionalText }).optional(),
   /** Self-hosted OpenSandbox server: an alternative to box.ascii.dev for the
    * cloud computer feature, running on infrastructure the operator controls
    * instead of a third-party vendor. url defaults to the SDK's own default
@@ -105,6 +108,9 @@ export interface AppConfig {
   xai?: { key?: string; url?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   box?: { token?: string };
+  /** hi.new agent-mail (server/hi-new-proxy.ts): owner-stored bearer token
+   * and the handle it belongs to. Token never leaves the server. */
+  hiNew?: { token?: string; name?: string };
   opensandbox?: { url?: string; apiKey?: string; useServerProxy?: boolean };
   /** Opt-in identity bridge — see server/muster-cloud.ts. Off by default;
    * an unset url means fully local, no network dependency, unchanged. */

@@ -32,6 +32,7 @@ const ENTRY_POINTS = [
   "container-mcp.ts",
   "permission-proxy.ts",
   "connector-proxy.ts",
+  "hi-new-proxy.ts",
   "drivers/agents-proxy.ts",
   "drivers/dweb-proxy.ts",
 ];
