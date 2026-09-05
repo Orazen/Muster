@@ -16,7 +16,7 @@ import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 import { NotificationStack } from "@/components/NotificationStack";
-import { MusterbotMark } from "@/components/MusterbotMark";
+import { MusterBloom } from "@/components/MusterBloom";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { AuthGate } from "@/components/AuthGate";
 import { LoginPage } from "@/pages/LoginPage";
@@ -171,8 +171,9 @@ function Shell() {
           className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-6 overflow-hidden bg-app text-ink-secondary"
           style={{ background: "linear-gradient(180deg, #f9f9f9 0%, #fdf3e7 100%)" }}
         >
-          {/* musterbot-style empty roster scene: the animated mark carries the screen */}
-          <MusterbotMark size={280} />
+          {/* musterbot-style empty roster scene: the interactive bloom carries
+              the screen — eyes follow the pointer, a click pops */}
+          <MusterBloom size={280} mood={state.connected ? "happy" : "thinking"} />
           <div className="text-[15px] font-medium text-[#0a0a0c]">
             {state.connected ? "Your roster is empty — muster your first teammate" : "Connecting to the bot server…"}
           </div>

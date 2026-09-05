@@ -10,6 +10,7 @@ import { ArrowLeft } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "@/components/Avatar";
 import { MusterbotMark } from "@/components/MusterbotMark";
+import { MusterBloom } from "@/components/MusterBloom";
 import { activityLabel, AgentWindow } from "@/components/os/AgentWindow";
 import { RoomsWindow } from "@/components/os/RoomsWindow";
 import { CommandBar } from "@/components/os/CommandBar";
@@ -201,7 +202,7 @@ export function DesktopShell() {
             access to everything the dock holds. */}
         {windows.length === 0 && bots.length > 0 && (
           <div className="os-welcome">
-            <MusterbotMark size={64} />
+          <MusterBloom size={64} mood={bots.some((b) => b.busy) ? "working" : "idle"} />
             <p className="os-welcome-title">Your agents, on a desktop.</p>
             <p className="os-welcome-hint">
               Open a bot from the dock below to watch its status, engine and computer — or start with one of these.
