@@ -19,6 +19,9 @@ interface WhyEntry {
   intent: string | null;
   decisions: WhyDecision[];
   outcome: "done" | "failed" | "partial";
+  /** ARC reasoning-agent fields: what the run assumed, what it learned. */
+  hypothesis?: string | null;
+  findings?: string | null;
 }
 
 const OUTCOME_STYLE = {
@@ -115,6 +118,20 @@ function WhyRow({ entry }: { entry: WhyEntry }) {
               </li>
             ))}
           </ul>
+        )}
+        {(entry.hypothesis || entry.findings) && (
+          <div className="mt-1 flex flex-col gap-0.5 rounded-lg bg-inset px-2.5 py-1.5">
+            {entry.hypothesis && (
+              <div className="text-[12px] leading-relaxed text-ink-secondary">
+                <span className="font-medium text-ink">Assumed:</span> {entry.hypothesis}
+              </div>
+            )}
+            {entry.findings && (
+              <div className="text-[12px] leading-relaxed text-ink-secondary">
+                <span className="font-medium text-ink">Learned:</span> {entry.findings}
+              </div>
+            )}
+          </div>
         )}
         <div className="mt-0.5 text-[12px] text-ink-secondary">{style.label}</div>
       </div>
