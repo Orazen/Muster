@@ -60,10 +60,19 @@ const updated = yml.replace(
 );
 writeFileSync("electron-builder.yml", updated);
 
-console.log(`Updated package.json and electron-builder.yml to ${next}`);
+// Update the visible version on the download page so the site always
+// names the build it actually serves
+const dl = readFileSync("www/download.html", "utf-8");
+const dlUpdated = dl.replace(
+  /(<h1>Download Muster <span[^>]*>)v[\d.]+(<\/span>)/,
+  `$1v${next}$2`,
+);
+writeFileSync("www/download.html", dlUpdated);
+
+console.log(`Updated package.json, electron-builder.yml and www/download.html to ${next}`);
 
 // Git commit and tag
-execSync("git add package.json electron-builder.yml", { stdio: "inherit" });
+execSync("git add package.json electron-builder.yml www/download.html", { stdio: "inherit" });
 execSync(`git commit -m "release: v${next}"`, { stdio: "inherit" });
 execSync(`git tag v${next}`, { stdio: "inherit" });
 

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/TestSprite/testsprite-cli/v0.10.0/schemas/plan.schema.json",
+  "projectId": "b06262d3-b9d1-4b82-af62-6f9fbfd69278",
+  "type": "frontend",
+  "name": "Cloud sign-in offers Google and email, pairing belongs to desktop",
+  "planSteps": [
+    { "type": "action", "description": "Open https://muster.orazen.online/app and wait for redirect to the sign-in screen" },
+    { "type": "assertion", "description": "A 'Continue with Google' button is visible" },
+    { "type": "assertion", "description": "An email textbox and a password textbox are visible with a 'Sign in with email' button" },
+    { "type": "assertion", "description": "A 'New here? Create an account' button is present" },
+    { "type": "action", "description": "Submit the sign-in form with a wrong email like nobody-nobody@example.com and a wrong 16-character password" },
+    { "type": "assertion", "description": "An error message is shown and the user is not signed in" }
+  ]
+}

@@ -171,6 +171,29 @@ export function DesktopShell() {
       </header>
       <main className="os-body">
         {bots.length === 0 && <div className="os-empty">Your roster is empty — muster a teammate from the app.</div>}
+        {/* When the desktop has no windows open it's a featureless void —
+            give first-time eyes something to act on: a hint plus one-click
+            access to everything the dock holds. */}
+        {windows.length === 0 && bots.length > 0 && (
+          <div className="os-welcome">
+            <MusterbotMark size={64} />
+            <p className="os-welcome-title">Your agents, on a desktop.</p>
+            <p className="os-welcome-hint">
+              Open a bot from the dock below to watch its status, engine and computer — or start with one of these.
+            </p>
+            <div className="os-welcome-actions">
+              {bots.slice(0, 4).map((bot) => (
+                <button key={bot.id} type="button" className="os-welcome-chip" onClick={() => dockClick({ kind: "agent", botId: bot.id })}>
+                  <AgentAvatar color={bot.color} character={bot.character} state={bot.busy ? "working" : "idle"} size={18} label={bot.name} />
+                  {bot.name}
+                </button>
+              ))}
+              <button type="button" className="os-welcome-chip" onClick={() => dockClick({ kind: "app", appId: "rooms" })}>
+                Rooms
+              </button>
+            </div>
+          </div>
+        )}
         <div className="os-windows">
           {windows.map((win, index) => {
             const focused = focusedId === win.id;

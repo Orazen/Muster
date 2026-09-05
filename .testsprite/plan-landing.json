@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/TestSprite/testsprite-cli/v0.10.0/schemas/plan.schema.json",
+  "projectId": "b06262d3-b9d1-4b82-af62-6f9fbfd69278",
+  "type": "frontend",
+  "name": "Muster landing page loads with hero, pricing and download sections",
+  "planSteps": [
+    { "type": "action", "description": "Open https://muster.orazen.online/ and wait for the page to fully load" },
+    { "type": "assertion", "description": "The hero heading 'Muster your agents.' is visible" },
+    { "type": "assertion", "description": "A 'Launch the app' link pointing to /app is present" },
+    { "type": "assertion", "description": "The pricing section shows a 'Self-host' plan and a 'Cloud · Monthly' plan with a 'Start with Muster Cloud' link" },
+    { "type": "assertion", "description": "The download section has links for macOS .dmg, Windows .exe, .deb and AppImage pointing to https://muster.orazen.online/downloads/" },
+    { "type": "assertion", "description": "The comparison table with columns Muster, Osaurus, Rakazo, OpenBot is rendered" }
+  ]
+}

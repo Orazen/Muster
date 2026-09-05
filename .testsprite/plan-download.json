@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/TestSprite/testsprite-cli/v0.10.0/schemas/plan.schema.json",
+  "projectId": "b06262d3-b9d1-4b82-af62-6f9fbfd69278",
+  "type": "frontend",
+  "name": "Download page lists every platform with mirror links and checksums",
+  "planSteps": [
+    { "type": "action", "description": "Open https://muster.orazen.online/download.html and wait for the page to load" },
+    { "type": "assertion", "description": "Download links for Muster.dmg, Muster-intel.dmg, Muster-setup.exe, Muster.deb and Muster.AppImage are present and point at https://muster.orazen.online/downloads/" },
+    { "type": "assertion", "description": "SHA256 checksums or a checksums file link is shown for at least one platform" },
+    { "type": "assertion", "description": "A Docker / self-host section with instructions or a command is visible" },
+    { "type": "assertion", "description": "The page states the current version number somewhere (e.g. 1.7.0 or a version badge)" }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/TestSprite/testsprite-cli/v0.10.0/schemas/plan.schema.json",
+  "projectId": "b06262d3-b9d1-4b82-af62-6f9fbfd69278",
+  "type": "frontend",
+  "name": "Sign-up form validates input and reports closed signups clearly",
+  "planSteps": [
+    { "type": "action", "description": "Open https://muster.orazen.online/app, click 'New here? Create an account'" },
+    { "type": "assertion", "description": "The sign-up form shows name, email and password fields plus a 'Create account' button" },
+    { "type": "action", "description": "Submit the form with an invalid email like 'not-an-email' and a short password" },
+    { "type": "assertion", "description": "A validation error appears and the user is not logged in" },
+    { "type": "action", "description": "Submit with a well-formed email like qa.tester+ts@example.com and a 16-character password" },
+    { "type": "assertion", "description": "Either signup succeeds into the app, or a clear alert message is shown explaining that sign-ups are closed on this deployment" }
+  ]
+}

@@ -197,8 +197,17 @@ function Shell() {
             </div>
           )}
           {!state.connected && (
-            <div className="text-[12px]">
-              Start it with <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
+            <div className="max-w-xs text-center text-[12px]">
+              {/* the pnpm hint only means anything in a dev checkout — the
+                  packaged app bundles the server, so a lost connection there
+                  is a restart problem, not a terminal problem */}
+              {import.meta.env.DEV ? (
+                <>
+                  Start it with <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
+                </>
+              ) : (
+                <>Reconnecting… if this stays stuck, quit Muster and reopen it (another app may be using its local port).</>
+              )}
             </div>
           )}
           <span aria-hidden="true" className="mt-auto pb-6 text-[11px] uppercase tracking-[0.42em] text-[#f08a24]" style={{ fontWeight: 700 }}>
