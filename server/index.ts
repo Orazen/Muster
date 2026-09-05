@@ -262,6 +262,8 @@ const MIME = new Map(Object.entries({
   ".json": "application/json",
   ".map": "application/json",
   ".txt": "text/plain",
+  // markdown docs (skill.md) must declare utf-8 or em-dashes render as mojibake
+  ".md": "text/markdown; charset=utf-8",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
   ".ttf": "font/ttf",
