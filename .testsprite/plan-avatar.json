@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/TestSprite/testsprite-cli/v0.10.0/schemas/plan.schema.json",
+  "projectId": "b06262d3-b9d1-4b82-af62-6f9fbfd69278",
+  "type": "frontend",
+  "name": "Sign-in screen shows the musterbot mascot alive in the header",
+  "planSteps": [
+    { "type": "action", "description": "Open https://muster.orazen.online/app and wait for the sign-in screen to fully render" },
+    { "type": "assertion", "description": "The musterbot mascot image labeled 'Muster teammate' is visible at the top of the auth card" },
+    { "type": "assertion", "description": "The heading 'Welcome back' is visible" },
+    { "type": "assertion", "description": "The 'Continue with Google' button is visible" },
+    { "type": "assertion", "description": "The email and password fields render inside the auth card" }
+  ]
+}
