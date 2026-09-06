@@ -9,6 +9,7 @@ import { SettingsPanel } from "@/components/SettingsPanel";
 import { PluginsPanel } from "@/components/PluginsPanel";
 import { ComputerPanel } from "@/components/ComputerPanel";
 import { BrowserPanel } from "@/components/BrowserPanel";
+import { FleetOrb } from "@/components/FleetOrb";
 import { InspectorPanel } from "@/components/InspectorPanel";
 import { SettingsModal } from "@/components/SettingsModal";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -225,6 +226,8 @@ function Shell() {
       {state.pluginsOpen && <PluginsPanel />}
       <CommandPalette />
       <NotificationStack />
+      {/* ambient fleet presence — one glance from any surface */}
+      <FleetOrb />
       {gateDecision === "show" && firstRun && (
         <Onboarding
           onDone={() => {
