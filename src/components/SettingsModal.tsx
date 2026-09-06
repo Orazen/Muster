@@ -7,6 +7,7 @@ import { Brain, Coins, CreditCard, Download, KeyRound, Monitor, NotebookPen, Pal
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
+import { WorkspaceSyncCard } from "./WorkspaceSyncCard";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
@@ -674,6 +675,7 @@ export function SettingsModal() {
                   <ApiKeyRow section="opensandbox" />
                   <ApiKeyRow section="musterCloud" />
                   <ApiKeyRow section="hiNew" />
+                  <WorkspaceSyncCard />
                   <details className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
                     <summary className="cursor-pointer text-[13px] text-ink-secondary">Self-host connected apps</summary>
                     <div className="mt-3">
