@@ -9,8 +9,9 @@ import { cn } from "@/lib/cn";
  * becomes a stop button while this message is the one speaking — the same
  * button, because "speak" and "shut up" are the same intent twice.
  *
- * Without a key it stays visible but disabled, saying what it needs: a
- * hidden button is a feature nobody discovers. */
+ * Works with ZERO keys: without ElevenLabs the speaker falls back to the
+ * browser's built-in voice (free, offline), so the button is always live
+ * wherever the Web Speech API exists. */
 export function SpeakButton({
   text,
   botId,
@@ -26,15 +27,22 @@ export function SpeakButton({
 }) {
   const { state } = useStore();
   const speech = useSpeech();
-  const ready = Boolean(state.config?.tts?.ready);
+  // capability probe of a window global, not input shaping
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof
+  const hasNativeVoice = typeof window !== "undefined" && "speechSynthesis" in window;
+  const ready =
+    Boolean(state.config?.tts?.ready) || hasNativeVoice;
+  const native = ready && !state.config?.tts?.ready; // free browser voice
   const mine = speech.messageId === messageId && speech.status !== "idle";
   const preparing = mine && speech.status === "preparing";
 
-  const label = !ready
-    ? "Add an ElevenLabs key in App Settings to read messages aloud"
-    : mine
-      ? "Stop speaking"
-      : "Read this aloud";
+  const label = mine
+    ? "Stop speaking"
+    : native
+      ? "Read this aloud (browser voice)"
+      : ready
+        ? "Read this aloud"
+        : "Voice is not available in this browser";
   return (
     <button
       onClick={() => {

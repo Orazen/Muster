@@ -106,16 +106,48 @@ export class Speaker {
 
     this.set({ status: "preparing", botId: opts.botId, messageId: opts.messageId });
     let utterances: string[];
+    let freeVoice = false;
     try {
       utterances = await this.prepare(text, opts.voiceId, controller.signal);
     } catch (e) {
-      if (live()) this.set({ ...IDLE, error: e instanceof Error ? e.message : String(e) });
-      if (this.request === controller) this.request = null;
-      return;
+      // No ElevenLabs key (or the harness rejected the request): fall back to
+      // the browser's built-in voice — free, offline, zero keys, the Elysia
+      // insight. The harness's utterance splitter already ran server-side
+      // where it could; the browser speaks the raw text when prepare never
+      // produced a list.
+      const message = e instanceof Error ? e.message : String(e);
+      // speechSynthesis is a browser-global capability probe, not a runtime
+      // type check — the fallback applies wherever the API exists.
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- capability probe of a window global, not input shaping
+      const hasNativeVoice = typeof window !== "undefined" && "speechSynthesis" in window;
+      if (/elevenlabs|voice service/i.test(message) && hasNativeVoice) {
+        freeVoice = true;
+        utterances = [text];
+      } else {
+        if (live()) this.set({ ...IDLE, error: message });
+        if (this.request === controller) this.request = null;
+        return;
+      }
     }
     if (!live()) return;
     if (!utterances.length) {
       this.set(IDLE);
+      if (this.request === controller) this.request = null;
+      return;
+    }
+
+    // Free-voice path: no ElevenLabs anywhere — speak through the browser's
+    // built-in speechSynthesis, one utterance at a time, same caption states
+    // as the rendered path so every voice UI treats both identically.
+    if (freeVoice) {
+      const synth = window.speechSynthesis;
+      for (let i = 0; i < utterances.length; i += 1) {
+        if (!live()) return;
+        this.set({ status: "speaking", botId: opts.botId, messageId: opts.messageId, caption: utterances[i] });
+        const finished = await this.playNative(synth, utterances[i], controller.signal, live);
+        if (!finished) return;
+      }
+      if (live()) this.set(IDLE);
       if (this.request === controller) this.request = null;
       return;
     }
@@ -186,6 +218,40 @@ export class Speaker {
   }
 
   /** Resolves true when the clip finished, false when it was interrupted. */
+  /** Free voice: speak one utterance through the browser's built-in
+   * speechSynthesis. Resolves true when finished, false when interrupted,
+   * mirroring play() exactly so callers treat both paths the same. */
+  private playNative(
+    synth: SpeechSynthesis,
+    text: string,
+    signal: AbortSignal,
+    live: () => boolean,
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (!live()) return resolve(false);
+      synth.cancel(); // one voice for the whole window — new cancels old
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1;
+      let settled = false;
+      const done = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        utterance.onend = null;
+        utterance.onerror = null;
+        signal.removeEventListener("abort", onAbort);
+        resolve(ok);
+      };
+      const onAbort = () => {
+        synth.cancel();
+        done(false);
+      };
+      signal.addEventListener("abort", onAbort);
+      utterance.onend = () => done(true);
+      utterance.onerror = () => done(false);
+      synth.speak(utterance);
+    });
+  }
+
   private play(blob: Blob, live: () => boolean): Promise<boolean> {
     return new Promise((resolve) => {
       if (!live()) return resolve(false);
