@@ -124,6 +124,7 @@ import { searchMessages } from "./message-db.ts";
 import { _loadPending, discardDelegations, drainDelegations, pendingThreads, queueDelegation } from "./delegations.ts";
 import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
 import { DecisionLog, queryAudit } from "./decision-log.ts";
+import { approvalHistory } from "./approval-history.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
@@ -1219,6 +1220,12 @@ bus.subscribe((event: RuntimeEvent) => {
           // the exact grant "always allow" would remember, decided here so
           // client and server can never derive it differently
           allowKey: permission ? approvalKey(event.tool, event.summary) : undefined,
+          // certify-lite evidence (ARC patterns §1.2): how this bot's past
+          // went with this tool, from the decision ledger. Evidence, not a
+          // verdict — the human still decides.
+          history: permission && asker
+            ? approvalHistory(decisions, asker.id, event.tool)
+            : undefined,
           // in auto mode a card can only mean the guard stopped it — say so
           held: permission && asker?.autoApprove ? "This looked destructive, so auto mode stopped to ask." : undefined,
         },

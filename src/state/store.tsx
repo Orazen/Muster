@@ -37,6 +37,16 @@ export interface OptionCardData {
   held?: string;
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
+  /** certify-lite evidence (ARC patterns §1.2): this bot's past with this
+   * tool, from the decision ledger. Evidence, not a verdict. */
+  history?: {
+    total: number;
+    approved: number;
+    denied: number;
+    auto: number;
+    lastDecision: "approved" | "denied" | "auto" | null;
+    summary: string | null;
+  };
 }
 
 export interface ConnectorCardData {

@@ -23,6 +23,8 @@ export interface Pending {
   allowKey?: string;
   detail: string;
   held?: string;
+  /** certify-lite evidence: this bot's past with this tool */
+  history?: NonNullable<Message["card"]>["history"];
 }
 
 /** Open approvals on a thread, oldest first — answered/dismissed drop out. */
@@ -36,6 +38,7 @@ export function pendingApprovals(messages: Message[]): Pending[] {
       allowKey: m.card!.allowKey,
       detail: m.card!.subtitle,
       held: m.card!.held,
+      history: m.card!.history,
     }));
 }
 
@@ -76,6 +79,17 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
       <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-ink">
         {pending.detail}
       </pre>
+      {pending.history && pending.history.total > 0 && (
+        <div
+          className={cn(
+            "mt-2 rounded-lg px-2.5 py-1.5 text-[12px] leading-snug",
+            pending.history.lastDecision === "denied" ? "bg-warning/10 text-warning" : "bg-inset text-ink-secondary",
+          )}
+          title="How this bot's past went with this tool — evidence, not a verdict"
+        >
+          {pending.history.summary}
+        </div>
+      )}
       {pending.held && <div className="mt-2 text-[12px] text-warning">{pending.held}</div>}
     </div>
   );
