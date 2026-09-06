@@ -49,6 +49,10 @@ const appConfigSchema = z.object({
   /** hi.new agent-mail token (server/hi-new-proxy.ts). Persisted write-only:
    * GET /api/config reports `configured`, never the value. */
   hiNew: z.object({ token: optionalText, name: optionalText }).optional(),
+  /** Google Drive workspace sync (server/drive-sync.ts): write-only tokens
+   * for the drive.appdata transport. The bundle pushed there is encrypted
+   * client-side; Drive never sees plaintext. */
+  driveSync: z.object({ refreshToken: optionalText, accessToken: optionalText, expiresAt: z.number().optional() }).optional(),
   /** Self-hosted OpenSandbox server: an alternative to box.ascii.dev for the
    * cloud computer feature, running on infrastructure the operator controls
    * instead of a third-party vendor. url defaults to the SDK's own default
@@ -111,6 +115,8 @@ export interface AppConfig {
   /** hi.new agent-mail (server/hi-new-proxy.ts): owner-stored bearer token
    * and the handle it belongs to. Token never leaves the server. */
   hiNew?: { token?: string; name?: string };
+  /** Google Drive workspace sync tokens (server/drive-sync.ts). */
+  driveSync?: { refreshToken?: string; accessToken?: string; expiresAt?: number };
   opensandbox?: { url?: string; apiKey?: string; useServerProxy?: boolean };
   /** Opt-in identity bridge — see server/muster-cloud.ts. Off by default;
    * an unset url means fully local, no network dependency, unchanged. */

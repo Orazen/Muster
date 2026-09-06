@@ -202,6 +202,8 @@ import {
   MEMORY_FILE_MAX_BYTES,
 } from "./workspace.ts";
 import * as browserPanel from "./browser-panel.ts";
+import * as workspaceBundle from "./workspace-bundle.ts";
+import * as driveSync from "./drive-sync.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimerPool } from "./local-vm-idle.ts";
 import { LocalVmLeasePool } from "./local-vm-lease.ts";
@@ -6551,6 +6553,98 @@ let requestUserEmail = "";
       return res.end(
         JSON.stringify({ frame: frame ? frame.toString("base64") : null, state: browserPanel.panelState(m[1]) }),
       );
+    }
+
+    // ── Workspace sync (portable encrypted bundle + Google Drive) ───────
+    // The account-sync design (docs/plans/account-sync-portable-profile.md):
+    // the workspace exports as one AES-256-GCM bundle under a user
+    // passphrase; the Drive transport (drive.appdata) holds only ciphertext.
+    // Keys never leave the machine. Restore skips existing ids and never
+    // overwrites a local memory file the human was last editing.
+    if (path === "/api/workspace/export" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      try {
+        const bundle = workspaceBundle.buildBundle(store, DATA_DIR);
+        const out = workspaceBundle.encryptBundle(bundle, passphrase, deploymentSigningSecret());
+        return json(res, 200, { payload: out.payload, counts: out.counts });
+      } catch (e) {
+        return json(res, 500, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/restore" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      const payload = isText(body?.payload) ? body.payload : "";
+      if (!payload) return json(res, 400, { error: "payload is required" });
+      try {
+        const { workspace } = workspaceBundle.decryptBundle(payload, passphrase, deploymentSigningSecret());
+        const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
+        await reloadProviders();
+        broadcast({ kind: "hello" });
+        return json(res, 200, { restored: result });
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/drive/url" && method === "GET") {
+      if (!isText(cfg.hiNew?.token) && !process.env.GOOGLE_CLIENT_ID) {
+        return json(res, 501, { error: "Google OAuth is not configured on this deployment" });
+      }
+      // Drive uses the same Google credentials as sign-in; the redirect
+      // lands on the app's own origin where the user pastes the code back.
+      const origin = `http://${req.headers.host ?? "127.0.0.1"}`;
+      return json(res, 200, { url: driveSync.driveAuthUrl(`${origin}/sync`) });
+    }
+    if (path === "/api/workspace/drive/connect" && method === "POST") {
+      const body = await readBody(req);
+      const code = isText(body?.code) ? body.code.trim() : "";
+      const redirectUri = isText(body?.redirectUri) ? body.redirectUri : "";
+      if (!code || !redirectUri) return json(res, 400, { error: "code and redirectUri are required" });
+      try {
+        const tokens = await driveSync.exchangeDriveCode(code, redirectUri);
+        saveConfig({ driveSync: { refreshToken: tokens.refreshToken ?? "", accessToken: tokens.accessToken, expiresAt: tokens.expiresAt ?? 0 } });
+        Object.assign(cfg, loadConfig());
+        return json(res, 200, { connected: true });
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/drive/push" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const refreshToken = cfg.driveSync?.refreshToken;
+      if (!refreshToken) return json(res, 400, { error: "Google Drive is not connected yet" });
+      try {
+        const token = await driveSync.refreshDriveToken(refreshToken);
+        const bundle = workspaceBundle.buildBundle(store, DATA_DIR);
+        const { payload, counts } = workspaceBundle.encryptBundle(bundle, passphrase, deploymentSigningSecret());
+        const uploaded = await driveSync.uploadBundle(token.accessToken, payload);
+        return json(res, 200, { uploaded: uploaded.id, counts });
+      } catch (e) {
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/drive/pull" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const refreshToken = cfg.driveSync?.refreshToken;
+      if (!refreshToken) return json(res, 400, { error: "Google Drive is not connected yet" });
+      try {
+        const token = await driveSync.refreshDriveToken(refreshToken);
+        const payload = await driveSync.downloadBundle(token.accessToken);
+        if (!payload) return json(res, 404, { error: "no workspace bundle exists in Drive yet — push from the other device first" });
+        const { workspace } = workspaceBundle.decryptBundle(payload, passphrase, deploymentSigningSecret());
+        const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
+        await reloadProviders();
+        broadcast({ kind: "hello" });
+        return json(res, 200, { restored: result });
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
     }
 
     // ── BYOK custom model providers (server/custom-providers.ts) ───────
