@@ -8,7 +8,7 @@
 //
 // Derives everything from the shared store: no polling, no new transports —
 // the same SSE stream the chat folds.
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -52,6 +52,13 @@ export function FleetOrb() {
 
   const visible = state.bots.filter((b) => !b.hidden);
   const { state: orbState, settledCount } = useMemo(() => orbStateFor(visible), [visible]);
+  // the ambient wash reacts to the fleet: amber-bright when someone needs you
+  useEffect(() => {
+    document.documentElement.dataset.ambient = orbState === "attention" ? "attention" : "calm";
+    return () => {
+      delete document.documentElement.dataset.ambient;
+    };
+  }, [orbState]);
   const mood = MOODS[orbState];
   const workingCount = visible.filter((b) => b.busy).length;
   const waitingList = visible.filter((b) => b.activity === "waiting-on-you");

@@ -473,7 +473,7 @@ export function GroupView({ group }: { group: Group }) {
   const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined;
 
   return (
-    <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
+    <main className="glass-shell-main relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <GroupCallOverlay group={group} members={members} />
       {/* Header: static member agents; a ring + dot marks the working bot. */}
       <div

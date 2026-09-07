@@ -110,7 +110,7 @@ export function BrowserPanel({ bot, onClose }: { bot: Bot; onClose: () => void }
   };
 
   return (
-    <div className="flex h-full min-w-0 flex-col bg-app" data-testid="browser-panel">
+    <div className="glass-panel flex h-full min-w-0 flex-col" data-testid="browser-panel">
       {/* header */}
       <div className="flex items-center gap-2 border-b border-hairline/40 px-3 py-2">
         <Globe size={15} className="shrink-0 text-ink-secondary" />

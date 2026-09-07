@@ -1,0 +1,130 @@
+/* Glass design system — the unique Muster surface language.
+ *
+ * One vocabulary, used everywhere: side panels (Computer, Browser), the
+ * OS windows, and overlays. Translucent panels float over a rich ambient
+ * background; content sits on solid "ink wells" inside them so text stays
+ * readable. Hairlines become light-on-dark glows instead of flat lines.
+ *
+ * The ambient background is a fixed gradient wash driven by the fleet
+ * state (see fleet-ambient.css hooks: [data-ambient]) so the transparency
+ * has something real to reveal — glass over flat black reads as gray, not
+ * glass. */
+
+/* ── tokens ──────────────────────────────────────────────────────────── */
+:root {
+  --glass-fill: rgba(17, 17, 17, 0.62); /* panel body over ambient bg */
+  --glass-fill-strong: rgba(17, 17, 17, 0.82); /* header/footer strips */
+  --glass-well: rgba(0, 0, 0, 0.55); /* content wells inside a panel */
+  --glass-edge: rgba(255, 255, 255, 0.14); /* hairline → glow edge */
+  --glass-edge-soft: rgba(255, 255, 255, 0.08);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.09); /* top bevel */
+  --glass-blur: 22px;
+  --glass-saturate: 1.5;
+}
+
+/* light skins swap to white glass with dark ink wells */
+[data-theme="atelier"],
+[data-theme="lagoon"] {
+  --glass-fill: rgba(255, 255, 255, 0.6);
+  --glass-fill-strong: rgba(255, 255, 255, 0.85);
+  --glass-well: rgba(20, 16, 10, 0.08);
+  --glass-edge: rgba(20, 16, 10, 0.16);
+  --glass-edge-soft: rgba(20, 16, 10, 0.09);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+/* ── ambient background (the thing transparency reveals) ─────────────── */
+.glass-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 82% 88%, rgba(240, 134, 36, 0.16), transparent 70%),
+    radial-gradient(50% 45% at 12% 8%, rgba(255, 176, 32, 0.07), transparent 70%),
+    radial-gradient(70% 60% at 50% 110%, rgba(120, 60, 10, 0.12), transparent 75%);
+}
+[data-ambient="attention"] .glass-ambient {
+  background:
+    radial-gradient(60% 50% at 82% 88%, rgba(255, 176, 32, 0.26), transparent 70%),
+    radial-gradient(50% 45% at 12% 8%, rgba(255, 176, 32, 0.1), transparent 70%),
+    radial-gradient(70% 60% at 50% 110%, rgba(140, 80, 10, 0.18), transparent 75%);
+}
+
+/* ── the glass panel primitive ───────────────────────────────────────── */
+.glass-panel {
+  background: var(--glass-fill);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid var(--glass-edge-soft);
+  border-top-color: var(--glass-edge);
+  box-shadow: var(--glass-highlight), 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+
+/* header/footer strips read stronger than the body — the "frame" */
+.glass-strip {
+  background: var(--glass-fill-strong);
+  border-bottom: 1px solid var(--glass-edge-soft);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+/* content wells: solid ink inside glass, so text never fights the blur */
+.glass-well {
+  background: var(--glass-well);
+  border: 1px solid var(--glass-edge-soft);
+  border-radius: 10px;
+}
+
+/* ── side panel shell (Computer / Browser panels) ────────────────────── */
+.glass-side {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  width: min(480px, 92vw);
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--glass-edge-soft);
+  animation: glass-side-in 0.24s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@keyframes glass-side-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass-side { animation: none; }
+}
+
+/* ── OS window adaptation ────────────────────────────────────────────── */
+.os-window.glass {
+  background: var(--glass-fill);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border-color: var(--glass-edge-soft);
+  box-shadow: var(--glass-highlight), 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+.os-window.glass .os-window-titlebar {
+  background: var(--glass-fill-strong);
+  border-bottom: 1px solid var(--glass-edge-soft);
+}
+
+/* ── chat shell adaptation: sidebar + main float over ambient ─────────
+ * Translucent fill only, NO backdrop-filter: nothing ever scrolls beneath
+ * these full-height surfaces (the ambient wash is what shows through), and
+ * a filter here would turn the shell into the containing block for fixed
+ * descendants — the sidebar's "+" menu backdrop and NewRoomPanel's overlay
+ * both rely on the viewport (see Sidebar.tsx). Blur stays on the floating
+ * panels, where it actually has something to diffuse. */
+.glass-shell-sidebar {
+  background: color-mix(in srgb, var(--glass-fill) 70%, transparent);
+  border-right: 1px solid var(--glass-edge-soft);
+}
+
+.glass-shell-main {
+  background: color-mix(in srgb, var(--color-app) 55%, transparent);
+}

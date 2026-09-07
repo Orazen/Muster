@@ -793,7 +793,7 @@ export function RoutinesPage() {
   };
 
   return (
-    <main className="flex h-full min-w-0 flex-1 flex-col bg-app">
+    <main className="glass-shell-main flex h-full min-w-0 flex-1 flex-col bg-app">
       <header
         className={cn(
           "shrink-0 px-5 pb-4 pt-4",

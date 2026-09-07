@@ -140,7 +140,7 @@ export function WindowFrame({
   return (
     <div
       ref={frameRef}
-      className="os-window"
+      className="os-window glass"
       role="dialog"
       aria-label={ariaLabel}
       tabIndex={-1}

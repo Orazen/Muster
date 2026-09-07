@@ -134,6 +134,8 @@ function Shell() {
 
   return (
     <div className="flex h-full flex-col">
+      {/* ambient wash under everything — what the glass panels refract */}
+      <div className="glass-ambient" aria-hidden="true" />
       <UpdateBanner />
       <div className="relative flex min-h-0 flex-1">
       <button

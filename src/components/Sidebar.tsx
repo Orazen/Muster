@@ -935,7 +935,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   return (
     <aside
       className={cn(
-        "flex h-full w-[320px] shrink-0 flex-col border-r border-hairline/40 bg-panel",
+        "glass-shell-sidebar flex h-full w-[320px] shrink-0 flex-col border-r border-hairline/40 bg-panel",
         // Below md only: the sidebar leaves the flow and slides in over the chat.
         // Scoped with max-md: rather than cancelled with md: on purpose — Tailwind
         // v4 emits the native `translate` property, and any value other than
