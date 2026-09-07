@@ -172,20 +172,19 @@ function Shell() {
         <ChatView bot={bot} />
       ) : (
         <main
-          className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-6 overflow-hidden bg-app text-ink-secondary"
-          style={{ background: "linear-gradient(180deg, #f9f9f9 0%, #fdf3e7 100%)" }}
+          className="glass-shell-main flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-6 overflow-hidden text-ink-secondary"
         >
           {/* musterbot-style empty roster scene: the interactive bloom carries
               the screen — eyes follow the pointer, a click pops */}
           <MusterBloom size={280} mood={state.connected ? "happy" : "thinking"} />
-          <div className="text-[15px] font-medium text-[#0a0a0c]">
+          <div className="text-[15px] font-medium text-ink">
             {state.connected ? "Your roster is empty — muster your first teammate" : "Connecting to the bot server…"}
           </div>
           {state.connected && (
             <div className="flex flex-col items-center gap-3">
               <button
                 onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "general" })}
-                className="rounded-lg bg-[#f0460e] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(240,70,14,.28)] transition-all hover:-translate-y-px hover:bg-[#f0460e]/90"
+                className="rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_color-mix(in_srgb,var(--color-accent)_28%,transparent)] transition-all hover:-translate-y-px hover:brightness-110"
               >
                 New bot
               </button>
@@ -215,7 +214,7 @@ function Shell() {
               )}
             </div>
           )}
-          <span aria-hidden="true" className="mt-auto pb-6 text-[11px] uppercase tracking-[0.42em] text-[#f08a24]" style={{ fontWeight: 700 }}>
+          <span aria-hidden="true" className="mt-auto pb-6 text-[11px] uppercase tracking-[0.42em] text-accent opacity-70" style={{ fontWeight: 700 }}>
             Muster
           </span>
         </main>

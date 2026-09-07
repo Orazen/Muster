@@ -494,7 +494,7 @@ export function Composer({
               "flex size-9 shrink-0 items-center justify-center rounded-full text-white",
               busy
                 ? "bg-raised text-ink-secondary hover:bg-raised-hover"
-                : "bg-accent shadow-[0_4px_14px_rgba(240,70,14,0.32)] hover:brightness-110",
+                : "bg-accent muster-send-glow hover:brightness-110",
             )}
           >
             {busy ? <Clock size={15} /> : <ArrowUp size={17} />}

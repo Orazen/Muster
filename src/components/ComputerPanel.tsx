@@ -6,6 +6,7 @@
 // prefers the cloud box when one exists, else local inside the app.
 import { useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   CalendarDays,
   CalendarClock,
   ExternalLink,
@@ -469,8 +470,11 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         </div>
 
         {error && (
-          <div className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
-            {error}
+          <div className="mt-2 flex items-start gap-2.5 rounded-xl border border-hairline/40 bg-card px-3.5 py-3">
+            <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-danger/15">
+              <AlertTriangle size={12} className="text-danger" />
+            </span>
+            <span className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-ink-secondary">{error}</span>
           </div>
         )}
         {phase === "unconfigured" && (
@@ -525,16 +529,19 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               in a container on this machine — free and separate from your own desktop. Set it up in App
               Settings → Local VM.
           </div>
-          <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
+          {/* macOS-style segmented control: a recessed track with a raised
+              thumb. Long names move to the tooltip — five segments can't
+              afford "This computer" at this width. */}
+          <div className="mt-3 flex rounded-[10px] bg-inset p-0.5">
             {(
               [
-                ["cloud", "Cloud box"],
-                ["opensandbox", "OpenSandbox"],
-                ["vm", "Local VM"],
-                ["local", "This computer"],
-                ["off", "Off"],
+                ["cloud", "Cloud", "Cloud box"],
+                ["opensandbox", "Sandbox", "OpenSandbox"],
+                ["vm", "VM", "Local VM"],
+                ["local", "This Mac", "This computer"],
+                ["off", "Off", "Off"],
               ] as const
-            ).map(([mode, label], i) => (
+            ).map(([mode, label, fullName]) => (
               (() => {
                 const disabled =
                   (mode === "cloud" && !cloudSupported) ||
@@ -567,19 +574,19 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                               ? "Local computer control requires the desktop app"
                               : "CUA Driver isn't ready"
                           : undefined;
+                const title = unavailableTitle ?? (fullName !== label ? fullName : undefined);
                 return (
               <button
                 key={mode}
                 disabled={disabled}
-                title={unavailableTitle}
+                title={title}
                 onClick={() => dispatch({ type: "updateBot", botId: bot.id, patch: { computer: mode } })}
                 className={cn(
-                  "flex-1 py-1.5 text-[13px]",
-                  i > 0 && "border-l border-hairline/40",
+                  "flex-1 rounded-lg py-1.5 text-[12.5px] font-medium transition-colors",
                   disabled && "cursor-not-allowed opacity-40",
                   bot.computer === mode
-                    ? "bg-raised text-ink"
-                    : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+                    ? "bg-raised text-ink shadow-sm"
+                    : "text-ink-secondary hover:text-ink",
                 )}
               >
                 {label}

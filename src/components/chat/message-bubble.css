@@ -97,3 +97,13 @@
 .muster-composer:focus-within {
   border-color: color-mix(in oklab, var(--color-accent) 50%, transparent);
 }
+
+/* Send button glow: the accent halo follows the skin's accent token, so a
+   warm skin glows warm and a blue skin glows blue — no hardcoded orange. */
+.muster-send-glow {
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-accent) 32%, transparent);
+}
+
+.muster-send-glow:hover {
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}

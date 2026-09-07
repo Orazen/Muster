@@ -110,8 +110,10 @@ function dayLabel(at: number): string {
 
 function DaySeparator({ at }: { at: number }) {
   return (
-    <div className="py-3 text-center text-[13px] text-ink-secondary">
-      {dayLabel(at)} {formatTime(at)}
+    <div className="flex justify-center py-3">
+      <span className="rounded-full bg-raised/50 px-3 py-1 text-[11px] font-medium text-ink-secondary">
+        {dayLabel(at)} · {formatTime(at)}
+      </span>
     </div>
   );
 }
@@ -197,24 +199,29 @@ function ErrorRow({
 }) {
   return (
     <div className="flex justify-start">
-      <div className="max-w-[70%] rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-[13.5px] text-danger">
-        <div className="flex items-start gap-2">
-          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-          <span className="min-w-0 break-words">{message}</span>
+      <div className="max-w-[70%] rounded-2xl border border-hairline/40 bg-card px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-danger/15">
+            <AlertTriangle size={12} className="text-danger" />
+          </span>
+          <span className="text-[13px] font-medium text-ink">Something didn't go through</span>
         </div>
-        {setupInstance &&
-        !(setupInstance.snapshot.state === "available" && setupInstance.snapshot.authenticated !== false) ? (
-          <EngineSetup instance={setupInstance} className="mt-2 text-ink-secondary" />
-        ) : (
-          onRetry && (
-            <button
-              onClick={onRetry}
-              className="mt-1.5 flex items-center gap-1.5 rounded-full border border-danger/30 px-2.5 py-1 text-[12.5px] hover:bg-danger/15"
-            >
-              <RefreshCw size={12} /> Retry
-            </button>
-          )
-        )}
+        <div className="mt-1.5 text-[13px] leading-relaxed text-ink-secondary">{message}</div>
+        <div className="mt-2.5 flex items-center gap-2">
+          {setupInstance &&
+          !(setupInstance.snapshot.state === "available" && setupInstance.snapshot.authenticated !== false) ? (
+            <EngineSetup instance={setupInstance} className="text-ink-secondary" />
+          ) : (
+            onRetry && (
+              <button
+                onClick={onRetry}
+                className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110"
+              >
+                <RefreshCw size={12} /> Try again
+              </button>
+            )
+          )}
+        </div>
       </div>
     </div>
   );
@@ -757,6 +764,11 @@ const MessagesList = memo(function MessagesList({
   );
 });
 
+/** Shared header icon-toggle: quiet circle at rest, accent-tinted when its
+ * panel is open — one grammar for every icon button in the titlebar. */
+const iconToggleClasses =
+  "flex size-7 items-center justify-center rounded-full transition-colors";
+
 export function ChatView({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1013,7 +1025,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
           {bot.busy && <Loader2 size={14} className="animate-spin text-ink-secondary" />}
         </div>
-        <div className="flex items-center gap-2" style={noDrag}>
+        <div className="flex items-center gap-1.5" style={noDrag}>
           {bot.busy && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
@@ -1025,63 +1037,57 @@ export function ChatView({ bot }: { bot: Bot }) {
             </button>
           )}
           <TaskPicker bot={bot} />
+          <ModelPicker bot={bot} />
+          {/* primary chips · task info · panel toggles — hairline separators
+              keep the three tiers readable instead of one crowded row */}
+          <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-hairline/40" />
           <UsageChip bot={bot} />
+          <WorkingFolderChip bot={bot} />
           <button
             onClick={() => setReceiptOpen(true)}
             aria-label="Job receipt"
-            className={cn("rounded-md p-1.5 hover:bg-raised", receiptOpen ? "text-accent" : "text-ink-secondary hover:text-ink")}
+            className={cn(iconToggleClasses, receiptOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
             title="Job receipt — proof of work for this task"
           >
-            <ReceiptText size={18} />
+            <ReceiptText size={17} />
           </button>
-          <WorkingFolderChip bot={bot} />
-          <ModelPicker bot={bot} />
           <CallButton bot={bot} />
           <button
             onClick={() => dispatch({ type: "toggleComputer" })}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
+            aria-label="Bot's computer"
+            aria-pressed={state.computerOpen}
+            className={cn(iconToggleClasses, state.computerOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
             title="Bot's computer"
           >
-            <Monitor size={18} />
+            <Monitor size={17} />
           </button>
           <button
             onClick={() => dispatch({ type: "toggleBrowserPanel" })}
             aria-label="Browser"
             aria-pressed={state.browserPanelOpen}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              state.browserPanelOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
+            className={cn(iconToggleClasses, state.browserPanelOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
             title="Browser — watch and drive this bot's web"
           >
-            <Globe size={18} />
+            <Globe size={17} />
           </button>
+          <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-hairline/40" />
           <button
             onClick={() => setFindOpen((open) => !open)}
             aria-label="Find in conversation"
             aria-pressed={findOpen}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
+            className={cn(iconToggleClasses, findOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
             title="Find in conversation (⌘F)"
           >
-            <Search size={18} />
+            <Search size={17} />
           </button>
           <button
             onClick={() => dispatch({ type: "toggleInspector" })}
             aria-label="Inspector"
             aria-pressed={state.inspectorOpen}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              state.inspectorOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
+            className={cn(iconToggleClasses, state.inspectorOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
             title="Inspector — runtime events and raw protocol for this thread"
           >
-            <Bug size={18} />
+            <Bug size={17} />
           </button>
         </div>
       </div>
@@ -1239,7 +1245,7 @@ function UsageChip({ bot }: { bot: Bot }) {
   return (
     <button
       onClick={() => dispatch({ type: "toggleSettings", open: true })}
-      className="rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[12px] tabular-nums text-ink-secondary hover:bg-raised hover:text-ink"
+      className="rounded-full px-2 py-1 text-[12px] tabular-nums text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
       title={detail}
     >
       {text}
@@ -1247,23 +1253,26 @@ function UsageChip({ bot }: { bot: Bot }) {
   );
 }
 
-/** The folder this task's tools run in — quiet unless it's somewhere other
- * than home. Shows the pinned task folder when there is one, else the bot's
- * folder a first turn would pin. Click opens bot settings to change it. */
+/** The folder this task's tools run in — an icon-only whisper unless it's
+ * somewhere other than home; the full path lives in the hover title, not
+ * the titlebar (a raw UUID stretched the header for nothing). */
 function WorkingFolderChip({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
   const folder = task?.cwd === undefined ? bot.cwd : (task.cwd ?? undefined);
   if (!folder) return null;
   const name = folder.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || folder;
+  // Auto-pinned workspaces get machine-assigned ids for names — an opaque
+  // uuid string is noise in the titlebar, so those show the icon only.
+  const meaningfulName = !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name);
   return (
     <button
       onClick={() => dispatch({ type: "toggleSettings", open: true })}
-      className="flex max-w-[180px] items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink"
+      className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[12px] text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
       title={`Working folder: ${folder}`}
     >
-      <Folder size={12} />
-      <span className="truncate font-mono">{name}</span>
+      <Folder size={13} />
+      {meaningfulName && <span className="hidden max-w-[120px] truncate font-mono lg:inline">{name}</span>}
     </button>
   );
 }
