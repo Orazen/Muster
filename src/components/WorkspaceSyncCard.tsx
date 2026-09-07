@@ -61,26 +61,26 @@ export function WorkspaceSyncCard() {
       return `Restored ${data.restored.botsRestored} bots, ${data.restored.memoryFilesRestored} memory files.`;
     });
 
-  const drivePush = () =>
-    run("Pushing to Drive…", async () => {
+  const googlePush = () =>
+    run("Pushing to your Google Drive…", async () => {
       if (passphrase.length < 8) throw new Error("Passphrase must be at least 8 characters");
-      await api("/api/workspace/drive/push", {
+      await api("/api/workspace/google/push", {
         method: "POST",
         body: JSON.stringify({ passphrase }),
       });
-      return "Pushed to your Google Drive (app-private folder).";
+      return "Pushed to your Drive (app folder — only Muster can read it).";
     });
 
-  const drivePull = () =>
-    run("Pulling from Drive…", async () => {
+  const googlePull = () =>
+    run("Pulling from your Google Drive…", async () => {
       if (passphrase.length < 8) throw new Error("Passphrase must be at least 8 characters");
       // SAFETY: own endpoint; the reply is {restored:{...counts}}.
-      const data = (await api("/api/workspace/drive/pull", {
+      const data = (await api("/api/workspace/google/pull", {
         method: "POST",
         body: JSON.stringify({ passphrase }),
       })) as { restored: { botsRestored: number; memoryFilesRestored: number } };
       window.location.reload();
-      return `Restored ${data.restored.botsRestored} bots, ${data.restored.memoryFilesRestored} memory files from Drive.`;
+      return `Restored ${data.restored.botsRestored} bots, ${data.restored.memoryFilesRestored} memory files from your Drive.`;
     });
 
   const connectDrive = () =>
@@ -135,13 +135,14 @@ export function WorkspaceSyncCard() {
           />
         </label>
         <span className="mx-1 w-px self-stretch bg-hairline/40" aria-hidden="true" />
-        <button type="button" disabled={busy} onClick={() => void drivePush()} className={button}>
-          <Upload size={13} /> Push to Drive
+        {/* signed in with Google? these use your login's Drive grant — no setup */}
+        <button type="button" disabled={busy} onClick={() => void googlePush()} className={cn(button, "text-accent font-medium")}>
+          <Upload size={13} /> Sync to Drive
         </button>
-        <button type="button" disabled={busy} onClick={() => void drivePull()} className={button}>
-          <HardDriveDownload size={13} /> Pull from Drive
+        <button type="button" disabled={busy} onClick={() => void googlePull()} className={cn(button, "text-accent font-medium")}>
+          <HardDriveDownload size={13} /> Restore from Drive
         </button>
-        <button type="button" disabled={busy} onClick={() => void connectDrive()} className={cn(button, "text-accent")}>
+        <button type="button" disabled={busy} onClick={() => void connectDrive()} className={button} title="Manual Drive connect (for accounts without a Google login)">
           Connect Drive ↗
         </button>
       </div>
