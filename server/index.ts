@@ -6510,11 +6510,12 @@ let requestUserEmail = "";
     // ── Browser panel (human-visible Chromium, per bot) ─────────────────
     // The chat's Browser side panel: start/stop/navigate a long-lived
     // Chromium for this bot, stream its frames, and flag human takeover.
-    // Ownership is enforced by the /api/bots/:id guard above; starting is
-    // gated to desktop/loopback installs only (the frames and control
-    // surface ride the same local-only trust boundary as the computer
-    // panel, and cloud multi-user isolation for a shared visible browser
-    // needs its own pass).
+    // Works on desktop AND cloud: ownership is enforced by the
+    // /api/bots/:id guard above, every endpoint is scoped to one bot id
+    // (another account's browser never resolves, so frames never cross
+    // accounts), and navigation is locked to public http/https hosts
+    // (isNavigableUrl) so the panel can't be aimed at the host's internal
+    // network.
     m = path.match(/^\/api\/bots\/([\w-]+)\/browser-panel$/);
     if (m && method === "GET") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
@@ -6523,7 +6524,6 @@ let requestUserEmail = "";
     m = path.match(/^\/api\/bots\/([\w-]+)\/browser-panel\/start$/);
     if (m && method === "POST") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
-      if (SELF_HOSTED) return json(res, 404, { error: "no such resource" });
       const body = await readBody(req);
       const profile = body?.profile === "guest" ? "guest" : "bot";
       try {
@@ -7261,6 +7261,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     reaper.stop();
     routines?.stop();
     webhookIngress?.server.close();
+    // panel browsers are harness children, not registry agents — without
+    // this every restart leaks a headless Chromium plus its guest profile
+    browserPanel.stopAllPanels();
     void registry.disposeAll().finally(() => process.exit(0));
   });
 }
