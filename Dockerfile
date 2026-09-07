@@ -41,12 +41,24 @@ RUN pnpm build \
 FROM node:22-slim AS runtime
 WORKDIR /app
 
+# Chromium powers the per-bot browser panel (server/browser-panel.ts). It
+# ships IN the image rather than relying on the panel's Chrome-for-Testing
+# auto-install so the panel works on first click with no download delay —
+# unzip/fonts stay because headless Chromium still renders real pages. The
+# container runs non-root without user namespaces, so the panel spawns it
+# with --no-sandbox (browser-panel.ts detects containers).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+       chromium unzip fonts-liberation fonts-noto-color-emoji ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production \
     OMB_HOST=0.0.0.0 \
     OMB_PORT=8799 \
     OMB_DATA_DIR=/data \
     OMB_STATIC_DIR=/app/dist \
-    OMB_MARKETING_DIR=/app/www
+    OMB_MARKETING_DIR=/app/www \
+    MUSTER_CHROME_PATH=/usr/bin/chromium
 
 # Self-hosted web UI and harness server (both fully self-contained), plus the
 # marketing landing page served at "/" for the public domain.
