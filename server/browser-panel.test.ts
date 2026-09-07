@@ -15,7 +15,28 @@ import {
   freeCdpPort,
   isNavigableUrl,
   resolveChrome,
+  toNavigableUrl,
 } from "./browser-panel.ts";
+
+describe("toNavigableUrl", () => {
+  it("passes absolute http/https through", () => {
+    expect(toNavigableUrl("https://example.com")).toBe("https://example.com");
+    expect(toNavigableUrl("  http://example.com/x ")).toBe("http://example.com/x");
+  });
+
+  it("prefixes bare hosts with https", () => {
+    expect(toNavigableUrl("example.com")).toBe("https://example.com");
+    expect(toNavigableUrl("example.com/path?q=1")).toBe("https://example.com/path?q=1");
+  });
+
+  it("refuses input that already names a non-http scheme", () => {
+    // Regression: these used to be prefixed into https://file/…, whose
+    // "file" hostname passed the public-site guard.
+    for (const bad of ["file:///etc/passwd", "ftp://example.com", "javascript:alert(1)", "data:text/html,hi", "chrome://settings"]) {
+      expect(() => toNavigableUrl(bad)).toThrow(/not allowed/);
+    }
+  });
+});
 
 describe("isNavigableUrl", () => {
   it("allows public http/https", () => {

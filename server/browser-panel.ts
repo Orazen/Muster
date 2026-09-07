@@ -597,10 +597,22 @@ export function stopAllPanels(): void {
   for (const botId of Array.from(sessions.keys())) stopPanel(botId);
 }
 
+/** Normalize panel address-bar input to an absolute http(s) URL. Input that
+ * already names a scheme must be http/https — prefixing would turn
+ * "file:///etc/passwd" into "https://file///…" whose hostname "file" looks
+ * like a public site and slips past isNavigableUrl. */
+export function toNavigableUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed) && !/^https?:\/\//i.test(trimmed)) {
+    throw new Error("that address is not allowed — http/https public sites only");
+  }
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 export async function navigatePanel(botId: string, rawUrl: string): Promise<BrowserPanelState> {
   const s = sessions.get(botId);
   if (!s) throw new Error("no browser session open");
-  const withScheme = /^https?:\/\//i.test(rawUrl) ? rawUrl.trim() : `https://${rawUrl.trim()}`;
+  const withScheme = toNavigableUrl(rawUrl);
   if (!isNavigableUrl(withScheme)) throw new Error("that address is not allowed — http/https public sites only");
   s.takeControl = true; // human is driving
   await cdp(s, "Page.navigate", { url: withScheme });
