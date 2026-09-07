@@ -674,14 +674,23 @@ export async function startPanel(botId: string, opts: { workspaceDir?: string; p
       sessions.delete(botId);
     }
   });
-  // chromium's debugger endpoint needs a beat to come up
-  for (let attempt = 0; attempt < 40; attempt++) {
-    await new Promise((r) => setTimeout(r, 250));
+  // chromium's debugger endpoint needs a beat to come up — and a container's
+  // very first launch after boot can take 15s+ (cold page cache, fontconfig
+  // building its cache), which exhausted the old 10s budget and 502'd the
+  // first panel click after every deploy. 90 × 300ms ≈ 27s covers cold
+  // start; a browser that died mid-poll fails fast instead of being polled
+  // as a corpse for the full budget.
+  for (let attempt = 0; attempt < 90; attempt++) {
+    await new Promise((r) => setTimeout(r, 300));
+    if (session.error && !session.dying) {
+      stopPanel(botId);
+      throw new Error(`browser session failed to start: ${session.error}`);
+    }
     try {
       await attach(session);
       return panelState(botId);
     } catch (e) {
-      if (attempt === 39) {
+      if (attempt === 89) {
         session.error = e instanceof Error ? e.message : String(e);
         stopPanel(botId);
         throw new Error(`browser session failed to start: ${session.error}`);

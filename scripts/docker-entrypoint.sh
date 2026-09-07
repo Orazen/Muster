@@ -22,4 +22,17 @@ if [ -z "$BETTER_AUTH_SECRET" ]; then
   export BETTER_AUTH_SECRET
 fi
 
-exec "$@"
+# Stay in the foreground as PID 1 instead of exec'ing the server: PID 1 must
+# reap orphans, and chromium spawns crashpad handlers and zygote/GPU helpers
+# that outlive their parents when a browser-panel session ends — reparented
+# to PID 1 and never wait()ed they pile up as zombies until the container
+# restarts. wait -n reaps one child at a time while the server runs; TERM is
+# forwarded so docker stop still reaches node's graceful shutdown.
+"$@" &
+NODE_PID=$!
+trap 'kill -TERM "$NODE_PID" 2>/dev/null' TERM INT
+while kill -0 "$NODE_PID" 2>/dev/null; do
+  wait -n 2>/dev/null || sleep 2
+done
+wait "$NODE_PID"
+exit $?
