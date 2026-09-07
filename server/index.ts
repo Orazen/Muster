@@ -176,6 +176,7 @@ import {
 import { fallbackEligible, markAttempted, pickAlternate, providerFamilyOf, recordRateLimitHit, recentRateLimitHits } from "./provider-fallback.ts";
 import { describeFreeBestChain, FREE_BEST_COOLDOWN_MS, pickFreeBest, recordFreeBestFailure, type FreeCandidate } from "./free-best.ts";
 import { consumeCode, getOrCreateCode, VerifyError } from "./pairing.ts";
+import { consumeClaimCode, createClaimCode } from "./claim.ts";
 import {
   IS_CLOUD,
   isBillingConfigured,
@@ -3935,6 +3936,56 @@ let requestUserEmail = "";
         `better-auth.session_token=${signedSessionCookieValue(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}`,
       );
       return json(res, 200, { ok: true, email: identity.email, name: identity.name ?? "" });
+    }
+
+    // ── Self-host claim: the QR front door ─────────────────────────────
+    // `muster up` prints a QR encoding /claim#CODE. Scanning it lands the
+    // phone in the console with an owner session. Mechanics live in
+    // server/claim.ts (same trust model as pairing above, separate code
+    // namespace — a pairing code never redeems as a claim code).
+    // Creating codes is loopback-only: only something already running ON
+    // the machine may mint the door key. The QR flow needs this on a
+    // self-host (0.0.0.0), a repo checkout (127.0.0.1), and a desktop
+    // install alike — so it sits above the SELF_HOSTED gate like pairing.
+    if (method === "POST" && path === "/api/pair/claim/create") {
+      const remote = req.socket.remoteAddress ?? "";
+      const remoteLoopback = remote === "::1" || remote === "::ffff:127.0.0.1" || remote.startsWith("127.");
+      if (!remoteLoopback || !isLoopbackHost(headerString(req.headers, "host"))) {
+        return json(res, 403, { error: "claim codes are minted only from the machine itself" });
+      }
+      const { code, expiresAt } = createClaimCode();
+      return json(res, 201, { code, expiresAt });
+    }
+    // Public redeem: the phone scanning the QR has no session yet — the
+    // code IS the credential. Single-use, 10-minute TTL, per-IP throttled.
+    if (method === "POST" && path === "/api/pair/claim") {
+      const body = await readBody(req);
+      const code = isText(body.code) ? body.code : "";
+      try {
+        consumeClaimCode(code, clientIpForLimiting(req));
+      } catch (e) {
+        if (e instanceof VerifyError) return json(res, e.status, { error: e.message });
+        throw e;
+      }
+      // The owner account: the deployment's first user. A fresh `muster up`
+      // install may have none — provision one so the scan always lands
+      // somewhere, exactly like pairing redeem provisions a bridged user.
+      let ownerId = primaryUserId();
+      if (!ownerId) ownerId = createBridgedUser("owner@muster.local", "Owner");
+      const owner = findUserById(ownerId);
+      if (!owner) return json(res, 500, { error: "owner account missing — check server logs" });
+      const { token, expiresAt } = mintSession(ownerId, {
+        ip: req.socket.remoteAddress ?? undefined,
+        userAgent: req.headers["user-agent"],
+      });
+      // Same signed cookie shape pair/redeem sets (see that comment for why
+      // the value must be the signed form). No Secure flag: self-hosts
+      // serve plain HTTP on the LAN.
+      res.setHeader(
+        "Set-Cookie",
+        `better-auth.session_token=${signedSessionCookieValue(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}`,
+      );
+      return json(res, 200, { ok: true, email: owner.email, name: owner.name });
     }
 
     // ── Stripe webhook ─────────────────────────────────────────────────

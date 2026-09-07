@@ -7,6 +7,7 @@
 // Zero dependencies beyond Node's own fetch — this file is copy-installed
 // by `curl` users and run by `npm i -g`, so the only contract is Node 22+.
 //
+//   muster up [--port 8799]        boot the server here + print a phone QR
 //   muster pair [--cloud URL]        print/redeem a pairing code
 //   muster bots                      roster: name, engine, state, budget
 //   muster send <bot> <text>         send a turn, print the reply
@@ -16,9 +17,14 @@
 //   muster receipts [n]              last N job receipts
 //   muster status --json             machine-readable (agent callers)
 
-import { homedir } from "node:os";
+import { homedir, networkInterfaces } from "node:os";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { createServer } from "node:net";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { renderTerminal } from "./qr.mjs";
 
 const CONFIG_PATH = join(homedir(), ".muster", "cli.json");
 const CLOUD_DEFAULT = "https://muster.orazen.online";
@@ -255,8 +261,143 @@ async function receipts() {
   }
 }
 
+// ── muster up ───────────────────────────────────────────────────────────
+// The one-command self-host: resolve a runtime, boot it, mint the owner's
+// claim code, print a QR the phone scans to land straight in the console.
+// The laptop can close afterwards — the server keeps running; `muster up`
+// prints how to run it detached for real.
+
+const MUSTER_DIR = join(homedir(), ".muster");
+
+function lanAddress() {
+  for (const nets of Object.values(networkInterfaces())) {
+    for (const net of nets ?? []) {
+      if (net.family === "IPv4" && !net.internal) return net.address;
+    }
+  }
+  return null;
+}
+
+function freePort(preferred) {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.on("error", reject);
+    srv.listen(preferred, "127.0.0.1", () => {
+      const port = srv.address().port;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+function resolveRuntime() {
+  // 1. npm install layout: dist-server ships alongside cli/ in the package.
+  const pkgRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
+  const bundled = join(pkgRoot, "dist-server", "index.js");
+  if (existsSync(bundled)) return { cmd: process.execPath, args: [bundled], cwd: pkgRoot, static: join(pkgRoot, "dist") };
+  // 2. repo checkout: run TypeScript directly, build assets if present.
+  const cwd = process.cwd();
+  if (existsSync(join(cwd, "server", "index.ts"))) {
+    const staticDir = existsSync(join(cwd, "dist", "index.html")) ? join(cwd, "dist") : null;
+    return {
+      cmd: process.execPath,
+      args: ["--experimental-strip-types", join(cwd, "server", "index.ts")],
+      cwd,
+      static: staticDir,
+    };
+  }
+  console.error(
+    "No Muster runtime found. Run this from a Muster repo checkout, or `npm i -g muster` for the packaged build.",
+  );
+  process.exit(1);
+}
+
+async function healthWait(port, { timeoutMs = 60_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+      if (res.ok) {
+        const body = await res.json().catch(() => null);
+        if (body?.app === "muster") return body;
+      }
+    } catch {
+      // not up yet
+    }
+    await new Promise((r) => setTimeout(r, 400));
+    if (child && child.exitCode !== null) throw new Error(`server exited with code ${child.exitCode} during startup`);
+  }
+  throw new Error(`server did not become healthy within ${timeoutMs / 1000}s`);
+}
+
+let child = null;
+
+async function up() {
+  const port = await freePort(Number(arg("--port") ?? 8799));
+  const runtime = resolveRuntime();
+
+  // Self-host gate: the server refuses to boot on a non-loopback host without
+  // BETTER_AUTH_SECRET (resolveSecret throws). Generate once, persist 0600,
+  // reuse forever — sessions must survive restarts.
+  const secretPath = join(MUSTER_DIR, "auth.secret");
+  mkdirSync(MUSTER_DIR, { recursive: true });
+  if (!existsSync(secretPath)) {
+    writeFileSync(secretPath, randomBytes(32).toString("base64"), { mode: 0o600 });
+  }
+
+  const env = {
+    ...process.env,
+    OMB_PORT: String(port),
+    OMB_HOST: "0.0.0.0", // all interfaces: loopback claim-create AND the phone's LAN access
+    BETTER_AUTH_SECRET: readFileSync(secretPath, "utf8").trim(),
+    OMB_STATIC_DIR: runtime.static ?? "",
+    OMB_DATA_DIR: arg("--data-dir") ?? process.env.OMB_DATA_DIR ?? join(MUSTER_DIR, "data"),
+  };
+  if (arg("--public-host")) env.OMB_PUBLIC_HOST = arg("--public-host");
+
+  child = spawn(runtime.cmd, runtime.args, { cwd: runtime.cwd, env, stdio: "inherit" });
+  const stop = (sig) => {
+    if (child && child.exitCode === null) child.kill(sig);
+    process.exit(0);
+  };
+  process.on("SIGINT", () => stop("SIGINT"));
+  process.on("SIGTERM", () => stop("SIGTERM"));
+  child.on("exit", (code) => process.exit(code ?? 0));
+
+  await healthWait(port);
+
+  // Mint the owner claim code — loopback socket + loopback Host header.
+  const create = await fetch(`http://127.0.0.1:${port}/api/pair/claim/create`, {
+    method: "POST",
+    headers: { host: `127.0.0.1:${port}`, "content-type": "application/json" },
+  });
+  if (!create.ok) {
+    console.error(`Could not mint a claim code (HTTP ${create.status}).`);
+    console.error("The server is up — open the printed URL manually and pair from the console.");
+  } else {
+    const { code } = await create.json();
+    const lan = lanAddress();
+    const url = `http://${lan ?? "127.0.0.1"}:${port}/claim#${code}`;
+    console.log("");
+    console.log("  Muster is up. Scan to open the console on your phone:");
+    console.log("");
+    console.log(url);
+    console.log(renderTerminal(url));
+    console.log("");
+    console.log("  The code expires in 10 minutes and works once.");
+    console.log(`  Later: ${url.split("#")[0]}  (same network)`);
+    if (!runtime.static) {
+      console.log("  No built UI found — API-only boot. Run `npm run build` in the repo for the web console.");
+    }
+    console.log("");
+    console.log("  Keep this terminal open — Ctrl-C stops Muster. Background mode (`muster up -d`) is coming.");
+  }
+  // Keep the foreground child attached; the exit/forward handlers above own
+  // the process lifetime from here.
+}
+
 const HELP = `muster — the CLI for your AI workforce
 
+  muster up [--port 8799]          boot the server here; scan the QR with your phone
   muster pair [--local --port 8799 --email .. --password ..]
               [--cloud URL --email .. --password ..] [--redeem CODE]
   muster bots [--json]
@@ -268,6 +409,9 @@ const HELP = `muster — the CLI for your AI workforce
 
 try {
   switch (command) {
+    case "up":
+      await up();
+      break;
     case "pair": {
       if (has("--redeem")) await pairRedeem();
       else await pair();

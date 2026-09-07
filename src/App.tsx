@@ -29,6 +29,7 @@ import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, serverGateDone } from "@/lib/analytics";
 import { PairPage } from "@/pages/PairPage";
+import { ClaimPage } from "@/pages/ClaimPage";
 import { DesktopShell } from "@/components/os/DesktopShell";
 import { Link } from "react-router-dom";
 
@@ -281,6 +282,7 @@ export default function App() {
           <Route path="/sign-in" element={<LoginPage />} />
           <Route path="/sign-up" element={<SignupPage />} />
           <Route path="/pair" element={<AuthGate><PairPage /></AuthGate>} />
+          <Route path="/claim" element={<ClaimPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/app/*" element={<AuthGate><AppShell /></AuthGate>} />

@@ -715,6 +715,11 @@ export function isPublicApiPath(path: string): boolean {
     path === "/api/pair/verify" ||
     // the desktop's local redeem endpoint — same code-as-credential story
     path === "/api/pair/redeem" ||
+    // Self-host claim redeem: the phone that scanned the `muster up` QR has
+    // no session yet — the single-use, 10-minute, per-IP-throttled code IS
+    // the credential (see server/claim.ts). Minting codes is NOT public:
+    // /api/pair/claim/create self-gates to loopback in its handler.
+    path === "/api/pair/claim" ||
     // The public team-directory feed (/bots page): read-only catalog of
     // installable teams, deliberately consumable without an account so
     // agents and aggregators can index it (server/viral.ts rationale).

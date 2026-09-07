@@ -235,6 +235,38 @@ flowchart LR
 | **Linux** (x64) | [Muster.deb](https://muster.orazen.online/downloads/Muster.deb) · [AppImage](https://muster.orazen.online/downloads/Muster.AppImage) | `sudo dpkg -i Muster.deb` · `chmod +x Muster.AppImage && ./Muster.AppImage` |
 | **Web / Cloud** | [muster.orazen.online/app](https://muster.orazen.online/app) | Nothing to install. Free account; computers from $20/mo. |
 | **Self-host** | Docker | `docker compose up -d --build` → http://localhost:8799 — see [docs/self-host.md](docs/self-host.md). |
+| **Self-host, one command** | Node 22+ | `npx muster up` — boot on your machine, scan the QR with your phone, done (below). |
+| **iOS / Android** | Built — store listings pending developer accounts | Pair with your computer's companion service. |
+
+### `muster up` — your bots, your machine, your phone
+
+```sh
+npx muster up
+```
+
+That's the whole install. Muster boots on your computer, generates its own
+secret, and prints a QR code in the terminal:
+
+```
+  Muster is up. Scan to open the console on your phone:
+
+  http://192.168.x.x:8799/claim#SEH5ZP3S
+  ▙▗▄▗▖▚▜▛▚…
+```
+
+Scan it with your phone's camera and you land straight in the console —
+signed in as the owner, no account creation, no password to invent. The
+claim code is single-use and expires in 10 minutes; the pairing itself
+never leaves your network. Close the laptop lid? The server keeps running —
+check in from your phone, send tasks, answer approvals.
+
+Need a fresh phone later (or a second one)? Run `muster up` again — or mint
+a code from the same machine with `curl -s -X POST
+http://127.0.0.1:8799/api/pair/claim/create`.
+
+Flags: `--port 8799` (pick another port), `--data-dir <dir>` (move the
+database), `--public-host <host>` (you're fronting it with a reverse
+proxy).
 | **iOS / Android** | Built — store listings pending developer accounts | Pair with your computer's companion service. |
 
 **Requirements (desktop):** macOS / Windows / Ubuntu 24.04 x64, Node 24+, pnpm, and at least one agent
