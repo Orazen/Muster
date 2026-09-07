@@ -205,6 +205,7 @@ import {
 import * as browserPanel from "./browser-panel.ts";
 import * as workspaceBundle from "./workspace-bundle.ts";
 import * as driveSync from "./drive-sync.ts";
+import * as accountDrive from "./account-drive.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimerPool } from "./local-vm-idle.ts";
 import { LocalVmLeasePool } from "./local-vm-lease.ts";
@@ -6644,6 +6645,66 @@ let requestUserEmail = "";
         const token = await driveSync.refreshDriveToken(refreshToken);
         const payload = await driveSync.downloadBundle(token.accessToken);
         if (!payload) return json(res, 404, { error: "no workspace bundle exists in Drive yet — push from the other device first" });
+        const { workspace } = workspaceBundle.decryptBundle(payload, passphrase, deploymentSigningSecret());
+        const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
+        await reloadProviders();
+        broadcast({ kind: "hello" });
+        return json(res, 200, { restored: result });
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    // ── Login-scoped Drive sync (Continue with Google IS the backup) ────
+    // Same bundle, same encryption, different token source: the Google
+    // tokens better-auth stored at login (drive.appdata scope) instead of
+    // a manually pasted code. Requires a signed-in account — the tokens
+    // are per-user, so this is scoped by construction.
+    if (path === "/api/workspace/google/push" && method === "POST") {
+      // Session truth on every deployment: cloud/self-host resolve it above;
+      // on the desktop (SELF_HOSTED=false, loopback-only) there is exactly
+      // one local user, so resolve the session here the same way.
+      const session = requestUserId ? { userId: requestUserId } : await getSession(req);
+      if (!session) return json(res, 401, { error: "sign in with Google first" });
+      const googleUserId = session.userId;
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const db = getDb();
+      try {
+        const accessToken = await accountDrive.accessTokenFor(db, googleUserId);
+        if (!accessToken) {
+          return json(res, 400, {
+            error: "no Google login on this account — sign in with Google (or reconnect) to grant Drive access",
+          });
+        }
+        const bundle = workspaceBundle.buildBundle(store, DATA_DIR);
+        const { payload, counts } = workspaceBundle.encryptBundle(bundle, passphrase, deploymentSigningSecret());
+        const id = await accountDrive.drivePushFor(accessToken, payload);
+        return json(res, 200, { uploaded: id, counts });
+      } catch (e) {
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/google/pull" && method === "POST") {
+      const session = requestUserId ? { userId: requestUserId } : await getSession(req);
+      if (!session) return json(res, 401, { error: "sign in with Google first" });
+      const googleUserId = session.userId;
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const db = getDb();
+      try {
+        const accessToken = await accountDrive.accessTokenFor(db, googleUserId);
+        if (!accessToken) {
+          return json(res, 400, {
+            error: "no Google login on this account — sign in with Google (or reconnect) to grant Drive access",
+          });
+        }
+        const payload = await accountDrive.drivePullFor(accessToken);
+        if (!payload) {
+          return json(res, 404, { error: "no workspace bundle in Drive yet — push from the other device first" });
+        }
         const { workspace } = workspaceBundle.decryptBundle(payload, passphrase, deploymentSigningSecret());
         const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
         await reloadProviders();

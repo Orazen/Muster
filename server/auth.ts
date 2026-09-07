@@ -383,7 +383,10 @@ export function requestOwnOrigin(request?: Request): string | undefined {
  * button that always errors, so an incomplete pair is treated as absent.
  */
 function socialProviders() {
-  const providers: Record<string, { clientId: string; clientSecret: string }> = {};
+  const providers: Record<
+    string,
+    { clientId: string; clientSecret: string; scope?: string[]; accessType?: string; prompt?: string }
+  > = {};
 
   const githubId = process.env.GITHUB_CLIENT_ID?.trim();
   const githubSecret = process.env.GITHUB_CLIENT_SECRET?.trim();
@@ -394,7 +397,17 @@ function socialProviders() {
   const googleId = process.env.GOOGLE_CLIENT_ID?.trim();
   const googleSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
   if (googleId && googleSecret) {
-    providers.google = { clientId: googleId, clientSecret: googleSecret };
+    providers.google = {
+      clientId: googleId,
+      clientSecret: googleSecret,
+      // Workspace sync (docs/plans/account-sync-portable-profile.md): the
+      // login grant includes the app-private Drive scope, so the tokens
+      // better-auth stores in the account table can push/pull the
+      // encrypted workspace bundle — one consent at login, no second flow.
+      scope: ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.appdata"],
+      accessType: "offline",
+      prompt: "consent",
+    };
   }
 
   return providers;
