@@ -235,13 +235,16 @@ flowchart LR
 | **Linux** (x64) | [Muster.deb](https://muster.orazen.online/downloads/Muster.deb) · [AppImage](https://muster.orazen.online/downloads/Muster.AppImage) | `sudo dpkg -i Muster.deb` · `chmod +x Muster.AppImage && ./Muster.AppImage` |
 | **Web / Cloud** | [muster.orazen.online/app](https://muster.orazen.online/app) | Nothing to install. Free account; computers from $20/mo. |
 | **Self-host** | Docker | `docker compose up -d --build` → http://localhost:8799 — see [docs/self-host.md](docs/self-host.md). |
-| **Self-host, one command** | Node 22+ | `npx muster up` — boot on your machine, scan the QR with your phone, done (below). |
+| **Self-host, one command** | Node 22+ | `node cli/muster.mjs up` from a checkout — boot on your machine, scan the QR with your phone, done (below). |
 | **iOS / Android** | Built — store listings pending developer accounts | Pair with your computer's companion service. |
 
 ### `muster up` — your bots, your machine, your phone
 
+From a Muster checkout (the CLI ships with the repo; an `npx` package may
+follow):
+
 ```sh
-npx muster up
+node cli/muster.mjs up
 ```
 
 That's the whole install. Muster boots on your computer, generates its own
