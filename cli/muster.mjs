@@ -18,6 +18,7 @@
 //   muster approve [allow|deny]      answer the oldest pending card
 //   muster status                    fleet summary
 //   muster receipts [n]              last N job receipts
+//   muster sessions                  active sign-ins; --revoke <prefix|other|all>
 //   muster status --json             machine-readable (agent callers)
 
 import { homedir, networkInterfaces } from "node:os";
@@ -63,7 +64,7 @@ function apiConfig() {
 }
 
 async function api(cfg, path, init = {}) {
-  const headers = { "content-type": "application/json", cookie: cfg.cookie };
+  const headers = { "content-type": "application/json", cookie: cfg.cookie, origin: cfg.base };
   if (init.headers) Object.assign(headers, init.headers);
   const res = await fetch(`${cfg.base}${path}`, { ...init, headers });
   if (res.status === 401) {
@@ -224,6 +225,65 @@ async function approve() {
   console.log("No pending approvals.");
 }
 
+// The session cookie is `token.signature`; the DB and the list/revoke
+// endpoints speak raw tokens, so peel the token back out for "current" marking.
+const currentToken = (cfg) => {
+  const value = decodeURIComponent((cfg.cookie || "").split("=").slice(1).join("="));
+  return value.split(".")[0] || "";
+};
+
+const shortDate = (iso) => (iso ? String(iso).slice(0, 16).replace("T", " ") : "?");
+
+async function sessions() {
+  const cfg = apiConfig();
+  const json = has("--json");
+  const revoke = arg("--revoke");
+  if (revoke === "all") {
+    await asJson(await api(cfg, "/api/auth/revoke-sessions", { method: "POST" }));
+    if (json) return console.log(JSON.stringify({ revoked: "all" }, null, 2));
+    console.log("All sessions revoked (including this CLI's — run `muster pair` to re-pair).");
+    return;
+  }
+  if (revoke !== undefined) {
+    const list = await asJson(await api(cfg, "/api/auth/list-sessions"));
+    const current = currentToken(cfg);
+    const targets =
+      revoke === "other"
+        ? list.filter((s) => s.token !== current)
+        : list.filter((s) => s.token.startsWith(revoke) || s.id === revoke);
+    if (!targets.length) {
+      console.error(`No matching session. Run \`muster sessions\` to see active tokens.`);
+      process.exit(1);
+    }
+    for (const s of targets) {
+      await asJson(
+        await api(cfg, "/api/auth/revoke-session", {
+          method: "POST",
+          body: JSON.stringify({ token: s.token }),
+        }),
+      );
+    }
+    const revoked = targets.map((s) => ({ id: s.id, token: s.token.slice(0, 6) + "…" }));
+    if (json) return console.log(JSON.stringify({ revoked }, null, 2));
+    for (const r of revoked) console.log(`Revoked ${r.token}`);
+    return;
+  }
+  const list = await asJson(await api(cfg, "/api/auth/list-sessions"));
+  const current = currentToken(cfg);
+  if (json) return console.log(JSON.stringify({ sessions: list }, null, 2));
+  console.log(
+    `${list.length} active session${list.length === 1 ? "" : "s"} (current marked *):`,
+  );
+  for (const s of list) {
+    const mark = s.token === current ? "*" : " ";
+    const ua = String(s.userAgent ?? "?").slice(0, 48);
+    console.log(
+      `${mark} ${String(s.token ?? s.id).slice(0, 6)}…  ${shortDate(s.createdAt)} → ${shortDate(s.expiresAt)}  ` +
+        `${s.ipAddress ?? "?"}  ${ua}`,
+    );
+  }
+}
+
 async function status() {
   const cfg = apiConfig();
   const { bots } = await asJson(await api(cfg, "/api/bots"));
@@ -247,8 +307,7 @@ async function receipts() {
   const cfg = apiConfig();
   const n = Number(subject) || 3;
   const { bots } = await asJson(await api(cfg, "/api/bots"));
-  const rows = [];
-  for (const bot of bots.filter((b) => !b.hidden)) {
+  const rows = [];  for (const bot of bots.filter((b) => !b.hidden)) {
     for (const task of (bot.tasks ?? []).slice(0, n)) {
       rows.push({ bot: bot.name, task: task.title, usage: task.usage ?? {} });
     }
@@ -537,6 +596,7 @@ const HELP = `muster — the CLI for your AI workforce
   muster approve [allow|deny]
   muster status [--json]
   muster receipts [n] [--json]
+  muster sessions [--json]        active sign-in sessions; --revoke <prefix|other|all>
   muster help`;
 
 try {
@@ -569,6 +629,9 @@ try {
       break;
     case "receipts":
       await receipts();
+      break;
+    case "sessions":
+      await sessions();
       break;
     default:
       console.log(HELP);

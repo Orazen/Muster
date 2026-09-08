@@ -175,8 +175,9 @@ Muster is agent-operable end to end:
 
 - **[skill.md](https://muster.orazen.online/skill.md)** — the onboarding an agent follows to pair with
   an install and operate the roster (pairing, roster, tasks, receipts, memory, untrusted-input rules).
-- **CLI** — `muster pair | bots | send <bot> <text> | approve [allow|deny] | status | receipts`, with
-  machine-readable `--json` on `bots`/`status`/`receipts`.
+- **CLI** — `muster pair | bots | send <bot> <text> | approve [allow|deny] | status | receipts | sessions`, with
+  machine-readable `--json` on `bots`/`status`/`receipts`/`sessions`. `muster sessions` lists every active
+  sign-in (current one marked) and `--revoke <prefix|other|all>` kills one, all others, or all.
 - **HTTP + SSE** — the whole product under `/api/*` (same auth as the app).
 - **llm.txt** — [muster.orazen.online/llm.txt](https://muster.orazen.online/llm.txt), the platform map.
 
@@ -274,6 +275,10 @@ detects the running server and just re-prints a fresh QR against it (no
 second server). Re-running while detached works the same way. The claim
 code can also be minted directly: `curl -s -X POST
 http://127.0.0.1:8799/api/pair/claim/create`.
+
+Every scan and sign-in becomes a tracked session: `muster sessions` lists
+them (current one marked) and `muster sessions --revoke <prefix|other|all>`
+revokes — kill a lost phone, kick every other device, or wipe all sign-ins.
 
 Managing a detached server:
 
