@@ -136,7 +136,9 @@ export function CommandPalette() {
       className={cn(
         "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left",
         twoLine && "flex-col items-stretch gap-0.5",
-        index === selected ? "bg-raised" : "hover:bg-raised/50",
+        index === selected
+          ? "bg-raised shadow-[inset_2px_0_0_0_var(--color-accent)]"
+          : "hover:bg-raised/50",
       )}
     >
       {children}
@@ -145,7 +147,7 @@ export function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-6 pt-[14vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-6 pt-[14vh] backdrop-blur-[2px]"
       onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}
       onKeyDown={onKeyDown}
     >
@@ -153,7 +155,7 @@ export function CommandPalette() {
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        className="flex max-h-[min(480px,70vh)] w-full max-w-[560px] flex-col overflow-hidden rounded-xl border border-hairline/50 bg-card shadow-2xl shadow-black/60"
+        className="glass-console flex max-h-[min(480px,70vh)] w-full max-w-[560px] flex-col overflow-hidden rounded-xl"
       >
         <div className="flex items-center gap-3 border-b border-hairline/40 px-4 py-3">
           <Search size={16} className="shrink-0 text-ink-secondary" />

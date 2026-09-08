@@ -653,10 +653,16 @@ export function GroupView({ group }: { group: Group }) {
             <>
               <ClusterLabel bot={speaker} name={speaker.name} color={speaker.color} />
               <div className="flex justify-start">
-                <div className="flex items-center gap-1.5 rounded-2xl bg-raised px-4 py-3">
-                  <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:0ms]" />
-                  <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:150ms]" />
-                  <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:300ms]" />
+                {/* same OpenManus step-mark as the 1:1 chat: [→] in progress,
+                    shimmer alive — no bouncing dots */}
+                <div className="flex items-center gap-2.5 rounded-2xl bg-raised px-4 py-3">
+                  <span
+                    className="flex size-5 items-center justify-center rounded-md border border-hairline bg-panel font-mono text-[11px] leading-none text-live"
+                    aria-hidden="true"
+                  >
+                    →
+                  </span>
+                  <span className="thinking-shimmer text-[13px] font-medium">Working</span>
                 </div>
               </div>
             </>

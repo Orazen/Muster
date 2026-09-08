@@ -84,7 +84,7 @@ export function CommandBar({ open, onClose, onOpenRooms }: { open: boolean; onCl
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[14vh]" onPointerDown={onClose}>
       <div
-        className="os-console w-[min(560px,92vw)] rounded-2xl border border-white/10 bg-[#101418]/95 p-2 shadow-2xl shadow-black/60 backdrop-blur"
+        className="glass-console w-[min(560px,92vw)] rounded-2xl p-2"
         role="dialog"
         aria-label="Command console"
         onPointerDown={(e) => e.stopPropagation()}
@@ -106,16 +106,16 @@ export function CommandBar({ open, onClose, onOpenRooms }: { open: boolean; onCl
             aria-label="Command"
             autoComplete="off"
             spellCheck={false}
-            className="w-full bg-transparent text-[15px] text-white placeholder:text-white/35 focus:outline-none"
+            className="w-full bg-transparent text-[15px] text-ink placeholder:text-ink-secondary/60 focus:outline-none"
           />
-          <kbd className="shrink-0 rounded border border-white/15 px-1.5 py-0.5 text-[10px] text-white/40">esc</kbd>
+          <kbd className="shrink-0 rounded border border-hairline/60 px-1.5 py-0.5 text-[10px] text-ink-secondary">esc</kbd>
         </div>
 
-        {error && <div className="px-3 pb-1 text-[12.5px] text-[#ff8f6b]">{error}</div>}
+        {error && <div className="px-3 pb-1 text-[12.5px] text-danger">{error}</div>}
 
         {suggestions.length > 0 && !parsed.targeted && (
-          <div className="border-t border-white/5 px-1.5 pb-1.5 pt-1.5">
-            <div className="px-1.5 pb-1 text-[10px] uppercase tracking-[0.14em] text-white/30">
+          <div className="border-t border-hairline/40 px-1.5 pb-1.5 pt-1.5">
+            <div className="px-1.5 pb-1 text-[10px] uppercase tracking-[0.14em] text-ink-secondary/70">
               {draft.trim() ? "Bots" : "Ask"}
             </div>
             {suggestions.map((bot) => (
@@ -126,11 +126,11 @@ export function CommandBar({ open, onClose, onOpenRooms }: { open: boolean; onCl
                   dispatch({ type: "send", botId: bot.id, text: draft.trim() || `Status check — what are you working on?` });
                   onClose();
                 }}
-                className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-white/5"
+                className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-raised/50"
               >
                 <AgentAvatar color={bot.color} character={bot.character} state={bot.busy ? "working" : "idle"} size={20} label={bot.name} />
-                <span className="min-w-0 flex-1 truncate text-[13px] text-white/85">{bot.name}</span>
-                <span className={cn("shrink-0 text-[11px]", bot.busy ? "text-[#ffd166]" : "text-white/30")}>
+                <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{bot.name}</span>
+                <span className={cn("shrink-0 text-[11px]", bot.busy ? "text-warning" : "text-ink-secondary/70")}>
                   {bot.busy ? "working…" : "idle"}
                 </span>
               </button>

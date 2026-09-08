@@ -27,10 +27,30 @@ interface OrbMood {
 
 const MOODS = {
   // clear glass = nothing is happening, and that's a promise
-  idle: { core: "rgba(255,255,255,0.28)", halo: "rgba(255,255,255,0.06)", label: "All agents idle", anim: "still" },
-  working: { core: "#f08a24", halo: "rgba(240,138,36,0.35)", label: "Agents working", anim: "breathe" },
-  attention: { core: "#ffb020", halo: "rgba(255,176,32,0.5)", label: "Waiting on you", anim: "pulse" },
-  settled: { core: "#00c26e", halo: "rgba(0,194,110,0.4)", label: "Work settled — take a look", anim: "flash" },
+  idle: {
+    core: "color-mix(in srgb, var(--color-ink) 28%, transparent)",
+    halo: "color-mix(in srgb, var(--color-ink) 7%, transparent)",
+    label: "All agents idle",
+    anim: "still",
+  },
+  working: {
+    core: "var(--color-live)",
+    halo: "color-mix(in srgb, var(--color-live) 38%, transparent)",
+    label: "Agents working",
+    anim: "breathe",
+  },
+  attention: {
+    core: "var(--color-warning)",
+    halo: "color-mix(in srgb, var(--color-warning) 55%, transparent)",
+    label: "Waiting on you",
+    anim: "pulse",
+  },
+  settled: {
+    core: "var(--color-success)",
+    halo: "color-mix(in srgb, var(--color-success) 45%, transparent)",
+    label: "Work settled — take a look",
+    anim: "flash",
+  },
 } as const satisfies Record<OrbState, OrbMood>;
 
 /** Pick the state with the strongest claim on your attention. Each return
@@ -77,7 +97,7 @@ export function FleetOrb() {
               <div className="fleet-orb-menu-label">Waiting on you</div>
               {waitingList.map((bot) => (
                 <button key={bot.id} type="button" className="fleet-orb-row" onClick={() => openBot(bot)}>
-                  <span className="fleet-orb-dot" style={{ background: "#ffb020" }} aria-hidden="true" />
+                  <span className="fleet-orb-dot" style={{ background: "var(--color-warning)" }} aria-hidden="true" />
                   {bot.name}
                 </button>
               ))}
@@ -90,7 +110,7 @@ export function FleetOrb() {
                 .filter((b) => b.busy)
                 .map((bot) => (
                   <button key={bot.id} type="button" className="fleet-orb-row" onClick={() => openBot(bot)}>
-                    <span className="fleet-orb-dot fleet-orb-dot-live" style={{ background: "#f08a24" }} aria-hidden="true" />
+                    <span className="fleet-orb-dot fleet-orb-dot-live" style={{ background: "var(--color-live)" }} aria-hidden="true" />
                     {bot.name}
                   </button>
                 ))}
@@ -104,7 +124,7 @@ export function FleetOrb() {
                 .slice(0, 5)
                 .map((bot) => (
                   <button key={bot.id} type="button" className="fleet-orb-row" onClick={() => openBot(bot)}>
-                    <span className="fleet-orb-dot" style={{ background: "#00c26e" }} aria-hidden="true" />
+                    <span className="fleet-orb-dot" style={{ background: "var(--color-success)" }} aria-hidden="true" />
                     {bot.name}
                   </button>
                 ))}

@@ -443,10 +443,15 @@ function Bubble({
         )}
         {!user && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
         {/* provenance chip: show the harness instead of hiding it — which
-            engine + model actually said this (routing visibility pattern) */}
+            engine + model actually said this (routing visibility pattern).
+            The LAST bot answer keeps it visible while idle, so the routing
+            fact survives without a hover; history turns stay hover-only. */}
         {via && (
           <span
-            className="ml-1 pb-1 text-[10.5px] tabular-nums text-ink-secondary/60 opacity-0 transition-opacity group-hover:opacity-100"
+            className={cn(
+              "ml-1 pb-1 text-[10.5px] tabular-nums text-ink-secondary/60 transition-opacity",
+              isLastBotText && !bot.busy ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+            )}
             title={via.effort ? `${viaInstance?.displayName ?? via.instanceId} · effort ${via.effort}` : viaInstance?.displayName ?? via.instanceId}
           >
             {via.model}
@@ -1200,11 +1205,16 @@ export function ChatView({ bot }: { bot: Bot }) {
             showWorkingDots(bot.busy, streaming, messages.at(-1)) && (
               <div className="flex justify-start">
                 <div className="flex items-center gap-2.5 rounded-2xl bg-raised px-4 py-3">
-                  <span className="flex items-center gap-1.5">
-                    <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:0ms]" />
-                    <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:150ms]" />
-                    <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:300ms]" />
+                  {/* OpenManus-style step mark: [→] says "in progress" the
+                      way a plan tool renders it, the shimmer says it's alive
+                      — no bouncing dots */}
+                  <span
+                    className="flex size-5 items-center justify-center rounded-md border border-hairline bg-panel font-mono text-[11px] leading-none text-live"
+                    aria-hidden="true"
+                  >
+                    →
                   </span>
+                  <span className="thinking-shimmer text-[13px] font-medium">Working</span>
                   <WorkingTimer since={lastUserMessage?.at ?? Date.now()} />
                 </div>
               </div>
@@ -1245,17 +1255,46 @@ export function ChatView({ bot }: { bot: Bot }) {
 
 /** The visible plan loop: while a goal is running on this thread it shows
  * "Goal · round N/M · <text>" with a Stop, so autonomy is something the
- * user watches and can halt — never a hidden loop. */
+ * user watches and can halt — never a hidden loop. The round pips borrow
+ * OpenManus's plan-step marks: ✓ done, → running, blank still to come, so
+ * progress reads at a glance without parsing numbers. */
 function GoalBanner({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const goal = state.goals.find((g) => g.botId === bot.id && g.status === "active");
   if (!goal) return null;
+  // one pip per round, capped so a 40-round goal can't stretch the strip
+  const pipCount = Math.min(goal.maxRounds, 12);
+  const currentRound = Math.min(goal.rounds + 1, goal.maxRounds);
   return (
     <div className="animate-pop-in flex items-center gap-2 border-t border-hairline/40 bg-raised/60 px-4 py-2 text-[12.5px]">
       <Target size={13} className="shrink-0 text-accent" aria-hidden="true" />
       <span className="shrink-0 font-medium tabular-nums">
-        Goal · round {Math.min(goal.rounds + 1, goal.maxRounds)}/{goal.maxRounds}
+        Goal · round {currentRound}/{goal.maxRounds}
       </span>
+      {pipCount > 1 && (
+        <span className="flex shrink-0 items-center gap-1" aria-hidden="true">
+          {Array.from({ length: pipCount }, (_, i) => {
+            const round = i + 1;
+            const done = round <= goal.rounds;
+            const active = round === currentRound;
+            return (
+              <span
+                key={round}
+                className={cn(
+                  "flex h-3.5 w-3.5 items-center justify-center rounded-[3px] border text-[8px] font-bold leading-none",
+                  done
+                    ? "border-success/50 bg-success/15 text-success"
+                    : active
+                      ? "border-accent/60 bg-accent/15 text-accent"
+                      : "border-hairline text-transparent",
+                )}
+              >
+                {done ? "✓" : active ? "→" : "·"}
+              </span>
+            );
+          })}
+        </span>
+      )}
       <span className="min-w-0 flex-1 truncate text-ink-secondary" title={goal.text}>
         {goal.text}
       </span>
