@@ -77,7 +77,7 @@ export function ClaimPage() {
               <h1 className="text-xl font-bold tracking-tight text-ink">That didn't work</h1>
               <div className="mt-4 rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>
               <p className="mt-4 text-sm leading-relaxed text-ink-secondary">
-                Codes expire in 10 minutes and work once. Run <span className="font-mono text-ink">muster up</span> again
+                Codes expire in 5 minutes and work once. Run <span className="font-mono text-ink">muster up</span> again
                 for a fresh QR.
               </p>
             </>

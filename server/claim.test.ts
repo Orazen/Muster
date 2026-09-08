@@ -25,12 +25,12 @@ describe("claim codes", () => {
     expect(() => consumeClaimCode(code, "1.2.3.4", T0 + 2000)).toThrow(VerifyError);
   });
 
-  it("rejects expired codes (10-minute TTL) and sweeps them", () => {
+  it("rejects expired codes (5-minute TTL) and sweeps them", () => {
     const { code } = createClaimCode(T0);
-    // still live at minute 9
-    expect(() => consumeClaimCode(code, "1.2.3.4", T0 + 9 * 60_000)).not.toThrow();
+    // still live at minute 4
+    expect(() => consumeClaimCode(code, "1.2.3.4", T0 + 4 * 60_000)).not.toThrow();
     const second = createClaimCode(T0).code;
-    expect(() => consumeClaimCode(second, "1.2.3.4", T0 + 10 * 60_000 + 1)).toThrow(/fresh QR/);
+    expect(() => consumeClaimCode(second, "1.2.3.4", T0 + 5 * 60_000 + 1)).toThrow(/fresh QR/);
     expect(_pendingClaimCount()).toBe(0);
   });
 
@@ -42,20 +42,44 @@ describe("claim codes", () => {
     expect(() => consumeClaimCode(second, "1.2.3.4", T0 + 2000)).not.toThrow();
   });
 
-  it("throttles redemption attempts per IP before a valid guess can land", () => {
+  it("locks an IP out for ten minutes after five failed attempts, before a valid guess can land", () => {
     const { code } = createClaimCode(T0);
     const ip = "9.9.9.9";
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 5; i++) {
       try {
         consumeClaimCode("WRONGCOD", ip, T0 + 1000 + i);
       } catch (e) {
         expect(e).toBeInstanceOf(VerifyError);
       }
     }
-    // the real code arrives attempt #21 — locked out anyway
-    expect(() => consumeClaimCode(code, ip, T0 + 2000)).toThrow(/too many attempts/);
+    // the real code arrives as attempt #6 — locked out anyway
+    expect(() => consumeClaimCode(code, ip, T0 + 2000)).toThrow(/too many failed attempts/);
+    // and the lockout outlives the code's own 5-minute TTL
+    expect(() => consumeClaimCode("WRONGCOD", ip, T0 + 6 * 60_000)).toThrow(/too many failed attempts/);
     // another IP is unaffected (the phone on the LAN still gets in)
     expect(() => consumeClaimCode(code, "other-ip", T0 + 2000)).not.toThrow();
+  });
+
+  it("a successful redemption clears the IP's failed-attempt slate", () => {
+    for (let i = 0; i < 4; i++) {
+      try {
+        consumeClaimCode("WRONGCOD", "8.8.8.8", T0 + 1000 + i);
+      } catch {
+        // four wrong guesses — one below the lockout
+      }
+    }
+    const { code } = createClaimCode(T0 + 100);
+    expect(() => consumeClaimCode(code, "8.8.8.8", T0 + 2000)).not.toThrow();
+    // the slate is clean: five fresh misses are needed before a lockout
+    const next = createClaimCode(T0 + 3000).code;
+    for (let i = 0; i < 5; i++) {
+      try {
+        consumeClaimCode("WRONGCOD", "8.8.8.8", T0 + 4000 + i);
+      } catch {
+        // the fifth lands the lockout, asserted below
+      }
+    }
+    expect(() => consumeClaimCode(next, "8.8.8.8", T0 + 5000)).toThrow(/too many failed attempts/);
   });
 
   it("refuses an empty code with a pointer back to muster up", () => {

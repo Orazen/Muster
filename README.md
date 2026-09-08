@@ -175,8 +175,10 @@ Muster is agent-operable end to end:
 
 - **[skill.md](https://muster.orazen.online/skill.md)** — the onboarding an agent follows to pair with
   an install and operate the roster (pairing, roster, tasks, receipts, memory, untrusted-input rules).
-- **CLI** — `muster pair | bots | send <bot> <text> | approve [allow|deny] | status | receipts | sessions`, with
-  machine-readable `--json` on `bots`/`status`/`receipts`/`sessions`. `muster sessions` lists every active
+- **CLI** — `muster setup | pair | bots | send <bot> <text> | approve [allow|deny] | status | receipts | sessions`, with
+  machine-readable `--json` on `bots`/`status`/`receipts`/`sessions`. `muster setup` is the guided first run —
+  it connects to (or boots) the local server, signs in as the owner, picks an engine, and introduces the first
+  bot; the one paid step (a test turn) is strictly opt-in. `muster sessions` lists every active
   sign-in (current one marked) and `--revoke <prefix|other|all>` kills one, all others, or all.
 - **HTTP + SSE** — the whole product under `/api/*` (same auth as the app).
 - **llm.txt** — [muster.orazen.online/llm.txt](https://muster.orazen.online/llm.txt), the platform map.
@@ -261,8 +263,9 @@ secret, and prints a QR code in the terminal:
 
 Scan it with your phone's camera and you land straight in the console —
 signed in as the owner, no account creation, no password to invent. The
-claim code is single-use and expires in 10 minutes; the pairing itself
-never leaves your network.
+claim code is single-use, expires in 5 minutes, and five failed
+redemption attempts lock an IP out for ten; the pairing itself never
+leaves your network.
 
 With `-d` the server detaches from the terminal — shut the terminal
 window, end the SSH session, log out; Muster keeps running on the machine

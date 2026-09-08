@@ -23,14 +23,21 @@
 
 import { homedir, networkInterfaces } from "node:os";
 import { existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
+import { createInterface } from "node:readline/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { renderTerminal } from "./qr.mjs";
 
-const CONFIG_PATH = join(homedir(), ".muster", "cli.json");
+// Every on-disk path hangs off MUSTER_DIR (default ~/.muster). The env
+// override keeps multi-instance testing and second installs off a real one.
+const MUSTER_DIR = process.env.MUSTER_DIR ? resolve(process.env.MUSTER_DIR) : join(homedir(), ".muster");
+const CONFIG_PATH = join(MUSTER_DIR, "cli.json");
+const RUN_DIR = join(MUSTER_DIR, "run");
+const RUNTIME_PATH = join(RUN_DIR, "up.json"); // { pid, port, detached, started }
+const LOG_PATH = join(RUN_DIR, "up.log");
 const CLOUD_DEFAULT = "https://muster.orazen.online";
 
 const arg = (flag) => {
@@ -186,20 +193,24 @@ async function send() {
     process.exit(1);
   }
   await asJson(await api(cfg, `/api/bots/${bot.id}/messages`, { method: "POST", body: JSON.stringify({ text }) }));
-  // Poll for the settled reply (the SSE stream is overkill for one-shot sends).
-  const deadline = Date.now() + 180_000;
+  const reply = await waitForReply(cfg, bot.id, 180_000);
+  if (!reply) {
+    console.error("Timed out waiting for the reply — the turn may still be running. Try `muster watch`.");
+    process.exit(1);
+  }
+  console.log(reply.trim());
+}
+
+/** Poll until the bot's thread settles with a text reply (the SSE stream is
+ *  overkill for one-shot sends). Returns the reply text or null on timeout. */
+async function waitForReply(cfg, botId, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     const { bots: now } = await asJson(await api(cfg, "/api/bots"));
-    const me = now.find((b) => b.id === bot.id);
+    const me = now.find((b) => b.id === botId);
     const reply = [...(me?.messages ?? [])].reverse().find((m) => m.role === "bot" && m.kind === "text" && m.text?.trim());
-    if (!me?.busy && reply) {
-      console.log(reply.text.trim());
-      return;
-    }
-    if (Date.now() > deadline) {
-      console.error("Timed out waiting for the reply — the turn may still be running. Try `muster watch`.");
-      process.exit(1);
-    }
+    if (!me?.busy && reply) return reply.text.trim();
+    if (Date.now() > deadline) return null;
     await new Promise((r) => setTimeout(r, 1_500));
   }
 }
@@ -329,11 +340,6 @@ async function receipts() {
 // scans to land straight in the console. Detached survives the terminal
 // closing (that's the "close the laptop, the bots keep working" part);
 // `muster stop` ends it, `muster logs` reads its output.
-
-const MUSTER_DIR = join(homedir(), ".muster");
-const RUN_DIR = join(MUSTER_DIR, "run");
-const RUNTIME_PATH = join(RUN_DIR, "up.json"); // { pid, port, detached, started }
-const LOG_PATH = join(RUN_DIR, "up.log");
 
 function lanAddress() {
   for (const nets of Object.values(networkInterfaces())) {
@@ -493,7 +499,7 @@ async function mintAndPrint(port, { detached }) {
     console.log(url);
     console.log(renderTerminal(url));
     console.log("");
-    console.log("  The code expires in 10 minutes and works once. Re-run `muster up` for a fresh QR anytime.");
+    console.log("  The code expires in 5 minutes and works once. Re-run `muster up` for a fresh QR anytime.");
     console.log(`  Later: ${url.split("#")[0]}  (same network)`);
   }
   if (detached) {
@@ -502,7 +508,53 @@ async function mintAndPrint(port, { detached }) {
     console.log("  Keep this terminal open — Ctrl-C stops Muster. (`muster up -d` keeps it after the terminal closes.)");
   }
   console.log("");
-  console.log("  Next: open Settings → Engines and give your first bot a model, then just talk to it.");
+  console.log("  Next: `muster setup` picks an engine and meets your first bot — or open Settings → Engines.");
+}
+
+/** Auth secret + server env shared by every boot path (up foreground, up -d,
+ *  setup). The server refuses to boot on a non-loopback host without
+ *  BETTER_AUTH_SECRET (resolveSecret throws): generate once, persist 0600,
+ *  reuse forever — sessions must survive restarts. */
+function serverEnv(port, runtime) {
+  const secretPath = join(MUSTER_DIR, "auth.secret");
+  mkdirSync(MUSTER_DIR, { recursive: true });
+  if (!existsSync(secretPath)) {
+    writeFileSync(secretPath, randomBytes(32).toString("base64"), { mode: 0o600 });
+  }
+  const env = {
+    ...process.env,
+    OMB_PORT: String(port),
+    OMB_HOST: "0.0.0.0", // all interfaces: loopback claim-create AND the phone's LAN access
+    BETTER_AUTH_SECRET: readFileSync(secretPath, "utf8").trim(),
+    OMB_STATIC_DIR: runtime.static ?? "",
+    OMB_DATA_DIR: arg("--data-dir") ?? process.env.OMB_DATA_DIR ?? join(MUSTER_DIR, "data"),
+  };
+  if (arg("--public-host")) env.OMB_PUBLIC_HOST = arg("--public-host");
+  return env;
+}
+
+/** Spawn the server detached — own process group, output to the log file,
+ *  survives the terminal closing (SIGHUP ignored via detached+unref on
+ *  POSIX) — record the run record, wait for health. Shared by `up -d` and
+ *  `setup`. Returns { pid, port }. */
+async function bootDetached(port, runtime) {
+  const env = serverEnv(port, runtime);
+  mkdirSync(RUN_DIR, { recursive: true });
+  const log = openSync(LOG_PATH, "a");
+  const daemon = spawn(runtime.cmd, runtime.args, {
+    cwd: runtime.cwd,
+    env,
+    stdio: ["ignore", log, log],
+    detached: true,
+  });
+  daemon.unref();
+  writeFileSync(
+    RUNTIME_PATH,
+    JSON.stringify({ pid: daemon.pid, port, started: new Date().toISOString() }, null, 2) + "\n",
+    { mode: 0o600 },
+  );
+  await waitHealthy(port);
+  return { pid: daemon.pid, port };
 }
 
 async function up() {
@@ -527,48 +579,13 @@ async function up() {
   const port = await freePort(Number(arg("--port") ?? 8799));
   const runtime = resolveRuntime();
 
-  // Self-host gate: the server refuses to boot on a non-loopback host without
-  // BETTER_AUTH_SECRET (resolveSecret throws). Generate once, persist 0600,
-  // reuse forever — sessions must survive restarts.
-  const secretPath = join(MUSTER_DIR, "auth.secret");
-  mkdirSync(MUSTER_DIR, { recursive: true });
-  if (!existsSync(secretPath)) {
-    writeFileSync(secretPath, randomBytes(32).toString("base64"), { mode: 0o600 });
-  }
-
-  const env = {
-    ...process.env,
-    OMB_PORT: String(port),
-    OMB_HOST: "0.0.0.0", // all interfaces: loopback claim-create AND the phone's LAN access
-    BETTER_AUTH_SECRET: readFileSync(secretPath, "utf8").trim(),
-    OMB_STATIC_DIR: runtime.static ?? "",
-    OMB_DATA_DIR: arg("--data-dir") ?? process.env.OMB_DATA_DIR ?? join(MUSTER_DIR, "data"),
-  };
-  if (arg("--public-host")) env.OMB_PUBLIC_HOST = arg("--public-host");
-
   if (detached) {
-    // Detached: own process group, output to the log file, survives the
-    // terminal closing (SIGHUP ignored via detached+unref on POSIX).
-    mkdirSync(RUN_DIR, { recursive: true });
-    const log = openSync(LOG_PATH, "a");
-    const daemon = spawn(runtime.cmd, runtime.args, {
-      cwd: runtime.cwd,
-      env,
-      stdio: ["ignore", log, log],
-      detached: true,
-    });
-    daemon.unref();
-    writeFileSync(
-      RUNTIME_PATH,
-      JSON.stringify({ pid: daemon.pid, port, started: new Date().toISOString() }, null, 2) + "\n",
-      { mode: 0o600 },
-    );
-    await waitHealthy(port);
+    await bootDetached(port, runtime);
     await mintAndPrint(port, { detached: true });
     return;
   }
 
-  child = spawn(runtime.cmd, runtime.args, { cwd: runtime.cwd, env, stdio: "inherit" });
+  child = spawn(runtime.cmd, runtime.args, { cwd: runtime.cwd, env: serverEnv(port, runtime), stdio: "inherit" });
   const stop = (sig) => {
     if (child && child.exitCode === null) child.kill(sig);
     process.exit(0);
@@ -583,10 +600,199 @@ async function up() {
   // the process lifetime from here.
 }
 
+// ── muster setup ────────────────────────────────────────────────────────
+// Guided first run: connect to (or boot) the local server, sign in as the
+// owner the way the QR does, pick an engine, meet the first bot — with the
+// one paid thing (a test turn) strictly behind an ask-first gate.
+
+// `ask` must tolerate piped stdin (an agent or CI driving `muster setup`):
+// readline drops `line` events that arrive before any question is pending,
+// and once stdin ends, `rl.question` after that rejects with
+// "readline was closed". So: buffer early lines into a queue, and treat
+// stdin-EOF as "take the default" instead of a crash.
+function makeAsker() {
+  const buffered = [];
+  let eof = false;
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  rl.on("line", (l) => buffered.push(l));
+  rl.on("close", () => { eof = true; });
+  const ask = async (question, fallback) => {
+    process.stdout.write(question);
+    if (buffered.length) return buffered.shift().trim() || fallback;
+    if (eof) return fallback;
+    const a = await rl.question("");
+    return a.trim() || fallback;
+  };
+  ask.close = () => rl.close();
+  return ask;
+}
+
+/** Owner session without the phone: mint a claim code over loopback and
+ *  redeem it — the exact ride the QR takes, driven from the machine itself.
+ *  Saves {base, cookie} and returns the config. */
+async function claimSession(port) {
+  const base = `http://127.0.0.1:${port}`;
+  const create = await fetch(`${base}/api/pair/claim/create`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  });
+  if (!create.ok) {
+    console.error(`Could not mint a claim code (HTTP ${create.status}). Is the server on this machine?`);
+    console.error("Alternatively: `muster pair --local --port <port> --email .. --password ..`");
+    process.exit(1);
+  }
+  const { code } = await create.json();
+  const redeem = await fetch(`${base}/api/pair/claim`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  const raw = redeem.headers.getSetCookie().find((c) => c.startsWith("better-auth.session_token="));
+  if (!redeem.ok || !raw) {
+    console.error("Claim redemption failed — run `muster up` and pair by QR instead.");
+    process.exit(1);
+  }
+  const cfg = { base, cookie: raw.split(";")[0] };
+  saveConfig(cfg);
+  return cfg;
+}
+
+async function setup() {
+  const ask = makeAsker();
+  try {
+    // ── connect ──
+    let rec = await liveServer(readRunRecord());
+    if (!rec) {
+      const answer = await ask("No Muster server is running. Start one now? [Y/n] ", "y");
+      if (!/^y/i.test(answer)) {
+        console.log("Okay — run `muster up` (or `muster up -d`) first, then `muster setup` again.");
+        return;
+      }
+      const port = await freePort(Number(arg("--port") ?? 8799));
+      console.log(`Booting Muster on port ${port} in the background — it survives this terminal, \`muster stop\` ends it…`);
+      rec = await bootDetached(port, resolveRuntime());
+    }
+    const base = `http://127.0.0.1:${rec.port}`;
+
+    // ── sign in ── keep a saved session if it already works here, else ride
+    // the claim flow (the owner account is provisioned server-side on first
+    // redemption if the install has none).
+    let cfg = loadConfig();
+    let signedIn = cfg.base === base && Boolean(cfg.cookie);
+    if (signedIn) {
+      const probe = await fetch(`${base}/api/auth/get-session`, { headers: { cookie: cfg.cookie } });
+      signedIn = probe.ok && Boolean(await probe.json().catch(() => null));
+    }
+    if (signedIn) {
+      cfg = { base, cookie: cfg.cookie };
+      console.log(`Connected to ${base} with the saved session.`);
+    } else {
+      console.log("Signing in as the owner (claim code over loopback)…");
+      cfg = await claimSession(rec.port);
+    }
+
+    // ── engine ──
+    const { instances } = await asJson(await api(cfg, "/api/instances"));
+    const available = instances.filter((i) => i.snapshot?.state === "available");
+    if (!available.length) {
+      console.log("");
+      console.log("No engine is available yet — that's the one thing Muster can't do for you.");
+      console.log("Install a CLI (Claude Code, Codex CLI, …) and sign in to it, or open the console's");
+      console.log("Settings → Engines to add a provider. Then run `muster setup` again.");
+      return;
+    }
+    console.log("");
+    console.log("Connect your AI provider — pick an engine:");
+    available.forEach((inst, i) => console.log(`  ${i + 1}) ${inst.displayName} · ${inst.driverKind}`));
+    const pick = Number(await ask(`Engine [1]: `, "1")) - 1;
+    const engine = available[Number.isInteger(pick) && pick >= 0 && pick < available.length ? pick : 0];
+    let model = engine.models?.default ?? "";
+    // options entries are {id,label} objects on every current driver; accept
+    // bare strings too so a driver that ships plain ids still renders.
+    const options = (engine.models?.options ?? []).map((mo) =>
+      typeof mo === "string" ? { id: mo, label: mo } : { id: String(mo.id), label: String(mo.label ?? mo.id) },
+    );
+    if (options.length > 1) {
+      console.log("  Models:");
+      options.forEach((mo, i) => console.log(`    ${i + 1}) ${mo.label}${mo.id === model ? "  (default)" : ""}`));
+      const mi = Number(await ask(`Model [1]: `, "1")) - 1;
+      if (Number.isInteger(mi) && mi >= 0 && mi < options.length) model = options[mi].id;
+    }
+    console.log(`  → ${engine.displayName}${model ? ` on ${model}` : ""}`);
+
+    // ── first bot ──
+    const { bots } = await asJson(await api(cfg, "/api/bots"));
+    const visible = bots.filter((b) => !b.hidden);
+    let bot;
+    let created = false;
+    if (visible.length) {
+      console.log("");
+      console.log("Bots on this server:");
+      visible.slice(0, 5).forEach((b, i) => console.log(`  ${i + 1}) ${b.name}${b.modelSelection?.instanceId ? ` · ${b.modelSelection.instanceId}` : " · no engine"}`));
+      const choice = await ask(`Who should run on ${engine.displayName}? [number, or Enter for a new bot] `, "new");
+      const bi = Number(choice) - 1;
+      bot = Number.isInteger(bi) && bi >= 0 && bi < visible.length ? visible[bi] : null;
+    }
+    if (!bot) {
+      const made = await api(cfg, "/api/bots", { method: "POST", body: "{}" });
+      if (!made.ok) {
+        const body = await made.json().catch(() => null);
+        console.error(body?.error ?? `could not create a bot (HTTP ${made.status})`);
+        process.exit(1);
+      }
+      bot = (await made.json()).bot;
+      created = true;
+      const name = await ask(`Name it [${bot.name}]: `, "");
+      if (name && name !== bot.name) {
+        bot = (await asJson(await api(cfg, `/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ name }) }))).bot;
+      }
+    }
+    if (bot.modelSelection?.instanceId !== engine.instanceId || (model && bot.modelSelection?.model !== model)) {
+      await asJson(
+        await api(cfg, `/api/bots/${bot.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ modelSelection: { instanceId: engine.instanceId, model } }),
+        }),
+      );
+    }
+    console.log(`${bot.name} runs on ${engine.displayName}${model ? ` (${model})` : ""}.${created ? "" : " (model selection updated)"}`);
+
+    // ── test turn, strictly opt-in: this calls the real provider ──
+    console.log("");
+    const go = await ask(`Send ${bot.name} a short hello now? It calls ${engine.displayName} and may use your plan's credits. [y/N] `, "n");
+    if (/^y/i.test(go)) {
+      console.log("Sent — waiting for the reply…");
+      await asJson(
+        await api(cfg, `/api/bots/${bot.id}/messages`, {
+          method: "POST",
+          body: JSON.stringify({ text: "Introduce yourself in one short sentence — you're part of my Muster workforce." }),
+        }),
+      );
+      const reply = await waitForReply(cfg, bot.id, 120_000);
+      console.log("");
+      if (reply) {
+        console.log(`  ${bot.name}: ${reply.trim()}`);
+        console.log("");
+        console.log("That's the workforce working. Give it real work with `muster send <bot> <text>`.");
+      } else {
+        console.log("No reply within two minutes — the turn may still be running.");
+        console.log(`Check \`muster watch\` or the console: http://${lanAddress() ?? "127.0.0.1"}:${rec.port}/app`);
+      }
+    } else {
+      console.log(`Skipped. Anytime: muster send ${bot.name} "hello"`);
+    }
+    console.log("");
+    console.log("Pair your phone anytime with `muster up` — it prints the QR. Config: " + CONFIG_PATH);
+  } finally {
+    ask.close();
+  }
+}
+
 const HELP = `muster — the CLI for your AI workforce
 
   muster up [-d] [--port 8799]    boot the server here; scan the QR with your phone.
                                   -d keeps it running after the terminal closes.
+  muster setup                    guided first run: connect, pick an engine, meet your first bot
   muster stop                     stop the background server started with up -d
   muster logs [n]                 last n lines of the background server log (default 40)
   muster pair [--local --port 8799 --email .. --password ..]
@@ -603,6 +809,9 @@ try {
   switch (command) {
     case "up":
       await up();
+      break;
+    case "setup":
+      await setup();
       break;
     case "stop":
       await stopDaemon();

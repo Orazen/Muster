@@ -7,7 +7,9 @@
 //
 // The code IS the credential (same trust model as OAuth device activation,
 // same mechanics as pairing.ts): 8 chars of the unambiguous alphabet,
-// single-use, ten-minute TTL, and claim attempts are rate-limited per IP.
+// single-use, five-minute TTL, and redemption is throttled per IP — five
+// failed attempts lock that IP out for ten minutes, so guessing a live code
+// is hopeless long before expiry.
 // This module deliberately does NOT share a namespace with pairing.ts — a
 // pairing code must never redeem as a claim code and vice versa, so the two
 // flows keep separate maps, separate stores, and this module never mixes
@@ -21,17 +23,19 @@ import { z } from "zod";
 import { DATA_DIR } from "./config.ts";
 import { VerifyError } from "./pairing.ts";
 
-const CODE_TTL_MS = 10 * 60_000;
+const CODE_TTL_MS = 5 * 60_000;
 const CODE_LENGTH = 8;
 // Same alphabet as pairing codes: no 0/O/1/I/L, because these get read off
 // a laptop screen by a phone camera at arm's length.
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
-/** Claim attempts allowed per IP inside one window — identical posture to
- * pairing redemption. The code's entropy (2^40) does the real work; this
- * just makes offline guessing hopeless before expiry. */
-const CLAIM_WINDOW_MS = 5 * 60_000;
-const MAX_CLAIMS_PER_WINDOW = 20;
+/** Failed redemptions an IP gets before a ten-minute lockout — the
+ * self-host front door's brute-force posture. The code's entropy (2^40)
+ * does the real work; this makes even a lucky guessing run hopeless, and
+ * unlike burning the code on bad guesses it can't be weaponized against
+ * the operator (a drive-by scanner can lock OUT an IP, never kill the QR). */
+const CLAIM_WINDOW_MS = 10 * 60_000;
+const MAX_CLAIMS_PER_WINDOW = 5;
 
 interface PendingClaim {
   expiresAt: number;
@@ -137,36 +141,45 @@ export function createClaimCode(now = Date.now()) {
   return { code, expiresAt };
 }
 
-/** Redeem a claim code: single-use, expiry-checked, IP-throttled. Throws
- * VerifyError on every failure shape (empty, unknown, expired, throttled).
- * The caller resolves the owner account — this module deliberately knows
- * nothing about users, keeping the code namespace and the identity store
- * decoupled. */
+/** Redeem a claim code: single-use, expiry-checked, brute-force-throttled.
+ * Throws VerifyError on every failure shape (empty, unknown, expired,
+ * locked out). Only FAILED attempts count toward the lockout — a wrong
+ * guess is evidence of attack, a right one isn't — and a successful
+ * redemption clears the IP's slate. The caller resolves the owner account —
+ * this module deliberately knows nothing about users, keeping the code
+ * namespace and the identity store decoupled. */
 export function consumeClaimCode(code: string, ip = "unknown", now = Date.now()): void {
   const normalized = String(code ?? "").trim().toUpperCase();
   if (!normalized) throw new VerifyError("this link is missing its claim code — run `muster up` and scan the fresh QR");
+  // Lockout check comes FIRST: a throttled IP gets 429 even holding the
+  // right code, or the throttle wouldn't throttle.
   const window = claimAttempts.get(ip);
-  if (!window || window.windowStart + CLAIM_WINDOW_MS <= now) {
-    claimAttempts.set(ip, { count: 1, windowStart: now });
-  } else {
-    window.count++;
-    if (window.count > MAX_CLAIMS_PER_WINDOW) {
-      throw new VerifyError("too many attempts — wait a few minutes and try again", 429);
-    }
+  if (window && window.windowStart + CLAIM_WINDOW_MS > now && window.count >= MAX_CLAIMS_PER_WINDOW) {
+    throw new VerifyError("too many failed attempts — locked out for a few minutes; run `muster up` again for a fresh QR if yours expired", 429);
   }
   sweepExpired(now);
   const entry = pending.get(normalized);
   if (!entry || entry.expiresAt <= now) {
     pending.delete(normalized);
+    if (!window || window.windowStart + CLAIM_WINDOW_MS <= now) {
+      claimAttempts.set(ip, { count: 1, windowStart: now });
+    } else {
+      window.count++;
+    }
     persistStore();
     // Enough to tell a typo from a restart race from a stale QR, never a
     // full redeemable code.
     console.log(
       `[claim] rejected ${normalized.slice(0, 2)}*** len=${normalized.length} ip=${ip} pending=${pending.size}`,
     );
-    throw new VerifyError("that code isn't valid — run `muster up` again for a fresh QR");
+    throw new VerifyError(
+      pending.size > 0
+        ? "that code isn't valid — a fresh QR was printed; use the latest one"
+        : "that code isn't valid — run `muster up` again for a fresh QR",
+    );
   }
   pending.delete(normalized);
+  claimAttempts.delete(ip);
   persistStore();
   console.log(`[claim] consumed ${normalized.slice(0, 2)}*** from ip ${ip}`);
 }

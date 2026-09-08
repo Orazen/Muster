@@ -3957,7 +3957,8 @@ let requestUserEmail = "";
       return json(res, 201, { code, expiresAt });
     }
     // Public redeem: the phone scanning the QR has no session yet — the
-    // code IS the credential. Single-use, 10-minute TTL, per-IP throttled.
+    // code IS the credential. Single-use, 5-minute TTL, per-IP throttled
+    // (five failed attempts lock that IP out for ten minutes).
     if (method === "POST" && path === "/api/pair/claim") {
       const body = await readBody(req);
       const code = isText(body.code) ? body.code : "";
