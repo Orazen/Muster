@@ -138,5 +138,5 @@ echoed by the API.
 | `GET /api/routines` | scheduled work |
 | `POST /api/pair/redeem` | pairing-code sign-in |
 
-Full platform docs for humans: https://muster.orazen.online/download.html ·
-Source: https://github.com/Orazen/Muster
+Full docs for humans: https://muster.orazen.online/docs ·
+Skill file: https://muster.orazen.online/skill.md · llms.txt: https://muster.orazen.online/llm.txt

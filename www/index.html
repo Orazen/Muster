@@ -405,9 +405,9 @@
       </nav>
     </div>
     <div class="site-header__right">
-      <a class="star-pill" href="https://github.com/Orazen/Muster" target="_blank" rel="noreferrer">
+      <a class="star-pill" href="/docs">
         <span aria-hidden="true">★</span>
-        <span data-star-count>Star</span>
+        <span>Docs</span>
       </a>
       <div class="site-header__cta">
         <a class="button button--primary button--small" href="/app">Open Muster</a>
@@ -428,7 +428,7 @@
         <a href="/switch.html">Switch</a>
           <a href="#compare">Compare</a>
           <a href="#download">Download</a>
-          <a href="https://github.com/Orazen/Muster" target="_blank" rel="noreferrer">GitHub</a>
+          <a href="/docs">Docs</a>
           <a href="/app">Open Muster</a>
         </nav>
       </details>
@@ -452,7 +452,7 @@
         <a class="button button--secondary" href="/download.html">Download for desktop</a>
       </div>
       <div class="hero__agent-setup">
-        <button class="setup-copy" type="button" data-setup-copy="Set up Muster for me. Follow the quick start at https://github.com/Orazen/Muster#quick-start">
+        <button class="setup-copy" type="button" data-setup-copy="Set up Muster for me. Follow the quick start at https://muster.orazen.online/docs/quick-start">
           <span class="setup-copy__prefix" aria-hidden="true">$</span>
           <span class="setup-copy__label">Set up with your agent</span>
           <svg class="setup-copy__icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -705,8 +705,8 @@
             <div>One Docker command to start</div>
           </div>
           <div class="comparison-actions">
-            <a class="button button--secondary button--small" href="https://github.com/Orazen/Muster" target="_blank" rel="noreferrer">Star on GitHub</a>
-            <a class="button button--secondary button--small" href="https://github.com/Orazen/Muster#quick-start" target="_blank" rel="noreferrer">Read the docs</a>
+            <a class="button button--secondary button--small" href="/download.html">Download</a>
+            <a class="button button--secondary button--small" href="/docs">Read the docs</a>
           </div>
         </article>
         <article class="comparison-card">
@@ -1045,7 +1045,7 @@
 
   <!-- Required footnote -->
   <p style="margin-top:16px;color:var(--muted-2);font-size:13px;">Compared from public READMEs Aug 2026 — corrections welcome.</p>
-  <p style="margin-top:10px;color:var(--muted-2);font-size:13px;">Also studied Sep 2026, same method: Buzz (Block), Multica, Omnigent, the Macro workspace suite, NanoClaw, OpenWork, Eigent and Cherry Studio — none combines agents-with-identity, rooms, verifiable signed receipts, BYO-any-endpoint and cloud computers on every surface. Full field notes: <a href="https://github.com/Orazen/Muster/blob/main/docs/plans/muster-platform-strategy.md" style="color:var(--accent-soft);">platform strategy doc</a>.</p>
+  <p style="margin-top:10px;color:var(--muted-2);font-size:13px;">Also studied Sep 2026, same method: Buzz (Block), Multica, Omnigent, the Macro workspace suite, NanoClaw, OpenWork, Eigent and Cherry Studio — none combines agents-with-identity, rooms, verifiable signed receipts, BYO-any-endpoint and cloud computers on every surface. Full field notes live in the <a href="/docs" style="color:var(--accent-soft);">docs</a>.</p>
 </section>
 
   </main>
@@ -1067,11 +1067,9 @@
     </div>
     <nav class="site-footer__links" aria-label="Footer">
       <a href="/bots">Teams</a>
-      <a href="https://github.com/Orazen/Muster" target="_blank" rel="noreferrer">GitHub</a>
-      <a href="https://github.com/Orazen/Muster#quick-start" target="_blank" rel="noreferrer">Docs</a>
-      <a href="https://github.com/Orazen/Muster/releases" target="_blank" rel="noreferrer">Releases</a>
-      <a href="https://github.com/Orazen/Muster/blob/main/SECURITY.md" target="_blank" rel="noreferrer">Security</a>
-      <a href="https://github.com/Orazen/Muster/blob/main/LICENSE" target="_blank" rel="noreferrer">License</a>
+      <a href="/docs">Docs</a>
+      <a href="/download.html">Download</a>
+      <a href="/docs/security">Security &amp; license</a>
       <a href="https://www.linkedin.com/in/ramagiritharun" target="_blank" rel="noreferrer">LinkedIn</a>
     </nav>
   </footer>
@@ -1100,8 +1098,7 @@
       "applicationSubCategory": "AI agent platform",
       "operatingSystem": "macOS, Windows, Ubuntu, Web",
       "isAccessibleForFree": true,
-      "codeRepository": "https://github.com/Orazen/Muster",
-      "license": "https://github.com/Orazen/Muster/blob/main/LICENSE",
+      "license": "https://muster.orazen.online/docs/security",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "author": {
         "@type": "Person",
@@ -1153,37 +1150,6 @@
         label.textContent = "Copy failed — try again";
       }
     });
-  })();
-
-  // GitHub stars
-  (function () {
-    var targets = document.querySelectorAll("[data-star-count]");
-    if (!targets.length) return;
-
-    function format(count) {
-      if (count < 1000) return String(count);
-      var thousands = count / 1000;
-      var rounded = thousands >= 10 ? Math.round(thousands) : Math.round(thousands * 10) / 10;
-      return (rounded + "k").replace(/\.0k$/, "k");
-    }
-
-    fetch("https://api.github.com/repos/Orazen/Muster", {
-      headers: { Accept: "application/vnd.github+json" },
-    })
-      .then(function (response) {
-        if (!response.ok) throw new Error("bad response");
-        return response.json();
-      })
-      .then(function (payload) {
-        if (typeof payload.stargazers_count !== "number") return;
-        var label = format(payload.stargazers_count);
-        targets.forEach(function (node) {
-          node.textContent = label;
-        });
-      })
-      .catch(function () {
-        /* leave the fallback text in place */
-      });
   })();
 </script>
 

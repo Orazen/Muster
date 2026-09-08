@@ -190,7 +190,7 @@
 
   <main>
     <section class="hero">
-      <h1>Download Muster <span style="font-weight:500;font-size:0.55em;vertical-align:middle;color:var(--muted);white-space:nowrap;">v1.10.2</span></h1>
+      <h1>Download Muster <span id="dl-version" style="font-weight:500;font-size:0.55em;vertical-align:middle;color:var(--muted);white-space:nowrap;">v1.10.2</span></h1>
       <p class="lead">The open desktop app for running a team of AI agents. Self-host free on your own machine.</p>
       <div class="detected-badge" id="detected-badge" style="display:none;">
         <span class="detected-badge__dot"></span>
@@ -272,7 +272,7 @@
   -p 3010:3010 \
   -v ~/.muster:/root/.muster \
   ghcr.io/orazen/muster:latest</code>
-      <p style="margin-top:16px;"><a href="https://github.com/Orazen/Muster/blob/main/docs/self-host.md" target="_blank" rel="noreferrer">Full self-hosting guide →</a></p>
+      <p style="margin-top:16px;"><a href="/docs/self-host">Full self-hosting guide →</a></p>
     </div>
 
     <div class="note">
@@ -335,18 +335,20 @@
     }
   }
 
-  // Fetch latest.json for checksums (non-blocking)
+  // Fetch latest.json for the version badge and checksums (non-blocking)
   fetch('/downloads/latest.json').then(function(r) {
     if (!r.ok) throw 0;
     return r.json();
   }).then(function(meta) {
+    var v = document.getElementById('dl-version');
+    if (v && meta.version) v.textContent = 'v' + meta.version;
     var list = document.getElementById('checksums-list');
     if (!meta.checksums) return;
     list.textContent = Object.keys(meta.checksums).map(function(f) {
       return meta.checksums[f] + '  ' + f;
     }).join('\n');
   }).catch(function() {
-    // latest.json not yet deployed — fall back to static links
+    // latest.json not reachable — keep the static version, fall back for checksums
     var list = document.getElementById('checksums-list');
     list.textContent = 'Checksums will be available after the next release.';
   });

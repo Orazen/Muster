@@ -7330,6 +7330,38 @@ let requestUserEmail = "";
       }
     }
 
+    // self-hosted docs at pretty URLs: /docs, /docs/quick-start, /docs/security.
+    // Resolves <rel>, <rel>.html, <rel>/index.html inside the marketing dir's
+    // docs/ folder. Unlike the marketing handler below, a miss 404s here so
+    // the app SPA fallback never swallows a broken docs link.
+    if (method === "GET" && MARKETING_DIR && (path === "/docs" || path.startsWith("/docs/"))) {
+      const rel = path.slice(1).replace(/\.\./g, "").replace(/\/+$/, "") || "docs";
+      const candidates = [join(MARKETING_DIR, rel), join(MARKETING_DIR, rel + ".html")];
+      if (path === "/docs" || path.endsWith("/")) candidates.push(join(MARKETING_DIR, rel, "index.html"));
+      for (const file of candidates) {
+        try {
+          const data = readFileSync(file);
+          res.writeHead(200, { "content-type": MIME.get(extname(file)) ?? "text/html" });
+          return res.end(data);
+        } catch {
+          /* try the next candidate */
+        }
+      }
+      res.writeHead(404, { "content-type": "text/html; charset=utf-8" });
+      return res.end(
+        `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
+        `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+        `<title>Page not found — Muster Docs</title><link rel="stylesheet" href="/docs/docs.css">` +
+        `</head><body><header class="docs-header"><a class="brand-lockup" href="/">Muster</a>` +
+        `<span class="docs-tag">Docs</span></header>` +
+        `<div class="docs-shell" style="grid-template-columns:1fr">` +
+        `<main class="docs-content"><h1>Page not found</h1>` +
+        `<p class="lead">That docs page doesn't exist. Head back to the ` +
+        `<a href="/docs">documentation overview</a> or the <a href="/">home page</a>.</p>` +
+        `</main></div></body></html>`
+      );
+    }
+
     // public marketing pages at "/" — the landing itself plus any real
     // file that exists in the marketing dir (teams.html, images, css).
     // Never intercepts /api or the app's deep links; SPA fallback below.

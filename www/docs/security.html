@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security &amp; license — Muster Docs</title>
+<meta name="description" content="Muster's security model: local-first data, keys on your server, claim-gated workspaces, approval gating. How to report security issues, and the Business Source License 1.1 explained.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+
+<header class="docs-header">
+  <a class="brand-lockup" href="/">
+    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
+    Muster
+  </a>
+  <span class="docs-tag">Docs</span>
+  <div class="docs-header__spacer"></div>
+  <nav class="docs-header__links">
+    <a href="/download.html">Download</a>
+    <a href="/#features">Features</a>
+    <a class="button button--primary button--small" href="/app">Open app</a>
+  </nav>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-sidebar" aria-label="Docs navigation">
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Start</p>
+      <a href="/docs">Overview</a>
+      <a href="/docs/quick-start">Quick start</a>
+      <a href="/docs/install">Install &amp; apps</a>
+      <a href="/docs/self-host">Self-hosting</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Operate</p>
+      <a href="/docs/engines">Engines &amp; models</a>
+      <a href="/docs/goals">Goals &amp; autonomy</a>
+      <a href="/docs/automation">Automation</a>
+      <a href="/docs/approvals">Approvals &amp; privacy</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Reference</p>
+      <a href="/docs/agents">For agents</a>
+      <a href="/docs/security" aria-current="page">Security &amp; license</a>
+    </div>
+  </aside>
+
+  <main class="docs-content">
+
+    <h1>Security &amp; license</h1>
+    <p class="lead">An agent workforce is only trustworthy if you can see where the data lives, who can sign in, and who says yes. This page is the plain-language version of Muster's security model, how to report a problem, and what the license lets you do.</p>
+
+    <div class="pill-row">
+      <span class="pill">Local-first</span>
+      <span class="pill">Self-hostable</span>
+      <span class="pill">Signed receipts</span>
+      <span class="pill">BSL 1.1</span>
+    </div>
+
+    <h2>The security model</h2>
+    <p>Four layers, each independently checkable:</p>
+    <ul>
+      <li><strong>Local-first data.</strong> Transcripts, keys, and events live in <code>~/.muster</code> on the machine running the server — not in a cloud. The mobile companions own nothing; your computer stays the source of truth.</li>
+      <li><strong>Keys on your server.</strong> Provider API keys are stored write-only and never echoed by the API. The Privacy Shield masks emails, phones, and secrets before a prompt reaches a cloud model, leaving a counts-only receipt.</li>
+      <li><strong>Claim-gated workspaces.</strong> <code>muster up</code> pairs your phone with a claim code: single-use, five-minute TTL, an unambiguous 8-character alphabet, and a per-IP lockout after five failed redemptions. The default server binds loopback-only, rejecting non-loopback hosts and origins (DNS-rebinding and CSRF protection); on desktop installs, state-changing requests must be same-origin with the Host header.</li>
+      <li><strong>Approval gating.</strong> Shell commands and file edits surface as approval cards you Allow or Deny; standing "always allow" grants are scoped per capability, and anything destructive stops and asks a human anyway. Per-agent token budgets and daily USD caps bound the blast radius of a runaway loop.</li>
+    </ul>
+    <p>Expose a self-hosted server and it hardens: every <code>/api/*</code> route requires a valid session — only sign-in (rate-limited to five attempts per minute per IP, twelve-character minimum passwords) and health checks are excepted. Cross-origin clients must be allow-listed via <code>OMB_ALLOWED_ORIGINS</code>, and peer-agent comms on <code>/api/internal/*</code> never leave loopback, even on an exposed deployment.</p>
+    <p>Work, too, is verifiable: every settled task ends in a job receipt (bot, duration, tokens, cost, final word), and shared receipts carry a detached HMAC signature anyone can verify at <code>/api/receipts/verify</code> — proof-of-work you can paste anywhere.</p>
+    <div class="callout callout--note">
+      <span class="callout__mark">Full details:</span>
+      <span>The controls above are covered in depth on <a href="/docs/approvals">Approvals &amp; privacy</a>, and the deployment side — TLS, reverse proxy, environment variables — in <a href="/docs/self-host">Self-hosting</a>.</span>
+    </div>
+
+    <h2>Reporting a security issue</h2>
+    <p>Found something? Please report it privately — don't open a public issue with exploit details. Contact the team privately through the site at <a href="/">orazen.online</a> and we'll take it from there. We'd rather hear about it from you than from someone else.</p>
+
+    <h2>The license: Business Source License 1.1</h2>
+    <p>Muster is <strong>source-available</strong>, not open-source. The license is the Business Source License 1.1 (BSL 1.1), © 2026-present Ramagiritharun (Tharun Ramagiri). In practice:</p>
+    <table>
+      <tr><th>You can</th><th>You can't</th></tr>
+      <tr><td>Copy, modify, create derivative works, redistribute, and sublicense the work.</td><td>Offer Muster (or a substantially similar product) as a managed service to third parties on infrastructure you control — the SaaS carve-out.</td></tr>
+      <tr><td>Use it free for personal, internal business, development, testing, and non-commercial purposes. Commercial use is permitted as long as you don't turn it into a competing managed service.</td><td>Remove, alter, or obscure proprietary notices, licenses, or disclaimers.</td></tr>
+      <tr><td>Self-host forever, free — this grant has no expiry.</td><td>Use Muster's name, trademarks, or logos to endorse or promote derived products without prior written permission.</td></tr>
+    </table>
+    <p>Content under a <code>/proprietary</code> directory, if present, is licensed separately under <code>LICENSE_PROPRIETARY.md</code>; everything else is BSL 1.1.</p>
+    <div class="callout">
+      <span class="callout__mark">Change date:</span>
+      <span>On <strong>2030-08-19</strong>, Muster converts to the Apache License, Version 2.0 — a fully permissive, OSI-approved open-source license. Everything published before that date falls under the same conversion. Self-hosting stays free the entire time.</span>
+    </div>
+    <p>Why BSL instead of MIT or Apache today? It keeps the source open for inspection while drawing one bright line — no reselling Muster itself as a service — until the change date arrives. After 2030-08-19 that line dissolves on its own.</p>
+
+    <h2>What Muster does not do</h2>
+    <ul>
+      <li><strong>No cryptocurrency.</strong> Muster has no token. Any coin using the Muster name is not created, endorsed, or affiliated with this project, Orazen, or its maintainers — no tokens, payment, or allocation have ever been received from anyone.</li>
+      <li><strong>Your data doesn't become ours.</strong> Transcripts and keys live on your machine by default; a self-hosted server keeps them on your hardware. Thin mobile clients store nothing.</li>
+      <li><strong>Untrusted input isn't instruction.</strong> Inbound agent mail, room messages, routine webhooks, and team-library packs are treated as data, not commands — a bot only acts on a channel its human approved, for that peer.</li>
+    </ul>
+
+    <h2>Where to go next</h2>
+    <p>For the human-side controls: <a href="/docs/approvals">Approvals &amp; privacy</a>. For running Muster on hardware you own: <a href="/docs/self-host">Self-hosting</a>. For the machine-readable security surface: <a href="/docs/agents">For agents</a>.</p>
+
+  </main>
+</div>
+
+<footer class="docs-footer">
+  <span>© 2026 Orazen · Muster</span>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/download.html">Download</a>
+    <a href="/docs/security">Security</a>
+  </nav>
+</footer>
+
+</body>
+</html>

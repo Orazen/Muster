@@ -71,6 +71,12 @@ More screens: [model picker](docs/screenshots/model-picker.png) ·
 
 ## What's new
 
+- **Goal mode** — set an outcome instead of managing turns: bots loop plan → act → verify under a
+  turn budget, with pause/stop controls and a live goal banner. Bounded autonomy you can trust.
+- **Provenance on every turn** — each bot reply is stamped with the engine instance and model that
+  produced it (hover the chip in chat) so mixed-model teams stay auditable.
+- **Docs site** — [muster.orazen.online/docs](https://muster.orazen.online/docs): the full manual
+  self-hosted — quick start, install, self-hosting, engines, goal mode, automation, approvals.
 - **Muster OS** — a web-based operating system for your agent workforce: the dock is the roster, the
   shell is a chat, and ⌘K ("Ask Muster…") dispatches real work from anywhere. Bots appear as windows
   with live status, engine and computer.
@@ -333,6 +339,9 @@ nothing; your computer stays the source of truth. [iOS](ios/README.md) and
 [Android](android-companion/README.md) are built; store listings await developer accounts.
 
 ## Documentation
+
+**Full manual online:** [muster.orazen.online/docs](https://muster.orazen.online/docs) — quick start,
+install, self-hosting, engines, goal mode, automation, approvals, security & license.
 
 | Doc | What's in it |
 |---|---|

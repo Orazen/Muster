@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-hosting — Muster Docs</title>
+<meta name="description" content="Run the full Muster stack in Docker on your own server: compose quick start, environment variables, security model, TLS behind a reverse proxy, models, and updates.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+
+<header class="docs-header">
+  <a class="brand-lockup" href="/">
+    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
+    Muster
+  </a>
+  <span class="docs-tag">Docs</span>
+  <div class="docs-header__spacer"></div>
+  <nav class="docs-header__links">
+    <a href="/download.html">Download</a>
+    <a href="/#features">Features</a>
+    <a class="button button--primary button--small" href="/app">Open app</a>
+  </nav>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-sidebar" aria-label="Docs navigation">
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Start</p>
+      <a href="/docs">Overview</a>
+      <a href="/docs/quick-start">Quick start</a>
+      <a href="/docs/install">Install &amp; apps</a>
+      <a href="/docs/self-host" aria-current="page">Self-hosting</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Operate</p>
+      <a href="/docs/engines">Engines &amp; models</a>
+      <a href="/docs/goals">Goals &amp; autonomy</a>
+      <a href="/docs/automation">Automation</a>
+      <a href="/docs/approvals">Approvals &amp; privacy</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Reference</p>
+      <a href="/docs/agents">For agents</a>
+      <a href="/docs/security">Security &amp; license</a>
+    </div>
+  </aside>
+
+  <main class="docs-content">
+
+    <h1>Self-hosting</h1>
+    <p class="lead">Muster is local-first by default, but it can run as a single-user web service you self-host and open in any browser — no Electron, no macOS requirement. The same harness server and React UI, packaged into one Docker image. Self-hosting is free forever.</p>
+
+    <div class="pill-row">
+      <span class="pill">Docker</span>
+      <span class="pill">One container</span>
+      <span class="pill">Data in a named volume</span>
+      <span class="pill">Bring TLS</span>
+    </div>
+
+    <div class="callout">
+      <span class="callout__mark">Heads-up</span>
+      <span><strong>One-user model.</strong> Muster has no accounts, no multi-tenancy, and no hosted auth. Self-hosting exposes <em>your</em> single workspace. Only deploy it where you alone (or people you fully trust) can reach it, and put it behind a reverse proxy with TLS if you expose it beyond your machine.</span>
+    </div>
+
+    <h2>Quick start</h2>
+    <p>From a checkout of the project (the compose file is included):</p>
+    <pre><code>docker compose up -d --build</code></pre>
+    <p>Open <code>http://localhost:8799</code>. Bots, transcripts, config, and keys persist in the <code>muster-data</code> volume.</p>
+    <p>To reach it from another machine, port-forward or reverse-proxy port <code>8799</code>:</p>
+    <pre><code><span class="c"># on the server, listen on all interfaces (the image already does):</span>
+docker compose up -d
+<span class="c"># then browse to http://YOUR_SERVER:8799</span></code></pre>
+    <p>Prefer the prebuilt image over building? It's published as <code>ghcr.io/orazen/muster:latest</code>:</p>
+    <pre><code>docker run -d --name muster \
+  -p 8799:8799 \
+  -v muster-data:/data \
+  ghcr.io/orazen/muster:latest</code></pre>
+    <p>The image sets <code>OMB_HOST=0.0.0.0</code> (self-hosted) and keeps state in <code>/data</code>, which the volume maps — data survives rebuilds and upgrades in both the compose and image paths.</p>
+
+    <h2>Configuration</h2>
+    <p>All settings are environment variables on the <code>muster</code> service. The essentials:</p>
+    <table>
+      <tr><th>Variable</th><th>Default</th><th>What it does</th></tr>
+      <tr><td><code>OMB_HOST</code></td><td><code>127.0.0.1</code></td><td>Bind host for the harness + UI. The image sets <code>0.0.0.0</code> (self-hosted).</td></tr>
+      <tr><td><code>OMB_PORT</code></td><td><code>8799</code></td><td>Port the service listens on.</td></tr>
+      <tr><td><code>OMB_DATA_DIR</code></td><td><code>~/.muster</code></td><td>Where bots/transcripts/config live. The image uses <code>/data</code> (a volume).</td></tr>
+      <tr><td><code>OMB_PUBLIC_HOST</code></td><td>*(unset)*</td><td>Public hostname (no port) when serving over a domain, e.g. <code>muster.example.com</code>.</td></tr>
+      <tr><td><code>OMB_ALLOWED_ORIGINS</code></td><td>*(unset)*</td><td>Comma-separated extra origins allowed to call the API cross-origin (e.g. <code>https://app.example.com</code>).</td></tr>
+      <tr><td><code>BETTER_AUTH_SECRET</code></td><td>—</td><td><strong>Required when self-hosting.</strong> Signs session tokens; generate with <code>openssl rand -base64 32</code>. The server refuses to boot without it once the host is non-loopback. Keep it stable — changing it signs out every session — and never leak it: a leaked secret lets sessions be forged. If left empty, the entrypoint generates one on first boot and persists it to the volume.</td></tr>
+      <tr><td><code>OMB_PUBLIC_URL</code></td><td>*(derived)*</td><td>Absolute base URL including scheme, e.g. <code>https://muster.example.com</code>. Falls back to <code>https://$OMB_PUBLIC_HOST</code>, then loopback. Set it if you terminate TLS on a non-default port or serve under a path.</td></tr>
+      <tr><td><code>OMB_ALLOW_SIGNUPS</code></td><td>*(closed)*</td><td><code>true</code> reopens email sign-up on the deployment. Default closed; sign-in for existing accounts always works.</td></tr>
+      <tr><td><code>RESEND_API_KEY</code></td><td>*(unset)*</td><td>Enables outbound email (verification, password reset) via Resend. Without it those flows are hidden in the UI and links are logged to the console instead.</td></tr>
+      <tr><td><code>EMAIL_FROM</code></td><td><code>Muster &lt;noreply@localhost&gt;</code></td><td>From address for verification and reset mail. Must be a domain verified with Resend.</td></tr>
+      <tr><td><code>GITHUB_CLIENT_ID</code> / <code>GITHUB_CLIENT_SECRET</code></td><td>*(unset)*</td><td>Enables "Sign in with GitHub". Both halves required. Callback: <code>$OMB_PUBLIC_URL/api/auth/callback/github</code>.</td></tr>
+      <tr><td><code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code></td><td>*(unset)*</td><td>Enables "Sign in with Google". Callback: <code>$OMB_PUBLIC_URL/api/auth/callback/google</code>.</td></tr>
+    </table>
+    <p>Provider and integration credentials can also be pre-seeded via env instead of pasted in Settings: <code>XAI_API_KEY</code>, <code>COMPOSIO_API_KEY</code>, <code>BOX_TOKEN</code>, <code>OPENCODE_API_KEY</code>, <code>OMB_TTS_KEY</code> (ElevenLabs). They're all optional.</p>
+
+    <h2>Security model</h2>
+    <ul>
+      <li><strong>Default is loopback-only.</strong> On <code>127.0.0.1</code> the server rejects non-loopback hosts and origins (DNS-rebinding + CSRF protection) and keeps peer-agent comms (<code>/api/internal/*</code>) loopback-only with a per-boot token.</li>
+      <li><strong>Binding to <code>0.0.0.0</code> opts in.</strong> The host gate widens and same-origin browser requests are allowed. Cross-origin clients still require <code>OMB_ALLOWED_ORIGINS</code>.</li>
+      <li><strong>Peer-agent comms never leave loopback</strong> — even under <code>0.0.0.0</code>, a remote socket to <code>/api/internal/*</code> is rejected before the token check.</li>
+      <li><strong>Every API route requires a session when self-hosting.</strong> Requests to <code>/api/*</code> without a valid session get a <code>401</code>, except <code>/api/auth/*</code> (so sign-in is reachable) and <code>/api/health</code> (so load balancers can probe). Sign-in is rate-limited to 5 attempts per minute per IP; passwords must be at least 12 characters.</li>
+      <li><strong>Optional flows are hidden, not broken.</strong> Password reset and email verification only appear once <code>RESEND_API_KEY</code> is set; social buttons only appear for providers with both client id and secret present. The UI never offers a button that cannot work.</li>
+      <li><strong>Still put TLS in front.</strong> Sessions travel as cookies — terminate HTTPS at a reverse proxy before exposing this to the internet.</li>
+    </ul>
+
+    <h2>TLS behind a reverse proxy (recommended)</h2>
+    <p>Terminate TLS at a proxy and forward to port <code>8799</code>. SSE for the live event stream must not be buffered:</p>
+    <pre><code>server {
+    listen 443 ssl;
+    server_name muster.example.com;
+
+    # TLS + optional basic auth here.
+
+    location / {
+        proxy_pass http://127.0.0.1:8799;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # SSE for the live event stream must not be buffered.
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_set_header Connection "";
+    }
+}</code></pre>
+    <p>Set <code>OMB_PUBLIC_HOST=muster.example.com</code> and <code>OMB_ALLOWED_ORIGINS=https://muster.example.com</code> on the <code>muster</code> service to match.</p>
+
+    <h2>Models and computers</h2>
+    <p>The model picker reflects whichever agent CLIs are installed and logged in on the machine running the harness. The stock image ships <strong>no</strong> agent CLIs — bots show as unavailable until you provide one:</p>
+    <ul>
+      <li><strong>Build a custom image</strong> that installs <code>claude</code>, <code>codex</code>, or <code>grok</code> (and their auth) on top of Muster,</li>
+      <li><strong>Use engine credentials</strong> where a driver only needs a key (OpenCode Go, Compose/Box), or</li>
+      <li><strong>Run the container on a machine</strong> where the CLIs are already on <code>PATH</code> via a bind mount.</li>
+    </ul>
+    <pre><code>FROM muster:latest
+<span class="c"># Install a CLI and log it in — but bake no secrets into the image.</span>
+RUN npm install -g @anthropic-ai/claude-code
+<span class="c"># …then run as usual; the model picker lists Claude once it is logged in.</span></code></pre>
+    <p>Cloud computers (Box) work out of the box with a <code>BOX_TOKEN</code>. "This Mac" local computer control is <strong>not</strong> available in a container — it requires the desktop app.</p>
+
+    <h2>Updating</h2>
+    <pre><code>docker compose pull &amp;&amp; docker compose up -d</code></pre>
+    <p>Data survives upgrades because it lives in the <code>muster-data</code> volume.</p>
+
+    <h2>Next steps</h2>
+    <div class="card-grid section-cards">
+      <a class="card" href="/docs/engines">
+        <p class="card__kicker">Operate</p>
+        <h3>Engines &amp; models</h3>
+        <p>Wire up providers and keys once the container is running.</p>
+      </a>
+      <a class="card" href="/docs/approvals">
+        <p class="card__kicker">Operate</p>
+        <h3>Approvals &amp; privacy</h3>
+        <p>How approval cards, scopes, and the Privacy Shield behave on your deployment.</p>
+      </a>
+      <a class="card" href="/docs/security">
+        <p class="card__kicker">Reference</p>
+        <h3>Security &amp; license</h3>
+        <p>Threat model, data flows, and what the Business Source License lets you do.</p>
+      </a>
+      <a class="card" href="/docs/quick-start">
+        <p class="card__kicker">Start</p>
+        <h3>Quick start</h3>
+        <p>The desktop-first path, if a server is more than you need today.</p>
+      </a>
+    </div>
+
+  </main>
+</div>
+
+<footer class="docs-footer">
+  <span>© 2026 Orazen · Muster</span>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/download.html">Download</a>
+    <a href="/docs/security">Security</a>
+  </nav>
+</footer>
+
+</body>
+</html>

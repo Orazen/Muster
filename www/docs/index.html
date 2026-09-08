@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Muster Docs — your AI workforce, documented</title>
+<meta name="description" content="Everything about running Muster: quick start, desktop and mobile apps, self-hosting, engines, goal mode, automation, approvals, and the agent skill file.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+
+<header class="docs-header">
+  <a class="brand-lockup" href="/">
+    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
+    Muster
+  </a>
+  <span class="docs-tag">Docs</span>
+  <div class="docs-header__spacer"></div>
+  <nav class="docs-header__links">
+    <a href="/download.html">Download</a>
+    <a href="/#features">Features</a>
+    <a class="button button--primary button--small" href="/app">Open app</a>
+  </nav>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-sidebar" aria-label="Docs navigation">
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Start</p>
+      <a href="/docs" aria-current="page">Overview</a>
+      <a href="/docs/quick-start">Quick start</a>
+      <a href="/docs/install">Install &amp; apps</a>
+      <a href="/docs/self-host">Self-hosting</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Operate</p>
+      <a href="/docs/engines">Engines &amp; models</a>
+      <a href="/docs/goals">Goals &amp; autonomy</a>
+      <a href="/docs/automation">Automation</a>
+      <a href="/docs/approvals">Approvals &amp; privacy</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Reference</p>
+      <a href="/docs/agents">For agents</a>
+      <a href="/docs/security">Security &amp; license</a>
+    </div>
+  </aside>
+
+  <main class="docs-content">
+
+    <h1>Muster documentation</h1>
+    <p class="lead">Muster is an AI-agent workforce: you hire bots, give them engines, put them in teams, and put them to work — from your desktop, your phone, or a server you own. These docs cover everything from your first minute to full self-hosting.</p>
+
+    <div class="pill-row">
+      <span class="pill">macOS · Windows · Linux</span>
+      <span class="pill">Web app</span>
+      <span class="pill">Self-hostable</span>
+      <span class="pill">Bring your own models</span>
+    </div>
+
+    <h2>Your first five minutes</h2>
+    <p>Install the desktop app, run one command, claim your workspace from your phone:</p>
+    <pre><code><span class="c"># 1. install the desktop app — the server ships inside it</span>
+
+<span class="c"># 2. or boot the server headless from a Muster checkout (Node 22+):</span>
+node cli/muster.mjs up
+
+<span class="c"># 3. claim your workspace — scan the QR code it prints with your phone,</span>
+<span class="c">#    or open the link in a browser</span></code></pre>
+    <p>Full walkthrough, including adding your first AI engine and hiring your first bot: <a href="/docs/quick-start">Quick start</a>.</p>
+
+    <h2>Start here</h2>
+    <div class="card-grid section-cards">
+      <a class="card" href="/docs/quick-start">
+        <p class="card__kicker">Start</p>
+        <h3>Quick start</h3>
+        <p>From zero to a working workforce: install, claim, add an engine, brief your first bot.</p>
+      </a>
+      <a class="card" href="/docs/install">
+        <p class="card__kicker">Start</p>
+        <h3>Install &amp; apps</h3>
+        <p>Desktop downloads for macOS, Windows and Linux, auto-updates, and the mobile companions.</p>
+      </a>
+      <a class="card" href="/docs/self-host">
+        <p class="card__kicker">Start</p>
+        <h3>Self-hosting</h3>
+        <p>Run the full stack in Docker on your own box: environment, proxy, TLS, backups.</p>
+      </a>
+      <a class="card" href="/docs/engines">
+        <p class="card__kicker">Operate</p>
+        <h3>Engines &amp; models</h3>
+        <p>Connect OpenAI-compatible or Anthropic-compatible providers, pick models per bot, watch health.</p>
+      </a>
+      <a class="card" href="/docs/goals">
+        <p class="card__kicker">Operate</p>
+        <h3>Goals &amp; autonomy</h3>
+        <p>Goal mode: give a bot an outcome and let it loop — with hard stops, budgets, and provenance chips.</p>
+      </a>
+      <a class="card" href="/docs/automation">
+        <p class="card__kicker">Operate</p>
+        <h3>Automation</h3>
+        <p>Routines, sentries, routine scorecards and the why-journal: work that keeps happening without you.</p>
+      </a>
+      <a class="card" href="/docs/approvals">
+        <p class="card__kicker">Operate</p>
+        <h3>Approvals &amp; privacy</h3>
+        <p>Approval cards, always-allow scopes, the evidence strip, and what stays on your machine.</p>
+      </a>
+      <a class="card" href="/docs/agents">
+        <p class="card__kicker">Reference</p>
+        <h3>For agents</h3>
+        <p>The skill file and llms.txt that let coding agents and AI tools operate Muster for you.</p>
+      </a>
+      <a class="card" href="/docs/security">
+        <p class="card__kicker">Reference</p>
+        <h3>Security &amp; license</h3>
+        <p>Threat model, data flows, reporting issues, and the Business Source License explained.</p>
+      </a>
+    </div>
+
+    <h2>What's new</h2>
+    <ul>
+      <li><strong>Goal mode</strong> — set an outcome instead of managing turns. Bots loop plan → act → verify with a turn budget, pause/stop controls, and a banner that always shows what the goal is and what it's costing you.</li>
+      <li><strong>Provenance chips</strong> — every bot reply is stamped with the engine instance and model that produced it. Hover the chip to see exactly who said what.</li>
+      <li><strong>Routine scorecards &amp; why-journal</strong> — recurring bots keep a HYPOTHESIS/FINDINGS journal and get scored on their routines, so you can see drift before it becomes a problem.</li>
+    </ul>
+    <p>See <a href="/docs/goals">Goals &amp; autonomy</a> for the full picture, or grab the latest build on the <a href="/download.html">download page</a>.</p>
+
+    <h2>Running a server?</h2>
+    <p>If you'd rather own the whole stack — data, engines, and uptime — the <a href="/docs/self-host">self-hosting guide</a> takes you from a bare VPS to a branded deployment in one Docker compose file. Muster's own site runs exactly that way.</p>
+
+  </main>
+</div>
+
+<footer class="docs-footer">
+  <span>© 2026 Orazen · Muster</span>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/download.html">Download</a>
+    <a href="/docs/security">Security</a>
+  </nav>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engines &amp; models — Muster Docs</title>
+<meta name="description" content="Connect AI engines to Muster: built-in CLIs, 12 API providers, your own OpenAI- or Anthropic-compatible endpoints, per-bot model assignment, health, and provenance chips.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+
+<header class="docs-header">
+  <a class="brand-lockup" href="/">
+    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
+    Muster
+  </a>
+  <span class="docs-tag">Docs</span>
+  <div class="docs-header__spacer"></div>
+  <nav class="docs-header__links">
+    <a href="/download.html">Download</a>
+    <a href="/#features">Features</a>
+    <a class="button button--primary button--small" href="/app">Open app</a>
+  </nav>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-sidebar" aria-label="Docs navigation">
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Start</p>
+      <a href="/docs">Overview</a>
+      <a href="/docs/quick-start">Quick start</a>
+      <a href="/docs/install">Install &amp; apps</a>
+      <a href="/docs/self-host">Self-hosting</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Operate</p>
+      <a href="/docs/engines" aria-current="page">Engines &amp; models</a>
+      <a href="/docs/goals">Goals &amp; autonomy</a>
+      <a href="/docs/automation">Automation</a>
+      <a href="/docs/approvals">Approvals &amp; privacy</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Reference</p>
+      <a href="/docs/agents">For agents</a>
+      <a href="/docs/security">Security &amp; license</a>
+    </div>
+  </aside>
+
+  <main class="docs-content">
+
+    <h1>Engines &amp; models</h1>
+    <p class="lead">An engine is a connection to an AI model — a CLI that's already logged in on your machine, an API provider with a key, or your own OpenAI- or Anthropic-compatible endpoint. Every bot runs on one, you can swap it mid-conversation, and every reply is stamped with exactly which engine produced it.</p>
+
+    <div class="pill-row">
+      <span class="pill">10+ CLI engines</span>
+      <span class="pill">12 API providers</span>
+      <span class="pill">Custom endpoints (BYO)</span>
+      <span class="pill">Local models via Ollama</span>
+    </div>
+
+    <h2>What an engine is</h2>
+    <p>An engine is how a bot gets a brain. Muster supports three kinds:</p>
+    <ul>
+      <li><strong>CLI engines</strong> — agent CLIs installed and logged in on your machine: Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, OpenCode Go. Muster detects them on your <code>PATH</code> and they appear in the picker automatically — no key pasting.</li>
+      <li><strong>API providers</strong> — twelve built-ins (OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Cohere, Groq, Together, Fireworks, OpenRouter, OpenCode Zen) driven by an API key. No CLI required.</li>
+      <li><strong>Custom providers</strong> — any OpenAI- or Anthropic-compatible endpoint you register yourself, including Ollama and LM Studio on <code>127.0.0.1</code>.</li>
+    </ul>
+    <p>All of them normalize to the same runtime event stream — streaming replies, tool calls, approvals — so a bot behaves identically no matter which engine sits underneath. Swapping models mid-conversation is normal practice: let the cheap one triage, the smart one write.</p>
+
+    <h2>Adding an engine in Settings</h2>
+    <p>Open <strong>Settings</strong> and you'll find two relevant panels:</p>
+    <ul>
+      <li><strong>Settings → Engines</strong> — for CLI engines. Muster lists what it detected. Each engine has a <strong>Set CLI…</strong> control to override the binary path: pick from every binary the server found on your <code>PATH</code>, or enter a manual path (useful for wrappers). Saving probes the binary with a version check; if the probe fails — typically a path your terminal sees but the GUI app doesn't — Muster asks before registering it anyway.</li>
+      <li><strong>Settings → Providers</strong> — for keys and custom endpoints. Paste a provider's API key into its row, or click <strong>Add model provider</strong> to register your own endpoint: a name, a base URL, an optional key, a wire format (<code>openai</code> or <code>anthropic</code>), and the model list to expose in the picker. Muster can fetch the model list from the endpoint's <code>/models</code> route automatically; if the endpoint doesn't serve one, enter the model IDs manually.</li>
+    </ul>
+    <p>For the very first setup, <code>muster setup</code> walks you through connecting to the server and picking an engine before introducing your first bot — see <a href="/docs/quick-start">Quick start</a>.</p>
+
+    <h2>Naming instances</h2>
+    <p>Each engine connection is an <em>instance</em>, and you can have several per provider — that's not a workaround, it's the intended shape. Two OpenAI keys with different budgets, a personal and a work Anthropic account, one OpenRouter instance routed through a gateway and one direct: each gets its own entry, its own key, and its own display name. Bots pick an instance, not just a provider, so the assignment is exact.</p>
+
+    <h2>Assigning engines to bots</h2>
+    <p>Every bot carries its own model selection: an instance plus a model from that instance's list. Set it when you hire the bot, change it later from the bot's settings or the model picker in the chat header, and the next turn uses it — the transcript doesn't care. Two bots in the same team can run on entirely different providers, and handing one conversation from a fast model to a frontier one mid-thread takes one click.</p>
+
+    <h2>Your keys stay on your server</h2>
+    <p>Muster is bring-your-own-key by design. API keys are stored server-side in your data directory (<code>~/.muster</code> on a desktop install), never echoed back to the UI once saved — the settings panel shows a configured-or-not flag — and never sent anywhere except to the provider the key belongs to. Custom-provider keys ride the instance's own environment into the driver, not a shared process env. There is no Muster-side key escrow and no model billing through us: usage is between you and your providers.</p>
+    <div class="callout callout--note">
+      <span class="callout__mark">Note</span>
+      <span>Self-hosted multi-tenant deployments block loopback and private-range custom-provider base URLs (an SSRF guard — one account must not probe the host network through a fake provider). Desktop single-user installs keep loopback allowed, which is exactly why <code>127.0.0.1</code> Ollama works out of the box there.</span>
+    </div>
+
+    <h2>Health and status</h2>
+    <p>Muster watches engines from local signals, never by scraping provider dashboards:</p>
+    <ul>
+      <li>The <strong>provider health dashboard</strong> (Settings → Usage → Provider health) shows, per provider: instances and which bots use them, turns, tokens in/out, spend, and rate-limit hits in the last 24 hours. "Healthy" means traffic without recent rate limits; "rate-limited recently" means the provider pushed back within a day; "no traffic yet" means unused. When an instance trips a rate limit, it sits out a cooldown before it's picked again.</li>
+      <li>A CLI engine that isn't installed or isn't signed in surfaces a focused <strong>setup card</strong> — the install command for your platform or a sign-in prompt — rather than a silent failure.</li>
+      <li>Drivers that can't start degrade to <em>unavailable</em>. One broken engine never takes down the fleet.</li>
+    </ul>
+
+    <h2>Provenance chips</h2>
+    <p>Every bot reply in chat carries a small <code>via</code> chip — the model, and when it differs, the instance display name that produced it. It's low-key by default: hover the reply and the chip fades in, with the full instance name (and effort level, when set) in its tooltip. When you swap a bot's model mid-thread, the older bubbles still show what produced them, so "which brain said this?" is always answerable by looking.</p>
+
+    <h2>Browsers and computers</h2>
+    <p>An engine is the thinking half of a bot; the <strong>computer</strong> is the doing half. Bots on computer-use-capable providers can drive a live browser — a session in the chat's side panel that you can watch frame-by-frame and grab control of mid-task — alongside the other computer options (cloud desktop, your own machine, a local VM, or a BYO VPS over SSH). See <a href="/docs/approvals">Approvals &amp; privacy</a> for what the bot may do on that computer without asking first.</p>
+
+    <h2>Quick reference</h2>
+    <table>
+      <thead>
+        <tr><th>You want</th><th>Do this</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Use a logged-in CLI agent</td><td>Install the CLI, sign in — it appears in the picker</td></tr>
+        <tr><td>Use an API provider</td><td>Settings → Providers → paste the key</td></tr>
+        <tr><td>Use Ollama / LM Studio / a gateway</td><td>Settings → Providers → Add model provider</td></tr>
+        <tr><td>Override a CLI's binary path</td><td>Settings → Engines → Set CLI…</td></tr>
+        <tr><td>Two accounts on one provider</td><td>Register two instances, name them, assign per bot</td></tr>
+        <tr><td>Check who replied</td><td>Hover the reply — the via chip shows model and instance</td></tr>
+      </tbody>
+    </table>
+
+    <p>Next: put engines to work — <a href="/docs/goals">Goals &amp; autonomy</a> and <a href="/docs/automation">Automation</a>.</p>
+
+  </main>
+</div>
+
+<footer class="docs-footer">
+  <span>© 2026 Orazen · Muster</span>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/download.html">Download</a>
+    <a href="/docs/security">Security</a>
+  </nav>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Approvals &amp; privacy — Muster Docs</title>
+<meta name="description" content="Approval cards, always-allow scopes, the approval-history evidence strip, what stays local on your machine, and claim-gated workspaces — how Muster keeps humans in charge.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+
+<header class="docs-header">
+  <a class="brand-lockup" href="/">
+    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
+    Muster
+  </a>
+  <span class="docs-tag">Docs</span>
+  <div class="docs-header__spacer"></div>
+  <nav class="docs-header__links">
+    <a href="/download.html">Download</a>
+    <a href="/#features">Features</a>
+    <a class="button button--primary button--small" href="/app">Open app</a>
+  </nav>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-sidebar" aria-label="Docs navigation">
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Start</p>
+      <a href="/docs">Overview</a>
+      <a href="/docs/quick-start">Quick start</a>
+      <a href="/docs/install">Install &amp; apps</a>
+      <a href="/docs/self-host">Self-hosting</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Operate</p>
+      <a href="/docs/engines">Engines &amp; models</a>
+      <a href="/docs/goals">Goals &amp; autonomy</a>
+      <a href="/docs/automation">Automation</a>
+      <a href="/docs/approvals" aria-current="page">Approvals &amp; privacy</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Reference</p>
+      <a href="/docs/agents">For agents</a>
+      <a href="/docs/security">Security &amp; license</a>
+    </div>
+  </aside>
+
+  <main class="docs-content">
+
+    <h1>Approvals &amp; privacy</h1>
+    <p class="lead">Muster bots do real work on real computers — which is exactly why consequential actions wait for you. This page is the control layer: approval cards, always-allow scopes, the evidence strip that informs your decisions, and what stays on your machine.</p>
+
+    <div class="pill-row">
+      <span class="pill">Approval cards</span>
+      <span class="pill">Always-allow scopes</span>
+      <span class="pill">Evidence strip</span>
+      <span class="pill">Local-first</span>
+      <span class="pill">Claim-gated access</span>
+    </div>
+
+    <h2>Bots ask before they act</h2>
+    <p>When a bot wants to run a shell command or edit a file, the request surfaces as an inline card in the thread. You have three moves: <strong>Allow</strong>, <strong>Deny</strong>, or answer in the thread — often "no, do this instead" is the fastest review of all.</p>
+    <p>While a card is open, the bot's activity reads <code>waiting-on-you</code>, so a glance at the presence bar tells you who needs a decision. You can answer from the desktop, the web app, or the mobile companions — thin clients built for exactly this: approvals and streaming replies on the go.</p>
+    <p>If you trust a bot's loop completely, auto-mode exists — but it is per bot and opt-in. Nothing runs unattended by default.</p>
+
+    <h2>Always-allow scopes</h2>
+    <p>Re-approving <code>git status</code> forty times a day isn't governance, it's friction. Pressing <strong>Always allow</strong> on a card grants standing permission per capability — and the grant is as narrow as the thing you actually looked at. Command tools are scoped by program: allowing <code>Bash:git</code> never hands the bot a permanent unattended shell.</p>
+    <p>The grant's key is computed once, server-side, and echoed back to the client, so the two sides can never disagree about what was granted.</p>
+    <p>Even with a standing grant, anything that reads as destructive stops and asks a human anyway:</p>
+    <table>
+      <tr><th>Backstop</th><th>What trips it</th></tr>
+      <tr><td>Destructive</td><td><code>rm -rf</code>, <code>mkfs</code>, <code>shutdown</code>/<code>reboot</code>, fork bombs, <code>git push --force</code>, <code>git reset --hard</code>, <code>DROP TABLE</code>, <code>sudo rm</code>, <code>chmod -R 777 /</code></td></tr>
+      <tr><td>Sensitive</td><td><code>.env</code> files, <code>.ssh</code> keys, <code>.aws/credentials</code>, <code>.netrc</code>, keychain access, service-account and credentials files — reads that are quiet, permanent, and unrecoverable</td></tr>
+    </table>
+    <div class="callout">
+      <span class="callout__mark">In plain terms:</span>
+      <span>This backstop is deliberately literal. It is not a security boundary — an agent set on damage has a thousand spellings for <code>rm</code>. It's a "you probably didn't mean to hand <em>this</em> one over unattended" guard for the obvious catastrophes. Real containment is the sandbox and the bot's own computer.</span>
+    </div>
+
+    <h2>The evidence strip</h2>
+    <p>Before you answer a card, Muster shows how <em>this bot's</em> past went with <em>this tool</em>: how many times it was allowed, denied, or auto-settled, and when the last one was.</p>
+    <pre><code><span class="c"># what an evidence strip can say, rendered on the card itself:</span>
+Bash was allowed 12× before (last 3h ago) — never denied.
+Bash history: 4 allowed, 2 denied (last 5d ago).</code></pre>
+    <p>History is scoped to the tool family: what this bot did with <code>Bash:git</code> is evidence about a <code>Bash:npm</code> ask, because both are "this bot running shell commands". For non-command tools like <code>Write</code> or <code>browser_click</code>, exact matches count.</p>
+    <div class="callout callout--note">
+      <span class="callout__mark">Evidence, not a verdict.</span>
+      <span>A passed history only counts what it counted. The summary is rendered server-side so every client says it the same way — and the human still decides.</span>
+    </div>
+
+    <h2>Budgets and the Privacy Shield</h2>
+    <p>Control isn't only per-action. Every bot carries a per-agent <strong>token budget</strong> and a per-agent <strong>daily USD cap</strong>, so a runaway loop stops being your money problem before it starts.</p>
+    <p>On the privacy side, the on-device <strong>Privacy Shield</strong> masks emails, phone numbers, and secrets before prompts reach a cloud model — deterministically, with counts-only receipts. You learn the shape of what was redacted without Muster keeping a second copy of the sensitive data.</p>
+
+    <h2>What stays local</h2>
+    <ul>
+      <li><strong>Transcripts, keys, events.</strong> They live in <code>~/.muster</code> on the machine running the server — not in a cloud.</li>
+      <li><strong>Engine API keys.</strong> Provider keys are stored write-only and never echoed by the API. The voice (TTS) key runs on the harness, so it never reaches the UI either.</li>
+      <li><strong>Your conversations.</strong> Thread history sits on your disk. The mobile companions own nothing — your computer stays the source of truth.</li>
+    </ul>
+    <p>Grants work the same way: connected-app access and agent-mail mailboxes are unlocked only by invite links <em>you</em> approve, and inbound agent mail is treated as untrusted data by design.</p>
+
+    <h2>Claiming a workspace is gated</h2>
+    <p><code>muster up</code> boots the server and prints a QR code encoding <code>http://&lt;lan-ip&gt;:8799/claim#CODE</code>. Scanning it signs your phone in as the owner — no account creation, no password to invent. The code <em>is</em> the credential, and it's engineered to be worthless to anyone else:</p>
+    <table>
+      <tr><th>Property</th><th>What it means</th></tr>
+      <tr><td>Single-use</td><td>Redeemed once, then dead.</td></tr>
+      <tr><td>Five-minute TTL</td><td>Expired before a stranger could act on it.</td></tr>
+      <tr><td>Unambiguous alphabet</td><td>8 characters, no <code>0/O/1/I/L</code> — built to be read off a laptop screen by a phone camera. About 2<sup>40</sup> of entropy.</td></tr>
+      <tr><td>Per-IP lockout</td><td>Five failed redemption attempts lock that IP out for ten minutes.</td></tr>
+    </table>
+    <p>The pairing itself never leaves your network. A claim code never redeems as a pairing code or vice versa — the two flows keep separate stores, so one front door can't be confused with the other.</p>
+    <p>Servers tighten further once exposed. The default is loopback-only: non-loopback hosts and origins are rejected (DNS-rebinding and CSRF protection), and on a desktop install, state-changing requests must carry a same-origin Origin/Host pair. Expose a self-hosted server and every <code>/api/*</code> route requires a session — only sign-in and health checks are excepted — with sign-in rate-limited to five attempts per minute per IP and passwords of at least twelve characters.</p>
+    <p>Sessions stay revocable: <code>muster sessions</code> lists every active sign-in (current one marked), and <code>muster sessions --revoke</code> kills one device, all the others, or everything.</p>
+
+    <h2>The layers, in one line</h2>
+    <p>Approval cards are the <strong>control layer</strong>. The Privacy Shield is the <strong>privacy layer</strong>. Routines and receipts are the <strong>audit layer</strong>. For the audit side — recurring bots, sentries, and the why-journal — see <a href="/docs/automation">Automation</a>. For running the whole server on hardware you own, see <a href="/docs/self-host">Self-hosting</a>.</p>
+
+  </main>
+</div>
+
+<footer class="docs-footer">
+  <span>© 2026 Orazen · Muster</span>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/download.html">Download</a>
+    <a href="/docs/security">Security</a>
+  </nav>
+</footer>
+
+</body>
+</html>

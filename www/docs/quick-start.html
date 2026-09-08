@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quick start — Muster Docs</title>
+<meta name="description" content="From zero to a working Muster workforce: install the app, start the local server, claim your workspace from your phone, add an engine, and brief your first bot.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+
+<header class="docs-header">
+  <a class="brand-lockup" href="/">
+    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
+    Muster
+  </a>
+  <span class="docs-tag">Docs</span>
+  <div class="docs-header__spacer"></div>
+  <nav class="docs-header__links">
+    <a href="/download.html">Download</a>
+    <a href="/#features">Features</a>
+    <a class="button button--primary button--small" href="/app">Open app</a>
+  </nav>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-sidebar" aria-label="Docs navigation">
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Start</p>
+      <a href="/docs">Overview</a>
+      <a href="/docs/quick-start" aria-current="page">Quick start</a>
+      <a href="/docs/install">Install &amp; apps</a>
+      <a href="/docs/self-host">Self-hosting</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Operate</p>
+      <a href="/docs/engines">Engines &amp; models</a>
+      <a href="/docs/goals">Goals &amp; autonomy</a>
+      <a href="/docs/automation">Automation</a>
+      <a href="/docs/approvals">Approvals &amp; privacy</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Reference</p>
+      <a href="/docs/agents">For agents</a>
+      <a href="/docs/security">Security &amp; license</a>
+    </div>
+  </aside>
+
+  <main class="docs-content">
+
+    <h1>Quick start</h1>
+    <p class="lead">From zero to a working workforce in about ten minutes: install Muster, start the local server, claim the workspace from your phone, give a bot an engine, and send your first message. Everything below runs on your machine — no account signup, no cloud dependency.</p>
+
+    <div class="pill-row">
+      <span class="pill">~10 minutes</span>
+      <span class="pill">macOS · Windows · Linux</span>
+      <span class="pill">Bring your own model</span>
+    </div>
+
+    <h2>1. Install the app (or skip it)</h2>
+    <p>Grab the desktop build for your platform from the <a href="/download.html">download page</a>: a <code>.dmg</code> for macOS (Apple Silicon or Intel), an <code>.exe</code> installer for Windows, or a <code>.deb</code> / <code>.AppImage</code> for Linux. Install details, first-launch notes, and auto-update behavior live in <a href="/docs/install">Install &amp; apps</a>.</p>
+    <p>The desktop app embeds the Muster harness server, so there is no separate server setup. Prefer the terminal instead? The CLI ships with a Muster checkout and boots the same server headless:</p>
+    <pre><code><span class="c"># boots the local server in the foreground (Ctrl-C stops it)</span>
+node cli/muster.mjs up
+
+<span class="c"># or detached: close the terminal and Muster keeps running</span>
+node cli/muster.mjs up -d</code></pre>
+    <div class="callout">
+      <span class="callout__mark">Note</span>
+      <span>The CLI needs Node 22 or newer. On a desktop app install you don't need Node at all — the server ships inside the app.</span>
+    </div>
+
+    <h2>2. Start the local server</h2>
+    <p>In the desktop app, use the app menu: <strong>Muster ▸ Start local server</strong>. The server binds to your machine and the chat UI opens against it. In a packaged install that's the whole story — no environment to configure, nothing else to run.</p>
+    <p>If you went the CLI route, <code>node cli/muster.mjs up</code> <em>is</em> the server. Managing it:</p>
+    <pre><code><span class="c"># end a detached server (SIGTERM, then SIGKILL after 10s)</span>
+node cli/muster.mjs stop
+
+<span class="c"># tail its output (node cli/muster.mjs logs 200 for more)</span>
+node cli/muster.mjs logs
+
+<span class="c"># useful flags</span>
+node cli/muster.mjs up --port 8799          <span class="c"># pick another port</span>
+node cli/muster.mjs up --data-dir ~/muster  <span class="c"># move the data directory</span></code></pre>
+    <p>A suspended laptop stops everything — the machine the server runs on needs to stay awake.</p>
+
+    <h2>3. Claim your workspace from your phone</h2>
+    <p>When the server boots it prints a pairing QR code and link in the terminal (the desktop app shows it too):</p>
+    <pre><code><span class="c">Muster is up. Scan to open the console on your phone:</span>
+<span class="c">http://192.168.x.x:8799/claim#SEH5ZP3S</span></code></pre>
+    <p>Scan it with your phone's camera — or open the printed link — and you land in the console already signed in as the owner. No account creation, no password to invent, and the pairing never leaves your network. Claim codes are single-use and expire after 5 minutes; five failed redemption attempts lock an IP out for ten.</p>
+    <p>Prefer a guided setup on the computer itself? Run <code>node cli/muster.mjs setup</code>: it connects to (or boots) the local server, signs you in as the owner, helps you pick an engine, and introduces your first bot. New phone later, or a second one? Run <code>muster up</code> again — it detects the running server and prints a fresh QR instead of starting a second one.</p>
+    <p>Every scan and sign-in is a tracked session. <code>node cli/muster.mjs sessions</code> lists them (current one marked), and <code>node cli/muster.mjs sessions --revoke &lt;prefix|other|all&gt;</code> kills one, all others, or all — useful if you lose a phone.</p>
+
+    <h2>4. Add your first engine</h2>
+    <p>An engine is what a bot thinks with. Open <strong>Settings → Providers → Add model provider</strong> and register any OpenAI- or Anthropic-compatible endpoint as a first-class engine: a name, the base URL, an optional API key, the wire format, and a model list. Local <code>127.0.0.1</code> endpoints like Ollama and LM Studio work out of the box on desktop installs.</p>
+    <p>You can also paste an API key from any of the 12 built-in providers in <strong>Settings → Providers</strong> — OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Cohere, Groq, Together AI, Fireworks AI, OpenRouter, and OpenCode Zen. Google AI Studio, Groq, OpenRouter's <code>:free</code> models, and OpenCode Zen all have free tiers, so your first bot can cost nothing.</p>
+    <div class="callout">
+      <span class="callout__mark">CLI route</span>
+      <span>Desktop Muster also picks up agent CLIs already installed and logged in on your machine — Claude, Codex, Grok, Gemini and friends appear in the model picker automatically, no key pasting needed.</span>
+    </div>
+    <p>Engines, health, and per-bot model picks are covered in <a href="/docs/engines">Engines &amp; models</a>.</p>
+
+    <h2>5. Hire and brief your first bot</h2>
+    <p>Hiring is one conversation. Create a bot from the roster, give it a name, a persona, and a brief — what it owns, how it should report back, what never to touch. The persona and memory persist across tasks, so a bot you briefed once keeps its brief tomorrow. Give it the engine you just added in its settings, and it's on the payroll.</p>
+    <p>Then send the first message — in the desktop app, from your phone, or straight from the terminal:</p>
+    <pre><code><span class="c"># say hello to a bot named "scout"</span>
+node cli/muster.mjs send scout "Introduce yourself and tell me what you own."
+
+<span class="c"># watch status and receipts</span>
+node cli/muster.mjs status
+node cli/muster.mjs receipts</code></pre>
+    <p>When the bot wants to run a shell command or edit a file, it asks first: the action surfaces as an approval card you Allow or Deny. Every settled task ends in a job receipt — bot, duration, tokens, cost. See <a href="/docs/approvals">Approvals &amp; privacy</a>.</p>
+
+    <h2>Where your data lives</h2>
+    <p>Muster is local-first. Transcripts, keys, events, the database, and the auth secret live in <code>~/.muster</code> on the machine running the server — not in a cloud. A detached server keeps its record and log there too, under <code>~/.muster/run/</code>. The only traffic that leaves your machine is the model call itself, which goes to whichever engine provider you configured. Back up <code>~/.muster</code> and you've backed up your workforce.</p>
+
+    <h2>Next steps</h2>
+    <div class="card-grid section-cards">
+      <a class="card" href="/docs/install">
+        <p class="card__kicker">Start</p>
+        <h3>Install &amp; apps</h3>
+        <p>All five desktop artifacts, auto-updates, the web app, and the mobile companions.</p>
+      </a>
+      <a class="card" href="/docs/engines">
+        <p class="card__kicker">Operate</p>
+        <h3>Engines &amp; models</h3>
+        <p>Connect providers, pick models per bot, swap mid-conversation, watch health.</p>
+      </a>
+      <a class="card" href="/docs/goals">
+        <p class="card__kicker">Operate</p>
+        <h3>Goals &amp; autonomy</h3>
+        <p>Give a bot an outcome instead of managing turns — with budgets and hard stops.</p>
+      </a>
+      <a class="card" href="/docs/automation">
+        <p class="card__kicker">Operate</p>
+        <h3>Automation</h3>
+        <p>Routines, sentries, and webhooks: work that keeps happening without you.</p>
+      </a>
+    </div>
+
+  </main>
+</div>
+
+<footer class="docs-footer">
+  <span>© 2026 Orazen · Muster</span>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/download.html">Download</a>
+    <a href="/docs/security">Security</a>
+  </nav>
+</footer>
+
+</body>
+</html>

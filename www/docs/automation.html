@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automation — Muster Docs</title>
+<meta name="description" content="Work that keeps happening without you: Muster routines on a schedule or webhook, sentries that notify only on change, the why-journal, and routine scorecards that surface drift.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23f0460e'/%3E%3Ctext x='16' y='22' font-family='ui-sans-serif,system-ui' font-size='17' font-weight='700' fill='white' text-anchor='middle'%3EM%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+
+<header class="docs-header">
+  <a class="brand-lockup" href="/">
+    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#f0460e"/><text x="16" y="22" font-family="ui-sans-serif,system-ui" font-size="17" font-weight="700" fill="#fff" text-anchor="middle">M</text></svg>
+    Muster
+  </a>
+  <span class="docs-tag">Docs</span>
+  <div class="docs-header__spacer"></div>
+  <nav class="docs-header__links">
+    <a href="/download.html">Download</a>
+    <a href="/#features">Features</a>
+    <a class="button button--primary button--small" href="/app">Open app</a>
+  </nav>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-sidebar" aria-label="Docs navigation">
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Start</p>
+      <a href="/docs">Overview</a>
+      <a href="/docs/quick-start">Quick start</a>
+      <a href="/docs/install">Install &amp; apps</a>
+      <a href="/docs/self-host">Self-hosting</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Operate</p>
+      <a href="/docs/engines">Engines &amp; models</a>
+      <a href="/docs/goals">Goals &amp; autonomy</a>
+      <a href="/docs/automation" aria-current="page">Automation</a>
+      <a href="/docs/approvals">Approvals &amp; privacy</a>
+    </div>
+    <div class="docs-sidebar__group">
+      <p class="docs-sidebar__label">Reference</p>
+      <a href="/docs/agents">For agents</a>
+      <a href="/docs/security">Security &amp; license</a>
+    </div>
+  </aside>
+
+  <main class="docs-content">
+
+    <h1>Automation</h1>
+    <p class="lead">A goal finishes; a routine doesn't. Muster's automation is four pieces that fit together: <strong>routines</strong> run a bot on a schedule or webhook, <strong>sentries</strong> watch and only speak when something actually changed, every run keeps a <strong>why-journal</strong> of its reasoning, and <strong>scorecards</strong> grade each run so you can see drift before it becomes a problem.</p>
+
+    <div class="pill-row">
+      <span class="pill">Schedules &amp; webhooks</span>
+      <span class="pill">Notify-on-change sentries</span>
+      <span class="pill">Overnight chains</span>
+      <span class="pill">Scorecards &amp; why-journal</span>
+    </div>
+
+    <h2>Routines</h2>
+    <p>A routine pins a prompt to a bot and a trigger. The bot runs it without you in the room, and the run lands in your feed like any other task — output, duration, cost, receipts.</p>
+    <ul>
+      <li><strong>Triggers</strong> — a schedule (fire once at a time, or daily at a set time on chosen weekdays), a manual "run now", or an incoming webhook from another system.</li>
+      <li><strong>Where it runs</strong> — on the agent as usual, or inside the bot's cloud computer, so a routine can do machine work headlessly.</li>
+      <li><strong>Lifecycle</strong> — every run is tracked: queued, running, completed, failed, cancelled, or missed (a schedule that couldn't fire gets marked, not silently dropped).</li>
+      <li><strong>Overnight chains</strong> — set iterations up to 12 and a shared notes file: each run reads what the last one wrote, continues the work, and appends a progress line before finishing. One firing becomes a whole night of chained work.</li>
+    </ul>
+    <pre><code><span class="c"># a daily routine, in spirit:</span>
+name:    spend digest
+bot:     Bea (finance bot)
+prompt:  Summarize yesterday's spend by vendor, flag anything over budget.
+runs:    daily at 08:00, weekdays 1–5</code></pre>
+    <p>For one-shot outcome work rather than recurring work, use <a href="/docs/goals">goal mode</a> instead — routines are for things that keep happening.</p>
+
+    <h2>Sentries</h2>
+    <p>A sentry is a routine with a watcher's temperament: it re-runs the same watching prompt on a cadence, remembers what it saw last time, and <strong>only notifies you when the picture changes</strong>. The run's reply must end with a <code>SENTRY:</code> line — a one-line summary of current state — and the harness compares that digest line run-over-run.</p>
+    <ul>
+      <li><strong>First run is baseline.</strong> A sentry with no memory records what it saw and stays quiet — the first observation is not news.</li>
+      <li><strong>Changed digest → notify.</strong> Same digest → silence. A sentry that fails to run also notifies: a watcher that can't watch is itself news.</li>
+      <li><strong>Malformed replies can't fake a diff.</strong> A reply that forgot the <code>SENTRY:</code> line yields no digest — the old memory is kept, never treated as a change.</li>
+    </ul>
+    <pre><code><span class="c"># a sentry, in spirit:</span>
+prompt:  Check the release page. End with SENTRY: &lt;one-line state&gt;.
+runs:    daily
+effect:  you hear nothing until the line changes</code></pre>
+
+    <h2>The why-journal</h2>
+    <p>Receipts record what a bot did — who, how long, what it cost, its final word. They can't tell you <em>why</em>. Every routine run (and other why-enabled runs) asks the bot to end its reply with a short decision journal, parsed mechanically and joined to that run's receipt:</p>
+    <pre><code><span class="c"># the journal block the bot appends to a settled run:</span>
+WHY: restore the staging deploy
+HYPOTHESIS: the new image was failing its health check, not the proxy
+FINDINGS: rollback restored green; proxy config untouched
+DECISIONS:
+- rolled back to the last green image
+- pinned the provider to its fallback</code></pre>
+    <ul>
+      <li><strong>WHY</strong> — one line: what the run was trying to accomplish.</li>
+      <li><strong>HYPOTHESIS / FINDINGS</strong> — what the bot assumed about the world, and what it learned. Two fields that make a journal comparable across runs instead of a pile of prose.</li>
+      <li><strong>DECISIONS</strong> — up to ten bullets naming the key choices and why.</li>
+    </ul>
+    <p>Over time this is the answer to "why has my recurring bot been doing it this way?" — intent and reasoning, kept per run. A bot that skips the contract produces no entry; an absent journal is data, never a guess.</p>
+
+    <h2>Routine scorecards</h2>
+    <p>Recurring work rots quietly — a source changes shape, a model regresses, a prompt that worked in March drifts by June. Scorecards catch it: attach deterministic checks to a routine and the harness grades <strong>every run's output</strong> against them.</p>
+    <ul>
+      <li><strong>Check kinds</strong> — <code>contains</code> (case-insensitive substring), <code>not_contains</code> (forbidden substring), <code>matches</code> (a regular expression).</li>
+      <li><strong>Graded harness-side.</strong> The bot is told what will be checked so it can self-verify before finishing, but grading happens against the settled output, not on the bot's honor.</li>
+      <li><strong>Pass/fail on the run card.</strong> Each check shows passed or failed with the reason, so a run is objectively comparable to last week's run — and to the same routine on a different bot.</li>
+    </ul>
+    <pre><code><span class="c"># scorecard for the spend digest:</span>
+mentions total     contains    "total"
+no placeholders    not_contains "TODO"
+has an amount      matches     \$?[0-9]+</code></pre>
+    <p>Read the scorecards the way you'd read a teammate's QA: a routine passing nine days out of ten and failing today is a signal, not noise. Combined with the why-journal ("this run assumed the old CSV layout"), drift usually explains itself.</p>
+
+    <h2>Putting it together</h2>
+    <ul>
+      <li>Recurring report → <strong>routine</strong> + daily schedule + <strong>scorecard</strong> for quality.</li>
+      <li>Something you need to know about only when it changes → <strong>sentry</strong>.</li>
+      <li>Long background grind that builds on itself → overnight <strong>chain</strong> with a notes file.</li>
+      <li>"Why did it do that?" three weeks later → the <strong>why-journal</strong>.</li>
+    </ul>
+    <p>Approval rules apply to automated runs exactly as to interactive ones — see <a href="/docs/approvals">Approvals &amp; privacy</a>. Automation runs on the engine the bot is assigned; see <a href="/docs/engines">Engines &amp; models</a> if you want the cheap model on the night shift.</p>
+
+  </main>
+</div>
+
+<footer class="docs-footer">
+  <span>© 2026 Orazen · Muster</span>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/download.html">Download</a>
+    <a href="/docs/security">Security</a>
+  </nav>
+</footer>
+
+</body>
+</html>
