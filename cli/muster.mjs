@@ -193,7 +193,11 @@ async function send() {
     process.exit(1);
   }
   await asJson(await api(cfg, `/api/bots/${bot.id}/messages`, { method: "POST", body: JSON.stringify({ text }) }));
-  const reply = await waitForReply(cfg, bot.id, 180_000);
+  const { text: reply, error } = await waitForReply(cfg, bot.id, 180_000);
+  if (error) {
+    console.error(`Engine error: ${error}`);
+    process.exit(1);
+  }
   if (!reply) {
     console.error("Timed out waiting for the reply — the turn may still be running. Try `muster watch`.");
     process.exit(1);
@@ -201,16 +205,42 @@ async function send() {
   console.log(reply.trim());
 }
 
-/** Poll until the bot's thread settles with a text reply (the SSE stream is
- *  overkill for one-shot sends). Returns the reply text or null on timeout. */
+/** Poll until the bot's thread settles after the turn we just sent (the SSE
+ *  stream is overkill for one-shot sends). The wait is scoped to THIS turn:
+ *  the newest user text is the one just posted, and only bot messages newer
+ *  than it can be its reply — a fresh bot's seeded greeting is a bot text
+ *  too, and the driver takes a moment to flip `busy`, so "newest bot text"
+ *  alone returns the greeting mid-spin-up. A hard engine failure lands as an
+ *  activity chip with tool.ok === false, not as a reply. */
+/** CLI drivers disagree on where failures land: codex-style ones raise a
+ *  runtime.error (the activity chip above), but the claude driver captures
+ *  the CLI's own auth failure as the turn's text output. A text that opens
+ *  like this is not a hello — classify it as the error it is. Some drivers
+ *  (droid) do both at once: chip AND the provider's HTTP error as text, so
+ *  the text check keeps those from passing as replies too. */
+const LOOKS_LIKE_FAILURE = /^(failed to authenticate|not logged in|please (run|sign in to)|unauthorized|invalid api key|error[:\s])/i;
+
 async function waitForReply(cfg, botId, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
+  let turnAt = 0;
   for (;;) {
     const { bots: now } = await asJson(await api(cfg, "/api/bots"));
     const me = now.find((b) => b.id === botId);
-    const reply = [...(me?.messages ?? [])].reverse().find((m) => m.role === "bot" && m.kind === "text" && m.text?.trim());
-    if (!me?.busy && reply) return reply.text.trim();
-    if (Date.now() > deadline) return null;
+    const mine = [...(me?.messages ?? [])].reverse();
+    if (!turnAt) turnAt = (mine.find((m) => m.role === "user" && m.kind === "text")?.at ?? 0) + 1;
+    const textReply = mine.find((m) => m.role === "bot" && m.kind === "text" && m.text?.trim() && m.at >= turnAt);
+    const reply = textReply && !LOOKS_LIKE_FAILURE.test(textReply.text.trim()) ? textReply : null;
+    const busted = textReply && !reply
+      ? { tool: { name: `error: ${textReply.text.trim().slice(0, 240)}`, setup: false } }
+      : mine.find((m) => m.role === "bot" && m.kind === "activity" && m.tool && m.tool.ok === false && m.at >= turnAt);
+    if (!me?.busy && (reply || busted)) {
+      return {
+        text: reply?.text?.trim() ?? null,
+        error: reply ? null : String(busted?.tool?.name ?? "").replace(/^error:\s*/, "").slice(0, 240) || "engine error",
+        setup: reply ? false : Boolean(busted?.tool?.setup),
+      };
+    }
+    if (Date.now() > deadline) return { text: null, error: null, setup: false };
     await new Promise((r) => setTimeout(r, 1_500));
   }
 }
@@ -768,10 +798,19 @@ async function setup() {
           body: JSON.stringify({ text: "Introduce yourself in one short sentence — you're part of my Muster workforce." }),
         }),
       );
-      const reply = await waitForReply(cfg, bot.id, 120_000);
+      const { text: reply, error } = await waitForReply(cfg, bot.id, 120_000);
       console.log("");
-      if (reply) {
-        console.log(`  ${bot.name}: ${reply.trim()}`);
+      if (error) {
+        console.log(`  ${bot.name} could not run that turn: ${error}`);
+        console.log("");
+        console.log(
+          engine.driverKind === "claudeAgent" || engine.driverKind === "codex"
+            ? "Sign in to the CLI on this machine (`claude` / `codex login`), or pick a different engine — then `muster send` will go through."
+            : "Check the engine's credentials, or pick a different engine — then `muster send` will go through.",
+        );
+        console.log(`The console shows the full trace: http://${lanAddress() ?? "127.0.0.1"}:${rec.port}/app`);
+      } else if (reply) {
+        console.log(`  ${bot.name}: ${reply}`);
         console.log("");
         console.log("That's the workforce working. Give it real work with `muster send <bot> <text>`.");
       } else {
