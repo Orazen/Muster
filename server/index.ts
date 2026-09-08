@@ -212,6 +212,7 @@ import { LocalVmIdleTimerPool } from "./local-vm-idle.ts";
 import { LocalVmLeasePool } from "./local-vm-lease.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import { GoalManager } from "./goals.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-library.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { readThreadEvents } from "./thread-events.ts";
@@ -858,6 +859,11 @@ const groupSpeakers = new Map<string, { botId: string; name: string; color: stri
 // into the task's tally when the turn settles.
 const turnUsage = new Map<string, { input: number; output: number }>();
 
+// Which engine + model is running the turn in flight on each thread. The
+// fold stamps it onto every reply message it persists, so the transcript
+// shows "which model said that" instead of hiding the harness.
+const turnProvenance = new Map<string, { instanceId: string; model: string; effort?: string }>();
+
 // Bounded per active turn. OpenHands uses a bounded recent-event scan for
 // the same class of stuck-loop detection; retaining an unlimited set of
 // unique arguments would let one pathological turn grow the server forever.
@@ -993,6 +999,7 @@ function isUnattended(botId?: string | null): boolean {
   return true;
 }
 let routines: RoutineManager | null = null;
+let goals: GoalManager | null = null;
 // Desktop isolation: "shared" keeps one visible desktop every bot leases
 // one at a time; "perBot" gives each bot its own container, workspace,
 // viewer port and lease/idle lanes. All lanes live in pools keyed by the
@@ -1109,7 +1116,15 @@ bus.subscribe((event: RuntimeEvent) => {
           replyBot?.privacyShield === true
             ? unscrubText(shieldSessionKey(replyBot.id, event.threadId), event.text)
             : event.text;
-        pushMessage({ role: "bot", kind: "text", text: shownText });
+        // Stamp the reply with the engine+model that produced it — the
+        // provenance map was set when this turn was dispatched, so a model
+        // switch mid-thread labels each reply with its actual author.
+        pushMessage({
+          role: "bot",
+          kind: "text",
+          text: shownText,
+          via: turnProvenance.get(event.threadId),
+        });
         // kept so "finished" can say what it finished with, rather than
         // just that something ended — carrying the SAME restored values
         // that were persisted above, never placeholder dialect
@@ -1297,6 +1312,7 @@ bus.subscribe((event: RuntimeEvent) => {
       lastReply.delete(event.threadId);
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
+      turnProvenance.delete(event.threadId);
       // group turns run on the room's thread — the speaking bot's task
       // tally is not the right home for a shared room's spend, so only
       // 1:1 task turns are tallied for now.
@@ -1530,6 +1546,15 @@ function drainQueuedSends() {
     }),
   );
 }
+
+// ── goal mode: bounded autonomy loop ───────────────────────────────────
+// A goal keeps re-dispatching its bot across consecutive turns until the
+// bot's reply marker says DONE or the round budget runs out. Registered
+// after the steer-queue drain for the same reason that drain runs late:
+// by the time this subscriber sees turn.completed, busy is already false.
+bus.subscribe((event: RuntimeEvent) => {
+  goals?.handleRuntimeEvent(event);
+});
 
 // ── live screen: poll the bot's box while it works ────────────────────
 // Frames stream to clients as SSE {kind:'screen'} (the "Bot's screen"
@@ -1777,6 +1802,7 @@ async function startTurn(
   // a cloud routine borrows the instance default model, so it borrows no
   // per-bot effort either
   const effort = opts?.runOn === "cloud" ? undefined : bot.modelSelection.effort;
+  turnProvenance.set(threadId, { instanceId, model, effort });
   // A selection can be persisted while its engine is offline. Re-check when
   // the engine returns so an old or unsupported value never reaches a CLI.
   if (effort && !instance.adapter.capabilities.effortLevels?.includes(effort)) {
@@ -2276,6 +2302,7 @@ async function startTurn(
       }
       watchdog.settle(threadId);
       turnUsage.delete(threadId);
+      turnProvenance.delete(threadId);
       const message = e instanceof Error ? e.message : String(e);
       store.appendMessage(threadId, {
         role: "bot",
@@ -2326,6 +2353,27 @@ routines = new RoutineManager({
   },
 });
 routines.start();
+
+// Goals ride the same harness: one turn at a time, dispatch through
+// startTurn, budgets enforced here instead of inside any provider.
+goals = new GoalManager({
+  emit: broadcast,
+  botState: (botId) => {
+    const bot = store.bot(botId);
+    return !bot ? "missing" : bot.busy ? "busy" : "ready";
+  },
+  startTurn: async ({ botId, threadId, userText, engineText, first, onDispatchError }) => {
+    // Round 1 shows the user's goal as their own bubble; continuation
+    // prompts are control-plane — the model sees them, the transcript
+    // stays the human's record (the detached userMessage mirrors how
+    // connector continuations avoid appending a visible bubble).
+    const userMessage = first
+      ? store.appendMessage(threadId, { role: "user", kind: "text", text: userText })
+      : { id: `goal-${randomUUID()}`, at: Date.now(), role: "user" as const, kind: "text" as const, text: engineText };
+    await startTurn(botId, engineText, { threadId, userMessage, unattended: true, onDispatchError });
+  },
+});
+goals.start();
 
 // Webhook definitions are independent from calendar schedules, but every
 // delivery joins the same RoutineManager queue. That keeps unattended work
@@ -4372,6 +4420,23 @@ let requestUserEmail = "";
       return run ? json(res, 200, { run }) : json(res, 404, { error: "no such active run" });
     }
 
+    // ── goals: bounded autonomy loop ─────────────────────────────────────
+    // A goal belongs to whoever owns its bot, same isolation as routines.
+    const ownsGoal = (g: { botId: string }) => {
+      const b = store.bot(g.botId);
+      return !b || ownsRecord(b);
+    };
+    if (path === "/api/goals" && method === "GET") {
+      return json(res, 200, { goals: goals!.listGoals().filter(ownsGoal) });
+    }
+    let goalMatch = path.match(/^\/api\/goals\/([\w-]+)\/stop$/);
+    if (goalMatch && method === "POST") {
+      const target = goals!.listGoals().find((g) => g.id === goalMatch![1]);
+      if (target && !ownsGoal(target)) return json(res, 404, { error: "no such goal" });
+      const goal = goals!.stopGoal(goalMatch[1]);
+      return goal ? json(res, 200, { goal }) : json(res, 404, { error: "no such goal" });
+    }
+
     // ── independent webhook triggers ────────────────────────────────────
     // Management stays on the app-only server. Actual deliveries land on a
     // second, webhook-only loopback listener so Funnel or a future hosted
@@ -5921,6 +5986,19 @@ let requestUserEmail = "";
       const message = store.messagesFor(bot.threadId)[before];
       if (message) return json(res, 202, { ok: true, message });
       return json(res, 202, { ok: true });
+    }
+
+    // start a goal on this bot: round 1 dispatches now, the loop continues
+    // across turns until the marker, the round budget, or Stop
+    m = path.match(/^\/api\/bots\/([\w-]+)\/goal$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      const text = String(body.text ?? "").trim();
+      if (!text) return json(res, 400, { error: "text required" });
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const goal = goals!.create({ botId: bot.id, threadId: bot.threadId, text, maxRounds: body.maxRounds });
+      return json(res, 201, { goal });
     }
 
     // edit a user message → fork the conversation there and rerun the turn.

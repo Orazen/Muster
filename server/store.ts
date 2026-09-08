@@ -122,6 +122,10 @@ export interface Message {
    * them; a true stranded by a restart is inert because the client only
    * shows the affordance while the bot is busy. */
   queued?: boolean;
+  /** turn provenance: which engine + model actually produced this reply.
+   * Stamped by the server's event fold so the UI can show "which model
+   * said that" instead of hiding the harness. */
+  via?: { instanceId: string; model: string; effort?: string };
 }
 
 export type GroupDefaultResponder =

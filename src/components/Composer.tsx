@@ -1,6 +1,6 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Clock, Mic, Square, Users, X } from "lucide-react";
+import { ArrowUp, Clock, Mic, Square, Target, Users, X } from "lucide-react";
 import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useComposerDraft } from "@/lib/drafts";
@@ -213,6 +213,11 @@ export function Composer({
   };
   // a chip on its own is a message: the send control has to appear for it
   const hasContent = Boolean(text.trim()) || attachments.length > 0;
+  // Goal mode: the next send starts a bounded autonomy loop instead of a
+  // single turn. A per-composer toggle, not a persisted setting — the send
+  // arrow becomes a target so the user always knows what the click means.
+  const [goalMode, setGoalMode] = useState(false);
+  const goalArmed = Boolean(bot && !group && goalMode && !busy);
   const send = () => {
     const t = composeMessage(text, attachments);
     if (!t) return;
@@ -226,8 +231,14 @@ export function Composer({
       dispatch({ type: "sendGroup", groupId: group.id, text: t });
       track("message_sent", { room: true });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, text: t });
-      track("message_sent", { driver: bot.modelSelection?.instanceId, queued: busy });
+      if (goalArmed) {
+        dispatch({ type: "startGoal", botId: bot.id, text: t });
+        track("goal_started", { driver: bot.modelSelection?.instanceId });
+        setGoalMode(false);
+      } else {
+        dispatch({ type: "send", botId: bot.id, text: t });
+        track("message_sent", { driver: bot.modelSelection?.instanceId, queued: busy });
+      }
     }
     setText("");
     setAttachments([]);
@@ -485,11 +496,25 @@ export function Composer({
             <Mic size={18} />
           </button>
         )}
+        {bot && !group && !busy && (
+          <button
+            onClick={() => setGoalMode((v) => !v)}
+            aria-pressed={goalMode}
+            aria-label={goalMode ? "Goal mode on — the next message starts an autonomous loop" : "Goal mode — work toward the next message autonomously"}
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-full",
+              goalMode ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink",
+            )}
+            title={goalMode ? "Goal mode on — the next message becomes a self-driving loop" : "Goal mode — let the bot work toward this on its own"}
+          >
+            <Target size={16} />
+          </button>
+        )}
         {hasContent && (
           <button
             onClick={send}
-            aria-label={busy ? "Queue message" : "Send message"}
-            title={busy ? "Sends when the current turn finishes" : "Send"}
+            aria-label={goalArmed ? "Start goal" : busy ? "Queue message" : "Send message"}
+            title={goalArmed ? "Start goal loop" : busy ? "Sends when the current turn finishes" : "Send"}
             className={cn(
               "flex size-9 shrink-0 items-center justify-center rounded-full text-white",
               busy
@@ -497,7 +522,7 @@ export function Composer({
                 : "bg-accent muster-send-glow hover:brightness-110",
             )}
           >
-            {busy ? <Clock size={15} /> : <ArrowUp size={17} />}
+            {goalArmed ? <Target size={15} /> : busy ? <Clock size={15} /> : <ArrowUp size={17} />}
           </button>
         )}
         </div>

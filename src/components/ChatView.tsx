@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Search,
   Square,
+  Target,
   Webhook,
   X,
 } from "lucide-react";
@@ -326,9 +327,11 @@ function Bubble({
   onSubmitEdit: (text: string) => void;
   onRegenerate?: () => void;
 }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const user = message.role === "user";
   const [expanded, setExpanded] = useState(false);
+  const via = !user && message.kind === "text" ? message.via : undefined;
+  const viaInstance = via ? state.instances.find((i) => i.instanceId === via.instanceId) : undefined;
   const text = message.text ?? "";
   const webhookView = user ? webhookMessageView(text) : null;
   const visibleText = webhookView?.task ?? text;
@@ -439,6 +442,18 @@ function Bubble({
           </div>
         )}
         {!user && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
+        {/* provenance chip: show the harness instead of hiding it — which
+            engine + model actually said this (routing visibility pattern) */}
+        {via && (
+          <span
+            className="ml-1 pb-1 text-[10.5px] tabular-nums text-ink-secondary/60 opacity-0 transition-opacity group-hover:opacity-100"
+            title={via.effort ? `${viaInstance?.displayName ?? via.instanceId} · effort ${via.effort}` : viaInstance?.displayName ?? via.instanceId}
+          >
+            {via.model}
+            {viaInstance && viaInstance.displayName !== via.model ? ` · ${viaInstance.displayName}` : ""}
+            {via.effort ? ` · ${via.effort}` : ""}
+          </span>
+        )}
         <span
           className={cn(
             "self-end pb-1 text-[11px] tabular-nums text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100",
@@ -1217,6 +1232,7 @@ export function ChatView({ bot }: { bot: Bot }) {
       {/* Execution timeline: what the bot just did / is doing, only while
           a turn runs — idle renders nothing, so no layout shift. */}
       <TimelineStrip bot={bot} messages={messages} />
+      <GoalBanner bot={bot} />
       <Composer
         key={bot.id}
         bot={bot}
@@ -1224,6 +1240,32 @@ export function ChatView({ bot }: { bot: Bot }) {
       />
 
     </main>
+  );
+}
+
+/** The visible plan loop: while a goal is running on this thread it shows
+ * "Goal · round N/M · <text>" with a Stop, so autonomy is something the
+ * user watches and can halt — never a hidden loop. */
+function GoalBanner({ bot }: { bot: Bot }) {
+  const { state, dispatch } = useStore();
+  const goal = state.goals.find((g) => g.botId === bot.id && g.status === "active");
+  if (!goal) return null;
+  return (
+    <div className="animate-pop-in flex items-center gap-2 border-t border-hairline/40 bg-raised/60 px-4 py-2 text-[12.5px]">
+      <Target size={13} className="shrink-0 text-accent" aria-hidden="true" />
+      <span className="shrink-0 font-medium tabular-nums">
+        Goal · round {Math.min(goal.rounds + 1, goal.maxRounds)}/{goal.maxRounds}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-ink-secondary" title={goal.text}>
+        {goal.text}
+      </span>
+      <button
+        onClick={() => dispatch({ type: "stopGoal", goalId: goal.id })}
+        className="shrink-0 rounded-md px-2 py-0.5 text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
+      >
+        Stop
+      </button>
+    </div>
   );
 }
 

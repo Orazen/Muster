@@ -93,6 +93,24 @@ export interface Message {
    * Rendered only while the bot is busy, so a flag stranded by a server
    * restart never shows a promise nothing will keep. */
   queued?: boolean;
+  /** turn provenance: which engine + model actually produced this reply,
+   * stamped by the server so the UI can show "who said that". */
+  via?: { instanceId: string; model: string; effort?: string };
+}
+
+/** A bounded autonomy loop: one goal the bot works toward across turns
+ * until it reports completion, fails, hits its round cap, or is stopped. */
+export interface Goal {
+  id: string;
+  botId: string;
+  threadId: string;
+  text: string;
+  status: "active" | "done" | "stopped" | "failed";
+  rounds: number;
+  maxRounds: number;
+  createdAt: number;
+  updatedAt: number;
+  lastOutcome?: string;
 }
 
 export type GroupDefaultResponder =
@@ -332,6 +350,7 @@ export interface AppState {
   selectedId: string;
   activeView: "chat" | "routines";
   routines: Routine[];
+  goals: Goal[];
   routineRuns: RoutineRun[];
   webhooks: WebhookTrigger[];
   webhookAttempts: WebhookAttempt[];
@@ -392,6 +411,10 @@ export type Action =
   | { type: "showRoutines" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinePatched"; routine: Routine }
+  | { type: "goalsHydrated"; goals: Goal[] }
+  | { type: "goalPatched"; goal: Goal }
+  | { type: "startGoal"; botId: string; text: string; maxRounds?: number }
+  | { type: "stopGoal"; goalId: string }
   | { type: "routineDeleted"; routineId: string }
   | { type: "routineRunPatched"; run: RoutineRun }
   | { type: "webhooksHydrated"; webhooks: WebhookTrigger[]; attempts: WebhookAttempt[]; ingress: WebhookIngressStatus }
@@ -546,6 +569,17 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "routineDeleted":
       return { ...state, routines: state.routines.filter((routine) => routine.id !== action.routineId) };
+    case "goalsHydrated":
+      return { ...state, goals: action.goals };
+    case "goalPatched": {
+      const exists = state.goals.some((goal) => goal.id === action.goal.id);
+      return {
+        ...state,
+        goals: exists
+          ? state.goals.map((goal) => (goal.id === action.goal.id ? action.goal : goal))
+          : [action.goal, ...state.goals],
+      };
+    }
     case "routineRunPatched": {
       const exists = state.routineRuns.some((run) => run.id === action.run.id);
       const runs = exists
@@ -938,6 +972,8 @@ export function reducer(state: AppState, action: Action): AppState {
     case "runRoutine":
     case "cancelRoutineRun":
     case "markRoutineRunSeen":
+    case "startGoal":
+    case "stopGoal":
       return state;
   }
 }
@@ -953,6 +989,7 @@ export const initialState: AppState = {
   selectedId: "",
   activeView: "chat",
   routines: [],
+  goals: [],
   routineRuns: [],
   webhooks: [],
   webhookAttempts: [],
@@ -1102,6 +1139,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "markRoutineRunSeen":
           api(`/api/routine-runs/${action.runId}/seen`, { method: "POST" }).catch(showError);
+          break;
+        case "startGoal":
+          api(`/api/bots/${action.botId}/goal`, {
+            method: "POST",
+            body: JSON.stringify({ text: action.text, maxRounds: action.maxRounds }),
+          }).catch(showError);
+          break;
+        case "stopGoal":
+          api(`/api/goals/${action.goalId}/stop`, { method: "POST" }).catch(showError);
           break;
         case "send":
           api(`/api/bots/${action.botId}/messages`, {
@@ -1359,6 +1405,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         api("/api/routines")
           .then(({ routines, runs }) => alive && rawDispatch({ type: "routinesHydrated", routines, runs }))
           .catch(() => {}),
+        api("/api/goals")
+          .then(({ goals }) => alive && rawDispatch({ type: "goalsHydrated", goals: goals ?? [] }))
+          .catch(() => {}),
         api("/api/webhooks")
           .then(({ webhooks, attempts, ingress }) => alive && rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress }))
           .catch(() => {}),
@@ -1550,6 +1599,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "routine.run":
           rawDispatch({ type: "routineRunPatched", run: frame.run });
+          break;
+        case "goal":
+          rawDispatch({ type: "goalPatched", goal: frame.goal });
           break;
         case "webhook":
           rawDispatch({ type: "webhookPatched", webhook: frame.webhook });
