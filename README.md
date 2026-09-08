@@ -235,7 +235,7 @@ flowchart LR
 | **Linux** (x64) | [Muster.deb](https://muster.orazen.online/downloads/Muster.deb) · [AppImage](https://muster.orazen.online/downloads/Muster.AppImage) | `sudo dpkg -i Muster.deb` · `chmod +x Muster.AppImage && ./Muster.AppImage` |
 | **Web / Cloud** | [muster.orazen.online/app](https://muster.orazen.online/app) | Nothing to install. Free account; computers from $20/mo. |
 | **Self-host** | Docker | `docker compose up -d --build` → http://localhost:8799 — see [docs/self-host.md](docs/self-host.md). |
-| **Self-host, one command** | Node 22+ | `node cli/muster.mjs up` from a checkout — boot on your machine, scan the QR with your phone, done (below). |
+| **Self-host, one command** | Node 22+ | `node cli/muster.mjs up` (add `-d` to keep it running after the terminal closes) — boot on your machine, scan the QR with your phone, done (below). |
 | **iOS / Android** | Built — store listings pending developer accounts | Pair with your computer's companion service. |
 
 ### `muster up` — your bots, your machine, your phone
@@ -244,7 +244,8 @@ From a Muster checkout (the CLI ships with the repo; an `npx` package may
 follow):
 
 ```sh
-node cli/muster.mjs up
+node cli/muster.mjs up        # foreground: Ctrl-C stops Muster
+node cli/muster.mjs up -d     # background: close the terminal, Muster keeps running
 ```
 
 That's the whole install. Muster boots on your computer, generates its own
@@ -260,17 +261,32 @@ secret, and prints a QR code in the terminal:
 Scan it with your phone's camera and you land straight in the console —
 signed in as the owner, no account creation, no password to invent. The
 claim code is single-use and expires in 10 minutes; the pairing itself
-never leaves your network. Close the laptop lid? The server keeps running —
-check in from your phone, send tasks, answer approvals.
+never leaves your network.
 
-Need a fresh phone later (or a second one)? Run `muster up` again — or mint
-a code from the same machine with `curl -s -X POST
+With `-d` the server detaches from the terminal — shut the terminal
+window, end the SSH session, log out; Muster keeps running on the machine
+and you check in from your phone: send tasks, answer approvals. (The
+machine itself still needs to stay awake — a suspended laptop stops
+everything.)
+
+Need a fresh phone later (or a second one)? Run `muster up` again — it
+detects the running server and just re-prints a fresh QR against it (no
+second server). Re-running while detached works the same way. The claim
+code can also be minted directly: `curl -s -X POST
 http://127.0.0.1:8799/api/pair/claim/create`.
+
+Managing a detached server:
+
+```sh
+node cli/muster.mjs stop      # end it (SIGTERM, then SIGKILL after 10s)
+node cli/muster.mjs logs      # tail its output (logs 100 for more)
+node cli/muster.mjs logs 200
+```
 
 Flags: `--port 8799` (pick another port), `--data-dir <dir>` (move the
 database), `--public-host <host>` (you're fronting it with a reverse
-proxy).
-| **iOS / Android** | Built — store listings pending developer accounts | Pair with your computer's companion service. |
+proxy). State lives in `~/.muster/` — the auth secret, the database, and
+(`up.json` + `up.log` under `run/`) the detached server's record and log.
 
 **Requirements (desktop):** macOS / Windows / Ubuntu 24.04 x64, Node 24+, pnpm, and at least one agent
 CLI (e.g. [`claude`](https://claude.com/claude-code), [`codex`](https://github.com/openai/codex),

@@ -7,7 +7,10 @@
 // Zero dependencies beyond Node's own fetch — this file is copy-installed
 // by `curl` users and run by `npm i -g`, so the only contract is Node 22+.
 //
-//   muster up [--port 8799]        boot the server here + print a phone QR
+//   muster up [-d] [--port 8799]   boot the server here + print a phone QR;
+//                                  -d keeps it running after the terminal closes
+//   muster stop                      stop the background server
+//   muster logs [n]                  last n lines of the background log
 //   muster pair [--cloud URL]        print/redeem a pairing code
 //   muster bots                      roster: name, engine, state, budget
 //   muster send <bot> <text>         send a turn, print the reply
@@ -18,7 +21,7 @@
 //   muster status --json             machine-readable (agent callers)
 
 import { homedir, networkInterfaces } from "node:os";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -262,12 +265,16 @@ async function receipts() {
 }
 
 // ── muster up ───────────────────────────────────────────────────────────
-// The one-command self-host: resolve a runtime, boot it, mint the owner's
-// claim code, print a QR the phone scans to land straight in the console.
-// The laptop can close afterwards — the server keeps running; `muster up`
-// prints how to run it detached for real.
+// The one-command self-host: resolve a runtime, boot it — foreground, or
+// detached with `-d` — mint the owner's claim code, print a QR the phone
+// scans to land straight in the console. Detached survives the terminal
+// closing (that's the "close the laptop, the bots keep working" part);
+// `muster stop` ends it, `muster logs` reads its output.
 
 const MUSTER_DIR = join(homedir(), ".muster");
+const RUN_DIR = join(MUSTER_DIR, "run");
+const RUNTIME_PATH = join(RUN_DIR, "up.json"); // { pid, port, detached, started }
+const LOG_PATH = join(RUN_DIR, "up.log");
 
 function lanAddress() {
   for (const nets of Object.values(networkInterfaces())) {
@@ -311,11 +318,89 @@ function resolveRuntime() {
   process.exit(1);
 }
 
-async function healthWait(port, { timeoutMs = 60_000 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+let child = null;
+
+/** Read the run record ({pid, port, started} JSON) or null. A record whose
+ *  server no longer answers /api/health is treated as gone (crash, reboot,
+ *  manual kill) — the health endpoint is the truth, not the PID. */
+function readRunRecord() {
+  try {
+    const rec = JSON.parse(readFileSync(RUNTIME_PATH, "utf8"));
+    if (typeof rec?.pid === "number" && typeof rec?.port === "number") return rec;
+  } catch {
+    // no record or garbage — fall through
+  }
+  return null;
+}
+
+async function liveServer(rec) {
+  if (!rec) return null;
+  try {
+    const res = await fetch(`http://127.0.0.1:${rec.port}/api/health`, { signal: AbortSignal.timeout(1500) });
+    const body = await res.json().catch(() => null);
+    if (res.ok && body?.app === "muster") return rec;
+  } catch {
+    // not answering — gone or still booting
+  }
+  return null;
+}
+
+function clearRunRecord() {
+  try {
+    unlinkSync(RUNTIME_PATH);
+  } catch {
+    // already gone
+  }
+}
+
+/** Stop the detached server: SIGTERM, wait for the health endpoint to go
+ *  quiet, escalate to SIGKILL after 10s. */
+async function stopDaemon() {
+  const rec = readRunRecord();
+  if (!rec) {
+    console.log("No background Muster found. (`muster up -d` starts one.)");
+    return;
+  }
+  const wasLive = Boolean(await liveServer(rec));
+  try {
+    process.kill(rec.pid, "SIGTERM");
+  } catch {
+    // already gone
+  }
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline && (await liveServer(rec))) {
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  if (await liveServer(rec)) {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+      process.kill(rec.pid, "SIGKILL");
+    } catch {
+      // already gone
+    }
+    console.log(`Force-stopped Muster (port ${rec.port} ignored SIGTERM).`);
+  } else {
+    console.log(`Stopped Muster${wasLive ? "" : " (it was already down)"} — port ${rec.port} free.`);
+  }
+  clearRunRecord();
+}
+
+function logs() {
+  const n = Number(subject) || 40;
+  if (!existsSync(LOG_PATH)) {
+    console.log("No background log yet. (`muster up -d` creates one.)");
+    return;
+  }
+  const lines = readFileSync(LOG_PATH, "utf8").split("\n");
+  console.log(lines.slice(Math.max(0, lines.length - 1 - n)).join("\n"));
+}
+
+/** Readiness probe shared by foreground and detached boots. */
+async function waitHealthy(port, { timeoutMs = 60_000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (child && child.exitCode !== null) throw new Error(`server exited with code ${child.exitCode} during startup`);
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2000) });
       if (res.ok) {
         const body = await res.json().catch(() => null);
         if (body?.app === "muster") return body;
@@ -323,15 +408,63 @@ async function healthWait(port, { timeoutMs = 60_000 } = {}) {
     } catch {
       // not up yet
     }
+    if (Date.now() > deadline) throw new Error(`server did not become healthy within ${timeoutMs / 1000}s`);
     await new Promise((r) => setTimeout(r, 400));
-    if (child && child.exitCode !== null) throw new Error(`server exited with code ${child.exitCode} during startup`);
   }
-  throw new Error(`server did not become healthy within ${timeoutMs / 1000}s`);
 }
 
-let child = null;
+/** Mint a claim code and print the onboarding banner — identical for
+ *  foreground and detached so the phone flow never depends on run mode. */
+async function mintAndPrint(port, { detached }) {
+  const create = await fetch(`http://127.0.0.1:${port}/api/pair/claim/create`, {
+    method: "POST",
+    headers: { host: `127.0.0.1:${port}`, "content-type": "application/json" },
+  });
+  console.log("");
+  console.log(`  Muster is up${detached ? " in the background" : ""} on port ${port}.`);
+  if (!create.ok) {
+    console.error(`  Could not mint a claim code (HTTP ${create.status}).`);
+    console.error("  The server is up — open the URL below and pair from the console.");
+  } else {
+    const { code } = await create.json();
+    const lan = lanAddress();
+    const url = `http://${lan ?? "127.0.0.1"}:${port}/claim#${code}`;
+    console.log("  Scan to open the console on your phone:");
+    console.log("");
+    console.log(url);
+    console.log(renderTerminal(url));
+    console.log("");
+    console.log("  The code expires in 10 minutes and works once. Re-run `muster up` for a fresh QR anytime.");
+    console.log(`  Later: ${url.split("#")[0]}  (same network)`);
+  }
+  if (detached) {
+    console.log("  Close the terminal — Muster keeps running. `muster stop` ends it, `muster logs` reads its output.");
+  } else {
+    console.log("  Keep this terminal open — Ctrl-C stops Muster. (`muster up -d` keeps it after the terminal closes.)");
+  }
+  console.log("");
+  console.log("  Next: open Settings → Engines and give your first bot a model, then just talk to it.");
+}
 
 async function up() {
+  const detached = has("-d") || has("--detach");
+
+  // Already-running awareness: a re-run is NEVER a second server — it
+  // re-points the QR at the live one (fresh claim code, fresh QR) instead
+  // of double-booting onto a random port.
+  const existing = await liveServer(readRunRecord());
+  if (existing && detached) {
+    await mintAndPrint(existing.port, { detached });
+    return;
+  }
+  if (existing) {
+    console.log(`Muster is already running on port ${existing.port}. Re-printing the QR against it.`);
+    await mintAndPrint(existing.port, { detached: false });
+    console.log("  (This foreground shell is only printing — Ctrl-C will not stop the running server.)");
+    return;
+  }
+  clearRunRecord();
+
   const port = await freePort(Number(arg("--port") ?? 8799));
   const runtime = resolveRuntime();
 
@@ -354,6 +487,28 @@ async function up() {
   };
   if (arg("--public-host")) env.OMB_PUBLIC_HOST = arg("--public-host");
 
+  if (detached) {
+    // Detached: own process group, output to the log file, survives the
+    // terminal closing (SIGHUP ignored via detached+unref on POSIX).
+    mkdirSync(RUN_DIR, { recursive: true });
+    const log = openSync(LOG_PATH, "a");
+    const daemon = spawn(runtime.cmd, runtime.args, {
+      cwd: runtime.cwd,
+      env,
+      stdio: ["ignore", log, log],
+      detached: true,
+    });
+    daemon.unref();
+    writeFileSync(
+      RUNTIME_PATH,
+      JSON.stringify({ pid: daemon.pid, port, started: new Date().toISOString() }, null, 2) + "\n",
+      { mode: 0o600 },
+    );
+    await waitHealthy(port);
+    await mintAndPrint(port, { detached: true });
+    return;
+  }
+
   child = spawn(runtime.cmd, runtime.args, { cwd: runtime.cwd, env, stdio: "inherit" });
   const stop = (sig) => {
     if (child && child.exitCode === null) child.kill(sig);
@@ -363,41 +518,18 @@ async function up() {
   process.on("SIGTERM", () => stop("SIGTERM"));
   child.on("exit", (code) => process.exit(code ?? 0));
 
-  await healthWait(port);
-
-  // Mint the owner claim code — loopback socket + loopback Host header.
-  const create = await fetch(`http://127.0.0.1:${port}/api/pair/claim/create`, {
-    method: "POST",
-    headers: { host: `127.0.0.1:${port}`, "content-type": "application/json" },
-  });
-  if (!create.ok) {
-    console.error(`Could not mint a claim code (HTTP ${create.status}).`);
-    console.error("The server is up — open the printed URL manually and pair from the console.");
-  } else {
-    const { code } = await create.json();
-    const lan = lanAddress();
-    const url = `http://${lan ?? "127.0.0.1"}:${port}/claim#${code}`;
-    console.log("");
-    console.log("  Muster is up. Scan to open the console on your phone:");
-    console.log("");
-    console.log(url);
-    console.log(renderTerminal(url));
-    console.log("");
-    console.log("  The code expires in 10 minutes and works once.");
-    console.log(`  Later: ${url.split("#")[0]}  (same network)`);
-    if (!runtime.static) {
-      console.log("  No built UI found — API-only boot. Run `npm run build` in the repo for the web console.");
-    }
-    console.log("");
-    console.log("  Keep this terminal open — Ctrl-C stops Muster. Background mode (`muster up -d`) is coming.");
-  }
+  await waitHealthy(port);
+  await mintAndPrint(port, { detached: false });
   // Keep the foreground child attached; the exit/forward handlers above own
   // the process lifetime from here.
 }
 
 const HELP = `muster — the CLI for your AI workforce
 
-  muster up [--port 8799]          boot the server here; scan the QR with your phone
+  muster up [-d] [--port 8799]    boot the server here; scan the QR with your phone.
+                                  -d keeps it running after the terminal closes.
+  muster stop                     stop the background server started with up -d
+  muster logs [n]                 last n lines of the background server log (default 40)
   muster pair [--local --port 8799 --email .. --password ..]
               [--cloud URL --email .. --password ..] [--redeem CODE]
   muster bots [--json]
@@ -411,6 +543,12 @@ try {
   switch (command) {
     case "up":
       await up();
+      break;
+    case "stop":
+      await stopDaemon();
+      break;
+    case "logs":
+      logs();
       break;
     case "pair": {
       if (has("--redeem")) await pairRedeem();
