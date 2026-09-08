@@ -691,6 +691,18 @@ const MessagesList = memo(function MessagesList({
 }) {
   const { dispatch } = useStore();
   const runPositions = useMemo(() => bubbleRunPositions(messages), [messages]);
+  // The one card letter hotkeys (A–F) may answer: the newest pending option
+  // card in the mounted transcript. Windowing makes that the honest scope —
+  // a card scrolled out of the visible tail can't be keyboard-driven.
+  const activeOptionsId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.kind === "options" && m.card && !m.card.dismissed && !m.card.answered && !(m.card.requestId && m.card.tool)) {
+        return m.id;
+      }
+    }
+    return undefined;
+  }, [messages]);
   return (
     <>
       {messages.length === 0 && !bot.busy && (
@@ -734,7 +746,7 @@ const MessagesList = memo(function MessagesList({
               return m.card?.requestId && m.card.tool ? (
                 <ApprovalCard bot={bot} message={m} />
               ) : (
-                <OptionCard botId={bot.id} message={m} />
+                <OptionCard botId={bot.id} message={m} hotkeys={m.id === activeOptionsId} />
               );
             case "activity":
               // a failed turn is an error, not a tool run — render it as one

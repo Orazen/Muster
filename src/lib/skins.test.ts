@@ -21,6 +21,19 @@ describe("skins", () => {
     }
   });
 
+  it("carries literal overlay tints the Windows caption strip can accept", () => {
+    for (const theme of THEMES) {
+      // The main-process handler rejects anything but #rrggbb hex; the CSS
+      // palette these mirror is all lowercase hex, so hold that line here.
+      expect(theme.overlay.color).toMatch(/^#[0-9a-f]{6}$/);
+      expect(theme.overlay.symbolColor).toMatch(/^#[0-9a-f]{6}$/);
+      // A glyph color that equals the strip would hide the caption buttons.
+      expect(theme.overlay.symbolColor).not.toBe(theme.overlay.color);
+    }
+    // Midnight must keep the exact pre-skin-follow look on a fresh install.
+    expect(THEMES[0].overlay).toEqual({ color: "#070707", symbolColor: "#b5b5b5" });
+  });
+
   it("falls back to Midnight", () => {
     expect(DEFAULT_THEME).toBe("midnight");
   });

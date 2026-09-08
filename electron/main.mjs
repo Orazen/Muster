@@ -414,6 +414,28 @@ ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
   return true;
 });
 
+// Windows paints its caption buttons from the native titleBarOverlay, which
+// cannot read CSS variables — so the renderer pushes the active skin's
+// colors across the bridge whenever the skin changes (src/lib/skins.ts).
+// Everywhere else this is a deliberate no-op: macOS traffic lights are
+// native and Linux keeps the desktop title bar.
+ipcMain.handle("desktop:set-titlebar-overlay", (event, overlay) => {
+  if (process.platform !== "win32") return false;
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return false;
+  const color = asText(overlay?.color);
+  const symbolColor = asText(overlay?.symbolColor);
+  // Literal hex only — a CSS var name or any other paint the shell can't
+  // resolve would come out black or throw deep inside Chromium.
+  if (!/^#[0-9a-fA-F]{6}$/.test(color ?? "") || !/^#[0-9a-fA-F]{6}$/.test(symbolColor ?? "")) {
+    throw new Error("Overlay colors must be #rrggbb hex values");
+  }
+  // Height MUST keep matching the header strip (createWindow) — the
+  // renderer may change the paint, never the geometry.
+  win.setTitleBarOverlay({ color, symbolColor, height: 60 });
+  return true;
+});
+
 ipcMain.handle("perm:status", () => ({
   mic:
     process.platform === "darwin"

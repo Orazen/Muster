@@ -21,6 +21,12 @@ export type Theme = {
   /** One line, shown under the label in the picker. */
   description: string;
   swatch: ThemeSwatch;
+  /** Windows paints the caption-button strip from a native overlay that
+   * cannot read CSS variables, so each skin carries literal tints: the
+   * window background behind the glyphs and a readable ink for them.
+   * macOS traffic lights are native (no overlay) and Linux keeps the
+   * desktop title bar, so this only ever matters on Windows. */
+  overlay: { color: string; symbolColor: string };
 };
 
 export const THEMES: readonly Theme[] = [
@@ -29,24 +35,28 @@ export const THEMES: readonly Theme[] = [
     label: "Midnight",
     description: "The original. Cool and dark.",
     swatch: { surface: "#070707", panel: "#111111", accent: "#1084fe" },
+    overlay: { color: "#070707", symbolColor: "#b5b5b5" },
   },
   {
     id: "atelier",
     label: "Atelier",
     description: "Daylight on paper, warm and quiet.",
     swatch: { surface: "#f4efe4", panel: "#ece5d6", accent: "#a94e26" },
+    overlay: { color: "#f4efe4", symbolColor: "#6b5d43" },
   },
   {
     id: "foundry",
     label: "Foundry",
     description: "Night shift. Dark, warm, lit in brass.",
     swatch: { surface: "#16110c", panel: "#1f1811", accent: "#aa6418" },
+    overlay: { color: "#16110c", symbolColor: "#cdc0a8" },
   },
   {
     id: "lagoon",
     label: "Lagoon",
     description: "Cool daylight. Porcelain and deep teal.",
     swatch: { surface: "#edf2f3", panel: "#e2eaec", accent: "#0e6e80" },
+    overlay: { color: "#edf2f3", symbolColor: "#476b74" },
   },
 ];
 
@@ -96,6 +106,7 @@ export function applyTheme(id: ThemeId): void {
   } catch {
     /* quota / private mode — the skin still applies for this session */
   }
+  syncWindowChrome(id);
 }
 
 /**
@@ -103,5 +114,24 @@ export function applyTheme(id: ThemeId): void {
  * booting is a read, not a choice.
  */
 export function restoreTheme(): void {
-  document.documentElement.dataset.theme = readTheme();
+  const id = readTheme();
+  document.documentElement.dataset.theme = id;
+  syncWindowChrome(id);
+}
+
+// Windows paints its caption buttons from the native titleBarOverlay, which
+// cannot read CSS variables — so the renderer pushes the active skin's
+// literal colors across the bridge on every skin change, boot included.
+// Every link here is optional: no bridge in the browser, no method in older
+// packaged shells, and non-Windows answers false.
+function syncWindowChrome(id: ThemeId): void {
+  try {
+    const overlay = THEMES.find((theme) => theme.id === id)?.overlay;
+    if (!overlay) return;
+    globalThis.window?.ogb
+      ?.setTitleBarOverlay?.(overlay)
+      ?.catch(() => undefined);
+  } catch {
+    /* re-tinting the chrome is cosmetic; never let it break a skin switch */
+  }
 }

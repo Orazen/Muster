@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useStore, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -8,19 +8,48 @@ const LETTERS = ["A", "B", "C", "D", "E", "F"];
 export function OptionCard({
   botId,
   message,
+  hotkeys = false,
 }: {
   botId: string;
   message: Message;
+  /** A–F answers the matching option. ChatView enables it only for the
+   * newest pending card in the mounted transcript, so two stacked cards
+   * can never race for one keypress. */
+  hotkeys?: boolean;
 }) {
   const { dispatch } = useStore();
   const [custom, setCustom] = useState("");
   const card = message.card;
-  if (!card || card.dismissed) return null;
 
   const answer = (text: string) => {
     if (!text.trim()) return;
     dispatch({ type: "answerCard", botId, messageId: message.id, answer: text.trim() });
   };
+
+  // Letter hotkeys. The handler stays out of the way of every editable
+  // surface — the composer, this card's own free-text field, the find bar —
+  // and of any chord with a modifier held (⌘A must stay select-all).
+  useEffect(() => {
+    if (!hotkeys || !card || card.dismissed || card.answered) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest("input, textarea, select, [contenteditable]")
+      ) {
+        return;
+      }
+      const index = LETTERS.indexOf(event.key.toUpperCase());
+      if (index < 0 || index >= card.options.length) return;
+      event.preventDefault();
+      answer(card.options[index]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hotkeys, card, answer]);
+
+  if (!card || card.dismissed) return null;
 
   return (
     <div className="w-full max-w-[840px] rounded-2xl border border-hairline/50 bg-card p-4">
@@ -55,7 +84,10 @@ export function OptionCard({
                 : "hover:bg-raised/60 disabled:hover:bg-transparent",
             )}
           >
-            <span className="flex size-6 items-center justify-center rounded-md bg-raised text-[12px] font-medium text-ink-secondary">
+            <span
+              title={hotkeys && !card.answered ? `Press ${LETTERS[i]}` : undefined}
+              className="flex size-6 items-center justify-center rounded-md bg-raised text-[12px] font-medium text-ink-secondary"
+            >
               {LETTERS[i]}
             </span>
             {opt}

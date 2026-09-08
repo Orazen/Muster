@@ -61,6 +61,10 @@ contextBridge.exposeInMainWorld("ogb", {
   pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
   /** Store a provider credential with OS-backed encryption. */
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
+  /** Re-tint the Windows caption-button overlay to the active skin. Answers
+   * false (never throws) off Windows or when the window was made without an
+   * overlay; the renderer treats that as "nothing to do". */
+  setTitleBarOverlay: (colors) => ipcRenderer.invoke("desktop:set-titlebar-overlay", colors),
 
   /** In-app auto-update. State object:
    *  { status: "idle"|"checking"|"available"|"downloading"|"downloaded"|"error",

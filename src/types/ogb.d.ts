@@ -65,6 +65,10 @@ declare global {
       pickFolder?(current?: string): Promise<string | null>;
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(name: "composioApiKey", value: string): Promise<ConfigStatus>;
+      /** Re-tint the Windows caption-button overlay to the active skin.
+       * Absent in older shells; resolves false off Windows — treat both as
+       * "nothing to do". */
+      setTitleBarOverlay?(colors: { color: string; symbolColor: string }): Promise<boolean>;
       /** In-app auto-update (packaged app only; dormant in dev). onState
        * fires immediately with the current state, then on transitions. */
       updater?: {

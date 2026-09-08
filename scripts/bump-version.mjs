@@ -1,29 +1,26 @@
 #!/usr/bin/env node
 
 /**
- * Bump the version in package.json and electron-builder.yml.
+ * Bump Muster's version. package.json is the ONLY version source —
+ * electron-builder.yml has no version key, so there is nothing else to edit.
  *
  * Usage:
- *   node scripts/bump-version.mjs patch     → 0.1.27 → 0.1.28
- *   node scripts/bump-version.mjs minor     → 0.1.27 → 0.2.0
- *   node scripts/bump-version.mjs major     → 0.1.27 → 1.0.0
- *   node scripts/bump-version.mjs 0.2.0     → explicit version
+ *   node scripts/bump-version.mjs patch     → 1.10.3 → 1.10.4
+ *   node scripts/bump-version.mjs minor     → 1.10.3 → 1.11.0
+ *   node scripts/bump-version.mjs major     → 1.10.3 → 2.0.0
+ *   node scripts/bump-version.mjs 1.11.0    → explicit version
  *
- * Commits the change, tags it, and optionally pushes:
- *   node scripts/bump-version.mjs patch --push
- *   node scripts/bump-version.mjs patch --no-push
+ * Deliberately does NOT run git: staging/committing stays with you
+ * (pathless `git add -A`), and releases are cut manually — there is no
+ * tag-triggered workflow to fire. Next steps are printed when it finishes.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { execSync } from "node:child_process";
 
-const args = process.argv.slice(2);
-const push = args.includes("--push");
-const noPush = args.includes("--no-push");
-const bumpArg = args.find((a) => !a.startsWith("--"));
+const bumpArg = process.argv.slice(2).find((a) => !a.startsWith("--"));
 
 if (!bumpArg) {
-  console.error("Usage: node scripts/bump-version.mjs <patch|minor|major|x.y.z> [--push|--no-push]");
+  console.error("Usage: node scripts/bump-version.mjs <patch|minor|major|x.y.z>");
   process.exit(1);
 }
 
@@ -52,36 +49,37 @@ console.log(`Bumping ${current} → ${next}`);
 pkg.version = next;
 writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
 
-// Update electron-builder.yml (version field)
-const yml = readFileSync("electron-builder.yml", "utf-8");
-const updated = yml.replace(
-  /^version:\s*.*/m,
-  `version: ${next}`
-);
-writeFileSync("electron-builder.yml", updated);
-
 // Update the visible version on the download page so the site always
-// names the build it actually serves
-const dl = readFileSync("www/download.html", "utf-8");
-const dlUpdated = dl.replace(
-  /(<h1>Download Muster <span[^>]*>)v[\d.]+(<\/span>)/,
-  `$1v${next}$2`,
-);
-writeFileSync("www/download.html", dlUpdated);
-
-console.log(`Updated package.json, electron-builder.yml and www/download.html to ${next}`);
-
-// Git commit and tag
-execSync("git add package.json electron-builder.yml www/download.html", { stdio: "inherit" });
-execSync(`git commit -m "release: v${next}"`, { stdio: "inherit" });
-execSync(`git tag v${next}`, { stdio: "inherit" });
-
-console.log(`\nCreated commit and tag v${next}`);
-
-if (push) {
-  execSync("git push && git push --tags", { stdio: "inherit" });
-  console.log("Pushed to origin. Release workflow will trigger automatically.");
-} else if (!noPush) {
-  console.log(`\nTo trigger the release, push the tag:`);
-  console.log(`  git push && git push --tags`);
+// names the build it actually serves. The badge's shape is part of the
+// hand-edited page — if the regex misses, say so instead of silently
+// writing the file back unchanged. package.json is already bumped by
+// this point, so a missing page must warn, not crash.
+let dl;
+try {
+  dl = readFileSync("www/download.html", "utf-8");
+} catch {
+  console.warn("WARNING: no www/download.html — skipping the download-page badge.");
+  dl = null;
 }
+if (dl !== null) {
+  const badge = new RegExp(`(<h1>Download Muster <span[^>]*>)v${current.replace(/\./g, "\\.")}(<\\/span>)`);
+  if (badge.test(dl)) {
+    writeFileSync("www/download.html", dl.replace(badge, `$1v${next}$2`));
+    console.log(`Updated package.json and www/download.html to ${next}`);
+  } else {
+    console.warn(
+      `WARNING: version badge for v${current} not found in www/download.html — ` +
+      `update the <span id="dl-version"> text by hand.`,
+    );
+    console.log(`Updated package.json to ${next}`);
+  }
+}
+
+console.log(`
+Next steps (no automation fires — releases are cut manually):
+  git add -A
+  git commit -m "release: v${next}"
+  git tag v${next}
+  git push && git push --tags
+Then build/installers and publish the GitHub release by hand.
+`);
