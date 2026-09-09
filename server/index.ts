@@ -278,6 +278,16 @@ const MIME = new Map(Object.entries({
   ".lottie": "application/zip",
   ".wasm": "application/wasm",
   ".webmanifest": "application/manifest+json",
+  // release-mirror artifacts: without these the marketing static handler serves
+  // binaries as text/html, so a browser click renders garbage instead of downloading
+  ".dmg": "application/octet-stream",
+  ".deb": "application/vnd.debian.binary-package",
+  ".exe": "application/vnd.microsoft.portable-executable",
+  ".appimage": "application/octet-stream",
+  ".zip": "application/zip",
+  ".blockmap": "application/gzip",
+  ".yml": "text/yaml; charset=utf-8",
+  ".yaml": "text/yaml; charset=utf-8",
 }));
 
 ensureDirs();
