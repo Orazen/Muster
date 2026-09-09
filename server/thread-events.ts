@@ -293,3 +293,10 @@ export function readThreadEvents(input: {
     total: { runtime: runtime.total, native: native.total },
   };
 }
+
+/** Runtime evidence in append order. Avoid reading native payloads or
+ * sorting by provider clocks when comparing ordered historical actions. */
+export function readRuntimeEvidence(eventsDir: string, threadId: string): RuntimeEvent[] {
+  assertThreadId(threadId);
+  return readRecentLines(join(eventsDir, `${threadId}.ndjson`), MAX_LIMIT, decodeRuntimeEvent).lines;
+}

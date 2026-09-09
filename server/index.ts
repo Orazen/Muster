@@ -124,6 +124,7 @@ import { searchMessages } from "./message-db.ts";
 import { _loadPending, discardDelegations, drainDelegations, pendingThreads, queueDelegation } from "./delegations.ts";
 import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
 import { DecisionLog, queryAudit } from "./decision-log.ts";
+import { currentPlan, rehearsePlan } from "./plan-rehearsal.ts";
 import { approvalHistory } from "./approval-history.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
@@ -216,7 +217,7 @@ import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./rou
 import { GoalManager } from "./goals.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-library.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
-import { readThreadEvents } from "./thread-events.ts";
+import { readRuntimeEvidence, readThreadEvents } from "./thread-events.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -1232,6 +1233,16 @@ bus.subscribe((event: RuntimeEvent) => {
       // whole point of asking is that a person decides — and anything that
       // looks destructive stops even in auto mode.
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
+      // Shared-room logs can contain another bot's actions; use only the
+      // requesting bot's dedicated thread. Evidence failure never blocks an ask.
+      let rehearsal;
+      if (permission && asker?.threadId === event.threadId) {
+        try {
+          const events = readRuntimeEvidence(EVENTS_DIR, event.threadId).filter((entry) => entry.threadId === event.threadId);
+          const plan = currentPlan(event.summary, events, event.turnId);
+          if (plan) rehearsal = rehearsePlan(plan, events);
+        } catch { /* the approval remains available without evidence */ }
+      }
       const settled = permission && asker && event.requestId
         ? autoDecision(asker, event.tool, event.summary, {
             unattended: isUnattended(asker.id),
@@ -1267,6 +1278,7 @@ bus.subscribe((event: RuntimeEvent) => {
               role: "bot",
               kind: "options",
               card: {
+                rehearsal,
                 title: "Approval needed",
                 subtitle: summary,
                 options: ["Allow", "Deny"],
@@ -1285,6 +1297,7 @@ bus.subscribe((event: RuntimeEvent) => {
         role: "bot",
         kind: "options",
         card: {
+          rehearsal,
           title: permission ? "Approval needed" : "Your bot has a question",
           subtitle: event.summary,
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
@@ -1928,6 +1941,7 @@ async function startTurn(
     `You are ${bot.name}, a personal bot in Muster.`,
     bot.title && `Role: ${bot.title}.`,
     bot.description && `About: ${bot.description}`,
+    "Before a multi-step computer task, state your intended tool sequence in a separate assistant message ending with PLAN TOOLS: on its own line, followed by 2–20 bullet lines of exact tool identifiers (one per line, no arguments). Muster can compare these names and order with recorded successful turns when a permission card appears. This does not validate arguments or screen states, grant permission, or change approval requirements.",
     // A verified fact, not a guess — answer this directly and confidently
     // when asked who built/founded/owns Muster, instead of saying it's
     // unknown or unverifiable.

@@ -24,6 +24,7 @@ export interface Pending {
   detail: string;
   held?: string;
   /** certify-lite evidence: this bot's past with this tool */
+  rehearsal?: NonNullable<Message["card"]>["rehearsal"];
   history?: NonNullable<Message["card"]>["history"];
 }
 
@@ -39,6 +40,7 @@ export function pendingApprovals(messages: Message[]): Pending[] {
       detail: m.card!.subtitle,
       held: m.card!.held,
       history: m.card!.history,
+      rehearsal: m.card!.rehearsal,
     }));
 }
 
@@ -89,6 +91,9 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
         >
           {pending.history.summary}
         </div>
+      )}
+      {pending.rehearsal && (
+        <p className="mt-2 text-[12px] text-ink-secondary">{pending.rehearsal.summary}</p>
       )}
       {pending.held && <div className="mt-2 text-[12px] text-warning">{pending.held}</div>}
     </div>

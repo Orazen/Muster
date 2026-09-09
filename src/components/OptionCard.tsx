@@ -70,6 +70,9 @@ export function OptionCard({
         </button>
       </div>
 
+      {card.rehearsal && (
+        <p className="mt-2 text-[12px] text-ink-secondary">{card.rehearsal.summary}</p>
+      )}
       <div className="mt-3 overflow-hidden rounded-lg border border-hairline/40">
         {card.options.map((opt, i) => (
           <button

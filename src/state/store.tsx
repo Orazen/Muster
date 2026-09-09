@@ -24,6 +24,7 @@ import { speaker } from "@/lib/tts";
 export type { AgentColor } from "@/lib/mascot";
 
 export interface OptionCardData {
+  rehearsal?: { plannedSteps: number; matchedSteps: number; matchedRuns: number; reviewedRuns: number; summary: string };
   title: string;
   subtitle: string;
   options: string[];
