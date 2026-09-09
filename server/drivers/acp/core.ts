@@ -126,13 +126,14 @@ export interface AcpSupport {
   /** Apply per-session settings between session/new (or session/load) and the
    * first session/prompt. Some CLIs ignore argv and take the model/mode over
    * the wire instead (droid), so this is the only place the pick can land; a
-   * throw here fails the turn rather than silently running another model. */
+   * throw here fails the turn rather than silently running another model.
+   * Return the confirmed model to include it in session.started evidence. */
   configureSession?(ctx: {
     request: (method: string, params: JsonValue, timeoutMs?: number) => Promise<any>;
     sessionId: string;
     config: AcpConfig;
     turn: SendTurnInput;
-  }): Promise<void | { model: string }>; 
+  }): Promise<void | { model: string }>;
 }
 
 const INIT_TIMEOUT = 20_000;
@@ -535,7 +536,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // this thread before sendTurn resolves, so a direct emit lands on a
         // watched turn.
         if (child.pid)
-          emit({ ...base(threadId, turnId), type: "turn.engine-pid", pid: child.pid } as RuntimeEvent);
+          emit({ ...base(threadId, turnId), type: "turn.engine-pid", pid: child.pid });
 
         (async () => {
           try {

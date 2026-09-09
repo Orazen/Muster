@@ -43,6 +43,7 @@ Suite baseline: **172 files / 1689 passed / 8 skipped**. If you land below that,
 
 ## Non-negotiable rules
 
+- **Ownership**: Astra Ultra is the sole maintainer under the board's standing mandate. Before `git add -A`, review `git status --short` and the diff; keep each commit scoped to the verified slice. Preserve any unexpected edits and establish their origin before including them.
 - Work on `main` only. Commit with `git add -A` and a **pathless commit message** (never name file paths in the message).
 - **Never claim "done" without running the tests and reporting the real numbers.** Honest reporting over optimism; if something failed, show the output.
 - Do not publish to npm (repo stays private). Never surface `npx muster` (squatter package) or any github.com link in user-facing UI.

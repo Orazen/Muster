@@ -487,7 +487,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     const environment = { ...entry.environment };
     if (cfg.xai?.key) environment.XAI_API_KEY = cfg.xai.key;
     if (cfg.box?.token) environment.BOX_TOKEN = cfg.box.token;
-    if (entry.driver === "vibeAgent" && cfg.providers?.mistral?.apiKey && !environment.MISTRAL_API_KEY) {
+    if (entry.driver === "vibeAgent" && cfg.providers?.mistral?.apiKey && !Object.hasOwn(environment, "MISTRAL_API_KEY")) {
       environment.MISTRAL_API_KEY = cfg.providers.mistral.apiKey;
     }
     if (entry.driver === "opencodeGo" && cfg.opencodeGo?.apiKey) {

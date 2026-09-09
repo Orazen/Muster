@@ -30,6 +30,12 @@
 //   FAKE_ACP_MODEL_STICKS  session/set_config_option succeeds but leaves the
 //                        model where it was, so the confirmation guard in
 //                        core.ts has something to catch
+//   FAKE_ACP_SESSION_MODE  advertise an initial mode in configOptions;
+//                        FAKE_ACP_MODE_STICKS ignores requested mode changes
+//   FAKE_ACP_MODE_RESETS_MODEL  a mode change restores the first model
+//   FAKE_ACP_MODEL_RESETS_MODE  a model change restores auto-approve mode
+//   sparse-permission     permission mode with metadata in a prior tool_call
+//                        update and only its id in the permission callback
 //   FAKE_ACP_USAGE_ROOT  put the prompt result's usage at the root instead of
 //                        under _meta (what opencode 1.18.18 actually does)
 //
@@ -262,6 +268,7 @@ function handle(msg: any) {
       const { configId, value } = msg.params ?? {};
       if (configId === "mode" && process.env.FAKE_ACP_SESSION_MODE) {
         if (!process.env.FAKE_ACP_MODE_STICKS) currentMode = value;
+        if (process.env.FAKE_ACP_MODE_RESETS_MODEL) currentModel = models[0] ?? null;
         result(msg.id, { configOptions: configOptions() });
         break;
       }
@@ -277,6 +284,7 @@ function handle(msg: any) {
       // in the protocol forbids it, and it is the shape core.ts's confirmation
       // guard exists for — an error is loud, this is silent.
       if (!process.env.FAKE_ACP_MODEL_STICKS) currentModel = value;
+      if (process.env.FAKE_ACP_MODEL_RESETS_MODE) currentMode = "auto-approve";
       result(msg.id, { configOptions: configOptions() });
       break;
     }
