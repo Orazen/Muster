@@ -7,7 +7,7 @@ checks passed; 1 = failed or missing probes; 2 = invalid input or output.
 Output must be a new file; existing runs are never overwritten.
 
 This is the docs-run option in the Astra brief. The command grades evidence
-collected with the six fleet MCP tools. It is not an autonomous benchmark
+collected with the fleet MCP tools. It is not an autonomous benchmark
 runner, task-quality judge, or independent verification of capture provenance.
 
 ## Collect evidence

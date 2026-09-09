@@ -27,6 +27,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { parseEvidenceQuery, parseScorecardEvidence, parseWhyEvidence } from "./fleet-evidence.ts";
 import type { JsonObject } from "./schema.ts";
 
 // ── protocol envelope ───────────────────────────────────────────────────
@@ -317,6 +318,36 @@ const TOOLS: ToolDef[] = [
       if (!botId) throw new Error("botId is required");
       const cfg = loadFleetConfig();
       return await harness(cfg, `/api/bots/${encodeURIComponent(botId)}/audit`);
+    },
+  },
+  {
+    name: "get_why_journal",
+    description: "Read one bot's recorded intent, decisions, hypotheses and findings. Read-only, newest first; missing evidence is not a successful outcome.",
+    inputSchema: {
+      type: "object", properties: { botId: botIdSchema, limit: { type: "integer", minimum: 1, maximum: 100, default: 10 } },
+      required: ["botId"], additionalProperties: false,
+    },
+    async run(args) {
+      const query = parseEvidenceQuery(args);
+      const data = await harness(loadFleetConfig(), `/api/bots/${encodeURIComponent(query.botId)}/why?limit=${query.limit}`, { method: "GET" });
+      return parseWhyEvidence(data, query);
+    },
+  },
+  {
+    name: "get_scorecard",
+    description: "Read recent routine run statuses and recorded checks for one bot. Read-only; absent checks never mean passed. No routine prompts or full run output are returned.",
+    inputSchema: {
+      type: "object", properties: { botId: botIdSchema, limit: { type: "integer", minimum: 1, maximum: 100, default: 10 } },
+      required: ["botId"], additionalProperties: false,
+    },
+    async run(args) {
+      const query = parseEvidenceQuery(args);
+      const cfg = loadFleetConfig();
+      // Confirm this bot is visible before querying the owner-scoped routine
+      // list; orphaned routine records cannot establish bot access.
+      await harness(cfg, `/api/bots/${encodeURIComponent(query.botId)}?messages=0`, { method: "GET" });
+      const data = await harness(cfg, "/api/routines", { method: "GET" });
+      return parseScorecardEvidence(data, query);
     },
   },
 ];

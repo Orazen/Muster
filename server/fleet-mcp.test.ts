@@ -70,7 +70,7 @@ describe("loadFleetConfig", () => {
 });
 
 describe("protocol", () => {
-  it("answers initialize and lists the six bounded tools", async () => {
+  it("answers initialize and lists the eight bounded tools", async () => {
     const { call } = session();
     const init = await call("initialize", { capabilities: {} });
     expect(init.result.protocolVersion).toBe("2024-11-05");
@@ -84,6 +84,8 @@ describe("protocol", () => {
       "get_receipt",
       "read_memory",
       "get_approval_history",
+      "get_why_journal",
+      "get_scorecard",
     ]);
   });
 
@@ -112,6 +114,52 @@ describe("tools", () => {
   });
   afterEach(() => {
     delete process.env.MUSTER_DIR;
+  });
+
+  it("get_why_journal issues a bounded GET and returns only the requested bot", async () => {
+    const fetchMock = vi.fn(async () => jsonRes(200, { entries: [
+      { runId: "r", botId: "b1", threadId: "t", at: 1, intent: "Inspect", decisions: [], outcome: "failed" },
+      { runId: "r2", botId: "b2", threadId: "t2", at: 2, intent: "Other", decisions: [], outcome: "done" },
+    ] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { call } = session();
+    const response = await call("tools/call", { name: "get_why_journal", arguments: { botId: "b1", limit: 2 } });
+    expect(response.result.isError).toBeUndefined();
+    expect(JSON.parse(response.result.content[0].text).entries).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8845/api/bots/b1/why?limit=2", expect.objectContaining({ method: "GET" }));
+  });
+
+  it("get_scorecard checks bot access and projects routine evidence with GET only", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonRes(200, { bot: { id: "b1" } })).mockResolvedValueOnce(jsonRes(200, {
+      runs: [{ id: "r", botId: "b1", routineId: "routine", routineName: "Inspect", scheduledFor: 1, status: "completed", output: "private" }],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { call } = session();
+    const response = await call("tools/call", { name: "get_scorecard", arguments: { botId: "b1" } });
+    const payload = JSON.parse(response.result.content[0].text);
+    expect(payload.runs[0].output).toBeUndefined();
+    expect(payload.runs[0].scorecard).toBeUndefined();
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://127.0.0.1:8845/api/bots/b1?messages=0", expect.objectContaining({ method: "GET" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://127.0.0.1:8845/api/routines", expect.objectContaining({ method: "GET" }));
+  });
+
+  it("evidence tools reject write arguments before making a request", async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const { call } = session();
+    for (const name of ["get_why_journal", "get_scorecard"]) {
+      const response = await call("tools/call", { name, arguments: { botId: "b1", approve: true } });
+      expect(response.result.isError).toBe(true);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("get_scorecard stops when the requested bot is inaccessible", async () => {
+    const fetchMock = vi.fn(async () => jsonRes(404, { error: "no such bot" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { call } = session();
+    const response = await call("tools/call", { name: "get_scorecard", arguments: { botId: "b1" } });
+    expect(response.result.isError).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("fleet_status maps the roster compactly", async () => {

@@ -876,7 +876,7 @@ async function mcpCommand() {
   console.error(
     `\nSession: ${cfg.base} (the cookie in ~/.muster/cli.json — pair with \`muster pair\` first).\n` +
       "Paste the mcpServers block into Claude Desktop / Cursor / any MCP client.\n" +
-      "Tools: fleet_status, send_task, wait_for_conversation, get_receipt, read_memory, get_approval_history.\n" +
+      "Tools: fleet_status, send_task, wait_for_conversation, get_receipt, read_memory, get_approval_history, get_why_journal, get_scorecard.\n" +
       "Run `muster mcp --serve` to host the stdio server yourself.",
   );
 }
