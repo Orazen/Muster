@@ -30,6 +30,7 @@ const server = join(root, "server");
 const ENTRY_POINTS = [
   "index.ts",
   "fleet-mcp.ts",
+  "fleet-eval.ts",
   "computer-proxy.ts",
   "container-mcp.ts",
   "permission-proxy.ts",

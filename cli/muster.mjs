@@ -835,19 +835,20 @@ async function setup() {
 // credentials, or memory writes), so a connected external agent can work
 // the fleet but never gut it.
 
-function resolveFleetRuntime() {
+function resolveFleetRuntime(entry = "fleet-mcp") {
   // Same layout logic as resolveRuntime(): packaged build ships
   // dist-server/ beside cli/, a repo checkout runs TypeScript directly.
   const pkgRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
-  const bundled = join(pkgRoot, "dist-server", "fleet-mcp.js");
+  const bundled = join(pkgRoot, "dist-server", `${entry}.js`);
   if (existsSync(bundled)) return { cmd: process.execPath, args: [bundled], cwd: pkgRoot };
-  const cwd = process.cwd();
-  if (existsSync(join(cwd, "server", "fleet-mcp.ts"))) {
-    return {
-      cmd: process.execPath,
-      args: ["--experimental-strip-types", join(cwd, "server", "fleet-mcp.ts")],
-      cwd,
-    };
+  for (const cwd of [pkgRoot, process.cwd()]) {
+    if (existsSync(join(cwd, "server", `${entry}.ts`))) {
+      return {
+        cmd: process.execPath,
+        args: ["--experimental-strip-types", join(cwd, "server", `${entry}.ts`)],
+        cwd,
+      };
+    }
   }
   console.error("No Muster fleet runtime found (expected dist-server/ or a repo checkout).");
   process.exit(1);
@@ -880,6 +881,22 @@ async function mcpCommand() {
   );
 }
 
+async function evalCommand() {
+  if (!subject || !rest[0] || rest.length !== 1) {
+    console.error("Usage: muster eval capture.json scorecard.json (see the fleet eval playbook)");
+    process.exitCode = 2;
+    return;
+  }
+  const input = resolve(subject);
+  const output = resolve(rest[0]);
+  const rt = resolveFleetRuntime("fleet-eval");
+  process.exitCode = await new Promise((finish) => {
+    const child = spawn(rt.cmd, [...rt.args, input, output], { cwd: rt.cwd, stdio: "inherit" });
+    child.on("error", () => finish(2));
+    child.on("exit", (code) => finish(code ?? 2));
+  });
+}
+
 const HELP = `muster — the CLI for your AI workforce
 
   muster up [-d] [--port 8799]    boot the server here; scan the QR with your phone.
@@ -896,6 +913,7 @@ const HELP = `muster — the CLI for your AI workforce
   muster receipts [n] [--json]
   muster sessions [--json]        active sign-in sessions; --revoke <prefix|other|all>
   muster mcp [--serve]            print MCP client config for Muster (--serve runs the stdio server)
+  muster eval capture.json scorecard.json  grade captured fleet probes locally; no fleet actions
   muster help`;
 
 try {
@@ -934,6 +952,9 @@ try {
       break;
     case "sessions":
       await sessions();
+      break;
+    case "eval":
+      await evalCommand();
       break;
     case "mcp":
       await mcpCommand();
