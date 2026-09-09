@@ -11,8 +11,10 @@ let package = Package(
     name: "CompanionCore",
     // macOS 13 rather than 14: the core needs nothing newer than
     // URLSession.bytes (macOS 12), and `swift test` should run on whatever
-    // Mac is to hand. The app's iOS 17 floor lives in project.yml.
-    platforms: [.iOS(.v17), .macOS(.v13)],
+    // Mac is to hand. The app's iOS 17 floor lives in project.yml, and the
+    // watch app's watchOS 10 floor beside it — the core itself has no
+    // watchOS-specific needs, which is the point of keeping it UI-free.
+    platforms: [.iOS(.v17), .macOS(.v13), .watchOS(.v10)],
     products: [
         .library(name: "CompanionCore", targets: ["CompanionCore"])
     ],

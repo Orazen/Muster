@@ -53,6 +53,10 @@ const appConfigSchema = z.object({
    * for the drive.appdata transport. The bundle pushed there is encrypted
    * client-side; Drive never sees plaintext. */
   driveSync: z.object({ refreshToken: optionalText, accessToken: optionalText, expiresAt: z.number().optional() }).optional(),
+  /** Telegram workspace sync (server/telegram-sync.ts): the @BotFather bot
+   * token and the chat the owner started with it. The chat only ever holds
+   * the encrypted bundle; the token alone cannot read a workspace. */
+  telegramSync: z.object({ botToken: optionalText, chatId: z.number().optional(), chatLabel: optionalText, lastFileId: optionalText }).optional(),
   /** Self-hosted OpenSandbox server: an alternative to box.ascii.dev for the
    * cloud computer feature, running on infrastructure the operator controls
    * instead of a third-party vendor. url defaults to the SDK's own default
@@ -117,6 +121,8 @@ export interface AppConfig {
   hiNew?: { token?: string; name?: string };
   /** Google Drive workspace sync tokens (server/drive-sync.ts). */
   driveSync?: { refreshToken?: string; accessToken?: string; expiresAt?: number };
+  /** Telegram workspace sync credentials (server/telegram-sync.ts). */
+  telegramSync?: { botToken?: string; chatId?: number; chatLabel?: string; lastFileId?: string };
   opensandbox?: { url?: string; apiKey?: string; useServerProxy?: boolean };
   /** Opt-in identity bridge — see server/muster-cloud.ts. Off by default;
    * an unset url means fully local, no network dependency, unchanged. */
@@ -250,7 +256,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
-  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm", "channels", "vps"] as const) {
+  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm", "channels", "vps", "hiNew", "driveSync", "telegramSync"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

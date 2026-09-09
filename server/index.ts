@@ -206,6 +206,7 @@ import {
 import * as browserPanel from "./browser-panel.ts";
 import * as workspaceBundle from "./workspace-bundle.ts";
 import * as driveSync from "./drive-sync.ts";
+import * as telegramSync from "./telegram-sync.ts";
 import * as accountDrive from "./account-drive.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimerPool } from "./local-vm-idle.ts";
@@ -3090,6 +3091,12 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
     // hi.new agent-mail: the handle is a setting (shown), the token is a
     // secret (configured-or-not only) — same discipline as every key
     hiNew: { configured: Boolean(cfg.hiNew?.token), name: cfg.hiNew?.name ?? "" },
+    // Telegram sync: which chat the bundle goes to; the bot token is a
+    // secret, reported configured-or-not only
+    telegramSync: {
+      configured: Boolean(cfg.telegramSync?.botToken && cfg.telegramSync?.chatId),
+      chat: cfg.telegramSync?.chatLabel ?? "",
+    },
     providers: providerFlags,
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
@@ -6897,6 +6904,81 @@ let requestUserEmail = "";
         if (!payload) {
           return json(res, 404, { error: "no workspace bundle in Drive yet — push from the other device first" });
         }
+        const { workspace } = workspaceBundle.decryptBundle(payload, passphrase, deploymentSigningSecret());
+        const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
+        await reloadProviders();
+        broadcast({ kind: "hello" });
+        return json(res, 200, { restored: result });
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    // ── Telegram sync ───────────────────────────────────────────────────
+    // Same encrypted bundle as Drive, dropped into the private chat with a
+    // bot the owner created via @BotFather — a free cloud store the user
+    // already has. The chat only ever holds ciphertext; the bot token alone
+    // cannot decrypt a workspace (the passphrase + server signing secret
+    // derive the key). Flow: paste the BotFather token → send /start to the
+    // bot in Telegram → Connect (which discovers the chat) → Push/Pull.
+    if (path === "/api/workspace/telegram/connect" && method === "POST") {
+      const body = await readBody(req);
+      const botToken = isText(body?.botToken) ? body.botToken.trim() : "";
+      if (!botToken) return json(res, 400, { error: "botToken is required — create a bot with @BotFather and paste its token" });
+      try {
+        // Validate against Telegram before persisting: a rejected token must
+        // not save and surface as errors in every later push.
+        const username = await telegramSync.verifyBot(botToken);
+        const chat = await telegramSync.discoverChat(botToken);
+        saveConfig({ telegramSync: { botToken, chatId: chat.chatId, chatLabel: chat.label } });
+        Object.assign(cfg, loadConfig());
+        return json(res, 200, { connected: true, bot: username ? `@${username}` : "", chat: chat.label });
+      } catch (e) {
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/telegram/disconnect" && method === "POST") {
+      saveConfig({ telegramSync: { botToken: "", chatId: 0, chatLabel: "", lastFileId: "" } });
+      Object.assign(cfg, loadConfig());
+      return json(res, 200, { connected: false });
+    }
+    if (path === "/api/workspace/telegram/push" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const botToken = cfg.telegramSync?.botToken;
+      const chatId = cfg.telegramSync?.chatId;
+      if (!botToken || !chatId) return json(res, 400, { error: "Telegram is not connected yet — paste a @BotFather token and connect first" });
+      try {
+        const bundle = workspaceBundle.buildBundle(store, DATA_DIR);
+        const { payload, counts } = workspaceBundle.encryptBundle(bundle, passphrase, deploymentSigningSecret());
+        const fileId = await telegramSync.pushBundle(botToken, chatId, payload);
+        saveConfig({ telegramSync: { lastFileId: fileId } });
+        Object.assign(cfg, loadConfig());
+        return json(res, 200, { uploaded: fileId, counts });
+      } catch (e) {
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/telegram/pull" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const botToken = cfg.telegramSync?.botToken;
+      if (!botToken) return json(res, 400, { error: "Telegram is not connected yet — paste a @BotFather token and connect first" });
+      try {
+        // Pull order: the file_id recorded at push time first (works beyond
+        // Telegram's ~24h update retention), then the newest bundle document
+        // visible in recent messages (covers a fresh install where the owner
+        // forwarded muster-workspace.enc to the bot).
+        let fileId = cfg.telegramSync?.lastFileId ?? "";
+        if (!fileId) {
+          fileId = (await telegramSync.resolveLatestFileId(botToken, cfg.telegramSync?.chatId ?? null)) ?? "";
+        }
+        if (!fileId) {
+          return json(res, 404, { error: "no workspace bundle in the Telegram chat yet — push from the other device first" });
+        }
+        const payload = await telegramSync.downloadBundle(botToken, fileId);
         const { workspace } = workspaceBundle.decryptBundle(payload, passphrase, deploymentSigningSecret());
         const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
         await reloadProviders();

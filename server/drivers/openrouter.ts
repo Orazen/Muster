@@ -26,6 +26,13 @@ export const OpenRouterDriver = createOpenAICompatibleDriver({
       // (Lyria music previews, Nemotron content-safety) are excluded on
       // purpose: they don't answer chat turns.
       { id: "openrouter/free", label: "OpenRouter Free Auto (free)", vision: true },
+
+      // Nex AGI N2.5 — agentic coding/tool-use line with 262K context and
+      // structured outputs + reasoning efforts. Pro accepts image input.
+      // Free tier: 20 req/min; 50 req/day on accounts that never bought
+      // credits, 1000/day once ≥10 credits purchased (429 + Retry-After).
+      { id: "nex-agi/nex-n2.5-mini:free", label: "NEX N2.5 Mini (free)" },
+      { id: "nex-agi/nex-n2.5-pro:free", label: "NEX N2.5 Pro (free)", vision: true },
       { id: "z-ai/glm-5.2:free", label: "GLM 5.2 (free)" },
       { id: "thinkingmachines/inkling:free", label: "Inkling (free)", vision: true },
       { id: "thinkingmachines/inkling-small:free", label: "Inkling Small (free)", vision: true },

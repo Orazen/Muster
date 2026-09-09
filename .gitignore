@@ -27,6 +27,10 @@ testsprite_tests/tmp/
 android-companion/node_modules/
 android-companion/package-lock.json
 
+# Xcode: the .xcodeproj is generated (see ios/README.md), and xcodebuild
+# writes DerivedData-style output into ios/build when invoked from CLI
+ios/build/
+
 # Muster+ additions - prevent these from being committed
 .claude-flow/
 .claude/

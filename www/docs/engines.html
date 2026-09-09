@@ -64,7 +64,7 @@
     <p>An engine is how a bot gets a brain. Muster supports three kinds:</p>
     <ul>
       <li><strong>CLI engines</strong> — agent CLIs installed and logged in on your machine: Claude, Codex, Grok, Gemini, Kimi, Qwen, Hermes, Droid, Antigravity, OpenCode Go. Muster detects them on your <code>PATH</code> and they appear in the picker automatically — no key pasting.</li>
-      <li><strong>API providers</strong> — twelve built-ins (OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Cohere, Groq, Together, Fireworks, OpenRouter, OpenCode Zen) driven by an API key. No CLI required.</li>
+      <li><strong>API providers</strong> — twelve built-ins (OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Cohere, Groq, Together, Fireworks, OpenRouter, OpenCode Zen) driven by an API key. No CLI required. OpenRouter carries a large <code>:free</code> catalog including the Nex AGI N2.5 agentic models (262K context, tool calling; Pro adds vision).</li>
       <li><strong>Custom providers</strong> — any OpenAI- or Anthropic-compatible endpoint you register yourself, including Ollama and LM Studio on <code>127.0.0.1</code>.</li>
     </ul>
     <p>All of them normalize to the same runtime event stream — streaming replies, tool calls, approvals — so a bot behaves identically no matter which engine sits underneath. Swapping models mid-conversation is normal practice: let the cheap one triage, the smart one write.</p>

@@ -12,6 +12,7 @@ options:
   bundleIdPrefix: com.muster
   deploymentTarget:
     iOS: "17.0"
+    watchOS: "10.0"
   createIntermediateGroups: true
 
 packages:
@@ -97,6 +98,64 @@ targets:
         # exempted (ATS exceptions are by name, not by subnet), but the
         # MagicDNS name can be, and every tailnet name ends in ts.net — so
         # connect by name and this one entry covers every machine you own.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            ts.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
+
+  # The watch app. An independent watchOS application target — a single
+  # app, no WatchKit extension, no embedded iOS app — because the watch is
+  # a companion of the *harness*, not of the phone: pairing, streaming and
+  # tokens all come straight from the computer over the network, exactly
+  # as the phone does it. (Embedding it in the iOS bundle for a unified
+  # App Store listing is a distribution question for later; nothing in the
+  # code below assumes either arrangement.)
+  #
+  # What the watch deliberately does not do, and why: no notification
+  # coordinator (a watch app off-screen is not running — local
+  # notifications are their own surface, later), no screen watching
+  # (base64 desktop captures on a 45mm display is a category error), no
+  # search (a keyboard this small should never be asked to compose a
+  # query). What remains is what a wrist is good for: glance at the fleet,
+  # settle approvals, dictate a short reply.
+  MusterWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: Watch
+      # Two files shared verbatim from the phone target, not copied: the
+      # keychain wrapper and Bonjour discovery are Foundation/Network only
+      # and behave identically on watchOS.
+      - path: App/Keychain.swift
+      - path: App/Discovery.swift
+    dependencies:
+      - package: CompanionCore
+        product: CompanionCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion.watchkitapp
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "4"
+    info:
+      path: Watch/Info.plist
+      properties:
+        CFBundleDisplayName: Muster
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Single-target watch app: no extension, no companion embedding.
+        WKApplication: true
+        WKRunsIndependentlyOfCompanionApp: true
+        # Same silent-empty-list failure mode as the phone: without these
+        # two keys NWBrowser returns nothing and looks like "no computers".
+        NSLocalNetworkUsageDescription: >-
+          Muster finds your computer on this network so your bots can
+          reach you here.
+        NSBonjourServices:
+          - _muster._tcp
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSExceptionDomains:

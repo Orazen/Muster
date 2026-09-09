@@ -438,11 +438,11 @@
         <span class="brand-lockup__word">Muster</span>
       </a>
       <nav class="site-nav" aria-label="Primary">
+        <a href="#how">How</a>
         <a href="#features">Product</a>
-        <a href="#roster">Bots</a>
+        <a href="#ecosystem">Ecosystem</a>
         <a href="#coding">Coding</a>
         <a href="#cli">CLI</a>
-        <a href="#engines">Engines</a>
         <a href="#pricing">Pricing</a>
         <a href="#download">Download</a>
       </nav>
@@ -462,7 +462,9 @@
           <svg class="site-menu__icon site-menu__icon--close" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" /></svg>
         </summary>
         <nav class="site-menu__panel" aria-label="Site">
+          <a href="#how">How it works</a>
           <a href="#features">Product</a>
+          <a href="#ecosystem">Ecosystem</a>
           <a href="#roster">Bots</a>
           <a href="#coding">Coding</a>
           <a href="#cli">CLI</a>
@@ -509,6 +511,36 @@
       </div>
       <div class="hero__visual">
         <img src="/hero.png" alt="Muster — a chat app where every conversation is a real AI agent" width="980" height="613" />
+      </div>
+    </section>
+
+    <!-- How it works (numbered walkthrough) -->
+    <section id="how" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">How it works</div>
+        <h2 class="section-heading">Four steps from install to a working team</h2>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:40px;">
+        <div class="feature-card">
+          <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">01</span>
+          <h3>Boot the harness</h3>
+          <p>Install the desktop app, or run <code>muster up</code>. One small server on your machine owns every agent process — nothing phones home.</p>
+        </div>
+        <div class="feature-card">
+          <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">02</span>
+          <h3>Hire your bots</h3>
+          <p>Start from 13 teammate shapes or 15 finished team packs. Each bot interviews you, then gets a name, a personality, and a memory.</p>
+        </div>
+        <div class="feature-card">
+          <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">03</span>
+          <h3>Give them hands</h3>
+          <p>Every bot drives its own Linux desktop in the cloud — or your Mac — and asks before anything ships. You Allow or Deny, inline.</p>
+        </div>
+        <div class="feature-card">
+          <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">04</span>
+          <h3>Run the team</h3>
+          <p>Chat from desktop, web, phone, or terminal. Routines put work on a schedule; receipts and scorecards prove it got done.</p>
+        </div>
       </div>
     </section>
 
@@ -567,6 +599,100 @@
           <div class="feature-card__icon" aria-hidden="true">🧾</div>
           <h3>Bots with receipts</h3>
           <p>Every task ends with a job receipt: what was done, how long it took, exactly what it cost in tokens. Proof-of-work you can copy and paste anywhere — your agents show their work.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Ecosystem showcase — everything shipped, one grid -->
+    <section id="ecosystem" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">Ecosystem</div>
+        <h2 class="section-heading">One workforce. Every surface.</h2>
+        <p class="section-copy">
+          Everything below ships today — not a roadmap. The same harness powers all of it, and your
+          bots reach every piece from the same chat.
+        </p>
+      </div>
+      <div class="card-grid-3">
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🖥️</div>
+          <h3>Desktop app</h3>
+          <p>Native macOS, Windows, and Linux builds with auto-update, menu-bar control, and on-device dictation.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🌐</div>
+          <h3>Web console</h3>
+          <p>The full roster in any browser — pair your phone with a QR code, watch bot screens live, approve from anywhere.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">⌨️</div>
+          <h3>CLI</h3>
+          <p><code>muster up</code>, <code>muster bots</code>, <code>muster send</code>, <code>muster approve</code>, <code>muster receipts</code> — the whole workforce from any shell. Zero dependencies.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">📱</div>
+          <h3>iPhone &amp; Android</h3>
+          <p>Native companions that pair with your harness — chat, approvals, and voice calls with your bots from your pocket.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">⌚</div>
+          <h3>Apple Watch</h3>
+          <p>Glance at runs, approve actions, and start bot calls from your wrist — the workforce follows you off the couch.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🎛️</div>
+          <h3>Muster OS ⌘K</h3>
+          <p>One command palette across the whole platform: jump to any bot, task, setting, or doc without leaving the keyboard.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">📮</div>
+          <h3>hi.new agent mail</h3>
+          <p>Email a task to your roster — each bot gets a real mailbox, and replies land in the thread like any teammate's would.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🌍</div>
+          <h3>Browser panel</h3>
+          <p>Bots drive a visible browser you can watch side-by-side — real pages, real logins, every click on screen.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">☁️</div>
+          <h3>Cloud computers</h3>
+          <p>Per-bot Linux desktops with a real browser and files. Watch live as the bot works, or bring your own machine instead.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🔁</div>
+          <h3>Routines &amp; sentries</h3>
+          <p>Put any task on a schedule, or post a sentry that watches and speaks up when a condition hits. Scorecards grade each run.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🎯</div>
+          <h3>Goal mode</h3>
+          <p>Give a bot an outcome, not a task list. It plans, works in bounded autonomous loops, and checks in with a why-journal.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🔐</div>
+          <h3>Approvals + history</h3>
+          <p>Every Allow/Deny decision is logged with its evidence strip — an audit trail you can read, not a black box.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🗄️</div>
+          <h3>Cloud sync, your storage</h3>
+          <p>Workspace sync to Google Drive or your own private Telegram chat — encrypted with your passphrase, ciphertext-only, free storage you already own.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🗣️</div>
+          <h3>Voice mode</h3>
+          <p>Spoken replies and full bot calls. Free built-in voice out of the box; bring an ElevenLabs key when you want studio quality.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🆓</div>
+          <h3>Free model tier</h3>
+          <p>OpenRouter free models built in — including Nex AGI — plus any OpenAI-compatible endpoint and local models via Ollama.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">📚</div>
+          <h3>Docs &amp; self-host</h3>
+          <p>Full docs at /docs and one-command self-hosting — the whole platform, free forever, on your own hardware.</p>
         </article>
       </div>
     </section>
@@ -703,7 +829,7 @@
         </div>
         <div class="feature-card">
           <span style="display:inline-block;border-radius:999px;border:1px solid rgba(255,255,255,.12);padding:4px 10px;font-size:11px;font-weight:600;color:#a1a1a6;margin-bottom:12px;">Paste a key · one field</span>
-          <p>→ OpenAI · Anthropic · Google · DeepSeek · Groq +5 more<br/>→ Cloud Linux desktop per bot<br/>→ 500+ apps via Composio OAuth<br/>→ Voice mode: free built-in voice, or ElevenLabs</p>
+          <p>→ OpenAI · Anthropic · Google · DeepSeek · Groq +5 more<br/>→ Free models built in via OpenRouter (incl. Nex AGI)<br/>→ Cloud Linux desktop per bot<br/>→ 500+ apps via Composio OAuth<br/>→ Voice mode: free built-in voice, or ElevenLabs</p>
         </div>
       </div>
     </section>
@@ -931,7 +1057,11 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
         </details>
         <details class="faq-item">
           <summary>Which AI models can my bots use?</summary>
-          <div class="faq-a">Whatever you already pay for. Bots run on Claude Code, Codex, Grok, Gemini, and any OpenAI-compatible API — including local models via Ollama. Vision-capable models can also read screenshots you attach.</div>
+          <div class="faq-a">Whatever you already pay for. Bots run on Claude Code, Codex, Grok, Gemini, and any OpenAI-compatible API — including local models via Ollama. There's also a built-in free tier through OpenRouter (including Nex AGI models), so you can start without a single paid subscription. Vision-capable models can read screenshots you attach.</div>
+        </details>
+        <details class="faq-item">
+          <summary>Where does my data actually live?</summary>
+          <div class="faq-a">On your machine, by default — transcripts, keys, and memories in <code>~/.muster</code>. If you want sync across devices, Muster pushes one AES-256-encrypted bundle to storage <em>you</em> own: your Google Drive or a private Telegram chat with a bot you create via @BotFather. Both hold ciphertext only — your passphrase never leaves you, and neither service can read a byte.</div>
         </details>
       </div>
     </section>
@@ -1027,8 +1157,8 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
       </div>
       <div class="stats-grid">
         <div>
-          <div class="stat-value" data-star-count>—</div>
-          <div class="stat-label">GitHub stars</div>
+          <div class="stat-value">16</div>
+          <div class="stat-label">Surfaces &amp; systems shipped</div>
         </div>
         <div>
           <div class="stat-value">BSL 1.1</div>

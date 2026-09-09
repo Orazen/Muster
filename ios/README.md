@@ -62,6 +62,52 @@ ios/
     ComputerView.swift           opt-in live view of a bot's computer
     MarkdownText.swift           the supported Markdown presentation layer
     SettingsView.swift           status, and unpair
+  Watch/                         the watch app — an independent watchOS target
+    MusterWatchApp.swift         entry; same scenePhase lifecycle rule
+    WatchSession.swift           a trimmed Session: restore/backoff/hydrate kept
+    WatchViews.swift             fleet, approvals, short replies, settings
+```
+
+## The watch app
+
+`MusterWatch` is an **independent watchOS application**, not a WatchKit
+extension embedded in the iOS bundle: it pairs with the computer directly,
+over the same sidecar and the same six-digit code, and runs whether or not
+the phone app is installed. `WKRunsIndependentlyOfCompanionApp` says so;
+`WKApplication: true` makes it a single-target SwiftUI app, which is all a
+modern watch app needs.
+
+Paired with Bonjour discovery — no camera on a wrist, so the QR flow the
+phone uses is replaced by tapping the computer from the found list, then
+typing the code Companion shows. The manual-address fallback (Tailscale
+MagicDNS) works here too. The token goes to the watch's Keychain with the
+same `AfterFirstUnlockThisDeviceOnly` class; the connection lands in
+`UserDefaults`, deliberately apart, so what gets backed up is never the
+credential.
+
+WatchSession is a trimmed copy of the phone's `Session`, and the trimming is
+the design: notifications (the phone raises banners; a watch without its
+phone's server-side route would double-buzz), screen watching (a base64
+desktop capture is the one thing a wrist must never ask for — `screens:
+false`, always), search, tasks and branch editing all stay off. What remains
+is the part worth keeping byte-identical: the three-outcome restore story
+(a locked keychain is "unlock this watch", not "unpaired"), the
+generation-guarded stream with 1→15s backoff, the cold-hydrate-on-
+unresumed-hello rule, and no optimistic writes. Those were the hard-won
+parts on the phone; a second subtly-different implementation would be a
+second home for the same bugs.
+
+What the wrist is for: glance the fleet, settle an approval (Deny is drawn
+before Allow — an accidental tap on a wrist should cost the bot a retry,
+not run a command), and dictate a short reply through the system keyboard.
+Everything else lives on the phone and the computer on purpose.
+
+Build it like the phone:
+
+```sh
+cd ios && xcodegen generate
+xcodebuild -project MusterCompanion.xcodeproj -scheme MusterWatch \
+  -destination 'generic/platform=watchOS Simulator' build CODE_SIGNING_ALLOWED=NO
 ```
 
 ## Building
