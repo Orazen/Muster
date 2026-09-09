@@ -7403,7 +7403,7 @@ let requestUserEmail = "";
       for (const file of candidates) {
         try {
           const data = readFileSync(file);
-          res.writeHead(200, { "content-type": MIME.get(extname(file)) ?? "text/html" });
+          res.writeHead(200, { "content-type": MIME.get(extname(file).toLowerCase()) ?? "text/html" });
           return res.end(data);
         } catch {
           /* try the next candidate */
@@ -7437,7 +7437,7 @@ let requestUserEmail = "";
         const rel = (path === "/" ? "index.html" : path.slice(1)).replace(/\.\./g, "");
         const file = join(MARKETING_DIR, rel);
         const data = readFileSync(file);
-        res.writeHead(200, { "content-type": MIME.get(extname(file)) ?? "text/html" });
+        res.writeHead(200, { "content-type": MIME.get(extname(file).toLowerCase()) ?? "text/html" });
         return res.end(data);
       } catch {
         /* fall through to the app SPA below */
