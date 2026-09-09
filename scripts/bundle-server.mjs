@@ -25,9 +25,11 @@ import { dirname, join } from "node:path";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const server = join(root, "server");
 
-// Every file run as its own process. Keep in sync with the spawn sites above.
+// Every file run as its own process. Keep in sync with the spawn sites above
+// and with cli/muster.mjs resolveFleetRuntime().
 const ENTRY_POINTS = [
   "index.ts",
+  "fleet-mcp.ts",
   "computer-proxy.ts",
   "container-mcp.ts",
   "permission-proxy.ts",

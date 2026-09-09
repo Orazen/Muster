@@ -1,10 +1,13 @@
 # OpenMausBot desktop design study — what it means for Muster on macOS
 
-Studied from the repo (github.com/milind-soni/OpenMausBot, v0.1.60) and its
-`docs/screenshots/` set: `hero`, `computer-panel`, `approval-card`, `model-picker`.
-Written 2026-09-07 to inform the Muster Mac desktop app. Companion to the glass
-design system (f442d6d), which was built as the deliberate counter-position to
-this app's surface language.
+Studied from the repo (github.com/milind-soni/OpenMausBot, v0.1.60; **re-checked
+against v0.1.69 on 2026-09-09** — see the corrections section at the bottom) and
+its `docs/screenshots/` set: `hero`, `computer-panel`, `approval-card`,
+`model-picker`. Written 2026-09-07 to inform the Muster Mac desktop app.
+Companion to the glass design system (f442d6d), which was built as the
+deliberate counter-position to this app's surface language. The product-level
+comparison (fleet MCP server, Grok Bot, OpenClaw) lives in
+[competitive-landscape.md](competitive-landscape.md).
 
 ## What OpenMausBot actually looks like
 
@@ -101,3 +104,31 @@ OpenMausBot validates the category (bots-as-contacts, approvals, computer use)
 and sets a floor, not a ceiling: its UI is competent-generic. Muster wins on
 (glass identity + OS frame + memory/governance surfaces + deeper browser panel),
 and should copy only the interaction micro-patterns listed above.
+
+## Corrections after the v0.1.69 re-check (2026-09-09)
+
+Full source re-study (all branches) found five facts above that were stale,
+wrong, or already-shipped by Muster — recorded so nobody re-flags them:
+
+1. **Lettered options already exist in Muster.** OptionCard renders A/B/C/D
+   hotkeys today (src/components/OptionCard.tsx). "Adopt" item 2 was already
+   done when written — the pattern was independent convergence, not a gap.
+2. **Their MCP surface is bounded, and that part is right.** Earlier notes
+   implied a sprawling tool surface; the code shows a deliberately small
+   server. That legitimized the design of Muster's own fleet MCP server
+   (server/fleet-mcp.ts) — bounded six-tool surface, no
+   approvals/deletes/credentials, shipped 2026-09-09.
+3. **Tool-run chips**: Muster's transcript already renders tool activity
+   inline (message kind "tool" with ok/spoken fields) — item 3 was likewise
+   already shipped, not a to-do.
+4. **Routines**: OpenMausBot's "Create Routine" card mirrors Muster's
+   RoutineManager (server/routines.ts, daily/weekly/once schedules + run-on
+   semantics). Parity exists; the differentiator to push is Muster's
+   why-journal + scorecards on top of routines (ARC pattern).
+5. **Composio/tool-ecosystem**: Muster's connector/agents/dweb MCP proxies
+   (server/mcp-client.ts and spawn sites) cover the "plugins" story
+   OpenMausBot markets as Plugins; the gap was never tool access — it was
+   exposing Muster ITSELF to external agents, closed by the fleet MCP server.
+
+Version note: v0.1.60 → v0.1.69 changed nothing structural in the shell or
+approval model; release cadence is fast but the surface described above held.

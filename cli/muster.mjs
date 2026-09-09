@@ -827,6 +827,59 @@ async function setup() {
   }
 }
 
+// ── mcp ─────────────────────────────────────────────────────────────────
+// `muster mcp` prints a ready-to-paste MCP client config; `muster mcp
+// --serve` becomes the stdio fleet server itself. Either way the auth is
+// the paired session in ~/.muster/cli.json — nothing new to log into, and
+// the tool surface is the bounded read/work set (no approvals, deletes,
+// credentials, or memory writes), so a connected external agent can work
+// the fleet but never gut it.
+
+function resolveFleetRuntime() {
+  // Same layout logic as resolveRuntime(): packaged build ships
+  // dist-server/ beside cli/, a repo checkout runs TypeScript directly.
+  const pkgRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
+  const bundled = join(pkgRoot, "dist-server", "fleet-mcp.js");
+  if (existsSync(bundled)) return { cmd: process.execPath, args: [bundled], cwd: pkgRoot };
+  const cwd = process.cwd();
+  if (existsSync(join(cwd, "server", "fleet-mcp.ts"))) {
+    return {
+      cmd: process.execPath,
+      args: ["--experimental-strip-types", join(cwd, "server", "fleet-mcp.ts")],
+      cwd,
+    };
+  }
+  console.error("No Muster fleet runtime found (expected dist-server/ or a repo checkout).");
+  process.exit(1);
+}
+
+async function mcpCommand() {
+  if (has("--serve")) {
+    const rt = resolveFleetRuntime();
+    const child = spawn(rt.cmd, rt.args, { cwd: rt.cwd, stdio: "inherit" });
+    child.on("exit", (code) => process.exit(code ?? 0));
+    return;
+  }
+  const cfg = apiConfig();
+  const rt = resolveFleetRuntime();
+  const config = {
+    mcpServers: {
+      "muster-fleet": {
+        command: rt.cmd,
+        args: rt.args,
+        env: { MUSTER_DIR: join(homedir(), ".muster") },
+      },
+    },
+  };
+  console.log(JSON.stringify(config, null, 2));
+  console.error(
+    `\nSession: ${cfg.base} (the cookie in ~/.muster/cli.json — pair with \`muster pair\` first).\n` +
+      "Paste the mcpServers block into Claude Desktop / Cursor / any MCP client.\n" +
+      "Tools: fleet_status, send_task, wait_for_conversation, get_receipt, read_memory, get_approval_history.\n" +
+      "Run `muster mcp --serve` to host the stdio server yourself.",
+  );
+}
+
 const HELP = `muster — the CLI for your AI workforce
 
   muster up [-d] [--port 8799]    boot the server here; scan the QR with your phone.
@@ -842,6 +895,7 @@ const HELP = `muster — the CLI for your AI workforce
   muster status [--json]
   muster receipts [n] [--json]
   muster sessions [--json]        active sign-in sessions; --revoke <prefix|other|all>
+  muster mcp [--serve]            print MCP client config for Muster (--serve runs the stdio server)
   muster help`;
 
 try {
@@ -880,6 +934,9 @@ try {
       break;
     case "sessions":
       await sessions();
+      break;
+    case "mcp":
+      await mcpCommand();
       break;
     default:
       console.log(HELP);
