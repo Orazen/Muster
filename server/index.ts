@@ -124,6 +124,7 @@ import { searchMessages } from "./message-db.ts";
 import { _loadPending, discardDelegations, drainDelegations, pendingThreads, queueDelegation } from "./delegations.ts";
 import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
 import { DecisionLog, queryAudit } from "./decision-log.ts";
+import { approvalWhy } from "./approval-why.ts";
 import { currentPlan, rehearsePlan } from "./plan-rehearsal.ts";
 import { approvalHistory } from "./approval-history.ts";
 import { EventBus } from "./harness/bus.ts";
@@ -1235,6 +1236,9 @@ bus.subscribe((event: RuntimeEvent) => {
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       // Shared-room logs can contain another bot's actions; use only the
       // requesting bot's dedicated thread. Evidence failure never blocks an ask.
+      const why = permission && asker
+        ? approvalWhy(listWhy(DATA_DIR, { botId: asker.id }), asker.id, event.threadId, Date.parse(event.createdAt))
+        : undefined;
       let rehearsal;
       if (permission && asker?.threadId === event.threadId) {
         try {
@@ -1279,6 +1283,7 @@ bus.subscribe((event: RuntimeEvent) => {
               kind: "options",
               card: {
                 rehearsal,
+                why,
                 title: "Approval needed",
                 subtitle: summary,
                 options: ["Allow", "Deny"],
@@ -1298,6 +1303,7 @@ bus.subscribe((event: RuntimeEvent) => {
         kind: "options",
         card: {
           rehearsal,
+          why,
           title: permission ? "Approval needed" : "Your bot has a question",
           subtitle: event.summary,
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],

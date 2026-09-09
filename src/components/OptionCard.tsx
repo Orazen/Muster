@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ApprovalWhyDetails } from "./ApprovalWhyDetails";
 import { X } from "lucide-react";
 import { useStore, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -70,6 +71,7 @@ export function OptionCard({
         </button>
       </div>
 
+      {card.why && <ApprovalWhyDetails why={card.why} />}
       {card.rehearsal && (
         <p className="mt-2 text-[12px] text-ink-secondary">{card.rehearsal.summary}</p>
       )}

@@ -27,6 +27,9 @@ public struct OptionCard: Codable, Hashable, Sendable {
     public var held: String?
     /// The narrow grant "always allow" would remember, e.g. `Bash:git`.
     public var allowKey: String?
+    /// A settled run's journal, attached by the harness as historical
+    /// context. This is never the reason for the current approval request.
+    public var why: ApprovalWhy?
 
     /// A card is actionable while it is unanswered and still has a request
     /// behind it. Everything else is transcript.
@@ -36,6 +39,32 @@ public struct OptionCard: Codable, Hashable, Sendable {
 
     /// Permission cards carry a tool; questions do not.
     public var isPermission: Bool { tool != nil }
+}
+
+public struct ApprovalWhy: Codable, Hashable, Sendable {
+    /// Kept as a string so a future source does not break the whole card.
+    /// Views only label the known `previous-run` source as previous history.
+    public var source: String
+    public var runId: String
+    public var botId: String
+    public var threadId: String
+    public var at: Double
+    public var intent: String
+    public var decisions: [String]
+    public var outcome: String
+    public var hypothesis: String?
+    public var findings: String?
+
+    public var date: Date { Date(timeIntervalSince1970: at / 1000) }
+
+    public var outcomeLabel: String {
+        switch outcome {
+        case "done": return "Completed"
+        case "failed": return "Failed"
+        case "partial": return "Partial"
+        default: return "Unknown outcome"
+        }
+    }
 }
 
 public struct ToolActivity: Codable, Hashable, Sendable {

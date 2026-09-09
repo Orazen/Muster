@@ -343,6 +343,7 @@ struct ApprovalView: View {
     let messageId: String
 
     @State private var busy = false
+    @State private var showingPreviousRun = false
 
     /// Resolved live from state, not held by value: the answer arrives as a
     /// stream patch, and the screen should reflect the harness's record of
@@ -363,6 +364,42 @@ struct ApprovalView: View {
                     Text(card.title).font(.headline)
                     if !card.subtitle.isEmpty {
                         Text(card.subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
+
+                    if let why = card.why, why.source == "previous-run", why.threadId == threadId {
+                        Button {
+                            showingPreviousRun.toggle()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Previous run").font(.caption)
+                                    Text("\(why.date.formatted(date: .abbreviated, time: .shortened)) · \(why.outcomeLabel)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: showingPreviousRun ? "chevron.up" : "chevron.down")
+                                    .font(.caption2)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityValue(showingPreviousRun ? "Expanded" : "Collapsed")
+
+                        if showingPreviousRun {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(why.intent)
+                                if let hypothesis = why.hypothesis {
+                                    Text("Assumed: \(hypothesis)")
+                                }
+                                if let findings = why.findings {
+                                    Text("Learned: \(findings)")
+                                }
+                                ForEach(Array(why.decisions.enumerated()), id: \.offset) { _, decision in
+                                    Text("• \(decision)")
+                                }
+                            }
+                            .font(.caption2)
+                        }
                     }
 
                     if busy {

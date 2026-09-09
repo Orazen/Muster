@@ -7,6 +7,7 @@
 // the detail printed raw in a monospace block that is NEVER truncated
 // (it scrolls instead), and the buttons ordered least-destructive-last so
 // the primary action sits under your thumb.
+import { ApprovalWhyDetails } from "./ApprovalWhyDetails";
 import { memo } from "react";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -24,6 +25,7 @@ export interface Pending {
   detail: string;
   held?: string;
   /** certify-lite evidence: this bot's past with this tool */
+  why?: NonNullable<Message["card"]>["why"];
   rehearsal?: NonNullable<Message["card"]>["rehearsal"];
   history?: NonNullable<Message["card"]>["history"];
 }
@@ -41,6 +43,7 @@ export function pendingApprovals(messages: Message[]): Pending[] {
       held: m.card!.held,
       history: m.card!.history,
       rehearsal: m.card!.rehearsal,
+      why: m.card!.why,
     }));
 }
 
@@ -92,6 +95,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
           {pending.history.summary}
         </div>
       )}
+      {pending.why && <ApprovalWhyDetails why={pending.why} />}
       {pending.rehearsal && (
         <p className="mt-2 text-[12px] text-ink-secondary">{pending.rehearsal.summary}</p>
       )}

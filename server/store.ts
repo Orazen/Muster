@@ -12,6 +12,7 @@ import * as mdb from "./message-db.ts";
 import { workspaceDir } from "./workspace.ts";
 import { newId, type ModelSelection, type ThreadId } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
+import { redactApprovalWhy, type ApprovalWhy } from "./approval-why.ts";
 import { redactSecretsInText } from "./redact.ts";
 
 export type AgentColor =
@@ -43,6 +44,7 @@ export const AGENT_CHARACTERS: readonly AgentCharacter[] = [
 ];
 
 export interface OptionCardData {
+  why?: ApprovalWhy;
   rehearsal?: { plannedSteps: number; matchedSteps: number; matchedRuns: number; reviewedRuns: number; summary: string };
   title: string;
   subtitle: string;
@@ -222,6 +224,7 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
     card.title = redactSecretsInText(card.title);
     if (card.subtitle !== undefined) card.subtitle = redactSecretsInText(card.subtitle);
     if (card.summary !== undefined) card.summary = redactSecretsInText(card.summary);
+    if (card.why) card.why = redactApprovalWhy(card.why);
     out.card = card;
   }
   if (out.connector) {

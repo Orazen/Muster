@@ -104,6 +104,7 @@ final class DecodingTests: XCTestCase {
         // the onboarding card has no request behind it, so it is history
         XCTAssertFalse(card.isPending)
         XCTAssertFalse(card.isPermission)
+        XCTAssertNil(card.why, "cards from an older harness have no attached journal")
     }
 
     func testAPendingApprovalIsActionableAndAnAnsweredOneIsNot() throws {
@@ -123,6 +124,7 @@ final class DecodingTests: XCTestCase {
         XCTAssertTrue(card.isPending)
         XCTAssertTrue(card.isPermission)
         XCTAssertEqual(card.allowKey, "Bash:rm")
+        XCTAssertNil(card.why, "an approval remains actionable without historical evidence")
 
         var answered = card
         answered.answered = "Allow"
@@ -131,6 +133,61 @@ final class DecodingTests: XCTestCase {
         var dismissed = card
         dismissed.dismissed = true
         XCTAssertFalse(dismissed.isPending)
+    }
+
+    func testDecodesPreviousRunEvidenceWithoutChangingTheApproval() throws {
+        let json = """
+        {
+          "id":"m1","role":"bot","kind":"options","at":1786742414000,
+          "card":{
+            "title":"Approval needed","subtitle":"Remove the build output",
+            "options":["Allow","Deny"],"requestId":"req-1","tool":"Bash",
+            "why":{
+              "source":"previous-run","runId":"settled-run-1","botId":"b1","threadId":"t1",
+              "at":1786742413000,"intent":"Rebuild the app","decisions":["Kept the source files"],
+              "outcome":"partial","hypothesis":"Build output was stale","findings":"A dependency was missing"
+            }
+          }
+        }
+        """
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        let card = try XCTUnwrap(message.card)
+        let why = try XCTUnwrap(card.why)
+        XCTAssertEqual(why.source, "previous-run")
+        XCTAssertEqual(why.runId, "settled-run-1")
+        XCTAssertEqual(why.botId, "b1")
+        XCTAssertEqual(why.threadId, "t1")
+        XCTAssertEqual(why.date.timeIntervalSince1970, 1786742413)
+        XCTAssertEqual(why.intent, "Rebuild the app")
+        XCTAssertEqual(why.decisions, ["Kept the source files"])
+        XCTAssertEqual(why.outcome, "partial")
+        XCTAssertEqual(why.outcomeLabel, "Partial")
+        XCTAssertEqual(why.hypothesis, "Build output was stale")
+        XCTAssertEqual(why.findings, "A dependency was missing")
+        XCTAssertTrue(card.isPending)
+        XCTAssertTrue(card.isPermission)
+        XCTAssertEqual(card.requestId, "req-1")
+        XCTAssertEqual(card.options, ["Allow", "Deny"])
+
+        let restored = try JSONDecoder().decode(Message.self, from: JSONEncoder().encode(message))
+        XCTAssertEqual(restored, message, "cached cards must retain their source and journal identity")
+    }
+
+    func testEvidenceAcceptsMissingOptionalFieldsAndFutureOutcomes() throws {
+        let json = """
+        {"source":"previous-run","runId":"r1","botId":"b1","threadId":"t1","at":1000,
+         "intent":"Check the build","decisions":[],"outcome":"done"}
+        """
+        for (outcome, label) in [("done", "Completed"), ("failed", "Failed"), ("partial", "Partial"), ("new-outcome", "Unknown outcome")] {
+            let value = json.replacingOccurrences(of: #""outcome":"done""#, with: "\"outcome\":\"\(outcome)\"")
+            let why = try JSONDecoder().decode(ApprovalWhy.self, from: Data(value.utf8))
+            XCTAssertEqual(why.outcomeLabel, label)
+            XCTAssertNil(why.hypothesis)
+            XCTAssertNil(why.findings)
+        }
+        let futureSource = json.replacingOccurrences(of: "previous-run", with: "future-source")
+        let why = try JSONDecoder().decode(ApprovalWhy.self, from: Data(futureSource.utf8))
+        XCTAssertEqual(why.source, "future-source", "a new source must remain distinguishable from previous-run history")
     }
 
     func testDecodesAMessageThatGainedAFieldWeDoNotKnow() throws {

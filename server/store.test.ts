@@ -476,6 +476,23 @@ describe("Store redacts bot-authored secrets on write", () => {
     rmSync(DATA_DIR, { recursive: true, force: true });
   });
 
+  it("redacts nested approval history before persistence and on reload", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const key = `sk-ant-api03-${"abcdefghijklmnopqrstuvwxyz0123456789"}`;
+    const message = store.appendMessage(bot.threadId, { role: "bot", kind: "options", card: {
+      title: "Allow?", subtitle: "Read", options: ["Allow", "Deny"],
+      why: { source: "previous-run", runId: "r", botId: bot.id, threadId: bot.threadId, at: 1,
+        intent: key, decisions: [key], outcome: "partial", hypothesis: key, findings: key },
+    } });
+    expect(JSON.stringify(message.card?.why)).not.toContain(key);
+    const again = new Store(selection);
+    const persisted = again.messagesFor(bot.threadId).find((m) => m.id === message.id);
+    expect(persisted?.card?.why?.source).toBe("previous-run");
+    expect(persisted?.card?.why?.outcome).toBe("partial");
+    expect(JSON.stringify(persisted?.card?.why)).not.toContain(key);
+  });
+
   it("masks a key in a bot reply, a tool title and a card summary — but never in what the user typed", () => {
     const store = new Store(selection);
     const bot = store.createBot();

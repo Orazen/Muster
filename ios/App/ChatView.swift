@@ -535,6 +535,33 @@ struct CardView: View {
                         .foregroundStyle(.orange)
                 }
 
+                if let why = card.why, why.source == "previous-run", why.threadId == chat.threadId {
+                    DisclosureGroup {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(why.intent)
+                            if let hypothesis = why.hypothesis {
+                                Text("Assumed: \(hypothesis)")
+                            }
+                            if let findings = why.findings {
+                                Text("Learned: \(findings)")
+                            }
+                            ForEach(Array(why.decisions.enumerated()), id: \.offset) { _, decision in
+                                Text("• \(decision)")
+                            }
+                        }
+                        .font(.system(size: 13))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Previous run").font(.system(size: 14, weight: .medium))
+                            Text("\(why.date.formatted(date: .abbreviated, time: .shortened)) · \(why.outcomeLabel)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 if card.isPending {
                     HStack(spacing: 10) {
                         ForEach(card.options, id: \.self) { option in

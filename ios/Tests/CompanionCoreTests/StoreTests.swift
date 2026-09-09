@@ -213,6 +213,38 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(pending.first?.threadId, secondThread)
     }
 
+    func testApprovalHistorySurvivesHydrationReplayAndResolution() throws {
+        var initialFleet = try fleet()
+        let bot = try XCTUnwrap(initialFleet.bots.first)
+        let why = ApprovalWhy(
+            source: "previous-run", runId: "settled-run", botId: bot.id, threadId: bot.threadId,
+            at: 1000, intent: "Check the build", decisions: ["Preserved the source files"],
+            outcome: "failed", hypothesis: "The build was ready", findings: "A dependency was missing"
+        )
+        var approval = Message(id: "pending-evidence", role: .bot, kind: .options, at: 2000)
+        approval.card = OptionCard(
+            title: "Approval needed", subtitle: "Rebuild output", options: ["Allow", "Deny"],
+            requestId: "req-evidence", tool: "Bash", why: why
+        )
+        initialFleet.bots[0].messages = [approval]
+        initialFleet.bots[0].activeLeafId = approval.id
+
+        var state = CompanionState()
+        state.hydrate(initialFleet)
+        XCTAssertEqual(state.pendingApprovals.first { $0.message.id == approval.id }?.message.card?.why, why)
+
+        state.apply(.message(threadId: bot.threadId, message: approval))
+        XCTAssertEqual(state.transcript(forThread: bot.threadId).filter { $0.id == approval.id }.count, 1)
+        XCTAssertEqual(state.pendingApprovals.first { $0.message.id == approval.id }?.message.card?.why, why)
+
+        approval.card?.answered = "deny"
+        state.apply(.messagePatch(threadId: bot.threadId, message: approval))
+        XCTAssertFalse(state.pendingApprovals.contains { $0.message.id == approval.id })
+        let settled = state.transcript(forThread: bot.threadId).first { $0.id == approval.id }
+        XCTAssertEqual(settled?.card?.why, why, "answering must preserve the exact historical evidence the human saw")
+        XCTAssertEqual(settled?.card?.answered, "deny")
+    }
+
     // MARK: - Cursor
 
     func testTheCursorFollowsTheStreamAndKeepsItsStreamId() {

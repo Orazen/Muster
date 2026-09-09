@@ -23,7 +23,21 @@ import { speaker } from "@/lib/tts";
 
 export type { AgentColor } from "@/lib/mascot";
 
+export interface ApprovalWhy {
+  source: "previous-run";
+  runId: string;
+  botId: string;
+  threadId: string;
+  at: number;
+  intent: string;
+  decisions: string[];
+  outcome: "done" | "failed" | "partial";
+  hypothesis?: string;
+  findings?: string;
+}
+
 export interface OptionCardData {
+  why?: ApprovalWhy;
   rehearsal?: { plannedSteps: number; matchedSteps: number; matchedRuns: number; reviewedRuns: number; summary: string };
   title: string;
   subtitle: string;
