@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loadFleetConfig, serveFleetMcp } from "./fleet-mcp.ts";
+import { Store } from "./store.ts";
 
 const dirs: string[] = [];
 
@@ -20,6 +21,7 @@ function pairedDir(cfg: Record<string, string>) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -253,7 +255,62 @@ describe("tools", () => {
     expect(init.method).toBe("POST");
   });
 
-  it("wait_for_conversation returns needs-user with the pending card", async () => {
+  it.each(["waiting-on-you", "no-signal"] as const)("wait_for_conversation preserves the store's %s state despite busy", async (activity) => {
+    const store = new Store(() => ({ instanceId: "fixture", model: "fixture" }));
+    const bot = store.createBot({ name: "State fixture" }, { seedMessages: false });
+    store.setActivity(bot.id, activity);
+    expect(bot.busy).toBe(true);
+    if (activity === "waiting-on-you") {
+      store.appendMessage(bot.threadId, {
+        role: "bot", kind: "options",
+        card: { title: "Allow inspection?", subtitle: "Read the report", options: ["Allow", "Deny"], requestId: "request", tool: "read_file" },
+      });
+    }
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonRes(200, { bot: { ...bot, messages: store.messagesFor(bot.threadId) } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.useFakeTimers();
+    const { call } = session();
+    const pending = call("tools/call", { name: "wait_for_conversation", arguments: { botId: bot.id, timeoutSeconds: 5 } });
+    await vi.advanceTimersByTimeAsync(5_005);
+    const payload = JSON.parse((await pending).result.content[0].text);
+    expect(payload.outcome).toBe(activity === "waiting-on-you" ? "needs-user" : "stalled");
+    expect(payload.threadId).toBe(bot.threadId);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method ?? "GET").toBe("GET");
+    if (activity === "waiting-on-you") {
+      expect(payload.needsUser).toMatchObject({ title: "Allow inspection?", options: ["Allow", "Deny"], permission: "read_file" });
+      expect(store.messagesFor(bot.threadId)[0].card?.answered).toBeUndefined();
+    }
+  });
+
+  it("wait_for_conversation reports explicit waiting when its card is outside the excerpt", async () => {
+    const fetchMock = vi.fn(async () => jsonRes(200, { bot: { id: "b1", busy: true, activity: "waiting-on-you", threadId: "t1", messages: [] } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.useFakeTimers();
+    const { call } = session();
+    const pending = call("tools/call", { name: "wait_for_conversation", arguments: { botId: "b1", timeoutSeconds: 5 } });
+    await vi.advanceTimersByTimeAsync(5_005);
+    const payload = JSON.parse((await pending).result.content[0].text);
+    expect(payload.outcome).toBe("needs-user");
+    expect(payload.needsUser).toBeUndefined();
+    expect(payload.hint).toContain("human owner");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("wait_for_conversation stops polling when a working bot opens an approval", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonRes(200, { bot: { id: "b1", busy: true, activity: "working", threadId: "t1", messages: [] } }))
+      .mockResolvedValue(jsonRes(200, { bot: { id: "b1", busy: true, activity: "waiting-on-you", threadId: "t1", messages: [] } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.useFakeTimers();
+    const { call } = session();
+    const pending = call("tools/call", { name: "wait_for_conversation", arguments: { botId: "b1", timeoutSeconds: 5 } });
+    await vi.advanceTimersByTimeAsync(5_005);
+    expect(JSON.parse((await pending).result.content[0].text).outcome).toBe("needs-user");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("wait_for_conversation returns needs-user for an idle bot with a pending card", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>

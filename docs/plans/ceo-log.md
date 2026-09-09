@@ -61,3 +61,42 @@ inventory count, not live task-quality parity. No paid provider turn was run.
 
 Next pick: audit the end-to-end harness against the five-step evaluation and
 record concrete failures; live evaluation remains outstanding.
+
+## Loop 2 — 2026-09-09 — Preserve approval and liveness states in fleet waits
+
+Audit findings: **P1** `wait_for_conversation` returned `working` for real human
+approvals because the store derives `busy: true` for `waiting-on-you`. **P2** the
+same ordering hid `no-signal` as `working`. Both were reproduced through the MCP
+protocol; the previous approval fixture covered an idle bot only.
+
+Fix: prioritize explicit dead, waiting, and no-signal states before the generic
+busy fallback. A pending approval returns `needs-user` on the first observation,
+even when its card falls outside the transcript excerpt; no-signal returns
+`stalled`. Existing idle-card and actively-working behavior remains covered.
+
+Shipped files: `server/fleet-mcp.ts`, `server/fleet-mcp.test.ts`, and this log.
+Four new regressions cover store-generated busy states, missing card excerpts,
+and a working-to-waiting transition. No approval is answered by the waiter.
+Before the fix: four targeted failures (`working` instead of `needs-user` or
+`stalled`). Final scoped run: 24 tests passed, zero failures. Server typecheck
+passed. Full suite: 179 files passed, 1761 tests passed, eight skipped, zero
+failures (175.76 seconds). Independent diff review found no actionable issues.
+
+Open **P3** audit item: scoped oxlint reports 18 pre-existing findings in the
+fleet MCP module and its tests (unparsed boundary types, unchecked assertions,
+and object-construction rules). The reported lines are outside this state-order
+change; lint is not recorded as passing. The broader lint debt remains open.
+
+Commercial implication: external fleet operators can surface human approvals
+and liveness interruptions promptly instead of spending the full wait window
+polling. This is a correctness improvement, not measured revenue uplift.
+
+Next pick, confirmed **P2**: `scoreFleetCapture` checks receipt start time but
+ignores its duration. A capture ending at 10:01 with a receipt starting at
+10:00:01 and lasting one hour incorrectly passes and exposes receipt metrics.
+The next slice must reject a derived receipt end after the capture (including
+non-finite sums) and retain the exact-end boundary. This is internal timing
+consistency, separate from the documented limits on provenance.
+
+Hourly continuation is active in the current task under the standing mandate;
+paid activation and other board-level actions remain gated.

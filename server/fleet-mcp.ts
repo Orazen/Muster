@@ -163,11 +163,14 @@ function pendingAsk(messages: any[]): JsonObject | undefined {
 /** One settled verdict for a thread, OpenMausBot-style vocabulary. */
 function outcomeOf(bot: any, messages: any[]): "settled" | "needs-user" | "failed" | "stalled" | "working" {
   const activity = bot.activity ?? (bot.busy ? "working" : "idle");
-  if (bot.busy || activity === "working") return "working";
+  // busy means the bot cannot accept another message. It also covers
+  // waiting-on-you and no-signal, so preserve those specific states first.
   // "dead" is the engine-gone-activity state — the harness crashed or the
   // process was killed. That is a failure, not a question for the user.
   if (activity === "dead") return "failed";
   if (activity === "waiting-on-you") return "needs-user";
+  if (activity === "no-signal") return "stalled";
+  if (bot.busy || activity === "working") return "working";
   if (pendingAsk(messages)) return "needs-user";
   const last = [...messages].reverse().find((m) => m.role === "bot" && m.kind === "text" && m.text?.trim());
   if (activity === "idle" && last) return "settled";
