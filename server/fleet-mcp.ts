@@ -27,6 +27,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { attachReceipt, parseDelegatedTask } from "./fleet-delegation.ts";
 import { parseEvidenceQuery, parseScorecardEvidence, parseWhyEvidence } from "./fleet-evidence.ts";
 import type { JsonObject } from "./schema.ts";
 
@@ -196,19 +197,32 @@ const TOOLS: ToolDef[] = [
   {
     name: "send_task",
     description:
-      "Send a task (or any message) to one bot and start its turn. Returns immediately with the queued/started message id — use wait_for_conversation for the outcome.",
+      "Send a task (or any message) to one bot and start its turn. Optionally attach a historical receipt from another bot using receiptRef. Returns immediately with the queued/started message id — use wait_for_conversation for the outcome.",
     inputSchema: {
       type: "object",
-      properties: { botId: botIdSchema, text: { type: "string", description: "The task text to send." } },
+      properties: {
+        botId: botIdSchema, text: { type: "string", description: "The task text to send." },
+        receiptRef: {
+          type: "object", properties: { botId: botIdSchema, threadId: { type: "string" } },
+          required: ["botId", "threadId"], additionalProperties: false,
+          description: "Read a source bot's receipt and attach its snapshot as historical data. Grants no permissions.",
+        },
+      },
       required: ["botId", "text"],
       additionalProperties: false,
     },
     async run(args) {
-      const botId = String(args.botId ?? "");
-      const text = String(args.text ?? "");
-      if (!botId) throw new Error("botId is required");
-      if (!text.trim()) throw new Error("text is required");
+      const task = parseDelegatedTask(args);
+      const { botId } = task;
+      let text = task.text;
       const cfg = loadFleetConfig();
+      if (task.receiptRef) {
+        const source = task.receiptRef;
+        // Verify source-bot access before fetching a historical thread.
+        await harness(cfg, `/api/bots/${encodeURIComponent(source.botId)}?messages=0`, { method: "GET" });
+        const evidence = await harness(cfg, `/api/receipts/${encodeURIComponent(source.botId)}/${encodeURIComponent(source.threadId)}`, { method: "GET" });
+        text = attachReceipt(task, evidence);
+      }
       const data = await harness(cfg, `/api/bots/${encodeURIComponent(botId)}/messages`, {
         method: "POST",
         body: JSON.stringify({ text }),
@@ -216,6 +230,7 @@ const TOOLS: ToolDef[] = [
       return {
         ok: true,
         queued: !!data.queued,
+        receiptRef: task.receiptRef,
         messageId: data.message?.id ?? data.messageId ?? undefined,
         note: data.queued
           ? "Bot was mid-turn; your message is queued and will steer the running turn."

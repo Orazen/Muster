@@ -162,6 +162,42 @@ describe("tools", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("send_task attaches an authenticated receipt snapshot before posting", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonRes(200, { bot: { id: "source" } }))
+      .mockResolvedValueOnce(jsonRes(200, { receipt: {
+        version: 1, bot: "Source", job: "Report", startedAt: "2026-09-09T00:00:00Z", durationMs: 10,
+        turns: 1, tokensIn: 10, tokensOut: 20, costUsd: null, result: "done", summary: "Prior output",
+      } }))
+      .mockResolvedValueOnce(jsonRes(202, { queued: false, messageId: "new-message" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { call } = session();
+    const receiptRef = { botId: "source", threadId: "old-thread" };
+    const response = await call("tools/call", { name: "send_task", arguments: { botId: "target", text: "Review this", receiptRef } });
+    expect(JSON.parse(response.result.content[0].text).receiptRef).toEqual(receiptRef);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "http://127.0.0.1:8845/api/bots/source?messages=0", expect.objectContaining({ method: "GET" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "http://127.0.0.1:8845/api/receipts/source/old-thread", expect.objectContaining({ method: "GET" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "http://127.0.0.1:8845/api/bots/target/messages", expect.objectContaining({ method: "POST", body: expect.stringContaining("Prior output") }));
+  });
+
+  it("send_task does not post when its receipt source is inaccessible", async () => {
+    const fetchMock = vi.fn(async () => jsonRes(404, { error: "no such bot" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { call } = session();
+    const response = await call("tools/call", { name: "send_task", arguments: { botId: "target", text: "Review", receiptRef: { botId: "source", threadId: "thread" } } });
+    expect(response.result.isError).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("send_task does not post when the fetched receipt is malformed", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonRes(200, { bot: { id: "source" } })).mockResolvedValueOnce(jsonRes(200, { receipt: null }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { call } = session();
+    const response = await call("tools/call", { name: "send_task", arguments: { botId: "target", text: "Review", receiptRef: { botId: "source", threadId: "thread" } } });
+    expect(response.result.isError).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("fleet_status maps the roster compactly", async () => {
     vi.stubGlobal(
       "fetch",
