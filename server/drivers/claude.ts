@@ -591,6 +591,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         current.child = child;
         current.broker = broker;
 
+        // CLI child spawned synchronously above; the harness watches this
+        // thread before sendTurn resolves. A retry calls startAttempt again,
+        // replacing the pid via a later event.
+        if (child.pid)
+          emit({ ...base(threadId, turnId), type: "turn.engine-pid", pid: child.pid } as RuntimeEvent);
+
       // token streaming: true while --include-partial-messages is delivering
       // text deltas for the current assistant message, so the whole-message
       // frame that follows doesn't re-emit the same text as one big delta

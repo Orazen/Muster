@@ -26,7 +26,11 @@ const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 // settle a turn. Raise the default for every test in this file so they
 // fail with their own rich diagnostic error instead of vitest's generic
 // "timed out in 45000ms" — the internal poll loops already carry deadlines
-// and helpful failure payloads.
+// and helpful failure payloads. Per-test timeouts must never sit BELOW an
+// internal poll deadline: under load vitest would kill a test that its own
+// deadline was still about to let pass, which is exactly the historical
+// full-suite flake. The boot hook gets the same headroom over its 90s
+// server-start deadline.
 vi.setConfig({ testTimeout: 150_000 });
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
@@ -192,7 +196,9 @@ describe("comms e2e (fake ACP fleet)", () => {
       if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
       await new Promise((r) => setTimeout(r, 150));
     }
-  }, 30_000);
+    // headroom over the 90s boot deadline above — a generic hook timeout
+    // at 30s used to abort the whole file before the deadline could report
+  }, 120_000);
 
   afterAll(async () => {
     await waitForExit(child, { signal: "SIGTERM" });
@@ -269,7 +275,8 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(rnote?.comm?.groupId).toBe(note.comm.groupId);
       expect(helperBot.busy).toBeFalsy();
     },
-    40_000,
+    // 25s internal poll + fleet setup needs load headroom
+    120_000,
   );
 
   // ── async peer handoff (delegate_bot) ───────────────────────────────
@@ -377,7 +384,8 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(helperBot.busy).toBeFalsy();
       expect(askerBot.busy).toBeFalsy();
     },
-    45_000,
+    // must exceed the 90s internal settle deadline
+    120_000,
   );
 
   // ── delegation terminal-state mirroring ─────────────────────────────
@@ -432,7 +440,8 @@ describe("comms e2e (fake ACP fleet)", () => {
         await new Promise((r) => setTimeout(r, 250));
       }
     },
-    45_000,
+    // must exceed the 90s internal settle deadline
+    120_000,
   );
 
   it(
@@ -604,7 +613,8 @@ describe("comms e2e (fake ACP fleet)", () => {
         await new Promise((r) => setTimeout(r, 250));
       }
     },
-    45_000,
+    // must exceed the 90s internal settle deadline
+    120_000,
   );
 
   // ── approval gate (approvePeerComms) ─────────────────────────────────
@@ -703,7 +713,8 @@ describe("comms e2e (fake ACP fleet)", () => {
         await new Promise((r) => setTimeout(r, 250));
       }
     },
-    60_000,
+    // 90s card wait + 25s settle must both fit under this timeout
+    150_000,
   );
 
   it("refuses ask_bot with a denial chip and never starts B when the user denies", async () => {
@@ -784,7 +795,8 @@ describe("comms e2e (fake ACP fleet)", () => {
           m.role === "bot" && m.kind === "text" && m.text?.includes("hello from fake acp"),
       ),
     ).toBe(false);
-  }, 150_000);
+    // card wait (90s) + settle wait (90s) must both fit under this timeout
+  }, 200_000);
 
   // ── depth guard regression ───────────────────────────────────────────
   // A bot invoked via ask_bot or delegate_bot runs at depth=1, which equals

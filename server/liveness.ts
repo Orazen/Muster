@@ -83,14 +83,22 @@ export class LivenessReaper {
     // same sweep, and onLost's own settle path may not have run yet.
     const open = this.opts.snapshotTurns();
     for (const death of deaths) {
-      // newest matching turn wins. A delegating parent's turn started long
-      // before the child's engine process spawned, so both match the
-      // lower-bound rule; the death belongs to the child, whose start sits
-      // right at the spawn — an oldest-first rule would steal it for the
-      // ancestor and kill the delegation mid-flight.
-      let index = -1;
-      for (let i = 0; i < open.length; i++) {
-        if (death.spawnedAt >= open[i]!.startedAt - skew) index = i;
+      // Exact pid match first: a turn that knows its engine's pid cannot be
+      // confused with any other process's exit, and a turn bound to a
+      // DIFFERENT (still-alive) process must never be blamed for one.
+      let index = open.findIndex((t) => t.pid !== undefined && t.pid === death.pid);
+      if (index === -1) {
+        // No bound pid anywhere: fall back to the spawn-time window, where
+        // newest matching turn wins. A delegating parent's turn started long
+        // before the child's engine process spawned, so both match the
+        // lower-bound rule; the death belongs to the child, whose start sits
+        // right at the spawn — an oldest-first rule would steal it for the
+        // ancestor and kill the delegation mid-flight. A pid-bound turn is
+        // excluded here: its own engine is another process, still running.
+        for (let i = 0; i < open.length; i++) {
+          if (open[i]!.pid !== undefined) continue;
+          if (death.spawnedAt >= open[i]!.startedAt - skew) index = i;
+        }
       }
       if (index === -1) continue;
       const [turn] = open.splice(index, 1);

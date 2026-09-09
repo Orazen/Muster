@@ -111,6 +111,55 @@ describe("LivenessReaper", () => {
     expect(lost.map((t) => t.threadId)).toEqual(["child"]);
   });
 
+  it("an exact pid match wins over the newest spawn-window candidate", () => {
+    const lost: Array<WatchedTurn> = [];
+    const reaper = new LivenessReaper({
+      checkMs: 1_000,
+      deathsSince: () => [death({ pid: 777, spawnedAt: 50_000 })],
+      snapshotTurns: () => [
+        // newest by the spawn window, but its own engine (pid 999) is alive
+        turn({ threadId: "newer", startedAt: 49_900, pid: 999 }),
+        // an older turn explicitly bound to the dying process
+        turn({ threadId: "bound", startedAt: 10_000, pid: 777 }),
+      ],
+      onLost: (t) => lost.push(t),
+    });
+    reaper.sweep();
+    expect(lost.map((t) => t.threadId)).toEqual(["bound"]);
+  });
+
+  it("a pid-bound turn is never blamed for a different process's exit", () => {
+    const lost: Array<WatchedTurn> = [];
+    const reaper = new LivenessReaper({
+      checkMs: 1_000,
+      deathsSince: () => [death({ pid: 9999, spawnedAt: 50_000 })],
+      snapshotTurns: () => [
+        // the spawn window would match this turn, but pid 4321 is its own
+        // still-running engine — the exit belongs to nobody watched
+        turn({ threadId: "bound", startedAt: 49_000, pid: 4321 }),
+      ],
+      onLost: (t) => lost.push(t),
+    });
+    reaper.sweep();
+    expect(lost).toHaveLength(0);
+  });
+
+  it("with no pid match, an unbound turn still absorbs the death by spawn window", () => {
+    const lost: Array<WatchedTurn> = [];
+    const reaper = new LivenessReaper({
+      checkMs: 1_000,
+      deathsSince: () => [death({ pid: 9999, spawnedAt: 50_000 })],
+      snapshotTurns: () => [
+        // bound to another (still-alive) engine — excluded from fallback
+        turn({ threadId: "child", startedAt: 49_800, pid: 888 }),
+        turn({ threadId: "parent", startedAt: 10_000 }),
+      ],
+      onLost: (t) => lost.push(t),
+    });
+    reaper.sweep();
+    expect(lost.map((t) => t.threadId)).toEqual(["parent"]);
+  });
+
   it("suspend() blanks attribution; resume() consumes deaths journalled meanwhile", () => {
     const lost: Array<WatchedTurn> = [];
     const journal: ProcessDeath[] = [];

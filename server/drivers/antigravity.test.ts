@@ -100,6 +100,7 @@ describe("Antigravity turns (fake CLI)", () => {
     const types = recorder.events.map((e) => e.type);
     expect(types).toEqual([
       "turn.started",
+      "turn.engine-pid", // pid bound for the liveness reaper
       "session.started",
       "item.started", // tool ACTIVE
       "item.completed", // tool DONE

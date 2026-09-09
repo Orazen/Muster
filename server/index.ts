@@ -702,8 +702,41 @@ interface SseClient {
    * records owned by someone else never reach this client — live or
    * replayed. */
   userId?: string;
+  /** Bytes accepted by res.write() but not yet flushed to the socket — our
+   * own accounting, since ServerResponse doesn't expose buffer depth. */
+  bufferedBytes: number;
 }
 const sseClients = new Set<SseClient>();
+
+/** A client that stops reading (phone asleep on cellular) but keeps its
+ * socket open would otherwise make every res.write() buffer server-side
+ * forever — hundreds-of-KB screen frames add up to real memory. Past this
+ * cap the client is dropped; its cursor-based replay covers the gap when
+ * it reconnects. */
+const SSE_CLIENT_CAP = 4 * 1024 * 1024;
+
+/** The only way frames leave the server. Quiet on a dead socket; drops a
+ * client whose unflushed backlog passes the cap. */
+function sseWrite(client: SseClient, frame: string): void {
+  client.bufferedBytes += Buffer.byteLength(frame);
+  let flushed = false;
+  try {
+    flushed = client.res.write(frame);
+  } catch {
+    sseClients.delete(client);
+    client.res.destroy();
+    return;
+  }
+  if (flushed) {
+    // the stream's buffer is back below its high-water mark
+    client.bufferedBytes = 0;
+    return;
+  }
+  if (client.bufferedBytes > SSE_CLIENT_CAP) {
+    sseClients.delete(client);
+    client.res.destroy();
+  }
+}
 
 /** The few frame fields the multi-tenant stream filter inspects; frames
  * carry arbitrary other fields that only ever go to the wire verbatim. */
@@ -754,11 +787,7 @@ function broadcast<P extends FrameIdentity>(payload: P) {
   if (replayBuffer.length > REPLAY_MAX) replayBuffer.shift();
   for (const client of sseClients) {
     if (!wants(client, kind) || !visibleToClient(client, payload)) continue;
-    try {
-      client.res.write(frame);
-    } catch {
-      sseClients.delete(client);
-    }
+    sseWrite(client, frame);
   }
 }
 
@@ -878,12 +907,23 @@ const repeats = new RepeatDetector({ thresholds: [5, 10, 20], maxKeysPerThread: 
 // touched, and turns parked on a human approval are exempt.
 const TURN_STALL_MS = Math.max(60_000, Number(process.env.OMB_TURN_STALL_MS) || 20 * 60_000);
 
+/** After a turn is lost, completions that cannot prove they belong to a
+ * newer generation are ignored for this long (see TurnWatchdog). The ACP
+ * interruption settles within five seconds; a minute covers slow adapters
+ * without risking a real replacement turn's own late completion — those
+ * always carry the events that bind their turnId first. */
+const STALE_SETTLE_GRACE_MS = 60_000;
+
 /** Settle a turn the harness had to take away from its engine — stall or
  * crash. One path so both losses behave identically: delegation watchers
  * resolve, queued sends drain, group ownership returns, and the bot idles
  * after a short grace that keeps the dying process as the turn's owner. */
 function settleLostTurn(turn: WatchedTurn, note: string): void {
   repeats.settle(turn.threadId);
+  // The interrupted provider usually survives and emits its real
+  // turn.completed seconds later. Arm the watchdog so that wind-down can't
+  // settle a replacement turn dispatched on this thread.
+  watchdog.suppressStaleSettles(turn.threadId, STALE_SETTLE_GRACE_MS);
   store.appendMessage(turn.threadId, {
     role: "bot",
     kind: "activity",
@@ -958,7 +998,12 @@ reaper.start();
 bus.subscribe((event: RuntimeEvent) => {
   if (event.type === "request.opened") watchdog.setWaitingOnHuman(event.threadId, true);
   else if (event.type === "request.resolved") watchdog.setWaitingOnHuman(event.threadId, false);
-  else if (event.type === "turn.completed") watchdog.settle(event.threadId);
+  else if (event.type === "turn.started") {
+    watchdog.touch(event.threadId);
+    watchdog.noteTurnStarted(event.threadId, event.turnId);
+  } else if (event.type === "turn.engine-pid") {
+    watchdog.noteEnginePid(event.threadId, event.pid);
+  } else if (event.type === "turn.completed") watchdog.settleIfCurrent(event.threadId, event.turnId);
   else watchdog.touch(event.threadId);
 });
 
@@ -5222,7 +5267,15 @@ let requestUserEmail = "";
 
     // ── events stream ──
     if (method === "GET" && path === "/api/events") {
-      const client: SseClient = { res, screens: url.searchParams.get("screens") !== "off", userId: requestUserId };
+      const client: SseClient = {
+        res,
+        screens: url.searchParams.get("screens") !== "off",
+        userId: requestUserId,
+        bufferedBytes: 0,
+      };
+      res.on("drain", () => {
+        client.bufferedBytes = 0;
+      });
       res.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
@@ -5240,7 +5293,8 @@ let requestUserEmail = "";
         since !== null &&
         since <= lastSeq &&
         (replayBuffer.length === 0 ? since === lastSeq : replayBuffer[0].seq <= since + 1);
-      res.write(
+      sseWrite(
+        client,
         `data: ${JSON.stringify({
           kind: "hello",
           cursor: `${STREAM_ID}:${lastSeq}`,
@@ -5258,15 +5312,13 @@ let requestUserEmail = "";
             wants(client, buffered.kind) &&
             (!buffered.payload || visibleToClient(client, buffered.payload))
           )
-            res.write(buffered.frame);
+            sseWrite(client, buffered.frame);
         }
       }
 
       sseClients.add(client);
       const keepalive = setInterval(() => {
-        try {
-          res.write(": keepalive\n\n");
-        } catch {}
+        sseWrite(client, ": keepalive\n\n");
       }, 25_000);
       req.on("close", () => {
         clearInterval(keepalive);

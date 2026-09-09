@@ -82,6 +82,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const types = recorder.events.map((e) => e.type);
     expect(types).toEqual([
       "turn.started",
+      "turn.engine-pid", // pid bound for the liveness reaper
       "session.started",
       "content.delta",
       "item.completed", // assistant_text

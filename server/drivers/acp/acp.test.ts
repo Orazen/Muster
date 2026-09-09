@@ -182,6 +182,7 @@ describe("ACP turns (fake CLI)", () => {
     const types = recorder.events.map((e) => e.type);
     expect(types).toEqual([
       "turn.started",
+      "turn.engine-pid", // pid bound for the liveness reaper
       "session.started",
       "content.delta",
       "item.started", // tool tc-1

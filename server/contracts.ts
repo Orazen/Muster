@@ -86,6 +86,14 @@ export type RuntimeEvent = RuntimeEventBase &
     | { type: "session.exited"; reason?: string }
     | { type: "turn.started" }
     | {
+        /** The turn's engine process pid, once known. Emitted shortly after
+         * turn.started (the CLI child may still be spawning when sendTurn
+         * returns); lets the harness bind the liveness reaper's death
+         * attribution to the exact turn instead of guessing by spawn time. */
+        type: "turn.engine-pid";
+        pid: number;
+      }
+    | {
         type: "turn.retrying";
         /** 1-based number of the attempt that just failed; the next try is
          * attempt + 1 of maxAttempts + 1 total. */

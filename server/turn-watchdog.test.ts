@@ -99,4 +99,66 @@ describe("TurnWatchdog", () => {
     dog.sweep();
     expect(stalls).toEqual([expect.objectContaining({ botId: "bot2" })]);
   });
+
+  it("settleIfCurrent: a matching turnId settles the turn", () => {
+    const { dog } = rig();
+    dog.watch("t1", "bot1");
+    dog.noteTurnStarted("t1", "gen-1");
+    dog.settleIfCurrent("t1", "gen-1");
+    expect(dog.watching("t1")).toBe(false);
+  });
+
+  it("a lost turn's late completion does not unwatch its replacement", () => {
+    const { dog, stalls, tick } = rig();
+    // generation 1 in flight, then lost by the stall sweep
+    dog.watch("t1", "bot1");
+    dog.noteTurnStarted("t1", "gen-1");
+    tick(STALL + 1);
+    dog.sweep();
+    expect(stalls).toHaveLength(1);
+    // the harness's loss path arms the guard (settleLostTurn)
+    dog.suppressStaleSettles("t1", 60_000);
+    // a replacement turn is dispatched and its started event lands
+    dog.watch("t1", "bot1");
+    dog.noteTurnStarted("t1", "gen-2");
+    // the interrupted-but-alive gen-1 provider finally completes
+    dog.settleIfCurrent("t1", "gen-1");
+    // gen-2 must STILL be watched — the stale completion clears nothing
+    expect(dog.watching("t1")).toBe(true);
+    // and gen-2's own completion settles it
+    dog.settleIfCurrent("t1", "gen-2");
+    expect(dog.watching("t1")).toBe(false);
+  });
+
+  it("settleIfCurrent: matching ids settle even inside the guard window", () => {
+    const { dog } = rig();
+    dog.watch("t1", "bot1");
+    dog.suppressStaleSettles("t1", 60_000);
+    dog.noteTurnStarted("t1", "gen-2");
+    dog.settleIfCurrent("t1", "gen-2");
+    expect(dog.watching("t1")).toBe(false);
+  });
+
+  it("settleIfCurrent: inside the guard window an undecided completion is ignored", () => {
+    const { dog, tick } = rig();
+    dog.watch("t1", "bot1");
+    dog.suppressStaleSettles("t1", 60_000);
+    // neither side knows a turnId — the window decides
+    dog.settleIfCurrent("t1");
+    expect(dog.watching("t1")).toBe(true);
+    // past the window the same undecided completion may settle
+    tick(61_000);
+    dog.settleIfCurrent("t1");
+    expect(dog.watching("t1")).toBe(false);
+  });
+
+  it("noteEnginePid binds the engine pid; snapshot carries it for the reaper", () => {
+    const { dog } = rig();
+    dog.watch("t1", "bot1");
+    dog.noteEnginePid("t1", 4711);
+    expect(dog.snapshot()).toEqual([expect.objectContaining({ threadId: "t1", pid: 4711 })]);
+    // a turn that never saw the event carries no pid
+    dog.watch("t2", "bot1");
+    expect(dog.snapshot().find((t) => t.threadId === "t2")?.pid).toBeUndefined();
+  });
 });

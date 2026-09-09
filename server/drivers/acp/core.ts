@@ -526,6 +526,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         active.set(threadId, { stop, interrupt, turnId, asks });
         emit({ ...base(threadId, turnId), type: "turn.started" });
 
+        // The CLI child spawned synchronously above and the harness watches
+        // this thread before sendTurn resolves, so a direct emit lands on a
+        // watched turn.
+        if (child.pid)
+          emit({ ...base(threadId, turnId), type: "turn.engine-pid", pid: child.pid } as RuntimeEvent);
+
         (async () => {
           try {
             const init = await request(

@@ -201,6 +201,8 @@ function isRuntimeEventRecord(value: JsonObject): value is RuntimeEvent & JsonOb
       return stringOrMissing(value.reason);
     case "turn.started":
       return true;
+    case "turn.engine-pid":
+      return isJsonNumber(value.pid) && Number.isSafeInteger(value.pid) && value.pid > 0;
     case "turn.completed":
       return (
         isJsonBoolean(value.ok) &&

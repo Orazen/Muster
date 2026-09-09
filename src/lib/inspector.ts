@@ -81,6 +81,8 @@ export function summarizeRuntime(e: RuntimeEvent): RuntimeSummary {
       return { summary: `session exited${e.reason ? ` · ${e.reason}` : ""}`, tone: "plain" };
     case "turn.started":
       return { summary: `turn started${e.turnId ? ` · ${e.turnId.slice(0, 8)}` : ""}`, tone: "boundary" };
+    case "turn.engine-pid":
+      return { summary: `engine pid ${e.pid}`, tone: "plain" };
     case "turn.completed": {
       const parts = [e.ok ? "turn ok" : "turn failed"];
       if (e.stopReason) parts.push(e.stopReason);

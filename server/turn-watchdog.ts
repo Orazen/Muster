@@ -14,6 +14,15 @@ export interface WatchedTurn {
   startedAt: number;
   lastEventAt: number;
   waitingOnHuman: boolean;
+  /** The engine process this turn was dispatched into, when the harness can
+   * see it — lets the liveness reaper attribute a journalled process death
+   * to the exact turn instead of guessing by spawn time. */
+  pid?: number;
+  /** The in-flight generation's provider turnId, bound from its turn.started
+   * event. A turn.completed carrying a different id is a prior generation's
+   * late wind-down — an interrupted-but-alive provider finishing after its
+   * turn was already lost — and must not settle this one. */
+  turnId?: string;
 }
 
 export interface TurnWatchdogOptions {
@@ -31,6 +40,12 @@ export interface TurnWatchdogOptions {
 
 export class TurnWatchdog {
   private turns = new Map<string, WatchedTurn>();
+  /** Threads whose turn was recently lost: until the window lapses, a
+   * turn.completed that cannot prove it belongs to the current generation
+   * (by turnId) is presumed to be the lost turn's wind-down and is ignored
+   * by settleIfCurrent. Covers the gap between a replacement turn's watch()
+   * and its turn.started, before ids can disambiguate. */
+  private staleSettleUntil = new Map<string, number>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private opts: TurnWatchdogOptions;
 
@@ -55,12 +70,21 @@ export class TurnWatchdog {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.turns.clear();
+    this.staleSettleUntil.clear();
   }
 
-  /** A turn was dispatched on this thread. */
-  watch(threadId: string, botId: string): void {
+  /** A turn was dispatched on this thread. `pid` binds the engine process
+   * when the harness can see it (reaper attribution). */
+  watch(threadId: string, botId: string, pid?: number): void {
     const at = this.now();
-    this.turns.set(threadId, { threadId, botId, startedAt: at, lastEventAt: at, waitingOnHuman: false });
+    this.turns.set(threadId, {
+      threadId,
+      botId,
+      startedAt: at,
+      lastEventAt: at,
+      waitingOnHuman: false,
+      ...(pid !== undefined ? { pid } : {}),
+    });
   }
 
   /** Any provider event for the thread proves the turn is alive. */
@@ -81,6 +105,54 @@ export class TurnWatchdog {
   /** The turn settled normally — stop watching it. */
   settle(threadId: string): void {
     this.turns.delete(threadId);
+  }
+
+  /** Bind the in-flight generation's provider turnId from its turn.started
+   * event, so later completions can be matched against it. */
+  noteTurnStarted(threadId: string, turnId?: string): void {
+    const turn = this.turns.get(threadId);
+    if (turn && turnId) turn.turnId = turnId;
+  }
+
+  /** Bind the turn's engine process pid (from a turn.engine-pid event) so
+   * the liveness reaper can attribute a process death exactly. */
+  noteEnginePid(threadId: string, pid: number): void {
+    const turn = this.turns.get(threadId);
+    if (turn) turn.pid = pid;
+  }
+
+  /** Arm the stale-completion guard for a thread whose turn was just lost:
+   * for the next `ms`, a completion that cannot prove it belongs to the
+   * current generation is presumed to be the lost turn's wind-down. */
+  suppressStaleSettles(threadId: string, ms: number): void {
+    this.staleSettleUntil.set(threadId, this.now() + ms);
+  }
+
+  /** The guarded settle for provider terminal events read off the event
+   * bus; settle() above stays for the harness's OWN completion paths, which
+   * always mean the current turn. A turn.completed may belong to a lost
+   * turn: when the watchdog interrupts a stalled provider, that provider
+   * usually survives the interrupt and emits its real completion seconds
+   * later. If a replacement turn is in flight by then, that stale
+   * completion — matched by threadId alone — would unwatch the NEW turn
+   * and leave it unprotected against the exact wedge this watchdog exists
+   * to catch. */
+  settleIfCurrent(threadId: string, turnId?: string): void {
+    const turn = this.turns.get(threadId);
+    if (!turn) return;
+    const bothKnown = turnId !== undefined && turn.turnId !== undefined;
+    // Matching ids prove the current generation; differing ids prove a
+    // prior one. When ids cannot decide, the guard window does.
+    if (bothKnown && turnId !== turn.turnId) return;
+    if (!bothKnown) {
+      const until = this.staleSettleUntil.get(threadId);
+      if (until !== undefined) {
+        if (this.now() < until) return;
+        this.staleSettleUntil.delete(threadId);
+      }
+    }
+    this.turns.delete(threadId);
+    this.staleSettleUntil.delete(threadId);
   }
 
   watching(threadId: string): boolean {
@@ -107,6 +179,11 @@ export class TurnWatchdog {
       }
       this.turns.delete(turn.threadId);
       this.opts.onStall(turn);
+    }
+    // windows for threads that never saw a follow-up completion are pure
+    // bookkeeping once lapsed — drop them so the map stays bounded
+    for (const [threadId, until] of this.staleSettleUntil) {
+      if (at >= until) this.staleSettleUntil.delete(threadId);
     }
   }
 }

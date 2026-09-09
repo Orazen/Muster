@@ -411,6 +411,11 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
       watchdog.unref?.();
 
       emit({ ...base(threadId, turnId), type: "turn.started" });
+      // child.pid exists — the spawn above is synchronous; the harness
+      // watches this thread before sendTurn resolves, so a direct emit lands
+      // on a watched turn.
+      if (child.pid)
+        emit({ ...base(threadId, turnId), type: "turn.engine-pid", pid: child.pid } as RuntimeEvent);
 
       return { turnId };
     };
