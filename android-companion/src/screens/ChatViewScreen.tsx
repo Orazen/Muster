@@ -1,178 +1,238 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  View,
-  Text,
+  ActivityIndicator,
   FlatList,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { Message, Approval } from "../core/types";
+import { Bot, isCardPending, Message, Room } from "../core/types";
+import { CompanionState, StreamBuffers, visibleTranscript } from "../core/store";
+import { ChatTarget } from "../hooks/useCompanion";
 
 interface ChatViewScreenProps {
-  roomId: string;
-  messages: Message[];
-  approvals: Approval[];
-  onSendMessage: (content: string) => void;
-  onApprove: (id: string) => void;
-  onDeny: (id: string) => void;
-  onAnswer: (id: string, answer: string) => void;
+  state: CompanionState;
+  target: ChatTarget;
+  bot?: Bot;
+  room?: Room;
+  onSend: (text: string) => void;
+  onRespond: (threadId: string, requestId: string, behavior: string, message?: string) => void;
+  onAlwaysAllow: (botId: string, allowKey: string) => void;
   onBack: () => void;
+  onLoadOlder: () => void;
+  viewThread: (threadId: string) => void;
+}
+
+function Bubble({
+  message,
+  color,
+  onApprove,
+  onDeny,
+  onAllowAlways,
+}: {
+  message: Message;
+  color: string;
+  onApprove: (card: NonNullable<Message["card"]>) => void;
+  onDeny: (card: NonNullable<Message["card"]>) => void;
+  onAllowAlways: (card: NonNullable<Message["card"]>) => void;
+}) {
+  const isUser = message.role === "user";
+
+  if (message.kind === "activity" && message.tool) {
+    const ok = message.tool.ok;
+    return (
+      <View style={[styles.activityRow, isUser && styles.activityRowUser]}>
+        <Text style={styles.activityText}>
+          {ok === false ? "✗" : "⚙"} {message.tool.name}
+        </Text>
+      </View>
+    );
+  }
+
+  if (message.kind === "options" && message.card) {
+    const card = message.card;
+    const pending = isCardPending(card);
+    return (
+      <View style={[styles.card, !pending && styles.cardDone]}>
+        <Text style={styles.cardTitle}>{card.title}</Text>
+        {card.subtitle ? <Text style={styles.cardSubtitle}>{card.subtitle}</Text> : null}
+        {pending ? (
+          <View style={styles.cardActions}>
+            <TouchableOpacity
+              style={[styles.cardBtn, styles.cardAllow]}
+              onPress={() => onApprove(card)}
+            >
+              <Text style={styles.cardAllowText}>Allow</Text>
+            </TouchableOpacity>
+            {card.allowKey ? (
+              <TouchableOpacity
+                style={[styles.cardBtn, styles.cardAlways]}
+                onPress={() => onAllowAlways(card)}
+              >
+                <Text style={styles.cardAlwaysText}>Always</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={[styles.cardBtn, styles.cardDeny]}
+              onPress={() => onDeny(card)}
+            >
+              <Text style={styles.cardDenyText}>Deny</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <Text style={styles.cardAnswered}>
+            {card.dismissed ? "Dismissed" : `Answered: ${card.answered ?? ""}`}
+          </Text>
+        )}
+      </View>
+    );
+  }
+
+  if (message.kind === "unknown" || (!message.text && message.kind === "text")) {
+    if (!message.text) return null;
+  }
+
+  return (
+    <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleBot]}>
+      {!isUser && message.from?.name ? (
+        <Text style={[styles.sender, { color }]}>{message.from.name}</Text>
+      ) : null}
+      {message.comm ? (
+        <Text style={styles.comm}>↔ {message.comm.withName ?? "room"}</Text>
+      ) : null}
+      <Text style={isUser ? styles.bubbleTextUser : styles.bubbleText}>{message.text}</Text>
+    </View>
+  );
 }
 
 export function ChatViewScreen({
-  roomId,
-  messages,
-  approvals,
-  onSendMessage,
-  onApprove,
-  onDeny,
-  onAnswer,
+  state,
+  target,
+  bot,
+  room,
+  onSend,
+  onRespond,
+  onAlwaysAllow,
   onBack,
+  onLoadOlder,
+  viewThread,
 }: ChatViewScreenProps) {
-  const [input, setInput] = useState("");
-  const flatListRef = useRef<FlatList>(null);
+  const [draft, setDraft] = useState("");
+  const listRef = useRef<FlatList<Message | null>>(null);
+  const threadId = target.threadId;
 
-  const pendingApprovals = approvals.filter(
-    (a) => a.roomId === roomId && a.status === "pending"
-  );
+  const transcript = useMemo(() => visibleTranscript(state, threadId), [state, threadId]);
+  const streams: StreamBuffers | undefined = state.streams[threadId];
+  const hasMore = state.hasMore[threadId] ?? false;
+  const title = bot?.name ?? room?.name ?? "Chat";
+  const color = bot?.color ?? "#f0460e";
 
-  const handleSend = () => {
-    if (!input.trim()) return;
-    onSendMessage(input.trim());
-    setInput("");
-  };
+  useEffect(() => {
+    viewThread(threadId);
+  }, [threadId, viewThread]);
 
-  const renderMessage = ({ item }: { item: Message }) => {
-    const isUser = item.role === "user";
-    return (
-      <View
-        style={[styles.messageBubble, isUser ? styles.userBubble : styles.botBubble]}
-      >
-        <Text style={[styles.messageText, isUser && styles.userText]}>
-          {item.content}
-        </Text>
-        <Text style={styles.messageTime}>
-          {new Date(item.timestamp).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </Text>
-      </View>
-    );
-  };
+  const rows: (Message | null)[] = useMemo(() => {
+    const out: (Message | null)[] = [...transcript];
+    if (streams?.reasoning) out.push(null); // reasoning placeholder
+    if (streams?.text) out.push(null); // streaming placeholder
+    return out;
+  }, [transcript, streams]);
 
-  const renderApproval = ({ item }: { item: Approval }) => {
-    if (item.type === "question") {
-      return (
-        <View style={styles.approvalCard}>
-          <Text style={styles.approvalTitle}>Question</Text>
-          <Text style={styles.approvalDescription}>{item.description}</Text>
-          <TextInput
-            style={styles.answerInput}
-            placeholder="Type your answer..."
-            placeholderTextColor="#666"
-            value=""
-            onChangeText={(text) => onAnswer(item.id, text)}
-          />
-          <View style={styles.approvalActions}>
-            <TouchableOpacity
-              style={styles.approveButton}
-              onPress={() => onAnswer(item.id, input)}
-            >
-              <Text style={styles.approveButtonText}>Send Answer</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      );
-    }
-
-    return (
-      <View style={styles.approvalCard}>
-        <Text style={styles.approvalTitle}>
-          {item.type === "shell" ? "Shell Command" : "File Edit"}
-        </Text>
-        <Text style={styles.approvalDescription}>{item.title}</Text>
-        <Text style={styles.approvalDetail} numberOfLines={3}>
-          {item.description}
-        </Text>
-        <View style={styles.approvalActions}>
-          <TouchableOpacity
-            style={styles.denyButton}
-            onPress={() => onDeny(item.id)}
-          >
-            <Text style={styles.denyButtonText}>Deny</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.approveButton}
-            onPress={() => onApprove(item.id)}
-          >
-            <Text style={styles.approveButtonText}>Allow</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
+  const send = () => {
+    const text = draft.trim();
+    if (!text) return;
+    setDraft("");
+    onSend(text);
   };
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={90}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
     >
       <StatusBar style="light" />
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Text style={styles.backText}>←</Text>
+        <TouchableOpacity onPress={onBack} hitSlop={12}>
+          <Text style={styles.back}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {roomId}
-        </Text>
+        <View style={styles.headerTitle}>
+          <Text style={styles.title}>{title}</Text>
+          {bot?.busy ? <Text style={styles.busy}>working…</Text> : null}
+        </View>
+        <View style={{ width: 32 }} />
       </View>
 
       <FlatList
-        ref={flatListRef}
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.messageList}
-        onContentSizeChange={() =>
-          flatListRef.current?.scrollToEnd({ animated: true })
-        }
+        ref={listRef}
+        data={rows}
+        inverted
+        keyExtractor={(item, i) => item?.id ?? `stream-${i}`}
+        onEndReached={() => hasMore && onLoadOlder()}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={hasMore ? <ActivityIndicator color="#555" style={styles.more} /> : null}
+        renderItem={({ item }) => {
+          if (item === null) {
+            const text = streams?.text ? streams.text : streams?.reasoning ?? "";
+            const label = streams?.text ? "" : "thinking · ";
+            return (
+              <View style={[styles.bubble, styles.bubbleBot]}>
+                {label ? <Text style={styles.reasoning}>{label}{streams?.reasoning?.slice(-140)}</Text> : null}
+                {streams?.text ? <Text style={styles.bubbleText}>{streams.text}</Text> : null}
+                {!streams?.text ? <Text style={styles.caret}>▍</Text> : null}
+                {text.length === 0 ? <Text style={styles.caret}>▍</Text> : null}
+              </View>
+            );
+          }
+          return (
+            <View
+              style={
+                item.role === "user"
+                  ? styles.userRow
+                  : item.kind === "activity"
+                    ? styles.activityOuter
+                    : undefined
+              }
+            >
+              <Bubble
+                message={item}
+                color={color}
+                onApprove={(card) =>
+                  card.requestId && onRespond(threadId, card.requestId, "allow")
+                }
+                onDeny={(card) =>
+                  card.requestId &&
+                  onRespond(threadId, card.requestId, card.tool ? "deny" : "dismiss")
+                }
+                onAllowAlways={(card) => {
+                  if (card.requestId && card.allowKey && bot) {
+                    onAlwaysAllow(bot.id, card.allowKey);
+                    onRespond(threadId, card.requestId, "allow");
+                  }
+                }}
+              />
+            </View>
+          );
+        }}
+        style={styles.list}
       />
 
-      {pendingApprovals.length > 0 && (
-        <View style={styles.approvalsContainer}>
-          <FlatList
-            data={pendingApprovals}
-            renderItem={renderApproval}
-            keyExtractor={(item) => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-          />
-        </View>
-      )}
-
-      <View style={styles.inputContainer}>
+      <View style={styles.composer}>
         <TextInput
           style={styles.input}
-          placeholder="Message..."
+          placeholder={`Message ${title}…`}
           placeholderTextColor="#666"
-          value={input}
-          onChangeText={setInput}
-          onSubmitEditing={handleSend}
-          returnKeyType="send"
+          value={draft}
+          onChangeText={setDraft}
           multiline
         />
-        <TouchableOpacity
-          style={[styles.sendButton, !input.trim() && styles.sendButtonDisabled]}
-          onPress={handleSend}
-          disabled={!input.trim()}
-        >
-          <Text style={styles.sendButtonText}>↑</Text>
+        <TouchableOpacity style={[styles.send, !draft.trim() && styles.sendDisabled]} onPress={send}>
+          <Text style={styles.sendText}>↑</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -180,165 +240,108 @@ export function ChatViewScreen({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0a0a0a",
-  },
+  container: { flex: 1, backgroundColor: "#0a0a0a" },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingTop: 60,
+    paddingHorizontal: 12,
+    paddingTop: 52,
     paddingBottom: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#1a1a1a",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#222",
   },
-  backButton: {
-    marginRight: 12,
-    padding: 8,
-  },
-  backText: {
-    fontSize: 24,
-    color: "#1084fe",
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#fff",
-    flex: 1,
-  },
-  messageList: {
-    padding: 16,
-    paddingBottom: 8,
-  },
-  messageBubble: {
-    maxWidth: "80%",
-    padding: 12,
+  back: { color: "#f0460e", fontSize: 30, lineHeight: 34, width: 32 },
+  headerTitle: { flex: 1, alignItems: "center" },
+  title: { color: "#f6f6f7", fontSize: 16, fontWeight: "600" },
+  busy: { color: "#f0460e", fontSize: 11, marginTop: 1 },
+  list: { flex: 1 },
+  more: { marginVertical: 8 },
+  userRow: { alignItems: "flex-end" },
+  activityOuter: { alignItems: "flex-start" },
+  bubble: {
+    maxWidth: "82%",
     borderRadius: 16,
-    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    marginHorizontal: 14,
+    marginVertical: 4,
   },
-  userBubble: {
-    alignSelf: "flex-end",
-    backgroundColor: "#1084fe",
-    borderBottomRightRadius: 4,
-  },
-  botBubble: {
+  bubbleBot: { backgroundColor: "#1a1a1c", alignSelf: "flex-start" },
+  bubbleUser: { backgroundColor: "#f0460e", alignSelf: "flex-end" },
+  sender: { fontSize: 12, fontWeight: "700", marginBottom: 2 },
+  comm: { color: "#8a8a8e", fontSize: 11, marginBottom: 2 },
+  bubbleText: { color: "#e8e8ea", fontSize: 15, lineHeight: 21 },
+  bubbleTextUser: { color: "#fff", fontSize: 15, lineHeight: 21 },
+  reasoning: { color: "#6a6a6e", fontSize: 12, fontStyle: "italic" },
+  caret: { color: "#f0460e", fontSize: 14 },
+  activityRow: {
     alignSelf: "flex-start",
-    backgroundColor: "#1a1a1a",
-    borderBottomLeftRadius: 4,
+    backgroundColor: "#141416",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginHorizontal: 14,
+    marginVertical: 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#26262a",
   },
-  messageText: {
-    fontSize: 15,
-    color: "#fff",
-    lineHeight: 20,
-  },
-  userText: {
-    color: "#fff",
-  },
-  messageTime: {
-    fontSize: 11,
-    color: "#666",
-    marginTop: 4,
-  },
-  approvalsContainer: {
-    borderTopWidth: 1,
-    borderTopColor: "#1a1a1a",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    maxHeight: 200,
-  },
-  approvalCard: {
-    backgroundColor: "#1a1a1a",
-    borderRadius: 12,
-    padding: 16,
-    marginRight: 12,
-    minWidth: 280,
+  activityRowUser: { alignSelf: "flex-end" },
+  activityText: { color: "#9a9a9e", fontSize: 12, fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }) },
+  card: {
+    alignSelf: "flex-start",
+    backgroundColor: "#1c1c1e",
+    borderRadius: 14,
+    padding: 14,
+    marginHorizontal: 14,
+    marginVertical: 4,
+    maxWidth: "86%",
     borderWidth: 1,
-    borderColor: "#333",
+    borderColor: "#3a3a3e",
   },
-  approvalTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#ffaa00",
-    marginBottom: 8,
-  },
-  approvalDescription: {
-    fontSize: 15,
-    color: "#fff",
-    marginBottom: 8,
-  },
-  approvalDetail: {
-    fontSize: 13,
-    color: "#888",
-    fontFamily: "monospace",
-    marginBottom: 12,
-  },
-  approvalActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
-  },
-  denyButton: {
-    backgroundColor: "#333",
-    borderRadius: 8,
-    paddingHorizontal: 16,
+  cardDone: { opacity: 0.55, borderColor: "#2a2a2c" },
+  cardTitle: { color: "#f6f6f7", fontSize: 15, fontWeight: "600" },
+  cardSubtitle: { color: "#8a8a8e", fontSize: 13, marginTop: 3, lineHeight: 18 },
+  cardActions: { flexDirection: "row", gap: 8, marginTop: 12 },
+  cardBtn: {
+    borderRadius: 9,
+    paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  denyButtonText: {
-    color: "#ff4444",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  approveButton: {
-    backgroundColor: "#1084fe",
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  approveButtonText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  answerInput: {
-    backgroundColor: "#0a0a0a",
-    borderRadius: 8,
-    padding: 12,
-    color: "#fff",
-    marginBottom: 12,
-  },
-  inputContainer: {
+  cardAllow: { backgroundColor: "#f0460e" },
+  cardAllowText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  cardAlways: { backgroundColor: "#2a2a2c" },
+  cardAlwaysText: { color: "#e8e8ea", fontWeight: "600", fontSize: 13 },
+  cardDeny: { backgroundColor: "transparent", borderWidth: 1, borderColor: "#3a3a3e" },
+  cardDenyText: { color: "#9a9a9e", fontWeight: "600", fontSize: 13 },
+  cardAnswered: { color: "#8a8a8e", fontSize: 12, marginTop: 8 },
+  composer: {
     flexDirection: "row",
     alignItems: "flex-end",
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: "#1a1a1a",
+    padding: 12,
+    paddingBottom: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "#222",
   },
   input: {
     flex: 1,
-    backgroundColor: "#1a1a1a",
+    backgroundColor: "#1a1a1c",
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 10,
+    paddingBottom: 10,
+    color: "#f6f6f7",
     fontSize: 15,
-    color: "#fff",
-    maxHeight: 100,
+    maxHeight: 120,
+    marginRight: 8,
   },
-  sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#1084fe",
-    justifyContent: "center",
+  send: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#f0460e",
     alignItems: "center",
-    marginLeft: 8,
+    justifyContent: "center",
   },
-  sendButtonDisabled: {
-    opacity: 0.3,
-  },
-  sendButtonText: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "700",
-  },
+  sendDisabled: { opacity: 0.35 },
+  sendText: { color: "#fff", fontSize: 20, fontWeight: "700" },
 });

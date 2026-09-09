@@ -27,6 +27,14 @@ targets:
     dependencies:
       - package: CompanionCore
         product: CompanionCore
+    entitlements:
+      path: App/MusterCompanion.entitlements
+      properties:
+        # Notifications.swift stamps approval pings with
+        # interruptionLevel = .timeSensitive. Without this entitlement
+        # iOS silently downgrades every one of them to .active — the code
+        # reads right and the phone stays quiet at lock screen.
+        com.apple.developer.usernotifications.time-sensitive: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion

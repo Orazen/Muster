@@ -1,117 +1,156 @@
 import React from "react";
 import {
-  View,
-  Text,
   FlatList,
-  TouchableOpacity,
-  StyleSheet,
   RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { Room, Bot } from "../core/types";
+import { Bot, Room } from "../core/types";
+import { ChatTarget } from "../hooks/useCompanion";
+import { CompanionState, StreamBuffers } from "../core/store";
 
 interface ChatListScreenProps {
-  rooms: Room[];
+  state: CompanionState;
   bots: Bot[];
-  onSelectRoom: (roomId: string) => void;
-  onRefresh: () => void;
+  rooms: Room[];
+  connected: boolean;
   refreshing: boolean;
+  onSelect: (target: ChatTarget) => void;
+  onRefresh: () => void;
+  onUnpair: () => void;
+}
+
+function lastActivity(
+  state: CompanionState,
+  threadId: string,
+): { at: number; preview: string } {
+  const list = state.messages[threadId] ?? [];
+  const last = list[list.length - 1];
+  const streams: StreamBuffers | undefined = state.streams[threadId];
+  if (streams && (streams.text || streams.reasoning)) {
+    return { at: last?.at ?? 0, preview: (streams.text || "thinking…").trim() };
+  }
+  if (!last) return { at: 0, preview: "" };
+  const preview =
+    last.card?.title ?? last.tool?.name ?? (last.text ? last.text.trim() : "");
+  return { at: last.at, preview: preview || "" };
 }
 
 export function ChatListScreen({
-  rooms,
+  state,
   bots,
-  onSelectRoom,
-  onRefresh,
+  rooms,
+  connected,
   refreshing,
+  onSelect,
+  onRefresh,
+  onUnpair,
 }: ChatListScreenProps) {
-  const getBotForRoom = (room: Room): Bot | undefined => {
-    if (room.kind === "dm") {
-      return bots.find((b) => room.members.includes(b.id));
-    }
-    return undefined;
-  };
+  const time = (ms: number) =>
+    ms > 0
+      ? new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "";
 
-  const getRoomTitle = (room: Room): string => {
-    if (room.name) return room.name;
-    const bot = getBotForRoom(room);
-    return bot?.name || room.id;
-  };
+  type Row =
+    | { key: string; kind: "bot"; bot: Bot; threadId: string; act: { at: number; preview: string } }
+    | { key: string; kind: "room"; room: Room; threadId: string; act: { at: number; preview: string } };
 
-  const getRoomSubtitle = (room: Room): string => {
-    const bot = getBotForRoom(room);
-    if (bot) return bot.engine;
-    return room.members.length > 1 ? `${room.members.length} members` : "";
-  };
+  const rows: Row[] = [
+    ...bots.map((bot) => ({
+      key: `bot-${bot.id}`,
+      kind: "bot" as const,
+      bot,
+      threadId: bot.threadId,
+      act: lastActivity(state, bot.threadId),
+    })),
+    ...rooms.map((room) => ({
+      key: `room-${room.id}`,
+      kind: "room" as const,
+      room,
+      threadId: room.threadId,
+      act: lastActivity(state, room.threadId),
+    })),
+  ].sort((a, b) => b.act.at - a.act.at);
 
-  const renderRoom = ({ item }: { item: Room }) => {
-    const bot = getBotForRoom(item);
-    return (
-      <TouchableOpacity
-        style={styles.roomItem}
-        onPress={() => onSelectRoom(item.id)}
-      >
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {bot?.name?.[0] || item.name?.[0] || "?"}
-          </Text>
-        </View>
-        <View style={styles.roomInfo}>
-          <View style={styles.roomHeader}>
-            <Text style={styles.roomName} numberOfLines={1}>
-              {getRoomTitle(item)}
-            </Text>
-            {item.lastMessage && (
-              <Text style={styles.timestamp}>
-                {new Date(item.lastMessage.timestamp).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </Text>
-            )}
-          </View>
-          <View style={styles.roomMeta}>
-            <Text style={styles.roomSubtitle} numberOfLines={1}>
-              {getRoomSubtitle(item)}
-            </Text>
-            {item.lastMessage && (
-              <Text style={styles.preview} numberOfLines={1}>
-                {item.lastMessage.content}
-              </Text>
-            )}
-          </View>
-        </View>
-        {item.unread > 0 && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{item.unread}</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-    );
-  };
+  const pendingCount = state.notifications.filter((n) => n.kind === "approval" || n.kind === "question").length;
 
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
       <View style={styles.header}>
-        <Text style={styles.title}>Muster</Text>
+        <View>
+          <Text style={styles.title}>Muster</Text>
+          <Text style={styles.status}>
+            {connected ? "Connected" : "Reconnecting…"}
+            {pendingCount > 0 ? `  ·  ${pendingCount} awaiting approval` : ""}
+          </Text>
+        </View>
+        <TouchableOpacity onPress={onUnpair} hitSlop={12}>
+          <Text style={styles.unpair}>Unpair</Text>
+        </TouchableOpacity>
       </View>
       <FlatList
-        data={rooms}
-        renderItem={renderRoom}
-        keyExtractor={(item) => item.id}
+        data={rows}
+        keyExtractor={(item) => item.key}
+        renderItem={({ item }) => {
+          const name = item.kind === "bot" ? item.bot.name : item.room.name ?? "Room";
+          const color = item.kind === "bot" ? item.bot.color ?? "#2a2a2c" : "#1c1c1e";
+          const initial = name.slice(0, 1).toUpperCase() || "?";
+          const unread =
+            item.kind === "bot" ? item.bot.unread ?? 0 : item.room.unread ?? 0;
+          const busy = item.kind === "bot" ? item.bot.busy : false;
+          const subtitle =
+            item.act.preview ||
+            (item.kind === "bot"
+              ? item.bot.description ?? "No messages yet"
+              : item.room.bulletin ?? "No messages yet");
+          return (
+            <TouchableOpacity
+              style={styles.row}
+              onPress={() =>
+                onSelect(
+                  item.kind === "bot"
+                    ? { kind: "bot", id: item.bot.id, threadId: item.threadId }
+                    : { kind: "room", id: item.room.id, threadId: item.threadId },
+                )
+              }
+            >
+              <View style={[styles.avatar, { backgroundColor: color }]}>
+                <Text style={styles.avatarText}>{initial}</Text>
+              </View>
+              <View style={styles.rowBody}>
+                <View style={styles.rowTop}>
+                  <Text style={styles.rowName} numberOfLines={1}>
+                    {name}
+                    {busy ? "  ●" : ""}
+                  </Text>
+                  <Text style={styles.rowTime}>{time(item.act.at)}</Text>
+                </View>
+                <View style={styles.rowBottom}>
+                  <Text style={styles.rowPreview} numberOfLines={1}>
+                    {subtitle}
+                  </Text>
+                  {unread > 0 ? (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{unread}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#1084fe"
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#f0460e" />
         }
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>No rooms yet</Text>
+            <Text style={styles.emptyTitle}>No bots yet</Text>
             <Text style={styles.emptyHint}>
-              Create a bot on your computer to get started
+              Create a bot on your computer — it appears here instantly.
             </Text>
           </View>
         }
@@ -121,106 +160,64 @@ export function ChatListScreen({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0a0a0a",
-  },
+  container: { flex: 1, backgroundColor: "#0a0a0a" },
   header: {
-    paddingTop: 60,
-    paddingBottom: 16,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#1a1a1a",
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  roomItem: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#1a1a1a",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#222",
+  },
+  title: { fontSize: 24, fontWeight: "700", color: "#f6f6f7" },
+  status: { fontSize: 12, color: "#8a8a8e", marginTop: 2 },
+  unpair: { color: "#f0460e", fontSize: 14, fontWeight: "600" },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 14,
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#1084fe",
-    justifyContent: "center",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
-    marginRight: 12,
+    justifyContent: "center",
+    marginRight: 14,
   },
-  avatarText: {
-    fontSize: 20,
-    fontWeight: "600",
-    color: "#fff",
-  },
-  roomInfo: {
-    flex: 1,
-  },
-  roomHeader: {
+  avatarText: { color: "#fff", fontSize: 18, fontWeight: "700" },
+  rowBody: { flex: 1 },
+  rowTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
+  rowName: { color: "#f6f6f7", fontSize: 16, fontWeight: "600", flexShrink: 1 },
+  rowTime: { color: "#6a6a6e", fontSize: 12, marginLeft: 8 },
+  rowBottom: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 4,
+    marginTop: 2,
   },
-  roomName: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#fff",
-    flex: 1,
-  },
-  timestamp: {
-    fontSize: 12,
-    color: "#666",
-    marginLeft: 8,
-  },
-  roomMeta: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  roomSubtitle: {
-    fontSize: 13,
-    color: "#888",
-    marginRight: 8,
-  },
-  preview: {
-    fontSize: 13,
-    color: "#666",
-    flex: 1,
-  },
+  rowPreview: { color: "#8a8a8e", fontSize: 14, flexShrink: 1 },
   badge: {
-    backgroundColor: "#1084fe",
+    backgroundColor: "#f0460e",
     borderRadius: 10,
     minWidth: 20,
     height: 20,
-    justifyContent: "center",
     alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 6,
     marginLeft: 8,
   },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#fff",
-  },
-  empty: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingTop: 100,
-  },
-  emptyText: {
-    fontSize: 18,
-    color: "#666",
-    marginBottom: 8,
-  },
+  badgeText: { color: "#fff", fontSize: 12, fontWeight: "700" },
+  empty: { alignItems: "center", marginTop: 96, paddingHorizontal: 40 },
+  emptyTitle: { color: "#f6f6f7", fontSize: 18, fontWeight: "600" },
   emptyHint: {
+    color: "#8a8a8e",
     fontSize: 14,
-    color: "#444",
     textAlign: "center",
+    marginTop: 8,
+    lineHeight: 20,
   },
 });

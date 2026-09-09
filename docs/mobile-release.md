@@ -21,7 +21,7 @@ There are **two separate mobile deliverables** in this repo:
 | Project shape | XcodeGen spec (`project.yml`); `.xcodeproj` is generated, never committed | Managed Expo workflow; **no native `android/` Gradle project exists yet** |
 | Identity | bundle id `com.muster.companion` | applicationId `com.muster.companion` (from `app.json` → `expo.android.package`) |
 | Version | `MARKETING_VERSION 1.0.0`, build `CURRENT_PROJECT_VERSION 1` | `version 1.0.0`, `versionCode 1` |
-| Status | Feature-complete, device-tested, store drafts already written under `ios/AppStore/` | Early: pairing/chat screens exist; no signing, broken EAS config |
+| Status | Feature-complete, device-tested, store drafts already written under `ios/AppStore/` | Core rewritten 2026-09-09 against the real wire protocol (the old core called endpoints that don't exist); signing still to configure |
 
 Do not confuse them: the Expo app also carries an `ios` section in `app.json`,
 but the shipping iOS app is the native SwiftUI one. The Expo `ios` config is
@@ -39,19 +39,17 @@ Read from `project.yml` and the sources it compiles:
 | Deployment target | iOS 17.0 | Swift 5.9 |
 | Devices | iPhone + iPad (`TARGETED_DEVICE_FAMILY "1,2"`) | Universal ⇒ **iPad screenshots are required** at submission (see §5) |
 | Signing | **None committed** — no `DEVELOPMENT_TEAM`, no profiles | Deliberate; set at archive time (§3 step 6). CI builds with `CODE_SIGNING_ALLOWED=NO` |
-| Entitlements | **No `.entitlements` file** | No push, no iCloud, no app groups. Keychain uses the default access group with `ThisDeviceOnly` accessibility — fine without a capability |
-| Capabilities used | Local network + Bonjour (`_muster._tcp`), camera (QR pairing), ATS local-networking + `ts.net` exception, URL scheme `muster`, notifications | All are Info.plist-driven, not entitlement-driven |
+| Entitlements | `App/MusterCompanion.entitlements` (XcodeGen-generated) | Time Sensitive Notifications declared (`com.apple.developer.usernotifications.time-sensitive`) since 2026-09-09 — `interruptionLevel = .timeSensitive` now actually takes effect. No push, no iCloud, no app groups. Keychain uses the default access group with `ThisDeviceOnly` accessibility — fine without a capability |
+| Capabilities used | Local network + Bonjour (`_muster._tcp`), camera (QR pairing), ATS local-networking + `ts.net` exception, URL scheme `muster`, notifications + time-sensitive entitlement | Info.plist-driven except the entitlement above |
 | Export compliance | `ITSAppUsesNonExemptEncryption: false` | Standard crypto only ⇒ skips the yearly export-compliance prompt |
 | App icon | `AppIcon` catalog present (1024px, generated from the mascot) | Regenerate with `node scripts/make-app-icon.mjs` if the mascot changes |
 | Privacy manifest | `App/PrivacyInfo.xcprivacy` present | Keep in sync with the App Store privacy answers (§7) |
 
-**Known gap (capability):** `Notifications.swift` sets
-`interruptionLevel = .timeSensitive` for blocking approvals, but the Time
-Sensitive Notifications capability is not declared. Without the
-`com.apple.developer.usernotifications.time-sensitive` entitlement Apple
-silently downgrades those alerts to ordinary active-level ones. Add the
-capability in Xcode ("Signing & Capabilities") or as an entitlements file in
-`project.yml` before shipping approval alerts.
+**Known gap (capability):** ✅ CLOSED 2026-09-09 — `project.yml` now declares
+`com.apple.developer.usernotifications.time-sensitive` and XcodeGen generates
+`App/MusterCompanion.entitlements` from it. The capability still has to be
+enabled on the App ID in the Apple developer portal when provisioning is set
+up (§3 step 6); automatic signing picks it up from the entitlements file.
 
 ### 1b. Android audit (`android-companion/`)
 
@@ -62,9 +60,10 @@ capability in Xcode ("Signing & Capabilities") or as an entitlements file in
 | versionCode / versionName | `1` / `1.0.0` | From `app.json` |
 | Signing | **None configured** | No keystore anywhere in the repo. EAS can generate one, or bring your own (appendix) |
 | Native project | Absent | Generated on demand by `expo prebuild` or by EAS Build; nothing to audit in Gradle today |
-| Permissions | `CAMERA`, `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, `BLUETOOTH`, `BLUETOOTH_ADMIN` | The legacy `BLUETOOTH*` permissions should be capped (`maxSdkVersion="30"`) when the native project lands; they are only needed for old-device discovery |
+| Permissions | `CAMERA`, `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE` | Legacy `BLUETOOTH`/`BLUETOOTH_ADMIN` removed entirely on 2026-09-09 — the rewritten app never touches Bluetooth, and uncapped legacy permissions trigger Play Console warnings. If Bluetooth discovery is ever wanted, re-add with `maxSdkVersion="30"` |
 | Camera rationale | Set via `expo-camera` plugin config for iOS; **Android needs the same string** once prebuilt | Play rejects missing permission explanations less often than Apple, but the pairing flow still needs it visible |
-| EAS config | **BROKEN**: `eas.json` contains a copy of an *Expo app config*, not EAS build profiles | `pnpm build:android:production` (`eas build --profile production`) fails today because no `production` profile exists. Fix in the appendix |
+| EAS config | ✅ FIXED 2026-09-09: real profiles — `development` (dev-client APK), `preview` (internal APK), `production` (AAB, autoIncrement) | `eas build --profile production -p android` now valid; keystore still to generate on first EAS build |
+| Core | Rewritten 2026-09-09 against the real sidecar protocol (mirrors `ios/Sources/CompanionCore`): `/api/bots?messages=50`, `/api/threads/{id}/messages`, `/api/threads/{id}/respond`, `/api/pair`, SSE with `id: <streamId>:<seq>` cursors | The previous core called `/api/rooms`, `/api/approvals/*`, `/api/companion/pair`, `/api/events/stream` — none exist; the app could never have worked. Fold behavior (dedupe, leaf walk, streaming buffers, notify cap 100, hydrate-replace) is behavioral-tested |
 
 ### 1c. Existing GitHub workflows (`.github/workflows/`)
 

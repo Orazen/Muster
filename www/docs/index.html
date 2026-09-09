@@ -64,8 +64,9 @@
     <p>Install the desktop app, run one command, claim your workspace from your phone:</p>
     <pre><code><span class="c"># 1. install the desktop app — the server ships inside it</span>
 
-<span class="c"># 2. or boot the server headless from a Muster checkout (Node 22+):</span>
-node cli/muster.mjs up
+<span class="c"># 2. or boot the server headless with the single-file CLI (Node 22+):</span>
+curl -fsSL https://muster.orazen.online/downloads/muster-cli.mjs -o muster && chmod +x muster
+./muster up
 
 <span class="c"># 3. claim your workspace — scan the QR code it prints with your phone,</span>
 <span class="c">#    or open the link in a browser</span></code></pre>

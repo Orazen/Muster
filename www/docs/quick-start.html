@@ -61,12 +61,17 @@
 
     <h2>1. Install the app (or skip it)</h2>
     <p>Grab the desktop build for your platform from the <a href="/download.html">download page</a>: a <code>.dmg</code> for macOS (Apple Silicon or Intel), an <code>.exe</code> installer for Windows, or a <code>.deb</code> / <code>.AppImage</code> for Linux. Install details, first-launch notes, and auto-update behavior live in <a href="/docs/install">Install &amp; apps</a>.</p>
-    <p>The desktop app embeds the Muster harness server, so there is no separate server setup. Prefer the terminal instead? The CLI ships with a Muster checkout and boots the same server headless:</p>
-    <pre><code><span class="c"># boots the local server in the foreground (Ctrl-C stops it)</span>
-node cli/muster.mjs up
+    <p>The desktop app embeds the Muster harness server, so there is no separate server setup. Prefer the terminal instead? Grab the single-file CLI — no checkout needed:</p>
+    <pre><code><span class="c"># one file, zero dependencies, ~40 KB — Node 22+ required</span>
+curl -fsSL https://muster.orazen.online/downloads/muster-cli.mjs -o muster
+chmod +x muster
+
+<span class="c"># boots the local server in the foreground (Ctrl-C stops it)</span>
+./muster up
 
 <span class="c"># or detached: close the terminal and Muster keeps running</span>
-node cli/muster.mjs up -d</code></pre>
+./muster up -d</code></pre>
+    <p>Working inside a Muster checkout already? <code>node cli/muster.mjs</code> is the same CLI.</p>
     <div class="callout">
       <span class="callout__mark">Note</span>
       <span>The CLI needs Node 22 or newer. On a desktop app install you don't need Node at all — the server ships inside the app.</span>
@@ -74,16 +79,16 @@ node cli/muster.mjs up -d</code></pre>
 
     <h2>2. Start the local server</h2>
     <p>In the desktop app, use the app menu: <strong>Muster ▸ Start local server</strong>. The server binds to your machine and the chat UI opens against it. In a packaged install that's the whole story — no environment to configure, nothing else to run.</p>
-    <p>If you went the CLI route, <code>node cli/muster.mjs up</code> <em>is</em> the server. Managing it:</p>
+    <p>If you went the CLI route, <code>./muster up</code> <em>is</em> the server. Managing it:</p>
     <pre><code><span class="c"># end a detached server (SIGTERM, then SIGKILL after 10s)</span>
-node cli/muster.mjs stop
+./muster stop
 
-<span class="c"># tail its output (node cli/muster.mjs logs 200 for more)</span>
-node cli/muster.mjs logs
+<span class="c"># tail its output (./muster logs 200 for more)</span>
+./muster logs
 
 <span class="c"># useful flags</span>
-node cli/muster.mjs up --port 8799          <span class="c"># pick another port</span>
-node cli/muster.mjs up --data-dir ~/muster  <span class="c"># move the data directory</span></code></pre>
+./muster up --port 8799          <span class="c"># pick another port</span>
+./muster up --data-dir ~/muster  <span class="c"># move the data directory</span></code></pre>
     <p>A suspended laptop stops everything — the machine the server runs on needs to stay awake.</p>
 
     <h2>3. Claim your workspace from your phone</h2>
@@ -91,8 +96,8 @@ node cli/muster.mjs up --data-dir ~/muster  <span class="c"># move the data dire
     <pre><code><span class="c">Muster is up. Scan to open the console on your phone:</span>
 <span class="c">http://192.168.x.x:8799/claim#SEH5ZP3S</span></code></pre>
     <p>Scan it with your phone's camera — or open the printed link — and you land in the console already signed in as the owner. No account creation, no password to invent, and the pairing never leaves your network. Claim codes are single-use and expire after 5 minutes; five failed redemption attempts lock an IP out for ten.</p>
-    <p>Prefer a guided setup on the computer itself? Run <code>node cli/muster.mjs setup</code>: it connects to (or boots) the local server, signs you in as the owner, helps you pick an engine, and introduces your first bot. New phone later, or a second one? Run <code>muster up</code> again — it detects the running server and prints a fresh QR instead of starting a second one.</p>
-    <p>Every scan and sign-in is a tracked session. <code>node cli/muster.mjs sessions</code> lists them (current one marked), and <code>node cli/muster.mjs sessions --revoke &lt;prefix|other|all&gt;</code> kills one, all others, or all — useful if you lose a phone.</p>
+    <p>Prefer a guided setup on the computer itself? Run <code>./muster setup</code>: it connects to (or boots) the local server, signs you in as the owner, helps you pick an engine, and introduces your first bot. New phone later, or a second one? Run <code>muster up</code> again — it detects the running server and prints a fresh QR instead of starting a second one.</p>
+    <p>Every scan and sign-in is a tracked session. <code>./muster sessions</code> lists them (current one marked), and <code>./muster sessions --revoke &lt;prefix|other|all&gt;</code> kills one, all others, or all — useful if you lose a phone.</p>
 
     <h2>4. Add your first engine</h2>
     <p>An engine is what a bot thinks with. Open <strong>Settings → Providers → Add model provider</strong> and register any OpenAI- or Anthropic-compatible endpoint as a first-class engine: a name, the base URL, an optional API key, the wire format, and a model list. Local <code>127.0.0.1</code> endpoints like Ollama and LM Studio work out of the box on desktop installs.</p>
@@ -107,11 +112,11 @@ node cli/muster.mjs up --data-dir ~/muster  <span class="c"># move the data dire
     <p>Hiring is one conversation. Create a bot from the roster, give it a name, a persona, and a brief — what it owns, how it should report back, what never to touch. The persona and memory persist across tasks, so a bot you briefed once keeps its brief tomorrow. Give it the engine you just added in its settings, and it's on the payroll.</p>
     <p>Then send the first message — in the desktop app, from your phone, or straight from the terminal:</p>
     <pre><code><span class="c"># say hello to a bot named "scout"</span>
-node cli/muster.mjs send scout "Introduce yourself and tell me what you own."
+./muster send scout "Introduce yourself and tell me what you own."
 
 <span class="c"># watch status and receipts</span>
-node cli/muster.mjs status
-node cli/muster.mjs receipts</code></pre>
+./muster status
+./muster receipts</code></pre>
     <p>When the bot wants to run a shell command or edit a file, it asks first: the action surfaces as an approval card you Allow or Deny. Every settled task ends in a job receipt — bot, duration, tokens, cost. See <a href="/docs/approvals">Approvals &amp; privacy</a>.</p>
 
     <h2>Where your data lives</h2>

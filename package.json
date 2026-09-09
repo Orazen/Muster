@@ -1,7 +1,7 @@
 {
   "name": "muster",
   "private": true,
-  "version": "1.10.3",
+  "version": "1.10.4",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/Orazen/Muster",
   "repository": {
@@ -27,7 +27,9 @@
   "pnpm": {
     "overrides": {
       "fast-uri@<3.2.0": ">=3.2.0",
-      "@xmldom/xmldom@<0.8.15": "0.8.15"
+      "@xmldom/xmldom@<0.8.15": "0.8.15",
+      "sharp@<0.35.4": ">=0.35.4",
+      "js-yaml@<4.3.2": ">=4.3.2"
     }
   },
   "scripts": {
@@ -57,6 +59,7 @@
     "package:mac": "pnpm package:mac:arm64",
     "package:mac:arm64": "pnpm package:prepare && pnpm build:speech && CUA_TARGET_ARCH=arm64 pnpm build:cua && electron-builder --mac --arm64 --publish never",
     "package:mac:x64": "pnpm package:prepare && pnpm build:speech && CUA_TARGET_ARCH=x64 pnpm build:cua && electron-builder --mac --x64 --publish never -c.dmg.artifactName=Muster-\\${version}-intel.dmg",
+    "package:cli": "esbuild cli/muster.mjs --bundle --platform=node --format=esm --outfile=release/muster-cli.mjs",
     "package:win": "pnpm package:prepare && electron-builder --win --publish never",
     "package:linux": "pnpm package:prepare && electron-builder --linux --x64 --publish never",
     "package:linux:dir": "pnpm package:prepare && electron-builder --linux dir --x64 --publish never",
@@ -111,7 +114,7 @@
     "tailwindcss": "^4.1.11",
     "typescript": "^5.8.3",
     "vite": "^7.1.0",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "wrangler": "4.123.0"
   }
 }

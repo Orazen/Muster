@@ -54,7 +54,7 @@
     <p class="lead">Muster runs as a desktop app on macOS, Windows, and Linux, as a web app in any browser, and as thin companions on your phone. Every desktop build embeds the harness server — there is no separate server setup.</p>
 
     <div class="pill-row">
-      <span class="pill">Current: v1.10.2</span>
+      <span class="pill">Current: v1.10.4</span>
       <span class="pill">macOS · Windows · Linux</span>
       <span class="pill">Web app</span>
       <span class="pill">iOS / Android companions</span>
@@ -74,6 +74,13 @@
       <span class="callout__mark">Homebrew</span>
       <span>On Apple Silicon Macs, <code>brew tap orazen/muster &amp;&amp; brew install --cask muster</code> installs Muster and clears the quarantine flag automatically — no Gatekeeper prompt.</span>
     </div>
+
+    <h2>The Muster CLI</h2>
+    <p>One file, zero dependencies, ~40 KB. It boots the whole stack (<code>muster up</code>), prints the phone-pairing QR, and drives the roster from any terminal — including a VPS over SSH. Works against your local harness or Muster Cloud.</p>
+    <pre><code>curl -fsSL https://muster.orazen.online/downloads/muster-cli.mjs -o muster
+chmod +x muster
+./muster help</code></pre>
+    <p>Requires Node 22+. Every command works the same as from a checkout (<code>node cli/muster.mjs</code>) — <code>up · setup · stop · logs · pair · bots · send · approve · status · receipts · sessions</code>.</p>
 
     <h2>First launch on each platform</h2>
     <p>The desktop builds are unsigned while proper signing and notarization are tracked. Each platform has a one-time first-open step, not a block:</p>
@@ -100,7 +107,7 @@
       <tr><td>macOS</td><td>Apple Silicon or Intel Mac</td><td>Full capability set, including on-device dictation and local screen control.</td></tr>
       <tr><td>Windows</td><td>64-bit Windows</td><td>Per-user install, no admin.</td></tr>
       <tr><td>Linux</td><td>Ubuntu 24.04 x64</td><td>Beta: chat, engines, approvals, cloud computers work; local screen preview, dictation, and Wayland capture are not claimed yet and fail closed without blocking anything else.</td></tr>
-      <tr><td>CLI (<code>node cli/muster.mjs up</code>, from a Muster checkout)</td><td>Node 22+</td><td>Any machine with Node — including a VPS over SSH.</td></tr>
+      <tr><td>CLI (<code>muster</code> — the single-file script above, or <code>node cli/muster.mjs</code> from a checkout)</td><td>Node 22+</td><td>Any machine with Node — including a VPS over SSH.</td></tr>
       <tr><td>Engines</td><td>At least one agent CLI logged in, or one API provider key</td><td>Engines appear in the picker automatically; a free-tier provider key costs nothing.</td></tr>
     </table>
 

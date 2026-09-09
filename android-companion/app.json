@@ -28,9 +28,7 @@
         "CAMERA",
         "INTERNET",
         "ACCESS_NETWORK_STATE",
-        "ACCESS_WIFI_STATE",
-        "BLUETOOTH",
-        "BLUETOOTH_ADMIN"
+        "ACCESS_WIFI_STATE"
       ]
     },
     "plugins": [

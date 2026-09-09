@@ -1,155 +1,295 @@
-import * as SecureStore from "expo-secure-store";
-import { Bot, Room, Message, Approval, PairingInfo } from "./types";
+// HTTP client mirroring ios/Sources/CompanionCore/Client.swift.
+// Only endpoints in the sidecar's default-deny allowlist are callable.
 
-const TOKEN_KEY = "muster-pairing-token";
-const ADDRESS_KEY = "muster-address";
+import { advanceCursor, decodeFleet, decodeFrame, Frame } from "./frames";
+import { SSEParser, SSEEvent } from "./sse";
+import {
+  Fleet,
+  Instance,
+  Message,
+  PairResponse,
+  ThreadPage,
+} from "./types";
+
+export const DEFAULT_PORT = 8810;
+
+export interface Connection {
+  host: string;
+  port: number;
+  token: string;
+}
+
+export class PairingError extends Error {}
+export class APIError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export interface ParsedAddress {
+  host: string;
+  port: number;
+}
+
+// Strips scheme, handles IPv6 brackets, applies the default port — mirrors
+// Connection.parse on iOS.
+export function parseAddress(input: string): ParsedAddress {
+  let s = input.trim();
+  s = s.replace(/^https?:\/\//i, "");
+  s = s.replace(/\/+$/, "");
+  const bracket = s.match(/^\[([^\]]+)\](?::(\d+))?$/);
+  if (bracket) {
+    return { host: bracket[1], port: bracket[2] ? Number(bracket[2]) : DEFAULT_PORT };
+  }
+  const lastColon = s.lastIndexOf(":");
+  if (lastColon > 0 && (s.match(/:/g) ?? []).length === 1) {
+    const port = Number(s.slice(lastColon + 1));
+    if (Number.isFinite(port) && port > 0) {
+      return { host: s.slice(0, lastColon), port };
+    }
+  }
+  return { host: s, port: DEFAULT_PORT };
+}
+
+export interface PairingInvite {
+  address: string;
+  token: string;
+}
+
+// muster://pair?address=host:port&token=omb_pair_…|code=…&name=…
+export function parsePairingURL(url: string): PairingInvite | null {
+  if (!url.startsWith("muster://pair?")) return null;
+  const query = url.slice("muster://pair?".length);
+  const params = new URLSearchParams(query.replace(/\|/g, "&"));
+  const address = params.get("address");
+  const token = params.get("token");
+  if (!address || !token || !token.startsWith("omb_pair_") || token.length < 8) return null;
+  return { address, token };
+}
 
 export class MusterClient {
-  private address: string = "";
-  private token: string = "";
+  conn: Connection;
 
-  async loadCredentials(): Promise<boolean> {
-    const address = await SecureStore.getItemAsync(ADDRESS_KEY);
-    const token = await SecureStore.getItemAsync(TOKEN_KEY);
-    if (address && token) {
-      this.address = address;
-      this.token = token;
-      return true;
-    }
-    return false;
+  constructor(conn: Connection) {
+    this.conn = conn;
   }
 
-  async saveCredentials(address: string, token: string): Promise<void> {
-    this.address = address;
-    this.token = token;
-    await SecureStore.setItemAsync(ADDRESS_KEY, address);
-    await SecureStore.setItemAsync(TOKEN_KEY, token);
+  get base(): string {
+    return `http://${this.conn.host}:${this.conn.port}`;
   }
 
-  async clearCredentials(): Promise<void> {
-    this.address = "";
-    this.token = "";
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
-    await SecureStore.deleteItemAsync(ADDRESS_KEY);
-  }
-
-  private get baseUrl(): string {
-    return `http://${this.address}`;
-  }
-
-  private get headers() {
+  private headers(): Record<string, string> {
     return {
-      Authorization: `Bearer ${this.token}`,
+      Authorization: `Bearer ${this.conn.token}`,
       "Content-Type": "application/json",
     };
   }
 
-  async healthCheck(): Promise<boolean> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    timeoutMs = 20_000,
+  ): Promise<T> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(`${this.baseUrl}/api/health`, {
-        headers: this.headers,
-        signal: AbortSignal.timeout(5000),
+      const res = await fetch(`${this.base}${path}`, {
+        method,
+        headers: this.headers(),
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller.signal,
       });
-      return res.ok;
-    } catch {
-      return false;
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          const errBody = await res.json();
+          if (typeof errBody?.error === "string") detail = errBody.error;
+        } catch {}
+        throw new APIError(res.status, detail);
+      }
+      if (res.status === 204) return undefined as T;
+      return (await res.json()) as T;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
-  async pair(info: PairingInfo): Promise<string> {
-    const res = await fetch(`${info.address}/api/companion/pair`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: info.code }),
-    });
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ error: "Pairing failed" }));
-      throw new Error(error.error || "Pairing failed");
+  static async pair(
+    host: string,
+    port: number,
+    opts: { credential?: string; code?: string; deviceName: string },
+  ): Promise<{ response: PairResponse; token: string }> {
+    const body: Record<string, unknown> = { deviceName: opts.deviceName };
+    if (opts.credential) body.credential = opts.credential;
+    else if (opts.code) body.code = opts.code;
+    else throw new PairingError("Need a QR credential or a 6-digit code");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20_000);
+    try {
+      const res = await fetch(`http://${host}:${port}/api/pair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          const errBody = await res.json();
+          if (typeof errBody?.error === "string") detail = errBody.error;
+        } catch {}
+        throw new PairingError(detail);
+      }
+      const response = (await res.json()) as PairResponse;
+      return { response, token: response.token };
+    } finally {
+      clearTimeout(timer);
     }
-    const data = await res.json();
-    return data.token;
   }
 
-  async getBots(): Promise<Bot[]> {
-    const res = await fetch(`${this.baseUrl}/api/bots`, {
-      headers: this.headers,
-    });
-    if (!res.ok) throw new Error("Failed to fetch bots");
-    return res.json();
+  async fleet(): Promise<Fleet> {
+    const raw = await this.request<unknown>("GET", "/api/bots?messages=50");
+    return decodeFleet(raw);
   }
 
-  async getRooms(): Promise<Room[]> {
-    const res = await fetch(`${this.baseUrl}/api/rooms`, {
-      headers: this.headers,
-    });
-    if (!res.ok) throw new Error("Failed to fetch rooms");
-    return res.json();
-  }
-
-  async getMessages(roomId: string, limit = 50): Promise<Message[]> {
-    const res = await fetch(
-      `${this.baseUrl}/api/rooms/${roomId}/messages?limit=${limit}`,
-      { headers: this.headers }
+  async messages(threadId: string, opts?: { before?: string; limit?: number }): Promise<ThreadPage> {
+    const params = new URLSearchParams();
+    if (opts?.before) params.set("before", opts.before);
+    params.set("limit", String(opts?.limit ?? 50));
+    const raw = await this.request<unknown>(
+      "GET",
+      `/api/threads/${encodeURIComponent(threadId)}/messages?${params}`,
     );
-    if (!res.ok) throw new Error("Failed to fetch messages");
-    return res.json();
+    return {
+      messages: Array.isArray((raw as any)?.messages) ? (raw as any).messages : [],
+      hasMore: Boolean((raw as any)?.hasMore),
+    };
   }
 
-  async sendMessage(roomId: string, content: string): Promise<Message> {
-    const res = await fetch(`${this.baseUrl}/api/rooms/${roomId}/messages`, {
-      method: "POST",
-      headers: this.headers,
-      body: JSON.stringify({ content }),
+  async instances(): Promise<Instance[]> {
+    const raw = await this.request<unknown>("GET", "/api/instances");
+    return Array.isArray(raw) ? (raw as Instance[]) : [];
+  }
+
+  async sendToBot(botId: string, text: string): Promise<void> {
+    await this.request("POST", `/api/bots/${encodeURIComponent(botId)}/messages`, { text });
+  }
+
+  async sendToGroup(groupId: string, text: string): Promise<void> {
+    await this.request("POST", `/api/groups/${encodeURIComponent(groupId)}/messages`, { text });
+  }
+
+  async respond(
+    threadId: string,
+    requestId: string,
+    behavior: "allow" | "allowAlways" | "deny" | string,
+    message?: string,
+  ): Promise<void> {
+    const body: Record<string, unknown> = { requestId, behavior };
+    if (message !== undefined) body.message = message;
+    await this.request("POST", `/api/threads/${encodeURIComponent(threadId)}/respond`, body);
+  }
+
+  async alwaysAllow(botId: string, allowKey: string): Promise<void> {
+    await this.request("POST", `/api/bots/${encodeURIComponent(botId)}/always-allow`, {
+      allowKey,
     });
-    if (!res.ok) throw new Error("Failed to send message");
-    return res.json();
   }
 
-  async getApprovals(): Promise<Approval[]> {
-    const res = await fetch(`${this.baseUrl}/api/approvals`, {
-      headers: this.headers,
-    });
-    if (!res.ok) throw new Error("Failed to fetch approvals");
-    return res.json();
+  async markRead(threadId: string): Promise<void> {
+    await this.request("POST", `/api/threads/${encodeURIComponent(threadId)}/read`, {});
   }
 
-  async approve(approvalId: string): Promise<void> {
-    const res = await fetch(
-      `${this.baseUrl}/api/approvals/${approvalId}/approve`,
-      {
-        method: "POST",
-        headers: this.headers,
+  async toggleReaction(threadId: string, messageId: string, emoji: string): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/reactions`,
+      { emoji },
+    );
+  }
+
+  // Event stream. `onFrame` fires for every decoded frame; the returned
+  // stopper cancels the connection. Reconnect with the returned cursor.
+  async events(
+    since: string | null,
+    onFrame: (frame: Frame, seq: number | null) => void,
+    onCursor: (cursor: string) => void,
+  ): Promise<{ stop: () => void }> {
+    const controller = new AbortController();
+    let stopped = false;
+
+    (async () => {
+      let cursor = since;
+      while (!stopped) {
+        const parser = new SSEParser();
+        try {
+          const params = new URLSearchParams({ screens: "off" });
+          if (cursor) params.set("since", cursor);
+          const res = await fetch(`${this.base}/api/events?${params}`, {
+            headers: {
+              Authorization: `Bearer ${this.conn.token}`,
+              Accept: "text/event-stream",
+            },
+            signal: controller.signal,
+          });
+          if (!res.ok || !res.body) {
+            if (res.status === 401 || res.status === 403) {
+              onFrame({ kind: "unknown", rawKind: "unauthorized" }, null);
+              return;
+            }
+            throw new APIError(res.status, res.statusText);
+          }
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done || stopped) break;
+            const chunk = decoder.decode(value, { stream: true });
+            for (const evt of parser.feed(chunk)) {
+              if (stopped) break;
+              cursor = this.handleEvent(evt, cursor, onFrame, onCursor);
+            }
+          }
+        } catch (err) {
+          if (stopped || (err as Error).name === "AbortError") return;
+        }
+        if (stopped) return;
+        // Backoff, then resume from the last committed cursor.
+        await new Promise((r) => setTimeout(r, 2000));
       }
-    );
-    if (!res.ok) throw new Error("Failed to approve");
+    })();
+
+    return {
+      stop: () => {
+        stopped = true;
+        controller.abort();
+      },
+    };
   }
 
-  async deny(approvalId: string): Promise<void> {
-    const res = await fetch(
-      `${this.baseUrl}/api/approvals/${approvalId}/deny`,
-      {
-        method: "POST",
-        headers: this.headers,
-      }
-    );
-    if (!res.ok) throw new Error("Failed to deny");
-  }
-
-  async answerQuestion(approvalId: string, answer: string): Promise<void> {
-    const res = await fetch(
-      `${this.baseUrl}/api/approvals/${approvalId}/answer`,
-      {
-        method: "POST",
-        headers: this.headers,
-        body: JSON.stringify({ answer }),
-      }
-    );
-    if (!res.ok) throw new Error("Failed to answer question");
-  }
-
-  getEventStreamUrl(): string {
-    return `${this.baseUrl}/api/events/stream`;
+  // Returns the advanced cursor. The `id:` line carries "<streamId>:<seq>";
+  // the streamId prefix must survive across resumes. hello.cursor commits a
+  // server-issued cursor (fresh streams hand one over).
+  private handleEvent(
+    evt: SSEEvent,
+    cursor: string | null,
+    onFrame: (frame: Frame, seq: number | null) => void,
+    onCursor: (cursor: string) => void,
+  ): string | null {
+    let next = cursor;
+    if (evt.id) {
+      next = advanceCursor(cursor, evt.id);
+      if (next !== cursor) onCursor(next);
+    }
+    const frame = decodeFrame(evt.data);
+    if (frame.kind === "hello" && frame.cursor) {
+      next = frame.cursor;
+      onCursor(next);
+    }
+    onFrame(frame, null);
+    return next;
   }
 }
-
-export const client = new MusterClient();

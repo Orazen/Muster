@@ -181,7 +181,7 @@ Muster is agent-operable end to end:
 
 - **[skill.md](https://muster.orazen.online/skill.md)** — the onboarding an agent follows to pair with
   an install and operate the roster (pairing, roster, tasks, receipts, memory, untrusted-input rules).
-- **CLI** — `muster setup | pair | bots | send <bot> <text> | approve [allow|deny] | status | receipts | sessions`, with
+- **CLI** — single file, zero dependencies: `curl -fsSL https://muster.orazen.online/downloads/muster-cli.mjs -o muster && chmod +x muster` (Node 22+; `node cli/muster.mjs` from a checkout is the same tool). `muster setup | pair | bots | send <bot> <text> | approve [allow|deny] | status | receipts | sessions`, with
   machine-readable `--json` on `bots`/`status`/`receipts`/`sessions`. `muster setup` is the guided first run —
   it connects to (or boots) the local server, signs in as the owner, picks an engine, and introduces the first
   bot; the one paid step (a test turn) is strictly opt-in. `muster sessions` lists every active

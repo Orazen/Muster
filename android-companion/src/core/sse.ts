@@ -1,75 +1,67 @@
-import { RuntimeEvent } from "./types";
+// SSE parsing mirroring ios/Sources/CompanionCore/SSE.swift.
+// The harness never sends an `event:` field — frames are identified by the
+// `kind` inside the single JSON data line. `id:` carries "<streamId>:<seq>".
 
-/**
- * Server-Sent Events parser for the Muster harness event stream.
- * Handles the raw byte stream format documented in ios/Sources/CompanionCore/SSE.swift.
- */
+export interface SSEEvent {
+  id: string | null;
+  data: string;
+}
+
 export class SSEParser {
-  private buffer: string = "";
-  private eventLines: string[] = [];
+  private buffer = "";
+  private id: string | null = null;
+  private dataLines: string[] = [];
 
-  /**
-   * Feed raw bytes from the event stream.
-   * Returns parsed events as they become complete.
-   */
-  feed(data: string): RuntimeEvent[] {
-    this.buffer += data;
-    const events: RuntimeEvent[] = [];
-
-    while (true) {
-      const newlineIndex = this.buffer.indexOf("\n");
-      if (newlineIndex === -1) break;
-
-      const line = this.buffer.slice(0, newlineIndex);
-      this.buffer = this.buffer.slice(newlineIndex + 1);
-
-      // Empty line = end of event
-      if (line === "") {
-        if (this.eventLines.length > 0) {
-          const event = this.parseEvent(this.eventLines);
-          if (event) events.push(event);
-          this.eventLines = [];
-        }
-        continue;
-      }
-
-      // Skip comments (lines starting with :)
-      if (line.startsWith(":")) continue;
-
-      // Collect event data lines
-      this.eventLines.push(line);
+  // Feeds a decoded chunk, returns complete events in order.
+  feed(chunk: string): SSEEvent[] {
+    this.buffer += chunk;
+    const events: SSEEvent[] = [];
+    let idx: number;
+    while ((idx = this.buffer.indexOf("\n")) >= 0) {
+      let line = this.buffer.slice(0, idx);
+      this.buffer = this.buffer.slice(idx + 1);
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      const event = this.handleLine(line);
+      if (event) events.push(event);
     }
-
     return events;
   }
 
-  private parseEvent(lines: string[]): RuntimeEvent | null {
-    let eventType = "";
-    const dataLines: string[] = [];
-
-    for (const line of lines) {
-      if (line.startsWith("event:")) {
-        eventType = line.slice(6).trim();
-      } else if (line.startsWith("data:")) {
-        dataLines.push(line.slice(5).trim());
-      }
-    }
-
-    if (!eventType || dataLines.length === 0) return null;
-
-    try {
-      const data = JSON.parse(dataLines.join("\n"));
-      // SAFETY: eventType is one of the known RuntimeEvent types from the harness event stream.
-      // The data payload is validated by the harness before it reaches the phone.
-      return { type: eventType as RuntimeEvent["type"], data };
-    } catch {
-      // Malformed JSON — skip this event
+  private handleLine(line: string): SSEEvent | null {
+    // Comment / keepalive (`: keepalive` every 25s on the harness).
+    if (line.startsWith(":") || line.length === 0) {
+      if (line.length === 0) return this.flush();
       return null;
     }
+    const colon = line.indexOf(":");
+    const field = colon < 0 ? line : line.slice(0, colon);
+    let value = colon < 0 ? "" : line.slice(colon + 1);
+    if (value.startsWith(" ")) value = value.slice(1);
+    if (field === "id") {
+      this.id = value;
+    } else if (field === "data") {
+      this.dataLines.push(value);
+    }
+    // event:/retry: and anything else is ignored.
+    return null;
   }
 
+  private flush(): SSEEvent | null {
+    if (this.dataLines.length === 0) {
+      this.id = null;
+      return null;
+    }
+    const event: SSEEvent = { id: this.id, data: this.dataLines.join("\n") };
+    this.id = null;
+    this.dataLines = [];
+    return event;
+  }
+
+  // Called before a fresh connection: an incomplete event from a torn stream
+  // is discarded, matching the iOS parser's reset semantics.
   reset(): void {
     this.buffer = "";
-    this.eventLines = [];
+    this.id = null;
+    this.dataLines = [];
   }
 }

@@ -22,6 +22,11 @@ cloudflare/composio-broker/worker-configuration.d.ts
 testsprite_tests/TC*.py
 testsprite_tests/tmp/
 
+# android-companion is npm-installed (outside the pnpm workspace); keep its
+# lockfile + modules out of the repo
+android-companion/node_modules/
+android-companion/package-lock.json
+
 # Muster+ additions - prevent these from being committed
 .claude-flow/
 .claude/

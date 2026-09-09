@@ -190,7 +190,7 @@
 
   <main>
     <section class="hero">
-      <h1>Download Muster <span id="dl-version" style="font-weight:500;font-size:0.55em;vertical-align:middle;color:var(--muted);white-space:nowrap;">v1.10.3</span></h1>
+      <h1>Download Muster <span id="dl-version" style="font-weight:500;font-size:0.55em;vertical-align:middle;color:var(--muted);white-space:nowrap;">v1.10.4</span></h1>
       <p class="lead">The open desktop app for running a team of AI agents. Self-host free on your own machine.</p>
       <div class="detected-badge" id="detected-badge" style="display:none;">
         <span class="detected-badge__dot"></span>
@@ -264,6 +264,13 @@
       <summary class="checksums__label">SHA-256 checksums</summary>
       <div class="checksums__list" id="checksums-list">Loading…</div>
     </details>
+
+    <div class="docker-section" style="margin-top:2.5rem;">
+      <h2>Muster CLI</h2>
+      <p>No installer at all — the CLI is a single file with zero dependencies (~40&nbsp;KB, Node&nbsp;22+). It boots the same server headless, prints the phone-pairing QR, and drives the roster from any terminal, including a VPS over SSH.</p>
+      <code>curl -fsSL https://muster.orazen.online/downloads/muster-cli.mjs -o muster && chmod +x muster && ./muster help</code>
+      <p style="margin-top:0.75rem;font-size:0.9em;color:var(--muted);">Command tour and real output: <a href="/#cli" style="color:var(--accent-soft);">the CLI section on the landing page</a>.</p>
+    </div>
 
     <div class="docker-section">
       <h2>Self-host with Docker</h2>

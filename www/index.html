@@ -70,8 +70,13 @@
 
   /* ---------- header ---------- */
   .site-header {
+    position: sticky; top: 0; z-index: 50;
     display: flex; align-items: center; justify-content: space-between;
-    gap: 24px; padding: 22px 0;
+    gap: 24px; padding: 14px 0;
+    background: color-mix(in srgb, var(--page) 82%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
   }
   .site-header__left, .site-header__right, .site-nav { display: flex; align-items: center; }
   .site-header__left { gap: 40px; }
@@ -286,6 +291,44 @@
     padding: 5px 11px; color: var(--accent-soft); font-size: 12px; font-weight: 600;
   }
 
+  /* ---------- terminal ---------- */
+  .term {
+    max-width: 780px; margin: 44px auto 0;
+    background: #0d0d0f; border: 1px solid var(--line); border-radius: 18px;
+    box-shadow: var(--shadow-soft); overflow: hidden; text-align: left;
+  }
+  .term__bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .term__dot { width: 11px; height: 11px; border-radius: 50%; background: var(--line-2); }
+  .term__dot--accent { background: var(--accent); }
+  .term__title { margin-left: 8px; color: var(--muted-2); font-size: 12.5px; font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; }
+  .term__body {
+    margin: 0; padding: 20px 22px; overflow-x: auto;
+    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+    font-size: 13.5px; line-height: 1.75; color: var(--muted);
+    white-space: pre;
+  }
+  .term__body .p { color: var(--accent-soft); font-weight: 600; }
+  .term__body .c { color: var(--ink); }
+  .term__body .ok { color: #4ade80; }
+  .term__body .dim { color: var(--muted-2); }
+  .install-line {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    max-width: 780px; margin: 18px auto 0; padding: 14px 18px;
+    border: 1px dashed var(--line-2); border-radius: 14px; background: var(--surface);
+    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; font-size: 13.5px;
+  }
+  .install-line code { background: transparent; color: var(--ink); padding: 0; font-size: 13.5px; }
+  .install-line button {
+    margin-left: auto; border: 1px solid var(--line); border-radius: 10px;
+    background: transparent; color: var(--muted); font-size: 12.5px; padding: 6px 12px;
+    transition: color 150ms ease, border-color 150ms ease;
+  }
+  .install-line button:hover, .install-line button:focus-visible { color: var(--ink); border-color: var(--line-2); }
+
   /* ---------- downloads ---------- */
   .download-rows { display: grid; gap: 14px; margin-top: 40px; }
   /* ---------- faq ---------- */
@@ -357,7 +400,8 @@
   }
   @media (max-width: 760px) {
     .container { width: calc(100% - 32px); }
-    .site-nav, .site-header__cta { display: none; }
+    .site-nav, .site-header__cta .button--secondary { display: none; }
+    .site-header__cta { display: flex; }
     .site-menu { display: block; }
     .section { padding-top: 76px; }
     .hero { padding-top: 32px; }
@@ -396,11 +440,10 @@
       <nav class="site-nav" aria-label="Primary">
         <a href="#features">Product</a>
         <a href="#roster">Bots</a>
-        <a href="#local-first">Local-first</a>
-        <a href="#privacy">Privacy</a>
+        <a href="#coding">Coding</a>
+        <a href="#cli">CLI</a>
         <a href="#engines">Engines</a>
         <a href="#pricing">Pricing</a>
-        <a href="#compare">Compare</a>
         <a href="#download">Download</a>
       </nav>
     </div>
@@ -410,7 +453,8 @@
         <span>Docs</span>
       </a>
       <div class="site-header__cta">
-        <a class="button button--primary button--small" href="/app">Open Muster</a>
+        <a class="button button--secondary button--small" href="/app">Open Muster</a>
+        <a class="button button--primary button--small" href="/download.html">Download</a>
       </div>
       <details class="site-menu" data-site-menu>
         <summary class="site-menu__toggle" aria-label="Menu">
@@ -420,12 +464,14 @@
         <nav class="site-menu__panel" aria-label="Site">
           <a href="#features">Product</a>
           <a href="#roster">Bots</a>
+          <a href="#coding">Coding</a>
+          <a href="#cli">CLI</a>
           <a href="#local-first">Local-first</a>
           <a href="#privacy">Privacy</a>
           <a href="#engines">Engines</a>
-        <a href="#pricing">Pricing</a>
-        <a href="/teams.html">Teams</a>
-        <a href="/switch.html">Switch</a>
+          <a href="#pricing">Pricing</a>
+          <a href="/teams.html">Teams</a>
+          <a href="/switch.html">Switch</a>
           <a href="#compare">Compare</a>
           <a href="#download">Download</a>
           <a href="/docs">Docs</a>
@@ -684,6 +730,111 @@
         <span class="engine-tag">Antigravity</span>
         <span class="engine-tag">OpenCode Go</span>
       </div>
+    </section>
+
+    <!-- Coding agents (what they're actually for) -->
+    <section id="coding" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">Coding agents</div>
+        <h2 class="section-heading">Your terminal agents, promoted to teammates</h2>
+        <p class="section-copy">
+          Claude Code, Codex, and their cousins are brilliant and stranded — one conversation,
+          one terminal, gone when you close the laptop. Muster gives each one a name, a desk,
+          and a job list that survives the weekend.
+        </p>
+      </div>
+      <div class="card-grid-3">
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">⌨️</div>
+          <h3>Drive them from anywhere</h3>
+          <p>Assign a task from your phone, the web console, or the terminal. The agent works on its own machine with its own credentials — not inside your terminal session.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🖥️</div>
+          <h3>Each agent gets a desk</h3>
+          <p>A coding bot runs on its own Linux desktop — or your Mac — so three agents can attack three tickets at once without fighting over your laptop. Watch their screens live.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🚦</div>
+          <h3>Approvals, not vibes</h3>
+          <p>Shell commands and file writes pause for your Allow until you trust the bot — then flip it to Always for the patterns you've reviewed. Every decision is logged.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🧾</div>
+          <h3>Receipts per task</h3>
+          <p>When a task ends you get a receipt: turns, tokens, and cost — proof-of-work you can paste into a standup note or an invoice.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">🔁</div>
+          <h3>Routines on a schedule</h3>
+          <p>Turn any task into a routine — nightly dependency bumps, morning triage, weekly release notes — and it runs while you sleep, with failures surfaced as notifications.</p>
+        </article>
+        <article class="feature-card">
+          <div class="feature-card__icon" aria-hidden="true">👥</div>
+          <h3>Delegation between bots</h3>
+          <p>A reviewer bot reads the coder's output before it reaches you. Group calls let three agents argue about an architecture doc so you only read the conclusion.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- CLI (the fifth surface) -->
+    <section id="cli" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">Muster CLI</div>
+        <h2 class="section-heading">One command boots the whole workforce</h2>
+        <p class="section-copy">
+          The desktop app, the web console, your phone, and now your terminal — all talking to the
+          same local server. The CLI is a single zero-dependency script: it boots the harness,
+          prints a QR code for your phone, and runs your agents from any shell.
+        </p>
+      </div>
+
+      <div class="term" role="img" aria-label="Terminal session showing the Muster CLI booting a server, listing bots, sending a task, and approving it">
+        <div class="term__bar" aria-hidden="true">
+          <span class="term__dot"></span><span class="term__dot"></span><span class="term__dot term__dot--accent"></span>
+          <span class="term__title">~/projects/webapp — muster</span>
+        </div>
+<pre class="term__body"><span class="dim"># boot the harness (from a checkout or the self-host image)</span>
+<span class="dim">$</span> <span class="c">muster up -d</span>
+
+  Muster is up in the background on port 8799.
+<span class="dim">  Scan to open the console on your phone:</span>
+
+  https://muster.orazen.online/claim#4KJ2XQ9P
+  <span class="dim">▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄</span>
+  <span class="dim">█</span> <span class="p">▓▓  QR  ▓▓</span> <span class="dim">— the real QR prints in your terminal</span>
+  <span class="dim">▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀</span>
+
+<span class="dim"># or pair with a running harness — local or Muster Cloud</span>
+<span class="dim">$</span> <span class="c">muster pair --cloud</span>
+Paired. Config: ~/.muster/config.json
+
+<span class="dim">$</span> <span class="c">muster bots</span>
+<span class="p">atlas</span>            idle       claude        128,402 tok
+<span class="p">vesper</span>           busy       codex          62,117 tok
+<span class="p">juniper</span>           waiting    gemini         9,880 tok
+
+<span class="dim">$</span> <span class="c">muster send atlas "triage the failing CI job on main"</span>
+On it — main is red on test_payments. Two flakes, one real failure:
+the Docker cache wasn't invalidated after the pgvector bump. PR incoming.
+
+<span class="dim">$</span> <span class="c">muster approve</span>
+Allowed juniper: npm test -- --filter=cart
+
+<span class="dim">$</span> <span class="c">muster receipts 2</span>
+atlas           triage failing CI job on main     3 turns · 18,432 tok · $0.2130
+vesper          fix flaky cart test               7 turns · 62,096 tok · $0.7442</pre>
+      </div>
+
+      <div class="install-line">
+        <span aria-hidden="true">$</span>
+        <code data-install-line>curl -fsSL https://muster.orazen.online/downloads/muster-cli.mjs -o muster && chmod +x muster && ./muster help</code>
+        <button type="button" data-install-copy>Copy</button>
+      </div>
+      <p style="margin-top:14px;text-align:center;color:var(--muted-2);font-size:13px;">
+        Single file, zero dependencies, ~40 KB — no install step. Requires Node 22+.
+        Every command works against your local harness or Muster Cloud. The desktop app bundles the same server; the CLI is just another window into it.
+      </p>
     </section>
 
     <section id="pricing" class="section">
@@ -1148,6 +1299,25 @@
         }, 2400);
       } catch (error) {
         label.textContent = "Copy failed — try again";
+      }
+    });
+  })();
+
+  // Copy install line
+  (function () {
+    var button = document.querySelector("[data-install-copy]");
+    if (!button) return;
+    button.addEventListener("click", async function () {
+      var line = document.querySelector("[data-install-line]");
+      if (!line) return;
+      try {
+        await navigator.clipboard.writeText(line.textContent.trim());
+        button.textContent = "Copied";
+        window.setTimeout(function () {
+          button.textContent = "Copy";
+        }, 2000);
+      } catch (error) {
+        button.textContent = "Select manually";
       }
     });
   })();
