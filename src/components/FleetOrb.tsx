@@ -1,14 +1,15 @@
 // The FleetOrb — Muster's ambient presence glyph, the Jarvis "pebble" idea
-// wearing the musterbot identity: one floating bloom in the corner of every
-// surface whose color IS the fleet's state. Clear means nothing is happening
+// wearing the musterbot identity: a compact status row whose color reflects
+// the fleet's state. Clear means nothing is happening
 // (a promise); orange pulse = agents working; amber pulse = someone is
 // waiting on you (click to jump straight into that thread); green flash =
 // work settled since you last looked. One glance answers "does my team need
-// me?" from any screen — chat, settings, Muster OS, anything.
+// me?" without covering the conversation's controls.
 //
 // Derives everything from the shared store: no polling, no new transports —
 // the same SSE stream the chat folds.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ChevronUp } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -69,6 +70,9 @@ export function FleetOrb() {
   const { state, dispatch } = useStore();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
 
   const visible = state.bots.filter((b) => !b.hidden);
   const { state: orbState, settledCount } = useMemo(() => orbStateFor(visible), [visible]);
@@ -80,25 +84,77 @@ export function FleetOrb() {
     };
   }, [orbState]);
   const mood = MOODS[orbState];
-  const workingCount = visible.filter((b) => b.busy).length;
+  const workingList = visible.filter((b) => b.busy && b.activity !== "waiting-on-you");
+  const workingCount = workingList.length;
   const waitingList = visible.filter((b) => b.activity === "waiting-on-you");
+  const hasMenu = waitingList.length > 0 || orbState === "working" || orbState === "settled";
+  const expanded = open && hasMenu;
+  const label = waitingList.length > 0
+    ? `${waitingList.length} waiting on you`
+    : workingCount > 0
+      ? `${workingCount} working`
+      : settledCount > 0
+        ? `${settledCount} with unread updates`
+        : mood.label;
+
+  useEffect(() => {
+    if (!hasMenu) setOpen(false);
+  }, [hasMenu]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const dismissOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    const dismissEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", dismissOutside);
+    document.addEventListener("keydown", dismissEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside);
+      document.removeEventListener("keydown", dismissEscape);
+    };
+  }, [expanded]);
 
   const openBot = (bot: Bot) => {
     dispatch({ type: "select", id: bot.id });
     setOpen(false);
+    triggerRef.current?.focus();
   };
 
   return (
     <div ref={rootRef} className="fleet-orb-root">
-      {open && (waitingList.length > 0 || orbState === "working" || orbState === "settled") && (
-        <div className="fleet-orb-menu" role="dialog" aria-label="Fleet status">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={`Fleet status: ${label}`}
+        aria-expanded={hasMenu ? expanded : undefined}
+        aria-controls={hasMenu ? menuId : undefined}
+        aria-haspopup={hasMenu ? "dialog" : undefined}
+        disabled={!hasMenu}
+        onClick={() => setOpen((value) => !value)}
+        className="fleet-orb-trigger"
+      >
+        <span className={cn("fleet-orb", `fleet-orb-${mood.anim}`)} style={{ background: mood.halo }} aria-hidden="true">
+          <span className="fleet-orb-core" style={{ background: mood.core, boxShadow: `0 0 18px 2px ${mood.halo}` }} />
+        </span>
+        <span className="fleet-orb-status" aria-live="polite">{label}</span>
+        {hasMenu && <ChevronUp size={14} aria-hidden="true" className={cn("shrink-0 transition-transform", expanded && "rotate-180")} />}
+      </button>
+      {expanded && (
+        <div ref={menuRef} id={menuId} className="fleet-orb-menu" role="dialog" aria-label="Fleet status">
           {waitingList.length > 0 && (
             <>
               <div className="fleet-orb-menu-label">Waiting on you</div>
               {waitingList.map((bot) => (
                 <button key={bot.id} type="button" className="fleet-orb-row" onClick={() => openBot(bot)}>
                   <span className="fleet-orb-dot" style={{ background: "var(--color-warning)" }} aria-hidden="true" />
-                  {bot.name}
+                  <span className="min-w-0 truncate">{bot.name}</span>
                 </button>
               ))}
             </>
@@ -106,12 +162,10 @@ export function FleetOrb() {
           {workingCount > 0 && (
             <>
               <div className="fleet-orb-menu-label">Working</div>
-              {visible
-                .filter((b) => b.busy)
-                .map((bot) => (
+              {workingList.map((bot) => (
                   <button key={bot.id} type="button" className="fleet-orb-row" onClick={() => openBot(bot)}>
                     <span className="fleet-orb-dot fleet-orb-dot-live" style={{ background: "var(--color-live)" }} aria-hidden="true" />
-                    {bot.name}
+                    <span className="min-w-0 truncate">{bot.name}</span>
                   </button>
                 ))}
             </>
@@ -125,26 +179,13 @@ export function FleetOrb() {
                 .map((bot) => (
                   <button key={bot.id} type="button" className="fleet-orb-row" onClick={() => openBot(bot)}>
                     <span className="fleet-orb-dot" style={{ background: "var(--color-success)" }} aria-hidden="true" />
-                    {bot.name}
+                    <span className="min-w-0 truncate">{bot.name}</span>
                   </button>
                 ))}
             </>
           )}
         </div>
       )}
-      <button
-        type="button"
-        aria-label={`${mood.label}${waitingList.length > 0 ? ` — ${waitingList.length} waiting` : workingCount > 0 ? ` — ${workingCount} working` : ""}`}
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        title={mood.label}
-        className={cn("fleet-orb", `fleet-orb-${mood.anim}`)}
-        style={{ background: mood.halo }}
-      >
-        <span className="fleet-orb-core" style={{ background: mood.core, boxShadow: `0 0 18px 2px ${mood.halo}` }} aria-hidden="true" />
-        {waitingList.length > 0 && <span className="fleet-orb-badge">{waitingList.length}</span>}
-        {waitingList.length === 0 && workingCount > 0 && <span className="fleet-orb-badge fleet-orb-badge-quiet">{workingCount}</span>}
-      </button>
     </div>
   );
 }

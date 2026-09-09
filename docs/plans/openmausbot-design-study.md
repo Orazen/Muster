@@ -1,134 +1,148 @@
-# OpenMausBot desktop design study — what it means for Muster on macOS
+# OpenMausBot UI study — implications for Muster
 
-Studied from the repo (github.com/milind-soni/OpenMausBot, v0.1.60; **re-checked
-against v0.1.69 on 2026-09-09** — see the corrections section at the bottom) and
-its `docs/screenshots/` set: `hero`, `computer-panel`, `approval-card`,
-`model-picker`. Written 2026-09-07 to inform the Muster Mac desktop app.
-Companion to the glass design system (f442d6d), which was built as the
-deliberate counter-position to this app's surface language. The product-level
-comparison (fleet MCP server, Grok Bot, OpenClaw) lives in
-[competitive-landscape.md](competitive-landscape.md).
+**Current source audit: 2026-09-10, v0.1.70**, commit
+[`67336fb2d7139de1b91a8050d9c1ca1215844fea`](https://github.com/milind-soni/OpenMausBot/commit/67336fb2d7139de1b91a8050d9c1ca1215844fea)
+(2026-09-10 04:13:31 +05:30). This was a read-only review of a shallow
+checkout of that public snapshot. **0 executable competitor tests and 0
+competitor runtime checks** were run. Source indicates implemented behavior;
+it does not prove that behavior works end to end on every device.
 
-## What OpenMausBot actually looks like
+The original 2026-09-07 study used v0.1.60 and its `docs/screenshots/` set;
+a 2026-09-09 pass referenced v0.1.69. The current findings supersede the
+older conclusions below, rather than treating those conclusions as verified
+advantages. This audit does not date when each capability was introduced.
+See [competitive-landscape.md](competitive-landscape.md) for the product
+comparison and measurement standard.
 
-**Surface language.** Flat, opaque, near-black (#0D–#1C range). No translucency,
-no depth cues beyond 1px borders and slightly-lighter card fills. It reads as
-"dark-mode chat app" — visually quiet, nothing moves except the mascots. Fast to
-render, zero GPU compositing cost, zero risk of the backdrop-filter pitfalls we
-documented in glass.css. The trade: every window looks like every other chat app;
-nothing about the surface says "agents."
+## Corrections to the earlier comparison
 
-**Three-column shell.**
-- Left sidebar (~280px, opaque #111): macOS traffic lights, a "+" add-bot button,
-  a search field, then the **bot roster as a contacts list** — each row a colored
-  cursor-mascot avatar (paper-plane arrow shape, per-bot hue: red/green/teal),
-  name + last-message preview + timestamp. Bottom anchors: Automations, Plugins,
-  then the user profile + settings gear.
-- Center: transcript. Bot replies in large dark rounded cards (left), user
-  messages in lighter gray bubbles (right). Tool runs surface as small pill
-  chips with green checkmarks inline in the flow ("ToolSearch ✓"). Questions and
-  approvals render as **inline cards with lettered options (A/B/C/D)** and an X
-  dismiss — answering by letter or free text in the composer. Date separators.
-  Composer is a full-width pill with "+" and mic.
-- Right panel (the "Computer" panel, ~340px): header with gear + X; "Atlas's
-  screen" label over a **live screenshot card**; "Open desktop" (takes over in
-  the browser) and "Sleep" buttons; a "Runs on" card with a segmented control
-  **Cloud box | This Mac | Off**; a "Routines" card with description + "Create
-  Routine".
+- **OpenMausBot is a fleet product.** Its current README describes a roster
+  of bots with separate models and channels. "One agent in one window" was
+  an incorrect blanket description.
+- **Mobile approvals exist in source.** The iOS roster routes needs-you
+  updates into the relevant chat; Android has native pairing/navigation
+  code. An absence-of-mobile claim is unsupported.
+- **Receipts exist in source.** Delegation receipts and routine execution
+  cards are present. Their exact semantics should be benchmarked against
+  Muster's task receipts, not described as absent.
+- **Visual identity is not an exclusive capability.** Earlier screenshots
+  showed a flat dark desktop shell. Current iOS source has glass surfaces
+  and platform-specific presentation. "Glass vs flat" is not a reliable
+  product-wide distinction, and the old claim of zero GPU compositing cost
+  had no measurement behind it.
+- **Computer presentation has evolved.** Current code includes local VM
+  workspaces and remote desktop panels. The old "external browser handoff
+  only" description is not a current architecture comparison.
+- **Do not infer lack of memory from the old screenshots.** That study did
+  not establish absence of memory functionality. Muster's memory and
+  why-journal still deserve a useful, discoverable surface.
 
-**Interactions worth stealing.**
-- Right-click a bot → contact-style menu: pin, mark unread, edit profile,
-  duplicate, copy conversation ID, hide, delete. Cheap to build, makes bots feel
-  like manageabe entities rather than config rows.
-- Model picker as a header chip that opens a provider rail (provider icons in a
-  left gutter, defaults badged, unavailable providers dimmed **with the reason
-  shown**).
-- Tool-run activity chips in the transcript (not a separate log drawer).
-- Onboarding as an in-chat question card ("What do you mostly want help with?"
-  A–D + free text) — zero forms, the first approval card teaches the approval
-  interaction.
-- Bot screenshots/screens folded INTO the transcript as message attachments.
-- Secrets write-only: settings show "configured" flags, never values.
+Sources: [README](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/README.md),
+[iOS roster](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/ios/App/ChatListView.swift),
+[Android root](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/android/app/src/main/kotlin/com/openmausbot/companion/ui/RootScreen.kt),
+[delegation receipt tests](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/server/delegations.test.ts),
+[application shell](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/App.tsx).
 
-**Their philosophy, verbatim-ish:** "One assistant in one box is the wrong shape
-for agents." Bots as contacts, watch them work, approve what matters. This is
-also Muster's thesis — the difference is the surface it plays on.
+## Current source-grounded interaction patterns
 
-## Where Muster already differs (shipped)
+### Conversation layout and controls
 
-- **Glass vs flat**: `.glass-panel/.glass-strip/.glass-well`, ambient wash driven
-  by fleet state (FleetOrb), translucent shell fill with no backdrop-filter on
-  shell surfaces (containing-block lesson). OpenMausBot has no equivalent; this
-  is the visual identity wedge. Keep it.
-- **Muster OS** (/os: dock, presence bar, ⌘K CommandBar) vs their plain sidebar —
-  Muster already has a stronger "operating system for agents" frame.
-- **Approval history strip on cards** (amber when last denied) — strictly more
-  informative than their plain Allow/Deny cards.
-- **Browser side panel** — per-bot embedded Chromium with screencast frames and
-  address bar; theirs is a screenshot card + "Open desktop" hand-off to an
-  external tab. Ours is the deeper primitive; the study below borrows their
-  presentation of it.
+The desktop/web shell retains a roster, conversation, and optional work
+panels. Its chat header uses a named container query so controls can compact
+when the **chat column** narrows, including when a panel is open. Long user
+messages can collapse; tool steps can group into expandable activity runs;
+transcript rendering is windowed. The scroll logic explicitly handles touch
+and suspends following when the user reads earlier content. Tool visibility
+is configurable, while live approval cards have their own rendering path.
 
-## Adopt (concrete, cheap, high-value)
+Sources: [ChatView](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/ChatView.tsx),
+[ActivityRun](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/ActivityRun.tsx).
 
-1. **Runs-on segmented control as a first-class card** ("Cloud box | This Mac |
-   Off") next to the browser/computer panel. Muster has the machinery (local
-   harness vs cloud) but exposes it less legibly.
-2. **Lettered-option approval/question cards** (A/B/C/D keyboard answers + free
-   text). Low cost, big UX win — Muster's OptionCards can gain letter hotkeys.
-3. **Tool-run chips inline in the transcript** with pass/fail coloring rather
-   than a separate activity drawer.
-4. **Contact-style right-click menu on roster bots** (pin, duplicate, copy
-   conversation id, hide). Note their "duplicate" — instant persona cloning is a
-   feature Muster's persistent-persona model should do BETTER (clone with memory
-   fork point).
-5. **Dimmed-with-reason in pickers**: wherever Muster dims unavailable models/
-   providers/instances, show the reason inline. Trust through honesty — fits the
-   governed-agents positioning.
-6. **Onboarding as in-chat question card** — Muster's onboarding-gate could
-   present as the bot's first message rather than a modal.
+### Task and approval state
 
-## Avoid
+Roster activity considers sibling tasks, not only the currently selected
+conversation. Waiting, working, queued, and unread tasks remain reachable
+when the normal thread tree is hidden. A compact activity selector above
+chat provides the same escape hatch when the mobile drawer is closed.
+Approval asks are distinguished from the onboarding question card; talking
+past the introductory quiz hides that quiz without hiding live asks.
 
-- **Opaque flat shell.** Ceding the surface to "another dark chat app" erases the
-  only free differentiator Muster has against a v0.1.60 incumbent with momentum.
-- **External hand-off as the only escape hatch.** Their "Open desktop" leaves the
-  app; Muster's embedded panel + takeControl should stay the primary path.
-- **No memory surface in the main shell.** Their bots have transcripts only;
-  Muster's MEMORY.md/SOUL.md are the moat — keep memory visible (why-journal,
-  scorecards), don't hide it in settings.
+Sources: [SidebarBotActivity](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/SidebarBotActivity.tsx),
+[TaskPicker](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/TaskPicker.tsx),
+[OptionCard](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/OptionCard.tsx),
+[ApprovalCard](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/ApprovalCard.tsx).
 
-## Net
+### Mobile navigation
 
-OpenMausBot validates the category (bots-as-contacts, approvals, computer use)
-and sets a floor, not a ceiling: its UI is competent-generic. Muster wins on
-(glass identity + OS frame + memory/governance surfaces + deeper browser panel),
-and should copy only the interaction micro-patterns listed above.
+Web uses a drawer that closes when the selected conversation or thread
+changes. The native iOS roster uses a navigation stack, scrolling content,
+a bottom action bar, and clearance beneath the final row so that bar does
+not cover it. Needs-you updates route to chat. iPad uses readable width
+limits and disables the iPhone-specific island presentation. These are
+separate adaptations; a web viewport test does not validate the native apps.
 
-## Corrections after the v0.1.69 re-check (2026-09-09)
+Sources: [web shell](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/App.tsx),
+[iOS roster](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/ios/App/ChatListView.swift),
+[iPad layout](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/ios/App/CompanionLayout.swift).
 
-Full source re-study (all branches) found five facts above that were stale,
-wrong, or already-shipped by Muster — recorded so nobody re-flags them:
+### Onboarding and capability explanations
 
-1. **Lettered options already exist in Muster.** OptionCard renders A/B/C/D
-   hotkeys today (src/components/OptionCard.tsx). "Adopt" item 2 was already
-   done when written — the pattern was independent convergence, not a gap.
-2. **Their MCP surface is bounded, and that part is right.** Earlier notes
-   implied a sprawling tool surface; the code shows a deliberately small
-   server. That legitimized the design of Muster's own fleet MCP server
-   (server/fleet-mcp.ts) — bounded six-tool surface, no
-   approvals/deletes/credentials, shipped 2026-09-09.
-3. **Tool-run chips**: Muster's transcript already renders tool activity
-   inline (message kind "tool" with ok/spoken fields) — item 3 was likewise
-   already shipped, not a to-do.
-4. **Routines**: OpenMausBot's "Create Routine" card mirrors Muster's
-   RoutineManager (server/routines.ts, daily/weekly/once schedules + run-on
-   semantics). Parity exists; the differentiator to push is Muster's
-   why-journal + scorecards on top of routines (ARC pattern).
-5. **Composio/tool-ecosystem**: Muster's connector/agents/dweb MCP proxies
-   (server/mcp-client.ts and spawn sites) cover the "plugins" story
-   OpenMausBot markets as Plugins; the gap was never tool access — it was
-   exposing Muster ITSELF to external agents, closed by the fleet MCP server.
+Desktop onboarding displays live engine availability and setup actions,
+skips dictation when unavailable, and offers optional phone setup. Its
+terminal guide distinguishes AI-provider sign-in, product identity, and
+device pairing; scanning a code is not presented as a completed connection.
+These are clarity patterns to evaluate, not proof of a zero-config first run.
 
-Version note: v0.1.60 → v0.1.69 changed nothing structural in the shell or
-approval model; release cadence is fast but the surface described above held.
+Sources: [Onboarding](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/Onboarding.tsx),
+[terminal setup guide](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/docs/cli-onboarding.md).
+
+## Ranked Muster UI audit priorities
+
+These gaps describe the Muster baseline inspected before this UI slice.
+Record implemented fixes and their actual test results in
+[ceo-log.md](ceo-log.md); do not turn the checklist into a completion claim.
+
+1. **Responsive conversation controls and pickers.** At the audit baseline,
+   `src/components/ChatView.tsx` placed task, model, usage, working folder,
+   receipt, call, computer, browser, search, and inspector controls on one
+   header row. Give identity and interrupt clear space, with an accessible
+   way to reach secondary controls. Verify 320/390/768px widths, long names,
+   open pickers, keyboard navigation, and desktop side panels. Group chat
+   needs the same checks; solving one header does not validate every page.
+2. **Task-specific attention.** `FleetOrb.tsx` derives attention from bot
+   state; `TaskPicker.tsx` at the audit baseline shows task titles, times,
+   and usage without sibling activity labels. Verify a waiting sibling task
+   remains discoverable and selecting its alert opens that exact thread.
+   Preserve this behavior when reducing navigation density.
+3. **Optional phone handoff after useful work.** Muster's onboarding already
+   includes a first-task step; keep it. Companion setup currently lives in
+   Settings. Offer a skippable next step after the first result, explain the
+   account/provider/device distinction, and verify resume, expired pairing,
+   reconnect, and notification-to-task navigation on the relevant client.
+
+Keep Muster's existing approval evidence, plan rehearsal, receipts, and
+memory accessible while improving layout. Evaluate whether each surface
+helps a person understand work and make a decision. Claims that a surface is
+unmatched, more performant, or inherently better require comparative evidence.
+
+## Patterns already present — do not queue as missing
+
+Muster already has lettered OptionCards and hotkeys, inline tool activity,
+bot context menus, routines, MCP clients, and a bounded Fleet MCP server.
+The older study's suggestions to add those primitives were stale. Work on
+their discoverability, state handling, accessibility, and actual outcomes.
+Likewise, a runs-on control is useful only if its choices match the actual
+execution capabilities and unavailable choices explain their prerequisites.
+
+## Reuse boundary and verification
+
+This audit copied no competitor implementation. The inspected
+[licensing notice](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/LICENSING.md)
+identifies Apache-2.0 outside the separately licensed `enterprise/` directory,
+with separate trademark and third-party notices. Interaction research does
+not authorize copying names, mascots, or separately licensed implementation.
+
+Browser evidence for Muster must distinguish local fixtures, real server
+behavior, authenticated flows, and production deployment. Native iOS/Android
+and packaged Electron checks need their own evidence. No runtime superiority
+or security conclusion follows from this source study.

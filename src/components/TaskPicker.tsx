@@ -4,7 +4,7 @@
 // the only clean slate is a second bot. A task is a real boundary — its
 // own transcript and its own provider session — so sensitive work, a
 // long job and a quick question can sit side by side under one agent.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Check, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { useStore, formatTime, type Bot, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -30,6 +30,7 @@ export function TaskPicker({ bot }: { bot: Bot }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const menuId = useId();
 
   const tasks = bot.tasks ?? [];
   const current = tasks.find((t) => t.threadId === bot.threadId);
@@ -80,10 +81,14 @@ export function TaskPicker({ bot }: { bot: Bot }) {
       : "Switch task";
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="task-picker relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
         title={switchTitle}
+        aria-label="Switch task"
+        aria-expanded={open}
+        aria-controls={menuId}
+        aria-haspopup="dialog"
         className="flex max-w-[220px] items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink"
       >
         <span className="truncate">{current?.title ?? "Task"}</span>
@@ -92,8 +97,8 @@ export function TaskPicker({ bot }: { bot: Bot }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1 shadow-2xl shadow-black/50">
-          <div className="max-h-[320px] overflow-y-auto">
+        <div id={menuId} data-task-picker-content role="dialog" aria-label="Tasks" className="absolute right-0 top-full z-40 mt-1 flex w-[300px] flex-col overflow-hidden rounded-xl border border-hairline/50 bg-card py-1 shadow-2xl shadow-black/50">
+          <div className="min-h-0 max-h-[320px] flex-1 overflow-y-auto">
             {tasks.map((task) => {
               const active = task.threadId === bot.threadId;
               return (

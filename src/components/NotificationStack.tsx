@@ -49,7 +49,7 @@ export function NotificationStack() {
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed right-4 bottom-4 z-50 flex flex-col gap-2"
+      className="pointer-events-none fixed left-[max(12px,env(safe-area-inset-left))] right-[max(12px,env(safe-area-inset-right))] top-[max(12px,env(safe-area-inset-top))] z-50 ml-auto flex max-w-[340px] flex-col gap-2"
     >
       {banners.map((banner) => (
         <NotificationCard

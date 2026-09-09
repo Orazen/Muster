@@ -15,6 +15,13 @@
   border-radius: 20px;
 }
 
+/* Touch users have no hover state. Actions have their own row so even
+   hidden desktop controls cannot squeeze the actual message into a sliver. */
+@media (hover: none) {
+  .conversation-message-actions button,
+  .conversation-message-actions [class*="opacity-0"] { opacity: 1; }
+}
+
 /* Surfaces */
 .muster-bubble.muster-from-user {
   background: var(--color-bubble-user);

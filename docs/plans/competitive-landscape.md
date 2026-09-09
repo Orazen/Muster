@@ -1,85 +1,137 @@
 # Competitive landscape — agent-workforce products (September 2026)
 
-Research basis: direct study of OpenMausBot's source (all branches), xAI's public
-Grok Bot materials, the OpenClaw ecosystem, and prior scans in
+**OpenMausBot source re-check: 2026-09-10.** This comparison uses public
+v0.1.70 source at commit
+[`67336fb2d7139de1b91a8050d9c1ca1215844fea`](https://github.com/milind-soni/OpenMausBot/commit/67336fb2d7139de1b91a8050d9c1ca1215844fea)
+(commit timestamp: 2026-09-10 04:13:31 +05:30). It is a read-only source
+audit of that snapshot, not an all-branches audit or a runtime benchmark:
+**0 competitor executable tests and 0 competitor runtime checks**. The
+version is recorded in its
+[`package.json`](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/package.json).
+
+The Grok Bot and OpenClaw sections retain earlier strategy hypotheses; they
+were not independently refreshed during this UI slice. See also
 [openmausbot-design-study.md](openmausbot-design-study.md) and
 [robotics-and-ecosystem-research.md](robotics-and-ecosystem-research.md).
-Every "they have / they lack" below was checked against code or primary docs at
-study time — not scraped from launch posts.
 
 ## The three that matter
 
-### 1. OpenMausBot — the direct competitor
-2.4k stars, single-repo local app, 11 model engines, four approval tiers, and —
-the part worth copying — a **bounded MCP server** exposing the product to
-external agents. Its trajectory is "one user's terminal agent, productized."
+### 1. OpenMausBot — the direct comparison
 
-**Where Muster is ahead (verified):**
-- **Fleet, not a bot.** OpenMausBot is one agent in one window. Muster runs a
-  roster of bots with per-bot engines, budgets, threads, and state.
-- **Approvals as a product spine.** Muster's OptionCard → Watch/phone approval
-  flow is a first-class surface. OpenMausBot has approval tiers but no mobile
-  approval device.
-- **Fleet MCP server (shipped this cycle).** `muster mcp` exposes six bounded
-  tools (status / send / wait / receipt / memory-read / approval-history) with
-  no approvals-deletes-credentials surface — the same bounded-server idea,
-  fleet-scale, reuse-of-session-auth.
-- **Receipts + why-journal.** Every settled task emits a proof-of-work receipt
-  (duration, tokens, final word) and approval decisions carry evidence
-  history. OpenMausBot has neither.
-- **Offline pairing.** QR/chip-code local pairing vs. their config-file setup.
+OpenMausBot describes a local-first **team of bots**, with per-bot models,
+channels, connected apps, computer access, and human approval cards. Its
+current source includes iOS and Android companions, phone pairing, and
+delegation/routine receipts. The earlier claims that it was a single agent,
+lacked a mobile approval surface, or had no receipts were incorrect as
+blanket comparisons and are withdrawn. These capabilities may predate this
+release; this audit does not establish when each was introduced.
 
-**Where they're ahead (honest):**
-- **Engine breadth:** 11 engines vs Muster's fewer, though Muster's driver
-  architecture (CLI/ACP/direct-API) makes parity an integration task, not a
-  rewrite.
-- **Zero-config first run:** their clone-and-run path is real. Muster's
-  `muster setup` closes most of the gap but ships with the desktop app.
-- **Mindshare:** 2.4k stars in months. The private repo means Muster can't
-  compete for stars — it competes on product depth.
+Primary evidence:
 
-### 2. xAI Grok Bot — the distribution threat
-Subscription-priced shared-VM bots that learn routines. No local mode, no
-approval surface a human owns, transcripts live on xAI's VMs. The threat is
-distribution and price, not architecture: Muster's counter is the things a
-shared VM structurally cannot offer — local execution, per-bot credential
-isolation (default-deny allowlists), human-owned approvals, receipts you can
-audit, and offline operation.
+- [README: bot roster, channels, MCP, and phone access](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/README.md).
+- [iOS roster and approval navigation](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/ios/App/ChatListView.swift)
+  and [Android onboarding/navigation](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/android/app/src/main/kotlin/com/openmausbot/companion/ui/RootScreen.kt).
+- [Delegation receipt tests](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/server/delegations.test.ts)
+  and [routine execution cards](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/ChatView.tsx).
 
-### 3. OpenClaw — the format war
-~389k stars, mostly a `soul.md` persona-format movement with an app around it.
-Format adoptions are winner-take-most; Muster already reads/writes SOUL.md per
-bot (`GET/PUT /api/bots/{id}/soul.md`), so it interoperates instead of
-fighting. The watch-item is OpenClaw growing a real harness underneath.
+**Muster capabilities to evaluate, without assuming exclusive ownership:**
 
-## Patterns across the landscape
+- A persistent fleet with per-bot engines, budgets, tasks, and memory.
+- OptionCard approvals, approval history, and phone/Watch delivery.
+- Task receipts, why-journal entries, routine scorecards, and plan rehearsal.
+- An eight-tool Fleet MCP surface that excludes approval grants, deletes,
+  credentials, and engine changes (`server/fleet-mcp.ts`). OpenMausBot also
+  documents a bounded MCP surface, with a different and broader set of team
+  operations; tool count alone does not establish product quality. Muster's
+  original six tools have since gained read-only why-journal and scorecard
+  access; the current count was checked against `server/fleet-mcp.ts`.
+- Local execution and device pairing. These are shared category capabilities;
+  compare setup effort, failure recovery, and the resulting evidence.
 
-1. **Bounded MCP beats sprawling MCP.** Both OpenMausBot and every serious
-   integration surface converge on a small tool set. Muster's six-tool fleet
-   server follows this; keep future tools gated behind the same review.
-2. **The approval moment is the moat.** Every competitor treats "agent asks
-   permission" as a settings toggle. Muster treats it as a cross-device
-   product moment (Watch + OptionCard + approval history). This is the
-   hardest thing to copy and the easiest thing to demo.
-3. **Economics win fleets.** Per-bot engine routing (cheap model for routine
-   work, frontier model for hard steps) is table stakes for a *workforce*
-   story; single-engine products can't tell it.
-4. **Proof-of-work builds trust.** Receipts + why-journal + approval history
-   are the trust artifacts none of the competitors ship.
-5. **Local-first is defensible.** Shared-VM bots can't follow. Lead every
-   comparison with it.
+**Source-grounded UX patterns worth testing in Muster:**
 
-## Exposures to fix next (ranked)
+1. **Responsive conversation controls and pickers.** OpenMausBot's
+   [chat header](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/ChatView.tsx)
+   compacts controls using the chat column's width. Test mobile widths and
+   desktop layouts with side panels open, not only full-width desktop.
+2. **Task-specific attention.** Its
+   [sidebar activity rows](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/SidebarBotActivity.tsx)
+   and [background activity picker](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/TaskPicker.tsx)
+   keep waiting, working, queued, and unread sibling tasks accessible even
+   when history is hidden. Muster's approval navigation must open the exact
+   task, including when another task on that bot is selected.
+3. **Optional phone handoff.** Its
+   [onboarding](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/src/components/Onboarding.tsx)
+   includes optional phone setup; the
+   [terminal setup guide](https://github.com/milind-soni/OpenMausBot/blob/67336fb2d7139de1b91a8050d9c1ca1215844fea/docs/cli-onboarding.md)
+   distinguishes product identity, AI-provider access, and device pairing.
+   Preserve Muster's first-task onboarding and make the subsequent phone
+   handoff discoverable, skippable, and recoverable.
+
+Engine breadth and installation friction still deserve a comparison, but
+the earlier fixed engine-count and "zero-config" advantage claims are not
+current measurements. Compare available models and completed first tasks on
+the same machine with the same credentials. Repository popularity is not a
+completion or reliability benchmark.
+
+### 2. xAI Grok Bot — distribution hypothesis
+
+Earlier research treated hosted bots, subscriptions, and routine learning as
+a distribution threat. This UI audit did not re-check its current offering,
+pricing, local modes, approval surfaces, or transcript handling. Do not turn
+those historical assumptions into present-tense feature-absence claims.
+
+Muster's strategy remains to make local operation, explicit execution
+location, human approvals, evidence, and per-bot economics understandable in
+the product. Whether those features differentiate it from a specific Grok
+Bot offering requires a dated, like-for-like evaluation.
+
+### 3. OpenClaw — interoperability hypothesis
+
+Earlier research identified persona-format interoperability as strategically
+useful. Muster already reads/writes SOUL.md per bot
+(`GET/PUT /api/bots/{id}/soul.md`). Preserve that interoperability and assess
+actual import fidelity and behavior. This audit makes no fresh claim about
+OpenClaw's popularity or the depth of its current harness.
+
+## Product principles to test across the landscape
+
+1. **Bounded control surfaces.** Document what an external agent can and
+   cannot do, then verify the contract. A small tool list is useful only if
+   it supports the intended workflow and handles failures honestly.
+2. **An understandable approval moment.** Show the action, the evidence,
+   and its scope; deliver the decision to the intended person and task.
+   The benefit must be demonstrated, not assumed exclusive to Muster.
+3. **Visible fleet economics.** Per-bot routing and usage should help an
+   owner choose engines and budgets with enough context to act.
+4. **Evidence after work.** Compare receipt completeness, why-journal
+   usefulness, and approval history on the same tasks. A competitor having
+   receipts does not establish identical semantics, or inferior semantics.
+5. **Clear execution location.** Explain local/cloud capabilities and
+   prerequisites accurately at the point of use.
+
+## Exposures to fix next
+
+Current UI audit priorities are the three UX gaps above. The broader
+engineering watch list remains:
+
 1. **Mimosa full security re-run** still owed after the scanner_enobufs
-   failure — blocked on MCP enablement, not on code.
-2. **Dependabot alerts on main untriaged (2 high)** — standing debt.
-3. **Engine breadth** — add engines via the driver layer until the roster
-   matches OpenMausBot's 11.
-4. **Zero-config onboarding** — collapse `up`+`setup` into one guided path.
+   failure. Confirm scanner availability; no security posture claim follows
+   from this UI work.
+2. **Dependabot triage:** the prior record listed two high alerts. Re-check
+   current alerts before reporting a count or remediation status.
+3. **Engine access and parity:** compare driver availability, authentication,
+   and successful task execution; add integrations based on demonstrated need.
+4. **Guided first run:** measure setup-to-first-result, then optional phone
+   pairing. Do not require a new user to understand the harness architecture.
 
-## What "beating OpenMausBot" means, concretely
-Not stars (private repo). It means: when the same task is given to both,
-Muster finishes with a receipt, a bounded-MCP audit trail, and a human
-approval record — and the bot that hit a snag escalates to the owner's Watch
-instead of stalling in a terminal. That comparison is runnable today and
-should be recorded as a benchmark doc when Astra (GPT-6) runs its eval.
+## What a credible comparison means
+
+Run the same bounded task and approval/failure probes on both products with
+recorded versions, engines, credentials, and environment. Measure completion,
+correct escalation, receipt/evidence completeness, tokens/cost, recovery,
+and mobile decision usability. Distinguish offline fixtures from live runs.
+
+Muster's existing eval harness can report its own outcomes. It does not prove
+that another product stalls, auto-approves, or performs worse. Comparative
+claims remain unverified until the matching competitor runs are recorded.

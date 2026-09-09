@@ -1,27 +1,42 @@
-/* FleetOrb styles — the ambient presence glyph. Lives bottom-right on every
-   surface; the color IS the state (clear idle, orange working, amber
-   waiting, green settled). Deliberately small and quiet when idle. */
+/* Fleet status occupies its own row so it cannot cover the composer. */
 .fleet-orb-root {
-  position: fixed;
-  right: 18px;
-  bottom: 18px;
-  z-index: 40;
+  position: relative;
+  flex-shrink: 0;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
+  justify-content: flex-end;
+  min-height: 40px;
+  padding: 0 max(12px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(12px, env(safe-area-inset-left));
+  border-top: 1px solid var(--color-hairline);
+  background: var(--color-panel);
 }
+
+.fleet-orb-trigger {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  color: var(--color-ink-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.fleet-orb-trigger:disabled { cursor: default; }
+.fleet-orb-trigger:not(:disabled):hover { color: var(--color-ink); }
+.fleet-orb-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .fleet-orb {
   position: relative;
-  width: 34px;
-  height: 34px;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--color-ink) 13%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
   transition: transform 0.15s ease, background 0.4s ease;
 }
 
@@ -34,27 +49,6 @@
   height: 14px;
   border-radius: 999px;
   transition: background 0.4s ease, box-shadow 0.4s ease;
-}
-
-.fleet-orb-badge {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 17px;
-  height: 17px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--color-warning);
-  color: #201200;
-  font-size: 10.5px;
-  font-weight: 700;
-  line-height: 17px;
-  text-align: center;
-}
-
-.fleet-orb-badge-quiet {
-  background: color-mix(in srgb, var(--color-live) 90%, transparent);
-  color: var(--color-app);
 }
 
 /* still: idle — nothing animates, a promise kept */
@@ -95,8 +89,13 @@
 
 /* the flyout menu — rides the glass language so it works on every skin */
 .fleet-orb-menu {
-  min-width: 190px;
-  max-width: 260px;
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: calc(100% + 6px);
+  z-index: 40;
+  width: min(300px, calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right))));
+  max-height: min(320px, calc(100dvh - 100px));
+  overflow-y: auto;
   padding: 8px;
   border-radius: 14px;
   border: 1px solid var(--glass-edge-soft);

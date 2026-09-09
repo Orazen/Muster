@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { TaskUsage } from "@/state/store";
 
 import { botUsage, costCaption, formatTokens, formatUsd, sumUsage, usageChip } from "./usage";
 
@@ -44,5 +45,37 @@ describe("usage formatting", () => {
     expect(costCaption("subscription")).toMatch(/not billed/);
     expect(costCaption("metered")).toMatch(/API key/);
     expect(costCaption(undefined)).toMatch(/reported/);
+  });
+
+  it("renders a legacy usage chip without treating missing cost as a number", () => {
+    const legacy: TaskUsage = JSON.parse('{"input":10000,"output":2400,"turns":3}');
+    expect(usageChip(legacy)).toBe("12.4k tok");
+  });
+
+  it("keeps an all-unknown aggregate null when legacy records omit cost", () => {
+    const legacy: TaskUsage = JSON.parse('{"input":40,"output":10,"turns":1}');
+    expect(sumUsage([legacy, undefined, { input: 2, output: 3, costUsd: null, turns: 1 }])).toEqual({
+      input: 42,
+      output: 13,
+      costUsd: null,
+      turns: 2,
+    });
+  });
+
+  it("preserves an explicitly reported zero among unknown costs", () => {
+    const legacy: TaskUsage = JSON.parse('{"input":40,"output":10,"turns":1}');
+    const total = sumUsage([legacy, { input: 10, output: 20, costUsd: 0, turns: 1 }, legacy]);
+    expect(total).toEqual({ input: 90, output: 40, costUsd: 0, turns: 3 });
+    expect(usageChip(total)).toBe("130 tok · $0");
+  });
+
+  it("retains reported cost when legacy tasks occur before and after it", () => {
+    const legacy: TaskUsage = JSON.parse('{"input":40,"output":10,"turns":1}');
+    expect(sumUsage([legacy, { input: 10, output: 20, costUsd: 0.06, turns: 1 }, legacy])).toEqual({
+      input: 90,
+      output: 40,
+      costUsd: 0.06,
+      turns: 3,
+    });
   });
 });

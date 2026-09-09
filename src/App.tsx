@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Menu, LogOut } from "lucide-react";
+import { Menu } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
@@ -31,37 +31,6 @@ import { emailGateDone, serverGateDone } from "@/lib/analytics";
 import { PairPage } from "@/pages/PairPage";
 import { ClaimPage } from "@/pages/ClaimPage";
 import { DesktopShell } from "@/components/os/DesktopShell";
-import { Link } from "react-router-dom";
-
-// A discreet entry point into the desktop-style roster view. Sits beside
-// the sign-out button but only on desktop widths — the mobile chrome
-// stays untouched.
-function OsLink() {
-  return (
-    <Link
-      to="/os"
-      className="fixed bottom-4 right-4 z-50 hidden items-center gap-1.5 rounded-lg border border-hairline bg-panel px-3 py-1.5 text-xs text-ink-secondary transition-colors hover:bg-raised hover:text-ink md:flex"
-      aria-label="Open Muster OS"
-    >
-      OS
-    </Link>
-  );
-}
-
-function SignOutButton() {
-  const { signOut } = useAuth();
-  return (
-    <button
-      type="button"
-      onClick={() => signOut()}
-      className="fixed bottom-4 right-4 z-50 flex items-center gap-1.5 rounded-lg border border-hairline bg-panel px-3 py-1.5 text-xs text-ink-secondary transition-colors hover:bg-raised hover:text-ink md:hidden"
-      aria-label="Sign out"
-    >
-      <LogOut size={14} />
-      Sign out
-    </button>
-  );
-}
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -228,8 +197,6 @@ function Shell() {
       {state.pluginsOpen && <PluginsPanel />}
       <CommandPalette />
       <NotificationStack />
-      {/* ambient fleet presence — one glance from any surface */}
-      <FleetOrb />
       {gateDecision === "show" && firstRun && (
         <Onboarding
           onDone={() => {
@@ -239,8 +206,8 @@ function Shell() {
         />
       )}
       </div>
-      <SignOutButton />
-      <OsLink />
+      {/* In flow so fleet attention never sits over Send or an approval. */}
+      <FleetOrb />
     </div>
   );
 }

@@ -193,7 +193,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
   );
 
   return (
-    <div ref={rootRef} className={cn("relative", className)}>
+    <div ref={rootRef} className={cn("model-picker relative", className)}>
       <button
         type="button"
         onClick={() => {
@@ -206,11 +206,12 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
         }}
         aria-expanded={open}
         aria-haspopup="dialog"
+        aria-label="Choose model"
         className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised"
         title={active ? `${active.displayName} · ${modelLabel(active, selection.model)}` : selection.model}
       >
         {active && <ProviderMark driverKind={active.driverKind} size={14} />}
-        <span className="max-w-[160px] truncate">{modelLabel(active, selection.model)}</span>
+        <span className="max-w-[160px] truncate">{modelLabel(active, selection.model) || "Choose model"}</span>
         <ChevronDown size={14} className={cn("text-ink-secondary transition-transform", open && "rotate-180")} />
       </button>
 

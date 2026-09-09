@@ -2,6 +2,7 @@ import { track } from "@/lib/analytics";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { createPortal } from "react-dom";
+import { Link } from "react-router-dom";
 import {
   Archive,
   ArrowDownToLine,
@@ -1133,6 +1134,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             </span>
           </button>
           <UpdateButton />
+          <Link to="/os" aria-label="Open Muster OS" title="Open Muster OS"
+            className="hidden min-h-9 items-center rounded-md px-2 text-xs font-semibold text-ink-secondary hover:bg-raised hover:text-ink md:flex">
+            OS
+          </Link>
           <button
             onClick={() => dispatch({ type: "toggleAppSettings" })}
             className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"

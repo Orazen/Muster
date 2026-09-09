@@ -21,7 +21,7 @@ export function NotificationCard({
   return (
     <div
       className={cn(
-        "pointer-events-auto w-[340px] rounded-2xl border px-4 py-3.5 transition",
+        "pointer-events-auto w-full min-w-0 rounded-2xl border px-4 py-3.5 transition",
         gaiaTheme.card.shadow,
         kind === "warning"
           ? gaiaTheme.notifications.warning

@@ -155,3 +155,60 @@ existing `.deploy-trigger` mechanism documented in the autodeploy workflow to
 request the same release through Dokploy's GitHub App webhook. Production was
 still serving the previous UI when the fallback trigger was requested; live
 rollout confirmation remains pending. No billing settings were changed.
+
+## Loop 4 — 2026-09-10 — Responsive conversations and receipt evidence
+
+The board expanded the UI request to Gaia components, all-page browser testing,
+and mobile/desktop parity. Rechecked Gaia UI at `14e20153` and OpenMausBot
+v0.1.70 at `67336fb2`. Corrected outdated competitor claims: current source
+includes fleets, mobile companions, approvals, and receipts. This research ran
+**0 competitor executable tests / 0 competitor runtime checks**; no comparative
+performance or product-superiority claim follows from it.
+
+Fixed reproduced conversation defects: overlapping phone header actions,
+off-screen task/model menus, hidden reactions and provenance squeezing message
+bodies, and the floating fleet indicator covering Send. Controls now respond to
+the conversation column; task/model remain primary, secondary actions live in
+Tools, and Stop remains directly available. Fleet status occupies a compact
+footer, with a bounded keyboard-accessible attention menu. Waiting bots appear
+once rather than again under Working. OS navigation moved into the sidebar;
+account sign-out remains in Settings. Notifications fit narrow viewports.
+
+Integrated the actual MIT Gaia StatRow source using Muster tokens and Lucide,
+with the complete license shipped in public third-party notices, also covering
+the existing Gaia message-bubble adaptation. Job receipts use a scrolling Radix
+dialog with focus restoration. Metrics and copied text come from one server
+snapshot; missing usage is explained, missing legacy costs remain unknown,
+reported zero costs remain zero. Receipt sharing retains the published URL and
+offers manual copying if clipboard access fails instead of claiming it copied.
+
+Verification: **26 distinct hands-on browser checks passed** using real isolated
+email authentication, onboarding, session persistence, task selection, message
+sending, receipt copying, Deny/Allow once, repeated approval, Stop, and Inspector
+cancellation evidence. Layouts checked at **320×568, 390×844, 768×1024, and
+1440×900**, including a 660px conversation beside Inspector. The 320px Send
+button had 31px clearance from the fleet footer. These are browser-driven
+checks, not 26 checked-in Playwright tests. The engine was the local scripted ACP
+fixture; no real provider response, Google login success, native app, microphone,
+payment, or external integration is counted as verified.
+
+Focused tests: **2 files / 16 passed / 0 skipped**. Final full suite:
+**182 files / 1799 passed / 8 skipped**, **207.62 seconds**. Both typechecks,
+scoped lint, diff checks, and Vite build passed (3032 modules; 8.05 seconds).
+Large-chunk warnings remain. This exceeds both the handbook baseline and Loop 3.
+
+The expanded settings sweep opened/read **14 of 15 available sections**; Usage
+blanked the app. Independent reproduction traced this to InviteSection fetching
+and updating state during render: **25 stub fetch attempts**, then React's
+too-many-renders error, with **0 external requests**. Mobile Settings also leaves
+roughly 100px for content beside its fixed navigation. These are the next bounded
+slice, documented with the remaining route/native inventory in
+`docs/plans/ui-e2e-program.md`; the complete product is not yet E2E-certified.
+
+Production follow-up: GET and a fresh browser visit now confirm the earlier
+account-entry redesign is deployed (`index-CpkiQPaW.js`, auth shell and password
+controls). The current conversation slice still needs its own rollout check.
+Hosted Actions billing remains a board item; no billing setting was changed.
+
+Commercial implication: users can act on approvals and inspect real work from
+a phone without composer obstruction. No conversion or revenue lift is claimed.

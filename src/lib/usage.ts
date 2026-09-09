@@ -12,7 +12,8 @@ export function sumUsage(items: Array<TaskUsage | undefined>): TaskUsage {
     out.input += u.input;
     out.output += u.output;
     out.turns += u.turns;
-    if (u.costUsd !== null) out.costUsd = (out.costUsd ?? 0) + u.costUsd;
+    // Legacy task records omit costUsd; missing is still unknown, not zero.
+    if (u.costUsd != null) out.costUsd = (out.costUsd ?? 0) + u.costUsd;
   }
   return out;
 }
@@ -41,7 +42,7 @@ export function formatUsd(usd: number): string {
 export function usageChip(u: TaskUsage): string {
   if (u.turns === 0 && u.input + u.output === 0) return "";
   const parts = [`${formatTokens(u.input + u.output)} tok`];
-  if (u.costUsd !== null) parts.push(formatUsd(u.costUsd));
+  if (u.costUsd != null) parts.push(formatUsd(u.costUsd));
   return parts.join(" · ");
 }
 

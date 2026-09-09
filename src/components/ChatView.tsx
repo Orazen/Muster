@@ -1,4 +1,5 @@
 import { Component, memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { JobReceipt } from "../../server/receipts";
 import {
   AlertTriangle,
   ReceiptText,
@@ -26,6 +27,9 @@ import {
 } from "lucide-react";
 
 import { ChatFindBar } from "./ChatFindBar";
+import { ConversationHeader } from "./ConversationHeader";
+import { TaskUsageStats } from "./TaskUsageStats";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { costCaption, formatTokens, formatUsd, usageChip } from "@/lib/usage";
 import {
   useStore,
@@ -355,30 +359,16 @@ function Bubble({
 
   return (
     <div className={cn("group animate-msg-in flex w-full flex-col", user ? "items-end" : "items-start")}>
-      <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
-        {/* editing rewinds the thread, so it waits for the turn to end —
-            same rule as the version switcher below */}
-        {user && message.kind === "text" && !webhookView && !bot.busy && (
-          <button
-            onClick={onStartEdit}
-            aria-label="Edit message"
-            className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
-            title="Edit message"
-          >
-            <Pencil size={14} />
-          </button>
-        )}
-        {user && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
-        {user && <CopyButton text={visibleText} />}
+      <div className={cn("flex w-full flex-col gap-1.5", user ? "items-end" : "items-start")}>
         <div
           className={cn(
-            "muster-bubble max-w-[70%] rounded-2xl text-[15px] leading-relaxed",
+            "muster-bubble min-w-0 max-w-[88%] rounded-2xl text-[15px] leading-relaxed sm:max-w-[80%]",
             user && webhookView
               ? "overflow-hidden border border-accent/25 bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
               : user
                 ? "muster-from-user px-4 py-2.5 whitespace-pre-wrap text-ink"
                 : "muster-from-bot px-4 py-2.5 text-ink",
-            runPosition && !webhookView ? runPosition : null,
+            runPosition && !webhookView ? `muster-${runPosition}` : null,
             // GAIA's tail rides only the last bubble of a run; single
             // messages keep the full round bubble with its tail.
             !webhookView && (!runPosition || runPosition === "last") ? "muster-tail" : null,
@@ -386,7 +376,7 @@ function Bubble({
           title={new Date(message.at).toLocaleString()}
         >
           {user && webhookView ? (
-            <div className="min-w-[300px] max-w-[520px]">
+            <div className="min-w-0 max-w-[520px]">
               <div className="flex items-center gap-2 border-b border-accent/15 bg-accent/[0.055] px-4 py-2.5 text-[11.5px] font-medium text-accent">
                 <Webhook size={13} />
                 <span>Webhook task</span>
@@ -423,8 +413,15 @@ function Bubble({
             </MessageBoundary>
           )}
         </div>
-        {!user && (
-          <div className="flex flex-col gap-0.5 self-end pb-0.5">
+        <div className={cn("conversation-message-actions flex max-w-full flex-wrap items-center gap-0.5", user && "justify-end")}>
+          {user && message.kind === "text" && !webhookView && !bot.busy && (
+            <button onClick={onStartEdit} aria-label="Edit message" title="Edit message"
+              className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100">
+              <Pencil size={14} />
+            </button>
+          )}
+          {user && <CopyButton text={visibleText} />}
+          {!user && (<>
             <CopyButton text={text} />
             {message.kind === "text" && (
               <SpeakButton text={text} botId={bot.id} messageId={message.id} voiceId={bot.voice} />
@@ -439,9 +436,10 @@ function Bubble({
                 <RefreshCw size={14} />
               </button>
             )}
-          </div>
-        )}
-        {!user && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
+          </>)}
+          {message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
+          <span className="px-1 text-[11px] tabular-nums text-ink-secondary/70">{formatTime(message.at)}</span>
+        </div>
         {/* provenance chip: show the harness instead of hiding it — which
             engine + model actually said this (routing visibility pattern).
             The LAST bot answer keeps it visible while idle, so the routing
@@ -449,7 +447,7 @@ function Bubble({
         {via && (
           <span
             className={cn(
-              "ml-1 pb-1 text-[10.5px] tabular-nums text-ink-secondary/60 transition-opacity",
+              "max-w-full pb-1 text-[10.5px] tabular-nums text-ink-secondary/70 transition-opacity [overflow-wrap:anywhere]",
               isLastBotText && !bot.busy ? "opacity-100" : "opacity-0 group-hover:opacity-100",
             )}
             title={via.effort ? `${viaInstance?.displayName ?? via.instanceId} · effort ${via.effort}` : viaInstance?.displayName ?? via.instanceId}
@@ -459,14 +457,6 @@ function Bubble({
             {via.effort ? ` · ${via.effort}` : ""}
           </span>
         )}
-        <span
-          className={cn(
-            "self-end pb-1 text-[11px] tabular-nums text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100",
-            user ? "order-first mr-1" : "ml-1",
-          )}
-        >
-          {formatTime(message.at)}
-        </span>
       </div>
       {/* busy-gated so a flag stranded by a server restart shows nothing */}
       {user && message.queued && bot.busy && (
@@ -984,6 +974,7 @@ export function ChatView({ bot }: { bot: Bot }) {
   // top-right: the header becomes the drag strip and clears room for it
   const isWin = window.ogb?.platform === "win32";
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const receiptButtonRef = useRef<HTMLButtonElement>(null);
   const [watermark, setWatermark] = useState(false);
   useEffect(() => {
     let alive = true;
@@ -1005,26 +996,14 @@ export function ChatView({ bot }: { bot: Bot }) {
       alive = false;
     };
   }, []);
-  // SAFETY: -webkit-app-region is an Electron-only property absent from React's CSSProperties.
-  const drag = isWin ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined;
-  // SAFETY: same Electron-only property as the drag style above.
-  const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined;
 
   return (
     <main className="glass-shell-main relative flex h-full min-w-0 flex-1 flex-col bg-app">
       {/* Call mode covers the thread while the bot is on the line */}
       <CallOverlay bot={bot} />
       {/* Header */}
-      <div
-        className={cn(
-          "flex items-center justify-between px-5 py-3",
-          // Room for the drawer button, which overlays this corner below md.
-          "pl-11 md:pl-5",
-          isWin && "pr-[148px]",
-        )}
-        style={drag}
-      >
-        <div className="flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1" style={noDrag}>
+      <ConversationHeader windows={isWin}
+        identity={<>
           <button
             onClick={() => dispatch({ type: "toggleSettings" })}
             className="flex shrink-0 items-center rounded-lg p-0.5 hover:bg-raised/50"
@@ -1042,12 +1021,12 @@ export function ChatView({ bot }: { bot: Bot }) {
           <RenameTitle
             value={bot.name}
             onCommit={(name) => dispatch({ type: "updateBot", botId: bot.id, patch: { name } })}
-            className="truncate text-[15px] font-semibold text-ink"
+            className="min-w-0 truncate text-[15px] font-semibold text-ink"
             inputClassName="max-w-[220px] rounded bg-inset px-1.5 py-0.5 text-[15px] font-semibold"
           />
           {bot.chiefOfStaff && (
-            <span className="flex items-center gap-1 rounded-full bg-accent/12 px-2 py-0.5 text-[11px] font-medium text-accent">
-              <Crown size={11} /> Chief of Staff
+            <span title="Chief of Staff" className="flex shrink-0 items-center gap-1 rounded-full bg-accent/12 px-2 py-0.5 text-[11px] font-medium text-accent">
+              <Crown size={11} /><span className="conversation-chief-label">Chief of Staff</span>
             </span>
           )}
           {watermark && (
@@ -1056,32 +1035,32 @@ export function ChatView({ bot }: { bot: Bot }) {
             </span>
           )}
           {bot.busy && <Loader2 size={14} className="animate-spin text-ink-secondary" />}
-        </div>
-        <div className="flex items-center gap-1.5" style={noDrag}>
-          {bot.busy && (
+        </>}
+        interrupt={bot.busy && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
-              className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+              className="flex min-h-9 items-center gap-1.5 rounded-lg border border-danger/30 bg-danger/10 px-3 text-[13px] font-medium text-danger hover:bg-danger/20"
               title="Stop this turn"
             >
               <Square size={12} className="fill-current" />
               Stop
             </button>
           )}
-          <TaskPicker bot={bot} />
-          <ModelPicker bot={bot} />
-          {/* primary chips · task info · panel toggles — hairline separators
-              keep the three tiers readable instead of one crowded row */}
-          <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-hairline/40" />
+        primary={<>
+          <div className="conversation-task-slot"><TaskPicker bot={bot} /></div>
+          <div className="conversation-model-slot"><ModelPicker bot={bot} /></div>
+        </>}
+        tools={<>
           <UsageChip bot={bot} />
           <WorkingFolderChip bot={bot} />
           <button
+            ref={receiptButtonRef}
             onClick={() => setReceiptOpen(true)}
             aria-label="Job receipt"
             className={cn(iconToggleClasses, receiptOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
             title="Job receipt — proof of work for this task"
           >
-            <ReceiptText size={17} />
+            <ReceiptText size={17} /><span className="conversation-tool-label">Receipt</span>
           </button>
           <CallButton bot={bot} />
           <button
@@ -1091,7 +1070,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             className={cn(iconToggleClasses, state.computerOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
             title="Bot's computer"
           >
-            <Monitor size={17} />
+            <Monitor size={17} /><span className="conversation-tool-label">Computer</span>
           </button>
           <button
             onClick={() => dispatch({ type: "toggleBrowserPanel" })}
@@ -1100,9 +1079,8 @@ export function ChatView({ bot }: { bot: Bot }) {
             className={cn(iconToggleClasses, state.browserPanelOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
             title="Browser — watch and drive this bot's web"
           >
-            <Globe size={17} />
+            <Globe size={17} /><span className="conversation-tool-label">Browser</span>
           </button>
-          <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-hairline/40" />
           <button
             onClick={() => setFindOpen((open) => !open)}
             aria-label="Find in conversation"
@@ -1110,7 +1088,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             className={cn(iconToggleClasses, findOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
             title="Find in conversation (⌘F)"
           >
-            <Search size={17} />
+            <Search size={17} /><span className="conversation-tool-label">Search</span>
           </button>
           <button
             onClick={() => dispatch({ type: "toggleInspector" })}
@@ -1119,13 +1097,13 @@ export function ChatView({ bot }: { bot: Bot }) {
             className={cn(iconToggleClasses, state.inspectorOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
             title="Inspector — runtime events and raw protocol for this thread"
           >
-            <Bug size={17} />
+            <Bug size={17} /><span className="conversation-tool-label">Inspector</span>
           </button>
-        </div>
-      </div>
+        </>}
+      />
 
       {findOpen && <ChatFindBar threadId={bot.threadId} onClose={() => setFindOpen(false)} />}
-      {receiptOpen && <JobReceiptModal bot={bot} onClose={() => setReceiptOpen(false)} />}
+      {receiptOpen && <JobReceiptModal key={`${bot.id}:${bot.threadId}`} bot={bot} onClose={() => setReceiptOpen(false)} onReturnFocus={() => receiptButtonRef.current?.focus()} />}
 
       {/* Error banner */}
       {state.error && (
@@ -1331,7 +1309,7 @@ function UsageChip({ bot }: { bot: Bot }) {
   const detail = [
     `${usage.turns} turn${usage.turns === 1 ? "" : "s"}`,
     `${formatTokens(usage.input)} in · ${formatTokens(usage.output)} out`,
-    usage.costUsd !== null ? `${formatUsd(usage.costUsd)} ${costCaption(billing)}` : null,
+    usage.costUsd != null ? `${formatUsd(usage.costUsd)} ${costCaption(billing)}` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1371,10 +1349,12 @@ function WorkingFolderChip({ bot }: { bot: Bot }) {
 }
 
 /** Proof-of-work card for the active task: who, what, how long, how much. */
-function JobReceiptModal({ bot, onClose }: { bot: Bot; onClose: () => void }) {
-  const [state, setState] = useState<{ loading: boolean; text: string | null; error: string | null }>({
+function JobReceiptModal({ bot, onClose, onReturnFocus }: { bot: Bot; onClose: () => void; onReturnFocus: () => void }) {
+  const [copyState, setCopyState] = useState<"idle" | "busy" | "copied" | "error">("idle");
+  const [state, setState] = useState<{ loading: boolean; text: string | null; receipt: JobReceipt | null; error: string | null }>({
     loading: true,
     text: null,
+    receipt: null,
     error: null,
   });
   useEffect(() => {
@@ -1387,13 +1367,14 @@ function JobReceiptModal({ bot, onClose }: { bot: Bot; onClose: () => void }) {
         // SAFETY: wire JSON is untyped; coerce the one field we render to text.
         const data: unknown = await r.json();
         if (!alive) return;
-        // SAFETY: wire JSON has exactly one rendered field, `text`; assert its container shape.
-        const raw = (data ?? {}) as { text?: unknown };
+        // The server returns one receipt and its text from the same snapshot.
+        // SAFETY: this same-origin API returns the typed JobReceipt alongside text; missing receipt remains null.
+        const raw = (data ?? {}) as { text?: unknown; receipt?: JobReceipt };
         // SAFETY: single-line assertion on the parsed record shape above.
         const text = raw.text == null ? null : String(raw.text);
-        setState({ loading: false, text, error: null });
+        setState({ loading: false, text, receipt: raw.receipt ?? null, error: null });
       } catch (e) {
-        if (alive) setState({ loading: false, text: null, error: String(e instanceof Error ? e.message : e) });
+        if (alive) setState({ loading: false, text: null, receipt: null, error: String(e instanceof Error ? e.message : e) });
       }
     })();
     return () => {
@@ -1401,73 +1382,99 @@ function JobReceiptModal({ bot, onClose }: { bot: Bot; onClose: () => void }) {
     };
   }, [bot.id, bot.threadId]);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6" onClick={onClose}>
-      <div
-        className="w-full max-w-md rounded-xl border border-hairline/60 bg-app p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center gap-2">
-          <ReceiptText size={16} className="text-accent" />
-          <h2 className="text-[15px] font-semibold text-ink">Job receipt</h2>
-          <button onClick={onClose} aria-label="Close receipt" className="ml-auto rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink">
-            ✕
-          </button>
-        </div>
-        {state.loading && <p className="text-sm text-ink-secondary">Sealing receipt…</p>}
-        {state.error && <p className="text-sm text-danger">Couldn't build a receipt: {state.error}</p>}
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-h-[calc(100dvh-24px)] w-[calc(100%-24px)] max-w-lg overflow-y-auto rounded-2xl p-5"
+        onCloseAutoFocus={(event) => { event.preventDefault(); onReturnFocus(); }}>
+        <DialogHeader className="mb-4 pr-6">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <ReceiptText size={17} className="text-accent" />Job receipt
+          </DialogTitle>
+          <DialogDescription>Snapshot of recorded work for {bot.name}.</DialogDescription>
+        </DialogHeader>
+        {state.receipt && <TaskUsageStats usage={state.receipt.turns > 0 || state.receipt.tokensIn + state.receipt.tokensOut > 0
+          ? { input: state.receipt.tokensIn, output: state.receipt.tokensOut, turns: state.receipt.turns, costUsd: state.receipt.costUsd }
+          : undefined} />}
+        {state.loading && <p className="mt-4 text-sm text-ink-secondary" role="status">Loading receipt…</p>}
+        {state.error && <p className="mt-4 text-sm text-danger" role="alert">Couldn't build a receipt: {state.error}</p>}
         {state.text && (
           <>
-            <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap rounded-lg bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink">
+            <pre className="mt-4 max-h-[35dvh] overflow-auto whitespace-pre-wrap rounded-xl bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink [overflow-wrap:anywhere]">
               {state.text}
             </pre>
-            <div className="mt-3 flex items-center justify-end gap-2">
-              <CopyButton text={state.text} className="opacity-100" />
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
               <button
-                onClick={() => void navigator.clipboard?.writeText(state.text ?? "")}
-                className="rounded-lg border border-hairline/60 px-3 py-1.5 text-[13px] text-ink hover:bg-raised"
+                disabled={copyState === "busy"}
+                onClick={async () => {
+                  setCopyState("busy");
+                  try {
+                    if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+                    await navigator.clipboard.writeText(state.text ?? "");
+                    setCopyState("copied");
+                  } catch {
+                    setCopyState("error");
+                  }
+                }}
+                className="min-h-10 rounded-lg border border-hairline/60 px-3 py-1.5 text-[13px] text-ink hover:bg-raised disabled:opacity-60"
               >
-                Copy receipt
+                {copyState === "copied" ? "Copied" : copyState === "error" ? "Copy failed — try again" : copyState === "busy" ? "Copying…" : "Copy receipt"}
               </button>
               <ReceiptShareButton botId={bot.id} threadId={bot.threadId} />
             </div>
           </>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 /** Share this receipt as a public proof-of-work page (/r/<token>), copied
  * to the clipboard on success. */
 function ReceiptShareButton({ botId, threadId }: { botId: string; threadId: string }) {
-  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const [state, setState] = useState<"idle" | "busy" | "copied" | "copy-error" | "error">("idle");
+  const [url, setUrl] = useState<string | null>(null);
   async function share(): Promise<void> {
     setState("busy");
     try {
-      const r = await fetch("/api/receipts/share", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ botId, threadId }),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      // SAFETY: the share route's 200 body is exactly {url: string}.
-      const body = (await r.json()) as { url: string };
-      await navigator.clipboard?.writeText(`${window.location.origin}${body.url}`).catch(() => {});
-      setState("done");
-      setTimeout(() => setState("idle"), 2000);
+      let sharedUrl = url;
+      if (!sharedUrl) {
+        const r = await fetch("/api/receipts/share", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ botId, threadId }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        // SAFETY: the same-origin share route returns a local receipt URL in its 201 response.
+        const body = (await r.json()) as { url: string };
+        sharedUrl = `${window.location.origin}${body.url}`;
+        setUrl(sharedUrl);
+      }
+      try {
+        if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+        await navigator.clipboard.writeText(sharedUrl);
+        setState("copied");
+      } catch {
+        // Publishing succeeded. Keep the link available for manual copying.
+        setState("copy-error");
+      }
     } catch {
       setState("error");
-      setTimeout(() => setState("idle"), 2500);
     }
   }
   return (
+    <>
     <button
       onClick={() => void share()}
       disabled={state === "busy"}
-      className="rounded-lg bg-ink px-3 py-1.5 text-[13px] font-semibold text-app hover:opacity-90 disabled:opacity-40"
-      title="Copy a public proof-of-work link for this job"
+      className="min-h-10 rounded-lg bg-ink px-3 py-1.5 text-[13px] font-semibold text-app hover:opacity-90 disabled:opacity-40"
+      title="Publish a public proof-of-work link for this job"
     >
-      {state === "busy" ? "Sharing…" : state === "done" ? "Link copied" : state === "error" ? "Failed" : "Share"}
+      {state === "busy" ? "Sharing…" : state === "copied" ? "Link copied" : state === "error" ? "Sharing failed — retry" : url ? "Copy link" : "Share public link"}
     </button>
+    {state === "copy-error" && url && <label className="w-full text-xs text-ink-secondary" role="status">
+      Link created. Copy it below:
+      <input readOnly value={url} aria-label="Public receipt link" onFocus={(event) => event.currentTarget.select()}
+        className="mt-2 w-full min-w-0 rounded-lg border border-hairline bg-inset px-3 py-2 text-sm text-ink" />
+    </label>}
+    </>
   );
 }
