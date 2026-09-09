@@ -100,3 +100,49 @@ consistency, separate from the documented limits on provenance.
 
 Hourly continuation is active in the current task under the standing mandate;
 paid activation and other board-level actions remain gated.
+
+## Loop 3 — 2026-09-10 — Use and improve the account entry experience
+
+The board requested hands-on use of the live app and a UI improvement. The live
+landing-to-app flow reached sign-in; the existing Google tab still awaited user
+authentication. This slice covers sign-in, signup, and recovery. Authenticated
+fleet use remains unverified; no production account or provider session was changed.
+
+Findings fixed: **P2** the auth surface could clip content on short screens
+because the surrounding app disables body scrolling; **P2** signup advertised
+eight characters while the server requires twelve; **P2** desktop OAuth support
+was dropped while loading capabilities. Also restored the capability-gated
+password recovery link, persistent input labels, readable account/error text,
+password visibility controls, and keyboard submission of the separate pairing
+form. Return destinations now remain local after URL normalization, including
+the dot-segment edge case caught during review.
+
+The visual update uses a warm two-column workspace introduction on desktop and
+a focused single-column form on mobile. The illustration is decorative and
+contains no invented activity, customer metrics, or benchmark results. Operator
+environment-variable instructions were removed from customer-facing entry forms.
+
+Shipped areas: `AuthShell.tsx`, scoped `auth.css`, `AuthPasswordField.tsx`, the
+four auth pages, `src/lib/auth.tsx`, `auth-navigation.ts`, and two regression test
+files. Google account selection, referral redemption, and approval ownership
+retain their existing behavior.
+
+Verification: 13 hands-on browser checks passed against a disposable local API
+fixture: show/hide password, Enter-to-sign-in with error feedback, recovery
+confirmation, 390px layout, short-password rejection, 320px scrolling, desktop
+capability hydration, unavailable recovery, Enter-to-pair, missing-token
+recovery, mismatched reset passwords, and keyboard reset submission with error
+feedback. Fixture logs contain method/path only; no real email or account was
+created. Focused tests: **2 files / 27 passed / 0 skipped**. Final full suite:
+**181 files / 1788 passed / 8 skipped**, 183.62 seconds, after the final redirect
+correction. This exceeds the handbook baseline of 172 files / 1689 passed / 8 skipped.
+Both typechecks, scoped lint, and the Vite production build passed. Vite still
+reports large chunks; this slice makes no bundle-size improvement claim.
+
+Commercial implication: account entry now explains the product, keeps controls
+readable and reachable on phones, and exposes available recovery paths. No
+conversion improvement is claimed without usage data.
+
+Next pick: resume the confirmed receipt-timing audit defect from Loop 2; review
+the authenticated fleet UI when a user session is available. The board's UI
+request took priority for this cycle.

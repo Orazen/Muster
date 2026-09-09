@@ -29,7 +29,7 @@ export function ForgotPasswordPage() {
       footer={
         <>
           Remembered it?{" "}
-          <Link to="/sign-in" className="font-medium text-[#ff7a45] hover:text-[#f0460e]">
+          <Link to="/sign-in" className="auth-link">
             Sign in
           </Link>
         </>
@@ -37,33 +37,33 @@ export function ForgotPasswordPage() {
     >
         {!capabilities.passwordReset ? (
           <div className={authCardBox}>
-            Password reset isn't available on this deployment — no email transport is configured.
-            Ask whoever runs this instance to set <code className="text-[#f5f5f5]">RESEND_API_KEY</code>,
-            or sign in with a provider instead.
+            Password reset is not available here. Contact the person who runs this
+            workspace, or return to sign in and use a connected provider.
           </div>
         ) : sent ? (
-          <div className={authCardBox}>
-            <p className="text-[#f5f5f5]">Check your inbox.</p>
+          <div className={authCardBox} role="status">
+            <p className="font-medium">Check your inbox.</p>
             <p className="mt-2">
-              If an account exists for <span className="text-[#f5f5f5]">{email}</span>, a reset link
+              If an account exists for <span className="font-medium">{email}</span>, a reset link
               is on its way. It expires in an hour.
             </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className={authCardBox} role="alert">
-                <span className="text-[#ff8f6b]">{error}</span>
+              <div className="auth-notice auth-error" role="alert">
+                {error}
               </div>
             )}
 
             <div>
-              <label htmlFor="email" className="mb-1 block text-[13px] font-medium text-[#a1a1a6]">
+              <label htmlFor="email" className="auth-label">
                 Email
               </label>
               <input
                 id="email"
                 type="email"
+                autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}

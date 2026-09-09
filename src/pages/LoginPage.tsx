@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { AuthShell, authCardBox } from "@/components/AuthShell";
+import { AuthShell, authCardBox, authInputCls, authButtonCls } from "@/components/AuthShell";
+
+import { AuthPasswordField } from "@/components/AuthPasswordField";
+import { authDestination } from "@/lib/auth-navigation";
 
 /** Three ways in, on web and in the packaged desktop app alike:
  *   1. Continue with Google        — direct OAuth on deployments with creds;
@@ -17,7 +20,7 @@ export function LoginPage() {
   const { capabilities, signInWithProvider, signIn, user, loading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const next = params.get("next") ?? "/app";
+  const next = authDestination(params.get("next"));
   const [error, setError] = useState("");
   const [googlePending, setGooglePending] = useState(false);
 
@@ -28,7 +31,7 @@ export function LoginPage() {
   const authError = params.get("authError");
   const authErrorHint =
     authError === "state_mismatch"
-      ? "That sign-in took too long and expired. One more tap and you're in."
+      ? "That sign-in expired. Please try again."
       : authError
         ? `Sign-in failed (${authError}). Please try again.`
         : "";
@@ -61,7 +64,7 @@ export function LoginPage() {
         if (r.ok && ((await r.json().catch(() => null)) as { user?: unknown } | null)?.user) {
           if (!alive) return;
           setOauthWaiting(false);
-          window.location.href = next.startsWith("/") ? next : "/app";
+          window.location.href = next;
           return;
         }
       } catch {
@@ -84,7 +87,7 @@ export function LoginPage() {
     e?.preventDefault();
     setError("");
     if (!email.trim() || !password) {
-      setError("enter your email and password");
+      setError("Enter your email and password.");
       return;
     }
     setEmailBusy(true);
@@ -94,9 +97,9 @@ export function LoginPage() {
         setError(result.error);
         return;
       }
-      navigate(next.startsWith("/") ? next : "/app");
+      navigate(next);
     } catch {
-      setError("could not reach the server");
+      setError("Could not reach the server. Please try again.");
     } finally {
       setEmailBusy(false);
     }
@@ -117,9 +120,9 @@ export function LoginPage() {
         return;
       }
       // the session cookie is set — reload auth state by hard-navigating
-      window.location.href = next.startsWith("/") ? next : "/app";
+      window.location.href = next;
     } catch {
-      setError("could not reach the local server");
+      setError("Could not reach the local server. Please try again.");
     } finally {
       setPairBusy(false);
     }
@@ -131,23 +134,24 @@ export function LoginPage() {
   const desktopOAuthHandoff = Boolean(capabilities.desktopOAuth) && !googleConfigured;
 
   return (
-    <AuthShell title="Welcome back" subtitle="One tap and your team of agents is waiting.">
-      <div className="space-y-4">
+    <AuthShell title="Welcome back" subtitle="Sign in to pick up where your team left off."
+      footer={<>New to Muster? <Link to={`/sign-up?next=${encodeURIComponent(next)}`} className="auth-link">Create an account</Link></>}>
+      <div className="auth-stack">
         {authErrorHint && (
-          <div role="alert" className="rounded-lg border border-[#7a3b12] bg-[#2a1a10] px-3 py-2 text-sm text-[#ffb27d]">
+          <div role="alert" className="auth-notice auth-error">
             {authErrorHint}
           </div>
         )}
         {!authLoading && user && (
           <div className={`flex flex-col gap-2.5 ${authCardBox}`}>
             <span>
-              Already signed in as <span className="font-semibold text-[#f5f5f5]">{user.email}</span>.
+              Already signed in as <span className="font-semibold">{user.email}</span>.
             </span>
             <span className="flex gap-3 text-xs">
               <button
                 type="button"
-                onClick={() => navigate("/app")}
-                className="font-semibold text-[#ff7a45] hover:text-[#f0460e]"
+                onClick={() => navigate(next)}
+                className="auth-link"
               >
                 Continue as {user.name?.split(" ")[0] || "this user"}
               </button>
@@ -156,7 +160,7 @@ export function LoginPage() {
                 onClick={async () => {
                   await signOut();
                 }}
-                className="text-[#a1a1a6] hover:text-[#f5f5f5]"
+                className="auth-link"
               >
                 Use another account
               </button>
@@ -164,8 +168,8 @@ export function LoginPage() {
           </div>
         )}
         {error && (
-          <div className={authCardBox} role="alert">
-            <span className="text-[#ff8f6b]">{error}</span>
+          <div className="auth-notice auth-error" role="alert">
+            {error}
           </div>
         )}
 
@@ -189,7 +193,7 @@ export function LoginPage() {
               setGooglePending(false);
               if (result.error) setError(result.error);
             }}
-            className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-gray-200 bg-white py-2.5 text-sm font-semibold text-[#1f1f1f] shadow-sm transition-all hover:bg-gray-50 disabled:opacity-50"
+            className="auth-google"
           >
             <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
               <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z" />
@@ -201,55 +205,31 @@ export function LoginPage() {
           </button>
         )}
 
-        <form
-          onSubmit={(e) => void handleEmailSignIn(e)}
-          className="space-y-2.5 rounded-xl border border-neutral-300 bg-white p-4 shadow-sm"
-        >
-          <p className="text-center text-[12px] font-medium text-neutral-700">or continue with email</p>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            aria-label="Email"
-            autoComplete="email"
-            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-black placeholder:text-neutral-400 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password"
-            aria-label="Password"
-            autoComplete="current-password"
-            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-black placeholder:text-neutral-400 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
-          />
-          <button
-            type="submit"
-            disabled={emailBusy}
-            className="w-full rounded-lg bg-[#1f1f1f] py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f1f1f]/90 disabled:opacity-50"
-          >
+        {(googleConfigured || desktopOAuthHandoff) && <div className="auth-divider">or use your email</div>}
+        <form onSubmit={(e) => void handleEmailSignIn(e)} className="auth-form">
+          <div>
+            <label htmlFor="email" className="auth-label">Email address</label>
+            <input id="email" name="email" type="email" required value={email}
+              onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
+              autoComplete="email" className={authInputCls} />
+          </div>
+          <AuthPasswordField id="password" value={password} onChange={setPassword} autoComplete="current-password" />
+          {capabilities.passwordReset && <div className="auth-recovery"><Link to="/forgot-password" className="auth-link">Forgot password?</Link></div>}
+          <button type="submit" disabled={emailBusy} className={authButtonCls}>
             {emailBusy ? "Signing in…" : "Sign in with email"}
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate(`/sign-up?next=${encodeURIComponent(next)}`)}
-            className="w-full text-center text-[12px] font-medium text-[#f0460e] hover:text-[#f0460e]/80"
-          >
-            New here? Create an account
           </button>
         </form>
 
         {capabilities.cloudPairing && (
-          // deliberately NOT inside a <form>: nested forms are illegal HTML.
-          // This bridge is how the packaged desktop app signs in with Google:
-          // authenticate on the web, type the one-time code here.
-          <div className="space-y-2.5 rounded-xl border border-neutral-300 bg-white p-4 shadow-sm">
-            <p className="text-center text-[12px] font-medium leading-relaxed text-neutral-700">
+          <form className="auth-pair" onSubmit={(event) => {
+            event.preventDefault();
+            if (!pairBusy && pairCode.trim().length >= 4) void handlePair();
+          }}>
+            <p className="auth-hint">
               Sign in once on muster.orazen.online with Google, then type the
               code it shows here. Codes last five minutes.
             </p>
-            <div className="flex gap-2">
+            <div className="auth-pair-row">
               <input
                 value={pairCode}
                 onChange={(e) => setPairCode(e.target.value.toUpperCase())}
@@ -260,13 +240,12 @@ export function LoginPage() {
                 // Headroom costs nothing; wrong codes still fail loudly.
                 maxLength={12}
                 autoComplete="off"
-                className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 font-mono text-sm uppercase tracking-[0.25em] text-black placeholder:text-neutral-400 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
+                className={authInputCls}
               />
               <button
-                type="button"
-                onClick={() => void handlePair()}
+                type="submit"
                 disabled={pairBusy || pairCode.trim().length < 4}
-                className="shrink-0 rounded-lg bg-[#f0460e] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#f0460e]/90 disabled:opacity-50"
+                className={authButtonCls}
               >
                 {pairBusy ? "…" : "Connect"}
               </button>
@@ -279,19 +258,14 @@ export function LoginPage() {
                 if (window.ogb?.openExternal) window.ogb.openExternal(url);
                 else window.open(url, "_blank", "noopener");
               }}
-              className="text-center text-[12px] font-medium text-[#f0460e] hover:text-[#f0460e]/80"
+              className="auth-link"
             >
               Open muster.orazen.online/pair ↗
             </button>
-          </div>
+          </form>
         )}
 
-        {!googleConfigured && !desktopOAuthHandoff && !capabilities.cloudPairing && (
-          <p className={`text-center text-[12px] ${authCardBox}`}>
-            This deployment has no Google sign-in configured — ask whoever runs it to set
-            GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.
-          </p>
-        )}
+
       </div>
     </AuthShell>
   );

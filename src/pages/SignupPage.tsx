@@ -1,7 +1,10 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { AuthShell, authCardBox } from "@/components/AuthShell";
+import { AuthShell, authInputCls, authButtonCls } from "@/components/AuthShell";
+
+import { AuthPasswordField } from "@/components/AuthPasswordField";
+import { authDestination, AUTH_PASSWORD_MIN_LENGTH } from "@/lib/auth-navigation";
 
 /** Two ways to create an account, neither hidden behind the other:
  *   1. Continue with Google — one tap where OAuth creds are configured.
@@ -13,7 +16,7 @@ export function SignupPage() {
   const { capabilities, signInWithProvider, signUp } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const next = params.get("next") ?? "/app";
+  const next = authDestination(params.get("next"));
   const [error, setError] = useState("");
   const [googlePending, setGooglePending] = useState(false);
   const [name, setName] = useState("");
@@ -25,8 +28,8 @@ export function SignupPage() {
   async function handleEmailSignUp(e?: React.FormEvent) {
     e?.preventDefault();
     setError("");
-    if (!name.trim() || !email.trim() || password.length < 8) {
-      setError("your name, email and a password of at least 8 characters");
+    if (!name.trim() || !email.trim() || password.length < AUTH_PASSWORD_MIN_LENGTH) {
+      setError(`Enter your name, email, and a password of at least ${AUTH_PASSWORD_MIN_LENGTH} characters.`);
       return;
     }
     setEmailBusy(true);
@@ -48,32 +51,21 @@ export function SignupPage() {
           body: JSON.stringify({ code: ref }),
         }).catch(() => {});
       }
-      navigate(next.startsWith("/") ? next : "/app");
+      navigate(next);
     } catch {
-      setError("could not reach the server");
+      setError("Could not reach the server. Please try again.");
     } finally {
       setEmailBusy(false);
     }
   }
 
   return (
-    <AuthShell
-      title="Muster your team"
-      subtitle={googleConfigured ? "One tap with Google and your first agent is minutes away." : "Create your account — your first agent is minutes away."}
-      footer={
-        <button
-          type="button"
-          onClick={() => navigate(`/sign-in?next=${encodeURIComponent(next)}`)}
-          className="font-medium text-[#ff7a45] hover:text-[#f0460e]"
-        >
-          Back to sign in
-        </button>
-      }
-    >
-      <div className="space-y-4">
+    <AuthShell title="Create your account" subtitle="One workspace for your agents and their work."
+      footer={<>Already have an account? <Link to={`/sign-in?next=${encodeURIComponent(next)}`} className="auth-link">Sign in</Link></>}>
+      <div className="auth-stack">
         {error && (
-          <div className={authCardBox} role="alert">
-            <span className="text-[#ff8f6b]">{error}</span>
+          <div className="auth-notice auth-error" role="alert">
+            {error}
           </div>
         )}
 
@@ -96,10 +88,10 @@ export function SignupPage() {
                     body: JSON.stringify({ code: ref }),
                   }).catch(() => {});
                 }
-                navigate(next.startsWith("/") ? next : "/app");
+                navigate(next);
               }
             }}
-            className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-gray-200 bg-white py-2.5 text-sm font-semibold text-[#1f1f1f] shadow-sm transition-all hover:bg-gray-50 disabled:opacity-50"
+            className="auth-google"
           >
             <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
               <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z" />
@@ -111,55 +103,28 @@ export function SignupPage() {
           </button>
         )}
 
-        <form
-          onSubmit={(e) => void handleEmailSignUp(e)}
-          className="space-y-2.5 rounded-xl border border-neutral-300 bg-white p-4 shadow-sm"
-        >
-          {googleConfigured && (
-            <p className="text-center text-[12px] font-medium text-neutral-700">or create an account with email</p>
-          )}
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Your name"
-            aria-label="Your name"
-            autoComplete="name"
-            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-black placeholder:text-neutral-400 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
-          />
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            aria-label="Email"
-            autoComplete="email"
-            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-black placeholder:text-neutral-400 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password (8+ characters)"
-            aria-label="Password"
-            autoComplete="new-password"
-            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-black placeholder:text-neutral-400 focus:border-[#f0460e]/60 focus:outline-none focus:ring-1 focus:ring-[#f0460e]/50"
-          />
-          <button
-            type="submit"
-            disabled={emailBusy}
-            className="w-full rounded-lg bg-[#1f1f1f] py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f1f1f]/90 disabled:opacity-50"
-          >
+        {googleConfigured && <div className="auth-divider">or use your email</div>}
+        <form onSubmit={(e) => void handleEmailSignUp(e)} className="auth-form">
+          <div>
+            <label htmlFor="name" className="auth-label">Your name</label>
+            <input id="name" name="name" type="text" required value={name}
+              onChange={(e) => setName(e.target.value)} placeholder="What should we call you?"
+              autoComplete="name" className={authInputCls} />
+          </div>
+          <div>
+            <label htmlFor="email" className="auth-label">Email address</label>
+            <input id="email" name="email" type="email" required value={email}
+              onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com"
+              autoComplete="email" className={authInputCls} />
+          </div>
+          <AuthPasswordField id="password" value={password} onChange={setPassword}
+            autoComplete="new-password" minLength={AUTH_PASSWORD_MIN_LENGTH}
+            hint={`Use at least ${AUTH_PASSWORD_MIN_LENGTH} characters.`} />
+          <button type="submit" disabled={emailBusy} className={authButtonCls}>
             {emailBusy ? "Creating account…" : "Create account"}
           </button>
         </form>
 
-        {!googleConfigured && (
-          <p className="text-center text-[12px] text-neutral-500">
-            Google sign-in isn't configured on this deployment — set GOOGLE_CLIENT_ID and
-            GOOGLE_CLIENT_SECRET to enable it alongside email.
-          </p>
-        )}
       </div>
     </AuthShell>
   );

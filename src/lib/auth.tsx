@@ -102,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         socialProviders: Array.isArray(data.socialProviders) ? data.socialProviders : [],
         googleOnlySignup: Boolean(data.googleOnlySignup),
         cloudPairing: Boolean(data.cloudPairing),
+        desktopOAuth: Boolean(data.desktopOAuth),
         pairingCloudUrl: data.pairingCloudUrl ?? null,
       });
     } catch {

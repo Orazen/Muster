@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { AuthShell, authInputCls, authButtonCls, authCardBox } from "@/components/AuthShell";
+import { AuthShell, authButtonCls, authCardBox } from "@/components/AuthShell";
 
-/** Must match minPasswordLength in server/auth.ts. */
-const MIN_PASSWORD_LENGTH = 12;
+import { AuthPasswordField } from "@/components/AuthPasswordField";
+import { AUTH_PASSWORD_MIN_LENGTH } from "@/lib/auth-navigation";
 
 export function ResetPasswordPage() {
   const { resetPassword } = useAuth();
@@ -23,8 +23,8 @@ export function ResetPasswordPage() {
 
     // Checked here as well as server-side so the failure is immediate rather
     // than a round trip.
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Use at least ${MIN_PASSWORD_LENGTH} characters.`);
+    if (password.length < AUTH_PASSWORD_MIN_LENGTH) {
+      setError(`Use at least ${AUTH_PASSWORD_MIN_LENGTH} characters.`);
       return;
     }
     if (password !== confirm) {
@@ -42,12 +42,12 @@ export function ResetPasswordPage() {
   return (
     <AuthShell
       title="Choose a new password"
-      subtitle="Pick something strong — this instance holds your agents' credentials."
+      subtitle="Choose a new password to get back to your workspace."
     >
         {!token ? (
           <div className={authCardBox}>
             This link is missing its reset token, or it has already been used.{" "}
-            <Link to="/forgot-password" className="font-medium text-[#ff7a45] hover:text-[#f0460e]">
+            <Link to="/forgot-password" className="auth-link">
               Request a new one
             </Link>
             .
@@ -55,44 +55,16 @@ export function ResetPasswordPage() {
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className={authCardBox} role="alert">
-                <span className="text-[#ff8f6b]">{error}</span>
+              <div className="auth-notice auth-error" role="alert">
+                {error}
               </div>
             )}
 
-            <div>
-              <label htmlFor="password" className="mb-1 block text-[13px] font-medium text-[#a1a1a6]">
-                New password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                minLength={MIN_PASSWORD_LENGTH}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className={authInputCls}
-                placeholder="••••••••••••"
-              />
-              <p className="mt-1 text-xs text-[#a1a1a6]">
-                At least {MIN_PASSWORD_LENGTH} characters.
-              </p>
-            </div>
-
-            <div>
-              <label htmlFor="confirm" className="mb-1 block text-[13px] font-medium text-[#a1a1a6]">
-                Confirm password
-              </label>
-              <input
-                id="confirm"
-                type="password"
-                required
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                className={authInputCls}
-                placeholder="••••••••••••"
-              />
-            </div>
+            <AuthPasswordField id="password" label="New password" value={password} onChange={setPassword}
+              autoComplete="new-password" minLength={AUTH_PASSWORD_MIN_LENGTH}
+              hint={`Use at least ${AUTH_PASSWORD_MIN_LENGTH} characters.`} />
+            <AuthPasswordField id="confirm" label="Confirm password" value={confirm} onChange={setConfirm}
+              autoComplete="new-password" />
 
             <button type="submit" disabled={loading} className={authButtonCls}>
               {loading ? "Saving…" : "Set new password"}
