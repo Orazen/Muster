@@ -418,6 +418,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     computer: { driver: "boxAgent" },
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
+    vibe: { driver: "vibeAgent" },
   };
   // Bring-your-own-key API engines appear as extra instances once their key
   // is saved in Settings → Providers (server/providers.ts catalog): no CLI
@@ -460,6 +461,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   const CUSTOM_ONLY = {
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
+    vibe: { driver: "vibeAgent" },
   } as const;
   const configured = cfg.instances && Object.keys(cfg.instances).length ? cfg.instances : null;
   const map: InstanceConfigMap = configured ? { ...configured } : { ...DEFAULT_FLEET };
@@ -485,6 +487,9 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     const environment = { ...entry.environment };
     if (cfg.xai?.key) environment.XAI_API_KEY = cfg.xai.key;
     if (cfg.box?.token) environment.BOX_TOKEN = cfg.box.token;
+    if (entry.driver === "vibeAgent" && cfg.providers?.mistral?.apiKey && !environment.MISTRAL_API_KEY) {
+      environment.MISTRAL_API_KEY = cfg.providers.mistral.apiKey;
+    }
     if (entry.driver === "opencodeGo" && cfg.opencodeGo?.apiKey) {
       environment.OPENCODE_API_KEY = cfg.opencodeGo.apiKey;
     }

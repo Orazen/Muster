@@ -44,9 +44,11 @@ const mode = process.env.FAKE_ACP_MODE ?? "happy";
 // identical to before.
 const models = (process.env.FAKE_ACP_MODELS ?? "").split(",").filter(Boolean);
 let currentModel: string | null = models[0] ?? null;
+let currentMode = process.env.FAKE_ACP_SESSION_MODE ?? "default";
 const configOptions = () =>
   models.length
     ? [
+        ...(process.env.FAKE_ACP_SESSION_MODE ? [{ id: "mode", currentValue: currentMode }] : []),
         {
           id: "model",
           name: "Model",
@@ -73,6 +75,8 @@ if (process.env.FAKE_ACP_DUMP) {
       "TEST_POLICY",
       "OPENCODE_API_KEY",
       "OPENAI_API_KEY",
+      "MISTRAL_API_KEY",
+      "VIBE_HOME",
       "OPENROUTER_API_KEY",
       "ANTHROPIC_API_KEY",
       "XAI_API_KEY",
@@ -256,6 +260,11 @@ function handle(msg: any) {
     }
     case "session/set_config_option": {
       const { configId, value } = msg.params ?? {};
+      if (configId === "mode" && process.env.FAKE_ACP_SESSION_MODE) {
+        if (!process.env.FAKE_ACP_MODE_STICKS) currentMode = value;
+        result(msg.id, { configOptions: configOptions() });
+        break;
+      }
       if (configId !== "model" || !models.includes(value)) {
         out({
           jsonrpc: "2.0",
@@ -372,7 +381,10 @@ function handle(msg: any) {
         return;
       }
       if (mode !== "empty-reply") playTurn();
-      if (mode === "permission") {
+      if (mode === "permission" || mode === "sparse-permission") {
+        if (mode === "sparse-permission") {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "sparse", kind: "execute", title: "Run command", rawInput: { command: "echo pending" } } } });
+        }
         // ask the client to approve a tool, then complete once answered
         pendingPermissionId = 9001;
         onPermissionAnswered = complete;
@@ -381,7 +393,7 @@ function handle(msg: any) {
           id: pendingPermissionId,
           method: "session/request_permission",
           params: {
-            toolCall: { kind: "execute", rawInput: { command: "echo hi" }, title: "echo hi" },
+            toolCall: mode === "sparse-permission" ? { toolCallId: "sparse" } : { kind: "execute", rawInput: { command: "echo hi" }, title: "echo hi" },
             options: [
               { optionId: "allow-once", kind: "allow_once" },
               { optionId: "reject", kind: "reject_once" },

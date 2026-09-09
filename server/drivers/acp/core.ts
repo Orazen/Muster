@@ -13,6 +13,7 @@
 // is never a security contract). session/load REPLAYS history as ordinary
 // session/update notifications, so updates are double-gated: nothing emits
 // before the prompt is sent, and `_meta.isReplay` updates are dropped.
+import { AcpToolContexts } from "./tool-context.ts";
 import { homedir } from "node:os";
 
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
@@ -131,7 +132,7 @@ export interface AcpSupport {
     sessionId: string;
     config: AcpConfig;
     turn: SendTurnInput;
-  }): Promise<void>;
+  }): Promise<void | { model: string }>; 
 }
 
 const INIT_TIMEOUT = 20_000;
@@ -145,6 +146,7 @@ const PROVIDER_CREDENTIAL_ENV = [
   "GOOGLE_API_KEY",
   "KIMI_API_KEY",
   "MOONSHOT_API_KEY",
+  "MISTRAL_API_KEY",
   "OPENAI_API_KEY",
   "OPENCODE_API_KEY",
   "XAI_API_KEY",
@@ -291,6 +293,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           stdio: ["pipe", "pipe", "pipe"],
         });
 
+        const toolContexts = new AcpToolContexts();
         const state = { settled: false, promptSent: false, text: "" };
         const asks = new Map<string, (behavior: string, source?: "user" | "timeout" | "system") => void>();
         let nextId = 1;
@@ -360,7 +363,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               message: `${DRIVER_KIND} offered no "${want}" permission option — cancelling the request instead of guessing`,
             });
 
-          const toolCall = params.toolCall ?? {};
+          const toolCall = toolContexts.remember(params.toolCall ?? {});
           if (config.fullAuto) {
             const allow = optionFor("allow");
             if (!allow) missing("allow");
@@ -433,6 +436,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               break;
             }
             case "tool_call": {
+              toolContexts.remember(u);
               emit({
                 ...base(threadId, turnId),
                 type: "item.started",
@@ -443,6 +447,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               break;
             }
             case "tool_call_update": {
+              toolContexts.remember(u);
               if (u.status === "completed" || u.status === "failed") {
                 emit({
                   ...base(threadId, turnId),
@@ -614,13 +619,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }
 
               if (support.configureSession) {
-                await support.configureSession({
+                const configured = await support.configureSession({
                   request: (method, params, timeoutMs) =>
                     request(method, params, timeoutMs ?? SESSION_CONFIG_TIMEOUT),
                   sessionId,
                   config,
                   turn: cliTurn,
                 });
+                if (configured) selectedModel = configured.model;
               }
             } catch (error) {
               // session.started is the only place the resume cursor is recorded,

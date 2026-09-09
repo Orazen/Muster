@@ -25,6 +25,7 @@ import { KimiAgentDriver } from "./acp/kimi.ts";
 import { DroidAgentDriver } from "./acp/droid.ts";
 import { OpenCodeGoDriver } from "./acp/opencode-go.ts";
 import { QwenAgentDriver } from "./acp/qwen.ts";
+import { VibeAgentDriver } from "./acp/vibe.ts";
 import { HermesAgentDriver } from "./acp/hermes.ts";
 
 export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
@@ -49,6 +50,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   OpenCodeGoDriver,
   QwenAgentDriver,
   HermesAgentDriver,
+  VibeAgentDriver,
   ClaudeDriver,
   CodexDriver,
   AntigravityDriver,
