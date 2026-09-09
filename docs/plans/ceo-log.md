@@ -146,3 +146,12 @@ conversion improvement is claimed without usage data.
 Next pick: resume the confirmed receipt-timing audit defect from Loop 2; review
 the authenticated fleet UI when a user session is available. The board's UI
 request took priority for this cycle.
+
+Release follow-up: UI commit `3ee3a9d` was pushed. GitHub CI and autodeploy
+failed before running any steps; their annotations report failed account
+payments or a spending limit. The local test numbers above remain the verified
+results. Board action is needed to restore hosted Actions billing. Used the
+existing `.deploy-trigger` mechanism documented in the autodeploy workflow to
+request the same release through Dokploy's GitHub App webhook. Production was
+still serving the previous UI when the fallback trigger was requested; live
+rollout confirmation remains pending. No billing settings were changed.
