@@ -77,14 +77,15 @@ export class TurnWatchdog {
    * when the harness can see it (reaper attribution). */
   watch(threadId: string, botId: string, pid?: number): void {
     const at = this.now();
-    this.turns.set(threadId, {
+    const turn: WatchedTurn = {
       threadId,
       botId,
       startedAt: at,
       lastEventAt: at,
       waitingOnHuman: false,
-      ...(pid !== undefined ? { pid } : {}),
-    });
+    };
+    if (pid !== undefined) turn.pid = pid;
+    this.turns.set(threadId, turn);
   }
 
   /** Any provider event for the thread proves the turn is alive. */

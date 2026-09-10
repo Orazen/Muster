@@ -1610,3 +1610,85 @@ it. Final review found no remaining material blocker within this slice.
 Public updater GET returned200 and still reports **1.10.4**. Source push
 does not establish deployment or a new desktop release. Allowance now
 **18% used / 82% remaining**; no reset consumed. Rebase was up to date.
+
+## Loop 29 — Fleet contracts and bounded goal scheduling — 2026-09-11
+
+Loop28 **36372e6** is pushed. This slice repairs the remaining harness lint
+bucket. Driver PID notifications now use their declared RuntimeEvent
+variant directly, preserving spawn/retry timing. Watchdog records assign
+an optional PID only when present. Goal test fixtures use complete runtime
+events and exercise the public timer rather than a private method cast.
+The queue snapshot remains explicit: work queued while a dispatch awaits
+must wait for the next tick. A deferred two-goal regression covers this.
+
+Review found and fixed a goal-capacity defect: after200 records, creation
+could remove the newly inserted goal before its first dispatch. Creation
+now preserves active goals and the new record, pruning only the oldest
+terminal history to maintain200 records. If all200 are active, creation
+returns the existing status409 error convention before changing disk,
+events or dispatch state. Stopping a goal makes capacity available again.
+Numeric coercion/default/round-cap behavior is retained; this is not a new
+HTTP input-validation claim.
+
+Fleet MCP now parses pairing configuration, JSON-RPC requests, tool
+arguments and method-specific REST responses through named contracts.
+Compact roster fields retain omission semantics; receipt/audit/why/scorecard
+data remain available to their existing tools. Approval selection continues
+to scan a reversed copy and stop at the newest substantive bot reply.
+String request IDs and integer0 retain their identity. Invalid JSON and
+request envelopes receive protocol errors; valid notifications stay silent.
+References: [JSON-RPC2.0](https://www.jsonrpc.org/specification) and
+[MCP base protocol](https://modelcontextprotocol.io/specification/2025-06-18/basic).
+No protocol-version upgrade or broader capability claim is made.
+
+Initial focused checks: drivers **3files/55passed/1skipped in4.84s**;
+goals/watchdog **2files/26passed/0skipped in2.03s**. Their scoped lint passed.
+Fleet/final integrated gates follow before commit. Source review preserves
+legitimate202 task acknowledgements without a message ID, string-valued
+answered cards and historical usage data. Verification uses local fixtures;
+no real provider task, approval or demo session is invoked.
+
+Commercial implication: predictable task dispatch and inspectable tool
+failures support reliable fleet use; this is not conversion/revenue evidence.
+After this bucket, companion/CLI lint and dependency readiness remain,
+followed by atomic/monotonic release mirror promotion and a versioned
+candidate. Native Google login, GUI/install/update, Android/Watch UI, VM,
+portable recovery/sync and Mimosa remain unverified.
+
+Fleet final focused run: **1file/67passed/0skipped in13.07s** after replacing
+the fixture's demo address with an invalid test hostname and a rejecting
+default fetch stub. The integrated typecheck found one heterogeneous JSON
+fixture inference error; its named JsonObject[] annotation fixes that
+without changing runtime behavior. Both types and scoped lint now pass.
+Build passed (Vite4.99s, existing large-chunk warning). Global lint is now
+**32errors/5warnings across7files**, down29errors/1warning from Loop28.
+
+Next-bucket preflight: Android companion alone has29errors/2warnings in5
+files. It is excluded from root tests/types and the root pnpm workspace.
+Its configured jest-expo preset is missing/undeclared, there are no tests,
+and its local npm lockfile is intentionally ignored. Installed SDK52 needs
+an explicit standalone dependency/test plan; schema imports must not rely
+on root's incidental Zod. Audit also found premature connected state and
+late old-session roster/stream updates in useCompanion. Cover those with
+deferred response/reconnect tests. Its README's build/distribution claims
+need verification when fixing package readiness; no native parity claim.
+
+CLI preflight contributes the other3errors/3warnings. Preserve its Node22+
+zero-external-dependency/copy-install contract. Validate persisted PID/port
+and model-option responses at their input boundaries. A valid number is
+not process identity: stopDaemon currently signals a recorded PID even
+when health fails, so add an owned-process check before any real signal.
+QR replacement arrays must retain numeric zero for parity buffers, null
+for unassigned modules, and independent rows. Direct CLI helper tests are
+missing; cli/*.test.mjs is outside root Vitest discovery. Place regressions
+under a configured test path and verify the bundled CLI separately.
+
+Loop29 final verification: **215files/2716passed/8skipped in237.91s**, exit0,
+**46 additional passes** versus Loop28. Authoritative evidence:
+`.omb-scratch/verification/loop29-full.log`, source hashes in
+`loop29-reviewed-source.json`, plus focused/build/type/lint logs. Build,
+both types and scoped lint pass; global lint remains32errors/5warnings.
+Final review found no material blocker in this slice. No new desktop
+version, provider/browser E2E, installer or native login verification is
+claimed. Allowance **20% used / 80% remaining**; no reset consumed. The
+active goal and existing heartbeat continue with companion/CLI readiness.

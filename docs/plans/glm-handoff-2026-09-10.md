@@ -738,3 +738,68 @@ Global lint remains61errors/6warnings. Public updater GET200 still reports
 1.10.4; no new release/deployment proof is implied. Allowance18%used/82%
 remaining, no reset consumed. Final review found no material blocker in
 this bounded slice; read-only next-slice preflight is complete.
+
+## Loop 29 — Fleet contracts and bounded goal scheduling
+
+Loop28 **36372e6** is pushed. Current harness slice owns fleet-mcp(+tests),
+goals(+tests), turn-watchdog and the antigravity/claude/codex driver PID
+assertions. Driver event timing and watchdog optional omission stay intact.
+Goal fixtures use complete RuntimeEvents/public timer advancement; the
+queue-at-start snapshot prevents a goal queued during an awaited dispatch
+from running in that same tick.
+
+Capacity correction: keep at most200 goals by pruning oldest terminal
+history, preserving new and active work. If200 records are active, refuse
+creation with409 before persistence/emission/dispatch, then allow it after
+one stops. The old unshift/splice logic could discard the newly created
+goal; regressions now check persisted records and actual dispatch calls.
+Outer HTTP parsing and existing goal-file recovery were not redesigned.
+
+Fleet MCP parses config/request/argument/REST boundaries while preserving
+optional fields and full method evidence. It keeps string/integer0 request
+IDs, returns explicit malformed-frame errors, and leaves valid notifications
+silent. Reversed transcript copies and the newest bot-reply barrier still
+prevent stale approvals from resurfacing. Existing successful task responses
+without message IDs remain accepted. No new tool or protocol-version bump.
+
+Initial focused gates: drivers3files/55passed/1skipped4.84s;
+goals+watchdog2files/26passed/0skipped2.03s; scoped lint passes for those files.
+Fleet and integrated/full-suite numbers follow before commit. No live
+provider/approval/demo calls. Next bucket remains companion/CLI dependency,
+test and lint readiness; then atomic/monotonic public mirror promotion and
+versioned candidate verification. Broad goal and existing heartbeat active.
+
+Fleet final focused1file/67passed/0skipped13.07s; its fixture now uses an
+invalid hostname plus rejecting default fetch, so missing mocks cannot hit
+the demo. One integrated type failure in a heterogeneous fixture array was
+fixed with the existing JsonObject[] contract. Types/scoped lint/build now
+pass (Vite4.99s, large-chunk warning). Global lint32errors/5warnings7files.
+Full suite is running against frozen reviewed source hashes.
+
+Next companion preflight: Android package contributes29errors/2warnings,
+is outside root workspace/types/tests, configures absent undeclared
+jest-expo, and has no tests. It has local Expo52/RN0.76/React18 dependencies;
+local npm lockfile is intentionally ignored. Declare any schema dependency
+inside this package and establish reproducible standalone test commands.
+Fix premature connected=true and late old-client roster/stream writes
+with explicit lifecycle/deferred-response tests. Verify/correct the README
+before repeating its native feature/build/store-distribution claims.
+
+CLI's remaining3errors/3warnings need built-in boundary parsing, preserving
+its zero-external-runtime-dependency Node22+ contract. Run records must
+reject invalid PID/port; stopDaemon currently signals a stored PID even
+when health is absent, which needs an identity check before signaling.
+Model options accept strings or id/optional-label records; malformed entries
+must not become the literal ID "undefined". QR arrays are already dense:
+keep zero parity buffers, null unassigned cells and independent rows.
+CLI helper tests belong under a configured Vitest include; CLI's own test
+directory would currently be ignored. package:cli exists but source push
+does not verify a published downloadable CLI artifact.
+
+Final Loop29: **215files/2716passed/8skipped in237.91s**, exit0, **+46**
+versus Loop28. Full evidence `loop29-full.log`; reviewed source hashes
+unchanged throughout the run. Build/types/scoped lint passed; separate
+global lint remains32errors/5warnings. Final review found no material
+blocker inside this slice. No new desktop release or native/provider E2E
+claim. Allowance20%used/80%remaining; no reset consumed. Continue the next
+bounded companion/CLI slice under the same broad goal and heartbeat.

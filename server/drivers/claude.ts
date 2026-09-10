@@ -595,7 +595,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // thread before sendTurn resolves. A retry calls startAttempt again,
         // replacing the pid via a later event.
         if (child.pid)
-          emit({ ...base(threadId, turnId), type: "turn.engine-pid", pid: child.pid } as RuntimeEvent);
+          emit({ ...base(threadId, turnId), type: "turn.engine-pid", pid: child.pid });
 
       // token streaming: true while --include-partial-messages is delivering
       // text deltas for the current assistant message, so the whole-message

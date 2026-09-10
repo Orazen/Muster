@@ -153,6 +153,9 @@ export class GoalManager {
     if (state === "busy") {
       throw Object.assign(new Error("the bot is working — stop it before starting a goal"), { status: 409 });
     }
+    if (this.goals.filter((goal) => goal.status === "active").length >= MAX_GOALS) {
+      throw Object.assign(new Error("The goal limit is reached — stop an active goal before starting another."), { status: 409 });
+    }
     const at = this.now();
     const goal: GoalRecord = {
       id: randomUUID(),
@@ -165,8 +168,13 @@ export class GoalManager {
       createdAt: at,
       updatedAt: at,
     };
-    this.goals.unshift(goal);
-    if (this.goals.length > MAX_GOALS) this.goals.splice(0, this.goals.length - MAX_GOALS);
+    const pruneCount = Math.max(0, this.goals.length + 1 - MAX_GOALS);
+    const oldestTerminal = this.goals
+      .filter((existing) => existing.status !== "active")
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .slice(0, pruneCount);
+    const prunedIds = new Set(oldestTerminal.map((existing) => existing.id));
+    this.goals = [goal, ...this.goals.filter((existing) => !prunedIds.has(existing.id))];
     this.save();
     this.emitGoal(goal);
     queueMicrotask(() => void this.dispatch(goal.id, true));
@@ -237,7 +245,10 @@ export class GoalManager {
     if (this.ticking) return;
     this.ticking = true;
     try {
-      for (const id of [...this.queued]) {
+      // A dispatch can await while another goal settles and queues work.
+      // Keep that new work for the next tick rather than extending this one.
+      const queuedAtStart = [...this.queued];
+      for (const id of queuedAtStart) {
         const goal = this.goals.find((g) => g.id === id && g.status === "active");
         if (!goal) {
           this.queued.delete(id);
@@ -305,7 +316,7 @@ export class GoalManager {
   }
 }
 
-function clampRounds(raw: unknown): number {
+function clampRounds(raw: number | undefined): number {
   const n = Math.round(Number(raw));
   if (!Number.isFinite(n) || n < 1) return DEFAULT_MAX_ROUNDS;
   return Math.min(MAX_ROUNDS_CAP, n);

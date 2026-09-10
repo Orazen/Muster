@@ -521,7 +521,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // thread before sendTurn resolves. A retry calls startAttempt again,
       // replacing the pid via a later event.
       if (child.pid)
-        emit({ ...base(threadId, turnId), type: "turn.engine-pid", pid: child.pid } as RuntimeEvent);
+        emit({ ...base(threadId, turnId), type: "turn.engine-pid", pid: child.pid });
 
       // handshake + kickoff; any refusal surfaces as failure, not a hang
       (async () => {

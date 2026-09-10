@@ -20,28 +20,83 @@
 // Run with `muster mcp` (cli/muster.mjs) or directly:
 //   node --experimental-strip-types server/fleet-mcp.ts
 // Auth comes from ~/.muster/cli.json ({base, cookie}) — the same file the
-// CLI's `pair` writes — so this server never sees or stores credentials.
+// CLI's `pair` writes. The cookie is a session credential read here; this
+// module does not mint or store new provider keys.
 import { createInterface } from "node:readline";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { z } from "zod";
 
 import { attachReceipt, parseDelegatedTask } from "./fleet-delegation.ts";
+import type { DelegatedTask } from "./fleet-delegation.ts";
 import { parseEvidenceQuery, parseScorecardEvidence, parseWhyEvidence } from "./fleet-evidence.ts";
-import type { JsonObject } from "./schema.ts";
+import type { ScorecardEvidence, WhyEvidence } from "./fleet-evidence.ts";
+import { parseJson, type JsonObject } from "./schema.ts";
 
 // ── protocol envelope ───────────────────────────────────────────────────
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_INFO = { name: "muster-fleet", version: "1.0" };
 
+const jsonObjectSchema = z.record(z.string(), z.json());
+const fleetConfigSchema = z.object({ base: z.string().min(1), cookie: z.string().min(1) });
+const messageSchema = z.object({
+  id: z.string(), role: z.string(), kind: z.string(), text: z.string().optional(),
+  card: z.object({
+    title: z.string().optional(), options: z.array(z.string()).optional(),
+    tool: z.string().optional(), answered: z.string().optional(), dismissed: z.boolean().optional(),
+  }).optional(),
+});
+const botSchema = z.object({
+  id: z.string(), name: z.string().optional(), title: z.string().optional(),
+  activity: z.string().optional(), busy: z.boolean().optional(), unread: z.boolean().optional(),
+  modelSelection: z.object({ model: z.string(), instanceId: z.string() }).optional(),
+  tasks: z.array(z.object({ title: z.string().optional(), usage: jsonObjectSchema.optional() })).optional(),
+  threadId: z.string().optional(), messages: z.array(messageSchema).optional(),
+});
+const rosterBotSchema = botSchema.extend({ name: z.string() });
+const rosterSchema = z.object({ bots: z.array(rosterBotSchema) });
+const botResponseSchema = z.union([z.object({ bot: botSchema }).transform((data) => data.bot), botSchema]);
+const sentSchema = z.object({
+  ok: z.literal(true).optional(), queued: z.boolean().optional(),
+  message: z.object({ id: z.string() }).optional(), messageId: z.string().optional(),
+}).refine((data) => data.ok === true || data.queued !== undefined || data.message !== undefined || data.messageId !== undefined);
+const receiptSchema = z.object({ receipt: jsonObjectSchema, text: z.string().optional() });
+const memorySchema = z.object({ text: z.string() });
+const auditSchema = z.object({
+  entries: z.array(jsonObjectSchema), nextBefore: z.string().optional(),
+}).catchall(z.json());
+const botArgsSchema = z.object({ botId: z.string().min(1) }).strict();
+const receiptArgsSchema = botArgsSchema.extend({ threadId: z.string().min(1) });
+const waitArgsSchema = botArgsSchema.extend({ timeoutSeconds: z.number().finite().optional() });
+type FleetBot = z.infer<typeof botSchema>;
+type FleetMessage = z.infer<typeof messageSchema>;
+type Outcome = "settled" | "needs-user" | "failed" | "stalled" | "working";
+interface BotSummary {
+  id: string; name: string; title: string; activity: string; busy: boolean; unread: boolean;
+  engine?: { model: string; instance: string };
+  lastTask?: { title: string; usage?: JsonObject };
+}
+interface PendingAsk {
+  messageId: string; title: string; options: string[]; permission?: string;
+}
+interface SentTask {
+  ok: boolean; queued: boolean; receiptRef?: DelegatedTask["receiptRef"]; messageId?: string; note: string;
+}
+interface ConversationOutcome {
+  outcome: Outcome; reply?: string; needsUser?: PendingAsk; threadId?: string; hint?: string;
+}
+type FleetToolResult = { bots: BotSummary[]; count: number } | SentTask | ConversationOutcome
+  | z.infer<typeof receiptSchema> | z.infer<typeof auditSchema> | { memory: string } | WhyEvidence | ScorecardEvidence;
+
 interface ToolDef {
   name: string;
   description: string;
   inputSchema: JsonObject;
   /** Execute; return a JSON-serializable payload rendered as tool text. */
-  run(args: JsonObject): Promise<unknown>;
+  run(args: JsonObject): Promise<FleetToolResult>;
 }
 
 // ── harness client (reuses the CLI session) ─────────────────────────────
@@ -51,9 +106,8 @@ export interface FleetConfig {
   cookie: string;
 }
 
-/** Guard the MUSTER_DIR override: absolute, no `..` segments, so a hostile
- *  environment can't steer the config read outside the expected locations.
- *  The override exists for tests and sandboxes, not as an escape hatch. */
+/** Require an absolute caller-selected MUSTER_DIR without '..' segments.
+ * This is lexical path validation; it does not resolve symlinks. */
 function safeMusterDir(raw: string): string {
   if (!isAbsolute(raw) || raw.split(sep).includes("..")) {
     throw new Error("MUSTER_DIR must be an absolute path without '..' segments.");
@@ -70,10 +124,8 @@ export function loadFleetConfig(dir?: string): FleetConfig {
       ? safeMusterDir(process.env.MUSTER_DIR)
       : join(homedir(), ".muster");
   const path = join(musterDir, "cli.json");
-  // Containment assertion: the only file this module may ever read is
-  // `<musterDir>/cli.json` with musterDir already validated above. resolve()
-  // here collapses any remaining traversal, and the startsWith bound makes
-  // an escape impossible rather than merely unlikely.
+  // Read cli.json beneath the selected directory. This lexical check does
+  // not establish the filesystem destination of a symlink.
   const resolved = resolve(path);
   if (!resolved.startsWith(resolve(musterDir) + sep)) {
     throw new Error("Config path escaped the Muster directory.");
@@ -82,58 +134,59 @@ export function loadFleetConfig(dir?: string): FleetConfig {
     throw new Error("Not paired. Run `muster pair` first.");
   }
   try {
-    const cfg = JSON.parse(readFileSync(path, "utf8"));
-    if (typeof cfg.base !== "string" || typeof cfg.cookie !== "string" || !cfg.base || !cfg.cookie) {
-      throw new Error("bad shape");
-    }
-    return { base: cfg.base, cookie: cfg.cookie };
+    return fleetConfigSchema.parse(parseJson(readFileSync(path, "utf8")));
   } catch {
     throw new Error("Pairing config is unreadable. Run `muster pair` again.");
   }
 }
 
-async function harness(cfg: FleetConfig, path: string, init: RequestInit = {}): Promise<any> {
-  const headers: Record<string, string> = {
+async function harness<Schema extends z.ZodType>(
+  cfg: FleetConfig, path: string, schema: Schema, init: RequestInit = {},
+): Promise<z.output<Schema>> {
+  const headers = new Headers({
     "content-type": "application/json",
     cookie: cfg.cookie,
     origin: cfg.base,
-  };
-  Object.assign(headers, init.headers ?? {});
+  });
+  new Headers(init.headers).forEach((value, name) => headers.set(name, value));
   const res = await fetch(`${cfg.base}${path}`, { ...init, headers, signal: AbortSignal.timeout(20_000) });
   if (res.status === 401) {
     throw new Error("Session expired. Run `muster pair` again.");
   }
-  // typed any: error bodies are arbitrary server JSON
-  const body: any = await res.json().catch(() => null);
+  const body: unknown = await res.json().catch(() => null);
   if (!res.ok) {
-    const detail = typeof body?.error === "string" ? body.error : `HTTP ${res.status}`;
+    const error = z.object({ error: z.string() }).safeParse(body);
+    const detail = error.success ? error.data.error : `HTTP ${res.status}`;
     throw new Error(detail);
   }
-  return body;
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new Error("Harness returned an unreadable response.");
+  return parsed.data;
 }
 
 // ── fleet helpers ───────────────────────────────────────────────────────
 
 /** Compact roster line per bot — never the full wire shape; the caller is
  *  a model with a context budget. */
-function describeBot(bot: any): JsonObject {
+function describeBot(bot: z.infer<typeof rosterBotSchema>): BotSummary {
   const engine = bot.modelSelection
     ? { model: bot.modelSelection.model, instance: bot.modelSelection.instanceId }
     : undefined;
   const task = bot.tasks?.[0];
-  return {
+  const summary: BotSummary = {
     id: bot.id,
     name: bot.name,
     title: bot.title ?? "",
     activity: bot.activity ?? (bot.busy ? "working" : "idle"),
     busy: !!bot.busy,
     unread: !!bot.unread,
-    // JsonObject forbids undefined values — omit the key, never null-hole it.
-    ...(engine ? { engine } : {}),
-    ...(task
-      ? { lastTask: { title: task.title ?? "", ...(task.usage ? { usage: task.usage } : {}) } }
-      : {}),
   };
+  if (engine) summary.engine = engine;
+  if (task) {
+    summary.lastTask = { title: task.title ?? "" };
+    if (task.usage) summary.lastTask.usage = task.usage;
+  }
+  return summary;
 }
 
 /** Summarize the newest pending option card on a thread, if any — the
@@ -145,7 +198,7 @@ function describeBot(bot: any): JsonObject {
  *  the first thing that matters — an unanswered card, or the bot's own
  *  text reply. Stopping at a bot reply is what keeps a stale, long-since
  *  answered card from reading as "needs-user" forever. */
-function pendingAsk(messages: any[]): JsonObject | undefined {
+function pendingAsk(messages: FleetMessage[]): PendingAsk | undefined {
   for (const m of [...messages].reverse()) {
     if (m.role === "bot" && m.kind === "text" && m.text?.trim()) return undefined;
     const card = m.card;
@@ -161,7 +214,7 @@ function pendingAsk(messages: any[]): JsonObject | undefined {
 }
 
 /** One settled verdict for a thread, OpenMausBot-style vocabulary. */
-function outcomeOf(bot: any, messages: any[]): "settled" | "needs-user" | "failed" | "stalled" | "working" {
+function outcomeOf(bot: FleetBot, messages: FleetMessage[]): Outcome {
   const activity = bot.activity ?? (bot.busy ? "working" : "idle");
   // busy means the bot cannot accept another message. It also covers
   // waiting-on-you and no-signal, so preserve those specific states first.
@@ -190,10 +243,11 @@ const TOOLS: ToolDef[] = [
     description:
       "List every bot in the Muster fleet with activity, engine, and the newest task per bot. Call this first; other tools want a bot id.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    async run() {
+    async run(args) {
+      z.object({}).strict().parse(args);
       const cfg = loadFleetConfig();
-      const data = await harness(cfg, "/api/bots?messages=0");
-      const bots = Array.isArray(data.bots) ? data.bots.map(describeBot) : [];
+      const data = await harness(cfg, "/api/bots?messages=0", rosterSchema);
+      const bots = data.bots.map(describeBot);
       return { bots, count: bots.length };
     },
   },
@@ -222,11 +276,11 @@ const TOOLS: ToolDef[] = [
       if (task.receiptRef) {
         const source = task.receiptRef;
         // Verify source-bot access before fetching a historical thread.
-        await harness(cfg, `/api/bots/${encodeURIComponent(source.botId)}?messages=0`, { method: "GET" });
-        const evidence = await harness(cfg, `/api/receipts/${encodeURIComponent(source.botId)}/${encodeURIComponent(source.threadId)}`, { method: "GET" });
+        await harness(cfg, `/api/bots/${encodeURIComponent(source.botId)}?messages=0`, botResponseSchema, { method: "GET" });
+        const evidence = await harness(cfg, `/api/receipts/${encodeURIComponent(source.botId)}/${encodeURIComponent(source.threadId)}`, jsonObjectSchema, { method: "GET" });
         text = attachReceipt(task, evidence);
       }
-      const data = await harness(cfg, `/api/bots/${encodeURIComponent(botId)}/messages`, {
+      const data = await harness(cfg, `/api/bots/${encodeURIComponent(botId)}/messages`, sentSchema, {
         method: "POST",
         body: JSON.stringify({ text }),
       });
@@ -255,19 +309,17 @@ const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
     async run(args) {
-      const botId = String(args.botId ?? "");
-      if (!botId) throw new Error("botId is required");
-      const timeoutMs = Math.min(Math.max(Number(args.timeoutSeconds ?? 90) * 1000, 5_000), 600_000);
+      const { botId, timeoutSeconds } = waitArgsSchema.parse(args);
+      const timeoutMs = Math.min(Math.max((timeoutSeconds ?? 90) * 1000, 5_000), 600_000);
       const cfg = loadFleetConfig();
       const deadline = Date.now() + timeoutMs;
-      let bot: any;
-      let outcome: string;
-      let messages: any[] = [];
+      let bot: FleetBot;
+      let outcome: Outcome;
+      let messages: FleetMessage[] = [];
       do {
         await new Promise((r) => setTimeout(r, 2_500));
-        const data = await harness(cfg, `/api/bots/${encodeURIComponent(botId)}?messages=25`);
-        bot = data.bot ?? data;
-        messages = Array.isArray(bot.messages) ? bot.messages : [];
+        bot = await harness(cfg, `/api/bots/${encodeURIComponent(botId)}?messages=25`, botResponseSchema);
+        messages = bot.messages ?? [];
         outcome = outcomeOf(bot, messages);
       } while (outcome === "working" && Date.now() < deadline);
 
@@ -302,13 +354,12 @@ const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
     async run(args) {
-      const botId = String(args.botId ?? "");
-      const threadId = String(args.threadId ?? "");
-      if (!botId || !threadId) throw new Error("botId and threadId are required");
+      const { botId, threadId } = receiptArgsSchema.parse(args);
       const cfg = loadFleetConfig();
       const data = await harness(
         cfg,
         `/api/receipts/${encodeURIComponent(botId)}/${encodeURIComponent(threadId)}`,
+        receiptSchema,
       );
       return { receipt: data.receipt, text: data.text };
     },
@@ -319,10 +370,9 @@ const TOOLS: ToolDef[] = [
       "Read one bot's persistent memory (what it remembers across tasks). Read-only — an agent never edits another agent's memory here.",
     inputSchema: { type: "object", properties: { botId: botIdSchema }, required: ["botId"], additionalProperties: false },
     async run(args) {
-      const botId = String(args.botId ?? "");
-      if (!botId) throw new Error("botId is required");
+      const { botId } = botArgsSchema.parse(args);
       const cfg = loadFleetConfig();
-      const data = await harness(cfg, `/api/bots/${encodeURIComponent(botId)}/memory`);
+      const data = await harness(cfg, `/api/bots/${encodeURIComponent(botId)}/memory`, memorySchema);
       return { memory: data.text ?? "" };
     },
   },
@@ -332,10 +382,9 @@ const TOOLS: ToolDef[] = [
       "Read one bot's approval history (who allowed or denied its tool requests, and why) — evidence, not a verdict.",
     inputSchema: { type: "object", properties: { botId: botIdSchema }, required: ["botId"], additionalProperties: false },
     async run(args) {
-      const botId = String(args.botId ?? "");
-      if (!botId) throw new Error("botId is required");
+      const { botId } = botArgsSchema.parse(args);
       const cfg = loadFleetConfig();
-      return await harness(cfg, `/api/bots/${encodeURIComponent(botId)}/audit`);
+      return await harness(cfg, `/api/bots/${encodeURIComponent(botId)}/audit`, auditSchema);
     },
   },
   {
@@ -347,7 +396,7 @@ const TOOLS: ToolDef[] = [
     },
     async run(args) {
       const query = parseEvidenceQuery(args);
-      const data = await harness(loadFleetConfig(), `/api/bots/${encodeURIComponent(query.botId)}/why?limit=${query.limit}`, { method: "GET" });
+      const data = await harness(loadFleetConfig(), `/api/bots/${encodeURIComponent(query.botId)}/why?limit=${query.limit}`, jsonObjectSchema, { method: "GET" });
       return parseWhyEvidence(data, query);
     },
   },
@@ -363,8 +412,8 @@ const TOOLS: ToolDef[] = [
       const cfg = loadFleetConfig();
       // Confirm this bot is visible before querying the owner-scoped routine
       // list; orphaned routine records cannot establish bot access.
-      await harness(cfg, `/api/bots/${encodeURIComponent(query.botId)}?messages=0`, { method: "GET" });
-      const data = await harness(cfg, "/api/routines", { method: "GET" });
+      await harness(cfg, `/api/bots/${encodeURIComponent(query.botId)}?messages=0`, botResponseSchema, { method: "GET" });
+      const data = await harness(cfg, "/api/routines", jsonObjectSchema, { method: "GET" });
       return parseScorecardEvidence(data, query);
     },
   },
@@ -372,11 +421,23 @@ const TOOLS: ToolDef[] = [
 
 // ── JSON-RPC plumbing ───────────────────────────────────────────────────
 
-function rpcResult(id: number, result: unknown) {
+const rpcIdSchema = z.union([z.string(), z.number().int()]);
+const rpcRequestSchema = z.object({
+  jsonrpc: z.literal("2.0"), id: rpcIdSchema.optional(), method: z.string().min(1), params: jsonObjectSchema.optional(),
+});
+const toolCallSchema = z.object({
+  name: z.string().min(1), arguments: jsonObjectSchema.optional().default({}),
+});
+type RpcId = z.infer<typeof rpcIdSchema>;
+interface ToolReply { content: Array<{ type: "text"; text: string }>; isError?: boolean }
+type RpcResult = { protocolVersion: string; capabilities: { tools: JsonObject }; serverInfo: typeof SERVER_INFO }
+  | { tools: Array<Omit<ToolDef, "run">> } | ToolReply;
+
+function rpcResult(id: RpcId, result: RpcResult) {
   return JSON.stringify({ jsonrpc: "2.0", id, result });
 }
 
-function rpcError(id: number, code: number, message: string) {
+function rpcError(id: RpcId | null, code: number, message: string) {
   return JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } });
 }
 
@@ -387,17 +448,26 @@ export function serveFleetMcp(input: NodeJS.ReadableStream, write: (line: string
   rl.on("line", (line) => {
     const trimmed = line.trim();
     if (!trimmed) return;
-    let msg: any;
+    let parsed: ReturnType<typeof rpcRequestSchema.safeParse>;
     try {
-      msg = JSON.parse(trimmed);
+      const raw = parseJson(trimmed);
+      parsed = rpcRequestSchema.safeParse(raw);
+      if (!parsed.success) {
+        const requestId = z.object({ id: rpcIdSchema }).safeParse(raw);
+        write(rpcError(requestId.success ? requestId.data.id : null, -32600, "Invalid request"));
+        return;
+      }
     } catch {
+      write(rpcError(null, -32700, "Parse error"));
       return;
     }
-    if (msg.id === undefined) return; // notifications: nothing to answer
+    const msg = parsed.data;
+    const id = msg.id;
+    if (id === undefined) return; // notifications: nothing to answer
 
     if (msg.method === "initialize") {
       write(
-        rpcResult(msg.id, {
+        rpcResult(id, {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: {} },
           serverInfo: SERVER_INFO,
@@ -407,31 +477,36 @@ export function serveFleetMcp(input: NodeJS.ReadableStream, write: (line: string
     }
     if (msg.method === "tools/list") {
       write(
-        rpcResult(msg.id, {
+        rpcResult(id, {
           tools: TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
         }),
       );
       return;
     }
     if (msg.method === "tools/call") {
-      const name = String(msg.params?.name ?? "");
+      const params = toolCallSchema.safeParse(msg.params);
+      if (!params.success) {
+        write(rpcError(id, -32602, "Invalid tool parameters"));
+        return;
+      }
+      const { name, arguments: args } = params.data;
       const tool = TOOLS.find((t) => t.name === name);
       if (!tool) {
-        write(rpcError(msg.id, -32602, `Unknown tool: ${name}`));
+        write(rpcError(id, -32602, `Unknown tool: ${name}`));
         return;
       }
       (async () => {
         try {
-          const payload = await tool.run((msg.params?.arguments ?? {}) as JsonObject);
-          write(rpcResult(msg.id, { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] }));
+          const payload = await tool.run(args);
+          write(rpcResult(id, { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] }));
         } catch (e) {
           const text = e instanceof Error ? e.message : String(e);
-          write(rpcResult(msg.id, { content: [{ type: "text", text }], isError: true }));
+          write(rpcResult(id, { content: [{ type: "text", text }], isError: true }));
         }
       })();
       return;
     }
-    write(rpcError(msg.id, -32601, `Method not found: ${msg.method}`));
+    write(rpcError(id, -32601, `Method not found: ${msg.method}`));
   });
   return rl;
 }
