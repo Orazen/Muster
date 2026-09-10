@@ -1,18 +1,17 @@
 // Browser panel session manager — a harness-owned Chromium the HUMAN can
-// watch and drive from the chat's Browser side panel (the OpenMausBot
+// preview public pages from the chat's Browser side panel (the OpenMausBot
 // "Quill's browser" pattern). This is deliberately NOT the bot's Obscura
 // browser: obscura is stealth + headless and lives only for the duration of
 // a turn, spawned by the CLI's MCP layer. This session is long-lived,
-// visible, and shared: the human types a URL or watches frames; a future
-// step attaches the bot's browser tools to the same session so "take
-// control" pauses the bot mid-task.
+// visible: the human enters a URL or watches frames. Bot tools and page
+// input are not attached to this session.
 //
 // One Chromium per bot. Profiles keep logins separate: "Bot's own"
 // (persistent user-data-dir under the bot's workspace) vs "Guest" (a scratch
 // dir wiped on switch). CDP drives navigation and the Page.startScreencast
 // frame feed; frames are kept in memory, one JPEG deep, and served to the
-// panel. Take-control is a flag the panel and (later) the bot's attach
-// layer read — while it is set, the panel shows the takeover banner.
+// panel. The legacy takeControl wire flag does not pause agent execution
+// and is ignored by the preview UI.
 //
 // Security: navigation URLs are validated http/https with a DNS-resolvable
 // public host (loopback/private ranges refused — a panel must not become a
@@ -378,15 +377,20 @@ export function isNavigableUrl(raw: string): boolean {
   return true;
 }
 
+// Commands (including fire-and-forget screencast acknowledgements) all need
+// unique numeric IDs on the CDP wire.
+let cdpCommandId = 0;
+
 async function cdp(session: Session, method: string, params: Json = {}): Promise<any> {
   const ws = session.ws;
   if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("browser session is not connected");
   return await new Promise((resolve, reject) => {
-    const id = Math.floor(Math.random() * 1e9);
+    const id = ++cdpCommandId;
     const onMessage = (event: MessageEvent) => {
       try {
         const msg = JSON.parse(String(event.data));
         if (msg.id === id) {
+          clearTimeout(timeout);
           ws.removeEventListener("message", onMessage);
           if (msg.error) reject(new Error(String(msg.error.message ?? "CDP error")));
           else resolve(msg.result);
@@ -395,12 +399,18 @@ async function cdp(session: Session, method: string, params: Json = {}): Promise
         /* non-JSON frame */
       }
     };
-    ws.addEventListener("message", onMessage);
-    ws.send(JSON.stringify({ id, method, params }));
-    setTimeout(() => {
+    const timeout = setTimeout(() => {
       ws.removeEventListener("message", onMessage);
       reject(new Error("CDP call timed out"));
     }, 15_000);
+    ws.addEventListener("message", onMessage);
+    try {
+      ws.send(JSON.stringify({ id, method, params }));
+    } catch (error) {
+      clearTimeout(timeout);
+      ws.removeEventListener("message", onMessage);
+      reject(error);
+    }
   });
 }
 
@@ -518,8 +528,8 @@ async function attach(session: Session): Promise<void> {
         if (!frame) return;
         session.frame = Buffer.from(frame.data, "base64");
         session.frameAt = Date.now();
-        if (frame.ackId) {
-          ws.send(JSON.stringify({ method: "Page.screencastFrameAck", params: { sessionId: frame.ackId } }));
+        if (frame.ackId !== null) {
+          ws.send(JSON.stringify({ id: ++cdpCommandId, method: "Page.screencastFrameAck", params: { sessionId: frame.ackId } }));
         }
         if (frame.url) session.url = frame.url;
         if (frame.title) session.title = frame.title;
@@ -530,6 +540,9 @@ async function attach(session: Session): Promise<void> {
   });
   await cdp(session, "Page.enable");
   await cdp(session, "Runtime.enable");
+  // A reopened profile can restore this target in the background. Activate
+  // the selected page so its compositor produces frames for the preview.
+  await cdp(session, "Page.bringToFront");
   await cdp(session, "Page.startScreencast", {
     format: "jpeg",
     quality: 55,
@@ -609,18 +622,45 @@ export function toNavigableUrl(raw: string): string {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
+const navigateResultSchema = z.object({
+  frameId: z.string().min(1),
+  errorText: z.string().optional(),
+  isDownload: z.boolean().optional(),
+});
+
 export async function navigatePanel(botId: string, rawUrl: string): Promise<BrowserPanelState> {
   const s = sessions.get(botId);
   if (!s) throw new Error("no browser session open");
   const withScheme = toNavigableUrl(rawUrl);
   if (!isNavigableUrl(withScheme)) throw new Error("that address is not allowed — http/https public sites only");
   s.takeControl = true; // human is driving
-  await cdp(s, "Page.navigate", { url: withScheme });
+  try {
+    const parsed = navigateResultSchema.safeParse(await cdp(s, "Page.navigate", { url: withScheme }));
+    if (!parsed.success) throw new Error("the browser returned an invalid navigation response");
+    if (parsed.data.errorText !== undefined) {
+      throw new Error(`could not open that page: ${parsed.data.errorText || "navigation failed"}`);
+    }
+    if (parsed.data.isDownload) throw new Error("that address started a download; the browser preview cannot display it");
+  } catch (error) {
+    s.error = error instanceof Error ? error.message : String(error);
+    throw error;
+  }
+  s.error = null;
   s.url = withScheme;
   return panelState(botId);
 }
 
-export async function startPanel(botId: string, opts: { workspaceDir?: string; profile?: "bot" | "guest" }): Promise<BrowserPanelState> {
+export interface BrowserPanelLauncher {
+  spawn(command: string, args: string[], options: { stdio: "ignore"; detached: false }): ChildProcess;
+}
+
+const browserPanelLauncher: BrowserPanelLauncher = { spawn };
+
+export async function startPanel(
+  botId: string,
+  opts: { workspaceDir?: string; profile?: "bot" | "guest" },
+  launcher: BrowserPanelLauncher = browserPanelLauncher,
+): Promise<BrowserPanelState> {
   const existing = sessions.get(botId);
   if (existing) return panelState(botId);
   // discovery first, auto-install (Chrome for Testing) as the last resort —
@@ -648,7 +688,7 @@ export async function startPanel(botId: string, opts: { workspaceDir?: string; p
   const isRoot = (process.getuid?.() ?? -1) === 0;
   const inContainer = existsSync("/.dockerenv") || existsSync("/run/.containerenv") || process.env.OMB_CONTAINER === "1";
   const containerFlags = isRoot || inContainer ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"] : [];
-  const child = spawn(
+  const child = launcher.spawn(
     chrome,
     [
       `--remote-debugging-port=${cdpPort}`,

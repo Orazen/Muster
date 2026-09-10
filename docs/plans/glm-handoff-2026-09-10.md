@@ -73,9 +73,9 @@ backgrounds cannot intercept input; an interactive mascot needs keyboard and
 touch access. Retain applicable upstream notices; its MIT code license does
 not establish ownership of the visual design or trademarks it references.
 
-The first active slice unifies `MusterBloom`, `MusterbotMark` and default
-`StarTeammate`, then adds a brief onboarding background entrance and a wave
-interaction. Update the completion ledger below only after verification.
+Loop 14 unified `MusterBloom`, `MusterbotMark` and default `StarTeammate`,
+with a brief onboarding background entrance and a wave interaction. Refer
+to the completion ledger for verification and remaining export work.
 
 Remaining brand surfaces require deliberate export and review:
 
@@ -145,17 +145,31 @@ performing destructive cleanup to make status look clean.
 
 - Loop 13: `f006fa9`, historical verification above; production marker absent
   at last check.
-- Loop 14: canonical web mascot and small-screen onboarding verified;
+- Loop 14: **a0e2d03**, pushed to main. Canonical web mascot and small-screen onboarding verified;
   **193 files / 1976 passed / 8 skipped in 239.35s**, frontend/server
   typechecks and scoped lint pass; final build 6.49s. Seven functional
   browser checks and seven measured layouts passed. Twelve focused component
   tests passed. No OS reduced-motion toggle, native app, real model or VM
-  runtime check is claimed. Commit and rollout follow this verification.
+  runtime check is claimed. Production GET at 08:16:48 UTC still served `/assets/index-Cd59czyZ.js`;
+  both Loop 13 and Loop 14 markers were absent. Pushed, deployment unconfirmed.
 
-Next bounded file set: `src/components/BrowserPanel.tsx`, narrowly related
-`server/browser-panel.ts` behavior/tests only if needed to remove the cosmetic
-takeover claim. Loop 14 fixtures, data and tabs were cleaned up; no active
-Loop 14 process remains. Full suite has no failures. Latest usage snapshot:
-19% remaining. Native CUA access is blocked by pending OS permissions; do
+- Loop 15: browser preview truthfulness, navigation errors/reload, polling
+  lifecycle, valid frame ACKs, restored-tab activation, and mobile keyboard
+  focus. **195 files / 2013 passed / 8 skipped in 205.47s**; focused server
+  22 passes and UI/lifecycle 30 passes. Both typechecks and scoped lint pass;
+  build 5.17s. Seven browser workflows and four final layouts passed against
+  installed Brave with fresh profiles; 0 captured console errors/warnings.
+  The first reopen attempt failed before the activation fix; final retry
+  rendered actual Example Domain. Commit identifier belongs in the next
+  log/update; this ledger is part of that verified commit.
+
+Next bounded file set: selected bot/room restoration in `src/state/store.tsx`
+and a small selection persistence helper/tests. Rows 1 and 2 are verified;
+begin row 3, preserving account isolation and reconnect behavior. All owned
+Loop 14/15 fixtures, data, helper scripts and tabs were cleaned up; viewport
+reset. Full suite has no failures. Latest usage snapshot: **6% remaining**.
+The existing CEO heartbeat
+was found PAUSED; preserve that state unless the board resumes it. Native
+CUA access is blocked by pending OS permissions; do
 not count its attempted inspection as a UI check. Update this ledger again
 before transferring ownership; the CEO log remains the latest evidence.

@@ -1,266 +1,225 @@
-// The Browser side panel — a human-visible browser for this bot, in the
-// chat's right panel next to the Computer panel. OpenMausBot's "Quill's
-// browser" shape: an address bar, the live page (screencast frames from the
-// harness-owned Chromium), a take-control flag, and profile switching
-// ("Bot's own" keeps logins; "Guest" is wiped on switch). A bot with its
-// browser tools mounted rides the SAME session in a later step; today the
-// panel is the human's window, and Take control marks the takeover so the
-// bot's attach layer can yield.
-import { useCallback, useEffect, useRef, useState } from "react";
+// An address-driven preview session. Agent browsing and page input are not
+// connected to this panel; the legacy server takeControl flag is ignored.
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Globe, Loader2, RotateCw, X } from "lucide-react";
 import { api, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
-
-type PanelState = {
-  running: boolean;
-  url: string | null;
-  title: string | null;
-  profile: "bot" | "guest";
-  takeControl: boolean;
-  error: string | null;
-};
-
-const IDLE: PanelState = { running: false, url: null, title: null, profile: "bot", takeControl: false, error: null };
+import {
+  createBrowserPreviewSession,
+  emptyBrowserPreview,
+  type BrowserPreviewSnapshot,
+} from "./browser-preview-session";
 
 export function BrowserPanel({ bot, onClose }: { bot: Bot; onClose: () => void }) {
-  const [state, setState] = useState<PanelState>(IDLE);
-  const [address, setAddress] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [frame, setFrame] = useState<string | null>(null);
-  const pollRef = useRef<number | null>(null);
+  // Changing bots remounts the address draft and all received state immediately.
+  return <BrowserPanelSession key={bot.id} bot={bot} onClose={onClose} />;
+}
 
-  const pull = useCallback(async () => {
-    try {
-      // SAFETY: /api/bots/:id/browser-panel/frame is this repo's own endpoint;
-      // its reply is the {frame, state} shape read below.
-      const data = (await api(`/api/bots/${bot.id}/browser-panel/frame`)) as {
-        frame: string | null;
-        state: PanelState;
-      };
-      setState(data.state);
-      setFrame(data.frame);
-    } catch {
-      /* transient — next tick retries */
-    }
-  }, [bot.id]);
+function BrowserPanelSession({ bot, onClose }: { bot: Bot; onClose: () => void }) {
+  const [snapshot, setSnapshot] = useState(emptyBrowserPreview);
+  const [address, setAddress] = useState("");
+  const session = useRef<ReturnType<typeof createBrowserPreviewSession> | null>(null);
+  const [overlay, setOverlay] = useState(() => globalThis.window?.matchMedia("(width < 80rem)").matches ?? false);
+  const [launcher] = useState(() => {
+    const active = globalThis.document?.activeElement;
+    return active && active instanceof HTMLElement ? active : null;
+  });
 
   useEffect(() => {
-    void pull();
-    pollRef.current = window.setInterval(() => void pull(), 900);
+    const query = window.matchMedia("(width < 80rem)");
+    const update = () => setOverlay(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => () => restoreBrowserPreviewFocus(launcher), [launcher]);
+
+  useEffect(() => {
+    const current = createBrowserPreviewSession(bot.id, api, setSnapshot);
+    session.current = current;
+    void current.pull();
+    const poll = window.setInterval(() => void current.pull(), 900);
     return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
+      window.clearInterval(poll);
+      current.dispose();
+      session.current = null;
     };
-  }, [pull]);
-
-  const start = async (profile: "bot" | "guest") => {
-    setBusy(true);
-    setError(null);
-    try {
-      // SAFETY: own endpoint; the reply is the BrowserPanelState shape.
-      const s = (await api(`/api/bots/${bot.id}/browser-panel/start`, {
-        method: "POST",
-        body: JSON.stringify({ profile }),
-      })) as PanelState;
-      setState(s);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const stop = async () => {
-    await api(`/api/bots/${bot.id}/browser-panel/stop`, { method: "POST" }).catch(() => {});
-    setFrame(null);
-    setState(IDLE);
-  };
-
-  const go = async () => {
-    if (!address.trim() || !state.running) return;
-    setBusy(true);
-    setError(null);
-    try {
-      // SAFETY: own endpoint; the reply is the BrowserPanelState shape.
-      const s = (await api(`/api/bots/${bot.id}/browser-panel/navigate`, {
-        method: "POST",
-        body: JSON.stringify({ url: address }),
-      })) as PanelState;
-      setState(s);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const setControl = async (on: boolean) => {
-    // SAFETY: own endpoint; the reply is the BrowserPanelState shape.
-    const s = (await api(`/api/bots/${bot.id}/browser-panel/control`, {
-      method: "POST",
-      body: JSON.stringify({ on }),
-    })) as PanelState;
-    setState(s);
-  };
-
-  const switchProfile = async (profile: "bot" | "guest") => {
-    if (state.profile === profile) return;
-    await stop();
-    await start(profile);
-  };
+  }, [bot.id]);
 
   return (
-    <div className="glass-panel flex h-full min-w-0 flex-col" data-testid="browser-panel">
-      {/* header */}
-      <div className="flex items-center gap-2 border-b border-hairline/40 px-3 py-2">
-        <Globe size={15} className="shrink-0 text-ink-secondary" />
-        <div className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
-          {bot.name}'s browser
+    <BrowserPreviewSurface overlay={overlay} onClose={onClose}>
+      <BrowserPanelView
+      botName={bot.name}
+      snapshot={snapshot}
+      address={address}
+      onAddressChange={setAddress}
+      onClose={onClose}
+      onRetry={() => void session.current?.pull()}
+      onStart={(profile) => void session.current?.start(profile)}
+      onStop={() => void session.current?.stop()}
+      onNavigate={(url) => void session.current?.navigate(url)}
+      onSwitchProfile={(profile) => void session.current?.switchProfile(profile)}
+      />
+    </BrowserPreviewSurface>
+  );
+}
+
+export function restoreBrowserPreviewFocus(launcher: Pick<HTMLElement, "isConnected" | "focus"> | null) {
+  if (launcher?.isConnected) launcher.focus({ preventScroll: true });
+}
+
+/** Use the existing dialog focus scope for the opaque overlay. Keeping this
+ * below the session preserves its draft and requests when the viewport changes. */
+export function BrowserPreviewSurface({ overlay, onClose, children }: { overlay: boolean; onClose: () => void; children: ReactNode }) {
+  if (!overlay) {
+    return <div className="glass-panel relative z-40 h-full w-[420px] min-w-0 shrink-0">{children}</div>;
+  }
+  return (
+    <DialogPrimitive.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogPrimitive.Content
+        aria-label="Browser preview"
+        aria-modal="true"
+        aria-describedby={undefined}
+        onCloseAutoFocus={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+        className="glass-panel absolute inset-0 z-40 h-full w-full min-w-0 outline-none [--glass-fill:var(--color-panel)]"
+      >
+        {children}
+      </DialogPrimitive.Content>
+    </DialogPrimitive.Root>
+  );
+}
+
+type BrowserPanelViewProps = {
+  botName: string;
+  snapshot: BrowserPreviewSnapshot;
+  address: string;
+  onAddressChange: (address: string) => void;
+  onClose: () => void;
+  onRetry: () => void;
+  onStart: (profile: "bot" | "guest") => void;
+  onStop: () => void;
+  onNavigate: (url: string) => void;
+  onSwitchProfile: (profile: "bot" | "guest") => void;
+};
+
+export function BrowserPanelView({
+  botName, snapshot, address, onAddressChange, onClose, onRetry, onStart, onStop, onNavigate, onSwitchProfile,
+}: BrowserPanelViewProps) {
+  const { state, frame, busy, error, pollError } = snapshot;
+  const status = busy
+    ? { start: "Opening preview…", stop: "Closing preview…", navigate: "Loading address…", profile: "Switching profile…" }[busy]
+    : pollError ? "Preview refresh unavailable"
+    : state?.error ? "Preview needs attention"
+    : state ? state.running ? "Preview open" : "No preview open"
+    : "Checking preview…";
+  const hasError = Boolean(error || pollError || state?.error);
+
+  return (
+    <div className="flex h-full min-w-0 flex-col overflow-y-auto" data-testid="browser-panel">
+      <div className="flex shrink-0 items-start gap-2 border-b border-hairline/40 px-3 py-2">
+        <Globe size={15} className="mt-0.5 shrink-0 text-ink-secondary" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[13px] font-medium text-ink">Browser preview</h2>
+          <p className="mt-0.5 text-[11.5px] text-ink-secondary [overflow-wrap:anywhere]">{botName}</p>
         </div>
-        <button
-          type="button"
-          aria-label="Close browser panel"
-          onClick={onClose}
-          className="flex size-6 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
-        >
-          <X size={14} />
+        <button type="button" aria-label="Close browser preview panel" onClick={onClose}
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink">
+          <X size={14} aria-hidden="true" />
         </button>
       </div>
 
-      {!state.running ? (
-        /* empty state — start or the guest split */
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-          <Globe size={28} className="text-ink-secondary" />
-          <div className="max-w-[280px] text-[13px] leading-relaxed text-ink-secondary">
-            Nothing open yet. Open a browser to watch {bot.name}'s web work live — enter an address, or
-            ask the bot to look something up.
+      <div className="shrink-0 border-b border-hairline/40 px-3 py-2 text-[11.5px] leading-relaxed text-ink-secondary">
+        Enter an address to preview a page. This preview is separate from agent browsing.
+        Clicking or typing on the page image is not supported.
+      </div>
+      <div role="status" className="flex shrink-0 items-center gap-2 px-3 py-2 text-[11.5px] text-ink-secondary">
+        {(busy || (!state && !pollError)) && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+        {status}
+      </div>
+
+      {hasError && (
+        <div role="alert" className="mx-3 mb-2 shrink-0 rounded-lg border border-danger/25 bg-danger/10 p-2 text-[12px] leading-relaxed text-danger [overflow-wrap:anywhere]">
+          {error && <p>{error}</p>}
+          {state?.error && state.error !== error && <p>{state.error}</p>}
+          {pollError && <p>Could not refresh this preview. {frame ? "The last received image is shown. " : ""}{pollError}</p>}
+          {pollError && <button type="button" onClick={onRetry} disabled={Boolean(busy)} className="mt-1 font-semibold underline disabled:opacity-50">Retry preview</button>}
+        </div>
+      )}
+
+      {!state?.running ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 py-6 text-center">
+          <Globe size={28} className="text-ink-secondary" aria-hidden="true" />
+          <p className="max-w-[280px] text-[13px] leading-relaxed text-ink-secondary">
+            Open a preview, then enter a public web address. Choose the bot profile to keep this preview's browsing data between sessions, or Guest for temporary browsing data.
+          </p>
+          <div className="flex max-w-full flex-wrap justify-center gap-2">
+            <button type="button" onClick={() => onStart("bot")} disabled={Boolean(busy) || !state}
+              className="max-w-full rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-semibold text-white hover:bg-accent/90 disabled:opacity-50">
+              Open preview
+            </button>
+            <button type="button" onClick={() => onStart("guest")} disabled={Boolean(busy) || !state}
+              className="max-w-full rounded-lg bg-raised px-3.5 py-2 text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-50">
+              Guest preview
+            </button>
           </div>
-          {busy ? (
-            <Loader2 size={16} className="animate-spin text-ink-secondary" />
-          ) : (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => void start("bot")}
-                className="rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-semibold text-white hover:bg-accent/90"
-              >
-                Open browser
-              </button>
-              <button
-                type="button"
-                onClick={() => void start("guest")}
-                className="rounded-lg bg-raised px-3.5 py-2 text-[12.5px] text-ink hover:bg-raised-hover"
-              >
-                Guest session
-              </button>
-            </div>
-          )}
-          {error && <div className="max-w-[300px] text-[12px] text-danger">{error}</div>}
         </div>
       ) : (
         <>
-          {/* address bar */}
-          <form
-            className="flex items-center gap-1.5 border-b border-hairline/40 px-2.5 py-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void go();
-            }}
-          >
-            <input
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="Enter a web address"
-              aria-label="Web address"
-              autoComplete="off"
-              spellCheck={false}
-              className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[12.5px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={busy || !address.trim()}
-              className="shrink-0 rounded-lg bg-accent px-2.5 py-1.5 text-[12px] font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
-            >
-              Go
-            </button>
-            <button
-              type="button"
-              aria-label="Stop browser"
-              onClick={() => void stop()}
-              className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-danger"
-              title="Close browser"
-            >
-              <X size={13} />
+          <form className="flex shrink-0 items-center gap-1.5 border-b border-hairline/40 px-2.5 py-2"
+            onSubmit={(event) => { event.preventDefault(); if (!busy && address.trim()) onNavigate(address); }}>
+            <input value={address} onChange={(event) => onAddressChange(event.target.value)}
+              placeholder="Enter a web address" aria-label="Web address" autoComplete="off" spellCheck={false}
+              className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[12.5px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none" />
+            <button type="submit" disabled={Boolean(busy) || !address.trim()}
+              className="shrink-0 rounded-lg bg-accent px-2.5 py-1.5 text-[12px] font-semibold text-white hover:bg-accent/90 disabled:opacity-50">Go</button>
+            <button type="button" aria-label="Stop browser preview" onClick={onStop} disabled={Boolean(busy)} title="Stop preview session"
+              className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-danger disabled:opacity-50">
+              <X size={13} aria-hidden="true" />
             </button>
           </form>
 
-          {/* takeover banner */}
-          {state.takeControl && (
-            <div className="border-b border-warning/25 bg-warning/10 px-3 py-1.5 text-[11.5px] text-warning">
-              You're driving — the bot pauses while you take over.{" "}
-              <button type="button" onClick={() => void setControl(false)} className="font-semibold underline">
-                Hand back
-              </button>
-            </div>
-          )}
-
-          {/* live page */}
-          <div className="min-h-0 flex-1 overflow-hidden bg-black/90">
+          <div className="min-h-[160px] flex-1 overflow-hidden bg-black/90">
             {frame ? (
-              <img
-                src={`data:image/jpeg;base64,${frame}`}
-                alt={state.title ?? "live page"}
-                className="h-full w-full object-contain"
-              />
+              <img src={`data:image/jpeg;base64,${frame}`} alt={`Latest received page image${state.title ? `: ${state.title}` : ""}`}
+                className="h-full w-full object-contain" />
             ) : (
-              <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-                <Loader2 size={16} className="animate-spin text-ink-secondary" />
-                <span className="text-[12px] text-ink-secondary">Waiting for the first frame…</span>
+              <div className="flex h-full min-h-[160px] flex-col items-center justify-center gap-2 p-3 text-center text-[12px] text-ink-secondary">
+                {!hasError && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+                {hasError ? "Page preview unavailable." : "Waiting for a page preview…"}
               </div>
             )}
           </div>
 
-          {/* footer: current page + profiles */}
-          <div className="border-t border-hairline/40 px-3 py-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0 flex-1 truncate text-[11.5px] text-ink-secondary">
-                {state.title || state.url || "New tab"}
+          <div className="shrink-0 border-t border-hairline/40 px-3 py-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1 text-[11.5px] text-ink-secondary [overflow-wrap:anywhere]">
+                <p>{state.title || "Current page"}</p>
+                <p>{state.url || "No address loaded"}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => address && void go()}
-                aria-label="Reload page"
-                className="flex size-6 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
-              >
-                <RotateCw size={12} />
+              <button type="button" onClick={() => { if (state.url && !busy) onNavigate(state.url); }} aria-label="Reload current page"
+                disabled={Boolean(busy) || !state.url || !/^https?:\/\//i.test(state.url)}
+                className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50">
+                <RotateCw size={12} aria-hidden="true" />
               </button>
             </div>
-            <div className="mt-2 flex items-center gap-1.5">
+            <p className="mt-1 text-[10.5px] text-ink-secondary">Page images may lag while navigation loads.</p>
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5" role="group" aria-label="Preview profile">
               <span className="text-[11px] text-ink-secondary">Profile</span>
-              {(
-                [
-                  { id: "bot", label: `${bot.name}'s own` },
-                  { id: "guest", label: "Guest" },
-                ] as const
-              ).map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => void switchProfile(p.id)}
-                  aria-pressed={state.profile === p.id}
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-[11px] transition-colors",
-                    state.profile === p.id ? "bg-accent/15 text-accent" : "bg-raised text-ink-secondary hover:text-ink",
-                  )}
-                >
-                  {p.label}
+              {([{ id: "bot", label: `${botName}'s profile` }, { id: "guest", label: "Guest" }] as const).map((profile) => (
+                <button key={profile.id} type="button" onClick={() => onSwitchProfile(profile.id)}
+                  disabled={Boolean(busy) || state.profile === profile.id} aria-pressed={state.profile === profile.id}
+                  className={cn("min-w-0 max-w-full rounded-xl px-2.5 py-1 text-left text-[11px] transition-colors [overflow-wrap:anywhere] disabled:cursor-default",
+                    state.profile === profile.id ? "bg-accent/15 text-accent" : "bg-raised text-ink-secondary hover:text-ink disabled:opacity-50")}>
+                  {profile.label}
                 </button>
               ))}
             </div>
-            <div className="mt-1.5 text-[10.5px] leading-snug text-ink-secondary">
-              Profiles keep logins separate. "{bot.name}'s own" is private to this bot; Guest is cleared
-              when you switch away.
-            </div>
+            <p className="mt-1.5 text-[10.5px] leading-snug text-ink-secondary">
+              Bot profile keeps this preview's browsing data between sessions. Guest uses temporary browsing data and is cleared when the preview closes.
+            </p>
           </div>
         </>
       )}

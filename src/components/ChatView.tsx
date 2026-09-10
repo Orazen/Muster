@@ -1077,7 +1077,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             aria-label="Browser"
             aria-pressed={state.browserPanelOpen}
             className={cn(iconToggleClasses, state.browserPanelOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
-            title="Browser — watch and drive this bot's web"
+            title="Browser — open a page preview for this bot"
           >
             <Globe size={17} /><span className="conversation-tool-label">Browser</span>
           </button>

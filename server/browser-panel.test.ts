@@ -3,20 +3,215 @@
 // discovery chain (override → system install → playwright cache → CfT
 // auto-install under DATA_DIR), and the container launch flags that keep
 // the panel spawner honest about when Chromium runs sandboxless.
+import { ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   findChromeSync,
   freeCdpPort,
   isNavigableUrl,
+  latestFrame,
+  navigatePanel,
+  panelState,
   resolveChrome,
+  startPanel,
+  stopPanel,
   toNavigableUrl,
+  type BrowserPanelLauncher,
 } from "./browser-panel.ts";
+
+interface FakeCdpCommand {
+  id?: number;
+  method: string;
+  params?: { url?: string; sessionId?: string | number };
+}
+
+interface FakeNavigationResult {
+  frameId?: string;
+  errorText?: string;
+  isDownload?: boolean;
+}
+
+/** A fixture-owned transport: no browser process, external fetch or live CDP
+ * connection is used. Frames stop until the protocol-valid ACK arrives. */
+class FakeCdpSocket extends EventTarget {
+  static readonly OPEN = 1;
+  static instances: FakeCdpSocket[] = [];
+  readyState = FakeCdpSocket.OPEN;
+  commands: FakeCdpCommand[] = [];
+  navigationResult: FakeNavigationResult = { frameId: "main" };
+  navigationProtocolError: string | null = null;
+  navigationSendError: string | null = null;
+  private pendingFrameId: number | null = null;
+  private active: boolean;
+  private screencasting = false;
+
+  constructor(readonly url: string) {
+    super();
+    this.active = url !== "ws://fixture.invalid/restored-background-page";
+    FakeCdpSocket.instances.push(this);
+    queueMicrotask(() => this.dispatchEvent(new Event("open")));
+  }
+
+  send(payload: string): void {
+    // SAFETY: payload is a JSON command built by browser-panel's CDP client;
+    // assertions below inspect the command ID, method, and parameters.
+    const command = JSON.parse(payload) as FakeCdpCommand;
+    this.commands.push(command);
+    if (command.method === "Page.navigate" && this.navigationSendError) throw new Error(this.navigationSendError);
+    // Chromium commands require an integer id; a notification-shaped ACK
+    // must not unlock the next frame in this regression fixture.
+    if (!Number.isInteger(command.id)) return;
+    if (command.method === "Page.bringToFront") this.active = true;
+    if (command.method === "Page.startScreencast") this.screencasting = true;
+    if (command.method === "Page.screencastFrameAck" && command.params?.sessionId === this.pendingFrameId) {
+      this.pendingFrameId = null;
+    }
+    const response = command.method === "Page.navigate"
+      ? this.navigationProtocolError
+        ? { id: command.id, error: { message: this.navigationProtocolError } }
+        : { id: command.id, result: this.navigationResult }
+      : { id: command.id, result: {} };
+    queueMicrotask(() => this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(response) })));
+  }
+
+  emitFrame(sessionId: number, text: string): boolean {
+    if (!this.active || !this.screencasting || this.pendingFrameId !== null) return false;
+    this.pendingFrameId = sessionId;
+    this.dispatchEvent(new MessageEvent("message", {
+      data: JSON.stringify({
+        method: "Page.screencastFrame",
+        params: { sessionId, data: Buffer.from(text).toString("base64"), metadata: {} },
+      }),
+    }));
+    return true;
+  }
+
+  close(): void {
+    this.readyState = 3;
+  }
+}
+
+describe("browser panel CDP bridge", () => {
+  const botId = "browser-panel-cdp-regression";
+  let scratch: string;
+  let socket: FakeCdpSocket;
+  let launcher: BrowserPanelLauncher;
+
+  beforeEach(async () => {
+    scratch = mkdtempSync(join(tmpdir(), "bpanel-cdp-test-"));
+    mkdirSync(join(scratch, "browser-profile"));
+    const chrome = join(scratch, "fake-chrome");
+    writeFileSync(chrome, "fixture; never executed");
+    vi.stubEnv("MUSTER_CHROME_PATH", chrome);
+    launcher = { spawn: vi.fn(() => {
+      const child = new ChildProcess();
+      vi.spyOn(child, "kill").mockReturnValue(true);
+      return child;
+    }) };
+    FakeCdpSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeCdpSocket);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify([{
+      type: "page", webSocketDebuggerUrl: "ws://fixture.invalid/page", url: "about:blank", title: "Initial page",
+    }]))));
+    await startPanel(botId, { workspaceDir: scratch }, launcher);
+    socket = FakeCdpSocket.instances[0];
+    expect(launcher.spawn).toHaveBeenCalledOnce();
+  });
+
+  afterEach(() => {
+    stopPanel(botId);
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it("retains the prior page on navigation failure and clears the error after a successful retry", async () => {
+    socket.navigationResult = { frameId: "main", errorText: "net::ERR_NAME_NOT_RESOLVED" };
+    await expect(navigatePanel(botId, "unreachable.example.com")).rejects.toThrow("net::ERR_NAME_NOT_RESOLVED");
+    expect(panelState(botId)).toMatchObject({
+      url: "about:blank", title: "Initial page", error: "could not open that page: net::ERR_NAME_NOT_RESOLVED",
+    });
+    // A same-document navigation may omit loaderId and is still valid.
+    socket.navigationResult = { frameId: "main" };
+    await expect(navigatePanel(botId, "example.com")).resolves.toMatchObject({ url: "https://example.com", error: null });
+    expect(socket.commands.filter((command) => command.method === "Page.navigate").map((command) => command.params?.url))
+      .toEqual(["https://unreachable.example.com", "https://example.com"]);
+  });
+
+  it.each([
+    [{}, "invalid navigation response"],
+    [{ frameId: "main", isDownload: true }, "started a download"],
+  ])("does not claim the requested page loaded for result %j", async (result, message) => {
+    socket.navigationResult = result;
+    await expect(navigatePanel(botId, "example.com")).rejects.toThrow(message);
+    expect(panelState(botId)).toMatchObject({ url: "about:blank", title: "Initial page", error: expect.stringContaining(message) });
+  });
+
+  it("persists protocol errors and clears the request timer on replies and send failures", async () => {
+    vi.useFakeTimers();
+    socket.navigationProtocolError = "navigation unavailable";
+    await expect(navigatePanel(botId, "example.com")).rejects.toThrow("navigation unavailable");
+    expect(vi.getTimerCount()).toBe(0);
+    expect(panelState(botId)).toMatchObject({ url: "about:blank", error: "navigation unavailable" });
+    socket.navigationProtocolError = null;
+    socket.navigationSendError = "socket closed during send";
+    await expect(navigatePanel(botId, "example.com")).rejects.toThrow("socket closed during send");
+    expect(vi.getTimerCount()).toBe(0);
+    socket.navigationSendError = null;
+    await expect(navigatePanel(botId, "example.com")).resolves.toMatchObject({ error: null });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([0, 7])("acknowledges frame session %i with a unique command id so later frames continue", (sessionId) => {
+    expect(socket.emitFrame(sessionId, "first frame")).toBe(true);
+    expect(latestFrame(botId)?.toString()).toBe("first frame");
+    expect(socket.emitFrame(sessionId + 1, "second frame")).toBe(true);
+    expect(latestFrame(botId)?.toString()).toBe("second frame");
+    const acknowledgements = socket.commands.filter((command) => command.method === "Page.screencastFrameAck");
+    expect(acknowledgements.map((command) => command.params?.sessionId)).toEqual([sessionId, sessionId + 1]);
+    const ids = socket.commands.map((command) => command.id);
+    expect(ids.every(Number.isInteger)).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("activates a restored background target before capture when reopening the same profile", async () => {
+    expect(socket.emitFrame(0, "first session preview")).toBe(true);
+    expect(latestFrame(botId)?.toString()).toBe("first session preview");
+    const previousSocket = socket;
+    stopPanel(botId);
+    expect(previousSocket.readyState).toBe(3);
+    expect(latestFrame(botId)).toBeNull();
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify([
+      { type: "page", webSocketDebuggerUrl: "ws://fixture.invalid/new-blank-page", url: "about:blank", title: "" },
+      {
+        type: "page", webSocketDebuggerUrl: "ws://fixture.invalid/restored-background-page",
+        url: "https://example.com", title: "Restored page",
+      },
+      { type: "browser_ui", webSocketDebuggerUrl: "ws://fixture.invalid/browser-ui", url: "chrome://omnibox-popup.top-chrome" },
+    ]))));
+    await expect(startPanel(botId, { workspaceDir: scratch }, launcher)).resolves.toMatchObject({
+      running: true, url: "https://example.com", title: "Restored page",
+    });
+    socket = FakeCdpSocket.instances[1];
+    expect(socket.url).toBe("ws://fixture.invalid/restored-background-page");
+    const methods = socket.commands.map((command) => command.method);
+    expect(methods.indexOf("Page.bringToFront")).toBeGreaterThanOrEqual(0);
+    expect(methods.indexOf("Page.bringToFront")).toBeLessThan(methods.indexOf("Page.startScreencast"));
+    await navigatePanel(botId, "example.com");
+    expect(socket.emitFrame(0, "reopened session preview")).toBe(true);
+    expect(latestFrame(botId)?.toString()).toBe("reopened session preview");
+    expect(launcher.spawn).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("toNavigableUrl", () => {
   it("passes absolute http/https through", () => {

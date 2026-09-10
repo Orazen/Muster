@@ -796,3 +796,61 @@ maintains the GLM handoff and pauses at the board's 1% threshold.
 Native OpenMausBot reference inspection was attempted through CUA, but app
 access reported pending Accessibility/Screen Recording permissions. No native
 UI state was returned or settings changed; this is not a passing check.
+
+## Loop 15 — 2026-09-10 — Reliable and truthful browser previews
+
+Audit reproduced three browser defects: the takeover banner claimed an
+agent pause without an attached agent transport, invalid CDP frame
+acknowledgements froze the page image, and reopening a saved profile could
+select a background tab that never produced frames. Navigation failures also
+looked successful. The panel now calls itself an address-driven preview,
+explains its actual limits, and reports failed navigation while retaining
+the last confirmed address for recovery. Shared agent/page input remains a
+separate roadmap slice.
+
+CDP commands and frame acknowledgements receive distinct numeric IDs;
+successful and failed commands clear their timers/listeners. Navigation
+validates the returned frame ID, error and download result. The selected
+page is brought to the foreground before capture, including restored tabs.
+The existing browser launch policy and profile storage are unchanged.
+
+The UI serializes actions, rejects stale polling replies, clears the prior
+bot's draft/image on selection changes, and does not restart a profile after
+a failed stop. Reload uses the confirmed address independently of the draft.
+Narrow screens use the existing Radix dialog focus scope; desktop keeps a
+420px side panel. Keyboard focus enters the overlay, wraps in both directions,
+Escape closes it, and the connected launcher receives focus again. Resizing
+preserves session state and the address draft.
+
+Final local browser evidence uses installed Brave, fresh temporary profiles,
+a synthetic account and an owned server. Seven functional workflows passed:
+first navigation to a real Example Domain image; stop/reopen of the same
+profile with a fresh image; switching bots without leaked image/draft;
+empty-draft reload; DNS failure followed by recovery; bot/guest switching and
+stop; and mobile keyboard open/focus wrapping/Escape/focus return. A reload
+of Muster retained the running server session. Four final layout checks
+passed: running and idle at 320×568, running at 390×844 and 1440×900. No
+horizontal overflow; desktop panel measured 420px. Phone-to-desktop resize
+retained the unsent draft. Final tab captured 0 console errors or warnings.
+
+The earlier same-profile reopen check failed before activation was added;
+it is not counted as a pass. A volatile roster label caused one locator
+timeout during the final runtime pass; reading its current label recovered
+the selection check. The initial full suite passed 2007 tests but preceded
+the reproduced reopen/focus fixes, so a final full run is required below.
+No Playwright runner, real model/Google login, VM or native UI execution is
+claimed. All owned Loop 15 fixture servers, profiles, helper and tabs were
+removed; viewport reset and demo 8845 untouched.
+
+Commercial implication: usable preview/recovery can reduce confusion during
+setup; conversion impact is unmeasured. The GLM handoff retains the separate
+browser-control, VM, OS, native and exported-brand acceptance contracts.
+
+Final verification: **195 files / 2013 passed / 8 skipped in 205.47s**.
+Focused server CDP checks: **22 passed / 0 skipped in 2.82s**. Focused UI
+and lifecycle checks: **30 passed / 0 skipped across 2 files in 0.804s**.
+Frontend/server typechecks and scoped lint pass. Final Vite build **5.17s**
+with the existing large-chunk warning; diff check passes. Read-only review
+found no remaining blocker after the mobile focus correction. Latest usage
+snapshot: **6% remaining**. The existing CEO heartbeat was found **PAUSED**;
+its state is preserved, with no duplicate automation created.
