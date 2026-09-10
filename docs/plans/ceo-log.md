@@ -899,3 +899,42 @@ Usage is **2% remaining** at the latest snapshot; finalize the GLM handoff
 without starting another code slice. Existing automation remains PAUSED.
 Commercial implication: people return to the work they selected; no retention
 or conversion lift is claimed.
+
+## Loop 17 — 2026-09-10 — Canonical brand exports from one geometry source
+
+The brand surfaces had drifted: both served favicon marks still showed the
+retired gradient-star "network of agents" design, several PWA icon files the
+manifest references did not exist on disk (so the service worker's precache
+install could never succeed), the manifest was never linked from the landing
+head at all, and the desktop exports (icns, ico, Electron window PNG)
+predated the canonical five-lobed mark chosen in Loop 14. One pure-JS
+generator now reads the canonical body path, eye shapes and colors straight
+out of the shared mascot component — generation fails loudly if that source
+changes shape — and emits every web and desktop asset from it: transparent
+favicon SVGs for both served roots, nine full-bleed PWA PNGs (72–512 plus
+180 for apple-touch), the rounded dark desktop tile as scalable SVG, a
+1024px PNG and a complete 12-file iconset assembled into the macOS icns by
+iconutil, a seven-size Windows ICO with embedded PNGs, and the 512px
+Electron window PNG. Stale manifest colors were replaced (dark tile
+background, brand orange theme color), and the manifest, theme color and
+apple-touch icon are linked from the landing head for the first time. The
+mac/win/linux packaging icon paths are unchanged, so packaging picks the
+canonical art up with no config change. No upstream notice obligations
+apply: the generator is original code over our own component geometry, and
+the MIT-licensed reference informed behavior ports, not asset content.
+
+Verification: favicon legibility checked in a real browser at 16/32/48px on
+white and near-black, plus the 30px dark-header lockup, the desktop tile and
+the 192px PWA icon — all from the served SVG and generated PNGs, light and
+dark. Frontend typecheck passes; Vite build **5.03s** with the existing
+large-chunk warning. Full suite: first run **1 failed / 2026 passed /
+8 skipped**, second run 4 timeouts (approval-harness, comms ×2,
+organization) — all known load-flake signatures; those three files rerun in
+isolation pass **25/25 in 27.29s**. No test exercises icon bytes; the
+service-worker precache resolution is verified by file presence against its
+URL list. Not claimed: packaged-app inspection, iOS and Android catalogs
+(explicitly separate slices, still on the previous design), any deployment.
+The landing is static HTML; no React route or test data was touched. Demo
+8845 untouched; no owned processes remain. Commercial implication: the
+chosen identity is now consistent at every surface a visitor or installer
+sees first; conversion impact unmeasured.

@@ -4,10 +4,16 @@
   "description": "The world's best AI assistant",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#030711",
-  "theme_color": "#00bbff",
+  "background_color": "#0a0a0a",
+  "theme_color": "#f08a24",
   "orientation": "portrait",
   "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
     {
       "src": "/assets/icons/icon-72.png",
       "sizes": "72x72",

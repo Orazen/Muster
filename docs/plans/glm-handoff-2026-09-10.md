@@ -169,15 +169,25 @@ performing destructive cleanup to make status look clean.
   pending-request account-switch race test is claimed. This ledger and the
   latest CEO entry are committed with that slice; use `git log -1` for its ID.
 
-Next bounded file set: **`src/components/GroupView.tsx` and narrowly related
-layout styles/tests**. Rows 1–3 are verified. A newly reproduced P2 takes
-priority: at **320×568**, the room document is **450px wide**. The Default
-responder select starts at x219.7 and ends at x390.7; member avatars also
-consume header width. Make room controls wrap/collapse without losing the
-selected responder, members, search/call/folder access or composer. Verify
-320/390/768/1440 widths, long room/member names, keyboard and preserved
-selection on reload, then full-suite gate. Afterwards resume row 4 brand
-exports and row 5 interactive landing; do not restart completed research.
+- Loop 17: canonical brand exports (row 4). One generator derives favicon
+  SVGs, the full PWA icon set, desktop tile SVG/PNG, icns, ICO and the
+  Electron PNG from the shared mascot geometry; manifest colors fixed and
+  manifest/theme-color/apple-touch linked from the landing head. Frontend
+  typecheck and build (5.03s) pass; full suite hit known load-timeout flakes
+  (1 then 4 failures) and the three affected files pass **25/25** in
+  isolation; browser favicon/lockup checks pass light and dark. iOS and
+  Android catalogs remain on the previous design as separate slices; packaged
+  app not inspected. This ledger and the CEO entry are committed with the
+  slice; use `git log -1` for its ID.
+
+Next bounded slice: **row 5 — interactive landing approval preview, `www/`
+only** (explicit simulation label; task → proposed action → Allow/Deny →
+sample receipt/evidence → reset; no production mutations or paid model;
+Deny never claims completed work; keyboard/touch, 320/390/768/1440 and
+reduced motion). Rows 1–4 are verified. After row 5, the P2 room overflow
+at 320×568 (`src/components/GroupView.tsx` and narrowly related layout
+styles/tests) takes priority, then iOS/Android brand catalogs. Do not
+restart completed research.
 
 All owned Loop 14–16 fixtures, data, helper scripts and tabs were cleaned up;
 viewport reset. No owned audit process remains from these loops; the earlier
