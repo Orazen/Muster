@@ -938,3 +938,36 @@ The landing is static HTML; no React route or test data was touched. Demo
 8845 untouched; no owned processes remain. Commercial implication: the
 chosen identity is now consistent at every surface a visitor or installer
 sees first; conversion impact unmeasured.
+
+## Loop 18 — 2026-09-10 — The landing walks visitors through an approval
+
+The landing claimed "Approvals that hold" but only as static copy; a visitor
+had to install the app to understand what an approval actually feels like.
+The landing now has an `#approvals` section that runs the loop on sample
+data: an explicit "Simulation — sample data only. Nothing real runs, no
+model is called, nothing leaves this page" badge sits above a card where the
+visitor picks one of three tasks — an inbox reply, a file move, and a
+deliberately destructive delete — watches the bot report its two simulated
+steps, reviews the proposed action with its scope and blast radius, then
+Allow or Deny. Allow produces a simulated receipt (task, decision, result,
+turn/token usage with cost honestly marked "not reported") plus the exact
+evidence artifact — the draft email text, the mv command list, the rm
+command. Deny produces a receipt whose outcome reads "No action taken" and
+a note saying the task stopped at the gate; the evidence block is never
+rendered on Deny, so the simulation cannot claim completed work. Reset
+returns to the task picker. The whole thing is one static HTML file with
+vanilla JS over hardcoded strings — a request listener confirmed zero
+network calls and no model traffic during the flows.
+
+Verification: **35/35 Playwright checks pass** in a real browser — all
+three flows end to end, deny-truthfulness, reset; keyboard-only walkthrough
+(Tab to task, Enter, focus lands on Allow, Enter, focus lands on reset);
+no horizontal overflow at 320/390/768/1440 in any of the three states;
+44px minimum touch targets at 320; `prefers-reduced-motion: reduce`
+renders with `animationName: none` before and after interaction; zero
+console errors. Frontend typecheck passes; full suite **196 files /
+2027 passed / 8 skipped with no flakes**. Not claimed: no production
+surface touched (`www/` only), no real approval path exercised, no
+deployment. Demo 8845 untouched; no owned processes remain. Commercial
+implication: a visitor can now feel the product's core trust loop before
+installing; conversion impact unmeasured.

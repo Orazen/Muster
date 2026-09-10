@@ -434,6 +434,80 @@
   .room-card h3 { margin: 6px 0 4px; font-size: 15px; }
   .room-card p { margin: 0; color: var(--muted-2); font-size: 13px; line-height: 1.5; }
   .room-kind { display: inline-block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #ff9800; border: 1px solid rgba(255,152,0,.35); border-radius: 6px; padding: 2px 7px; margin-bottom: 8px; }
+
+  /* ---------- approval simulation (static demo) ---------- */
+  .apx { margin-top: 44px; max-width: 760px; }
+  .apx-sim-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12.5px; color: var(--muted);
+    border: 1px solid var(--line-2); border-radius: 999px;
+    padding: 6px 12px; margin: 0 0 14px; background: var(--surface-soft);
+  }
+  .apx-sim-badge::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .apx-card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius-card); box-shadow: var(--shadow-soft);
+    overflow: hidden;
+  }
+  .apx-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 18px; border-bottom: 1px solid var(--line);
+    background: var(--surface-soft);
+  }
+  .apx-head img { border-radius: 8px; flex: none; }
+  .apx-head__name { color: var(--ink); font-weight: 600; font-size: 14px; }
+  .apx-head__role { color: var(--muted-2); font-size: 12px; }
+  .apx-head__state {
+    margin-left: auto; flex: none; font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted-2); border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 8px;
+  }
+  .apx-head__state--approval { color: #ffb02e; border-color: rgba(255,176,46,.4); }
+  .apx-head__state--allowed { color: #4ade80; border-color: rgba(74,222,128,.4); }
+  .apx-head__state--denied { color: #f87171; border-color: rgba(248,113,113,.4); }
+  .apx-body { padding: 18px; display: grid; gap: 14px; }
+  .apx-pick { margin: 0; color: var(--muted); font-size: 14px; }
+  .apx-tasks { display: grid; gap: 10px; }
+  .apx-task {
+    text-align: left; background: var(--surface-raised); color: var(--body);
+    border: 1px solid var(--line-2); border-radius: 12px;
+    padding: 12px 14px; min-height: 44px; font-size: 15px; line-height: 1.45;
+  }
+  .apx-task:hover { border-color: var(--accent-line); color: var(--ink); }
+  .apx-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+  .apx-steps li { color: var(--muted); font-size: 13.5px; display: flex; gap: 8px; }
+  .apx-steps li::before { content: "✓"; color: #4ade80; flex: none; }
+  .apx-action { border: 1px solid rgba(255,176,46,.35); background: rgba(255,176,46,.07); border-radius: 12px; padding: 14px; }
+  .apx-action__label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #ffb02e; margin-bottom: 6px; }
+  .apx-action__title { color: var(--ink); font-size: 15px; font-weight: 600; line-height: 1.4; }
+  .apx-action__detail { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .apx-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+  .apx-allow, .apx-deny, .apx-reset { min-height: 44px; border-radius: 10px; padding: 10px 20px; font-size: 14px; font-weight: 600; border: 1px solid transparent; }
+  .apx-allow { background: var(--accent); color: #fff; }
+  .apx-allow:hover { background: var(--accent-soft); }
+  .apx-deny { background: transparent; color: var(--body); border-color: var(--line-2); }
+  .apx-deny:hover { border-color: #f87171; color: #f87171; }
+  .apx-reset { justify-self: start; background: transparent; color: var(--muted); border-color: var(--line-2); }
+  .apx-reset:hover { color: var(--ink); }
+  .apx-receipt { border: 1px solid var(--line-2); border-radius: 12px; padding: 14px; background: var(--surface-raised); }
+  .apx-receipt__label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted-2); margin-bottom: 10px; }
+  .apx-kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin: 0; font-size: 13.5px; }
+  .apx-kv dt { color: var(--muted-2); }
+  .apx-kv dd { margin: 0; color: var(--body); }
+  .apx-evidence {
+    margin: 0; padding: 12px; border-radius: 10px; background: #0d0d0f; border: 1px solid var(--line);
+    color: var(--body); font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .apx-denied-note { border: 1px solid rgba(248,113,113,.35); background: rgba(248,113,113,.07); border-radius: 12px; padding: 12px 14px; color: var(--body); font-size: 14px; line-height: 1.5; }
+  @media (max-width: 480px) {
+    .apx-kv { grid-template-columns: 1fr; }
+    .apx-kv dd { margin-top: 2px; }
+    .apx-kv dt:not(:first-child) { margin-top: 8px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    @keyframes apx-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    .apx-body > * { animation: apx-in .18s ease-out; }
+  }
 </style>
 </head>
 <body>
@@ -551,6 +625,33 @@
           <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">04</span>
           <h3>Run the team</h3>
           <p>Chat from desktop, web, phone, or terminal. Routines put work on a schedule; receipts and scorecards help you review the results.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Approval simulation: static sample data, no network or model calls -->
+    <section id="approvals" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">Approvals</div>
+        <h2 class="section-heading">You decide what your bots may do</h2>
+        <p class="section-copy">
+          Before a bot touches your mail, your files, or anything that can't be undone, it stops
+          and asks. This is the loop, with sample data: pick a task, review the proposed action,
+          then Allow or Deny.
+        </p>
+      </div>
+      <div class="apx">
+        <p class="apx-sim-badge" role="note">Simulation — sample data only. Nothing real runs, no model is called, nothing leaves this page.</p>
+        <div class="apx-card">
+          <div class="apx-head">
+            <img src="/app-icon.svg" width="28" height="28" alt="" aria-hidden="true" />
+            <div>
+              <div class="apx-head__name" data-apx-agent>Scout</div>
+              <div class="apx-head__role" data-apx-role>Sample bot · Inbox Manager</div>
+            </div>
+            <span class="apx-head__state" data-apx-state>Sample</span>
+          </div>
+          <div class="apx-body" data-apx-body aria-live="polite"></div>
         </div>
       </div>
     </section>
@@ -1465,6 +1566,200 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
         button.textContent = "Select manually";
       }
     });
+  })();
+
+  // Approval simulation — static sample data only; no network requests, no model calls.
+  (function () {
+    var body = document.querySelector("[data-apx-body]");
+    var stateBadge = document.querySelector("[data-apx-state]");
+    var agentName = document.querySelector("[data-apx-agent]");
+    var agentRole = document.querySelector("[data-apx-role]");
+    if (!body || !stateBadge || !agentName || !agentRole) return;
+
+    var TASKS = [
+      {
+        agent: "Scout",
+        role: "Sample bot · Inbox Manager",
+        task: "Triage this morning's support inbox and draft replies",
+        steps: ["Read 14 new messages in the simulated inbox", "Drafted a reply to the newest thread"],
+        action: "Send the drafted reply to anna@fernwoodlabs.com",
+        detail: "Via Gmail · new sender in this thread",
+        allowed: {
+          result: "Reply sent to anna@fernwoodlabs.com",
+          usage: "6 turns · 41s · 12,431 tokens · cost not reported",
+          evidence: "To: anna@fernwoodlabs.com\n\nHi Anna — thanks for the report. The sync error you hit on Tuesday was a stale cache on our side, fixed in 2.4.1. Steps that clear it:\n\n  1. Settings → Sync → Clear cache\n  2. Sign in again\n\nIf it recurs, reply here and I'll pull the logs with you.\n\n— Scout"
+        },
+        denied: "No reply was sent. The task stopped at the approval gate, and Scout is waiting for a different instruction."
+      },
+      {
+        agent: "Filer",
+        role: "Sample bot · File runner",
+        task: "Find every invoice from Veltro Ltd in Downloads and file them",
+        steps: ["Scanned 312 files in the simulated Downloads folder", "Matched 7 Veltro invoices by name and sender"],
+        action: "Move 7 PDFs into ~/Documents/Veltro/Invoices",
+        detail: "On the bot's own desktop · files are moved, not copied",
+        allowed: {
+          result: "7 files moved to ~/Documents/Veltro/Invoices",
+          usage: "9 turns · 1m 12s · 21,004 tokens · cost not reported",
+          evidence: "mv ~/Downloads/veltro-invoice-2026-03.pdf  ~/Documents/Veltro/Invoices/\nmv ~/Downloads/veltro-invoice-2026-04.pdf  ~/Documents/Veltro/Invoices/\nmv ~/Downloads/veltro-invoice-2026-05.pdf  ~/Documents/Veltro/Invoices/\n… 4 more files\n\n7 moved · 0 skipped · 0 errors"
+        },
+        denied: "No files were moved. The task stopped at the approval gate, and the Downloads folder is untouched."
+      },
+      {
+        agent: "Broom",
+        role: "Sample bot · Cleanup",
+        task: "Free up space — delete the duplicate screenshots folder",
+        steps: ["Compared both screenshot folders in the sample data", "Found 214 exact duplicates — 6.2 GB"],
+        action: "Permanently delete 214 files in “Screenshots (duplicate copy)”",
+        detail: "Destructive · bypasses the trash · 6.2 GB reclaimable",
+        allowed: {
+          result: "214 files deleted — 6.2 GB freed",
+          usage: "4 turns · 18s · 8,912 tokens · cost not reported",
+          evidence: "rm -rf \"~/Desktop/Screenshots (duplicate copy)\"\n\n214 files removed · 6.2 GB freed"
+        },
+        denied: "Nothing was deleted. The task stopped at the approval gate — exactly where a destructive step should stop."
+      }
+    ];
+
+    function setBadge(text, modifier) {
+      stateBadge.textContent = text;
+      stateBadge.className = "apx-head__state" + (modifier ? " " + modifier : "");
+    }
+
+    function focusFirst(container) {
+      var target = container.querySelector("[data-apx-focus]");
+      if (target) target.focus();
+    }
+
+    function renderIdle() {
+      setBadge("Sample", "");
+      var wrap = document.createElement("div");
+      var pick = document.createElement("p");
+      pick.className = "apx-pick";
+      pick.textContent = "Pick a sample task to walk the approval loop:";
+      var list = document.createElement("div");
+      list.className = "apx-tasks";
+      TASKS.forEach(function (item) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "apx-task";
+        button.textContent = item.task;
+        button.addEventListener("click", function () { renderWorking(item); });
+        list.appendChild(button);
+      });
+      wrap.appendChild(pick);
+      wrap.appendChild(list);
+      body.replaceChildren(wrap);
+      var first = list.querySelector("button");
+      if (first) {
+        first.setAttribute("data-apx-focus", "");
+        focusFirst(body);
+      }
+    }
+
+    function renderWorking(item) {
+      agentName.textContent = item.agent;
+      agentRole.textContent = item.role;
+      setBadge("Awaiting you", "apx-head__state--approval");
+      var wrap = document.createElement("div");
+      var steps = document.createElement("ul");
+      steps.className = "apx-steps";
+      item.steps.forEach(function (step) {
+        var li = document.createElement("li");
+        li.textContent = step;
+        steps.appendChild(li);
+      });
+      var action = document.createElement("div");
+      action.className = "apx-action";
+      var label = document.createElement("div");
+      label.className = "apx-action__label";
+      label.textContent = "Proposed action — waiting for your approval";
+      var title = document.createElement("div");
+      title.className = "apx-action__title";
+      title.textContent = item.action;
+      var detail = document.createElement("div");
+      detail.className = "apx-action__detail";
+      detail.textContent = item.detail;
+      action.appendChild(label);
+      action.appendChild(title);
+      action.appendChild(detail);
+      var buttons = document.createElement("div");
+      buttons.className = "apx-buttons";
+      var allow = document.createElement("button");
+      allow.type = "button";
+      allow.className = "apx-allow";
+      allow.textContent = "Allow";
+      allow.addEventListener("click", function () { renderDecision(item, true); });
+      var deny = document.createElement("button");
+      deny.type = "button";
+      deny.className = "apx-deny";
+      deny.textContent = "Deny";
+      deny.addEventListener("click", function () { renderDecision(item, false); });
+      buttons.appendChild(allow);
+      buttons.appendChild(deny);
+      wrap.appendChild(steps);
+      wrap.appendChild(action);
+      wrap.appendChild(buttons);
+      body.replaceChildren(wrap);
+      allow.setAttribute("data-apx-focus", "");
+      focusFirst(body);
+    }
+
+    function renderDecision(item, allowed) {
+      setBadge(allowed ? "Allowed" : "Denied", allowed ? "apx-head__state--allowed" : "apx-head__state--denied");
+      var wrap = document.createElement("div");
+      var receipt = document.createElement("div");
+      receipt.className = "apx-receipt";
+      var receiptLabel = document.createElement("div");
+      receiptLabel.className = "apx-receipt__label";
+      receiptLabel.textContent = "Simulated receipt";
+      receipt.appendChild(receiptLabel);
+      var kv = document.createElement("dl");
+      kv.className = "apx-kv";
+      var rows = [
+        ["Task", item.task],
+        ["Decision", allowed ? "Allowed by you" : "Denied by you"],
+        allowed ? ["Result", item.allowed.result] : ["Outcome", "No action taken"],
+        allowed ? ["Usage", item.allowed.usage] : null
+      ];
+      rows.forEach(function (row) {
+        if (!row) return;
+        var dt = document.createElement("dt");
+        dt.textContent = row[0];
+        var dd = document.createElement("dd");
+        dd.textContent = row[1];
+        kv.appendChild(dt);
+        kv.appendChild(dd);
+      });
+      receipt.appendChild(kv);
+      wrap.appendChild(receipt);
+      if (allowed) {
+        var evidenceLabel = document.createElement("div");
+        evidenceLabel.className = "apx-receipt__label";
+        evidenceLabel.textContent = "Evidence — exact simulated artifact";
+        wrap.appendChild(evidenceLabel);
+        var evidence = document.createElement("pre");
+        evidence.className = "apx-evidence";
+        evidence.textContent = item.allowed.evidence;
+        wrap.appendChild(evidence);
+      } else {
+        var note = document.createElement("p");
+        note.className = "apx-denied-note";
+        note.textContent = item.denied;
+        wrap.appendChild(note);
+      }
+      var reset = document.createElement("button");
+      reset.type = "button";
+      reset.className = "apx-reset";
+      reset.textContent = "Run another sample task";
+      reset.addEventListener("click", renderIdle);
+      wrap.appendChild(reset);
+      body.replaceChildren(wrap);
+      reset.setAttribute("data-apx-focus", "");
+      focusFirst(body);
+    }
+
+    renderIdle();
   })();
 </script>
 

@@ -180,14 +180,26 @@ performing destructive cleanup to make status look clean.
   app not inspected. This ledger and the CEO entry are committed with the
   slice; use `git log -1` for its ID.
 
-Next bounded slice: **row 5 — interactive landing approval preview, `www/`
-only** (explicit simulation label; task → proposed action → Allow/Deny →
-sample receipt/evidence → reset; no production mutations or paid model;
-Deny never claims completed work; keyboard/touch, 320/390/768/1440 and
-reduced motion). Rows 1–4 are verified. After row 5, the P2 room overflow
-at 320×568 (`src/components/GroupView.tsx` and narrowly related layout
-styles/tests) takes priority, then iOS/Android brand catalogs. Do not
-restart completed research.
+- Loop 18: interactive landing approval preview (row 5, `www/` only). The
+  landing gains an `#approvals` section with an explicit "Simulation — sample
+  data only" badge and a three-step sample loop: pick one of three tasks
+  (inbox reply, file move, destructive delete), review the proposed action
+  with Allow/Deny, then a simulated receipt — evidence artifact on Allow, a
+  "No action taken" note and no evidence block on Deny — plus reset. Static
+  data only: zero network requests, no model calls, verified by request
+  listener. **35/35 Playwright checks pass**: full Allow/Deny/reset flows,
+  deny never claims completed work, keyboard-only walkthrough with focus
+  moved to the meaningful element after each render, no horizontal overflow
+  at 320/390/768/1440, 44px touch targets, reduced-motion emulation renders
+  with `animationName: none`, zero console errors. Typecheck pass; full
+  suite **196 files / 2027 passed / 8 skipped, no flakes**. Section is
+  `www/`-only; no production surface touched. This ledger and the CEO entry
+  are committed with the slice; use `git log -1` for its ID.
+
+Next bounded slice: **the P2 room overflow at 320×568
+(`src/components/GroupView.tsx` and narrowly related layout styles/tests)**,
+then iOS/Android brand catalogs. Rows 1–5 are verified. Do not restart
+completed research.
 
 All owned Loop 14–16 fixtures, data, helper scripts and tabs were cleaned up;
 viewport reset. No owned audit process remains from these loops; the earlier
