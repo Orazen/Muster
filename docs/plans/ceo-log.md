@@ -339,3 +339,69 @@ E2E case, then native simulator verification and the remaining workspace
 matrix one bounded slice at a time. GET verification of the Settings/public
 releases remains pending; do not create duplicate deployment triggers while
 hosted Actions billing is blocked.
+
+
+## Loop 7 — 2026-09-10 — Reliable self-host device-link recovery
+
+Reproduced a blank application from `/claim#%`: `decodeURIComponent` threw
+`URIError` during both development effect passes. The original effect also
+cleared the fragment before re-subscription, showing a false missing-code
+error during a valid request, and its success timer could navigate after
+leaving the page. The claim flow now parses the link without throwing, keeps
+one single-use submission through cleanup/re-subscription, validates server
+confirmation and offers explicit retry only for transport/server failures.
+It removes malformed fragments too, preserves query/router state, detaches
+late UI updates, and cancels the redirect on departure.
+
+Reused the responsive auth layout for loading, connected and recovery states.
+Open console performs a full reload so it can recover an already-created
+session after a lost or malformed confirmation. Browser testing caught a
+WebKit fetch-receiver issue in the first implementation; the default transport
+now calls fetch without binding it to the controller, with a regression test.
+Read-only peer review identified the session-refresh recovery link before
+commit. Both findings were corrected and exercised again.
+
+**10 focused hands-on browser checks passed:** malformed-link recovery;
+missing-link recovery after reload; anonymous console gate; a fresh lowercase
+claim leading to the authenticated app; consumed-code rejection; alternate
+sign-in navigation; explicit 503 retry to confirmation; leaving a confirmed
+claim before its timer; leaving during a pending request; and recovering a
+real session cookie after deliberately corrupted confirmation. **10 layout
+checks passed:** missing, malformed and consumed states at **320×568,
+390×844 and 1440×900**, plus retry at **320×568**. No horizontal page overflow
+was detected in these checks. These are browser-driven checks, not automated
+Playwright case counts.
+
+The local server used disposable synthetic account data on port 18861,
+with Vite on 15199. A temporary proxy on 18863 returned controlled 503/delayed
+responses, then separately forwarded a real local redemption cookie while
+corrupting its JSON confirmation. Logged request counts were one for the
+pending flow and two only after an explicit retry; the recovery proxy saw
+HTTP 200 with one session cookie. Both proxy processes and their tabs were
+closed. The existing demo on 8845 was untouched. Physical camera scanning,
+production redemption, native clients and real Google login were not tested.
+
+Focused tests: **2 files / 37 passed / 0 skipped**, **576 ms**, including
+**29 new claim-flow regressions** and eight existing server claim tests.
+After test-only lint corrections, the 29-test file passed again in **351 ms**.
+Both typechecks, scoped oxlint and diff checks passed. The final Vite build
+completed in **5.46 seconds**, with the existing large-chunk warning.
+Final full Vitest suite after the recovery-link correction: **186 files /
+1858 passed / 8 skipped**, **174.45 seconds**. The earlier full pass was
+also 186 files / 1858 passed / 8 skipped, in 176.30 seconds; it was repeated
+because peer review required that functional correction. These results are
+above the handbook baseline of 172 files / 1689 passed / 8 skipped.
+
+Commercial implication: a broken or interrupted setup link now has a usable
+recovery path, and a successful claim survives development remounts without
+confusing failure feedback. No activation, conversion or revenue lift is
+claimed. No pricing or identity provider wiring changed.
+
+Next pick: preserve the missing state cookie in the existing desktop OAuth
+redirect wrapper and add a route regression. A separate read-only audit ran
+**2 local HTTP checks** with dummy OAuth settings: direct social start emitted
+one state cookie, while desktop start emitted zero. **0 external redirects**
+were followed. The `/pair` retry/copy/rotation inconsistencies and misleading
+transcript E2E case remain separately queued in the audit matrix. Native
+verification remains outstanding. Previously reported hosted Actions billing
+is unchanged; do not create duplicate deploy triggers or board notices.

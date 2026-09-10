@@ -87,10 +87,10 @@ The router contains nine explicit SPA route patterns plus its fallback.
 | `/sign-up?next=…&ref=…` | Account creation, invalid inputs, existing account, disabled signup, referral preservation | Local email signup checked; remaining states unverified; Google-only and verification delivery need their services |
 | `/forgot-password`, `/reset-password?token=…` | Neutral response, missing/invalid/expired/reused token, mismatch, successful reset and subsequent login | Unverified in this slice; disposable mail fixture can test app logic, real delivery needs email service |
 | `/pair` | Auth gate, generation, copy, countdown, expiry, regeneration, consumed-code rejection | Unverified in this slice; two isolated servers can exercise bridge |
-| `/claim#CODE` | Missing/malformed/expired/consumed code, fragment removal, session creation, `/app` navigation | Unverified; disposable claim fixture for browser logic, physical phone for QR scanning |
+| `/claim#CODE` | Missing/malformed/expired/consumed code, fragment removal, session creation, `/app` navigation | Loop 7: missing/malformed/consumed recovery, fragment removal, previously anonymous real local claim → authenticated app, mock 503 retry and departure during/after request checked; nine recovery layouts at 320/390/1440px plus retry at 320px. Expiry covered by server tests; physical QR scanning and production redemption unverified |
 | `/app/*` | Auth gate, onboarding, reconnect, empty roster, No Engines, authenticated surfaces below | Local account/onboarding/reload and listed fake-ACP interactions checked; other states unverified |
 | `/os` | Bot and Rooms windows, open/focus/minimize/restore/close, drag/resize, command console, attention targets, Back to app | Unverified; browser shell and packaged Electron are separate checks |
-| `/desktop-auth/start?redirect=…`, `/desktop-auth/done?grant=…`, `/oauth/finish#code=…` | Invalid/expired grants, OAuth return, exchange, error recovery | Unverified in this slice; full success needs real OAuth and local desktop handoff |
+| `/desktop-auth/start?redirect=…`, `/desktop-auth/done?grant=…`, `/oauth/finish#code=…` | Invalid/expired grants, OAuth return, exchange, error recovery | Local HTTP audit reproduced lost OAuth state cookie at desktop start; queued fix below. Full success needs real OAuth and local desktop handoff |
 | Unknown SPA route | Predictable fallback and preserved authentication state | Unverified |
 
 ## Authenticated surface matrix
@@ -203,6 +203,34 @@ slice's native UI. No checked-in native UI test suite was found in the audit.
   one category does not fill another category's unverified cells.
 
 ## Next verified slices
+
+Loop 7 narrowed entry recovery to the self-host claim page. A malformed `%`
+fragment previously threw `URIError` and blanked the app. Its effect also
+removed the fragment before React's development re-subscription, producing
+a false missing-code state; a completed request could redirect after leaving.
+The repaired flow keeps one request, validates confirmation, detaches UI
+updates and cancels navigation on departure, with explicit recoverable errors
+inside the shared responsive auth layout. Open console reloads authentication
+even when the server set a session cookie but its confirmation was malformed;
+a real local claim through a response-corrupting proxy verified that recovery.
+Browser fixtures confirmed exactly
+one delayed submission and two submissions only after an explicit 503 retry.
+These controlled responses do not prove external authentication.
+
+The next bounded fix is the desktop OAuth handoff: two local HTTP checks
+with random dummy OAuth settings showed the direct Better Auth social-start
+response emits one `better-auth.state` cookie, while Muster's
+`/desktop-auth/start` emits a Google redirect with zero `Set-Cookie` headers.
+The current wrapper reads the authorization URL and drops the auth response
+cookies. Better Auth's callback checks that state cookie. Preserve it and add
+a real local-route regression before attempting full Google/desktop E2E;
+the two-check audit followed zero external redirects. This is evidence of a
+handoff defect, not proof of a completed provider login.
+
+Keep `/pair` recovery separate: its error branch hides the retry action,
+clipboard rejection is unhandled, and the UI's New code label promises
+rotation while the endpoint reuses a live code. Verify and fix those in their
+own slice without mixing self-host claims, cloud pairing, and desktop OAuth.
 
 1. **Settings follow-through.** The Usage crash and responsive navigation
    slice is locally verified. Continue individual save/error and integration
