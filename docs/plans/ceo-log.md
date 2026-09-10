@@ -1346,3 +1346,75 @@ Loop 23 production closeout at **20:37:17 UTC**: normal GETs to `/os` and
 `Workspace overview`). This supersedes the earlier pending deployment
 observation. Exact deployed SHA and authenticated backend behavior remain
 unobserved. Loop 24 still needs its own post-push marker check.
+
+Loop 24 release closeout: **6c61a18** pushed. At **20:50:36 UTC**, normal
+`/app` GET returned 200 and loaded `index-CMSE0abM.js`; bundle GET returned
+200 with session-recovery, retry and OS markers. Source and serving UI are
+confirmed; no new real OAuth or production storage/session experiment was
+performed.
+
+## Loop 25 — 2026-09-10 — Package SQLite for the actual Electron runtime
+
+The packaging hook now stages and rebuilds only the packaged native resource
+copy for the resolved Electron version, host platform and target architecture.
+It restores helper dependencies after resource pruning, rejects invalid or
+escaping paths, removes stale addons, clears inherited node-gyp overrides
+and fails on compiler/missing-output errors. node-gyp is pinned to 12.4.0.
+Framework dependency rebuilding is disabled so shared Node dependencies are
+not retargeted. Standalone server artifacts remain unchanged by the hook.
+
+The staged-server smoke now requires explicit runtime/version/architecture
+for Electron, checks a real SQLite roundtrip and seven contained proxy paths,
+and verifies health belongs to its child PID. It uses owned fixtures and
+bounded output/timeouts. Cancellation reaps probe/server process groups,
+including resistant descendants, before reporting success. Tests exposed
+that execFile ignored detached; the probe now uses explicit spawn. Desktop
+renderer smoke expects the confirmed `/sign-in?next=%2Fapp` root handoff.
+
+Focused contracts: **22/22 in 1.41s**, plus **5/5 cancellation tests in
+16.99s**, no skips on this Mac. Fake process fixtures are not native proof.
+Actual integrated helper rebuilt in **26.25s** (five upstream C++ warnings,
+zero errors), then Electron **43.4.0 / Node 24.18.1 / ABI148 / arm64** passed
+**9/9 checks in 4.27s** on the current 6c61a18 server. The root Node addon
+SHA256 was unchanged. Separate Node22/ABI127 smoke passed **9/9**; the old
+host addon deliberately fails the new Electron gate with ERR_DLOPEN_FAILED.
+Actual helper evidence uses a builder-shaped owned resources tree and
+explicit cached headers; the full builder/default-header gate follows.
+Full-suite and actual app-build results are recorded below before commit.
+
+Commercial implication: an installer that starts but cannot use its native
+storage breaks the product's core promise. This closes that packaging gap;
+no reliability, conversion or revenue rate is inferred from these tests.
+Next is release-control guards and actual platform release gates. No new
+version, installer publication, native Google login or universal runtime
+compatibility is claimed. Usage last measured **11% used / 89% remaining**.
+
+Loop 25 final verification: **208 files / 2236 passed / 8 skipped in
+235.39s**, exit 0, **27 additional passes** over Loop 24. Frontend/server
+typechecks and scoped lint passed; **14 updater tests / 0 skipped** passed
+in 76.48ms; **8 Electron syntax checks** passed. Durable full log:
+`.omb-scratch/verification/loop25-full.log`. pnpm10.33.0 warned that the
+legacy package.json pnpm.overrides field is ignored; record a P2 configuration
+follow-up before dependency updates. This slice changed only the pinned
+node-gyp importer in the existing lockfile; no security claim follows.
+
+The actual isolated macOS arm64 app build passed: preparation **46.07s**,
+speech **6.02s**, CUA staging **2.96s**, electron-builder **108.78s**, all
+exit 0. The real afterPack hook fetched official Electron43.4.0 headers
+and checksums with HTTP200 and rebuilt without overrides. **5 upstream
+C++ warnings / 0 compiler errors**. The actual packaged Muster executable
+then passed **9/9 checks in 7.08s** (owned HTTP, seven proxy paths, SQLite
+roundtrip) under **Electron43.4.0 / Node24.18.1 / ABI148 / arm64**.
+Independent deep/strict signature verification passed in **0.27s**; the
+signature is ad-hoc, with no TeamIdentifier. All nine source-overlay hashes
+and the original Node addon hashes were unchanged. This closes the actual
+builder/default-header gate; it is not a Developer-ID/notarization claim.
+
+Artifact: `.omb-scratch/verification/mac-app-loop25-20260910T205233Z-d6b3d6/package/mac-arm64/Muster.app`,
+version **1.10.4**, built solely for verification. Exact commands, manifests
+and results are in that directory's `build-results.json`,
+`packaged-results.json`, `artifact-verification.json`, `source-manifest.json`.
+No GUI interaction, installed upgrade, new-version publication, DMG,
+Windows/Linux runtime or native Google login is established by these gates.
+Next: correct release staging/dry-run/draft-mirror controls, then prepare
+a versioned release candidate and its remaining native acceptance gates.

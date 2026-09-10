@@ -1,124 +1,216 @@
-// Prove the built server actually STARTS with no node_modules in reach.
-//
-// 0.1.24 shipped a server that died on every launch with
-//   ERR_MODULE_NOT_FOUND: Cannot find package 'zod'
-// because `tsc` leaves bare imports verbatim and the packaged app carries no
-// node_modules. Every existing gate passed it: the unit suite runs in the repo
-// (where zod resolves), and the packaging check only asserts index.js EXISTS.
-//
-// So this copies dist-server OUT of the repo before running it. Inside the
-// repo a bare import still resolves by walking up to ./node_modules and the
-// test passes on a build that would be dead in the field — which is precisely
-// how the bug escaped. The copy is the whole point; do not "simplify" it away.
+// Run the server and native dependency outside the repo's node_modules tree.
+// Default: standalone Node. For desktop gates pass the packaged executable,
+// its exact Electron version and architecture; never silently test host Node.
 import { execFile, spawn } from "node:child_process";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { randomInt } from "node:crypto";
+import { cpSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { parseArgs, promisify } from "node:util";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const staging = mkdtempSync(join(tmpdir(), "omb-smoke-"));
-const home = mkdtempSync(join(tmpdir(), "omb-smoke-home-"));
-const port = 21000 + Math.floor(Math.random() * 9000);
-
-cpSync(join(root, "dist-server"), join(staging, "server"), { recursive: true });
-
-// PATH and SystemRoot pass through only when present: a stripped env is part
-// of what this smoke exercises, so missing vars must stay missing.
-const childEnv = {
-  HOME: home,
-  USERPROFILE: home,
-  OMB_PORT: String(port),
-};
-if (process.env.PATH) childEnv.PATH = process.env.PATH;
-if (process.env.SystemRoot) childEnv.SystemRoot = process.env.SystemRoot;
-
-const child = spawn(process.execPath, [join(staging, "server", "index.js")], {
-  cwd: staging,
-  env: childEnv,
-  stdio: ["ignore", "pipe", "pipe"],
-});
-
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const { values } = parseArgs({ options: {
+  "server-dir": { type: "string", default: join(root, "dist-server") },
+  runtime: { type: "string" },
+  "electron-version": { type: "string" },
+  arch: { type: "string", default: process.arch },
+} });
+if (Boolean(values.runtime) !== Boolean(values["electron-version"])) {
+  throw new Error("Desktop smoke requires both --runtime and --electron-version");
+}
+const runtime = values.runtime ? resolve(values.runtime) : process.execPath;
+const expectedElectron = values["electron-version"] ?? null;
+const expectedArch = values.arch;
+const source = realpathSync(values["server-dir"]);
+const fixture = mkdtempSync(join(tmpdir(), "muster-package-smoke-"));
+const staging = join(fixture, "server");
+const fixtureHome = join(fixture, "home");
+const fixtureData = join(fixture, "data");
+let child;
+let probeChild;
+let verifiedReport;
+let executionError;
 let output = "";
-child.stdout.on("data", (chunk) => (output += chunk));
-child.stderr.on("data", (chunk) => (output += chunk));
+let childError;
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const interruption = new AbortController();
+const onInterrupt = () => interruption.abort();
+process.on("SIGINT", onInterrupt);
+process.on("SIGTERM", onInterrupt);
 
-// Best-effort by design. Windows holds file handles open a little longer than
-// the process that owned them, so removing the scratch dir immediately after
-// the kill raises EPERM; Linux runners can raise EACCES the same way. Scratch
-// cleanup must never decide whether the build is good — it failed a green run
-// on Windows once already, and see f66d30f for the same lesson on Linux.
-const cleanup = () => {
-  child.kill("SIGKILL");
-  for (const dir of [staging, home]) {
+async function freePortPair() {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const port = randomInt(21000, 50000);
+    const listeners = [];
     try {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    } catch {
-      /* the OS will reap it; the assertion below is what matters */
+      for (const candidate of [port, port + 1]) {
+        const server = createServer();
+        listeners.push(server);
+        await new Promise((resolve, reject) => {
+          server.once("error", reject);
+          server.listen(candidate, "127.0.0.1", resolve);
+        });
+      }
+      return port;
+    } catch (error) {
+      if (error.code !== "EADDRINUSE") throw error;
+    } finally {
+      await Promise.all(listeners.filter((server) => server.listening).map((server) => new Promise((resolve) => server.close(resolve))));
     }
   }
-};
-
-const deadline = Date.now() + 45_000;
-let listening = false;
-while (Date.now() < deadline) {
-  if (child.exitCode !== null) break;
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/health`);
-    if (res.ok) {
-      listening = true;
-      break;
-    }
-  } catch {
-    /* not up yet */
-  }
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  throw new Error("No free owned port pair found");
 }
 
-// Serving /api/health is necessary but nowhere near sufficient. Bundling
-// relocates import.meta.url, so a module that used to sit in drivers/ resolves
-// its sibling paths from the bundle's directory instead — one level too high.
-// The 0.1.24 candidate booted and answered /api/health perfectly while every
-// spawned proxy pointed outside Resources/server, silently killing permission
-// prompts, computer use and dweb. So check the paths the server ACTUALLY
-// resolved, from inside the staged copy, before calling the build good.
-const probe = join(staging, "server", "probe-proxy-paths.mjs");
-writeFileSync(
-  probe,
-  [
-    'import { existsSync } from "node:fs";',
-    'import { SPAWNED_PROXIES } from "./proxy-paths.js";',
-    "const missing = Object.entries(SPAWNED_PROXIES).filter(([, p]) => !existsSync(p));",
-    "console.log(JSON.stringify({ resolved: SPAWNED_PROXIES, missing }));",
-  ].join("\n"),
-);
+function contained(file) {
+  const path = relative(realpathSync(staging), realpathSync(file));
+  return path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+}
 
-let proxyReport = null;
+function runProbe(probe, env) {
+  interruption.signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    // execFile does not forward detached to spawn. Use spawn directly so
+    // cancellation can reap a resistant probe and its whole owned group.
+    probeChild = spawn(runtime, [probe], {
+      cwd: fixture, env, detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => finish(new Error("Native runtime probe timed out")), 30_000);
+    const abort = () => finish(new Error("Native runtime probe interrupted"));
+    function finish(error) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      interruption.signal.removeEventListener("abort", abort);
+      if (error) reject(error);
+      else resolve({ stdout });
+    }
+    interruption.signal.addEventListener("abort", abort, { once: true });
+    probeChild.stdout.on("data", (chunk) => {
+      if (settled) return;
+      stdout += chunk;
+      if (stdout.length > 1_000_000) finish(new Error("Native probe stdout exceeded its limit"));
+    });
+    probeChild.stderr.on("data", (chunk) => {
+      if (settled) return;
+      stderr += chunk;
+      if (stderr.length > 1_000_000) finish(new Error("Native probe stderr exceeded its limit"));
+    });
+    for (const stream of [probeChild.stdout, probeChild.stderr]) stream.once("error", finish);
+    probeChild.once("error", finish);
+    probeChild.once("close", (code, signal) => finish(code === 0 ? null : new Error(`Native runtime probe failed (${signal ?? code}):\n${stderr}`)));
+  });
+}
+
+async function stopOwnedChild(child) {
+  if (!child?.pid) return;
+  const exited = () => child.exitCode !== null || child.signalCode !== null;
+  const groupAlive = () => {
+    if (process.platform === "win32") return !exited();
+    try { process.kill(-child.pid, 0); return true; }
+    catch (error) { if (error.code === "ESRCH") return false; throw error; }
+  };
+  if (process.platform === "win32" && !exited()) {
+    // A Node/Electron child may own helper processes. Restrict taskkill to
+    // this exact child tree, then await exit before removing fixture data.
+    await promisify(execFile)("taskkill", ["/pid", String(child.pid), "/T", "/F"]).catch(() => {});
+  } else if (process.platform !== "win32") {
+    try { process.kill(-child.pid, "SIGTERM"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+  }
+  const deadline = Date.now() + 5_000;
+  while ((!exited() || groupAlive()) && Date.now() < deadline) await delay(50);
+  if (!exited() || groupAlive()) {
+    if (process.platform === "win32") child.kill("SIGKILL");
+    else { try { process.kill(-child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } }
+    const forcedDeadline = Date.now() + 5_000;
+    while ((!exited() || groupAlive()) && Date.now() < forcedDeadline) await delay(50);
+  }
+  if (!exited() || groupAlive()) throw new Error("Owned smoke process tree did not exit; fixture retained");
+}
+
 try {
-  const { stdout } = await promisify(execFile)(process.execPath, [probe], { cwd: staging });
-  proxyReport = JSON.parse(stdout);
+  cpSync(source, staging, { recursive: true, dereference: true });
+  for (const directory of [fixtureHome, fixtureData]) mkdirSync(directory, { recursive: true });
+  writeFileSync(join(fixtureData, "config.json"), JSON.stringify({
+    instances: { ghost: { driver: "not-a-real-driver", displayName: "Offline package fixture" } },
+  }));
+  const port = await freePortPair();
+  // Preserve only the OS environment needed to execute the owned child.
+  // No credentials, real user data, Node flags or alternate module paths.
+  const childEnv = {
+    HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_USER_DATA: fixtureData,
+    OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
+    OMB_COMPANION_DIR: join(fixture, "companion"),
+  };
+  for (const key of ["PATH", "SystemRoot", "TMPDIR", "TEMP", "TMP", "LANG"]) {
+    if (process.env[key]) childEnv[key] = process.env[key];
+  }
+  if (expectedElectron) childEnv.ELECTRON_RUN_AS_NODE = "1";
+
+  const probe = join(staging, "package-runtime-probe.mjs");
+  writeFileSync(probe, [
+    'import { existsSync } from "node:fs";',
+    'import { createRequire } from "node:module";',
+    'import { SPAWNED_PROXIES } from "./proxy-paths.js";',
+    'const require = createRequire(import.meta.url);',
+    'const Database = require("./_native/better-sqlite3/lib/index.js");',
+    'const db = new Database(":memory:");',
+    'let value;',
+    'try { db.exec("CREATE TABLE proof (value INTEGER)"); db.prepare("INSERT INTO proof VALUES (?)").run(17); value = db.prepare("SELECT value FROM proof").get().value; } finally { db.close(); }',
+    'console.log(JSON.stringify({ electron: process.versions.electron ?? null, node: process.versions.node, abi: process.versions.modules, arch: process.arch, value, proxies: SPAWNED_PROXIES, missing: Object.values(SPAWNED_PROXIES).filter((path) => !existsSync(path)) }));',
+  ].join("\n"));
+  const { stdout } = await runProbe(probe, childEnv);
+  const report = JSON.parse(stdout);
+  if (report.electron !== expectedElectron || report.arch !== expectedArch) {
+    throw new Error(`Wrong smoke runtime: ${JSON.stringify(report)}`);
+  }
+  if (report.value !== 17 || report.missing.length || Object.values(report.proxies).some((file) => !contained(file))) {
+    throw new Error(`Packaged native/proxy check failed: ${JSON.stringify(report)}`);
+  }
+  const proxyCount = Object.keys(report.proxies).length;
+  if (proxyCount !== 7) throw new Error(`Expected 7 spawned proxy paths, received ${proxyCount}`);
+
+  interruption.signal.throwIfAborted();
+  child = spawn(runtime, [join(staging, "index.js")], {
+    cwd: fixture, env: childEnv, detached: process.platform !== "win32",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.on("error", (error) => { childError = error; });
+  for (const stream of [child.stdout, child.stderr]) stream.on("data", (chunk) => { output = (output + chunk).slice(-100_000); });
+  let healthy = false;
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline && !interruption.signal.aborted && !childError && child.exitCode === null && child.signalCode === null) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.any([AbortSignal.timeout(1_000), interruption.signal]) });
+      if (response.ok) {
+        const health = await response.json();
+        if (health.app !== "muster" || health.pid !== child.pid) throw new Error("Health port belongs to another process");
+        healthy = true;
+        break;
+      }
+    } catch (error) {
+      if (error.message === "Health port belongs to another process") throw error;
+    }
+    await delay(200);
+  }
+  if (!healthy) throw new Error(`Packaged server failed its owned health check: ${childError?.message ?? child.exitCode}\n${output}`);
+  verifiedReport = { passed: proxyCount + 2, checks: { ownedHttp: 1, proxyPaths: proxyCount, nativeDatabase: 1 }, runtime: { electron: report.electron, node: report.node, abi: report.abi, arch: report.arch } };
 } catch (error) {
-  proxyReport = { error: String((error && error.message) || error) };
+  executionError = error;
 }
-
-cleanup();
-
-if (!listening) {
-  console.error(`the packaged server never served /api/health on port ${port}.`);
-  console.error(`exit code: ${child.exitCode}`);
-  console.error(output.trim() || "(no output)");
-  process.exit(1);
+const cleanup = await Promise.allSettled([stopOwnedChild(child), stopOwnedChild(probeChild)]);
+const cleanupErrors = cleanup.filter((result) => result.status === "rejected").map((result) => result.reason);
+if (!cleanupErrors.length) {
+  try { rmSync(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); }
+  catch (error) { cleanupErrors.push(error); }
 }
-
-if (!proxyReport || proxyReport.error || proxyReport.missing.length > 0) {
-  console.error("spawned proxy paths do not resolve inside the packaged server dir:");
-  console.error(JSON.stringify(proxyReport, null, 2));
-  console.error("\nthe server would still answer /api/health — and every one of these");
-  console.error("features would be dead: permission prompts, computer use, dweb, peer comms.");
-  process.exit(1);
-}
-
-const count = Object.keys(proxyReport.resolved).length;
-console.log(`packaged server started with no node_modules in reach (port ${port}) ✓`);
-console.log(`all ${count} spawned proxy paths resolve inside the packaged server dir ✓`);
+process.removeListener("SIGINT", onInterrupt);
+process.removeListener("SIGTERM", onInterrupt);
+if (cleanupErrors.length) throw new AggregateError([...(executionError ? [executionError] : []), ...cleanupErrors], "Packaged smoke failed to clean up its owned fixture");
+if (executionError) throw executionError;
+console.log(JSON.stringify(verifiedReport));

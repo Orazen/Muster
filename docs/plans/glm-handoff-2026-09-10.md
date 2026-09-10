@@ -523,3 +523,56 @@ Loop 23 production closeout at **20:37:17 UTC**: normal GETs to `/os` and
 `Workspace overview`). This supersedes the earlier pending deployment
 observation. Exact deployed SHA and authenticated backend behavior remain
 unobserved. Loop 24 still needs its own post-push marker check.
+
+## Loop 25 — Native packaging verification
+
+Loop 24 **6c61a18** is pushed and its UI markers are live in
+`index-CMSE0abM.js` (GET 200 at 20:50:36 UTC). Google/native persistence is
+not newly verified. Loop 25 isolates Electron native rebuilding to the
+packaged resource copy, pins node-gyp12.4.0, disables framework rebuilding
+of shared dependencies, and upgrades the smoke to actual runtime/arch,
+SQLite roundtrip, seven proxy paths and owned PID verification. Cancellation
+now reaps resistant probe/server groups; execFile's ignored detached option
+was reproduced and replaced with spawn.
+
+Focused **22 native contracts / 5 cleanup cases passed**, zero Mac skips.
+Actual helper compile **26.25s**, actual Electron checks **9/9 in 4.27s**,
+original Node addon hash unchanged; default Node smoke also **9/9**. Old
+Node addon under Electron is correctly rejected. Full suite and full app
+builder results follow in the CEO log. Evidence is under
+`.omb-scratch/verification/native-helper-20260910T204629Z-c8e29c` and the
+`loop25-*` logs. These are not native Google/UI, signing identity or release
+publication claims. The goal remains active; allowance **89% remaining**,
+no reset/credits consumed. Next source slice: release-control guards, then
+verified native release candidates. Existing release workflow must not be
+dispatched while dry-run uploads and draft mirroring remain possible.
+
+Loop 25 final verification: **208 files / 2236 passed / 8 skipped in
+235.39s**, exit 0, **27 additional passes** over Loop 24. Frontend/server
+typechecks and scoped lint passed; **14 updater tests / 0 skipped** passed
+in 76.48ms; **8 Electron syntax checks** passed. Durable full log:
+`.omb-scratch/verification/loop25-full.log`. pnpm10.33.0 warned that the
+legacy package.json pnpm.overrides field is ignored; record a P2 configuration
+follow-up before dependency updates. This slice changed only the pinned
+node-gyp importer in the existing lockfile; no security claim follows.
+
+The actual isolated macOS arm64 app build passed: preparation **46.07s**,
+speech **6.02s**, CUA staging **2.96s**, electron-builder **108.78s**, all
+exit 0. The real afterPack hook fetched official Electron43.4.0 headers
+and checksums with HTTP200 and rebuilt without overrides. **5 upstream
+C++ warnings / 0 compiler errors**. The actual packaged Muster executable
+then passed **9/9 checks in 7.08s** (owned HTTP, seven proxy paths, SQLite
+roundtrip) under **Electron43.4.0 / Node24.18.1 / ABI148 / arm64**.
+Independent deep/strict signature verification passed in **0.27s**; the
+signature is ad-hoc, with no TeamIdentifier. All nine source-overlay hashes
+and the original Node addon hashes were unchanged. This closes the actual
+builder/default-header gate; it is not a Developer-ID/notarization claim.
+
+Artifact: `.omb-scratch/verification/mac-app-loop25-20260910T205233Z-d6b3d6/package/mac-arm64/Muster.app`,
+version **1.10.4**, built solely for verification. Exact commands, manifests
+and results are in that directory's `build-results.json`,
+`packaged-results.json`, `artifact-verification.json`, `source-manifest.json`.
+No GUI interaction, installed upgrade, new-version publication, DMG,
+Windows/Linux runtime or native Google login is established by these gates.
+Next: correct release staging/dry-run/draft-mirror controls, then prepare
+a versioned release candidate and its remaining native acceptance gates.

@@ -120,6 +120,9 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
+      node-gyp:
+        specifier: 12.4.0
+        version: 12.4.0
       oxlint:
         specifier: 1.78.0
         version: 1.78.0

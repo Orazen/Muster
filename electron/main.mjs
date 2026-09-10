@@ -323,7 +323,7 @@ function createWindow() {
         `);
         // This smoke run starts with no session, so /sign-in is the one
         // correct settled destination for a signed-out desktop launch.
-        const expectedLocation = `http://127.0.0.1:${SERVER_PORT}/sign-in`;
+        const expectedLocation = `http://127.0.0.1:${SERVER_PORT}/sign-in?next=%2Fapp`;
         if (result.location !== expectedLocation) {
           throw new Error(
             `unexpected packaged renderer URL: ${result.location} (expected ${expectedLocation})`,

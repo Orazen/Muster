@@ -37,6 +37,10 @@ files:
 
 asar: true
 
+# Runtime dependencies are bundled. Rebuild the packaged SQLite copy in
+# afterPack; electron-builder must not retarget shared Node dependencies.
+npmRebuild: false
+
 # Re-seals the .app with a clean, internally consistent ad-hoc signature
 # when there is no real Apple Developer identity — fixes the packaged
 # build going from Gatekeeper's hard-block "is damaged and can't be

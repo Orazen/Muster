@@ -1,4 +1,5 @@
-// electron-builder afterPack hook — macOS only.
+// electron-builder afterPack hook — native staging on every platform,
+// followed by the existing macOS signature handling.
 //
 // Real root cause of the "Muster is damaged and can't be opened. You should
 // move it to the Bin." Gatekeeper message on the unsigned release build,
@@ -24,27 +25,12 @@
 // "damaged" (a hard block) to "unidentified developer" (the normal,
 // expected, resolvable unsigned-app prompt).
 import { execFileSync } from "node:child_process";
-import { writeFileSync, cpSync, existsSync, readdirSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { prepareElectronNative } from "./prepare-electron-native.mjs";
 
 export default async function afterPack(context) {
-  // electron-builder prunes node_modules dirs even inside extraResources,
-  // which silently dropped dist-server/node_modules/better-sqlite3 — the one
-  // native external the packaged server needs (vaultgram's index store).
-  // Re-stage it on EVERY platform before any signing/re-sealing below.
-  {
-    const resources = join(context.appOutDir, "Contents", "Resources");
-    const serverDir = join(resources, "server");
-    const src = join(context.packager.projectDir, "dist-server", "node_modules");
-    if (existsSync(serverDir) && existsSync(src)) {
-      const dest = join(serverDir, "node_modules");
-      // dereference: pnpm installs are symlink farms — copying links verbatim
-      // yields a dangling tree inside the app. Embed real files instead.
-      cpSync(src, dest, { recursive: true, dereference: true });
-      const pkg = join(dest, "better-sqlite3");
-      console.log(`[afterPack] staged server node_modules (${readdirSync(dest).length} pkgs) better-sqlite3=${existsSync(pkg) ? "present" : "MISSING"}`);
-    }
-  }
+  const native = await prepareElectronNative(context);
 
   if (context.electronPlatformName !== "darwin") return;
 
@@ -52,7 +38,7 @@ export default async function afterPack(context) {
   // looks for, which unlocks Squirrel.Mac's in-place restart updates. Its
   // absence is what routes unsigned builds to the direct-download flow.
   if (process.env.CSC_IDENTITY_AUTO_DISCOVERY === "true" && process.env.MAC_SIGNING_IDENTITY) {
-    const markerPath = `${context.appOutDir}/${context.packager.appInfo.productFilename}.app/Contents/Resources/trusted-mac-updates`;
+    const markerPath = join(native.resourcesDir, "trusted-mac-updates");
     writeFileSync(markerPath, `identity: ${process.env.MAC_SIGNING_IDENTITY}\n`);
     console.log(`[afterPack] trusted-mac-updates marker written (${markerPath})`);
     return;
