@@ -90,7 +90,7 @@ The router contains nine explicit SPA route patterns plus its fallback.
 | `/claim#CODE` | Missing/malformed/expired/consumed code, fragment removal, session creation, `/app` navigation | Loop 7: missing/malformed/consumed recovery, fragment removal, previously anonymous real local claim → authenticated app, mock 503 retry and departure during/after request checked; nine recovery layouts at 320/390/1440px plus retry at 320px. Expiry covered by server tests; physical QR scanning and production redemption unverified |
 | `/app/*` | Auth gate, onboarding, reconnect, empty roster, No Engines, authenticated surfaces below | Local account/onboarding/reload and listed fake-ACP interactions checked; other states unverified |
 | `/os` | Bot and Rooms windows, open/focus/minimize/restore/close, drag/resize, command console, attention targets, Back to app | Unverified; browser shell and packaged Electron are separate checks |
-| `/desktop-auth/start?redirect=…`, `/desktop-auth/done?grant=…`, `/oauth/finish#code=…` | Invalid/expired grants, OAuth return, exchange, error recovery | Local HTTP audit reproduced lost OAuth state cookie at desktop start; queued fix below. Full success needs real OAuth and local desktop handoff |
+| `/desktop-auth/start?redirect=…`, `/desktop-auth/done?grant=…`, `/oauth/finish#code=…` | Invalid/expired grants, OAuth return, exchange, error recovery | Loop 8: 12 real local HTTP cases verify state cookie/signature, callback acceptance/rejection, repeated starts, invalid redirects, anonymous finish and missing provider. Existing 8 handoff unit cases pass. Full Google login, native browser handoff and deployed correction remain unverified |
 | Unknown SPA route | Predictable fallback and preserved authentication state | Unverified |
 
 ## Authenticated surface matrix
@@ -217,15 +217,23 @@ Browser fixtures confirmed exactly
 one delayed submission and two submissions only after an explicit 503 retry.
 These controlled responses do not prove external authentication.
 
-The next bounded fix is the desktop OAuth handoff: two local HTTP checks
-with random dummy OAuth settings showed the direct Better Auth social-start
-response emits one `better-auth.state` cookie, while Muster's
-`/desktop-auth/start` emits a Google redirect with zero `Set-Cookie` headers.
-The current wrapper reads the authorization URL and drops the auth response
-cookies. Better Auth's callback checks that state cookie. Preserve it and add
-a real local-route regression before attempting full Google/desktop E2E;
-the two-check audit followed zero external redirects. This is evidence of a
-handoff defect, not proof of a completed provider login.
+Loop 8 repairs the desktop OAuth handoff by forwarding Better Auth's separate
+`Set-Cookie` headers with the authorization redirect. The real local callback
+accepts the returned signed state cookie and reaches a simulated provider
+cancellation; missing or mismatched cookies still produce `state_mismatch`.
+Twelve local HTTP cases use random dummy OAuth settings, separate fixture
+processes, outbound fetch/TCP guards and manual redirects. An initial shared
+fixture hit actual rate limits (8 passed / 4 failed); isolating each behavior
+retains throttling and passes all 12 cases. A production GET before this fix
+confirmed HTTP 302 to Google with zero cookies. Neither these tests nor that
+GET followed an external redirect or completed provider authentication.
+
+P2 follow-up from those failures: the wrapper converts upstream sign-in
+throttling into a generic HTTP 500 unavailable-provider response. Its internal
+request also carries no client IP header, while Better Auth falls back to one
+shared bucket when it cannot resolve a trusted IP. Verify distinct-client
+behavior and preserve rate-limit status/retry guidance in a separate slice;
+do not disable throttling to make tests or production sign-ins pass.
 
 Keep `/pair` recovery separate: its error branch hides the retry action,
 clipboard rejection is unhandled, and the UI's New code label promises

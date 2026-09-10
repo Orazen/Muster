@@ -405,3 +405,43 @@ were followed. The `/pair` retry/copy/rotation inconsistencies and misleading
 transcript E2E case remain separately queued in the audit matrix. Native
 verification remains outstanding. Previously reported hosted Actions billing
 is unchanged; do not create duplicate deploy triggers or board notices.
+
+
+## Loop 8 — 2026-09-10 — Preserve desktop OAuth state cookies
+
+P1: the existing desktop sign-in wrapper dropped Better Auth's `Set-Cookie`
+headers when converting its social-start response to a Google redirect.
+A production GET reproduced HTTP 302 with **0 cookies**, following **0
+external redirects**. The five-line repair in `server/index.ts` forwards
+all cookie headers separately. `server/desktop-auth-route.test.ts` verifies
+that the returned signed cookie satisfies the real local callback state
+check; missing/mismatched cookies continue to fail. No provider configuration
+or credentials changed.
+
+New focused suite: **1 file / 12 passed / 0 skipped**, **11.86 seconds**.
+Existing handoff lifecycle suite: **1 file / 8 passed / 0 skipped**, **307 ms**.
+The first new-suite attempt was **8 passed / 4 failed** because shared fixture
+requests hit real sign-in rate limits; separate processes fixed the fixture
+without disabling throttling. Cases cover cookie/signature preservation,
+fresh starts, simulated provider cancellation, missing/mismatched cookies,
+five invalid redirects, anonymous finish, and unavailable configuration.
+Random dummy keys and temporary data are confined to owned local processes;
+outbound fetch/TCP is blocked and redirects are manual. **0 browser UI tests,
+0 native tests, and 0 real Google logins** ran in this server-only slice.
+Server typecheck, scoped lint and diff checks passed. Final full Vitest:
+**187 files / 1870 passed / 8 skipped**, **178.66 seconds**. This exceeds
+the handbook baseline of 172 files / 1689 passed / 8 skipped.
+
+Commercial implication: the desktop entry point retains the state required
+to return from Google, removing a reproduced sign-in failure. No successful
+real-provider login or conversion lift is claimed. The earlier Settings and
+public-page releases are now visible by production GET; the device-claim
+release was still pending at this loop's opening check. Hosted Actions billing
+remains the previously reported board item; no duplicate trigger was created.
+
+P2 follow-up: upstream sign-in throttling is currently reported as generic
+HTTP 500, as seen in the first fixture run. Audit the internal request's
+missing client-IP context and distinct-client rate buckets, then preserve
+rate-limit status/retry guidance without disabling throttles. After that,
+continue `/pair` recovery/copy/rotation, truthful transcript E2E and native checks.
+The route/state/device matrix remains the record of unverified workflows.

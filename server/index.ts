@@ -3862,6 +3862,11 @@ let requestUserEmail = "";
         // OAuth provider; an unconfigured provider 404s into the catch below.
         const social = socialRes.ok ? ((await socialRes.json()) as { url?: string }) : null;
         if (!social?.url) throw new Error("provider did not return an authorization url");
+        // The browser must carry Better Auth's state cookie back through
+        // Google's callback. Keep separate Set-Cookie headers intact;
+        // folding them into a comma-separated value changes cookie parsing.
+        const cookies = socialRes.headers.getSetCookie();
+        if (cookies.length) res.setHeader("Set-Cookie", cookies);
         return res.writeHead(302, { Location: social.url }).end();
       } catch (e) {
         // SAFETY: caught rejections from fetch here are Error instances thrown by undici.
