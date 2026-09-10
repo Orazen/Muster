@@ -1,6 +1,8 @@
 # Muster execution handoff — 10 September 2026
 
-This is the live handoff for **GLM 5.3 Flash**, as requested by the board.
+This is Muster's continuity ledger. **GPT-6 Astra owns the checkout again**
+under the board's 10 September Pro upgrade and explicit takeover. GLM's
+completed slices and original handoff remain below as historical evidence.
 Read `AGENTS.md`, `astra-ceo-mandate.md`, the latest `ceo-log.md` entry and git
 status first. The latest log and commit supersede any historical numbers here.
 Continue one verified slice at a time on `main`; do not restart the audit.
@@ -41,14 +43,15 @@ Do not retrigger unchanged failures or repeat the same board notification.
 
 ## Budget and continuity
 
-The account usage check at the start of this request showed **24% remaining**
-in the weekly Codex window. Reported reset: **16 September 2026, 21:16:18 UTC
-(23:16:18 Europe/Rome)**. This is account-wide, not a per-task token balance.
+The takeover usage tool reported **Pro, 0% used / 100% remaining**. This
+supersedes the old 1–2% allowance and September 16 ownership deadline. The
+obsolete `muster-post-reset-handover-audit` was deleted; Astra is active now.
+This is account-wide, not a per-task token balance.
 Check current usage before each new slice; never infer remaining allowance
 from response length or these historical numbers. Do not consume reset
 credits, buy credits, or select another paid service to bypass the limit.
 
-At **1% remaining or less**, stop starting builds/research, finalize this
+Keep this ledger ready at **2% remaining**. At **1% remaining or less**, stop starting builds/research, finalize this
 document with exact git status, active processes, failing commands, latest
 verified counts and the next bounded slice; notify the board and pause the
 existing `muster-ceo-loop` heartbeat to avoid duplicate work while GLM owns
@@ -102,6 +105,7 @@ when evidence changes.
 | 4 | Consistent exported brand assets | Canonical vector to favicon/public/desktop assets, then native catalogs in separately verifiable slices. Check small size, both themes, loading, packaging references and missing assets; preserve required notices. |
 | 5 | Interactive landing approval preview; `www/` only | Explicit simulation label, task → proposed action → Allow/Deny → sample receipt/evidence → reset. No production mutations or paid model. Deny never claims completed work; keyboard/touch, responsive layout and reduced motion pass. |
 | 6 | First-task onboarding reliability | Check creation responses, preserve input and show recovery, reuse eligible greeting bot, prevent duplicate creation/send, do not mark failure as success. Keep job drafts through auth with an allowlisted template ID and explicit send. |
+| 6b | First-task send/skip contract and durable request identity | Audit Skip for now with a populated draft: it currently calls the same finish path. Make send versus skip explicit. Add account-scoped server idempotency for creation and task acceptance, bind acceptance to the expected thread atomically, return a durable receipt, and exercise response loss, restart, reload and concurrent task switches. Client locks alone do not prove these cases. |
 | 7 | Local VM guided setup and recovery | Explain runtime/download/storage, observable phases and actionable retries. Fixture failures plus one owned cold/warm runtime run and a durable-file round trip. Colima was stopped at audit; no actual VM has been validated. |
 | 8 | Per-bot VM inventory | Discover after restart/destination change; distinguish unmanaged/stale targets; prove two isolated workspaces, cap enforcement, lease behavior, collision recovery and injected-clock idle cleanup. |
 | 9 | `/os` workspace layout and task targeting | Open/focus/minimize/restore/close, bounds after resize, compact phone presentation, keyboard/focus return, reload persistence, exact bot/thread command and approval targets. Reuse server contracts. |
@@ -243,3 +247,117 @@ was found PAUSED; preserve that state unless the board resumes it. Native
 CUA access is blocked by pending OS permissions; do
 not count its attempted inspection as a UI check. Update this ledger again
 before transferring ownership; the CEO log remains the latest evidence.
+
+## Ownership handoff to GPT-6 Astra — 2026-09-10 (GLM)
+
+Row 6 (first-task onboarding reliability) is IMPLEMENTED but UNCOMMITTED —
+the next owner decides whether to run the remaining gates and commit, or
+rework. Per the build queue's acceptance text: check creation responses,
+preserve input and show recovery, reuse the eligible greeting bot, prevent
+duplicate creation/send, never mark failure as success, keep drafts through
+auth with an allowlisted template id and explicit send.
+
+Working tree at 8729aa6, clean except row 6:
+- `src/state/teammate-setup.ts` (new): pure decision module. Reuse-eligibility
+  for the seeded greeting bot = has id, not hidden, not chiefOfStaff, no user
+  message in transcript (a greeter that already received a task is not
+  reusable); otherwise create. Identity is applied via PATCH and validated
+  ("did not stick" throw); unusable create responses throw instead of
+  continuing.
+- `src/state/teammate-setup.test.ts` (new, 8 tests): reuse seeded greeter
+  without create/patch; create when roster empty; hidden/chiefOfStaff skip;
+  identity-on-reuse keeps messages when PATCH omits them; pending bot from a
+  failed attempt is preferred on retry (no duplicate); throws on botless
+  create, empty-id bot, botless patch.
+- `src/state/onboarding-draft.ts` (new): per-account sessionStorage draft
+  keyed `muster:onboarding-draft:v1:<encodeURIComponent(accountId)>`; the
+  AuthGate redirect to /sign-in is same-tab so the session survives auth.
+  Zod caps mirror server limits (name 100, title 200, description 4000,
+  axes 0–100). `FIRST_TASK_TEMPLATES` allowlist (`weekly-priorities`,
+  `field-brief`, `notes-to-draft`) prefills from `?template=`; unknown ids
+  resolve to "" and nothing is ever auto-sent.
+- `src/state/onboarding-draft.test.ts` (new, 6 tests): per-account
+  round-trip and isolation; corrupt JSON / version 2 / over-cap name → null;
+  clear and undefined-account no-ops; schema-violating save refuses to
+  write; template allowlist and unknown/empty ids.
+- `src/components/Onboarding.tsx` (modified): `finish()` rewritten over
+  `api()` (status-checked; the 402 TIER_BOT_CAP message surfaces verbatim in
+  a `role="alert"` recovery box). Re-entry guarded by `finishingRef` and all
+  five finish entry points disabled while `creating`. `pendingBotRef` carries
+  a bot created in a failed attempt into the retry; `botAdded` dedupes by id.
+  First task is dispatched as a normal `send` after success.
+  `track("onboarding_completed")` is success-only now. Draft is cleared on
+  success and deliberate abandonment (Escape / Maybe later), kept on failure.
+
+Verified: `npx tsc -b` clean; focused vitest 28/28 (14 new + 14 pre-existing
+chat-selection). NOT verified — remaining gates for row 6: browser E2E
+(duplicate-creation repro on a fresh account, tier-cap message rendering,
+draft restore across /sign-in, template prefill), full `npx vitest run`
+(196 files / 2027 passed baseline), Loop 21 entries here and in the CEO log,
+pathless commit + push, deployment GET verify. Nothing for row 6 is
+live-verified; push is not deployment.
+
+Slices A (P2 320px overflow, ae6b52d) and B (native brand catalogs, 8729aa6)
+are committed and pushed with their own Loop entries above. The Mimosa full
+re-run remains owed (blocked on MCP enablement). Ownership of Muster
+transfers to GPT-6 Astra as of this entry; no owned background process was
+left running for row 6 (no rig was started; demo 127.0.0.1:8845 untouched).
+
+## Astra takeover verification — Loop 21 — 2026-09-10
+
+The board upgraded the account and explicitly resumed Astra; the old
+September 16 transfer schedule no longer applies. Rows 1–5, the room
+overflow and native catalog exports remain completed as logged. Row 6's
+inherited uncommitted code was reworked and verified; do not reuse its
+earlier 28-test claim as evidence of the final implementation.
+
+Final full suite: **199 files / 2086 passed / 8 skipped in 214.59s**, exit 0.
+Frontend/server/E2E typechecks, scoped lint and production build pass.
+**12 manual CUA scenarios**, four recovery viewport widths and a real
+Free-tier 402 are itemized in CEO Loop 21. Authoritative roster/history,
+strict unused-teammate eligibility, acknowledged-task retries, lifecycle
+fences, account drafts and exact template allowlisting are now covered.
+Browser-discovered duplicate message receipts no longer hide a completed
+reply. Completion events contain a boolean first-task flag, not its text.
+
+All owned fixtures, fake engines, data and tabs are removed; viewport reset.
+No required process remains. Demo 8845 was untouched. The reusable manual
+fixture is `e2e/onboarding-harness.ts`; run it with
+`node --experimental-strip-types e2e/onboarding-harness.ts --onboarding-audit`
+after a current Vite build. Use CUA for UI actions and `stop` for cleanup.
+Do not count fixture control requests as browser actions.
+
+**Remaining evidence limits:** synthetic accounts/fake ACP, no real Google
+OAuth, provider, native app or VM execution. Acknowledged-send caching lasts
+for the mounted wizard only; a lost response, reload or later concurrent
+thread switch still needs server idempotency and atomic expected-thread
+acceptance. That is row 6b before the VM queue. The Mimosa full re-run still
+has no callable MCP/tool-search capability in this session; zero scans run.
+No security or revenue claim is warranted.
+
+**Desktop release remains owed.** Public updater feeds still reported
+1.10.4; GitHub latest reported 1.10.3. No new installer, tag or version was
+published in Loop 21. Exact `8729aa6` CI/autodeploy jobs (34506218764 and
+34506218899) failed before starting because of GitHub billing/spending
+limits; the Codex Pro upgrade does not change that. Before a candidate
+1.10.5 release, inspect current versions/assets, clear external runner and
+signing/notarization prerequisites, bump through the existing version tool,
+verify builds/installers/updater metadata, and follow the release workflow.
+Version tags trigger that workflow; its dry-run mode still uploads draft
+assets. Do not publish an unsigned or unverified build as a normal release.
+
+The preexisting `Verified release handoff before rebase` stash belongs to
+Astra's interrupted release preparation and was preserved. Its old Loop 17
+and September 16 ownership text conflict with newer history: never blindly
+pop it. Its prior evidence at e0a1454 was 14 updater tests, eight Electron
+syntax checks and packaged-server startup with seven resolved proxy paths;
+those are historical checks, not a new desktop release or tests of this SHA.
+
+Production GET at 18:30–18:32 UTC returned eight 200s and
+`/assets/index-_h_ora_i.js` containing the earlier preview/mascot markers.
+The old absent-marker observation is superseded, but exact deployed SHA
+was not established. Verify this slice after push with GET against its
+draft-key and completion-recovery markers; push alone is not deployment.
+The existing CEO heartbeat resumes under Astra after push; the obsolete
+post-reset handover audit has been deleted. Keep this ledger current before
+the next low-allowance handoff; do not launch GLM or buy/reset credits.

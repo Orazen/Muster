@@ -743,11 +743,12 @@ export function reducer(state: AppState, action: Action): AppState {
           ),
         };
       }
-      // every server-side append chains onto (and becomes) the active leaf
+      // SSE replay and HTTP acknowledgements may repeat an older message
+      // after a newer reply arrived. A duplicate is not a new append or a
+      // branch selection; only threadActive may intentionally rewind it.
+      if (bot.messages.some((message) => message.id === action.message.id)) return state;
+      // every new server-side append chains onto (and becomes) the active leaf
       const next = updateBot(state, bot.id, (b) => {
-        if (b.messages.some((m) => m.id === action.message.id)) {
-          return { ...b, activeLeafId: action.message.id };
-        }
         let messages = [...b.messages, action.message];
         // base64 screen frames are big; a long computer-use session would
         // grow memory without bound. Keep the newest few frames' pixels and

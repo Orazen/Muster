@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, AlertTriangle, Loader2, Mic, ArrowLeft, Sparkles } from "lucide-react";
 import { MusterBloom } from "./MusterBloom";
 import { AgentAvatar } from "./Avatar";
@@ -7,9 +7,16 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
 import { ProviderMark } from "./ProviderIcons";
 import { AGENT_CHARACTERS, AGENT_COLORS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor } from "@/lib/mascot";
-import { useStore } from "@/state/store";
+import { api, useStore, type Bot } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import type { InstanceInfo } from "@/state/store";
+import { createOnboardingFinishSession } from "@/state/onboarding-finish";
+import {
+  clearOnboardingDraft,
+  readOnboardingDraft,
+  resolveInitialTaskDraft,
+  saveOnboardingDraft,
+} from "@/state/onboarding-draft";
 
 // First-run onboarding, vellum-assistant style: a wizard that talks about the
 // product by building it — welcome, live engine checks, assemble your first
@@ -170,6 +177,21 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [suggestion, setSuggestion] = useState("");
   const [customTask, setCustomTask] = useState("");
   const [creating, setCreating] = useState(false);
+  // Setup failure keeps the wizard open with every input intact — the
+  // message surfaces verbatim from the API (e.g. the free-tier bot cap).
+  const [setupError, setSetupError] = useState("");
+  // Re-entry guard: quick start, both skips, and the finish button all call
+  // finish(); a double-click must not double-create or double-send.
+  const finishingRef = useRef(false);
+  const [finishSession] = useState(createOnboardingFinishSession);
+  // Draft hydration runs once per account; saving starts only after it.
+  const restoredRef = useRef(false);
+  const [draftReady, setDraftReady] = useState(false);
+
+  useEffect(() => {
+    finishSession.activate();
+    return () => finishSession.dispose();
+  }, [finishSession]);
 
   // Browser mic permission (web only — desktop uses the OS TCC flow below).
   const [webMic, setWebMic] = useState<"prompt" | "granted" | "denied" | "unsupported">("prompt");
@@ -186,11 +208,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [decided, setDecided] = useState(false);
   useEffect(() => {
     if (decided || !state.connected) return;
-    setDecided(true);
     const hasRealHistory = state.bots.some((b) => b.messages.some((m) => m.role === "user"));
     let cancelled = false;
     void serverGateDone().then((serverDone) => {
       if (cancelled) return;
+      setDecided(true);
       if (serverDone || emailGateDone(user?.id)) {
         onDone();
       } else if (hasRealHistory) {
@@ -212,10 +234,60 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   // when the gate resolves), leaving step 1 empty for a signed-in account.
   // `current ||` keeps anything the user already typed.
   useEffect(() => {
-    if (!user) return;
+    if (!user || draftReady) return;
     setName((current) => current || user.name || "");
     setEmail((current) => current || user.email || "");
-  }, [user]);
+  }, [user, draftReady]);
+
+  // Draft hydration: a reload or the sign-in round trip used to wipe every
+  // field. Restore once per account before exposing editable controls,
+  // and prefill the first task from an allowlisted
+  // ?template= id only when nothing better is at hand. Templates never
+  // auto-send; sending stays an explicit finish-button press.
+  useEffect(() => {
+    if (!user || !decided || restoredRef.current) return;
+    restoredRef.current = true;
+    const stored = readOnboardingDraft(user.id);
+    if (stored) {
+      if (stored.name !== undefined) setName(stored.name);
+      if (stored.email !== undefined) setEmail(stored.email);
+      setStep(stored.step);
+      setBotName((current) => current || stored.botName);
+      setBotRole((current) => current || stored.botRole);
+      const savedColor = AGENT_COLOR_NAMES.find((color) => color === stored.botColor);
+      const savedCharacter = AGENT_CHARACTERS.find((character) => character === stored.botCharacter);
+      if (savedColor) setBotColor(savedColor);
+      if (savedCharacter) setBotCharacter(savedCharacter);
+      setAxes(stored.axes);
+      setShowPersonality(stored.showPersonality);
+    }
+    const firstTask = resolveInitialTaskDraft(stored, new URLSearchParams(window.location.search).get("template"));
+    setSuggestion(firstTask.suggestion);
+    setCustomTask(firstTask.customTask);
+    setDraftReady(true);
+  }, [user, decided]);
+
+  // Persist the draft while the wizard is open — strictly after hydration,
+  // so the first paint never overwrites the stored draft with pristine
+  // state. Cleared on success and deliberate abandonment (Escape / Maybe
+  // later); a failed finish keeps it, so nothing typed is lost.
+  useEffect(() => {
+    if (!draftReady || !user) return;
+    saveOnboardingDraft(user.id, {
+      version: 1,
+      name,
+      email,
+      step,
+      botName,
+      botRole,
+      botColor,
+      botCharacter,
+      suggestion,
+      customTask,
+      showPersonality,
+      axes,
+    });
+  }, [draftReady, user, name, email, step, botName, botRole, botColor, botCharacter, suggestion, customTask, showPersonality, axes]);
 
   useEffect(() => {
     track("onboarding_step", { step, name: STEP_LABELS[step] });
@@ -226,14 +298,18 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   // sane escape hatch (it previously had none at all).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || finishingRef.current || !finishSession.active) return;
       track("email_skipped");
       setEmailGateDone(user?.id, "skipped");
+      // Deliberate abandonment discards the draft — it exists to protect
+      // against accidental loss (reload, auth bounce, failure), not to
+      // resurrect sessions the user walked away from.
+      clearOnboardingDraft(user?.id);
       onDone();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [user?.id, onDone]);
+  }, [user?.id, onDone, finishSession]);
 
   useEffect(() => {
     if (step !== 1) return;
@@ -303,53 +379,86 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     setStep(1);
   };
 
-  /** Finish: assemble the teammate (if one was named), hand off to chat.
-   * Bot creation is best-effort — a failed POST must not trap the user
-   * in the wizard. */
+  /** Finish: reuse an eligible greeting bot when present, create only when
+   * nothing is eligible, then hand off to chat.
+   * Responses are checked through api(); a failure keeps the wizard open
+   * with every input preserved, surfaces the API's message, and never
+   * marks the gate done. */
   const finish = async () => {
-    track("onboarding_completed", {
-      engines_available: instances?.filter((i) => i.snapshot.state === "available").length ?? -1,
-      mic: perms?.mic ?? "n/a",
-      teammate: Boolean(botName.trim()),
-      first_task: (customTask.trim() || suggestion.trim()) || null,
-    });
-    const task = customTask.trim() || suggestion.trim();
-    // A fresh account has zero bots, so "Skip" must still leave one behind —
-    // otherwise the app opens on an empty roster.
-    if (!botName.trim()) {
-      try {
-        const created = await fetch("/api/bots", { method: "POST" }).then((r) => r.json());
-        dispatch({ type: "botAdded", bot: { ...created.bot, messages: created.bot.messages } });
-      } catch {
-        // best effort — empty-roster state still works
-      }
-    }
-    if (botName.trim()) {
-      setCreating(true);
-      try {
-        const created = await fetch("/api/bots", { method: "POST" }).then((r) => r.json());
-        const patched = await fetch(`/api/bots/${created.bot.id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            name: botName.trim(),
-            color: botColor,
-            character: botCharacter,
-            title: botRole.trim(),
-            description: about,
+    if (finishingRef.current || !finishSession.active) return;
+    finishingRef.current = true;
+    setCreating(true);
+    setSetupError("");
+    let completing = false;
+    try {
+      const task = customTask.trim() || suggestion.trim();
+      const result = await finishSession.finish({
+        // SSE connected is not a roster/history readiness signal. Read the
+        // authenticated snapshot before choosing or creating a teammate.
+        readRoster: async () => {
+          const snapshot: { bots: Bot[] } = await api("/api/bots");
+          return snapshot.bots;
+        },
+        identity: botName.trim()
+          ? { name: botName.trim(), color: botColor, character: botCharacter, title: botRole.trim(), description: about }
+          : null,
+        task,
+        createBot: () => api("/api/bots", { method: "POST" }),
+        patchBot: (botId, persona) =>
+          api(`/api/bots/${botId}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              name: persona.name,
+              color: persona.color,
+              character: persona.character,
+              title: persona.title,
+              description: persona.description,
+            }),
           }),
-        }).then((r) => r.json());
-        // botAdded also selects the bot and switches to the chat view —
-        // the handoff lands the user in their teammate's conversation
-        dispatch({ type: "botAdded", bot: { ...patched.bot, messages: created.bot.messages } });
-        if (task) dispatch({ type: "send", botId: patched.bot.id, text: task });
+        // Select before sending, so a fast SSE reply cannot be overwritten
+        // later by the pre-send roster snapshot.
+        onBotReady: (bot) => dispatch({ type: "botAdded", bot: { ...bot, messages: bot.messages ?? [] } }),
+        sendTask: (botId, text) => api(`/api/bots/${botId}/messages`, {
+          method: "POST",
+          body: JSON.stringify({ text }),
+        }),
+      });
+      if (!result || !finishSession.active) return;
+      if (result.message) dispatch({ type: "messageAdded", threadId: result.bot.threadId, message: result.message });
+      completing = true;
+      // Persist the account gate only after task acceptance. If this request
+      // fails, the session retains its accepted result and retry only repeats
+      // completion; the task is never sent again for a bookkeeping failure.
+      await api("/api/me/onboarding", {
+        method: "PUT",
+        body: JSON.stringify({ status: "submitted" }),
+      });
+      if (!finishSession.active) return;
+      clearOnboardingDraft(user?.id);
+      try {
+        track("onboarding_completed", {
+          engines_available: instances?.filter((i) => i.snapshot.state === "available").length ?? -1,
+          mic: perms?.mic ?? "n/a",
+          teammate: Boolean(botName.trim()),
+          first_task: Boolean(result.task),
+        });
       } catch {
-        // leave the user in the app; they can create a bot any time
+        // Analytics must not turn an accepted task into a retryable failure.
       }
-      setCreating(false);
+      onDone();
+    } catch (error) {
+      if (!finishSession.active) return;
+      setSetupError(
+        completing
+          ? "Your teammate is ready, but saving setup failed. Try again to finish — your task will not be sent again."
+          : error instanceof Error && error.message
+          ? error.message
+          : "Setting up your teammate failed — try again.",
+      );
+    } finally {
+      finishingRef.current = false;
+      if (finishSession.active) setCreating(false);
     }
-    setEmailGateDone(user?.id, "submitted");
-    onDone();
   };
 
   const engines: EngineEntry[] = (instances ?? [])
@@ -365,7 +474,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const readyEngines = engines.filter((e) => engineReady(e.instance));
   const setupEngines = engines.filter((e) => !engineReady(e.instance));
 
-  if (!decided) return null;
+  if (!decided || !draftReady) return null;
 
   // dense array indexed by step — steps are 0..5 by construction
   const stepContent = [
@@ -409,7 +518,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             track("onboarding_quick_start");
             finish();
           }}
-          className="mt-2 w-full rounded-lg border border-hairline/60 bg-raised py-2 text-[13.5px] font-medium text-ink transition-colors hover:bg-raised-hover"
+          disabled={creating}
+          className="mt-2 w-full rounded-lg border border-hairline/60 bg-raised py-2 text-[13.5px] font-medium text-ink transition-colors hover:bg-raised-hover disabled:opacity-40"
         >
           Quick start — skip setup, just get me in
         </button>
@@ -420,9 +530,12 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             // modal stops reappearing on every reload (web audit 2026-08-23
             // found it bouncing straight back because nothing was saved).
             setEmailGateDone(user?.id, "skipped");
+            // Deliberate abandonment discards the draft (same rule as Escape).
+            clearOnboardingDraft(user?.id);
             onDone();
           }}
-          className="mt-3 text-[12px] text-ink-secondary hover:text-ink"
+          disabled={creating}
+          className="mt-3 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-40"
         >
           Maybe later
         </button>
@@ -635,15 +748,17 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           <div className="mt-2 flex w-full max-w-sm gap-3">
             <button
               onClick={() => setStep(1)}
-              className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[14px] text-ink-secondary hover:bg-raised hover:text-ink"
+              disabled={creating}
+              className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[14px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
             >
               Back to Engines
             </button>
             <button
               onClick={() => (botName.trim() ? setStep(3) : finish())}
-              className="flex-1 rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white"
+              disabled={creating}
+              className="flex-1 rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white disabled:opacity-40"
             >
-              {botName.trim() ? "Continue" : "Skip — no teammate yet"}
+              {creating ? "Setting up…" : botName.trim() ? "Continue" : "Skip — no teammate yet"}
             </button>
           </div>
         </div>
@@ -778,7 +893,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             {creating ? "Setting up…" : botName.trim() ? `Muster ${botName.trim()} →` : "Start using Muster"}
           </button>
         </div>
-        <button onClick={finish} className="mt-3 text-[12px] text-ink-secondary hover:text-ink">
+        <button onClick={finish} disabled={creating} className="mt-3 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-40">
           Skip for now
         </button>
       </div>
@@ -817,9 +932,21 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             framer-motion v13, leaving the previous step mounted with the
             new step's label — the wizard became un-navigable mid-funnel.
             A hard swap is boring and always correct. */}
-        <div key={step} className="wizard-step flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-1 pb-1">
+        <fieldset key={step} disabled={creating} className="wizard-step m-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain border-0 px-1 pb-1 pt-0">
           {stepContent[step]}
-        </div>
+        </fieldset>
+        {/* Recovery: a failed finish keeps the wizard open with every input
+            intact and says what went wrong, instead of closing on a failure
+            like it used to. */}
+        {setupError && (
+          <div
+            role="alert"
+            className="mx-1 mt-3 flex items-start gap-2 rounded-xl border border-[#ff5c5c40] bg-[#ff5c5c14] px-3.5 py-2.5 text-[13px] leading-relaxed text-ink"
+          >
+            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-[#ff7a7a]" />
+            <span>{setupError}</span>
+          </div>
+        )}
         {step === 1 && (
           <button
             onClick={() => setStep(step - 1)}

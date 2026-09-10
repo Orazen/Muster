@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { initialState, reducer, type Bot, type Group, type Message } from "./store";
+import { initialState, reducer, visibleMessages, type Bot, type Group, type Message } from "./store";
 
 describe("cross-client bot creation", () => {
   it("adds an announced bot before its greeting frames arrive", () => {
@@ -102,5 +102,36 @@ describe("hydrate transcript preservation", () => {
     });
 
     expect(reconciled.groups[0]?.messages.map((m) => m.id)).toEqual(["r1"]);
+  });
+});
+
+describe("duplicate message acknowledgements", () => {
+  const bot: Bot = {
+    id: "bot", threadId: "thread", name: "Scout", title: "", description: "",
+    notifications: true, color: "green", unread: false, messages: [],
+    modelSelection: { instanceId: "fixture", model: "default" },
+  };
+  const request: Message = { id: "request", role: "user", kind: "text", text: "Draft a brief", at: 1, parentId: null };
+  const reply: Message = { id: "reply", role: "bot", kind: "text", text: "Here is your brief", at: 2, parentId: request.id };
+
+  it("keeps the bot reply visible when completion retry echoes the earlier accepted user message", () => {
+    const requested = reducer({ ...initialState, bots: [bot] }, {
+      type: "messageAdded", threadId: bot.threadId, message: request,
+    });
+    const answered = reducer(requested, { type: "messageAdded", threadId: bot.threadId, message: reply });
+    const retried = reducer(answered, { type: "messageAdded", threadId: bot.threadId, message: { ...request } });
+    expect(retried).toBe(answered);
+    expect(retried.bots[0].activeLeafId).toBe(reply.id);
+    expect(visibleMessages(retried.bots[0])).toEqual([request, reply]);
+  });
+
+  it("does not switch branches or replay mascot motion when an existing bot response is redelivered", () => {
+    const answered = reducer({ ...initialState, bots: [{ ...bot, messages: [request, reply], activeLeafId: reply.id }] }, {
+      type: "threadActive", threadId: bot.threadId, activeLeafId: request.id,
+    });
+    const replayed = reducer(answered, { type: "messageAdded", threadId: bot.threadId, message: { ...reply } });
+    expect(replayed).toBe(answered);
+    expect(replayed.bots[0].activeLeafId).toBe(request.id);
+    expect(visibleMessages(replayed.bots[0])).toEqual([request]);
   });
 });

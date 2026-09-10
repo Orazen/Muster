@@ -1039,3 +1039,83 @@ in-app avatar semantics were deliberately out of scope), no deployment. Demo
 8845 untouched; rig helper scripts removed. Commercial implication: the
 first brand a new phone owner sees on the home screen now matches what the
 landing promised; install-conversion impact unmeasured.
+
+## Loop 21 — 2026-09-10 — First-task onboarding recovers without losing work
+
+Astra resumed from GLM's uncommitted row 6 at `8729aa6`; initial pull was
+up to date. The inherited implementation was not ready to ship: sending was
+fire-and-forget, SSE connection did not prove roster hydration, inherited
+template keys were accepted, and late completion could outlive its account.
+
+Shipped scope: `Onboarding.tsx`, the new `onboarding-draft`,
+`teammate-setup`, and `onboarding-finish` modules/tests, two store reducer
+regressions, and `e2e/onboarding-harness.ts`. Finish now reads an authoritative
+roster, reuses only an idle unused teammate with complete current history
+and compatible task metadata, validates PATCH identity/thread, awaits task
+acceptance and account completion, and retains the chosen bot for retries.
+All controls and Escape are locked during the transaction; disposal fences
+stop follow-on actions from an unmounted wizard. Acknowledged tasks are
+cached for completion retries within that mounted wizard. Account drafts
+restore welcome fields, identity, step and task; saved choices and explicit
+empty fields take precedence over allowlisted templates. Completion
+analytics records a boolean first-task flag, not the task's text.
+
+The browser exposed a further reducer defect: replaying the acknowledged
+user message after a failed completion-save rewound the active conversation
+and hid the bot's reply. Duplicate message receipts now leave the active
+branch and mascot state unchanged. Final source review also excluded
+established teammates with an empty new task, active work, incomplete
+history and observed task switches from fresh reuse.
+
+Verification: final full Vitest **199 files / 2086 passed / 8 skipped in
+214.59s**, exit 0; **59 more passing tests than the takeover baseline**.
+The run includes all 22 setup, 12 finish-lifecycle, 23 draft and 6 store
+tests. The earlier complete run was 199 / 2075 / 8 in 213.47s; the rerun was
+required by the additional eligibility regressions. Frontend, server and
+E2E typechecks, scoped lint, and production Vite build pass. The existing
+large-chunk advisory remains; no build error occurred.
+
+**12 manual CUA browser scenarios passed**, using four isolated synthetic
+accounts, real local server endpoints and a fake ACP engine:
+
+1. Allowlisted template prefill waits for an explicit finish action.
+2. A real sign-in round trip after injected 401 restores step, teammate and edited task.
+3. Delayed PATCH 503 locks controls, then shows the error with inputs intact.
+4. Rejected task POST 503 keeps setup open and retries the same teammate.
+5. Accepted task followed by gate 503 retries with only gate 200: no second send, reply stays visible.
+6. `template=constructor` is ignored without crashing or sending.
+7. A saved suggestion survives reload through a different valid template link.
+8. Real Free-tier creation returns 402 with its exact message and preserved task.
+9. Welcome name/email survive reload; email was confirmed visually because the DOM/AX read omitted its value.
+10. Quick-start double click plus Escape during saving produces one accepted task, zero duplicate bots.
+11. Completion and the bot reply survive reload.
+12. A bot with a completed prior task and empty new thread is left intact; onboarding creates one separate teammate.
+
+Recovery has no horizontal overflow at 320/390/768/1440; the real cap alert
+also fits at 320. The last two fixtures report zero captured console errors.
+Faults are injected before forwarding: they do **not** prove behavior when
+the server accepts work but its response is lost. The final observed-thread
+guard has a deterministic regression; send-time atomicity needs a server
+contract. Fixture control requests bypass injection and carry separate
+record attribution. Cleanup was verified: all owned servers, fake engines,
+data and tabs removed, viewport reset; demo 8845 untouched. A stdin cleanup
+smoke also exits 0. Logs: `/tmp/muster-loop21-vitest-final.log`,
+`/tmp/muster-loop21-build-final.log`, `/tmp/muster-loop21-server-types.log`,
+`/tmp/muster-loop21-e2e-types.log`, `/tmp/muster-loop21-fixture-cleanup.log`.
+
+Commercial implication: rejected setup no longer silently discards a new
+user's first task or consumes an unnecessary Free teammate slot. Activation
+or revenue lift has not been measured. Next bounded audit: explicit
+send/skip semantics and server-owned first-task idempotency/thread binding,
+then the existing Local VM guided-setup queue. Native apps, real provider
+execution and Mimosa's full scan remain unverified; no security claim.
+
+Operational continuity: the board restored Astra ownership with Pro usage
+available. The obsolete September 16 handover audit was deleted. The CEO
+heartbeat is to resume after this slice's push using this ledger. The
+preexisting docs-only release stash was identified and preserved, not
+blindly applied over GLM's newer log. Production GET at 18:30–18:32 UTC
+served `/assets/index-_h_ora_i.js` with prior mascot/preview markers, replacing
+the older absent-marker evidence; this does not identify the exact commit.
+Exact `8729aa6` GitHub CI/autodeploy jobs still failed before starting for
+billing/spending limits. Post-push verification is recorded in the handoff.
