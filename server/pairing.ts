@@ -148,7 +148,7 @@ export function createCode(userId: string, now = Date.now()) {
  * displaying the previous one — the desktop then redeemed a code that no
  * longer existed and got "isn't valid" for no visible reason. With this,
  * every fetch of the pair page shows the SAME live code until it truly
- * expires or the user explicitly rotates via New code. */
+ * expires or is consumed. The refresh endpoint does not rotate a live code. */
 export function getOrCreateCode(userId: string, now = Date.now()) {
   if (!userId) throw Object.assign(new Error("a session is required to create a pairing code"), { status: 401 });
   sweepExpired(now);

@@ -86,7 +86,7 @@ The router contains nine explicit SPA route patterns plus its fallback.
 | `/sign-in?next=…&authError=…` | Email login, error feedback, recovery links, password visibility, return destination, sign-out/re-entry, capability variants | Local wrong/correct email login and sign-out checked; remaining variants unverified; real Google requires provider account/consent |
 | `/sign-up?next=…&ref=…` | Account creation, invalid inputs, existing account, disabled signup, referral preservation | Local email signup checked; remaining states unverified; Google-only and verification delivery need their services |
 | `/forgot-password`, `/reset-password?token=…` | Neutral response, missing/invalid/expired/reused token, mismatch, successful reset and subsequent login | Unverified in this slice; disposable mail fixture can test app logic, real delivery needs email service |
-| `/pair` | Auth gate, generation, copy, countdown, expiry, regeneration, consumed-code rejection | Unverified in this slice; two isolated servers can exercise bridge |
+| `/pair` | Auth gate, generation, copy, countdown, expiry, regeneration, consumed-code rejection | Loop 10: 13 browser checks, 10 layouts and 2 local HTTP checks; recovery, copy/manual fallback, exact expiry and truthful refresh covered. 42 client and 12 server tests pass. Anonymous gate and actual cloud-to-desktop session bridge remain unverified |
 | `/claim#CODE` | Missing/malformed/expired/consumed code, fragment removal, session creation, `/app` navigation | Loop 7: missing/malformed/consumed recovery, fragment removal, previously anonymous real local claim → authenticated app, mock 503 retry and departure during/after request checked; nine recovery layouts at 320/390/1440px plus retry at 320px. Expiry covered by server tests; physical QR scanning and production redemption unverified |
 | `/app/*` | Auth gate, onboarding, reconnect, empty roster, No Engines, authenticated surfaces below | Local account/onboarding/reload and listed fake-ACP interactions checked; other states unverified |
 | `/os` | Bot and Rooms windows, open/focus/minimize/restore/close, drag/resize, command console, attention targets, Back to app | Unverified; browser shell and packaged Electron are separate checks |
@@ -244,10 +244,18 @@ redirects; one initial browser fixture attempt did reach Google's
 invalid-client page, completing no login. It was repeated behind a local
 proxy that blocks external redirects. These checks do not complete OAuth.
 
-Keep `/pair` recovery separate: its error branch hides the retry action,
-clipboard rejection is unhandled, and the UI's New code label promises
-rotation while the endpoint reuses a live code. Verify and fix those in their
-own slice without mixing self-host claims, cloud pairing, and desktop OAuth.
+Loop 10 repairs `/pair` recovery in the shared AuthShell. Retry remains
+available after request or malformed-response failures; copy is enabled only
+for a confirmed live code and browser clipboard denial selects it manually.
+The countdown respects exact expiry. Refresh retains a live code and its
+original deadline; a new code follows expiry or consumption. Read-only
+review caught and corrected dark-theme contrast and spacing before final
+browser verification. Thirteen browser checks, ten layouts and two real
+local consume/reuse HTTP checks passed. Controlled failures and short expiry
+come from a local proxy; the successful generation/refresh/consumption path
+uses the owned real API. Anonymous access was not established because the
+attempt reused an existing session. The actual cloud-to-desktop session
+bridge remains separate from these page and API checks.
 
 1. **Settings follow-through.** The Usage crash and responsive navigation
    slice is locally verified. Continue individual save/error and integration

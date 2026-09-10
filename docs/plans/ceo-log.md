@@ -493,3 +493,62 @@ Google. This slice's production throttle behavior still needs verification.
 Next pick: `/pair` recovery, clipboard failure and truthful code-refresh
 behavior, then transcript E2E correction and the native client matrix. Keep
 unresolved proxy topology and all real-provider/native outcomes explicit.
+
+
+## Loop 10 — 2026-09-10 — Pairing recovery and truthful refresh
+
+P2 fixed: `/pair` previously hid its only retry after an error, coerced
+malformed codes, copied expired values and left clipboard rejection unhandled.
+`src/pages/PairPage.tsx` now uses the shared responsive AuthShell with a
+selectable code field, persistent recovery, accurate expiry and 46px actions.
+Refresh keeps a live code and its original deadline; replacement follows
+expiry or consumption. The stale rotation comment in `server/pairing.ts`
+was corrected without changing the endpoint's behavior.
+
+`src/lib/pairing-flow.ts` validates responses, deduplicates initial/refresh
+requests, isolates each account's page state, detaches updates and clears
+copy feedback. Clipboard denial selects the code for manual copying; stale
+completion after refresh, departure or expiry cannot confirm a copy. A
+network failure gives connection/retry guidance. Read-only review caught
+low-contrast dark-theme text and missing spacing in the first AuthShell
+pass; both were corrected and visually rechecked before full verification.
+
+Focused tests: **2 files / 54 passed / 0 skipped**, **553 ms**: 42 new client
+cases and 12 server cases, including five new refresh semantics tests.
+Both UI and server typechecks and scoped lint passed. Vite production build
+passed in **5.72 seconds**, retaining the existing large-chunk warning.
+Full Vitest: **188 files / 1939 passed / 8 skipped**, **189.13 seconds**.
+This adds 47 passing tests over the preceding 187 / 1892 / 8 result and
+exceeds the handbook baseline of 172 / 1689 / 8.
+
+**13 hands-on browser checks** passed: real local generation/countdown,
+settled clipboard contents, stable refresh, stable reload, replacement after
+consumption, initial 503 recovery with disabled busy controls, failed refresh,
+malformed response recovery, clipboard-policy denial/manual selection,
+keyboard traversal and refresh, expiry, fresh-code recovery, and return to
+the signed-in workspace. Separately, **2 local HTTP checks** accepted the
+owned code once (200, expected synthetic account) and rejected reuse (400).
+The first immediate clipboard read was stale; a settled repeat returned the
+exact displayed value. The anonymous-gate attempt reused an existing fixture
+session and is not counted as an anonymous check.
+
+**10 final layout checks** passed: ready/error/expired at **320×568,
+390×844 and 1440×900**, plus manual-copy fallback at **320×568**. No
+horizontal overflow; both actions are 46px high. Real local API mechanics
+use only the owned account/server on 18861 and current-source Vite on 15199.
+A temporary local proxy supplies 503, malformed and short-expiry responses
+and a Permissions-Policy clipboard denial. Those fixtures do not establish
+production failures or a complete cloud-to-desktop session bridge. **0 real
+Google logins and 0 native UI tests** ran; the demo on 8845 was untouched.
+
+Commercial implication: a recoverable connection or clipboard failure no
+longer strands a user trying to connect their desktop, and the refresh label
+matches the actual code lifetime. No conversion lift is claimed. Pre-push
+production GET returned 200 for `/pair` and its existing assets; this slice's
+asset marker was absent. Deployment verification follows the push.
+
+Next pick: repair the misleading transcript E2E case, then continue the
+workspace, native-client and AGI harness matrix. Anonymous pairing access,
+the actual cloud-to-desktop bridge, real Google login and native outcomes
+remain unverified here. Hosted Actions billing and production OAuth proxy
+topology retain their previously recorded status; no duplicate trigger.

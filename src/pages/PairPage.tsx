@@ -1,113 +1,81 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { RefreshCw, Copy, Check } from "lucide-react";
+import { Check, Copy, RefreshCw } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { MusterbotMark } from "@/components/MusterbotMark";
+import { AuthShell, authButtonCls, authInputCls } from "@/components/AuthShell";
+import { PairingFlow, pairingSecondsLeft } from "@/lib/pairing-flow";
 
-/** Cloud side of the desktop pairing bridge: a signed-in cloud user shows
- * this code to their desktop app, which redeems it for a local session.
- * One live code per user; generating again kills the old one. */
+/** Cloud pairing codes retain their value until they expire or are used. */
 export function PairPage() {
   const { user } = useAuth();
-  const [code, setCode] = useState("");
-  const [expiresAt, setExpiresAt] = useState<number | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(0);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  return <PairCodeView key={user?.id} email={user?.email ?? ""} />;
+}
 
-  const generate = useCallback(async () => {
-    setBusy(true);
-    setError("");
-    try {
-      const res = await fetch("/api/pair/create", { method: "POST" });
-      const body = await res.json();
-      if (!res.ok) {
-        setError(body.error ?? "could not generate a code");
-        return;
-      }
-      setCode(String(body.code ?? ""));
-      setExpiresAt(Number.isFinite(body.expiresAt) ? body.expiresAt : null);
-    } catch {
-      setError("could not reach the server");
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+function PairCodeView({ email }: { email: string }) {
+  const [flow] = useState(() => new PairingFlow());
+  const [state, setState] = useState(flow.state);
+  const [now, setNow] = useState(Date.now);
+  const codeInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    void generate();
-  }, [generate]);
+    const unsubscribe = flow.subscribe(setState);
+    void flow.start();
+    return unsubscribe;
+  }, [flow]);
 
   useEffect(() => {
-    if (!expiresAt) return;
-    const tick = () => setSecondsLeft(Math.max(0, Math.round((expiresAt - Date.now()) / 1000)));
+    if (!state.pairing) return;
+    const tick = () => setNow(Date.now());
     tick();
-    const t = setInterval(tick, 1000);
-    return () => clearInterval(t);
-  }, [expiresAt]);
+    const timer = window.setInterval(tick, 250);
+    return () => window.clearInterval(timer);
+  }, [state.pairing]);
+
+  const seconds = state.pairing ? pairingSecondsLeft(state.pairing.expiresAt, now) : 0;
+  const expired = state.pairing !== null && seconds === 0;
+  const busy = state.status === "idle" || state.status === "loading";
+  const usable = state.status === "ready" && !expired && state.pairing !== null;
+  const refreshLabel = busy ? "Getting your code…" : state.status === "error" ? "Try again" : expired ? "Get a new code" : "Refresh code";
 
   const copy = async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setNow(Date.now());
+    if (await flow.copy() === "manual") {
+      codeInput.current?.focus();
+      codeInput.current?.select();
+    }
   };
 
-  const expired = secondsLeft === 0 && Boolean(expiresAt);
-
   return (
-    <div className="flex min-h-screen items-center justify-center bg-app px-4">
-      <div className="w-full max-w-md text-center">
-        <Link to="/" className="inline-flex items-center gap-2 text-ink">
-          <MusterbotMark size={48} />
-          <span className="text-xl font-semibold tracking-tight">Muster</span>
-        </Link>
-        <h1 className="mt-6 text-2xl font-bold tracking-tight text-ink">Pair your desktop app</h1>
-        <p className="mt-6 text-sm leading-relaxed text-ink-secondary">
-          Open Muster Desktop, then type this code where it asks for a pairing
-          code. It expires in five minutes and works once. Reloading this page
-          always shows the same code until it expires.
-        </p>
-
-        <div className="mt-6 rounded-xl border border-hairline bg-panel p-6">
-          {error ? (
-            <div className="rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div>
-          ) : (
-            <>
-              <button
-                onClick={copy}
-                title="Copy code"
-                className="group mx-auto flex items-center gap-3 rounded-lg bg-white px-4 py-2 shadow-sm ring-1 ring-black/10 hover:bg-white"
-              >
-                <span className="font-mono text-4xl font-semibold tracking-[0.3em] text-black">
-                  {code || "····"}
-                </span>
-                {copied ? <Check size={16} className="text-success" /> : <Copy size={16} className="text-ink-secondary opacity-0 transition-opacity group-hover:opacity-100" />}
-              </button>
-              <div className="mt-3 flex items-center justify-center gap-2 text-[12.5px] text-ink-secondary">
-                {busy ? (
-                  "Generating…"
-                ) : expired ? (
-                  <>Expired.</>
-                ) : (
-                  <>Expires in {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}</>
-                )}
-                <button
-                  onClick={() => void generate()}
-                  disabled={busy}
-                  className="inline-flex items-center gap-1 font-medium text-accent hover:text-accent/80 disabled:opacity-50"
-                >
-                  <RefreshCw size={12} className={busy ? "animate-spin" : ""} /> New code
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-
-        <p className="mt-6 text-sm text-ink-secondary">
-          Signed in as <span className="font-medium text-ink">{user?.email}</span>.
-        </p>
+    <AuthShell
+      title="Connect your desktop"
+      subtitle="Open Muster Desktop and enter this code in its pairing field."
+      footer={<><p className="break-all">Signed in as {email}.</p><Link to="/app">Back to your workspace</Link></>}
+    >
+      <div className="flex flex-col gap-3">
+      {state.error && <div className="auth-notice auth-error" role="alert">{state.error}</div>}
+      <label htmlFor="pairing-code" className="text-sm font-medium">Pairing code</label>
+      <input
+        ref={codeInput} id="pairing-code" className={authInputCls}
+        style={{ textAlign: "center", fontFamily: "monospace", fontSize: "clamp(20px, 5vw, 28px)", letterSpacing: "0.12em" }}
+        value={usable ? state.pairing?.code ?? "" : ""}
+        placeholder={expired ? "Expired" : busy ? "Loading…" : "Unavailable"}
+        readOnly disabled={!usable} autoComplete="off" spellCheck={false}
+        aria-describedby="pairing-status" onFocus={(event) => event.currentTarget.select()}
+      />
+      <p id="pairing-status" className="text-sm" style={{ color: "var(--auth-muted)" }}>
+        {busy ? "Getting your pairing code…" : state.status === "error" ? "Refresh to confirm your current code." : expired ? "This code expired. Get a new one to continue." : `Expires in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}. Works once.`}
+      </p>
+      <button type="button" className={authButtonCls} disabled={!usable || state.copy === "copying"} onClick={() => void copy()}>
+        {state.copy === "copied" && usable ? <Check size={18} aria-hidden="true" /> : <Copy size={18} aria-hidden="true" />}
+        {state.copy === "copying" && usable ? "Copying…" : state.copy === "copied" && usable ? "Copied" : "Copy code"}
+      </button>
+      {state.copy === "manual" && usable && <p role="status" className="auth-notice">Copy is unavailable here. The code is selected so you can copy it manually.</p>}
+      {state.copy === "copied" && usable && <span role="status" className="sr-only">Pairing code copied.</span>}
+      <button type="button" disabled={busy} onClick={() => void flow.refresh()} className="auth-google">
+        <RefreshCw size={16} className={busy ? "animate-spin motion-reduce:animate-none" : ""} aria-hidden="true" />{refreshLabel}
+      </button>
+      <div className="auth-notice">Refreshing keeps the same live code. Once it expires or is used, refresh to get a new one.</div>
       </div>
-    </div>
+    </AuthShell>
   );
 }

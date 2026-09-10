@@ -4,7 +4,7 @@
 // verify throttle that makes brute-forcing a live code hopeless.
 import { describe, expect, it } from "vitest";
 
-import { createCode, consumeCode, VerifyError, _pendingCount } from "./pairing.ts";
+import { createCode, getOrCreateCode, consumeCode, VerifyError, _pendingCount } from "./pairing.ts";
 
 const T0 = 1_700_000_000_000;
 
@@ -60,5 +60,69 @@ describe("pairing codes", () => {
 
   it("refuses to mint a code without an owning user", () => {
     expect(() => createCode("", T0)).toThrow();
+  });
+});
+
+describe("idempotent pairing code refresh", () => {
+  const now = T0 + 10 * 60_000;
+  const ttl = 5 * 60_000;
+
+  it("retains the same redeemable code and original deadline on every live refresh", () => {
+    const user = "refresh-live-user";
+    const first = getOrCreateCode(user, now);
+    expect(first.expiresAt).toBe(now + ttl);
+    for (const elapsed of [0, 1_000, 60_000, ttl - 1]) {
+      expect(getOrCreateCode(user, now + elapsed)).toEqual(first);
+    }
+    expect(consumeCode(first.code, "192.0.2.101", first.expiresAt - 1)).toBe(user);
+  });
+
+  it("replaces a code at its exact expiry with a fresh five-minute deadline", () => {
+    const user = "refresh-expiry-user";
+    const first = getOrCreateCode(user, now);
+    const replacement = getOrCreateCode(user, first.expiresAt);
+
+    expect(replacement.code).not.toBe(first.code);
+    expect(replacement.expiresAt).toBe(first.expiresAt + ttl);
+    expect(() => consumeCode(first.code, "192.0.2.102", first.expiresAt)).toThrow(VerifyError);
+    expect(getOrCreateCode(user, first.expiresAt + 1)).toEqual(replacement);
+    expect(consumeCode(replacement.code, "192.0.2.102", first.expiresAt + 1)).toBe(user);
+  });
+
+  it("issues a fresh code after redemption without reviving the consumed code", () => {
+    const user = "refresh-consumed-user";
+    const first = getOrCreateCode(user, now);
+    expect(consumeCode(first.code, "192.0.2.103", now + 1_000)).toBe(user);
+
+    const replacement = getOrCreateCode(user, now + 2_000);
+    expect(replacement.code).not.toBe(first.code);
+    expect(replacement.expiresAt).toBe(now + 2_000 + ttl);
+    expect(() => consumeCode(first.code, "192.0.2.103", now + 3_000)).toThrow(VerifyError);
+    expect(consumeCode(replacement.code, "192.0.2.103", now + 3_000)).toBe(user);
+  });
+
+  it("keeps another user's live code and deadline intact when one user refreshes after redemption", () => {
+    const firstUser = "refresh-independent-a";
+    const secondUser = "refresh-independent-b";
+    const first = getOrCreateCode(firstUser, now);
+    const second = getOrCreateCode(secondUser, now + 500);
+    expect(first.code).not.toBe(second.code);
+    expect(consumeCode(first.code, "192.0.2.104", now + 1_000)).toBe(firstUser);
+
+    const replacement = getOrCreateCode(firstUser, now + 2_000);
+    expect(getOrCreateCode(secondUser, now + 3_000)).toEqual(second);
+    expect(consumeCode(second.code, "192.0.2.105", now + 3_000)).toBe(secondUser);
+    expect(consumeCode(replacement.code, "192.0.2.104", now + 3_000)).toBe(firstUser);
+  });
+
+  it("rejects an absent owner without changing an existing user's code", () => {
+    const user = "refresh-owner-user";
+    const first = getOrCreateCode(user, now);
+
+    expect(() => getOrCreateCode("", now + 1_000)).toThrow(
+      expect.objectContaining({ status: 401 }),
+    );
+    expect(getOrCreateCode(user, now + 2_000)).toEqual(first);
+    expect(consumeCode(first.code, "192.0.2.106", now + 2_000)).toBe(user);
   });
 });
