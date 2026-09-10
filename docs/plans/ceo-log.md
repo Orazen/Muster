@@ -728,3 +728,71 @@ continues, instead of disappearing with the approval composer. No conversion
 lift is claimed. Production marker to verify after push: **Evidence when
 requested**. Hosted Actions billing remains the existing board item; no
 unchanged escalation or duplicate deployment trigger.
+
+## Loop 14 — 2026-09-10 — One mascot and usable small-screen onboarding
+
+The board's new request prioritizes its supplied orange mascot, interactive
+onboarding/landing, computer setup, `/os` and native acceptance. Two parallel
+research passes produced `landing-reference-study-2026-09-10.md` and
+`computer-os-native-roadmap-2026-09-10.md`; the live GLM 5.3 Flash execution
+handoff is `glm-handoff-2026-09-10.md`. References are dated and source-pinned;
+competitor marketing is not runtime evidence. The browser control boolean
+does not establish agent pause; guided Local VM and native execution remain
+explicit gaps. Read-only inventory found Colima stopped; no VM launched.
+
+This bounded product slice shares the existing five-lobed body through
+`MusterMascot`. Bloom, static brand marks and the default star avatar now use
+that geometry, flat orange and offwhite capsule eyes. Explicit alternative
+characters and custom teammate colors remain available. Happy/sleeping eye
+families and larger working/thinking poses remain distinct. Static marks no
+longer run JavaScript animation loops; optional animation uses CSS. The
+interactive mascot is a native **Wave to Muster** button with a status greeting.
+Reduced-motion rules suppress float, blink and wave; no runtime setting was
+changed to test the OS preference, so that leg remains source-reviewed only.
+Upstream mascot code attribution is retained in third-party notices.
+
+Onboarding replaces drifting blurred glows with a brief, non-intercepting
+mascot entrance, then a still background. Its constrained card scrolls on
+short screens; four form inputs have explicit accessible names and duplicate
+Back links are removed. No engine installation, provider connection or
+permission request is introduced by these visual changes.
+
+Focused component verification: **1 file / 12 passed / 0 skipped in 0.573s**.
+Frontend and server typechecks, scoped lint and final diff check pass. Final
+Vite build **6.49s** with the existing large-chunk warning. Read-only review
+found no blockers. Full Vitest: **193 files / 1976 passed / 8 skipped**,
+**239.35s**. This adds twelve passes over Loop 13 and remains above the
+handbook baseline of 172 files / 1689 passed / 8 skipped.
+
+**7 functional browser checks passed:** cloud-to-desktop fixture pairing,
+keyboard mascot greeting, preserved blue teammate choice, navigation through
+all five setup steps with permissions skipped, explicit first-task reply,
+reply persistence after reload, and Back navigation in the final build.
+**7 final layout checks passed:** Welcome at **320×568, 768×1024, 1440×900**;
+Engines, Permissions and First task at **320×568**; Teammate at **390×844**.
+No horizontal overflow; long steps have a reachable internal scroll area.
+The final cloud tab had **0 captured console errors**. A hydration read and
+subsequent missing-wave wait failed because the cloud fixture had redirected
+to sign-in after the same-host desktop cookie changed; explicit sign-in
+recovered it. Those attempts are not passing checks. A viewport command
+initially affected another tab; only measured target dimensions count above.
+
+The root additionally opened all five landing references and verified five
+small UI interactions; one mascot-demo color interaction passed. These are
+reference checks, not product acceptance. **0 Playwright runner cases, real
+Google logins, real model tasks, native UI tests or VM runtime tests** ran.
+The first-task reply used a deterministic fake ACP engine with real local
+servers and storage. All Loop 14 fixture processes/data and owned tabs were
+removed; viewport reset and demo 8845 untouched.
+
+Commercial implication: a consistent identity and reachable setup support
+first use; conversion improvement is unmeasured. Public/native icon exports
+and the separately served `www/` landing remain queued. A renamed new bot's
+seed greeting still used its generated name during the fixture; retain that
+as part of the first-task reliability slice. Usage fell from 24% to 19%
+remaining during research/build; the existing heartbeat now checks usage,
+maintains the GLM handoff and pauses at the board's 1% threshold.
+
+Native OpenMausBot reference inspection was attempted through CUA, but app
+access reported pending Accessibility/Screen Recording permissions. No native
+UI state was returned or settings changed; this is not a passing check.

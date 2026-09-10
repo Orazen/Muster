@@ -1,256 +1,55 @@
-// MusterBloom — the interactive mascot. The musterbot mark (near-white
-// flower body, orange eyes showing through masked cutouts) made alive the
-// way procedural-avatar studios do it: eyes track the pointer through a
-// damped rAF loop, a tiny expression vocabulary (idle / working / thinking /
-// happy) drives eye openness and body motion, ambient micro-rotation keeps
-// the body breathing, blinks land on a human cadence, and a click pops a
-// squash-and-stretch plus a petal burst. One rAF loop writes transforms
-// through refs — no per-frame React renders — and prefers-reduced-motion
-// freezes everything to the static mark.
-import { forwardRef, useEffect, useId, useRef, useState } from "react";
+// The larger brand mascot. A real button owns the optional interaction;
+// static marks and roster avatars reuse the same authored SVG underneath.
+import { forwardRef, useState } from "react";
+import { MusterMascot, MUSTER_ORANGE } from "./MusterMascot";
 
 export type BloomMood = "idle" | "working" | "thinking" | "happy";
-
-interface MoodProfile {
-  /** eye openness multiplier (scaleY) */
-  openness: number;
-  /** how far the eyes may chase the pointer, in viewBox units */
-  gaze: number;
-  /** body wobble amplitude, degrees */
-  wobble: number;
-  /** bob cycles per second */
-  bobHz: number;
-}
-
-const MOODS = {
-  idle: { openness: 1, gaze: 7, wobble: 1.2, bobHz: 0.28 },
-  working: { openness: 0.55, gaze: 9, wobble: 2.4, bobHz: 0.85 },
-  thinking: { openness: 0.8, gaze: 12, wobble: 0.8, bobHz: 0.2 },
-  happy: { openness: 0.7, gaze: 6, wobble: 2, bobHz: 0.7 },
-} as const satisfies Record<BloomMood, MoodProfile>;
-
-/** Blink scheduler: a blink lands every 3.4–6.2s; every third blink is a
- * quick double — the cadence that reads as "alive" rather than mechanical. */
-function nextBlinkDelay(blinkCount: number): number {
-  const base = 3400 + Math.random() * 2800;
-  return blinkCount % 3 === 2 ? base * 0.45 : base;
-}
 
 export const MusterBloom = forwardRef<
   HTMLDivElement,
   {
     size?: number;
-    /** letter-spaced MUSTER wordmark under the mark */
     wordmark?: boolean;
     mood?: BloomMood;
-    /** pointer tracking + click reaction (default true) */
+    /** Adds a keyboard-accessible wave button. Defaults to true. */
     interactive?: boolean;
+    /** Ambient motion; defaults to the interactive setting. */
+    animated?: boolean;
     className?: string;
   }
 >(function MusterBloom(
-  { size = 250, wordmark = false, mood = "idle", interactive = true, className },
-  _ref,
+  { size = 250, wordmark = false, mood = "idle", interactive = true, animated = interactive, className },
+  ref,
 ) {
-  const uid = useId().replace(/:/g, "");
-  const rootRef = useRef<HTMLDivElement>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
-  const bodyRef = useRef<SVGGElement>(null);
-  const leftEyeRef = useRef<SVGGElement>(null);
-  const rightEyeRef = useRef<SVGGElement>(null);
-  const burstRef = useRef<SVGGElement>(null);
-  const [popped, setPopped] = useState(false);
-
-  // Per-frame values live outside React state: one rAF loop mutates them,
-  // and transforms land on SVG groups via refs.
-  const frame = useRef({
-    px: 0, py: 0,          // pointer offset from center, viewBox units
-    gx: 0, gy: 0,          // damped gaze (lerps toward px/py)
-    blink: 1,              // current eye scaleY
-    blinking: false,
-    blinkCount: 0,
-    pop: 0,                // squash-and-stretch decay 0..1
-    burst: 0,              // petal-burst progress 0..1
-    raf: 0,
-    startedAt: performance.now(),
-    mood,
-  });
-  frame.current.mood = mood;
-
-  useEffect(() => {
-    if (!interactive) return;
-    const onPointer = (e: PointerEvent) => {
-      const el = rootRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      // normalize to the SVG's 250-unit viewBox, capped so faraway
-      // pointers produce a look, not a stalk
-      const scale = 250 / Math.max(rect.width, rect.height);
-      const dx = Math.max(-40, Math.min(40, (e.clientX - cx) * scale));
-      const dy = Math.max(-40, Math.min(40, (e.clientY - cy) * scale));
-      frame.current.px = dx;
-      frame.current.py = dy;
-    };
-    window.addEventListener("pointermove", onPointer, { passive: true });
-    return () => window.removeEventListener("pointermove", onPointer);
-  }, [interactive]);
-
-  // Blink cadence: setTimeout chain independent of the rAF loop.
-  useEffect(() => {
-    if (!interactive) return;
-    let timer: number;
-    const schedule = () => {
-      timer = window.setTimeout(() => {
-        frame.current.blinking = true;
-        frame.current.blinkCount += 1;
-        schedule();
-      }, nextBlinkDelay(frame.current.blinkCount));
-    };
-    schedule();
-    return () => window.clearTimeout(timer);
-  }, [interactive]);
-
-  useEffect(() => {
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduced) return;
-
-    const f = frame.current;
-    const tick = () => {
-      const now = performance.now();
-      const t = (now - f.startedAt) / 1000;
-      const profile = MOODS[f.mood] ?? MOODS.idle;
-
-      // damped gaze
-      f.gx += (f.px - f.gx) * 0.08;
-      f.gy += (f.py - f.gy) * 0.08;
-      const gx = Math.max(-profile.gaze, Math.min(profile.gaze, f.gx));
-      const gy = Math.max(-profile.gaze, Math.min(profile.gaze, f.gy));
-
-      // blink: quick close-open over ~140ms
-      if (f.blinking) {
-        f.blink += (0.06 - f.blink) * 0.55;
-        if (Math.abs(f.blink - 0.06) < 0.02) f.blinking = false;
-      } else {
-        f.blink += (profile.openness - f.blink) * 0.22;
-      }
-
-      // ambient micro-rotation: three out-of-phase sines so the body never
-      // loops visibly
-      const wob =
-        Math.sin(t * 0.9) * 0.35 +
-        Math.sin(t * 1.7 + 1.3) * 0.25 +
-        Math.sin(t * 2.6 + 2.1) * 0.15;
-      const bob = Math.sin(t * Math.PI * 2 * profile.bobHz) * 5;
-      const breath = 1 + Math.sin(t * 0.7) * 0.006;
-
-      // squash-and-stretch decay after a click
-      if (f.pop > 0.001) f.pop *= 0.88;
-      if (f.burst > 0.001) f.burst = Math.max(0, f.burst - 0.03);
-
-      const squash = 1 + f.pop * 0.14;
-      const stretch = 1 - f.pop * 0.1;
-
-      if (bodyRef.current) {
-        bodyRef.current.style.transform =
-          `translateY(${bob}px) rotate(${wob * profile.wobble}deg) scale(${squash * breath}, ${stretch * breath})`;
-        bodyRef.current.style.transformOrigin = "center";
-      }
-      // the wrappers hold the authored placement (translate + matrix); the
-      // inner groups only ever carry the live delta — gaze + blink
-      if (leftEyeRef.current) {
-        leftEyeRef.current.style.transform = `translate(${gx}px, ${gy}px) scaleY(${Math.max(0.05, f.blink)})`;
-        leftEyeRef.current.style.transformOrigin = "0px 0px";
-      }
-      if (rightEyeRef.current) {
-        rightEyeRef.current.style.transform = `translate(${gx}px, ${gy}px) scaleY(${Math.max(0.05, f.blink)})`;
-        rightEyeRef.current.style.transformOrigin = "0px 0px";
-      }
-      if (burstRef.current) {
-        burstRef.current.style.opacity = String(f.burst);
-        const spread = 1 + (1 - f.burst) * 0.9;
-        burstRef.current.style.transform = `scale(${spread})`;
-        burstRef.current.style.transformOrigin = "center";
-      }
-      f.raf = requestAnimationFrame(tick);
-    };
-    f.raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(f.raf);
-  }, []);
-
-  const pop = () => {
-    if (!interactive) return;
-    frame.current.pop = 1;
-    frame.current.burst = 1;
-    frame.current.blinking = true;
-    setPopped(true);
-    window.setTimeout(() => setPopped(false), 700);
-  };
-
-  // The authored mark: musterbot body path + masked orange eye cutouts.
-  const BODY =
-    "M92.79 0.33C91.27 3.35 89.38 6.32 87 8.93C84.61 11.55 82.11 14.13 78.48 16.01C74.85 17.88 66.56 17.93 65.21 20.2C63.86 22.47 68.79 26.23 70.37 29.61C71.96 32.98 73.87 36.88 74.73 40.45C75.59 44.01 75.71 47.58 75.52 51.01C75.33 54.43 74.63 57.83 73.61 61C72.58 64.17 71.12 67.24 69.39 70.02C67.66 72.81 65.54 75.42 63.21 77.7C60.88 79.97 58.22 82.01 55.42 83.66C52.62 85.32 49.55 86.68 46.43 87.62C43.3 88.57 39.97 89.17 36.67 89.33C33.37 89.49 29.93 89.28 26.61 88.59C23.29 87.89 19.91 86.84 16.74 85.15C13.57 83.47 10.4 82.24 7.6 78.47C4.79 74.7 2.48 62.54 -0.08 62.54C-2.63 62.54 -4.94 74.7 -7.75 78.47C-10.55 82.24 -13.72 83.47 -16.89 85.15C-20.06 86.84 -23.44 87.89 -26.76 88.59C-30.08 89.28 -33.52 89.49 -36.82 89.33C-40.12 89.17 -43.45 88.57 -46.58 87.62C-49.7 86.68 -52.77 85.32 -55.57 83.66C-58.37 82.01 -61.03 79.97 -63.36 77.7C-65.69 75.42 -67.81 72.81 -69.54 70.02C-71.27 67.24 -72.74 64.17 -73.76 61C-74.78 57.83 -75.48 54.43 -75.67 51.01C-75.86 47.58 -75.74 44.01 -74.88 40.45C-74.02 36.88 -72.11 32.98 -70.52 29.61C-68.94 26.23 -64.01 22.47 -65.36 20.2C-66.71 17.93 -75 17.88 -78.63 16.01C-82.26 14.13 -84.76 11.55 -87.15 8.93C-89.53 6.32 -91.42 3.35 -92.94 0.33C-94.46 -2.69 -95.56 -5.95 -96.27 -9.18C-96.97 -12.41 -97.27 -15.78 -97.18 -19.05C-97.1 -22.32 -96.6 -25.65 -95.74 -28.79C-94.89 -31.93 -93.63 -35.04 -92.06 -37.9C-90.48 -40.75 -88.52 -43.5 -86.3 -45.91C-84.07 -48.33 -81.49 -50.56 -78.7 -52.38C-75.9 -54.21 -72.81 -55.79 -69.53 -56.86C-66.25 -57.93 -62.77 -58.77 -59.02 -58.81C-55.27 -58.84 -50.24 -57 -47.03 -57.08C-43.82 -57.15 -41.16 -56.77 -39.76 -59.26C-38.36 -61.76 -39.58 -68.26 -38.63 -72.04C-37.67 -75.81 -35.91 -78.96 -34.02 -81.9C-32.13 -84.84 -29.78 -87.43 -27.29 -89.68C-24.79 -91.92 -21.96 -93.83 -19.05 -95.36C-16.13 -96.89 -12.97 -98.06 -9.81 -98.83C-6.65 -99.61 -3.32 -100 -0.08 -100C3.17 -100 6.5 -99.61 9.66 -98.83C12.82 -98.06 15.98 -96.89 18.9 -95.36C21.81 -93.83 24.64 -91.92 27.14 -89.68C29.63 -87.43 31.98 -84.84 33.87 -81.9C35.76 -78.96 37.52 -75.81 38.48 -72.04C39.43 -68.26 38.21 -61.76 39.61 -59.26C41.01 -56.77 43.67 -57.15 46.88 -57.08C50.09 -57 55.12 -58.84 58.87 -58.81C62.62 -58.77 66.1 -57.93 69.38 -56.86C72.66 -55.79 75.75 -54.21 78.55 -52.38C81.34 -50.56 83.92 -48.33 86.15 -45.91C88.37 -43.5 90.33 -40.75 91.91 -37.9C93.48 -35.04 94.74 -31.93 95.59 -28.79C96.45 -25.65 96.94 -22.32 97.03 -19.05C97.12 -15.78 96.82 -12.41 96.12 -9.18C95.41 -5.95 94.31 -2.69 92.79 0.33Z";
-  const EYE =
-    "M-20 -8A20 20 0 0 1 0 -28L0 -28A20 20 0 0 1 20 -8L20 8A20 20 0 0 1 0 28L0 28A20 20 0 0 1 -20 8Z";
+  const [wave, setWave] = useState(0);
+  const mascot = (
+    <MusterMascot
+      size={size}
+      eyes={mood === "happy" ? "happy" : "open"}
+      eyeOpenness={mood === "working" ? 0.82 : mood === "thinking" ? 0.9 : 1}
+      label={interactive ? undefined : "Muster teammate"}
+      animated={animated}
+      reaction={interactive ? wave : 0}
+    />
+  );
 
   return (
-    <div ref={rootRef} className={`flex flex-col items-center gap-4 ${className ?? ""}`}>
-      <svg
-        ref={svgRef}
-        width={size}
-        height={size}
-        viewBox="-125 -125 250 250"
-        role="img"
-        aria-label="Muster teammate"
-        onClick={pop}
-        style={{
-          cursor: interactive ? "pointer" : undefined,
-          transform: popped ? "scale(1.02)" : undefined,
-          transition: "transform 160ms ease",
-        }}
-      >
-        <defs>
-          <mask id={`${uid}-mask`} maskUnits="userSpaceOnUse" x="-158" y="-158" width="316" height="316">
-            <path d={BODY} fill="#fff" />
-            {/* eye cutouts live in the mask and are what actually moves —
-                gaze, blink and expression all rewrite these transforms */}
-            <g transform="translate(-24.54,10.55) matrix(0.97,-0.09,0.13,0.98,0,0)">
-              <g ref={leftEyeRef} style={{ willChange: "transform" }}>
-                <path d={EYE} fill="#000" />
-              </g>
-            </g>
-            <g transform="translate(31.23,7) matrix(0.86,0.11,-0.2,0.97,0,0)">
-              <g ref={rightEyeRef} style={{ willChange: "transform" }}>
-                <path d={EYE} fill="#000" />
-              </g>
-            </g>
-          </mask>
-        </defs>
-        <g ref={bodyRef}>
-          <path d={BODY} fill="#f9f9f9" />
-          <g mask={`url(#${uid}-mask)`}>
-            <rect x="-158" y="-158" width="316" height="316" fill="#f08a24" />
-          </g>
-          {/* petal burst on click: six dots flying outward, faded by the loop */}
-          <g ref={burstRef} style={{ opacity: 0, pointerEvents: "none" }}>
-            {[0, 60, 120, 180, 240, 300].map((deg) => (
-              <circle
-                key={deg}
-                cx={0}
-                cy={-98}
-                r={6}
-                fill="#f08a24"
-                transform={`rotate(${deg})`}
-              />
-            ))}
-          </g>
-        </g>
-      </svg>
+    <div ref={ref} className={`muster-bloom ${className ?? ""}`}>
+      {interactive ? (
+        <button
+          type="button"
+          className="muster-bloom__button"
+          aria-label="Wave to Muster"
+          onClick={() => setWave((previous) => previous === 1 ? 2 : 1)}
+        >
+          {mascot}
+        </button>
+      ) : mascot}
+      {interactive && <span className="sr-only" role="status">{wave ? "Hello from Muster." : ""}</span>}
       {wordmark && (
         <span
           aria-hidden="true"
-          className="text-[#f08a24]"
-          style={{ fontSize: size * 0.11, letterSpacing: "0.42em", fontWeight: 700 }}
+          style={{ color: MUSTER_ORANGE, fontSize: size * 0.11, letterSpacing: "0.42em", fontWeight: 700 }}
         >
           MUSTER
         </span>

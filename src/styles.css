@@ -753,54 +753,38 @@ body {
   }
 }
 
-/* ── Onboarding wizard: ambient field + card (Mercury-inspired) ──────
-    Two slow accent glows drift behind the wizard card; content keeps a
-    solid, readable panel. Disabled under prefers-reduced-motion. */
-
-.onboarding-glow {
-  position: fixed;
-  border-radius: 9999px;
-  filter: blur(90px);
-  opacity: 0.14;
+/* A brief mascot entrance settles into a quiet field behind setup. */
+.onboarding-scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
   pointer-events: none;
-  z-index: 0;
+  background: radial-gradient(ellipse at 50% 35%, color-mix(in srgb, #f08a24 9%, transparent), transparent 65%);
 }
 
-.onboarding-glow-a {
-  width: 520px;
-  height: 520px;
-  left: -120px;
-  top: -140px;
-  background: #f0460e;
-  animation: onboarding-drift-a 26s ease-in-out infinite alternate;
+.onboarding-petal {
+  position: absolute;
+  opacity: 0.08;
+  animation: onboarding-arrive 4s ease-out both;
 }
 
-.onboarding-glow-b {
-  width: 460px;
-  height: 460px;
-  right: -140px;
-  bottom: -160px;
-  background: #7c3aed;
-  animation: onboarding-drift-b 32s ease-in-out infinite alternate;
+.onboarding-petal-a { left: calc(50% - 740px); top: calc(50% - 380px); rotate: -18deg; }
+.onboarding-petal-b { right: calc(50% - 680px); bottom: calc(50% - 380px); rotate: 24deg; animation-delay: 120ms; }
+.onboarding-petal-c { right: calc(50% - 380px); top: calc(50% - 340px); rotate: 12deg; animation-delay: 240ms; }
+
+@keyframes onboarding-arrive {
+  from { transform: translateY(28px) scale(0.92); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 0.08; }
 }
 
-@keyframes onboarding-drift-a {
-  from { transform: translate(0, 0) scale(1); }
-  to { transform: translate(120px, 60px) scale(1.15); }
-}
+.onboarding-card { position: relative; z-index: 1; }
 
-@keyframes onboarding-drift-b {
-  from { transform: translate(0, 0) scale(1); }
-  to { transform: translate(-90px, -70px) scale(1.1); }
-}
-
-.onboarding-card {
-  position: relative;
-  z-index: 1;
+@media (max-width: 640px) {
+  .onboarding-petal-a { left: -260px; top: -180px; }
+  .onboarding-petal-b { right: -200px; bottom: -160px; }
+  .onboarding-petal-c { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .onboarding-glow {
-    animation: none;
-  }
+  .onboarding-petal { animation: none; }
 }

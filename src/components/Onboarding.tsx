@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Check, AlertTriangle, Loader2, Mic, ArrowLeft, Sparkles } from "lucide-react";
-import { MusterbotMark } from "./MusterbotMark";
+import { MusterBloom } from "./MusterBloom";
 import { AgentAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -371,7 +371,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const stepContent = [
     (
       <div className="flex flex-col items-center">
-        <MusterbotMark size={96} wordmark />
+        <MusterBloom size={96} wordmark />
         <h1 className="mt-4 text-[20px] font-semibold text-ink">Welcome to Muster</h1>
         <p className="mt-1.5 text-center text-[14px] leading-relaxed text-ink-secondary">
           A roster of AI agents that do real work on their own computer. Let&rsquo;s set yours up —
@@ -383,6 +383,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Your name"
+          aria-label="Your name"
           className="mt-5 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
         />
         <input
@@ -391,6 +392,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           onChange={(e) => setEmail(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && valid && saveProfile()}
           placeholder="you@example.com"
+          aria-label="Email address"
           className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
         />
         <button
@@ -583,6 +585,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             value={botName}
             onChange={(e) => setBotName(e.target.value)}
             placeholder="Name your teammate (e.g. Scout)"
+            aria-label="Teammate name"
             className="mt-1 w-full max-w-sm rounded-lg border border-hairline/40 bg-inset px-3.5 py-2.5 text-center text-[15px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
           />
           <input
@@ -590,6 +593,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             value={botRole}
             onChange={(e) => setBotRole(e.target.value)}
             placeholder="Role — research, writing, ops… (optional)"
+            aria-label="Teammate role (optional)"
             className="w-full max-w-sm rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-center text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
           />
 
@@ -782,14 +786,14 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-app px-4">
-      {/* Mercury-inspired ambient field: two slow-drifting accent glows give
-          the wizard a sense of place without any notification pull. Pure
-          CSS animation, disabled under prefers-reduced-motion. */}
-      <div aria-hidden="true" className="onboarding-glow onboarding-glow-a" />
-      <div aria-hidden="true" className="onboarding-glow onboarding-glow-b" />
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-app p-4">
+      <div aria-hidden="true" className="onboarding-scene">
+        <div className="onboarding-petal onboarding-petal-a"><MusterBloom size={480} interactive={false} /></div>
+        <div className="onboarding-petal onboarding-petal-b"><MusterBloom size={360} interactive={false} /></div>
+        <div className="onboarding-petal onboarding-petal-c"><MusterBloom size={120} interactive={false} /></div>
+      </div>
       <div
-        className={`onboarding-card flex max-h-full w-full flex-col rounded-2xl border border-hairline/40 bg-panel/90 p-8 backdrop-blur-xl ${
+        className={`onboarding-card flex max-h-full min-h-0 w-full flex-col rounded-2xl border border-hairline/40 bg-panel/95 p-6 shadow-xl backdrop-blur-xl sm:p-8 ${
           step === 1 ? "max-w-[680px]" : "max-w-[460px]"
         }`}
       >
@@ -813,10 +817,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             framer-motion v13, leaving the previous step mounted with the
             new step's label — the wizard became un-navigable mid-funnel.
             A hard swap is boring and always correct. */}
-        <div key={step} className="flex min-h-0 flex-1 flex-col wizard-step">
+        <div key={step} className="wizard-step flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-1 pb-1">
           {stepContent[step]}
         </div>
-        {step > 0 && step !== STEP_LABELS.length - 1 && (
+        {step === 1 && (
           <button
             onClick={() => setStep(step - 1)}
             className="mt-4 flex items-center gap-1 self-center text-[12px] text-ink-secondary hover:text-ink"
