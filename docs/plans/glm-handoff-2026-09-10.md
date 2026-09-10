@@ -576,3 +576,60 @@ No GUI interaction, installed upgrade, new-version publication, DMG,
 Windows/Linux runtime or native Google login is established by these gates.
 Next: correct release staging/dry-run/draft-mirror controls, then prepare
 a versioned release candidate and its remaining native acceptance gates.
+
+## Loop 26 — Release publication controls
+
+Loop25 **216df5b** is pushed. Its actual ad-hoc macOS arm64 app and 9/9
+packaged-runtime result remain valid; no new installer was released.
+
+Release controls now prepare one matching draft behind explicit non-dry
+state, require existing tag→prepared SHA, refuse ambiguous/published state,
+and recheck the draft before each of four guarded uploads and publication.
+Draft lookup handles GitHub's tag-endpoint404 with a bounded complete list
+scan. Dry runs skip notarization submission too. Release runs serialize
+across refs, Intel selects macos-15-intel, and only confirmed published
+stable releases can reach the mirror. Partial core builds stay drafts.
+
+Files: `.github/workflows/release.yml`; scripts `release-policy.mjs`,
+`release-state.mjs`, `release-payload.mjs`, `verify-release-workflow.mjs`;
+their four Electron-directory test files; package.json/pnpm-lock.yaml with
+pinned yaml2.9.0. Payload validation covers parsed feeds, bytes/hashes,
+stable aliases, optional Intel completeness, stale versions and links. The
+mirror manifest includes every verified updater target. Generated output
+filenames are reserved from feed/checksum references.
+
+Focused: **4 files / 180 passed / 0 skipped in 1.47s**. Types, scoped lint
+and four syntax checks pass. Full-suite and final actionlint counts follow
+before commit. Durable evidence: `.omb-scratch/verification/loop26-focused.log`,
+`loop26-full.log`, `loop26-lint.log`, `loop26-gh-404.json`, and
+`actionlint-1.7.12/` with official binary checksum/provenance. The one real
+GitHub operation was an authenticated nonexistent-tag GET; all release-state
+unit provider calls are injected. No remote mutation, workflow dispatch,
+release publication or new deployment is implied.
+
+**Next bounded release gates:** selected-SHA tests before staging; actual
+packaged Electron smoke in desktop jobs; Gatekeeper after notarization;
+post-staple Mac feed correctness; atomic/monotonic public mirror promotion.
+Do not dispatch release.yml until these remaining acceptance gates are fixed
+and verified. Also correct the stale bump-script guidance that says no tag
+automation runs. Only then prepare a versioned candidate, validate native
+GUI/install/update and state the supported/unsupported platform evidence.
+GitHub runner billing is a pre-existing external issue, separate from the
+upgraded Codex plan. Do not repeatedly retry unchanged failed Actions runs.
+
+The broader active goal still includes native Google login, account-scoped
+portable backup/recovery, real cross-device sync, Android/Watch UI and VM
+execution. Hosted global backups remain disabled. Browser/CUA tools remain
+unavailable in this context, and Mimosa has no complete re-run. Existing
+hourly heartbeat is active; old GLM ownership/date limits remain superseded.
+Latest allowance **14% used / 86% remaining**, with no reset consumed.
+
+Final verification: **212 files / 2416 passed / 8 skipped in225.28s**,
+exit0; **+180 passed** versus Loop25. Final actionlint1.7.12: **4 workflows,
+0 diagnostics in0.0267s** (ShellCheck unavailable). Independent negative
+checks **5/5 rejected**; detailed evidence in
+`actionlint-1.7.12/loop26-workflows-final-result.json` and
+`loop26-guard-counterexamples-final.json`. Public updater GET still reports
+**1.10.4**, saved as `loop26-production-updater-before.yml`. This is a
+verified source-control slice, not a new desktop release or remote smoke
+test. Reverting the source change remains the pre-dispatch rollback path.

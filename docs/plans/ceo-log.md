@@ -1418,3 +1418,67 @@ No GUI interaction, installed upgrade, new-version publication, DMG,
 Windows/Linux runtime or native Google login is established by these gates.
 Next: correct release staging/dry-run/draft-mirror controls, then prepare
 a versioned release candidate and its remaining native acceptance gates.
+
+## Loop 26 — Release publication controls — 2026-09-10
+
+Audit found dry-run platform uploads, ambiguous staging creation, and draft
+releases reaching the public mirror. This slice separates preparation,
+platform attachment, publication and stable mirror promotion. All releases
+share one concurrency group; each attachment requires a successful real
+build and rechecks the exact tag/SHA draft. Manual runs default to dry and
+skip release writes and Apple notarization submissions. Intel uses an
+explicit Intel runner. Published prereleases cannot promote the stable feed.
+
+`scripts/release-policy.mjs` derives pinned outputs and partial-build draft
+state without shell interpolation. `release-state.mjs` verifies lightweight
+and bounded annotated tags, exact release target SHA, and strict API results.
+A tag-endpoint 404 alone is insufficient: drafts require a complete bounded
+release-list lookup. Creation uses --verify-tag and refuses ambiguous,
+published, malformed or unavailable state. Only preparation may create;
+assertions are read-only. One real authenticated GET confirmed gh's HTTP404
+response shape; all unit-test provider calls are injected. No remote writes.
+
+`release-payload.mjs` parses update feeds, verifies size/SHA512 and platform
+SHA256 checksums, matches stable aliases to versioned bytes, rejects stale
+assets and filesystem links, and requires a complete optional Intel set.
+It generates the existing latest.json schema and an explicit rsync list
+containing every update target. Generated output names cannot themselves be
+feed/checksum references. Pinned yaml2.9.0 is now a project dependency; the
+lockfile adds it and associated optional-peer keys without unrelated version
+upgrades. The existing pnpm.overrides warning remains a recorded P2 follow-up.
+
+Parsed workflow guard tests cover eight known mutation steps and negative
+regressions. Review caught and fixed dry input overrides, fabricated complete
+build results, wrong upload targets, GitHub draft lookup behavior, and feeds
+referencing files the mirror would overwrite. Focused verification:
+**4 files / 180 passed / 0 skipped in 1.47s**. Frontend/server typechecks,
+scoped lint and four helper syntax checks passed. Full-suite and final
+workflow lint results follow before commit.
+
+Commercial implication: verified update bytes and controlled publication
+are prerequisites for a usable desktop distribution; this is not evidence
+of conversion or revenue. No release dispatch, installer publication,
+notarization submission or VPS mutation occurred. The 1.10.4 packaged app
+from Loop25 commit216df5b remains the latest locally verified artifact.
+
+Next release blockers, retained explicitly: run selected-SHA tests in the
+release pipeline; replace host-Node desktop smoke with the actual packaged
+Electron runtime; move Gatekeeper assessment after notarization; account for
+post-staple DMG bytes in update feeds; make stable mirror promotion atomic
+and monotonic. Prepare the versioned candidate only after these gates. CI
+runner billing remains distinct from Codex allowance; do not retry unchanged
+provider failures. Native GUI/install/update, Google native sign-in, Android,
+VM execution and Mimosa remain unverified. Latest usage: **14% used / 86%
+remaining**. Existing goal and hourly heartbeat remain active.
+
+Loop26 final verification: **212 files / 2416 passed / 8 skipped in
+225.28s**, exit0, **180 additional passes** over Loop25. Full log:
+`.omb-scratch/verification/loop26-full.log`. Official checksum-verified
+actionlint1.7.12 passed **4 workflows / 0 diagnostics in 0.0267s**; ShellCheck
+was unavailable. Independent review rejected **5/5 attempted guard
+bypasses**, with no new material blocker inside this slice's controls.
+The bounded validator is not a general proof of all possible workflow code.
+Production updater GET still reports **1.10.4**; this source slice changes
+release controls, not the installed or published application version.
+Rollback is a reviewed source revert before dispatch; no release, tag or
+mirror asset was created or modified during this loop.
