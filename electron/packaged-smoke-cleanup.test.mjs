@@ -96,8 +96,11 @@ async function withFixture(mode, run) {
 
   const environment = { TMPDIR: temporary, TEMP: temporary, TMP: temporary };
   for (const key of ["PATH", "SystemRoot"]) if (process.env[key]) environment[key] = process.env[key];
-  const child = spawn(process.execPath, [script, "--server-dir", source], {
-    env: environment, detached: true, stdio: ["ignore", "pipe", "pipe"],
+  const wrongPlatform = process.platform === "darwin" ? "linux" : "darwin";
+  const child = spawn(process.execPath, [script, "--server-dir", source,
+    ...(mode === "wrong-platform" ? ["--platform", wrongPlatform] : []),
+  ], {
+    env: environment, detached: true, stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   let stdout = "";
   let stderr = "";
@@ -128,8 +131,32 @@ async function withFixture(mode, run) {
 }
 
 // Windows process-tree termination uses taskkill, not POSIX process groups.
-// These five cases intentionally make no Windows cleanup claim.
+// These cases intentionally make no Windows cleanup claim.
 describe.skipIf(process.platform === "win32")("packaged smoke POSIX cleanup", () => {
+  it("cleans an IPC-cancelled probe before closing its parent channel", async () => {
+    await withFixture("probe", async ({ child, marker, temporary, finished }) => {
+      const probe = await until(() => readMarker(marker("probe")));
+      child.send("muster-smoke-cancel");
+      const result = await finished();
+      expect(result.code).not.toBe(0);
+      expect(result.stderr).toContain("Native runtime probe interrupted");
+      expect(result.stdout).not.toContain('"passed":');
+      expect(alive(probe.pid, true)).toBe(false);
+      expect(readdirSync(temporary)).toEqual([]);
+      expect(child.connected).toBe(false);
+    });
+  }, 25_000);
+  it("rejects a wrong runtime platform before starting a server and cleans the probe", async () => {
+    await withFixture("wrong-platform", async ({ marker, temporary, finished }) => {
+      const result = await finished();
+      expect(result.error).toBeUndefined();
+      expect(result.code).not.toBe(0);
+      expect(result.stderr).toContain("Wrong smoke runtime");
+      expect(existsSync(marker("server"))).toBe(false);
+      expect(alive(readMarker(marker("probe"))?.pid)).toBe(false);
+      expect(readdirSync(temporary)).toEqual([]);
+    });
+  });
   for (const phase of ["probe", "server"]) {
     it.each(["SIGINT", "SIGTERM"])(`cleans an interrupted ${phase} on %s`, async (signal) => {
       await withFixture(phase, async ({ child, marker, temporary, source, finished }) => {

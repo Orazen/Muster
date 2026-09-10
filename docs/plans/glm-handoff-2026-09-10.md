@@ -633,3 +633,56 @@ checks **5/5 rejected**; detailed evidence in
 **1.10.4**, saved as `loop26-production-updater-before.yml`. This is a
 verified source-control slice, not a new desktop release or remote smoke
 test. Reverting the source change remains the pre-dispatch rollback path.
+
+## Loop 27 — Native release acceptance
+
+Loop26 **5a98daa** is pushed. Release preparation now gates the selected
+commit on frozen dependencies, lint, types, main Vitest, broker, updater and
+Electron syntax before staging. CI build invokes pnpm build. Native jobs
+use release-native-smoke to select actual packaged executables and exact
+installed Electron/platform/architecture; Intel no longer changes its
+dependency manifest during packaging. The core smoke reports/checks platform
+and accepts private IPC cancellation before awaited cleanup/disconnection.
+
+Mac Gatekeeper assessment follows successful notarization/stapling. The new
+refresh-mac-feed preserves updater ZIP bytes and refreshes only authorized
+post-staple DMG hashes/sizes (including legacy metadata). Dry/unsigned runs
+cannot approve changed DMG bytes. Atomic local writes preserve the feed on
+validation failures. Workflow mutation tests cover these acceptance gates.
+
+Verified so far: build/types pass, Vite5.61s with large-chunk warning;
+broker2/2, updater14/14, eight Electron syntax checks; root/feed focused
+3files/121passed/0skipped24.13s. Wrapper/actual Mac/full-suite numbers follow.
+
+**New authoritative blocker:** full pnpm lint returns92errors/8warnings
+across21files, all byte-identical to5a98daa; changed-file diagnostics0.
+Full diagnostic output and baseline hashes are in
+`.omb-scratch/verification/loop27-full-lint.log` and
+`loop27-lint-baseline.json`. The selected-commit release lint gate will fail
+until a scoped cleanup fixes these. Do not remove/ignore the gate to publish.
+Next: clear the lint baseline, implement atomic/monotonic public mirror
+promotion, fix stale bump-script guidance, then prepare the new candidate
+and verify native GUI/install/update. No remote release operation occurred.
+
+Actual provider signing, Windows/Linux native execution, native Google,
+Android/Watch UI, VM, portable backup/sync and Mimosa remain open. Existing
+Mac verification artifact is still1.10.4. Latest allowance15%used/85%remaining;
+active goal and hourly heartbeat unchanged, no reset or spending.
+
+Wrapper30/30passes482ms; actual existing owned Mac app **9/9 in3.745s**,
+Electron43.4.0/Node24.18.1/ABI148/darwin-arm64. Real SQLite, seven contained
+proxies and owned HTTP/PID; artifact/source hashes unchanged. Evidence
+`loop27-native-wrapper/result.json` plus logs. No GUI or new artifact build.
+Actionlint4workflows/0diagnostics0.021s, independent10/10acceptance mutations
+rejected. ShellCheck unavailable. No new release-readiness claim overrides
+the global lint failure or missing native platform/signing evidence.
+
+Full-suite final: **214 files / 2523 passed / 8 skipped in225.85s**, exit0,
+**+107 passes** versus Loop26. `loop27-full.log` is authoritative. Global
+lint still92errors/8warnings; scoped changed-file lint passes.
+Next bounded repair bucket: server telegram-sync(+tests), user-keys(+tests),
+account-drive and drive-sync: **31errors/2warnings in6files**. Then harness
+contracts:29errors/1warning8files; companion/CLI:32errors/5warnings7files.
+Do not weaken input boundaries or asynchronous queue snapshot semantics to
+silence lint. The companion package also needs its own dependency/test
+readiness checked rather than relying on root tooling accidentally.

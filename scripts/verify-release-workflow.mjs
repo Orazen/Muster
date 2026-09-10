@@ -82,6 +82,16 @@ export function verifyReleaseWorkflow(workflow) {
     'Release creation belongs to the exact-commit staging helper');
   const staging = one(jobs.prepare, (step) => /release-state\.mjs prepare\s*$/.test(shell(step)));
   check(steps(jobs.prepare).indexOf(pin) < steps(jobs.prepare).indexOf(staging), 'Pin must precede staging');
+  const prepareSteps = steps(jobs.prepare);
+  const installIndex = prepareSteps.findIndex((step) => shell(step) === 'pnpm install --frozen-lockfile');
+  check(installIndex > prepareSteps.indexOf(pin), 'Release verification requires frozen dependencies after pinning');
+  for (const [id, command] of [['lint', 'pnpm lint'], ['typecheck', 'pnpm typecheck'], ['tests', 'pnpm exec vitest run'],
+    ['broker', 'pnpm broker:test'], ['updater', 'pnpm test:updater'], ['electron-syntax', 'pnpm check:electron']]) {
+    const gate = one(jobs.prepare, (step) => step.id === id);
+    check(shell(gate) === command && gate.if === undefined && gate['continue-on-error'] === undefined &&
+      prepareSteps.indexOf(gate) > installIndex && prepareSteps.indexOf(gate) < prepareSteps.indexOf(staging),
+      'Selected commit verification must pass before staging');
+  }
   check(staging.env?.RELEASE_SHA === '${{ steps.pin.outputs.sha }}' &&
     staging.env?.RELEASE_VERSION === '${{ steps.pin.outputs.version }}', 'Staging must use the pinned version and SHA');
   for (const dry of ['true', 'false', '', undefined]) {
@@ -96,6 +106,14 @@ export function verifyReleaseWorkflow(workflow) {
     const job = jobs[platform];
     check(job?.needs === 'prepare', 'Every platform must await verified staging');
     const upload = one(job, (step) => /gh\s+release\s+upload/.test(shell(step)));
+    const native = one(job, (step) => step.id === 'native-smoke');
+    const nativePlatform = platform.startsWith('macos') ? 'darwin' : platform === 'windows' ? 'win32' : 'linux';
+    const arch = platform === 'macos' ? 'arm64' : 'x64';
+    check(shell(native).trim().endsWith(`node scripts/release-native-smoke.mjs --platform ${nativePlatform} --arch ${arch}`) &&
+      native.if === undefined && native['continue-on-error'] === undefined && steps(job).indexOf(native) < steps(job).indexOf(upload),
+      'Platform upload requires the actual packaged Electron smoke');
+    check(!steps(job).some((step) => /pnpm add|node "\$(?:staging|res)\//.test(shell(step))),
+      'Packaging must preserve pinned dependencies and avoid host-Node smoke');
     check(upload.env?.RELEASE_SHA === '${{ needs.prepare.outputs.sha }}' &&
       upload.env?.RELEASE_VERSION === '${{ needs.prepare.outputs.version }}', 'Uploads must use pinned release identity');
     check(/set -euo pipefail/.test(shell(upload)) && /release-state\.mjs assert-draft\s*\n\s*gh release upload/.test(shell(upload)),
@@ -111,6 +129,21 @@ export function verifyReleaseWorkflow(workflow) {
     }
   }
   const notarize = one(jobs.macos, (step) => /notarytool submit/.test(shell(step)));
+  const gatekeeper = one(jobs.macos, (step) => /spctl --assess/.test(shell(step)));
+  check(notarize.id === 'notarize' && notarize['continue-on-error'] === undefined && gatekeeper['continue-on-error'] === undefined &&
+    steps(jobs.macos).indexOf(gatekeeper) > steps(jobs.macos).indexOf(notarize),
+    'Gatekeeper assessment must follow notarization');
+  for (const outcome of ['success', 'failure', 'skipped', '']) for (const success of [true, false]) {
+    check(evaluateGuard(gatekeeper.if, { success, steps: { notarize: { outcome } } }) === (success && outcome === 'success'),
+      'Gatekeeper requires successful notarization');
+  }
+  const refresh = one(jobs.macos, (step) => step.id === 'refresh-feed');
+  const checksums = one(jobs.macos, (step) => /shasum -a 256/.test(shell(step)));
+  check(shell(refresh) === 'node scripts/refresh-mac-feed.mjs' && refresh.if === undefined && refresh['continue-on-error'] === undefined &&
+    refresh.env?.RELEASE_VERSION === '${{ needs.prepare.outputs.version }}' && refresh.env?.ASSETS_DIR === 'release' &&
+    refresh.env?.ALLOW_DMG_CHANGE === "${{ steps.notarize.outcome == 'success' }}" &&
+    steps(jobs.macos).indexOf(refresh) > steps(jobs.macos).indexOf(notarize) && steps(jobs.macos).indexOf(refresh) < steps(jobs.macos).indexOf(checksums),
+    'Mac feed must follow stapling and precede final checksums');
   for (const success of [true, false]) for (const dry of ['false', 'true', '']) {
     for (const credentials of [true, false]) {
       const env = Object.fromEntries(['APPLE_ID', 'APPLE_APP_PASSWORD', 'APPLE_TEAM_ID'].map((key) => [key, credentials ? 'present' : '']));

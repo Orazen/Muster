@@ -58,3 +58,4 @@ jobs:
       # release in release.yml, and artifact uploads on this private repo
       # keep tripping the storage quota (recalculated only every 6-12h),
       # which fails CI even when the build itself is green.
+      - run: pnpm build

@@ -16,6 +16,7 @@ const { values } = parseArgs({ options: {
   runtime: { type: "string" },
   "electron-version": { type: "string" },
   arch: { type: "string", default: process.arch },
+  platform: { type: "string", default: process.platform },
 } });
 if (Boolean(values.runtime) !== Boolean(values["electron-version"])) {
   throw new Error("Desktop smoke requires both --runtime and --electron-version");
@@ -23,6 +24,7 @@ if (Boolean(values.runtime) !== Boolean(values["electron-version"])) {
 const runtime = values.runtime ? resolve(values.runtime) : process.execPath;
 const expectedElectron = values["electron-version"] ?? null;
 const expectedArch = values.arch;
+const expectedPlatform = values.platform;
 const source = realpathSync(values["server-dir"]);
 const fixture = mkdtempSync(join(tmpdir(), "muster-package-smoke-"));
 const staging = join(fixture, "server");
@@ -37,8 +39,10 @@ let childError;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const interruption = new AbortController();
 const onInterrupt = () => interruption.abort();
+const onParentMessage = (message) => { if (message === "muster-smoke-cancel") interruption.abort(); };
 process.on("SIGINT", onInterrupt);
 process.on("SIGTERM", onInterrupt);
+process.on("message", onParentMessage);
 
 async function freePortPair() {
   for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -162,11 +166,11 @@ try {
     'const db = new Database(":memory:");',
     'let value;',
     'try { db.exec("CREATE TABLE proof (value INTEGER)"); db.prepare("INSERT INTO proof VALUES (?)").run(17); value = db.prepare("SELECT value FROM proof").get().value; } finally { db.close(); }',
-    'console.log(JSON.stringify({ electron: process.versions.electron ?? null, node: process.versions.node, abi: process.versions.modules, arch: process.arch, value, proxies: SPAWNED_PROXIES, missing: Object.values(SPAWNED_PROXIES).filter((path) => !existsSync(path)) }));',
+    'console.log(JSON.stringify({ electron: process.versions.electron ?? null, node: process.versions.node, abi: process.versions.modules, arch: process.arch, platform: process.platform, value, proxies: SPAWNED_PROXIES, missing: Object.values(SPAWNED_PROXIES).filter((path) => !existsSync(path)) }));',
   ].join("\n"));
   const { stdout } = await runProbe(probe, childEnv);
   const report = JSON.parse(stdout);
-  if (report.electron !== expectedElectron || report.arch !== expectedArch) {
+  if (report.electron !== expectedElectron || report.arch !== expectedArch || report.platform !== expectedPlatform) {
     throw new Error(`Wrong smoke runtime: ${JSON.stringify(report)}`);
   }
   if (report.value !== 17 || report.missing.length || Object.values(report.proxies).some((file) => !contained(file))) {
@@ -199,7 +203,7 @@ try {
     await delay(200);
   }
   if (!healthy) throw new Error(`Packaged server failed its owned health check: ${childError?.message ?? child.exitCode}\n${output}`);
-  verifiedReport = { passed: proxyCount + 2, checks: { ownedHttp: 1, proxyPaths: proxyCount, nativeDatabase: 1 }, runtime: { electron: report.electron, node: report.node, abi: report.abi, arch: report.arch } };
+  verifiedReport = { passed: proxyCount + 2, checks: { ownedHttp: 1, proxyPaths: proxyCount, nativeDatabase: 1 }, runtime: { electron: report.electron, node: report.node, abi: report.abi, arch: report.arch, platform: report.platform } };
 } catch (error) {
   executionError = error;
 }
@@ -211,6 +215,8 @@ if (!cleanupErrors.length) {
 }
 process.removeListener("SIGINT", onInterrupt);
 process.removeListener("SIGTERM", onInterrupt);
+process.removeListener("message", onParentMessage);
+if (process.connected) process.disconnect();
 if (cleanupErrors.length) throw new AggregateError([...(executionError ? [executionError] : []), ...cleanupErrors], "Packaged smoke failed to clean up its owned fixture");
 if (executionError) throw executionError;
 console.log(JSON.stringify(verifiedReport));

@@ -24,6 +24,21 @@ describe('release control decision matrix', () => {
   });
 
   const regressions = [
+    ['missing selected-commit tests', (w) => { w.jobs.prepare.steps = w.jobs.prepare.steps.filter((s) => s.id !== 'tests'); }],
+    ['ignored selected-commit failures', (w) => { w.jobs.prepare.steps.find((s) => s.id === 'tests')['continue-on-error'] = true; }],
+    ['conditional selected-commit tests', (w) => { w.jobs.prepare.steps.find((s) => s.id === 'tests').if = 'false'; }],
+    ['staging before tests', (w) => { const i = w.jobs.prepare.steps.findIndex((s) => s.id === 'staging'); w.jobs.prepare.steps.splice(2, 0, ...w.jobs.prepare.steps.splice(i, 1)); }],
+    ['floating package install', (w) => { w.jobs.macos.steps.push({ run: 'pnpm add electron@latest' }); }],
+    ['host Node desktop smoke', (w) => { w.jobs.windows.steps.find((s) => s.id === 'native-smoke').run = 'node release/win-unpacked/resources/server/index.js'; }],
+    ['wrong desktop architecture', (w) => { const s = w.jobs.macos.steps.find((s) => s.id === 'native-smoke'); s.run = s.run.replace('--arch arm64', '--arch x64'); }],
+    ['ignored native smoke failure', (w) => { w.jobs.linux.steps.find((s) => s.id === 'native-smoke')['continue-on-error'] = true; }],
+    ['Gatekeeper before notarization', (w) => { const all = w.jobs.macos.steps; const index = all.findIndex((s) => s.id === 'gatekeeper'); all.splice(1, 0, ...all.splice(index, 1)); }],
+    ['Gatekeeper on unsigned dry run', (w) => { delete w.jobs.macos.steps.find((s) => s.id === 'gatekeeper').if; }],
+    ['ignored notarization failure', (w) => { w.jobs.macos.steps.find((s) => s.id === 'notarize')['continue-on-error'] = true; }],
+    ['ignored Gatekeeper failure', (w) => { w.jobs.macos.steps.find((s) => s.id === 'gatekeeper')['continue-on-error'] = true; }],
+    ['missing post-staple feed refresh', (w) => { w.jobs.macos.steps = w.jobs.macos.steps.filter((s) => s.id !== 'refresh-feed'); }],
+    ['feed refresh before stapling', (w) => { const all = w.jobs.macos.steps; const index = all.findIndex((s) => s.id === 'refresh-feed'); all.splice(1, 0, ...all.splice(index, 1)); }],
+    ['DMG change without successful stapling', (w) => { w.jobs.macos.steps.find((s) => s.id === 'refresh-feed').env.ALLOW_DMG_CHANGE = 'true'; }],
     ['dry-run input overridden', (w) => { w.jobs.prepare.steps.find((s) => s.id === 'pin').env.DRY_RUN = 'false'; }],
     ['dry-run derivation overridden', (w) => { w.jobs.prepare.steps.find((s) => s.id === 'pin').run = 'echo dry_run=false >> "$GITHUB_OUTPUT"'; }],
     ['partial builds declared complete', (w) => { w.jobs.publish.steps.find((s) => s.id === 'draft').run = 'echo value=false >> "$GITHUB_OUTPUT"'; }],

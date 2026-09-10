@@ -1482,3 +1482,68 @@ Production updater GET still reports **1.10.4**; this source slice changes
 release controls, not the installed or published application version.
 Rollback is a reviewed source revert before dispatch; no release, tag or
 mirror asset was created or modified during this loop.
+
+## Loop 27 — Native release acceptance — 2026-09-10
+
+Loop26 **5a98daa** is pushed. This slice makes release preparation install
+frozen dependencies and run lint, types, main Vitest, broker, updater and
+Electron syntax gates on the selected commit before creating a draft. CI's
+build job now actually runs the build. Removed the Intel job's dependency
+mutation after checkout.
+
+All four native jobs select the exact packaged executable, installed
+Electron version, platform and architecture through release-native-smoke.
+The existing isolated server gate now checks process.platform too. Private
+IPC cancellation lets the helper finish owned-process cleanup before exit;
+this avoids the Windows force-termination behavior of forwarded signals.
+No new Windows runtime execution is implied by those contract tests.
+
+Mac signature verification stays before notarization; Gatekeeper assessment
+requires successful notarization/stapling. refresh-mac-feed preserves ZIP
+bytes and updates DMG size/hash plus matching legacy fields through an
+atomic local replacement. Changes require explicit successful-notarization
+authorization; unsigned/dry runs must still match their original DMG hashes.
+Mutation tests reject bypasses of selected-commit tests, actual native smoke,
+signing acceptance and feed refresh.
+
+Build and both typechecks passed; Vite **5.61s** with the existing large-chunk
+warning. Broker **2/2 in188ms**, updater **14/14 in78.90ms**, eight Electron
+syntax checks passed. Focused root/feed checks: **3 files / 121 passed /
+0 skipped in24.13s**. Wrapper, actual Mac and full-suite results follow.
+
+Broader lint audit failed: **92 errors / 8 warnings across21 files**, exit1.
+Every affected file is byte-identical to Loop26; none belongs to this slice.
+Evidence: `loop27-full-lint.log` and `loop27-lint-baseline.json` in
+`.omb-scratch/verification/`. Examples include unreviewed type assertions
+and unparsed input boundaries in existing tests/server code. Scoped lint
+for this slice passes. Do not call the release ready: the new gate correctly
+refuses staging while these errors exist. Next pick is this bounded lint
+cleanup, then atomic/monotonic mirror promotion and the versioned candidate.
+
+Commercial implication: testing the executable users receive is necessary
+for dependable distribution; no conversion/revenue outcome is inferred.
+No signing-provider submission, release dispatch, upload or VPS mutation.
+Native GUI/install/update, native Google login, Android/Watch UI, VM and
+portable account recovery remain unverified. Allowance **15% used / 85%
+remaining**; the broad goal and existing heartbeat remain active.
+
+Wrapper contracts: **30/30 in482ms**, no skips. Actual wrapper execution
+against the owned Loop25 app passed **9/9 in3.745s**, exit0, using
+Electron43.4.0 / Node24.18.1 / ABI148 / darwin-arm64. Native SQLite1,
+contained proxies7, owned HTTP/PID1. Runtime, server, addon and signature
+resource hashes stayed unchanged. Evidence: `loop27-native-wrapper/`.
+This is not a new build, GUI, installer, notarization or Windows/Linux run.
+Official actionlint1.7.12 passed **4 workflows / 0 diagnostics in0.021s**;
+independent acceptance mutations **10/10 rejected**. ShellCheck remains
+unavailable. Evidence: `loop27-acceptance-controls.json` and
+`actionlint-1.7.12/loop27-workflows-final-result.json`.
+
+Loop27 final suite: **214 files / 2523 passed / 8 skipped in225.85s**,
+exit0, **107 additional passes** over Loop26. Full evidence:
+`.omb-scratch/verification/loop27-full.log`. Build/types/scoped lint pass;
+the separate global lint result remains **92 errors / 8 warnings**.
+Read-only repair grouping: provider storage/transport6files31errors2warnings;
+harness/contracts8files29errors1warning; companion/CLI7files32errors5warnings.
+Start with provider input/persistence contracts. Preserve queue snapshot
+semantics and audit genuine linter false positives instead of weakening
+types or globally disabling rules. No new desktop release is claimed.

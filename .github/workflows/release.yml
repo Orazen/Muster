@@ -27,9 +27,8 @@
 # Deliberate scope limit: the macOS ZIP is never modified after electron-
 # builder writes latest-mac.yml (no re-zipping a stapled .app here). Restapling
 # into the zip invalidates the feed hash and strands every installed Mac —
-# fixing that properly needs a feed-regeneration script (see OpenMausBot's
-# scripts/regenerate-mac-feed.mjs) and is tracked as a follow-up, not faked
-# with stale hashes.
+# refresh-mac-feed updates only post-staple DMG hashes and rejects any ZIP
+# byte change. It never re-zips or silently rewrites a changed ZIP hash.
 #
 # REQUIRED SECRETS (Settings → Secrets and variables → Actions; names only,
 # values never in this file). Absent-secret behavior is stated per group so
@@ -101,7 +100,7 @@ jobs:
   prepare:
     name: Pin the release commit
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
     outputs:
       sha: ${{ steps.pin.outputs.sha }}
       version: ${{ steps.pin.outputs.version }}
@@ -118,6 +117,30 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
         run: node scripts/release-policy.mjs pin
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint the selected release commit
+        id: lint
+        run: pnpm lint
+      - name: Typecheck the selected release commit
+        id: typecheck
+        run: pnpm typecheck
+      - name: Test the selected release commit
+        id: tests
+        run: pnpm exec vitest run
+      - name: Test the connection broker
+        id: broker
+        run: pnpm broker:test
+      - name: Verify updater behavior
+        id: updater
+        run: pnpm test:updater
+      - name: Check Electron entry points
+        id: electron-syntax
+        run: pnpm check:electron
       - name: Prepare the verified staging release
         id: staging
         if: ${{ success() && steps.pin.outputs.dry_run == 'false' }}
@@ -211,46 +234,23 @@ jobs:
           set -euo pipefail
           # notarytool ACCEPTS binaries codesign rejects — this gate is the
           # only chance to catch a bad seal before it's notarized
-          APP=$(ls -d release/mac*/Muster.app | head -1)
+          APP=release/mac-arm64/Muster.app
           codesign --verify --deep --strict "$APP"
-          spctl --assess --type exec -vv "$APP"
           echo "ok: signature verifies ($APP)"
 
-      - name: "Gate: packaged server starts with no node_modules in reach"
+      - name: "Gate: actual packaged Electron storage and server"
+        id: native-smoke
         run: |
           set -euo pipefail
-          APP=$(ls -d release/mac*/Muster.app | head -1)
-          res="$APP/Contents/Resources"
-          [ -f "$res/server/index.js" ] || { echo "::error::missing packaged server/index.js"; exit 1; }
-          [ -f "$res/ui/index.html" ] || { echo "::error::missing packaged ui/index.html"; exit 1; }
+          res="release/mac-arm64/Muster.app/Contents/Resources"
           [ -x "$res/cua-driver" ] || { echo "::error::missing staged cua-driver"; exit 1; }
           lipo -archs "$res/cua-driver" | grep -q "arm64" || {
             echo "::error::cua-driver lacks arm64 slice"; exit 1; }
-          # Copy OUT of the bundle before running: inside the app a bare
-          # import could resolve through stray paths and mask a dead tree.
-          staging="$RUNNER_TEMP/smoke-server"
-          rm -rf "$staging"
-          cp -R "$res/server" "$staging"
-          port=$((21000 + RANDOM % 9000))
-          HOME="$RUNNER_TEMP/smoke-home" OMB_PORT=$port \
-            node "$staging/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
-          pid=$!
-          for _ in $(seq 1 90); do
-            if curl -fsS --max-time 2 "http://127.0.0.1:$port/api/health" >/dev/null 2>&1; then
-              echo "packaged server answered /api/health ✓"
-              kill $pid 2>/dev/null || true
-              exit 0
-            fi
-            kill -0 $pid 2>/dev/null || break
-            sleep 1
-          done
-          echo "::error::packaged server never served /api/health"
-          cat "$RUNNER_TEMP/server.log" || true
-          kill $pid 2>/dev/null || true
-          exit 1
+          node scripts/release-native-smoke.mjs --platform darwin --arch arm64
 
       # Notarization (optional — skipped if secrets are not set)
       - name: Notarize and staple
+        id: notarize
         if: ${{ success() && needs.prepare.outputs.dry_run == 'false' && env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
         run: |
           set -euo pipefail
@@ -271,8 +271,26 @@ jobs:
             [ -e "$f" ] || continue
             xcrun stapler staple "$f"
           done
-          APP=$(ls -d release/mac*/Muster.app | head -1)
+          APP=release/mac-arm64/Muster.app
           xcrun stapler staple "$APP"
+
+      - name: "Gate: notarized app passes Gatekeeper"
+        id: gatekeeper
+        if: ${{ success() && steps.notarize.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          APP=release/mac-arm64/Muster.app
+          codesign --verify --deep --strict "$APP"
+          xcrun stapler validate "$APP"
+          spctl --assess --type exec -vv "$APP"
+
+      - name: Refresh Mac update feed after stapling
+        id: refresh-feed
+        env:
+          ASSETS_DIR: release
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          ALLOW_DMG_CHANGE: ${{ steps.notarize.outcome == 'success' }}
+        run: node scripts/refresh-mac-feed.mjs
 
       - name: Clean up keychain
         if: always() && env.KEYCHAIN_PATH != ''
@@ -341,8 +359,6 @@ jobs:
           key: macos-electron-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: macos-electron-
       - run: pnpm install --frozen-lockfile
-      - name: Install the x64 CUA native package
-        run: pnpm add -D @trycua/cua-driver-darwin-x64@0.20.0
       - name: Clean generated output
         run: |
           set -euo pipefail
@@ -352,36 +368,15 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: pnpm package:mac:x64
 
-      - name: "Gate: packaged server starts with no node_modules in reach"
+      - name: "Gate: actual packaged Electron storage and server"
+        id: native-smoke
         run: |
           set -euo pipefail
-          APP=$(ls -d release/mac*/Muster.app | head -1)
-          res="$APP/Contents/Resources"
-          [ -f "$res/server/index.js" ] || { echo "::error::missing packaged server/index.js"; exit 1; }
-          [ -f "$res/ui/index.html" ] || { echo "::error::missing packaged ui/index.html"; exit 1; }
+          res="release/mac/Muster.app/Contents/Resources"
           [ -x "$res/cua-driver" ] || { echo "::error::missing staged cua-driver"; exit 1; }
           lipo -archs "$res/cua-driver" | grep -q "x86_64" || {
             echo "::error::cua-driver lacks x86_64 slice"; exit 1; }
-          staging="$RUNNER_TEMP/smoke-server"
-          rm -rf "$staging"
-          cp -R "$res/server" "$staging"
-          port=$((21000 + RANDOM % 9000))
-          HOME="$RUNNER_TEMP/smoke-home" OMB_PORT=$port \
-            node "$staging/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
-          pid=$!
-          for _ in $(seq 1 90); do
-            if curl -fsS --max-time 2 "http://127.0.0.1:$port/api/health" >/dev/null 2>&1; then
-              echo "packaged server answered /api/health ✓"
-              kill $pid 2>/dev/null || true
-              exit 0
-            fi
-            kill -0 $pid 2>/dev/null || break
-            sleep 1
-          done
-          echo "::error::packaged server never served /api/health"
-          cat "$RUNNER_TEMP/server.log" || true
-          kill $pid 2>/dev/null || true
-          exit 1
+          node scripts/release-native-smoke.mjs --platform darwin --arch x64
 
       - name: Stable-named copy and checksums
         run: |
@@ -467,28 +462,9 @@ jobs:
           fi
           exit $fail
 
-      # index.js EXISTING is not the same as index.js RUNNING. Start the real
-      # packaged copy where node_modules genuinely is not reachable.
-      - name: "Gate: packaged server starts and serves /api/health"
-        run: |
-          set -euo pipefail
-          res=release/win-unpacked/resources
-          HOME="$RUNNER_TEMP/smoke-home" USERPROFILE="$RUNNER_TEMP/smoke-home" OMB_PORT=21987 \
-            node "$res/server/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
-          pid=$!
-          for _ in $(seq 1 90); do
-            if curl -fsS --max-time 2 http://127.0.0.1:21987/api/health >/dev/null 2>&1; then
-              echo "packaged server answered /api/health ✓"
-              kill $pid 2>/dev/null || true
-              exit 0
-            fi
-            kill -0 $pid 2>/dev/null || break
-            sleep 1
-          done
-          echo "::error::packaged server never served /api/health"
-          cat "$RUNNER_TEMP/server.log" || true
-          kill $pid 2>/dev/null || true
-          exit 1
+      - name: "Gate: actual packaged Electron storage and server"
+        id: native-smoke
+        run: node scripts/release-native-smoke.mjs --platform win32 --arch x64
 
       # nsis.artifactName is Muster-${version}-setup.exe — no "-x64-" segment.
       # A past copy referenced one and silently no-op'd; a mismatch must fail.
@@ -559,6 +535,10 @@ jobs:
           sudo chown root:root release/linux-unpacked/chrome-sandbox
           sudo chmod 4755 release/linux-unpacked/chrome-sandbox
           test "$(stat -c '%U:%G %a' release/linux-unpacked/chrome-sandbox)" = "root:root 4755"
+
+      - name: "Gate: actual packaged Electron storage and server"
+        id: native-smoke
+        run: node scripts/release-native-smoke.mjs --platform linux --arch x64
 
       - name: "Gate: launch the packaged app end-to-end"
         run: dbus-run-session -- xvfb-run -a node scripts/smoke-linux-package.mjs
