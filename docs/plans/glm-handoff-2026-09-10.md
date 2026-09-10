@@ -210,10 +210,26 @@ performing destructive cleanup to make status look clean.
   cannot), so browser evidence is the proof. This ledger and the CEO entry
   are committed with this record; use `git log -1` for its ID.
 
-Next bounded slice: **iOS/Android brand catalogs** (regenerate
-`ios/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png` from the canonical
-mascot; add `icon` and Android adaptive icon to the Expo app config). Rows
-1–5 and the P2 overflow are verified. Do not restart completed research.
+- Loop 20: iOS/Android brand catalogs (row 4 remainder). `make-brand-icons.mjs`
+  now also emits, from the same canonical mascot geometry: the iOS App Store
+  icon (`ios/App/…/AppIcon.appiconset/icon-1024.png`, full-bleed square — iOS
+  applies its own mask; the previous file was still the retired Aug 31
+  design), `android-companion/assets/{icon,adaptive-icon,splash}.png` (the
+  app.json referenced all three and the directory did not exist), and
+  `mobile/assets/{icon,adaptive-icon}.png` with `icon` + `android.adaptiveIcon`
+  added to `mobile/app.json` (Muster+ had no icon at all). Adaptive
+  foregrounds keep the mark inside the 66% safe-zone circle (span 214–809px of
+  1024, radius ≈297px ≤ 338px) on transparent; legacy icons are full-bleed
+  #0a0a0a; center pixels are brand orange. All six PNGs verified 1024×1024
+  RGBA through a real browser decoder with pixel probes. Typecheck pass; full
+  suite **196 files / 2027 passed / 8 skipped, no flakes, 203.45s**. Not
+  claimed: no simulator/device/EAS build, no packaged-app inspection, Watch
+  and `AgentAvatar.swift` untouched, no deployment. This ledger and the CEO
+  entry are committed with the slice; use `git log -1` for its ID.
+
+Next bounded slice: **row 6 — first-task onboarding reliability** per the
+ordered build queue. Rows 1–5, the P2 overflow, and the native brand
+catalogs are verified. Do not restart completed research.
 
 All owned Loop 14–16 fixtures, data, helper scripts and tabs were cleaned up;
 viewport reset. No owned audit process remains from these loops; the earlier

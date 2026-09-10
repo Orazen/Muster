@@ -14,6 +14,12 @@
 //   electron/resources/app-icon.png          512 tile (BrowserWindow icon)
 //   public/assets/icons/icon-*.png           full-bleed PWA icons (maskable)
 //                                             incl. icon-180.png (apple-touch)
+//   ios/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+//                                            iOS App Store icon (full-bleed
+//                                            square; iOS applies its own mask)
+//   android-companion/assets/{icon,adaptive-icon,splash}.png
+//                                            fills the app.json references
+//   mobile/assets/{icon,adaptive-icon}.png   Muster+ catalog assets
 //
 //   node scripts/make-brand-icons.mjs
 //   iconutil -c icns build/icon.iconset -o build/icon.icns   (macOS)
@@ -304,6 +310,30 @@ writeFileSync(join(ROOT, "electron/resources/app-icon.png"), encodePng(render({ 
 for (const s of [72, 96, 128, 144, 152, 180, 192, 384, 512]) {
   writeFileSync(join(publicIcons, `icon-${s}.png`), encodePng(render({ size: s, fullBleed: true }), s));
 }
+
+// ── native catalogs (iOS + Android) ────────────────────────────────────
+// iOS App Store icon: full-bleed square — iOS applies its own corner mask,
+// so the tile must not be pre-rounded here.
+writeFileSync(
+  join(ROOT, "ios/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png"),
+  encodePng(render({ size: 1024, fullBleed: true }), 1024),
+);
+
+// Android adaptive-icon layers are 108dp with the outer 18dp maskable each
+// side, so the mark must fit the central 66% safe-zone circle: the body's
+// 100-unit radius × 3.2 = 320px stays inside 0.33 × 1024 ≈ 338px.
+const ADAPTIVE_SCALE = 3.2;
+const companionAssets = join(ROOT, "android-companion/assets");
+mkdirSync(companionAssets, { recursive: true });
+writeFileSync(join(companionAssets, "icon.png"), encodePng(render({ size: 1024, fullBleed: true }), 1024));
+writeFileSync(join(companionAssets, "adaptive-icon.png"), encodePng(render({ size: 1024, mascotScale: ADAPTIVE_SCALE }), 1024));
+writeFileSync(join(companionAssets, "splash.png"), encodePng(render({ size: 1024, mascotScale: ADAPTIVE_SCALE }), 1024));
+
+// Muster+ (mobile/) — same exports its app.json now points at.
+const plusAssets = join(ROOT, "mobile/assets");
+mkdirSync(plusAssets, { recursive: true });
+writeFileSync(join(plusAssets, "icon.png"), encodePng(render({ size: 1024, fullBleed: true }), 1024));
+writeFileSync(join(plusAssets, "adaptive-icon.png"), encodePng(render({ size: 1024, mascotScale: ADAPTIVE_SCALE }), 1024));
 
 try {
   execFileSync("iconutil", ["-c", "icns", join(ROOT, "build/icon.iconset"), "-o", join(ROOT, "build/icon.icns")]);

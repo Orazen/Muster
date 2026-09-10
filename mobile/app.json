@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "scheme": "muster-plus",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
     "splash": {
       "backgroundColor": "#030711"
     },
@@ -14,7 +15,11 @@
       "bundleIdentifier": "com.muster.plus"
     },
     "android": {
-      "package": "com.muster.plus"
+      "package": "com.muster.plus",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0a0a"
+      }
     },
     "plugins": [
       "expo-router",

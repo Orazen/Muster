@@ -1002,3 +1002,40 @@ data dir, cookie jar, helper scripts) was removed after verification; demo
 8845 untouched. Commercial implication: none directly — this restores
 usability of rooms on the narrowest supported phones, which mobile visitors
 were previously locked out of.
+
+## Loop 20 — 2026-09-10 — The native catalogs catch up to the mascot
+
+Loop 17 unified every web and desktop surface but left the native catalogs
+explicitly on the old design, and the gap was worse than styling: the iOS
+App Store icon was still the retired Aug 31 network-of-agents mark,
+`android-companion/app.json` referenced `assets/icon.png`,
+`assets/adaptive-icon.png` and `assets/splash.png` from a directory that did
+not exist (any Expo prebuild/EAS run would fail or silently fall back), and
+the Muster+ app (`mobile/`) declared no icon at all. The one geometry source
+now covers all of it: `make-brand-icons.mjs` additionally emits the iOS
+1024px App Store icon as a full-bleed square (iOS applies its own corner
+mask, so the desktop tile's pre-rounded corners would be double-masked), the
+three android-companion assets its config already names, and the two Muster+
+assets with the matching `icon` and `android.adaptiveIcon` keys added to
+`mobile/app.json` (brand tile background #0a0a0a). Android adaptive layers
+are 108dp with the outer 18dp maskable each side, so the foregrounds render
+the mark at scale 3.2 — span 214–809px of the 1024 canvas, radius ≈297px,
+comfortably inside the central-66% safe-zone circle of ≈338px — on
+transparent, over each app's configured background color. Splash art is the
+transparent mark, so it composites over any splash background unchanged.
+
+Verification: all six PNGs confirmed 1024×1024 RGBA by `file` and decoded
+pixel-by-pixel in a real browser canvas — adaptive corners fully transparent
+[0,0,0,0], legacy/icon corners exactly #0a0a0a opaque, mark center pixels
+brand orange #f08a24, and both adaptive copies byte-identical. The mascot
+and eyes match the canonical component because they are rasterised from its
+exported path constants, which the generator refuses to run without. The
+regenerated web/desktop outputs were byte-identical to the committed ones,
+which independently confirms the generator stayed deterministic. Frontend
+typecheck passes; full suite **196 files / 2027 passed / 8 skipped with no
+flakes in 203.45s**. Not claimed: no iOS/Android simulator or device build,
+no EAS/packaging run, Watch views and `AgentAvatar.swift` untouched (their
+in-app avatar semantics were deliberately out of scope), no deployment. Demo
+8845 untouched; rig helper scripts removed. Commercial implication: the
+first brand a new phone owner sees on the home screen now matches what the
+landing promised; install-conversion impact unmeasured.
