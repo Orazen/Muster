@@ -1,9 +1,7 @@
-// Workspace sync card — export/restore the workspace as one encrypted
-// bundle, and connect Google Drive or a Telegram bot chat so the same
-// bundle syncs between desktop and web installs. The passphrase never
-// leaves the browser except inside the encrypted payload; Drive and the
-// Telegram chat only ever hold ciphertext
-// (docs/plans/account-sync-portable-profile.md).
+// Manual backups for a local installation. The server receives the passphrase
+// and encrypts the bundle using both it and this installation's secret.
+// The current format does not include conversation history or support moving
+// a workspace to another installation. Hosted deployments reject these routes.
 import { Download, HardDriveDownload, Loader2, Send, Upload } from "lucide-react";
 import { useState } from "react";
 
@@ -71,7 +69,7 @@ export function WorkspaceSyncCard() {
         method: "POST",
         body: JSON.stringify({ passphrase }),
       });
-      return "Pushed to your Drive (app folder — only Muster can read it).";
+      return "Backup saved to Muster's application folder in your Google Drive.";
     });
 
   const googlePull = () =>
@@ -86,16 +84,6 @@ export function WorkspaceSyncCard() {
       return `Restored ${data.restored.botsRestored} bots, ${data.restored.memoryFilesRestored} memory files from your Drive.`;
     });
 
-  const connectDrive = () =>
-    run("Connecting…", async () => {
-      // SAFETY: own endpoint; reply is {url} — the Google consent URL.
-      const { url } = (await api("/api/workspace/drive/url")) as { url: string };
-      window.open(url, "_blank", "noopener");
-      // Drive connect completes out-of-band: the user approves in Google,
-      // pastes the code back on the sync page, and the next Push/Pull works.
-      return "Google opened in a new tab — approve access, copy the code, and paste it below.";
-    });
-
   const connectTelegram = () =>
     run("Connecting Telegram…", async () => {
       const token = botToken.trim();
@@ -107,7 +95,7 @@ export function WorkspaceSyncCard() {
       })) as { bot: string; chat: string };
       setBotToken("");
       setShowTelegram(false);
-      return `Connected to ${data.bot} — the bundle will sync in the ${data.chat} chat.`;
+      return `Connected to ${data.bot}. You can now save a backup to the ${data.chat} chat.`;
     });
 
   const telegramPush = () =>
@@ -117,7 +105,7 @@ export function WorkspaceSyncCard() {
         method: "POST",
         body: JSON.stringify({ passphrase }),
       });
-      return "Sent to your Telegram chat — the message holds only ciphertext.";
+      return "Encrypted backup sent to your Telegram chat.";
     });
 
   const telegramPull = () =>
@@ -139,19 +127,22 @@ export function WorkspaceSyncCard() {
 
   return (
     <div className="rounded-xl border border-hairline/40 bg-card p-3">
-      <div className="text-[13px] font-medium text-ink">Workspace sync</div>
+      <div className="text-[13px] font-medium text-ink">Workspace backup</div>
       <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-        Take your whole team — bots, memory, threads — to any install. The bundle is encrypted with
-        your passphrase; Google Drive and your Telegram chat only ever hold ciphertext. API keys
-        never sync.
+        Save teammate profiles, groups, and memory from a local desktop install. Conversation
+        history and provider connections are not included. This backup format restores to the
+        same installation only; it does not sync devices automatically.
       </div>
+      <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">
+        Workspace backups are available on local desktop installs only for now.
+      </p>
 
       <input
         type="password"
         value={passphrase}
         onChange={(e) => setPassphrase(e.target.value)}
-        placeholder="Sync passphrase (8+ characters)"
-        aria-label="Sync passphrase"
+        placeholder="Backup passphrase (8+ characters)"
+        aria-label="Backup passphrase"
         autoComplete="off"
         className={cn(input, "mt-2.5")}
       />
@@ -164,6 +155,7 @@ export function WorkspaceSyncCard() {
           <Upload size={13} /> Restore file…
           <input
             type="file"
+            disabled={busy}
             accept=".enc,text/plain"
             aria-label="Restore from file"
             className="hidden"
@@ -175,20 +167,17 @@ export function WorkspaceSyncCard() {
           />
         </label>
         <span className="mx-1 w-px self-stretch bg-hairline/40" aria-hidden="true" />
-        {/* signed in with Google? these use your login's Drive grant — no setup */}
+        {/* Requires a Google Drive grant on this installation. Desktop pairing
+            alone does not transfer the web account's Drive grant. */}
         <button type="button" disabled={busy} onClick={() => void googlePush()} className={cn(button, "text-accent font-medium")}>
-          <Upload size={13} /> Sync to Drive
+          <Upload size={13} /> Back up to Drive
         </button>
         <button type="button" disabled={busy} onClick={() => void googlePull()} className={cn(button, "text-accent font-medium")}>
           <HardDriveDownload size={13} /> Restore from Drive
         </button>
-        <button type="button" disabled={busy} onClick={() => void connectDrive()} className={button} title="Manual Drive connect (for accounts without a Google login)">
-          Connect Drive ↗
-        </button>
         <span className="mx-1 w-px self-stretch bg-hairline/40" aria-hidden="true" />
-        {/* Telegram: the bot chat as a free cloud store you already own */}
         <button type="button" disabled={busy} onClick={() => void telegramPush()} className={cn(button, "text-accent font-medium")}>
-          <Send size={13} /> Sync to Telegram
+          <Send size={13} /> Back up to Telegram
         </button>
         <button type="button" disabled={busy} onClick={() => void telegramPull()} className={cn(button, "text-accent font-medium")}>
           <HardDriveDownload size={13} /> Restore from Telegram
@@ -198,7 +187,7 @@ export function WorkspaceSyncCard() {
           disabled={busy}
           onClick={() => setShowTelegram((v) => !v)}
           className={button}
-          title="Connect a Telegram bot chat (free storage in your own account)"
+          title="Connect a Telegram bot chat for manual backups"
         >
           Connect Telegram…
         </button>
@@ -233,11 +222,13 @@ export function WorkspaceSyncCard() {
         </div>
       )}
       {step.kind === "done" && <div className="mt-2 text-[12px] text-success">{step.message}</div>}
-      {step.kind === "error" && <div className="mt-2 text-[12px] text-danger">{step.message}</div>}
+      {step.kind === "error" && <div role="alert" className="mt-2 text-[12px] text-danger">{step.message}</div>}
       {step.kind === "idle" && (
         <div className="mt-2 text-[11px] leading-snug text-ink-secondary">
-          First time? Run Export on this install, then Connect Drive or Connect Telegram → Push. On
-          the other install: connect the same account → Pull. Same passphrase on both sides.
+          Keep this installation and its settings, along with your backup file and passphrase.
+          Reinstalling without the original settings can make a backup unreadable. Drive requires
+          an existing Google Drive connection on this install. Telegram backups are sent only
+          when you choose Back up to Telegram.
         </div>
       )}
     </div>

@@ -4192,6 +4192,17 @@ let requestUserEmail = "";
       requestUserEmail = sessAcct?.user?.email ?? "";
     }
 
+    // Version-one bundles contain the whole install, not one account. Keep
+    // every workspace backup route local until export and restore both have
+    // an account-scoped format; even the primary account must not upload
+    // other users' data to its personal storage.
+    if (SELF_HOSTED && (path === "/api/workspace" || path.startsWith("/api/workspace/"))) {
+      return json(res, 403, {
+        code: "WORKSPACE_BACKUP_UNAVAILABLE",
+        error: "Workspace backups are available on local desktop installs only for now.",
+      });
+    }
+
     // ── multi-tenant guard (SELF_HOSTED only) ──────────────────────────
     // One shared store serves every signed-in account, so ownership is
     // enforced at this single choke point instead of inside each of the

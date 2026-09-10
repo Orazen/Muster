@@ -1126,3 +1126,66 @@ the unchanged GitHub billing/spending restriction, not an executed test
 failure. Public updater metadata remains 1.10.4. The existing CEO heartbeat
 is confirmed ACTIVE; the obsolete post-reset audit is removed. This
 documentation-only closeout uses the same verified code and test counts.
+
+## Loop 22 — 2026-09-10 — Contain hosted workspace backups before portable sync
+
+The board requested a Today/Warmwind-informed OS, Google sign-in across
+clients, and Drive/Telegram recovery. The first audit found that the v1
+backup routes build the entire installation even when the transport uses
+one account's Google token. Restore and Telegram configuration also bypassed
+the normal record ownership boundary. The bundle key additionally depends
+on the installation secret; conversation history is not exported. The old
+UI's cross-install, whole-history and browser-only encryption promises were
+incorrect.
+
+`server/index.ts` now rejects the complete `/api/workspace` route family on
+SELF_HOSTED deployments after authentication and before body parsing or
+provider calls. Both primary and secondary accounts receive 403 with code
+`WORKSPACE_BACKUP_UNAVAILABLE`. Operator access is not an exception: an
+operator's personal backup must not include other accounts. Local desktop
+export and same-install restore remain available. This is containment,
+not account-scoped portable backup or a completed security audit.
+
+The backup card now describes its actual contents and recovery limits,
+uses manual backup labels, exposes rejection as an accessible alert, and
+disables file selection while busy. Removed the incomplete manual Drive
+connection control: it asked for an authorization code but provided no code
+field or completion path. No provider configuration or stored data migrated.
+
+Verification: **200 files / 2121 passed / 8 skipped in 246.61s**, exit 0;
+**35 additional passing tests** over Loop 21. The new real HTTP harness is
+**35/35** (focused run 3.10s): two actual account roles, all 12 method/path
+pairs, bare/future route-family paths, anonymous rejection, malformed-body
+ordering, unchanged account rosters/configuration/memory, no outbound
+attempts, and a genuine local export followed by memory restoration.
+Frontend/server typechecks and scoped lint pass. Vite build passes in
+16.02s; its existing large-chunk advisory remains.
+
+**3 manual CUA backup checks** passed on an isolated synthetic hosted
+account: export denial, Drive denial, and optional Telegram form layout.
+Document width equals viewport at **320 and 1440 pixels**; the exact hosted
+message is exposed through one alert. Zero captured console errors. The
+browser checks did not call a live storage provider. Owned fixture/server,
+data and audit tabs were removed; viewport reset; demo 8845 untouched.
+Test logs: `/tmp/muster-loop22-vitest.log`,
+`/tmp/muster-loop22-frontend-types.log`, `/tmp/muster-loop22-ui-lint.log`,
+and `/tmp/muster-loop22-build.log`.
+
+Separately, **one real production Google web sign-in** returned to `/app`
+and `/os` using the existing account and previously granted scopes. No
+password was handled and no new scope, task or backup was submitted.
+Today login and Warmwind homepage/login were inspected publicly; zero
+competitor accounts or authenticated workflows were exercised. Native
+Google login, mobile/Watch execution, VM execution and Mimosa remain
+unverified. OS research and the ranked implementation plan follow in the
+next slice. Priority defects now include a portable validated account
+schema, Drive grant/recovery behavior, Android initial/reconnect hydration,
+and Loop 21's durable first-task receipt and explicit send/skip semantics.
+
+Commercial implication: prevent another account's workspace from reaching
+personal backup storage and stop promising recovery the current format
+cannot provide. Activation, retention and revenue effects are unmeasured.
+The verified source is ready for deployment. This push also updates the
+existing `.deploy-trigger` watched by Dokploy, because the hosted Actions
+runner remains blocked. Verify production with GET; no new release or
+deployment success is claimed before observing the result.

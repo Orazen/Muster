@@ -379,3 +379,47 @@ after its push; this final documentation-only closeout changes no tested
 code. Full-suite evidence remains **199 / 2086 passed / 8 skipped**. Preserve
 the earlier release stash. Next work is row 6b; external deployment/release
 and native/VM/Mimosa evidence gaps remain open, not silently completed.
+
+## Loop 22 — hosted backup containment and expanded OS mandate
+
+The board explicitly requested Today/Warmwind research, an improved OS,
+cross-platform Google entry and portable Drive/Telegram recovery. An active
+goal tracks this work. Astra remains owner; the September 16 transfer is
+obsolete. The existing hourly heartbeat remains ACTIVE.
+
+Hosted v1 workspace backups were not account-scoped: exports included the
+installation-wide roster/memory even through an account-specific Google
+grant, and restore/Telegram configuration bypassed record ownership.
+All SELF_HOSTED `/api/workspace` routes are now unavailable (403,
+`WORKSPACE_BACKUP_UNAVAILABLE`) for primary and secondary accounts before
+parsing bodies or accessing storage. Local same-install export/restore is
+preserved. UI copy now states exact limits; the incomplete manual Drive
+authorization link is removed. Do not reopen hosted routes until explicit
+account selection, schema validation, owner/ID remapping, contained paths,
+and fresh-install recovery are independently verified.
+
+**Full suite: 200 files / 2121 passed / 8 skipped, 246.61s, exit 0.**
+New HTTP harness: **35/35**, focused 3.10s. Frontend/server typechecks,
+scoped lint and Vite build pass. **3 CUA backup checks**, widths 320/1440,
+zero captured console errors, synthetic account only; no live provider
+backup calls. Owned fixtures/tabs/data removed and viewport reset.
+
+**One actual Google production web sign-in passed**, returning to `/app`
+and `/os` using an existing account and existing grant. This supersedes
+Loop 21's zero-real-OAuth limit for web only. Native, provider task, VM and
+Mimosa verification remain open. Public Today and Warmwind login/landing
+pages were reviewed without competitor registration or authenticated use.
+
+Next: persist the sourced OS/recovery research and implement a bounded OS
+home slice with real decision/work/review state and truthful mascot states.
+Then account-scoped portable backup, durable onboarding first-task receipt,
+explicit send/skip semantics, Android fleet hydration/reconnect, and native
+release gates. Current backup format excludes conversation history and
+derives its key from the installation secret; same-passphrase fresh-device
+restore is not implemented. Desktop pairing transfers identity, not Drive
+tokens. Telegram requires bounded payloads and exact bot/chat binding.
+
+The verified source push includes the existing `.deploy-trigger` mechanism
+to request Dokploy deployment independently of the blocked Actions runner.
+Confirm with GET after push. Desktop updater version remains 1.10.4 until
+a verified installer is actually published; no new version is claimed here.
