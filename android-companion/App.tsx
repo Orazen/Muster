@@ -37,6 +37,7 @@ export default function App() {
       <ChatViewScreen
         state={companion.state}
         target={target}
+        connection={companion.client}
         bot={bot}
         room={room}
         onSend={(text) => companion.send(target, text)}

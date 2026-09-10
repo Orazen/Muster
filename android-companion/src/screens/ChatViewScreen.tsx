@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -13,14 +13,16 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { Bot, isCardPending, Message, Room } from "../core/types";
 import { CompanionState, StreamBuffers, visibleTranscript } from "../core/store";
-import { ChatTarget } from "../hooks/useCompanion";
+import type { ChatTarget, CompanionClient } from "../hooks/companion-session";
+import { ComposerDraft, composerContextKey } from "./composer-draft";
 
 interface ChatViewScreenProps {
   state: CompanionState;
   target: ChatTarget;
+  connection: CompanionClient;
   bot?: Bot;
   room?: Room;
-  onSend: (text: string) => void;
+  onSend: (text: string) => Promise<boolean>;
   onRespond: (threadId: string, requestId: string, behavior: string, message?: string) => void;
   onAlwaysAllow: (botId: string, allowKey: string) => void;
   onBack: () => void;
@@ -110,9 +112,49 @@ function Bubble({
   );
 }
 
+interface ChatComposerProps {
+  title: string;
+  onSend: (text: string) => Promise<boolean>;
+}
+function ChatComposer({ title, onSend }: ChatComposerProps) {
+  const sendRef = useRef(onSend);
+  useLayoutEffect(() => { sendRef.current = onSend; }, [onSend]);
+  const [composer] = useState(() => new ComposerDraft((text) => sendRef.current(text)));
+  const { draft, pending, error } = useSyncExternalStore(composer.subscribe, composer.getSnapshot, composer.getSnapshot);
+  useLayoutEffect(composer.attach, [composer]);
+  const disabled = pending || !draft.trim();
+  return (
+    <View style={styles.composerSection}>
+      {error ? <Text style={styles.sendError} accessibilityRole="alert" accessibilityLiveRegion="polite">{error}</Text> : null}
+      <View style={styles.composer}>
+        <TextInput
+          style={styles.input}
+          accessibilityLabel="Message draft"
+          placeholder={`Message ${title}…`}
+          placeholderTextColor="#666"
+          value={draft}
+          onChangeText={composer.edit}
+          multiline
+        />
+        <TouchableOpacity
+          style={[styles.send, disabled && styles.sendDisabled]}
+          onPress={() => { void composer.submit(); }}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Send message"
+          accessibilityState={{ disabled, busy: pending }}
+        >
+          {pending ? <ActivityIndicator color="#fff" /> : <Text style={styles.sendText}>↑</Text>}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 export function ChatViewScreen({
   state,
   target,
+  connection,
   bot,
   room,
   onSend,
@@ -122,7 +164,6 @@ export function ChatViewScreen({
   onLoadOlder,
   viewThread,
 }: ChatViewScreenProps) {
-  const [draft, setDraft] = useState("");
   const listRef = useRef<FlatList<Message | null>>(null);
   const threadId = target.threadId;
 
@@ -142,13 +183,6 @@ export function ChatViewScreen({
     if (streams?.text) out.push(null); // streaming placeholder
     return out;
   }, [transcript, streams]);
-
-  const send = () => {
-    const text = draft.trim();
-    if (!text) return;
-    setDraft("");
-    onSend(text);
-  };
 
   return (
     <KeyboardAvoidingView
@@ -222,19 +256,11 @@ export function ChatViewScreen({
         style={styles.list}
       />
 
-      <View style={styles.composer}>
-        <TextInput
-          style={styles.input}
-          placeholder={`Message ${title}…`}
-          placeholderTextColor="#666"
-          value={draft}
-          onChangeText={setDraft}
-          multiline
-        />
-        <TouchableOpacity style={[styles.send, !draft.trim() && styles.sendDisabled]} onPress={send}>
-          <Text style={styles.sendText}>↑</Text>
-        </TouchableOpacity>
-      </View>
+      <ChatComposer
+        key={composerContextKey(connection, target)}
+        title={title}
+        onSend={onSend}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -314,13 +340,13 @@ const styles = StyleSheet.create({
   cardDeny: { backgroundColor: "transparent", borderWidth: 1, borderColor: "#3a3a3e" },
   cardDenyText: { color: "#9a9a9e", fontWeight: "600", fontSize: 13 },
   cardAnswered: { color: "#8a8a8e", fontSize: 12, marginTop: 8 },
+  composerSection: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#222" },
+  sendError: { color: "#ff8a80", paddingHorizontal: 16, paddingTop: 10, fontSize: 13, lineHeight: 18 },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
     padding: 12,
     paddingBottom: 24,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "#222",
   },
   input: {
     flex: 1,

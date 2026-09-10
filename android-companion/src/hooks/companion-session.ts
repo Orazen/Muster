@@ -320,10 +320,13 @@ export class CompanionSession {
       || Object.values(this.snapshot.state.rooms).some((room) => room.threadId === threadId);
   }
 
-  async send(client: CompanionClient | null, target: ChatTarget, text: string): Promise<void> {
-    if (!this.owns(client) || !currentChatTarget({ client, target }, client, this.snapshot.state)) return;
+  async send(client: CompanionClient | null, target: ChatTarget, text: string): Promise<boolean> {
+    if (!this.owns(client) || !currentChatTarget({ client, target }, client, this.snapshot.state)) return false;
+    const generation = this.generation;
     if (target.kind === "bot") await client.sendToBot(target.id, text);
     else await client.sendToGroup(target.id, text);
+    return this.current(generation) && this.owns(client)
+      && currentChatTarget({ client, target }, client, this.snapshot.state) !== null;
   }
 
   async respond(client: CompanionClient | null, threadId: string, requestId: string, behavior: string, message?: string): Promise<void> {

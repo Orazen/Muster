@@ -39,6 +39,7 @@ class FixtureClient implements CompanionClient {
   fleetCalls = 0;
   fleetResponses: Array<Promise<Fleet>> = [];
   pageResponses: Array<Promise<ThreadPage>> = [];
+  sendResponses: Array<Promise<void>> = [];
   streams: Stream[] = [];
   actions: string[] = [];
   pages: Array<{ threadId: string; before?: string }> = [];
@@ -60,8 +61,8 @@ class FixtureClient implements CompanionClient {
     this.onOpen?.(stream);
     return { stop: () => { stream.stopped = true; } };
   }
-  async sendToBot(id: string, text: string): Promise<void> { this.actions.push(`bot:${id}:${text}`); }
-  async sendToGroup(id: string, text: string): Promise<void> { this.actions.push(`group:${id}:${text}`); }
+  async sendToBot(id: string, text: string): Promise<void> { this.actions.push(`bot:${id}:${text}`); await this.sendResponses.shift(); }
+  async sendToGroup(id: string, text: string): Promise<void> { this.actions.push(`group:${id}:${text}`); await this.sendResponses.shift(); }
   async respond(thread: string, request: string, behavior: string): Promise<void> { this.actions.push(`respond:${thread}:${request}:${behavior}`); }
   async alwaysAllow(bot: string, key: string): Promise<void> { this.actions.push(`always:${bot}:${key}`); }
   async markRead(thread: string): Promise<void> { this.actions.push(`read:${thread}`); }
@@ -492,12 +493,12 @@ describe("companion session lifecycle", () => {
       ...fleet("a").bots[0], threadId: "new-thread",
     } }, null);
     expect(currentChatTarget({ client: f.a, target }, f.a, f.session.getSnapshot().state)).toBeNull();
-    await f.session.send(f.a, target, "stale draft");
+    await expect(f.session.send(f.a, target, "stale draft")).resolves.toBe(false);
     await f.session.respond(f.a, "thread", "request", "allow");
     expect(f.a.actions).toEqual([]);
     page.resolve({ messages: [older], hasMore: false }); await paging;
     expect(f.session.getSnapshot().state.messages.thread).toEqual([newest]);
-    await f.session.send(f.a, { ...target, threadId: "new-thread" }, "current draft");
+    await expect(f.session.send(f.a, { ...target, threadId: "new-thread" }, "current draft")).resolves.toBe(true);
     expect(f.a.actions).toEqual(["bot:a:current draft"]);
   });
 
@@ -510,7 +511,7 @@ describe("companion session lifecycle", () => {
     expect(currentChatTarget(selection, f.a, f.session.getSnapshot().state)).toEqual(target);
     f.a.streams[0].frame({ kind: "group", group: { ...room, threadId: "new-room-thread" } }, null);
     expect(currentChatTarget(selection, f.a, f.session.getSnapshot().state)).toBeNull();
-    await f.session.send(f.a, target, "stale room draft");
+    await expect(f.session.send(f.a, target, "stale room draft")).resolves.toBe(false);
     expect(f.a.actions).toEqual([]);
   });
 
@@ -532,11 +533,51 @@ describe("companion session lifecycle", () => {
     expect(f.session.getSnapshot().state.bots.a.threadId).toBe(target.threadId);
     expect(currentChatTarget(selection, f.b, f.session.getSnapshot().state)).toBeNull();
     expect(currentChatTarget(selection, null, f.session.getSnapshot().state)).toBeNull();
-    await f.session.send(f.a, target, "old screen");
+    await expect(f.session.send(f.a, target, "old screen")).resolves.toBe(false);
     await f.session.respond(f.a, "thread", "request", "allow");
     await f.session.alwaysAllow(f.a, "a", "tool");
     await f.session.viewThread(f.a, "thread");
     expect(f.a.actions).toEqual([]); expect(f.b.actions).toEqual([]);
     expect(f.session.getSnapshot().state.viewedThread).toBeNull();
+  });
+
+  it("reports acceptance for a current room send only after transport completion", async () => {
+    const f = fixture(); await boot(f);
+    const room = { id: "room", threadId: "room-thread", memberIds: ["a"], defaultResponder: { kind: "any" } };
+    f.a.streams[0].frame({ kind: "group", group: room }, null);
+    const request = deferred<void>(); f.a.sendResponses.push(request.promise);
+    let settled = false;
+    const sending = f.session.send(f.a, { kind: "room", id: room.id, threadId: room.threadId }, "room task");
+    void sending.then(() => { settled = true; });
+    await settleMicrotasks();
+    expect(f.a.actions).toEqual(["group:room:room task"]);
+    expect(settled).toBe(false);
+    request.resolve();
+    await expect(sending).resolves.toBe(true);
+  });
+
+  it.each(["account", "thread"])("does not report a late send acknowledgement as current after a %s switch", async (context) => {
+    const f = fixture(); await boot(f);
+    const request = deferred<void>(); f.a.sendResponses.push(request.promise);
+    const sending = f.session.send(f.a, { kind: "bot", id: "a", threadId: "thread" }, "old task");
+    if (context === "account") {
+      f.b.fleetResponses.push(Promise.resolve(fleet("a")));
+      await pairWith(f);
+    } else {
+      f.a.streams[0].frame({ kind: "bot", bot: { ...fleet("a").bots[0], threadId: "new-thread" } }, null);
+    }
+    request.resolve();
+    await expect(sending).resolves.toBe(false);
+    expect(f.a.actions).toEqual(["bot:a:old task"]);
+    expect(f.b.actions).toEqual([]);
+  });
+
+  it("propagates the actual send error so the composer can retain the draft and explain recovery", async () => {
+    const f = fixture(); await boot(f);
+    const request = deferred<void>(); f.a.sendResponses.push(request.promise);
+    const sending = f.session.send(f.a, { kind: "bot", id: "a", threadId: "thread" }, "unsent task");
+    const error = new APIError(503, "Your computer is temporarily unavailable");
+    request.reject(error);
+    await expect(sending).rejects.toBe(error);
   });
 });

@@ -908,3 +908,43 @@ Next candidate/native verification and companion failed-send draft recovery
 remain. Native Google login, actual desktop/mobile/Watch/device/VM E2E,
 portable backup/restore/sync and Mimosa are still open. Allowance **26% used /
 74% remaining**; no reset. Keep the full goal and existing heartbeat active.
+
+
+### Loop 32 — Companion composer recovery, browser and desktop shell evidence
+
+Base `9fb3abb`; prior mirror source is pushed, but four post-push public GETs
+still serve **200 / 1.10.4**. No version/tag, native release, VPS migration or
+payment action occurred.
+
+Changed scope: Android ChatViewScreen, its pure composer controller, the narrow
+session send result, App connection identity, screen/session regressions and
+standalone Jest setup/lock. Send now reports explicit accepted/current status;
+errors or ignored stale sends keep the draft. Pending taps are locked, newer
+edits survive old success, and keyed connection/target/thread plus detach epochs
+fence old acknowledgments. Drafts exist only while the chat is mounted. This is
+not persistent draft recovery or ambiguous-delivery idempotency.
+
+After **npm ci --ignore-scripts --no-audit --no-fund** installed **1,004 packages
+in 9.02s**, standalone Android: **4 suites / 132 passed / 0 skipped in 1.577s**
+(3.80s command), **+15 passes**. Android types/local/root custom lint pass.
+Root: **219 files / 2,836 passed / 8 skipped in 238.90s**, exit 0 (unchanged root count; Android runs separately). Root build includes both typechecks and passes
+(Vite 4.99s, existing chunk warning); global lint has no diagnostics. Nine
+source hashes stayed fixed. Final read-only review found no material blocker.
+
+Browser E2E: initial **7 missing-browser failures / 1 redirect pass**; matching
+Chromium installed, then **8/8 in 34.4s**. Real current-source Electron shell:
+**8/8 in 5.454s**, exercising pairing, actual preload IPC, quick start, task/reply
+and reload in owned paths/accounts/servers, with fake ACP. Fixture selector
+ambiguity was corrected to the transcript before final success. All owned
+processes closed; demo8845 untouched. Evidence `.omb-scratch/verification/loop32-*`,
+`loop32android/`, and screenshots/result in `loop32-gui-0iQFm0/`.
+
+Native keyboard/device behavior is outside React Native host-stub tests; Google
+redirect construction is not completed OAuth. Electron development-shell
+success is not packaged install/update acceptance. The old local native artifact
+is still ad-hoc1.10.4. Next versioned candidate must explicitly package, verify
+and publish the current CLI (release workflow currently omits it), and complete
+isolated packaged/signing/native acceptance. Recorded runner billing and VPS
+host-trust/routing prerequisites remain. Keep broader OS/device/Watch/VM,
+portable account recovery/sync and Mimosa work open. Allowance **27% used /
+73% remaining**; no reset. Full goal and existing heartbeat remain active.

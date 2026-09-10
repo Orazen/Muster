@@ -1854,3 +1854,77 @@ also preserve companion composer text on failed async sends in its own UI slice.
 Native Google login, mobile/Watch/device E2E, VM, portable account recovery/sync
 and Mimosa remain open. No demo session was touched. Allowance **26% used /
 74% remaining**; no reset consumed. Broad goal and existing heartbeat stay active.
+
+
+## Loop 32 — Companion message recovery and isolated desktop UI evidence (2026-09-11)
+
+Starting source: `9fb3abb` (Loop 31 pushed and clean; pull was up to date).
+The preceding mirror slice was confirmed with four public GETs after push:
+latest metadata and all updater feeds remain **200 / 1.10.4**. Its atomic
+promotion is committed source, not a production migration or new release.
+
+Audit found that the Android companion cleared its composer before its async
+send completed. A failed request lost the user's task, while the session's
+previous void result also made an ignored stale request look like success.
+The composer now waits for explicit acceptance, preserves the exact draft on
+failure, shows the real error, and synchronously blocks repeated taps while
+pending. Input remains editable; a successful earlier request cannot clear
+newer edits, even if the user edits away and then back to the same text.
+
+The session returns false for a stale connection/target and rechecks the current
+session and thread after an acknowledgment. Composer identity includes the
+actual connection object, bot/room kind, target and thread; disposal epochs
+ignore late results from a previous screen. This is client-observed context
+checking, not a server-side atomic thread precondition. Drafts remain in memory
+only for the mounted chat and are discarded on navigation. No persistent draft
+store, automatic resend, or delivery idempotency was introduced.
+
+React Native tests now render the real screen using the installed official
+native host stubs and React 18.3.1's matching test renderer. They exercise
+failure/retry, acceptance, edits during send, repeated taps and bot/account/
+thread/unmount isolation. The existing core tests remain in a separate Jest
+project. This follows the boundary described in the [React Native testing
+overview](https://reactnative.dev/docs/testing-overview): JS component tests
+cannot establish native keyboard, device layout or platform-code behavior.
+
+Final standalone verification from a real clean install: **1,004 packages in
+9.02s**, then **4 suites / 132 passed / 0 skipped**, Jest **1.577s** (3.80s
+command). This is **15 additional passes** over Loop 30's companion baseline.
+Android types, local lint and root custom scoped lint pass. Root final suite:
+**219 files / 2,836 passed / 8 skipped in 238.90s**, exit 0 (unchanged root count; Android runs separately). Root build and both typechecks pass (Vite 4.99s;
+existing large-chunk warning), and global lint passes with no diagnostics.
+Nine reviewed source files stayed fixed during verification. Evidence is
+`.omb-scratch/verification/loop32-*` and `loop32android/`.
+
+The actual browser suite initially had **7 startup failures / 1 pass** because
+Playwright's matching Chromium was missing. After installing Chromium 151 /
+build 1234, the same suite passed **8/8 in 34.4s**: desktop/cloud pairing,
+consumed-code rejection, messages/reload, exact allow/deny decisions and
+rehearsal evidence. The OAuth case verifies construction of the Google
+redirect without following it; no real Google login is claimed by that test.
+
+Current-source Electron 43.4.0 also ran through the real window/preload with
+seven profile paths confined to a fresh owned directory, allowlisted child
+environment and HTTP origins, isolated test accounts/servers and fake ACP.
+It passed **8/8 checks in 5.454s**: path confinement, pairing UI, capability IPC,
+exact-account pairing from the browser-displayed code, quick start, one task
+and reply, transcript reload, and no observed page errors/external requests.
+An initial fixture-only selector was ambiguous because the same reply also
+appears in the sidebar and activity panel; scoping it to the transcript fixed
+the check. Screenshots and result are in
+`.omb-scratch/verification/loop32-gui-0iQFm0/`. All owned app/browser/server
+processes closed. The demo at 127.0.0.1:8845 was never used or changed.
+
+This is development-shell evidence, **not** packaged installation/update or
+native Google acceptance. Direct packaged startup still performs connected-app
+registration and computer-access setup before its smoke hook; do not mistake
+an unisolated packaged launch for a harmless fixture. Existing local Loop 25
+app remains ad-hoc 1.10.4 with 9/9 native runtime checks. Next prepare a versioned
+candidate including an explicitly built, verified and published CLI artifact;
+current release workflow does not yet produce that CLI. Keep exact-SHA and
+atomic-mirror gates. Recorded GitHub runner billing, trusted VPS access/routing,
+and signing prerequisites remain unresolved; do not retry unchanged external
+failures or spend to bypass them. Device/Watch UI, VM, portable recovery/sync and
+Mimosa remain open. Commercial intent is fewer lost first tasks; no measured
+retention or revenue uplift is claimed. Allowance **27% used / 73% remaining**;
+no reset consumed. The broad goal and existing heartbeat stay active.
