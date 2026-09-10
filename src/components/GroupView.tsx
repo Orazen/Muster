@@ -475,18 +475,20 @@ export function GroupView({ group }: { group: Group }) {
   return (
     <main className="glass-shell-main relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <GroupCallOverlay group={group} members={members} />
-      {/* Header: static member agents; a ring + dot marks the working bot. */}
+      {/* Header: static member agents; a ring + dot marks the working bot.
+          Wraps at narrow widths — the name truncates and the controls flow
+          onto their own lines instead of forcing the document wide. */}
       <div
         className={cn(
-          "flex items-center justify-between px-5 py-3",
+          "flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-5 py-3",
           // Room for the drawer button, which overlays this corner below md.
           "pl-11 md:pl-5",
           isWin && "pr-[148px]",
         )}
         style={drag}
       >
-        <span className="text-[15px] font-semibold text-ink">{group.name}</span>
-        <div className="flex items-center gap-1.5" style={noDrag}>
+        <span className="min-w-0 truncate text-[15px] font-semibold text-ink">{group.name}</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5" style={noDrag}>
           <button
             onClick={() => setFindOpen((open) => !open)}
             aria-label="Find in conversation"
