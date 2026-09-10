@@ -361,3 +361,21 @@ draft-key and completion-recovery markers; push alone is not deployment.
 The existing CEO heartbeat resumes under Astra after push; the obsolete
 post-reset handover audit has been deleted. Keep this ledger current before
 the next low-allowance handoff; do not launch GLM or buy/reset credits.
+
+### Post-push closeout — 19:09:51 UTC
+
+Source commit **c6eb22e2039a4ccdbe3ce45abbba5b567b3a68df** is pushed.
+Five GETs (`/`, `/app`, `/api/health`, updater metadata and the app bundle)
+returned 200. Production still uses `index-_h_ora_i.js`, with neither
+`muster:onboarding-draft:v1:` nor the new completion-recovery text; it differs
+from local `index-C6wV6z6U.js`. **The new onboarding code is not deployed.**
+Exact-SHA CI 34518411854 and autodeploy 34518411951 failed before jobs ran
+because of the existing GitHub billing/spending restriction. No retry or
+deployment mutation was attempted. Desktop remains 1.10.4.
+
+The existing hourly CEO heartbeat is confirmed **ACTIVE** under Astra;
+`muster-post-reset-handover-audit` is deleted. The source tree was clean
+after its push; this final documentation-only closeout changes no tested
+code. Full-suite evidence remains **199 / 2086 passed / 8 skipped**. Preserve
+the earlier release stash. Next work is row 6b; external deployment/release
+and native/VM/Mimosa evidence gaps remain open, not silently completed.

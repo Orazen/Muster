@@ -1117,5 +1117,12 @@ preexisting docs-only release stash was identified and preserved, not
 blindly applied over GLM's newer log. Production GET at 18:30–18:32 UTC
 served `/assets/index-_h_ora_i.js` with prior mascot/preview markers, replacing
 the older absent-marker evidence; this does not identify the exact commit.
-Exact `8729aa6` GitHub CI/autodeploy jobs still failed before starting for
-billing/spending limits. Post-push verification is recorded in the handoff.
+Source was committed and pushed as **c6eb22e** after a clean rebase. At
+19:09:51 UTC, five production GETs returned 200, but `/app` still referenced
+`index-_h_ora_i.js`; both new onboarding markers were absent and it did not
+match local `index-C6wV6z6U.js`. **Loop 21 is not deployed.** Exact-SHA CI
+34518411854 and autodeploy 34518411951 failed before their jobs started for
+the unchanged GitHub billing/spending restriction, not an executed test
+failure. Public updater metadata remains 1.10.4. The existing CEO heartbeat
+is confirmed ACTIVE; the obsolete post-reset audit is removed. This
+documentation-only closeout uses the same verified code and test counts.
