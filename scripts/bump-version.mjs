@@ -2,7 +2,8 @@
 
 /**
  * Bump Muster's version. package.json is the ONLY version source —
- * electron-builder.yml has no version key, so there is nothing else to edit.
+ * electron-builder.yml has no version key. The download-page badge is
+ * updated to match the candidate version when its current badge is found.
  *
  * Usage:
  *   node scripts/bump-version.mjs patch     → 1.10.3 → 1.10.4
@@ -10,9 +11,9 @@
  *   node scripts/bump-version.mjs major     → 1.10.3 → 2.0.0
  *   node scripts/bump-version.mjs 1.11.0    → explicit version
  *
- * Deliberately does NOT run git: staging/committing stays with you
- * (pathless `git add -A`), and releases are cut manually — there is no
- * tag-triggered workflow to fire. Next steps are printed when it finishes.
+ * Does not run git or start a release. The Release workflow can validate
+ * a candidate SHA with dry_run enabled; pushing its exact v* tag starts
+ * the publishing pipeline. Next steps are printed when this finishes.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -49,8 +50,8 @@ console.log(`Bumping ${current} → ${next}`);
 pkg.version = next;
 writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
 
-// Update the visible version on the download page so the site always
-// names the build it actually serves. The badge's shape is part of the
+// Prepare the download-page badge for this candidate. Changing the badge
+// does not prove that installers have been published. Its shape is part of the
 // hand-edited page — if the regex misses, say so instead of silently
 // writing the file back unchanged. package.json is already bumped by
 // this point, so a missing page must warn, not crash.
@@ -76,10 +77,23 @@ if (dl !== null) {
 }
 
 console.log(`
-Next steps (no automation fires — releases are cut manually):
+Release candidate v${next} prepared. No Git commands or release actions were run.
+
+Review the candidate diff and run the required checks, then commit it on main:
+  git diff
   git add -A
   git commit -m "release: v${next}"
-  git tag v${next}
-  git push && git push --tags
-Then build/installers and publish the GitHub release by hand.
+  CANDIDATE_SHA="$(git rev-parse HEAD)"
+  git push origin main
+
+In Actions → Release → Run workflow, set ref to that full CANDIDATE_SHA.
+Keep dry_run checked (the default). It builds and validates without release
+uploads, public mirror writes, or notarization submissions.
+
+After the dry run passes and the release is authorized, tag that exact tested SHA:
+  git tag v${next} "$CANDIDATE_SHA"
+  git push origin refs/tags/v${next}
+
+That tag push starts the publishing pipeline. Release gates determine whether
+the artifacts can be published; a partial platform set remains a draft.
 `);

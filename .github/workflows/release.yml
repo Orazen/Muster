@@ -667,14 +667,21 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Download published release assets
+        id: download
         run: |
           set -euo pipefail
           node scripts/release-state.mjs assert-published
           mkdir -p artifacts
           gh release download "v$RELEASE_VERSION" --dir artifacts --clobber --repo "$GITHUB_REPOSITORY"
+          PUBLISHED_AT="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$RELEASE_VERSION" --jq .published_at)"
+          [[ "$PUBLISHED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]] || {
+            echo "::error::published release timestamp is missing or invalid"; exit 1; }
+          printf 'published_at=%s\n' "$PUBLISHED_AT" >> "$GITHUB_OUTPUT"
 
       - name: Validate complete mirror payload and write manifests
         id: payload
+        env:
+          RELEASE_PUBLISHED_AT: ${{ steps.download.outputs.published_at }}
         run: node scripts/release-payload.mjs mirror
 
       - name: Deploy to VPS
@@ -692,15 +699,35 @@ jobs:
           trap 'rm -f ~/.ssh/deploy_key' EXIT
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-          DEST="tarun@$VPS_HOST:/opt/muster-downloads/"
+          # The public root may be bind-mounted. Never replace that directory
+          # or copy a candidate directly over its live aliases.
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || exit 1
+          REMOTE_ROOT=/opt/muster-downloads
+          STAGE_NAME="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          STAGE="$REMOTE_ROOT/.incoming/$STAGE_NAME"
+          MANIFEST_SHA256="$(sha256sum artifacts/mirror-manifest.json | cut -d ' ' -f1)"
           SSH_OPTS="ssh -i $HOME/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes"
           ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes -o BatchMode=yes "tarun@$VPS_HOST" \
-            "sudo mkdir -p /opt/muster-downloads && sudo chown tarun:tarun /opt/muster-downloads"
+            "python3 - '$REMOTE_ROOT' '$STAGE_NAME'" <<'PY'
+          import pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          if not root.is_absolute() or root.resolve() != root or not root.is_dir():
+              raise SystemExit('The existing public mirror must be a real writable directory')
+          incoming = root / '.incoming'
+          if incoming.resolve() != incoming:
+              raise SystemExit('The incoming mirror directory must not contain links')
+          incoming.mkdir(mode=0o755, exist_ok=True)
+          if incoming.is_symlink() or not incoming.is_dir():
+              raise SystemExit('The incoming mirror directory must not be a link')
+          (incoming / sys.argv[2]).mkdir(mode=0o755)
+          PY
 
-          # Include every verified feed target; Intel is included only when
-          # its complete optional payload is present. No unchecked glob list.
+          # Transfer only the validated inventory to an unused staging path.
+          # The remote helper re-hashes all bytes, locks, checks monotonic
+          # release identity and atomically switches the current generation.
           rsync -avz --checksum --files-from=artifacts/mirror-files.txt \
-            -e "$SSH_OPTS" artifacts/ "$DEST"
+            -e "$SSH_OPTS" artifacts/ "tarun@$VPS_HOST:$STAGE/"
 
           ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes -o BatchMode=yes "tarun@$VPS_HOST" \
-            "ls -lh /opt/muster-downloads/ && python3 -m json.tool /opt/muster-downloads/latest.json"
+            "python3 - --root '$REMOTE_ROOT' --candidate '$STAGE' --version '$RELEASE_VERSION' --sha '$RELEASE_SHA' --manifest-sha256 '$MANIFEST_SHA256'" \
+            < scripts/promote-release-mirror.py

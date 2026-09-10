@@ -10,6 +10,7 @@ import { z } from "zod";
 
 const FlatName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/);
 const Version = z.string().regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/);
+const PublishedAt = z.string().datetime();
 const Options = z.object({
   assetsDir: z.string().min(1), version: Version,
   sha: z.string().regex(/^[a-f0-9]{40}$/i), requireComplete: z.boolean(),
@@ -24,7 +25,7 @@ const Feed = z.object({
 const FEEDS = ["latest-mac.yml", "latest.yml", "latest-linux.yml"];
 const CHECKSUMS = ["SHA256SUMS-macos-arm64.txt", "SHA256SUMS-macos-x64.txt", "SHA256SUMS-windows-x64.txt", "SHA256SUMS-linux-x64.txt"];
 const STABLE = ["Muster.dmg", "Muster-setup.exe", "Muster.deb", "Muster.AppImage", "Muster-intel.dmg"];
-const GENERATED = ["latest.json", "mirror-files.txt"];
+const GENERATED = ["latest.json", "mirror-files.txt", "mirror-manifest.json"];
 
 function fail(message) { throw new Error(message); }
 
@@ -166,30 +167,47 @@ export async function validateReleasePayload(options) {
       if (!feeds.get(name).files.some((entry) => targets.includes(entry.url))) fail(`Missing platform update target in ${name}`);
     }
   }
-  return { assetsDir, version, sha, requireComplete, feeds: [...feeds.keys()], stableFiles, files: [...selected].sort(), hashes: Object.fromEntries(hashes) };
+  // Feeds themselves are transferred too. Bind their bytes, not only the
+  // installer hashes they contain, to the later remote promotion gate.
+  for (const name of selected) await digest(name);
+  return { assetsDir, version, sha, requireComplete, feeds: [...feeds.keys()], feedTargets: [...referenced].sort(), stableFiles, files: [...selected].sort(), hashes: Object.fromEntries(hashes) };
 }
 
 export async function prepareMirrorPayload(options) {
   if (options.requireComplete !== true) fail("Mirror requires REQUIRE_COMPLETE=true");
-  if (!Version.safeParse(options.version).success || options.version.includes("-")) fail("Stable mirror refuses prerelease versions");
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(options.version ?? "")) fail("Stable mirror refuses prerelease or noncanonical versions");
+  if (!/^[a-f0-9]{40}$/.test(options.sha ?? "")) fail("Mirror requires a canonical lowercase source SHA");
+  const publishedAt = PublishedAt.safeParse(options.publishedAt);
+  if (!publishedAt.success) fail("Mirror requires the release's authoritative publishedAt UTC timestamp");
   const validated = await validateReleasePayload(options);
-  const latest = { version: validated.version, sha: validated.sha, published: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), files: {}, checksums: {} };
+  const immutable = (name) => (name === `Muster-${validated.version}.dmg` || name.startsWith(`Muster-${validated.version}-`)) &&
+    [".zip", ".dmg", ".exe", ".deb", ".AppImage", ".blockmap"].some((extension) => name.endsWith(extension));
+  if (!validated.feedTargets.every(immutable)) fail("Every mirrored updater feed target must have an immutable versioned filename");
+  const latest = { version: validated.version, sha: validated.sha, published: new Date(publishedAt.data).toISOString().replace(/\.000Z$/, "Z"), files: {}, checksums: {} };
   for (const name of validated.stableFiles) {
     const { size, sha256 } = validated.hashes[name];
     latest.files[name] = { size, sha256 }; latest.checksums[name] = sha256;
   }
-  const mirrorFiles = [...validated.files, "latest.json"].sort();
+  const latestText = JSON.stringify(latest, null, 2) + "\n";
+  const manifestFiles = validated.files.map((name) => ({ name, size: validated.hashes[name].size, sha256: validated.hashes[name].sha256 }));
+  manifestFiles.push({ name: "latest.json", size: Buffer.byteLength(latestText), sha256: createHash("sha256").update(latestText).digest("hex") });
+  manifestFiles.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const manifest = { schemaVersion: 1, version: validated.version, sha: validated.sha, files: manifestFiles };
+  const manifestText = JSON.stringify(manifest, null, 2) + "\n";
+  const manifestSha256 = createHash("sha256").update(manifestText).digest("hex");
+  const mirrorFiles = [...validated.files, "latest.json", "mirror-manifest.json"].sort();
   // Inventory has rejected pre-existing symlink/hardlink outputs. O_NOFOLLOW
   // also prevents a replacement symlink from redirecting these local writes.
   const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW;
-  await writeFile(join(validated.assetsDir, "latest.json"), JSON.stringify(latest, null, 2) + "\n", { flag: flags });
+  await writeFile(join(validated.assetsDir, "latest.json"), latestText, { flag: flags });
+  await writeFile(join(validated.assetsDir, "mirror-manifest.json"), manifestText, { flag: flags });
   await writeFile(join(validated.assetsDir, "mirror-files.txt"), mirrorFiles.join("\n") + "\n", { flag: flags });
-  return { ...validated, mirrorFiles, latest };
+  return { ...validated, mirrorFiles, latest, manifest, manifestSha256 };
 }
 
 export async function runReleasePayload(command, env) {
   if (!["true", "false"].includes(env.REQUIRE_COMPLETE)) fail("REQUIRE_COMPLETE must be exactly true or false");
-  const options = { assetsDir: env.ASSETS_DIR ?? "assets", version: env.RELEASE_VERSION, sha: env.RELEASE_SHA, requireComplete: env.REQUIRE_COMPLETE === "true" };
+  const options = { assetsDir: env.ASSETS_DIR ?? "assets", version: env.RELEASE_VERSION, sha: env.RELEASE_SHA, requireComplete: env.REQUIRE_COMPLETE === "true", publishedAt: env.RELEASE_PUBLISHED_AT };
   if (command === "validate") return validateReleasePayload(options);
   if (command === "mirror") return prepareMirrorPayload(options);
   fail("Usage: release-payload.mjs validate|mirror");

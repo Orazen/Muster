@@ -9,10 +9,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { prepareMirrorPayload, runReleasePayload, validateReleasePayload } from "../scripts/release-payload.mjs";
 
 const version = "1.10.5", sha = "a".repeat(40);
+const publishedAt = "2026-09-11T00:00:00Z";
 let scratch, assetsDir;
 beforeEach(() => { scratch = mkdtempSync(join(tmpdir(), "muster-release-payload-")); assetsDir = join(scratch, "assets"); mkdirSync(assetsDir); });
 afterEach(() => { rmSync(scratch, { recursive: true, force: true }); });
-const options = (requireComplete = true) => ({ assetsDir, version, sha, requireComplete });
+const options = (requireComplete = true) => ({ assetsDir, version, sha, requireComplete, publishedAt });
 const hash = (bytes, algorithm = "sha512", format = "base64") => createHash(algorithm).update(bytes).digest(format);
 const put = (name, contents = `owned release bytes: ${name}`) => { writeFileSync(join(assetsDir, name), contents); return contents; };
 const bytes = (name) => readFileSync(join(assetsDir, name));
@@ -194,6 +195,7 @@ describe("release mirror and CLI", () => {
   it.each([
     ["latest.json", "feed"], ["mirror-files.txt", "feed"],
     ["latest.json", "checksum"], ["mirror-files.txt", "checksum"],
+    ["mirror-manifest.json", "feed"], ["mirror-manifest.json", "checksum"],
   ])("refuses generated %s in a %s before replacing its verified bytes", async (name, kind) => {
     const { zip, dmg } = complete();
     put(name, "existing verification output");
@@ -211,17 +213,26 @@ describe("release mirror and CLI", () => {
     const result = await prepareMirrorPayload(options());
     const latest = JSON.parse(bytes("latest.json"));
     expect(Object.keys(latest)).toEqual(["version", "sha", "published", "files", "checksums"]);
-    expect(latest).toMatchObject({ version, sha }); expect(latest.published).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+    expect(latest).toMatchObject({ version, sha, published: publishedAt });
     expect(latest.files["Muster.dmg"]).toEqual({ size: bytes(dmg).length, sha256: hash(bytes(dmg), "sha256", "hex") });
     expect(latest.checksums["Muster.dmg"]).toBe(latest.files["Muster.dmg"].sha256);
     const lines = bytes("mirror-files.txt").toString().trimEnd().split("\n");
     expect(lines).toEqual(result.mirrorFiles);
-    expect(lines).toEqual(expect.arrayContaining([exe, appimage, deb, "latest.json", "latest.yml", "latest-linux.yml"]));
+    expect(lines).toEqual(expect.arrayContaining([exe, appimage, deb, "latest.json", "latest.yml", "latest-linux.yml", "mirror-manifest.json"]));
     expect(lines).not.toContain("Muster-intel.dmg"); expect(lines).not.toContain("mirror-files.txt"); expect(lines).not.toContain("ignored-not-for-mirror.txt");
     expect(new Set(lines).size).toBe(lines.length);
     for (const name of lines) expect(existsSync(join(assetsDir, name))).toBe(true);
+    const manifestText = bytes("mirror-manifest.json");
+    const manifest = JSON.parse(manifestText);
+    expect(manifest).toMatchObject({ schemaVersion: 1, version, sha });
+    expect(result.manifestSha256).toBe(hash(manifestText, "sha256", "hex"));
+    expect(manifest.files.map((entry) => entry.name)).toEqual(lines.filter((name) => name !== "mirror-manifest.json"));
+    for (const entry of manifest.files) {
+      expect(entry).toEqual({ name: entry.name, size: bytes(entry.name).length, sha256: hash(bytes(entry.name), "sha256", "hex") });
+    }
     // A second local invocation can replace its own previous regular outputs.
     await expect(prepareMirrorPayload(options())).resolves.toMatchObject({ mirrorFiles: lines });
+    expect(bytes("mirror-manifest.json")).toEqual(manifestText);
   });
 
   it("includes optional Intel only when the entire checked pair exists", async () => {
@@ -237,6 +248,38 @@ describe("release mirror and CLI", () => {
 
   it("refuses prerelease versions on the stable mirror", async () => {
     await expect(prepareMirrorPayload({ ...options(), version: "1.10.5-beta.1" })).rejects.toThrow(/prerelease/);
+    expect(readdirSync(assetsDir)).toEqual([]);
+  });
+
+  it.each([undefined, "", "invalid", "2026-09-11", "2026-09-11T25:00:00Z"])("refuses missing or invalid publication time (%s) before output", async (time) => {
+    await expect(prepareMirrorPayload({ ...options(), publishedAt: time })).rejects.toThrow(/publishedAt/);
+    expect(readdirSync(assetsDir)).toEqual([]);
+  });
+
+  it.each(["latest.yml", "latest-mac.yml", "latest-linux.yml"])("rejects a mutable extra updater target in %s before mirror output", async (name) => {
+    const { exe, zip, appimage } = complete();
+    const target = name === "latest.yml" ? exe : name === "latest-mac.yml" ? zip : appimage;
+    feed(name, [target, "Muster.dmg"]);
+    await expect(prepareMirrorPayload(options())).rejects.toThrow(/immutable versioned filename/);
+    expect(existsSync(join(assetsDir, "mirror-manifest.json"))).toBe(false);
+  });
+
+  it("rejects a linked transport manifest without altering its target", async () => {
+    complete(); const outside = join(scratch, "manifest-sentinel"); writeFileSync(outside, "unchanged");
+    symlinkSync(outside, join(assetsDir, "mirror-manifest.json"));
+    await expect(prepareMirrorPayload(options())).rejects.toThrow(/regular file/);
+    expect(readFileSync(outside, "utf8")).toBe("unchanged");
+  });
+
+  it("rejects a versioned but unsupported updater target before transfer", async () => {
+    const { zip } = complete(); const extra = `Muster-${version}-notes.txt`; put(extra);
+    feed("latest-mac.yml", [zip, extra]);
+    await expect(prepareMirrorPayload(options())).rejects.toThrow(/immutable versioned filename/);
+    expect(existsSync(join(assetsDir, "mirror-manifest.json"))).toBe(false);
+  });
+
+  it("requires the canonical source SHA used by the remote promoter", async () => {
+    await expect(prepareMirrorPayload({ ...options(), sha: sha.toUpperCase() })).rejects.toThrow(/canonical lowercase/);
     expect(readdirSync(assetsDir)).toEqual([]);
   });
 

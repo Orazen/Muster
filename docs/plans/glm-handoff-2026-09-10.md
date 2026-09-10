@@ -858,3 +858,53 @@ E2E, portable account backup/restore/sync and Mimosa remain outstanding.
 GitHub runner billing constraints remain separate from Codex allowance;
 do not retry unchanged blocked runs or spend to bypass them. Continue the
 same broad active goal and existing heartbeat; no new ownership deadline.
+
+## Loop 31 — Download publication verified locally — 2026-09-11
+
+Base Loop 30 `4b77308`. Full suite **219 files / 2,836 passed / 8 skipped
+in 240.93s**, exit 0, **+67**. Producer/workflow focused **149 passed**;
+promoter plus loopback integration **36 passed** (29 direct, 7 integration);
+candidate-script **8 passed**. Build/both types/global and scoped lint pass;
+Vite 5.36s retains the large-chunk warning. Actionlint covers 4 workflows with
+0 diagnostics; ShellCheck unavailable. Python syntax passes. The 10 reviewed
+source hashes remained fixed through the full suite. No native installer was
+executed by the new mirror fixtures.
+
+`release-payload.mjs mirror` now requires authoritative release `publishedAt`
+(environment `RELEASE_PUBLISHED_AT`), a canonical stable version and lowercase
+source SHA. It binds every served file, including YAML/latest bytes, into
+`mirror-manifest.json`; the exact transfer list includes that manifest. Every
+updater target must have a supported immutable versioned name. Deterministic
+publication timestamps permit identical retries. Generated outputs cannot be
+used as their own feed/checksum inputs.
+
+The workflow obtains GitHub's `published_at`, rejects linked root ancestors,
+transfers into a unique `.incoming` child, and sends the stdlib Python promoter
+via stdin with expected version/SHA/manifest hash. The promoter keeps the public
+root inode, uses kernel flock, validates all staged bytes, retains old versioned
+URLs and unrelated CLI files, and atomically replaces `.current`. Legacy flat
+aliases migrate through equivalent old bytes and recover after interruption.
+Downgrades, source/byte conflicts at the same version, immutable filename
+collisions and dropping a published platform are refused. Intel is therefore
+required for the current public mirror's successor. No automatic artifact GC
+or downgrade override was added. Read [the runbook](../release-mirror.md).
+
+Bump-script guidance now prepares an exact-SHA dry run followed by one explicit
+version-tag push; it no longer claims releases are manual-only or recommends
+pushing all tags. No actual version/tag/release action occurred. Final review
+found no material source blocker. Evidence is `.omb-scratch/verification/loop31-*`.
+
+Production metadata GETs still return **200 / 1.10.4**. Actual VPS route/mount
+configuration is absent from the repo; read-only SSH refused an unknown host
+key before executing code. No trust setting was changed. Latest release run
+`34470403198` still records a GitHub billing/spending-limit failure before builds;
+no newer successful run, rerun or spending action. Treat trusted VPS access,
+symlink/internal-path/cache acceptance and runner/signing readiness as real
+release prerequisites, not proven by local filesystem tests. Blockmaps remain
+unmirrored (full-download fallback); the existing public CLI is preserved,
+so explicitly package/publish the updated CLI when preparing the candidate.
+
+Next candidate/native verification and companion failed-send draft recovery
+remain. Native Google login, actual desktop/mobile/Watch/device/VM E2E,
+portable backup/restore/sync and Mimosa are still open. Allowance **26% used /
+74% remaining**; no reset. Keep the full goal and existing heartbeat active.

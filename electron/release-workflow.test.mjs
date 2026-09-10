@@ -63,6 +63,16 @@ describe('release control decision matrix', () => {
     ['incomplete public mirror', (w) => { w.jobs['deploy-downloads'].env.REQUIRE_COMPLETE = 'false'; }],
     ['unchecked mirror glob', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run = s.run.replace('--files-from=artifacts/mirror-files.txt', 'artifacts/*'); }],
     ['missing publication recheck', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run = s.run.replace('node scripts/release-state.mjs assert-published', 'true'); }],
+    ['nondeterministic mirror timestamp', (w) => { w.jobs['deploy-downloads'].steps.find((s) => s.id === 'payload').env.RELEASE_PUBLISHED_AT = '${{ github.run_id }}'; }],
+    ['timestamp from another release', (w) => { const s = w.jobs['deploy-downloads'].steps.find((s) => s.id === 'download'); s.run = s.run.replace('tags/v$RELEASE_VERSION', 'latest'); }],
+    ['direct live mirror transfer', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run = s.run.replace('"tarun@$VPS_HOST:$STAGE/"', '"tarun@$VPS_HOST:$REMOTE_ROOT/"'); }],
+    ['reused staging path', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run = s.run.replace('STAGE_NAME="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"', 'STAGE_NAME="shared"'); }],
+    ['linked staging ancestor', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run = s.run.replace('root.resolve() != root', 'False'); }],
+    ['linked incoming ancestor', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run = s.run.replace('incoming.resolve() != incoming', 'False'); }],
+    ['missing remote promotion', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run = s.run.replace('< scripts/promote-release-mirror.py', '< /dev/null'); }],
+    ['wrong remote release identity', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run = s.run.replace("--sha '$RELEASE_SHA'", "--sha 'arbitrary'"); }],
+    ['unbound transfer manifest', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run = s.run.replace('sha256sum artifacts/mirror-manifest.json', 'echo fixed'); }],
+    ['extra remote mirror mutation', (w) => { const s = step(w, 'deploy-downloads', 'rsync '); s.run += '\nssh host overwrite-live'; }],
   ];
   it.each(regressions)('rejects regression: %s', (_name, mutate) => {
     const workflow = copy(); mutate(workflow);

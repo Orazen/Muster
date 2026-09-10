@@ -191,6 +191,7 @@ export function verifyReleaseWorkflow(workflow) {
     }
   }
   const mirrorPayload = one(mirror, (step) => shell(step) === 'node scripts/release-payload.mjs mirror');
+  const download = one(mirror, (step) => step.id === 'download');
   const deploy = one(mirror, (step) => /rsync /.test(shell(step)));
   const knownMutations = new Set([staging, ...uploads, notarize, release, deploy]);
   const mutationSteps = allSteps.filter((step) => /gh\s+release\s+(create|upload|edit|delete)|release-state\.mjs prepare|notarytool submit|\brsync\b|\bssh\b/.test(shell(step)) ||
@@ -199,9 +200,28 @@ export function verifyReleaseWorkflow(workflow) {
     'Unexpected release mutation outside the validated gates');
   check(mirror.env?.REQUIRE_COMPLETE === 'true' && steps(mirror).indexOf(mirrorPayload) < steps(mirror).indexOf(deploy) &&
     mirrorPayload.if === undefined && deploy.if === undefined, 'Mirror must validate complete payload before deployment');
+  check(download.if === undefined && steps(mirror).indexOf(download) < steps(mirror).indexOf(mirrorPayload) &&
+    shell(download).includes('gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$RELEASE_VERSION" --jq .published_at') &&
+    shell(download).includes('published_at=%s\\n') &&
+    mirrorPayload.env?.RELEASE_PUBLISHED_AT === '${{ steps.download.outputs.published_at }}',
+    'Mirror must use the published release timestamp for deterministic retry bytes');
   check(/set -euo pipefail/.test(shell(deploy)) && /release-state\.mjs assert-published/.test(shell(deploy)) &&
     shell(deploy).indexOf('release-state.mjs assert-published') < shell(deploy).indexOf('ssh-keyscan') &&
     shell(deploy).includes('--files-from=artifacts/mirror-files.txt'), 'Mirror must recheck publication and use only the validated manifest');
+  const deployment = shell(deploy);
+  check(deployment.includes('REMOTE_ROOT=/opt/muster-downloads') &&
+    deployment.includes('STAGE_NAME="$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"') &&
+    deployment.includes('STAGE="$REMOTE_ROOT/.incoming/$STAGE_NAME"') &&
+    deployment.includes('root.resolve() != root') && deployment.includes('incoming.resolve() != incoming') &&
+    deployment.includes('-e "$SSH_OPTS" artifacts/ "tarun@$VPS_HOST:$STAGE/"') &&
+    (deployment.match(/^\s*rsync /gm) ?? []).length === 1 && !/\bsudo\b/.test(deployment),
+    'Mirror transfer must target unique staging below the existing public root');
+  const promotion = 'python3 - --root \'$REMOTE_ROOT\' --candidate \'$STAGE\' --version \'$RELEASE_VERSION\' --sha \'$RELEASE_SHA\' --manifest-sha256 \'$MANIFEST_SHA256\'';
+  check(deployment.includes('sha256sum artifacts/mirror-manifest.json') && deployment.includes(promotion) &&
+    deployment.includes('< scripts/promote-release-mirror.py') &&
+    deployment.indexOf(promotion) > deployment.indexOf('rsync -') &&
+    (deployment.match(/^\s*ssh /gm) ?? []).length === 2,
+    'Mirror promotion must validate transferred bytes and identity through the locked atomic helper');
   return { platformUploads: uploads.length, mutationSteps: mutationSteps.length };
 }
 
