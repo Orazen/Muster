@@ -86,7 +86,7 @@ The router contains nine explicit SPA route patterns plus its fallback.
 | `/sign-in?next=…&authError=…` | Email login, error feedback, recovery links, password visibility, return destination, sign-out/re-entry, capability variants | Local wrong/correct email login and sign-out checked; remaining variants unverified; real Google requires provider account/consent |
 | `/sign-up?next=…&ref=…` | Account creation, invalid inputs, existing account, disabled signup, referral preservation | Local email signup checked; remaining states unverified; Google-only and verification delivery need their services |
 | `/forgot-password`, `/reset-password?token=…` | Neutral response, missing/invalid/expired/reused token, mismatch, successful reset and subsequent login | Unverified in this slice; disposable mail fixture can test app logic, real delivery needs email service |
-| `/pair` | Auth gate, generation, copy, countdown, expiry, regeneration, consumed-code rejection | Loop 10: 13 browser checks, 10 layouts and 2 local HTTP checks; recovery, copy/manual fallback, exact expiry and truthful refresh covered. 42 client and 12 server tests pass. Anonymous gate and actual cloud-to-desktop session bridge remain unverified |
+| `/pair` | Auth gate, generation, copy, countdown, expiry, regeneration, consumed-code rejection | Loop 10: 13 browser checks, 10 layouts and 2 HTTP checks for recovery/copy/expiry/refresh. Loop 11 verifies the anonymous gate and displayed cloud code → local desktop account → visible transcript/reload through CUA. These are isolated local servers; packaged desktop, real Google login and production pairing remain unverified |
 | `/claim#CODE` | Missing/malformed/expired/consumed code, fragment removal, session creation, `/app` navigation | Loop 7: missing/malformed/consumed recovery, fragment removal, previously anonymous real local claim → authenticated app, mock 503 retry and departure during/after request checked; nine recovery layouts at 320/390/1440px plus retry at 320px. Expiry covered by server tests; physical QR scanning and production redemption unverified |
 | `/app/*` | Auth gate, onboarding, reconnect, empty roster, No Engines, authenticated surfaces below | Local account/onboarding/reload and listed fake-ACP interactions checked; other states unverified |
 | `/os` | Bot and Rooms windows, open/focus/minimize/restore/close, drag/resize, command console, attention targets, Back to app | Unverified; browser shell and packaged Electron are separate checks |
@@ -180,11 +180,12 @@ slice's native UI. No checked-in native UI test suite was found in the audit.
 - `e2e/pairing.e2e.spec.ts` and `e2e/approval-card.e2e.spec.ts` contain six
   declared browser cases at the audit baseline. `playwright.config.ts`
   configures one 1280×900 browser viewport; it does not define mobile or
-  packaged Electron projects. This program has not rerun those specs.
-- The pairing case named **"sent messages actually RENDER in the
-  transcript"** currently pairs, dismisses onboarding, and closes the
-  context. It never sends a message or asserts its rendered row. Repair
-  that test before counting it as transcript coverage.
+  packaged Electron projects. Loop 11 typechecks and discovers all five repaired pairing cases but executes zero Playwright runner cases under the current CUA-only UI instructions. Nine separate hands-on browser checks exercise the pairing flow. The approval spec remains unrevised.
+- Loop 11 replaces the false-positive **"sent messages actually RENDER in the
+  transcript"** case. The revised test sends a unique message and requires
+  visible user/reply text in unique transcript rows before and after reload.
+  CUA verified those interactions with two real local servers and a fake ACP
+  engine; the revised Playwright runner itself remains unexecuted.
 - The OAuth case asserts a Google authorization-URL redirect using dummy
   client credentials. It does not complete Google authentication or verify
   the final desktop session.
@@ -253,17 +254,29 @@ review caught and corrected dark-theme contrast and spacing before final
 browser verification. Thirteen browser checks, ten layouts and two real
 local consume/reuse HTTP checks passed. Controlled failures and short expiry
 come from a local proxy; the successful generation/refresh/consumption path
-uses the owned real API. Anonymous access was not established because the
-attempt reused an existing session. The actual cloud-to-desktop session
-bridge remains separate from these page and API checks.
+uses the owned real API. The initial Loop 10 anonymous access attempt reused an existing session.
+Loop 11 now verifies the anonymous redirect and cloud email sign-in, reads the
+actual code field, pairs the exact account into a separate local server and
+checks a unique message and fake-engine reply visibly before and after reload.
+Consumed-code reuse leaves the desktop at sign-in. Nine CUA browser checks at
+1280×720 and one manual-redirect HTTP OAuth check passed, with zero captured
+browser console errors. This completes the isolated local bridge, not a
+packaged Electron or real-provider login. Nine focused harness tests cover
+environment isolation, ownership, pairing, fake-engine output and cleanup.
+The five repaired Playwright cases are discovered/typechecked, not executed;
+current computer-use instructions require CUA for browser actions. Before
+running the whole declared browser suite, repair the approval fixture's
+inherited provider environment, fixed port, cleanup and unasserted errors.
 
 1. **Settings follow-through.** The Usage crash and responsive navigation
    slice is locally verified. Continue individual save/error and integration
    flows from the matrix; opening all sections is not their completion.
 2. **Public routes and entry-state completeness.** Sweep marketing/docs and
    auth/pair/claim recovery states using isolated accounts and fixtures.
-   Repair the misleading transcript E2E case and preserve an explicit record
-   of what the Google test does and does not cover. The public-page slice fixed the Docker
+   The misleading transcript case is repaired and its core flow checked via
+   CUA. Continue the approval fixture and preserve the distinction between
+   test discovery, hands-on checks and completed runner tests. Keep the Google
+   redirect test separate from a successful provider login. The public-page slice fixed the Docker
    anchor, mobile overflows, and selected unsupported network, backup,
    license, receipt, and competitive claims while preserving Muster pricing.
    Remaining feature claims need their own source/runtime verification. Source has a PostHog integration but no

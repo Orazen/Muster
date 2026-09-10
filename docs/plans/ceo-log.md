@@ -552,3 +552,69 @@ workspace, native-client and AGI harness matrix. Anonymous pairing access,
 the actual cloud-to-desktop bridge, real Google login and native outcomes
 remain unverified here. Hosted Actions billing and production OAuth proxy
 topology retain their previously recorded status; no duplicate trigger.
+
+
+## Loop 11 — 2026-09-10 — A transcript E2E that checks the transcript
+
+P2 fixed: the pairing test named for rendered messages previously stopped
+after login/onboarding. `e2e/pairing.e2e.spec.ts` now signs in through visible
+controls, reads the displayed cloud code, pairs the exact synthetic account,
+quick-starts a bot and sends a unique message. It requires exactly one user
+row and one deterministic fake-engine reply, their actual text visibly
+rendered inside `[data-mid]`, and both still present after reload. It also
+checks anonymous access, consumed-code denial and a null session. Redemption
+setup uses POST. OAuth coverage constructs a redirect with a state cookie
+and follows zero external redirects; it is not a completed Google login.
+
+`e2e/pairing-harness.ts` replaces fixed ports, ambient provider settings and
+literal fixture credentials with four available ports, explicit child
+environment, random credentials, isolated homes/data and a temporary fake
+ACP wrapper. Readiness requires that child's exact startup log before a
+health check can pass. Guards block external browser/server requests; the
+desktop's server guard permits only the exact local cloud verification
+endpoint. Cleanup awaits owned servers and fake engines, including engine
+process groups, and removes owned data after partial startup failure.
+`server/pairing-harness.test.ts` exercises these contracts. The tests exposed
+an intermittent EPERM from probing a stopped process group; cleanup now
+awaits child close events instead. The initial failing run was **8 passed /
+1 failed**; final focused verification is **1 file / 9 passed / 0 skipped**,
+**5.57 seconds**. The final browser fixture also shut down and removed its
+data successfully; its temporary credential metadata was removed.
+
+`tsconfig.e2e.json` typechecks the pairing suite and fixture. The server
+and E2E typechecks, scoped lint and diff checks passed. Fresh Vite build:
+**5.58 seconds**, with the existing large-chunk warning. Playwright config
+now retains failure traces/screenshots in ignored `.omb-scratch/e2e`.
+Read-only review checked the installed runner's manual-context artifact
+support and found no remaining blockers. **5 Playwright cases discovered,
+0 runner cases executed**: current computer-use instructions require CUA
+for UI actions. Test discovery is not a browser test result.
+Full Vitest: **189 files / 1948 passed / 8 skipped**, **177.34 seconds**.
+This adds nine passing tests over Loop 10 and exceeds the handbook baseline
+of 172 files / 1689 passed / 8 skipped.
+
+**9 hands-on CUA browser checks passed at 1280×720:** anonymous cloud `/pair`
+redirect, email login returning to the displayed code, desktop bridge
+controls, code-to-app handoff, Quick start, visible unique user/reply rows,
+reload persistence, exact account in Settings, and consumed-code rejection
+with `/app` still gated. Both browser tabs reported **0 console errors**.
+Separately, **1 local HTTP OAuth check** returned 302 to Google with a client
+ID and **1 state cookie**, following **0 external redirects**. The cloud and
+desktop are actual isolated local servers; model output is the fake ACP
+fixture. **0 real Google logins, 0 native UI tests, and 0 new mobile layout
+checks** ran. The demo on 8845 was untouched.
+
+Commercial implication: pairing-to-first-reply now has observable regression
+evidence instead of a passing test that never sends work. No conversion
+lift, real model completion or production-account success is claimed. A
+production GET at this loop's start confirmed Loop 10 pairing UI live in
+`/assets/index-Cd59czyZ.js`, including the truthful refresh marker (both
+route and asset returned 200). This slice changes test infrastructure only.
+
+Next pick: bring the remaining approval-card E2E fixture under the same
+isolation, owned lifecycle and meaningful error assertions, then continue
+approval/rehearsal, workspace and native-client coverage. Do not execute the
+whole existing browser suite while that approval fixture still inherits
+ambient provider settings. Production proxy topology and real-provider
+login remain separate gaps. Hosted Actions billing remains the existing
+board item; avoid duplicate trigger commits or unchanged billing notices.

@@ -13,6 +13,8 @@ export default defineConfig({
   use: {
     headless: true,
     viewport: { width: 1280, height: 900 },
+    screenshot: "only-on-failure",
+    trace: "retain-on-failure",
   },
-  outputDir: "./e2e/artifacts",
+  outputDir: "./.omb-scratch/e2e",
 });
