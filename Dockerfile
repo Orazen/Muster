@@ -29,6 +29,9 @@ RUN pnpm install --frozen-lockfile
 COPY tsconfig.json tsconfig.server.json tsconfig.server.build.json vite.config.ts index.html ./
 COPY src src
 COPY server server
+# server tests import the browser harness from e2e/, and pnpm build
+# type-checks them — without this the in-image tsc dies on TS2307.
+COPY e2e e2e
 COPY companion companion
 COPY scripts scripts
 COPY public public
