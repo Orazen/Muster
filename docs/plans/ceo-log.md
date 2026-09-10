@@ -670,3 +670,61 @@ composer. Restore that evidence after a decision and reload in one bounded
 UI slice. Track this in `docs/plans/ui-e2e-program.md`. Production OAuth
 topology, real-provider/native checks and the existing hosted Actions billing
 board item remain separate gaps; no duplicate trigger or billing notice.
+
+
+## Loop 13 — 2026-09-10 — Approval evidence survives the decision
+
+P2 fixed in `src/components/ApprovalCard.tsx`: the actual permission
+transcript omitted the stored rehearsal, approval history and previous-run
+why data. These now remain under **Evidence when requested** after Allow or
+Deny, with the existing expandable why details. The label distinguishes the
+frozen snapshot from the decision just made. Settled cards retain normal
+text opacity; long labels and evidence wrap within the card.
+
+Added `src/components/ApprovalCard.test.ts` (11 rendering regressions),
+`server/approval-rehearsal-harness.test.ts` (2 local HTTP integration cases)
+and `e2e/approval-rehearsal.e2e.spec.ts`. The shared harness and fake ACP CLI
+add opt-in `rehearsal-gated`: an explicit assistant plan precedes permission;
+Allow produces two ordered successful tool events and WHY/DECISIONS/
+HYPOTHESIS/FINDINGS; Deny produces no tool events. Tests read actual runtime
+records and persisted SQLite cards. First approval: **0/2 steps, 0 matching
+runs, 0 reviewed**. After Allow, next approval: **2/2, 1 matching, 1 reviewed**.
+A completed denied turn can be reviewed but contributes zero matching tools.
+No journal or approval evidence is injected.
+
+Focused results: component **11 passed / 0 skipped in 0.49s**; final rehearsal
+HTTP **2 passed / 0 skipped in 6.54s**. Earlier compatibility run: rehearsal
+and approval HTTP **5 passed / 0 skipped in 14.71s**. Frontend/server/E2E
+typechecks, scoped lint and diff checks pass. Final Vite build **7.01s**, with
+the existing large-chunk warning. Review strengthened the E2E history and
+expanded why-body assertions. Full Vitest: **192 files / 1964 passed /
+8 skipped**, **199.09s** — thirteen additional passes over Loop 12 and above
+the handbook baseline of 172 files / 1689 passed / 8 skipped.
+
+**8 final evidence browser checks passed**: zero-history card, first Allow
+and stored snapshot, second-turn matching evidence, pending reload, Deny,
+completed reload with both original snapshots, visible previous-run body,
+and keyboard disclosure. **6 layout checks passed**: matched pending and
+expanded settled evidence at **320×568, 390×844, 1440×900**. No horizontal
+overflow; pending decisions stayed reachable and long expanded content
+remained scrollable. Both tabs reported **0 captured console errors**.
+**8 Playwright cases discovered/typechecked in 3 files; 0 runner cases
+executed** under CUA-only UI instructions. Local servers and storage are
+real; tool results and rationale are fake-engine fixtures. **0 real model,
+Google-login or native UI checks** ran. Owned fixture processes, data,
+metadata and tabs were removed; viewport reset and demo 8845 untouched.
+
+**Separate P2 found:** switching from Quick-start-created Mochi to Basil,
+then reloading, restores Mochi. An initial exact-card locator timed out
+because the conversation changed; it is not counted as a passing navigation
+check. Evidence checks explicitly reselect Basil after reload. Selection
+lives only in reducer memory; initial hydration chooses `bots[0]` in
+`src/state/store.tsx`, and bot creation prepends the roster. No approval data
+was lost. Next slice: restore selected bot/group per account and tab, with
+stale-ID, account-switch, reconnect and unavailable-storage checks.
+
+Commercial implication: decision history remains reviewable after work
+continues, instead of disappearing with the approval composer. No conversion
+lift is claimed. Production marker to verify after push: **Evidence when
+requested**. Hosted Actions billing remains the existing board item; no
+unchanged escalation or duplicate deployment trigger.

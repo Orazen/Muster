@@ -8,6 +8,8 @@
 //   FAKE_ACP_MODE   happy (default) | empty-reply | exit-early | hang | no-auth | auth-required | permission
 //                   | permission-gated (reply only after the exact allow-once
 //                     response; any other decision produces a denied reply)
+//                   | rehearsal-gated (state an explicit two-tool plan before
+//                     permission, then emit matching successes only if allowed)
 //                   | die-midturn (engine exits code 9 mid-prompt while a
 //                     grandchild holds stdio open — the pipe-held crash the
 //                     liveness reaper exists for)
@@ -41,7 +43,7 @@
 //   FAKE_ACP_USAGE_ROOT  put the prompt result's usage at the root instead of
 //                        under _meta (what opencode 1.18.18 actually does)
 //   FAKE_ACP_PERMISSION_DUMP  optional path for the actual permission outcome
-//                        received in permission-gated mode (JSON, not inferred
+//                        received in either gated mode (JSON, not inferred
 //                        from the visible reply)
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
@@ -204,7 +206,7 @@ function handle(msg: any) {
     const answered = onPermissionAnswered;
     onPermissionAnswered = null;
     const outcome = msg.result?.outcome;
-    if (mode === "permission-gated" && process.env.FAKE_ACP_PERMISSION_DUMP) {
+    if ((mode === "permission-gated" || mode === "rehearsal-gated") && process.env.FAKE_ACP_PERMISSION_DUMP) {
       writeFileSync(process.env.FAKE_ACP_PERMISSION_DUMP, JSON.stringify(outcome ?? null), { mode: 0o600 });
     }
     answered?.(outcome?.outcome === "selected" && outcome?.optionId === "allow-once");
@@ -399,16 +401,39 @@ function handle(msg: any) {
           });
         return;
       }
-      if (mode === "permission-gated") {
+      if (mode === "permission-gated" || mode === "rehearsal-gated") {
+        if (mode === "rehearsal-gated") {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: {
+            sessionUpdate: "agent_message_chunk", content: { text: "Open and inspect the page.\nPLAN TOOLS:\n- browser_open\n- screenshot" },
+          } } });
+        }
         pendingPermissionId = 9001;
         onPermissionAnswered = (allowOnce) => {
           // The ACP client wraps the selected option in result.outcome. A
           // rejection, cancellation, malformed response or RPC error must
           // never make the success assertion pass.
           if (allowOnce) {
-            playTurn();
+            if (mode === "rehearsal-gated") {
+              // ACP normalizes rawInput.command ahead of title. Omit rawInput
+              // so these exact titles match the declared tool identifiers.
+              for (const title of ["browser_open", "screenshot"]) {
+                const toolCallId = `rehearsal-${title}`;
+                out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId, title } } });
+                out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", toolCallId, status: "completed" } } });
+              }
+              const reply = "\n\nWHY: Exercise an owned approval rehearsal fixture.\n"
+                + "DECISIONS:\n- Wait for Allow once before emitting simulated tool successes.\n"
+                + "- Record browser_open then screenshot in the fixture journal.\n"
+                + "HYPOTHESIS: Two ordered successful fixture tools will match the next stated plan.\n"
+                + "FINDINGS: The fixture emitted browser_open and screenshot in order; no real browser action was performed.\n\n"
+                + "hello from fake acp";
+              out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: reply } } } });
+            } else {
+              playTurn();
+            }
           } else {
-            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "permission denied by fake acp" } } } });
+            const denied = mode === "rehearsal-gated" ? "\n\npermission denied by fake acp" : "permission denied by fake acp";
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: denied } } } });
           }
           complete();
         };

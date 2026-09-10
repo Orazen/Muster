@@ -1,11 +1,11 @@
 /** Shared owned browser fixtures. Each test gets independent servers,
  * accounts and contexts; no real provider authentication is exercised. */
 import { expect, test as baseTest, type BrowserContext, type Page } from "@playwright/test";
-import { startPairingHarness } from "./pairing-harness.ts";
+import { startPairingHarness, type FixtureEngineMode } from "./pairing-harness.ts";
 
 type Harness = Awaited<ReturnType<typeof startPairingHarness>>;
 type Fixtures = {
-  engineMode: "happy" | "permission-gated";
+  engineMode: FixtureEngineMode;
   harness: Harness;
   newPage: (expectedPairFailure?: boolean) => Promise<Page>;
   pairCodeFromCloud: string;
@@ -81,4 +81,3 @@ export async function pairDesktop(page: Page, harness: Harness, code: string): P
   expect(response.status()).toBe(200);
   expect((await response.json()).user?.email).toBe(harness.email);
 }
-

@@ -103,11 +103,11 @@ orientations, zoom levels, and native keyboard behavior remain separate.
 | Surface | Required interactions and states | Current evidence / dependency |
 | --- | --- | --- |
 | **Onboarding:** Welcome, Engines, Teammate, Permissions, First task | Back/continue/skip, capability refresh, dismissal persistence, first useful task | Local onboarding and reload checked; every branch and capability variant remains unverified |
-| **Roster / New or share:** New Bot, New Room, Export all bots, Teams, Archived bots | Selection/search, keyboard navigation, rename/pin/duplicate/archive/restore, isolated export/import | Unverified unless individually recorded in the slice report |
+| **Roster / New or share:** New Bot, New Room, Export all bots, Teams, Archived bots | Selection/search, keyboard navigation, rename/pin/duplicate/archive/restore, isolated export/import | P2 observed in Loop 13: selecting a non-first bot is lost on reload; hydration returns to bots[0]. Evidence remains intact after reselection. Remaining actions unverified unless recorded |
 | **Chat** | Send/stream, retry/edit/branch, attachment/paste, older messages/search, scroll preservation, queued messages, Stop | Chat and Stop checked with fake ACP; remaining interactions unverified |
 | **Group chat** | Member selection/mentions, group send/stream, room bulletin and working folder, find, replies, failure/empty states | Unverified |
 | **Task / Model / Usage / Working folder pickers** | Open/close/focus, selection persistence, disabled reasons, long names, narrow columns | Task creation/switching, model controls/menu fit and responsive controls checked with fake ACP; usage/folder and full picker state matrix unverified |
-| **OptionCard / Pending approval** | Allow/Deny, keyboard choice, history/evidence/rehearsal, expired/already answered ask, exact sibling-task navigation | Loop 12: Allow once and Deny checked with an engine that waits for the decision; same card survives pending/completed reload, actual ACP choice verified. Three local HTTP tests cover Allow, Deny and exact thread isolation. Earlier re-ask and Stop/cancel ledger checks remain; rehearsal, history and remaining states unverified |
+| **OptionCard / Pending approval** | Allow/Deny, keyboard choice, history/evidence/rehearsal, expired/already answered ask, exact sibling-task navigation | Loop 12: Allow once and Deny checked with an engine that waits for the decision; same card survives pending/completed reload, actual ACP choice verified. Three local HTTP tests cover Allow, Deny and exact thread isolation. Loop 13 retains rehearsal/history/why after decisions and reload (with explicit bot reselection), with 8 evidence checks and 6 layouts. Earlier re-ask and Stop/cancel ledger checks remain; other states unverified |
 | **Goal mode / Job receipt** | Bounded goal progression/stop, completion/failure evidence, exact task receipt and copy/export | Receipt, empty/missing-usage state, copy, narrow fit and Escape/focus return checked with fake ACP; goal lifecycle and remaining receipt states unverified |
 | **Bot Settings** | Profile/persona, Chief of Staff, peer communication, model/effort, computer mode, folder, memory, Auto mode, voice | Unverified; real model/voice/computer effects need their runtimes |
 | **Computer / Browser** | Available/unavailable/error states, viewer controls, navigation/profile selection, take/release control | Unverified; actual control needs provisioned local/cloud runtime and relevant permissions |
@@ -184,7 +184,9 @@ slice's native UI. No checked-in native UI test suite was found in the audit.
   in 2 files**, including two rewritten approval cases. **0 Playwright runner
   cases executed** under current CUA-only UI instructions. Loop 11 records
   nine pairing browser checks; Loop 12 records ten approval browser checks.
-  Discovery does not establish that the runner cases pass.
+  Loop 13 adds a two-turn rehearsal case: **8 cases in 3 files discovered
+  and typechecked, 0 runner cases executed**. Discovery does not establish
+  that the runner cases pass.
 - Loop 11 replaces the false-positive **"sent messages actually RENDER in the
   transcript"** case. The revised test sends a unique message and requires
   visible user/reply text in unique transcript rows before and after reload.
@@ -306,12 +308,13 @@ remain separate gaps.
    Connected apps, Bot Settings, and OS windows one bounded slice at a time.
    Keep task-specific waiting/working/queued attention discoverable when
    simplifying navigation; alerts must land on the exact conversation.
-4. **Work lifecycle and evidence.** Next P2: tool approval messages render
-   `ApprovalCard`, which omits persisted rehearsal/why/history displayed by
-   `OptionCard` and the pending composer. Keep that evidence visible after a
-   decision and reload, with exact-card browser checks. Then expand coverage
-   to queueing, goal limits, retry/failure, routine/webhook outcomes and
-   receipt correctness. Use isolated data for mutations.
+4. **Work lifecycle and evidence.** Loop 13 fixes the missing transcript
+   rehearsal/why/history in `ApprovalCard`. Eight final browser evidence
+   checks and six layouts at 320/390/1440px passed using actual local runtime
+   journals and fake engine events. Reload checks explicitly reselected the
+   original bot because selection reset is a separate P2. Next restore bot
+   and group selection per account/tab, then cover queueing, goal limits,
+   retry/failure, routine/webhook outcomes and receipt correctness.
 5. **Optional phone handoff and native clients.** Add a discoverable,
    skippable handoff after useful work, then verify pairing/reconnect and
    approval targeting on each supported client. Do not equate a mobile web

@@ -7,6 +7,7 @@
 import { Check, ShieldCheck, X } from "lucide-react";
 import { type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { ApprovalWhyDetails } from "./ApprovalWhyDetails";
 
 interface ToolLabels {
   [tool: string]: string;
@@ -39,20 +40,22 @@ export function ApprovalCard({
   const card = message.card;
   if (!card) return null;
   const settled = card.answered;
+  const hasHistory = card.history && card.history.total > 0;
+  const hasEvidence = hasHistory || card.why?.source === "previous-run" || card.rehearsal;
 
   return (
     <div
       className={cn(
-        "w-full max-w-[840px] rounded-2xl border bg-card p-4",
-        settled ? "border-hairline/30 opacity-70" : "border-accent/40",
+        "min-w-0 w-full max-w-[840px] rounded-2xl border bg-card p-4",
+        settled ? "border-hairline/30" : "border-accent/40",
       )}
     >
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="text-[15px] font-semibold text-ink">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
+        <div className="min-w-0 text-[15px] font-semibold text-ink">
           {bot ? `${bot.name} wants to ` : "Wants to "}
           {toolLabel(card.tool)}
         </div>
-        {card.tool && <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{card.tool}</span>}
+        {card.tool && <span className="min-w-0 font-mono text-[11px] text-ink-secondary">{card.tool}</span>}
       </div>
 
       {/* what, exactly */}
@@ -83,6 +86,21 @@ export function ApprovalCard({
           </>
         )}
       </div>
+
+      {hasEvidence && (
+        <section aria-label="Approval evidence" className="mt-3 min-w-0 border-t border-hairline/40 pt-3 [overflow-wrap:anywhere]">
+          <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-secondary">Evidence when requested</p>
+          {hasHistory && (
+            <p className={cn("mt-2 text-[12px] leading-relaxed", card.history!.lastDecision === "denied" ? "text-warning" : "text-ink-secondary")}>
+              {card.history!.summary}
+            </p>
+          )}
+          {card.rehearsal && (
+            <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{card.rehearsal.summary}</p>
+          )}
+          {card.why && <ApprovalWhyDetails why={card.why} />}
+        </section>
+      )}
     </div>
   );
 }

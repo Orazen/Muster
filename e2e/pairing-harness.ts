@@ -190,26 +190,28 @@ export interface PairingHarness {
   rootDirectory: string;
   email: string;
   password: string;
-  /** Actual ACP response evidence, present only in permission-gated mode. */
+  /** Actual ACP response evidence, present only in gated modes. */
   permissionOutcomePath?: string;
   stop(): Promise<void>;
 }
 
+export type FixtureEngineMode = "happy" | "permission-gated" | "rehearsal-gated";
+
 interface FakeEngineEnvironment {
-  FAKE_ACP_MODE: "happy" | "permission-gated";
+  FAKE_ACP_MODE: FixtureEngineMode;
   FAKE_ACP_DUMP: string;
   FAKE_ACP_PERMISSION_DUMP?: string;
 }
 
 export async function startPairingHarness(
-  { staticDir = join(ROOT, "dist"), engineMode = "happy" }: { staticDir?: string; engineMode?: "happy" | "permission-gated" } = {},
+  { staticDir = join(ROOT, "dist"), engineMode = "happy" }: { staticDir?: string; engineMode?: FixtureEngineMode } = {},
   { waitForServer = waitForOwnedServer }: { waitForServer?: typeof waitForOwnedServer } = {},
 ): Promise<PairingHarness> {
   if (process.platform === "win32") throw new Error("Pairing fixture requires POSIX process groups");
   const builtUi = resolve(staticDir);
   await access(join(builtUi, "index.html"));
   const rootDirectory = await mkdtemp(join(tmpdir(), "muster-pairing-e2e-"));
-  const permissionOutcomePath = engineMode === "permission-gated" ? join(rootDirectory, "desktop", "permission-outcome.json") : undefined;
+  const permissionOutcomePath = engineMode !== "happy" ? join(rootDirectory, "desktop", "permission-outcome.json") : undefined;
   const children: OwnedChild[] = [];
   let stopping = false;
   let stopped: Promise<void> | undefined;

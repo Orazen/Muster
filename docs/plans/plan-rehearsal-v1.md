@@ -21,6 +21,12 @@ prefix match within one successful run, full-sequence matching run count,
 and reviewed successful run count. The persisted card retains that snapshot.
 It does not trigger additional approvals or execute a rehearsal.
 
+The permission transcript displays this frozen snapshot under **Evidence
+when requested**, alongside prior approval history and a previous-run
+disclosure when available. It stays readable after Allow or Deny and after
+reloading the conversation. Those historical counts are not recomputed to
+include the decision just made.
+
 The evidence covers exact tool names and order only. It does not validate
 arguments, intent, environment, screen states, or future success. It is not
 a statistical confidence score or the full transition replay envisioned in
@@ -40,7 +46,12 @@ Scope and exclusions:
   intact. An eligible plan with no matching history explicitly reports zero.
 - Engines that omit turn/item identifiers cannot contribute those runs.
 
-Validation: focused comparison/provenance tests and pending-card rendering
-coverage. Run `npx vitest run server/plan-rehearsal.test.ts
-src/components/PendingApproval.test.ts`, followed by the required typechecks
-and full suite before committing.
+Validation: comparison/provenance tests, pending and transcript-card
+rendering, and `server/approval-rehearsal-harness.test.ts` cover real local
+HTTP/ACP runtime evidence and persisted card snapshots. The deterministic
+fixture states a plan, emits successful ordered tool events only after Allow,
+and supplies explicit WHY/HYPOTHESIS/FINDINGS for server extraction. Denied
+plans supply no matching tools. These are simulated engine events, not real
+browser actions or model completions. `e2e/approval-rehearsal.e2e.spec.ts`
+declares the browser regression; see the CEO log for executed checks versus
+runner discovery, and the separate bot-selection-on-reload gap.
