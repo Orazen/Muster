@@ -445,3 +445,51 @@ missing client-IP context and distinct-client rate buckets, then preserve
 rate-limit status/retry guidance without disabling throttles. After that,
 continue `/pair` recovery/copy/rotation, truthful transcript E2E and native checks.
 The route/state/device matrix remains the record of unverified workflows.
+
+
+## Loop 9 — 2026-09-10 — Desktop sign-in limits and usable retry guidance
+
+P2 fixed in `server/index.ts` and `server/desktop-auth.ts`: preserve the
+complete original X-Forwarded-For header when calling Better Auth, matching
+the direct auth endpoint. Keep its IP validation, chain handling and all
+throttles enabled. Accepted single-IP clients now retain their own auth
+bucket; missing, malformed and multi-value headers still share the fallback.
+Production proxy topology remains unverified. Upstream 429 now stays 429,
+with validated Retry-After seconds, no-store and a responsive recovery page.
+The outer ten-attempt gate keeps its limit and gives one-minute guidance.
+
+Focused route tests: **1 file / 20 passed / 0 skipped**, **15.09 seconds**,
+including eight new cases for client isolation, shared direct/desktop budgets,
+unresolved-IP fallback, retry metadata and the outer gate. Helper/lifecycle
+suite: **1 file / 22 passed / 0 skipped**, **308 ms**, including fourteen new
+retry parsing cases. Server typecheck, scoped lint and diff checks passed.
+
+Four browser-driven checks exercised the actual upstream and outer throttle
+responses, then verified pointer and keyboard recovery. Three final layout
+checks passed at **320×568,
+390×844 and 1440×900** with no horizontal overflow and a **44px-high** recovery
+link. The initial inline link wrapped awkwardly and its automation click
+missed; it became a separate action and both input methods passed again.
+One initial outer-limit fixture navigation unexpectedly followed an external
+Google authorization redirect and ended at invalid_client. No login completed.
+It was repeated successfully through a local proxy blocking external redirects.
+Automated HTTP tests followed **0 external redirects**. Local server fixtures
+used random dummy OAuth settings and blocked outbound fetch/TCP; their owned
+processes/tabs were closed. The demo on 8845 was untouched. **0 real Google
+logins and 0 native UI tests** ran.
+
+The first full suite passed **187 files / 1892 passed / 8 skipped** in
+**187.77 seconds**. Final full verification after the recovery-link change:
+**187 files / 1892 passed / 8 skipped**, **186.14 seconds**. Read-only review
+found no blocking regressions. The handbook baseline is 172 / 1689 / 8.
+
+Commercial implication: simultaneous desktop sign-ins retain the same client
+limits as web sign-in where the deployment supplies a resolvable IP, and
+throttled users get a clear recovery action instead of a false provider error.
+No conversion improvement is claimed. A production GET now confirms the
+preceding cookie fix with HTTP 302 and **1 state cookie**, without following
+Google. This slice's production throttle behavior still needs verification.
+
+Next pick: `/pair` recovery, clipboard failure and truthful code-refresh
+behavior, then transcript E2E correction and the native client matrix. Keep
+unresolved proxy topology and all real-provider/native outcomes explicit.

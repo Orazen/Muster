@@ -1,10 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
+  desktopSignInRetrySeconds,
   isLoopbackRedirect,
   issueDesktopGrant,
   issueHandoffCode,
   redeemHandoffCode,
 } from "./desktop-auth.ts";
+
+describe("desktop sign-in retry delay", () => {
+  it.each([["10", 10], [" 7 ", 7], ["0", 1], ["3600", 3600]])(
+    "normalizes delay-seconds %j to %i",
+    (value, expected) => expect(desktopSignInRetrySeconds(String(value))).toBe(expected),
+  );
+
+  it.each([null, "", "-1", "0.5", "NaN", "Infinity", "3601", "99999999999999", "10\r\nX-Test: injected", "<script>bad</script>"])(
+    "uses the social window for an invalid retry value %j",
+    (value) => expect(desktopSignInRetrySeconds(value)).toBe(10),
+  );
+});
 
 describe("isLoopbackRedirect", () => {
   it("accepts 127.0.0.1 and localhost over http", () => {

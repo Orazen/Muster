@@ -29,6 +29,14 @@ interface PendingGrant {
 const GRANT_TTL_MS = 10 * 60_000;
 const CODE_TTL_MS = 90_000;
 
+/** Better Auth returns delay-seconds in X-Retry-After. Only whole seconds
+ * reach our response header and page; malformed values use its social window. */
+export function desktopSignInRetrySeconds(value: string | null): number {
+  if (value === null || !/^\d{1,6}$/.test(value.trim())) return 10;
+  const seconds = Number(value.trim());
+  return seconds <= 3600 ? Math.max(1, seconds) : 10;
+}
+
 const grants = new Map<string, PendingGrant>();
 const codes = new Map<string, { userId: string; email: string; name: string; expiresAt: number }>();
 

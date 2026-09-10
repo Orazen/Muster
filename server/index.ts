@@ -150,7 +150,7 @@ import {
   userProviderFlags,
 } from "./user-keys.ts";
 import { vpsComputerStatus, vpsEnsureDesktop, vpsDockerHost, vpsReachable } from "./vps-computer.ts";
-import { isLoopbackRedirect, issueDesktopGrant, issueHandoffCode, redeemHandoffCode } from "./desktop-auth.ts";
+import { desktopSignInRetrySeconds, isLoopbackRedirect, issueDesktopGrant, issueHandoffCode, redeemHandoffCode } from "./desktop-auth.ts";
 import { startAccountMerge, spendAccountMergeToken } from "./account-merge.ts";
 import { mergeUserVault } from "./user-keys.ts";
 import { PROVIDER_DRIVER_ENV, DATA_DIR } from "./config.ts";
@@ -3823,10 +3823,18 @@ let requestUserEmail = "";
     // These live next to pairing because they serve the same surface and
     // must work on any deployment acting as "the cloud" (prod + e2e twin).
     if (method === "GET" && path === "/desktop-auth/start") {
+      const rateLimited = (seconds: number) => {
+        res.setHeader("Retry-After", String(seconds));
+        res.setHeader("Cache-Control", "no-store");
+        return html(res, 429, `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Try again shortly · Muster</title>
+<style>body{margin:0;background:#f7f6f2;color:#26251f;font:16px/1.6 system-ui,sans-serif}main{box-sizing:border-box;width:calc(100% - 32px);max-width:460px;margin:12vh auto;padding:clamp(24px,6vw,40px);background:#fff;border:1px solid #dfded6;border-radius:20px}p{color:#656258}h1{font-size:clamp(26px,6vw,34px);line-height:1.15;letter-spacing:-.04em}a{display:inline-flex;align-items:center;min-height:44px;color:#994b2c;text-underline-offset:4px}a:focus-visible{outline:2px solid #994b2c;outline-offset:5px}</style></head>
+<body><main><strong>Muster</strong><h1>Give it a moment</h1><p>Too many sign-in attempts. Try signing in again in ${seconds} ${seconds === 1 ? "second" : "seconds"}.</p><p>Return to the desktop app to try again.</p><a href="/sign-in">Open web sign-in</a></main></body></html>`);
+      };
       // Pre-gate route that mints server state: throttle per client so an
       // anonymous loop over this URL can't grow the grants map unboundedly.
       if (!consumeEgressBucket(clientIpForLimiting(req))) {
-        return json(res, 429, { error: "too many sign-in attempts — wait a minute and try again" });
+        return rateLimited(60);
       }
       // Browser navigated here from the desktop app. Validate the loopback
       // target BEFORE spending anything, then bounce into Google with the
@@ -3852,12 +3860,23 @@ let requestUserEmail = "";
         // resolve from and mints a relative redirect_uri Google rejects.
         const host = req.headers.host ?? "127.0.0.1:8799";
         const proto = forwardedProtoOf(req);
+        const socialHeaders = new Headers({ "content-type": "application/json", origin: `${proto}://${host}` });
+        // Match toWebRequest: preserve the complete header for Better Auth's
+        // own IP validation. Never promote our outer limiter's CF/leftmost
+        // value into a single trusted IP, or discard a proxy chain.
+        const forwardedFor = req.headers["x-forwarded-for"];
+        if (forwardedFor !== undefined) {
+          socialHeaders.set("x-forwarded-for", Array.isArray(forwardedFor) ? forwardedFor.join(", ") : forwardedFor);
+        }
         const socialReq = new Request(`${proto}://${host}/api/auth/sign-in/social`, {
           method: "POST",
-          headers: { "content-type": "application/json", origin: `${proto}://${host}` },
+          headers: socialHeaders,
           body: JSON.stringify({ provider: "google", callbackURL: callback }),
         });
         const socialRes = await auth.handler(socialReq);
+        if (socialRes.status === 429) {
+          return rateLimited(desktopSignInRetrySeconds(socialRes.headers.get("x-retry-after")));
+        }
         // SAFETY: the sign-in/social endpoint answers {url, redirect} for an
         // OAuth provider; an unconfigured provider 404s into the catch below.
         const social = socialRes.ok ? ((await socialRes.json()) as { url?: string }) : null;

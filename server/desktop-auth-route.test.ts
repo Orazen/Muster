@@ -82,12 +82,43 @@ async function startFixture(googleConfigured = true): Promise<Fixture> {
   }
 }
 
-function desktopStart(fixture: Fixture, cookie?: string): Promise<Response> {
+function desktopStart(fixture: Fixture, cookie?: string, forwardedFor?: string): Promise<Response> {
   const query = new URLSearchParams({ redirect: "http://127.0.0.1:5199" });
+  const headers = new Headers();
+  if (cookie) headers.set("cookie", cookie);
+  if (forwardedFor !== undefined) headers.set("x-forwarded-for", forwardedFor);
   return fetch(`${fixture.base}/desktop-auth/start?${query}`, {
     redirect: "manual",
-    headers: cookie ? { cookie } : undefined,
+    headers,
   });
+}
+
+function socialStart(fixture: Fixture, forwardedFor: string): Promise<Response> {
+  return fetch(`${fixture.base}/api/auth/sign-in/social`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      "content-type": "application/json",
+      origin: fixture.base,
+      "x-forwarded-for": forwardedFor,
+    },
+    body: JSON.stringify({ provider: "google", callbackURL: "/app" }),
+  });
+}
+
+async function expectDesktopThrottle(response: Response, maxSeconds = 10): Promise<void> {
+  expect(response.status).toBe(429);
+  const retryAfter = response.headers.get("retry-after");
+  expect(retryAfter).toMatch(/^[1-9]\d*$/);
+  expect(Number(retryAfter)).toBeLessThanOrEqual(maxSeconds);
+  expect(response.headers.get("location")).toBeNull();
+  expect(response.headers.getSetCookie()).toHaveLength(0);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.headers.get("content-type")).toContain("text/html");
+  const body = await response.text();
+  expect(body).toContain("Give it a moment");
+  expect(body).toContain(`Try signing in again in ${retryAfter} ${Number(retryAfter) === 1 ? "second" : "seconds"}.`);
+  expect(body).not.toContain("Google sign-in is not available");
 }
 
 function authorization(response: Response, fixture: Fixture) {
@@ -146,6 +177,84 @@ posixOnly("desktop OAuth start route", () => {
     const second = authorization(await desktopStart(fixture, first.cookie), fixture);
     expect(second.state).not.toBe(first.state);
     expect(second.cookie).not.toBe(first.cookie);
+  });
+
+  it("retains the real three-attempt social throttle and gives the same client retry guidance", async () => {
+    const client = "198.51.100.10";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      authorization(await desktopStart(fixture, undefined, client), fixture);
+    }
+    await expectDesktopThrottle(await desktopStart(fixture, undefined, client));
+  });
+
+  it("keeps an independent single-IP client available after another client reaches its limit", async () => {
+    const limitedClient = "198.51.100.10";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      authorization(await desktopStart(fixture, undefined, limitedClient), fixture);
+    }
+    authorization(await desktopStart(fixture, undefined, "198.51.100.11"), fixture);
+    await expectDesktopThrottle(await desktopStart(fixture, undefined, limitedClient));
+  });
+
+  it("retains the outer ten-attempt gate with one-minute guidance before reaching social auth", async () => {
+    const invalidTarget = `${fixture.base}/desktop-auth/start?redirect=%2Fapp`;
+    const request = { redirect: "manual" as const, headers: { "x-forwarded-for": "198.51.100.13" } };
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const response = await fetch(invalidTarget, request);
+      expect(response.status).toBe(400);
+      expect(response.headers.getSetCookie()).toHaveLength(0);
+    }
+    const response = await fetch(invalidTarget, request);
+    expect(response.headers.get("retry-after")).toBe("60");
+    await expectDesktopThrottle(response, 60);
+    // Rejected targets never spend the social endpoint's independent budget.
+    expect((await socialStart(fixture, "198.51.100.13")).status).toBe(200);
+  });
+
+  it("shares a client's limit between the direct social route and the desktop wrapper", async () => {
+    const client = "198.51.100.12";
+    const first = await socialStart(fixture, client);
+    expect(first.status).toBe(200);
+    expect(first.headers.getSetCookie().some((cookie) => cookie.startsWith("better-auth.state="))).toBe(true);
+    authorization(await desktopStart(fixture, undefined, client), fixture);
+    expect((await socialStart(fixture, client)).status).toBe(200);
+    await expectDesktopThrottle(await desktopStart(fixture, undefined, client));
+    const directThrottle = await socialStart(fixture, client);
+    expect(directThrottle.status).toBe(429);
+    expect(directThrottle.headers.get("x-retry-after")).toMatch(/^[1-9]\d*$/);
+    expect(directThrottle.headers.getSetCookie()).toHaveLength(0);
+  });
+
+  it.each([
+    {
+      name: "absent IP headers",
+      headers: [undefined, undefined, undefined, undefined],
+    },
+    {
+      name: "different malformed IP headers",
+      headers: ["not-an-ip", "invalid-client", "999.2.3.4", "still-not-an-ip"],
+    },
+    {
+      name: "multi-value headers with different leftmost addresses",
+      headers: [
+        "198.51.100.21, 203.0.113.50",
+        "198.51.100.22, 203.0.113.50",
+        "198.51.100.23, 203.0.113.50",
+        "198.51.100.24, 203.0.113.50",
+      ],
+    },
+    {
+      name: "mixed unresolved header forms",
+      headers: [undefined, "invalid-client", "198.51.100.31, 203.0.113.50", "198.51.100.32, 203.0.113.50"],
+    },
+  ])("keeps $name in Better Auth's shared fallback bucket", async ({ headers }) => {
+    // Keep the original header intact: neither arbitrary values nor a chain's
+    // leftmost address establishes an identity under the installed auth policy.
+    for (const forwardedFor of headers.slice(0, 3)) {
+      authorization(await desktopStart(fixture, undefined, forwardedFor), fixture);
+    }
+    await expectDesktopThrottle(await desktopStart(fixture, undefined, headers[3]));
+    authorization(await desktopStart(fixture, undefined, "198.51.100.99"), fixture);
   });
 
   it("accepts its returned cookie at the real callback before handling provider cancellation", async () => {

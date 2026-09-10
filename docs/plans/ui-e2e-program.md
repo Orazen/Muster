@@ -90,7 +90,7 @@ The router contains nine explicit SPA route patterns plus its fallback.
 | `/claim#CODE` | Missing/malformed/expired/consumed code, fragment removal, session creation, `/app` navigation | Loop 7: missing/malformed/consumed recovery, fragment removal, previously anonymous real local claim → authenticated app, mock 503 retry and departure during/after request checked; nine recovery layouts at 320/390/1440px plus retry at 320px. Expiry covered by server tests; physical QR scanning and production redemption unverified |
 | `/app/*` | Auth gate, onboarding, reconnect, empty roster, No Engines, authenticated surfaces below | Local account/onboarding/reload and listed fake-ACP interactions checked; other states unverified |
 | `/os` | Bot and Rooms windows, open/focus/minimize/restore/close, drag/resize, command console, attention targets, Back to app | Unverified; browser shell and packaged Electron are separate checks |
-| `/desktop-auth/start?redirect=…`, `/desktop-auth/done?grant=…`, `/oauth/finish#code=…` | Invalid/expired grants, OAuth return, exchange, error recovery | Loop 8: 12 real local HTTP cases verify state cookie/signature, callback acceptance/rejection, repeated starts, invalid redirects, anonymous finish and missing provider. Existing 8 handoff unit cases pass. Full Google login, native browser handoff and deployed correction remain unverified |
+| `/desktop-auth/start?redirect=…`, `/desktop-auth/done?grant=…`, `/oauth/finish#code=…` | Invalid/expired grants, OAuth return, exchange, error recovery | Loops 8–9: 20 local HTTP cases cover cookies, callbacks, client/fallback buckets, shared direct/desktop limits, retry guidance and outer gate; 22 helper/lifecycle cases pass. Retry page checked at 320/390/1440px with pointer/keyboard recovery. Cookie forwarding is visible in production. Full Google login, native handoff and production throttle isolation remain unverified |
 | Unknown SPA route | Predictable fallback and preserved authentication state | Unverified |
 
 ## Authenticated surface matrix
@@ -228,12 +228,21 @@ retains throttling and passes all 12 cases. A production GET before this fix
 confirmed HTTP 302 to Google with zero cookies. Neither these tests nor that
 GET followed an external redirect or completed provider authentication.
 
-P2 follow-up from those failures: the wrapper converts upstream sign-in
-throttling into a generic HTTP 500 unavailable-provider response. Its internal
-request also carries no client IP header, while Better Auth falls back to one
-shared bucket when it cannot resolve a trusted IP. Verify distinct-client
-behavior and preserve rate-limit status/retry guidance in a separate slice;
-do not disable throttling to make tests or production sign-ins pass.
+Loop 9 preserves the complete original X-Forwarded-For header through the
+desktop wrapper, matching direct auth requests. It leaves Better Auth's IP
+validation and chain handling intact; it does not promote the outer limiter's
+Cloudflare/leftmost value into an auth identity. Local tests show distinct
+accepted single-IP clients have separate limits, direct/desktop routes share
+a client's budget, and missing/malformed/multi-value headers retain the shared
+fallback. Production proxy topology is still unverified.
+
+Upstream throttling now returns HTTP 429 with validated Retry-After seconds,
+no-store and a readable recovery page. The outer ten-attempt gate remains
+enabled and returns one-minute guidance. Pointer/keyboard recovery and three
+final viewport layouts passed. Automated HTTP tests followed no external
+redirects; one initial browser fixture attempt did reach Google's
+invalid-client page, completing no login. It was repeated behind a local
+proxy that blocks external redirects. These checks do not complete OAuth.
 
 Keep `/pair` recovery separate: its error branch hides the retry action,
 clipboard rejection is unhandled, and the UI's New code label promises
