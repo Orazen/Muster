@@ -62,7 +62,8 @@
 
     <h2>Desktop downloads</h2>
     <p>Five artifacts, all on the <a href="/download.html">download page</a>. The download page detects your platform and moves the matching card to the top.</p>
-    <table>
+    <div class="table-scroll" role="region" tabindex="0" aria-label="Desktop downloads table">
+<table>
       <tr><th>Platform</th><th>Artifact</th><th>Install</th></tr>
       <tr><td>macOS — Apple Silicon</td><td><a href="https://muster.orazen.online/downloads/Muster.dmg"><code>Muster.dmg</code></a></td><td>Drag to Applications.</td></tr>
       <tr><td>macOS — Intel</td><td><a href="https://muster.orazen.online/downloads/Muster-intel.dmg"><code>Muster-intel.dmg</code></a></td><td>Same as above.</td></tr>
@@ -70,6 +71,7 @@
       <tr><td>Ubuntu / Debian (x64)</td><td><a href="https://muster.orazen.online/downloads/Muster.deb"><code>Muster.deb</code></a></td><td><code>sudo dpkg -i Muster.deb</code></td></tr>
       <tr><td>Linux — any distro (x64)</td><td><a href="https://muster.orazen.online/downloads/Muster.AppImage"><code>Muster.AppImage</code></a></td><td><code>chmod +x Muster.AppImage &amp;&amp; ./Muster.AppImage</code></td></tr>
     </table>
+    </div>
     <div class="callout">
       <span class="callout__mark">Homebrew</span>
       <span>On Apple Silicon Macs, <code>brew tap orazen/muster &amp;&amp; brew install --cask muster</code> installs Muster and clears the quarantine flag automatically — no Gatekeeper prompt.</span>
@@ -102,7 +104,8 @@ chmod +x muster
     <p>Pairing uses the same claim flow as the web console: start the server, scan the QR code it prints (or open the <code>/claim#…</code> link), and the phone is in as your device. Claim codes are single-use and expire after 5 minutes. Every sign-in is a tracked session — <code>muster sessions</code> lists them, <code>muster sessions --revoke other</code> kills every device but the one you're on.</p>
 
     <h2>System requirements</h2>
-    <table>
+    <div class="table-scroll" role="region" tabindex="0" aria-label="System requirements table">
+<table>
       <tr><th>Platform</th><th>Requirement</th><th>Notes</th></tr>
       <tr><td>macOS</td><td>Apple Silicon or Intel Mac</td><td>Full capability set, including on-device dictation and local screen control.</td></tr>
       <tr><td>Windows</td><td>64-bit Windows</td><td>Per-user install, no admin.</td></tr>
@@ -110,6 +113,7 @@ chmod +x muster
       <tr><td>CLI (<code>muster</code> — the single-file script above, or <code>node cli/muster.mjs</code> from a checkout)</td><td>Node 22+</td><td>Any machine with Node — including a VPS over SSH.</td></tr>
       <tr><td>Engines</td><td>At least one agent CLI logged in, or one API provider key</td><td>Engines appear in the picker automatically; a free-tier provider key costs nothing.</td></tr>
     </table>
+    </div>
 
     <div class="callout callout--note">
       <span class="callout__mark">i</span>

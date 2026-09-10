@@ -80,13 +80,13 @@
   }
   .site-header__left, .site-header__right, .site-nav { display: flex; align-items: center; }
   .site-header__left { gap: 40px; }
-  .site-header__right { gap: 12px; }
+  .site-header__right { gap: 12px; flex-shrink: 0; }
   .site-nav { gap: 26px; color: var(--muted); font-size: 15px; }
   .site-nav a { transition: color 150ms ease; }
   .site-nav a:hover, .site-nav a:focus-visible { color: var(--ink); }
 
-  .brand-lockup { display: inline-flex; align-items: center; gap: 9px; }
-  .brand-lockup__mark { width: 30px; height: 30px; border-radius: 8px; }
+  .brand-lockup { display: inline-flex; align-items: center; gap: 9px; flex-shrink: 0; }
+  .brand-lockup__mark { width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0; }
   .brand-lockup__word {
     color: var(--ink); font-size: 19px; font-weight: 600; letter-spacing: -0.02em;
   }
@@ -114,7 +114,8 @@
   .site-menu[open] .site-menu__icon--close { display: block; }
   .site-menu__panel {
     position: absolute; right: 0; top: calc(100% + 10px); z-index: 40;
-    display: flex; flex-direction: column; min-width: 208px;
+    display: flex; flex-direction: column; width: min(240px, calc(100vw - 32px));
+    max-height: calc(100dvh - 96px); overflow-y: auto; overscroll-behavior: contain;
     border: 1px solid var(--line-2); border-radius: 16px;
     background: var(--surface-raised); padding: 8px;
     box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
@@ -125,7 +126,7 @@
   /* ---------- buttons ---------- */
   .button {
     display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-    min-height: 48px; padding: 0 22px;
+    min-height: 48px; max-width: 100%; padding: 10px 22px; text-align: center;
     border: 1px solid transparent; border-radius: 14px;
     font-size: 16px; font-weight: 500;
     transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease, border-color 180ms ease, color 180ms ease;
@@ -185,10 +186,10 @@
 
   .hero__agent-setup { display: flex; justify-content: center; margin-top: 14px; }
   .setup-copy {
-    display: inline-flex; min-height: 42px; align-items: center; justify-content: center;
-    gap: 10px; padding: 0 16px; border: 0; border-radius: 12px;
+    display: inline-flex; min-height: 42px; max-width: 100%; align-items: center; justify-content: center;
+    gap: 10px; padding: 10px 16px; border: 0; border-radius: 12px;
     background: transparent; color: var(--muted);
-    font: 500 14px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font: 500 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     letter-spacing: -0.02em;
     transition: color 150ms ease;
   }
@@ -261,7 +262,7 @@
   .engine-tags { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 40px; }
   .engine-tag {
     border: 1px solid var(--line); background: var(--surface-raised); color: var(--body);
-    padding: 8px 16px; border-radius: 999px; font-size: 13.5px; font-weight: 500;
+    padding: 8px 16px; max-width: 100%; overflow-wrap: anywhere; border-radius: 999px; font-size: 13.5px; font-weight: 500;
     transition: border-color 180ms ease, color 180ms ease;
   }
   .engine-tag:hover { border-color: var(--accent-line); color: var(--ink); }
@@ -321,7 +322,7 @@
     border: 1px dashed var(--line-2); border-radius: 14px; background: var(--surface);
     font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; font-size: 13.5px;
   }
-  .install-line code { background: transparent; color: var(--ink); padding: 0; font-size: 13.5px; }
+  .install-line code { min-width: 0; overflow-wrap: anywhere; background: transparent; color: var(--ink); padding: 0; font-size: 13.5px; }
   .install-line button {
     margin-left: auto; border: 1px solid var(--line); border-radius: 10px;
     background: transparent; color: var(--muted); font-size: 12.5px; padding: 6px 12px;
@@ -393,6 +394,11 @@
   .site-footer__links a:hover, .site-footer__links a:focus-visible { color: var(--ink); }
 
   /* ---------- responsive ---------- */
+  @media (max-width: 1100px) {
+    .site-nav, .site-header__cta .button--secondary { display: none; }
+    .site-header__cta { display: flex; }
+    .site-menu { display: block; }
+  }
   @media (max-width: 1000px) {
     .card-grid-3, .comparison-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .card-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -400,9 +406,11 @@
   }
   @media (max-width: 760px) {
     .container { width: calc(100% - 32px); }
-    .site-nav, .site-header__cta .button--secondary { display: none; }
-    .site-header__cta { display: flex; }
-    .site-menu { display: block; }
+    .site-header { gap: 12px; }
+    .site-header__left { gap: 0; }
+    .site-header__right { gap: 8px; }
+    .site-header__right .star-pill { display: none; }
+    .site-header__cta .button--small { padding-inline: 12px; }
     .section { padding-top: 76px; }
     .hero { padding-top: 32px; }
     .hero__pill { font-size: 12.5px; }
@@ -410,8 +418,11 @@
     .hero__actions, .cta-actions, .comparison-actions { flex-direction: column; align-items: stretch; }
     .hero__actions .button { width: 100%; }
     .card-grid-3, .card-grid-4, .comparison-grid, .stats-grid { grid-template-columns: minmax(0, 1fr); }
-    .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stats-band { padding: 24px; }
+    .stats-grid { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 16px; }
+    .stat-value { font-size: clamp(24px, 5vw, 30px); overflow-wrap: anywhere; }
     .download-row { flex-direction: column; align-items: flex-start; gap: 12px; }
+    .download-row a { white-space: normal; }
     .site-footer { flex-direction: column; }
     .site-footer__brand, .site-footer__links { padding-top: 0; }
   }
@@ -488,7 +499,7 @@
     <section class="hero">
       <a class="hero__pill" href="#local-first">
         <span class="hero__badge">BSL 1.1</span>
-        <span>Source-available, local-first<span class="hero__pill-tail"> — runs entirely on your own machine</span></span>
+        <span>Source-available, local-first<span class="hero__pill-tail"> — run the server on your own machine</span></span>
       </a>
       <h1>Muster <span class="accent">your agents.</span></h1>
       <p class="lead">
@@ -524,7 +535,7 @@
         <div class="feature-card">
           <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">01</span>
           <h3>Boot the harness</h3>
-          <p>Install the desktop app, or run <code>muster up</code>. One small server on your machine owns every agent process — nothing phones home.</p>
+          <p>Install the desktop app, or run <code>muster up</code>. Your local server manages the bots; you choose their engines and connected services.</p>
         </div>
         <div class="feature-card">
           <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">02</span>
@@ -539,7 +550,7 @@
         <div class="feature-card">
           <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">04</span>
           <h3>Run the team</h3>
-          <p>Chat from desktop, web, phone, or terminal. Routines put work on a schedule; receipts and scorecards prove it got done.</p>
+          <p>Chat from desktop, web, phone, or terminal. Routines put work on a schedule; receipts and scorecards help you review the results.</p>
         </div>
       </div>
     </section>
@@ -588,7 +599,7 @@
         <article class="feature-card">
           <div class="feature-card__icon" aria-hidden="true">🗄️</div>
           <h3>Vaultgram backups, built in</h3>
-          <p>Your whole Google account — Drive, Photos, Gmail — mirrored AES-256-encrypted into your own private Telegram channel. One click to restore, every byte hash-verified. No competitor restores.</p>
+          <p>Pair Vaultgram with your Telegram channel to back up files, sync Google Drive, or import an extracted Google Takeout archive. Browse saved files and restore them from Settings → Vault. Setup is required.</p>
         </article>
         <article class="feature-card">
           <div class="feature-card__icon" aria-hidden="true">📦</div>
@@ -598,7 +609,7 @@
         <article class="feature-card">
           <div class="feature-card__icon" aria-hidden="true">🧾</div>
           <h3>Bots with receipts</h3>
-          <p>Every task ends with a job receipt: what was done, how long it took, exactly what it cost in tokens. Proof-of-work you can copy and paste anywhere — your agents show their work.</p>
+          <p>Open a task receipt to review recorded turns, duration, token usage, and cost when the engine reports it. Copy the receipt to share the record with your team.</p>
         </article>
       </div>
     </section>
@@ -712,8 +723,8 @@
           <p>Bots run on the AI CLIs already installed and logged in on your machine. Your existing subscriptions, no proxy in the middle.</p>
         </article>
         <article class="feature-card">
-          <h3>Nothing phones home</h3>
-          <p>No telemetry pipeline, no account required to run it. The harness only talks to the engines you point it at.</p>
+          <h3>Choose what you connect</h3>
+          <p>Run the server locally and choose your model engines and integrations. Cloud models, connected apps, backups, and other online features can send requests to external services.</p>
         </article>
         <article class="feature-card">
           <h3>An audit log you own</h3>
@@ -888,7 +899,7 @@
         <article class="feature-card">
           <div class="feature-card__icon" aria-hidden="true">🧾</div>
           <h3>Receipts per task</h3>
-          <p>When a task ends you get a receipt: turns, tokens, and cost — proof-of-work you can paste into a standup note or an invoice.</p>
+          <p>Review a task's recorded turns and usage, with cost when the engine reports it. Copy the receipt into a standup note alongside the result.</p>
         </article>
         <article class="feature-card">
           <div class="feature-card__icon" aria-hidden="true">🔁</div>
@@ -1129,7 +1140,7 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
       <div style="max-width:660px;margin:36px auto 0;">
         <div style="display:flex;gap:14px;margin-bottom:22px;">
           <span style="font-size:22px;font-weight:bold;color:rgba(255,255,255,.08);flex-shrink:0;">01</span>
-          <div><strong style="color:#f6f6f7;font-size:15px;">Your machine is the boundary</strong><p style="margin-top:4px;color:#98989e;font-size:13.5px;line-height:1.6;">Every agent process, transcript, and credential lives in ~/.muster on your disk. No cloud copy exists unless you create one.</p></div>
+          <div><strong style="color:#f6f6f7;font-size:15px;">Choose where the server runs</strong><p style="margin-top:4px;color:#98989e;font-size:13.5px;line-height:1.6;">A local install stores Muster's data in ~/.muster by default. Keep track of your bots' working folders too, and choose which model providers and online services they connect to.</p></div>
         </div>
         <div style="display:flex;gap:14px;margin-bottom:22px;">
           <span style="font-size:22px;font-weight:bold;color:rgba(255,255,255,.08);flex-shrink:0;">02</span>
@@ -1187,10 +1198,10 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
 <section id="compare" class="section">
   <div class="section-intro">
     <div class="eyebrow">Compare</div>
-    <h2 class="section-heading">Four teams are building this. Here’s the honest difference.</h2>
+    <h2 class="section-heading">Compare the documented features.</h2>
     <p class="section-copy">
-      Every fact below is taken from each project’s public README, checked line by line.
-      Where a README doesn’t answer, the cell stays empty instead of guessing.
+      This table summarizes an August 2026 snapshot of public READMEs.
+      A dash means the feature was not documented in that snapshot, not that the product lacks it.
     </p>
   </div>
 
@@ -1325,8 +1336,8 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
   </div>
 
   <!-- Required footnote -->
-  <p style="margin-top:16px;color:var(--muted-2);font-size:13px;">Compared from public READMEs Aug 2026 — corrections welcome.</p>
-  <p style="margin-top:10px;color:var(--muted-2);font-size:13px;">Also studied Sep 2026, same method: Buzz (Block), Multica, Omnigent, the Macro workspace suite, NanoClaw, OpenWork, Eigent and Cherry Studio — none combines agents-with-identity, rooms, verifiable signed receipts, BYO-any-endpoint and cloud computers on every surface. Full field notes live in the <a href="/docs" style="color:var(--accent-soft);">docs</a>.</p>
+  <p style="margin-top:16px;color:var(--muted-2);font-size:13px;">README comparison, August 2026. Features and availability may have changed; this is not a runtime benchmark.</p>
+  <p style="margin-top:10px;color:var(--muted-2);font-size:13px;">Start with the workflows you need: setting up a bot, reviewing an approval, and checking the result. The <a href="/docs" style="color:var(--accent-soft);">Muster guides</a> explain how to try them.</p>
 </section>
 
   </main>
@@ -1409,7 +1420,11 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
       if (menu.open && !menu.contains(event.target)) menu.open = false;
     });
     document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape") menu.open = false;
+      if (event.key === "Escape" && menu.open) {
+        event.preventDefault();
+        menu.open = false;
+        menu.querySelector("summary").focus();
+      }
     });
   })();
 

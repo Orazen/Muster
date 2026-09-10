@@ -1,6 +1,6 @@
 # Muster UI and E2E audit program
 
-**Status: 2026-09-10, conversation and Settings slices verified locally.** This is the inventory
+**Status: 2026-09-10, conversation, Settings, and public-page slices verified locally.** This is the inventory
 for the board's request to improve and exercise every page and major feature
 on web, desktop, and mobile. Track **route × state × device**, rather than
 treating a page opening as proof that every feature on it works.
@@ -48,6 +48,19 @@ belong in [ceo-log.md](ceo-log.md). Unlisted outcomes remain unverified.
   slice, separately from the 45 layout checks. Settings focused tests:
   **4 files / 33 passed / 0 skipped**; final full suite:
   **185 files / 1829 passed / 8 skipped**, 179.76 seconds.
+- **Public pages:** all **14 HTML pages** rendered and fit at **320×568,
+  390×844, and 1440×900**: **42 layout checks**, with no broken images
+  detected after load. Fixed five initial overflow failures (homepage,
+  Install, Quick start, For agents, Self-hosting). Nine named browser
+  interactions cover table keyboard scrolling, mobile menu/Escape/focus,
+  menu-to-docs, setup/install copying, Docker anchor, FAQ, docs navigation,
+  and missing-page recovery. Static inspection covered **284 internal links,
+  38 known-page fragments, and 2 parsed inline scripts**, with no detected
+  fragment/ID/script failures; this is not 284 runtime link checks.
+- **Release links:** six production download URLs returned **HTTP 200** and
+  non-HTML content through GET, reading only their first 64 bytes. This
+  verifies reachability, not archive integrity, current-source freshness,
+  signing, installation, or successful application launch.
 - **Native iOS, Watch, Android, and packaged Electron checks have not run
   in this program.** Web viewport checks cannot substitute for them.
 - Production GET verification first found the account-entry release
@@ -66,10 +79,10 @@ The router contains nine explicit SPA route patterns plus its fallback.
 
 | Route | Required interactions and states | Current evidence / dependency |
 | --- | --- | --- |
-| `/` | Marketing navigation, mobile menu, app/download links; packaged SPA root redirect | Unverified in this slice; distinguish deployment modes |
-| `/download.html`, `/teams.html`, `/switch.html` | Narrow layout, navigation, download/catalog links, installation handoff | Unverified; installer behavior needs platform checks |
+| `/` | Marketing navigation, mobile menu, app/download links; packaged SPA root redirect | Public page layout at three widths; mobile menu/Escape, copy controls, FAQ and Docker handoff checked; packaged root redirect separately unverified |
+| `/download.html`, `/teams.html`, `/switch.html` | Narrow layout, navigation, download/catalog links, installation handoff | Three-width layouts checked; Docker anchor works; six release URLs reachable by GET. Catalog/install and native behavior remain unverified |
 | `/bots` | Team directory loading, unavailable state, install handoff | Unverified; catalog service is external |
-| `/docs`, `/docs/install`, `/docs/quick-start`, `/docs/engines`, `/docs/agents`, `/docs/approvals`, `/docs/automation`, `/docs/goals`, `/docs/security`, `/docs/self-host` | All navigation, readable code/tables, mobile overflow, unknown-page 404; `.html` aliases | Unverified rendered UI; existing server tests cover routing |
+| `/docs`, `/docs/install`, `/docs/quick-start`, `/docs/engines`, `/docs/agents`, `/docs/approvals`, `/docs/automation`, `/docs/goals`, `/docs/security`, `/docs/self-host` | All navigation, readable code/tables, mobile overflow, unknown-page 404; `.html` aliases | All ten guides fit at three widths; sidebar navigation, keyboard table scroll and missing-page recovery checked; existing server tests cover routing |
 | `/sign-in?next=…&authError=…` | Email login, error feedback, recovery links, password visibility, return destination, sign-out/re-entry, capability variants | Local wrong/correct email login and sign-out checked; remaining variants unverified; real Google requires provider account/consent |
 | `/sign-up?next=…&ref=…` | Account creation, invalid inputs, existing account, disabled signup, referral preservation | Local email signup checked; remaining states unverified; Google-only and verification delivery need their services |
 | `/forgot-password`, `/reset-password?token=…` | Neutral response, missing/invalid/expired/reused token, mismatch, successful reset and subsequent login | Unverified in this slice; disposable mail fixture can test app logic, real delivery needs email service |
@@ -145,6 +158,18 @@ path is not the current checkout location.
 | Android | PairingScreen, ChatListScreen, ChatViewScreen; unpair action in roster | Emulator/device navigation, keyboard/safe areas, QR, streaming/reconnect, decisions; no separate Settings screen is declared by current `App.tsx` |
 | Electron | Web shell plus native auth bridge, updates, companion, local capabilities | Packaged launch/relaunch, native window controls, filesystem/dialog/permission behavior and local OAuth return |
 
+Read-only toolchain inventory: Xcode 26.6, Swift 6.3.3, XcodeGen, eleven
+available iOS 26.5 and five watchOS 26.5 simulator devices are present; all
+were shutdown. Android SDK/API images, Java 17, installed Expo dependencies,
+and an existing AVD are available, but three referenced artwork files and
+the configured `jest-expo` preset are missing. The development Electron
+binary is missing; installed/release applications exist but their source
+freshness is unverified. This inventory ran **0 tests/builds/native UI
+checks** and installed or launched nothing. Begin native verification with
+`swift test --package-path ios`, then the explicit simulator build/manual
+steps in `ios/TESTING.md`; core tests are not SwiftUI coverage. Establish
+isolated Electron userData as well as OMB_DATA_DIR before native launch.
+
 `ios/TESTING.md` separates core tests, desktop sidecar, simulator, physical
 phone, and off-network pairing. Follow that distinction. Historical Swift
 test/build results are useful regression evidence, but do not validate this
@@ -185,10 +210,10 @@ slice's native UI. No checked-in native UI test suite was found in the audit.
 2. **Public routes and entry-state completeness.** Sweep marketing/docs and
    auth/pair/claim recovery states using isolated accounts and fixtures.
    Repair the misleading transcript E2E case and preserve an explicit record
-   of what the Google test does and does not cover. A read-only static sweep
-   of fourteen public HTML files found a missing `/download.html#docker`
-   anchor. Correct unsupported network, backup, license, and competitive
-   claims without changing pricing. Source has a PostHog integration but no
+   of what the Google test does and does not cover. The public-page slice fixed the Docker
+   anchor, mobile overflows, and selected unsupported network, backup,
+   license, receipt, and competitive claims while preserving Muster pricing.
+   Remaining feature claims need their own source/runtime verification. Source has a PostHog integration but no
    current `initAnalytics()` caller was found; actual transmission remains
    unverified. Avoid claiming either active telemetry or no external traffic.
 3. **Workspace operations.** Verify roster, group chat, Teams import,

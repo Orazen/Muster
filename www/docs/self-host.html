@@ -82,7 +82,8 @@ docker compose up -d
 
     <h2>Configuration</h2>
     <p>All settings are environment variables on the <code>muster</code> service. The essentials:</p>
-    <table>
+    <div class="table-scroll" role="region" tabindex="0" aria-label="Configuration table">
+<table>
       <tr><th>Variable</th><th>Default</th><th>What it does</th></tr>
       <tr><td><code>OMB_HOST</code></td><td><code>127.0.0.1</code></td><td>Bind host for the harness + UI. The image sets <code>0.0.0.0</code> (self-hosted).</td></tr>
       <tr><td><code>OMB_PORT</code></td><td><code>8799</code></td><td>Port the service listens on.</td></tr>
@@ -97,6 +98,7 @@ docker compose up -d
       <tr><td><code>GITHUB_CLIENT_ID</code> / <code>GITHUB_CLIENT_SECRET</code></td><td>*(unset)*</td><td>Enables "Sign in with GitHub". Both halves required. Callback: <code>$OMB_PUBLIC_URL/api/auth/callback/github</code>.</td></tr>
       <tr><td><code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code></td><td>*(unset)*</td><td>Enables "Sign in with Google". Callback: <code>$OMB_PUBLIC_URL/api/auth/callback/google</code>.</td></tr>
     </table>
+    </div>
     <p>Provider and integration credentials can also be pre-seeded via env instead of pasted in Settings: <code>XAI_API_KEY</code>, <code>COMPOSIO_API_KEY</code>, <code>BOX_TOKEN</code>, <code>OPENCODE_API_KEY</code>, <code>OMB_TTS_KEY</code> (ElevenLabs). They're all optional.</p>
 
     <h2>Security model</h2>

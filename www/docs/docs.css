@@ -47,6 +47,10 @@ body::before {
 
 a { color: var(--accent-soft); text-decoration: none; }
 a:hover { text-decoration: underline; }
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 4px;
+}
 
 /* ── top bar ─────────────────────────────────────────────────────────── */
 
@@ -166,7 +170,8 @@ a:hover { text-decoration: underline; }
   font-weight: 600;
 }
 
-.docs-content { min-width: 0; max-width: 860px; }
+.docs-content { min-width: 0; max-width: 860px; overflow-wrap: anywhere; }
+.docs-content [id] { scroll-margin-top: 90px; }
 
 /* ── content typography ──────────────────────────────────────────────── */
 
@@ -219,7 +224,7 @@ code {
   border-radius: 6px;
   padding: 1.5px 6px;
   color: var(--ink);
-  white-space: nowrap;
+  white-space: normal;
 }
 
 pre {
@@ -241,11 +246,18 @@ pre code {
 }
 pre code .c { color: var(--muted-2); } /* comment lines */
 
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
 table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13.5px;
-  margin: 0 0 18px;
+  margin: 0;
 }
 th, td {
   text-align: left;
@@ -301,6 +313,7 @@ td code { white-space: nowrap; }
 }
 .callout--note { background: var(--surface); border-color: var(--line); }
 .callout__mark { color: var(--accent-soft); font-weight: 700; flex-shrink: 0; }
+.callout > :last-child { min-width: 0; }
 
 .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 26px; }
 .pill {
@@ -352,4 +365,10 @@ td code { white-space: nowrap; }
   .docs-content h1 { font-size: 27px; }
   .docs-header { padding: 12px 18px; }
   .docs-header__links > a:not(.button) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .card, .button { transition: none; }
+  .card:hover { transform: none; }
 }

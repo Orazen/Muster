@@ -99,7 +99,8 @@ curl -b muster-cookies.txt -X POST "{DESKTOP}/api/bots/{BOT_ID}/messages" \
 
     <h2>The API surface</h2>
     <p>The endpoints skill.md documents, all under the same session auth as the app:</p>
-    <table>
+    <div class="table-scroll" role="region" tabindex="0" aria-label="The API surface table">
+<table>
       <tr><th>Endpoint</th><th>What it's for</th></tr>
       <tr><td><code>GET /api/bots?messages=0</code></td><td>roster</td></tr>
       <tr><td><code>GET /api/bots/{id}</code></td><td>one bot + recent thread</td></tr>
@@ -111,6 +112,7 @@ curl -b muster-cookies.txt -X POST "{DESKTOP}/api/bots/{BOT_ID}/messages" \
       <tr><td><code>GET /api/routines</code></td><td>scheduled work</td></tr>
       <tr><td><code>POST /api/pair/redeem</code></td><td>pairing-code sign-in</td></tr>
     </table>
+    </div>
 
     <h2>The CLI, if curl is overkill</h2>
     <p>The Muster CLI mirrors the API: <code>muster setup | pair | bots | send &lt;bot&gt; &lt;text&gt; | approve [allow|deny] | status | receipts | sessions</code>, with machine-readable <code>--json</code> output on <code>bots</code>, <code>status</code>, <code>receipts</code>, and <code>sessions</code>. <code>muster setup</code> is the guided first run — it connects to (or boots) the local server, signs in as the owner, picks an engine, and introduces the first bot.</p>

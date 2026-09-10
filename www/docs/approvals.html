@@ -70,11 +70,13 @@
     <p>Re-approving <code>git status</code> forty times a day isn't governance, it's friction. Pressing <strong>Always allow</strong> on a card grants standing permission per capability — and the grant is as narrow as the thing you actually looked at. Command tools are scoped by program: allowing <code>Bash:git</code> never hands the bot a permanent unattended shell.</p>
     <p>The grant's key is computed once, server-side, and echoed back to the client, so the two sides can never disagree about what was granted.</p>
     <p>Even with a standing grant, anything that reads as destructive stops and asks a human anyway:</p>
-    <table>
+    <div class="table-scroll" role="region" tabindex="0" aria-label="Always-allow scopes table">
+<table>
       <tr><th>Backstop</th><th>What trips it</th></tr>
       <tr><td>Destructive</td><td><code>rm -rf</code>, <code>mkfs</code>, <code>shutdown</code>/<code>reboot</code>, fork bombs, <code>git push --force</code>, <code>git reset --hard</code>, <code>DROP TABLE</code>, <code>sudo rm</code>, <code>chmod -R 777 /</code></td></tr>
       <tr><td>Sensitive</td><td><code>.env</code> files, <code>.ssh</code> keys, <code>.aws/credentials</code>, <code>.netrc</code>, keychain access, service-account and credentials files — reads that are quiet, permanent, and unrecoverable</td></tr>
     </table>
+    </div>
     <div class="callout">
       <span class="callout__mark">In plain terms:</span>
       <span>This backstop is deliberately literal. It is not a security boundary — an agent set on damage has a thousand spellings for <code>rm</code>. It's a "you probably didn't mean to hand <em>this</em> one over unattended" guard for the obvious catastrophes. Real containment is the sandbox and the bot's own computer.</span>
@@ -105,13 +107,15 @@ Bash history: 4 allowed, 2 denied (last 5d ago).</code></pre>
 
     <h2>Claiming a workspace is gated</h2>
     <p><code>muster up</code> boots the server and prints a QR code encoding <code>http://&lt;lan-ip&gt;:8799/claim#CODE</code>. Scanning it signs your phone in as the owner — no account creation, no password to invent. The code <em>is</em> the credential, and it's engineered to be worthless to anyone else:</p>
-    <table>
+    <div class="table-scroll" role="region" tabindex="0" aria-label="Claiming a workspace is gated table">
+<table>
       <tr><th>Property</th><th>What it means</th></tr>
       <tr><td>Single-use</td><td>Redeemed once, then dead.</td></tr>
       <tr><td>Five-minute TTL</td><td>Expired before a stranger could act on it.</td></tr>
       <tr><td>Unambiguous alphabet</td><td>8 characters, no <code>0/O/1/I/L</code> — built to be read off a laptop screen by a phone camera. About 2<sup>40</sup> of entropy.</td></tr>
       <tr><td>Per-IP lockout</td><td>Five failed redemption attempts lock that IP out for ten minutes.</td></tr>
     </table>
+    </div>
     <p>The pairing itself never leaves your network. A claim code never redeems as a pairing code or vice versa — the two flows keep separate stores, so one front door can't be confused with the other.</p>
     <p>Servers tighten further once exposed. The default is loopback-only: non-loopback hosts and origins are rejected (DNS-rebinding and CSRF protection), and on a desktop install, state-changing requests must carry a same-origin Origin/Host pair. Expose a self-hosted server and every <code>/api/*</code> route requires a session — only sign-in and health checks are excepted — with sign-in rate-limited to five attempts per minute per IP and passwords of at least twelve characters.</p>
     <p>Sessions stay revocable: <code>muster sessions</code> lists every active sign-in (current one marked), and <code>muster sessions --revoke</code> kills one device, all the others, or everything.</p>

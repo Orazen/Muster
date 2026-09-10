@@ -278,3 +278,64 @@ workspace, work-lifecycle, and native client checks in
 found a missing Docker anchor and unsupported network/backup/license/competitor
 claims. Correct those in a separate slice without changing live pricing.
 Hosted Actions billing remains a previously reported board item.
+
+
+## Loop 6 — 2026-09-10 — Readable public pages and accurate handoffs
+
+Audited all fourteen public HTML pages. The first 320px sweep found five
+horizontal overflow failures: homepage 409px, Install 704px, Quick start
+381px, For agents 813px, and Self-hosting 737px. The homepage now keeps the
+brand, primary Download action and Menu reachable; secondary navigation sits
+inside a bounded scrolling menu with Escape/focus return. Nine reference
+tables sit in labeled keyboard-focusable scroll regions. Inline code and
+callouts wrap without widening the guide; focus styles and reduced-motion
+handling apply across the docs.
+
+Corrected unsupported network/storage, complete-Google-backup, receipt-cost,
+license and exclusive-capability claims. The comparison identifies its
+August README snapshot and explains missing evidence. Removed unverified
+blanket competitor characterizations and historical competitor price claims
+from Switch; published Muster pricing is unchanged. Restored the actual
+Docker anchor. These are selected claim corrections, not certification of
+every remaining marketing statement. No pricing, billing or payment wiring
+was activated or changed.
+
+Verification: **42 public-page render/layout checks passed** (14 pages at
+**320×568, 390×844 and 1440×900**), with **0 broken images detected** after
+load. **9 focused hands-on browser interactions passed:** keyboard table
+scrolling, bounded mobile menu/Escape/focus, mobile menu-to-docs, setup-prompt
+copy, install-command copy, Docker guide anchor, FAQ disclosure, guide
+navigation, and missing-document recovery. These are browser-driven checks,
+not automated Playwright case counts. Installer execution, live catalog
+imports, external integrations, and all auth/native workflows remain separate.
+
+Static inspection of **14 HTML files / 284 internal links / 38 known-page
+fragments / 2 inline scripts** found **0 detected fragment, duplicate-ID or
+script-parse failures**. Those are static checks, not 284 runtime navigations.
+The homepage pricing section matches the preceding commit exactly. GET
+checks of the six published desktop/CLI artifact URLs returned **6 HTTP 200
+responses with non-HTML content**, reading only the first 64 bytes. This is
+reachability evidence only: no installation, full download, checksum,
+current-source freshness or signing result is claimed.
+
+Focused routing tests: **1 file / 6 passed / 0 skipped**, **5.13 seconds**.
+Final full Vitest suite: **185 files / 1829 passed / 8 skipped**,
+**169.01 seconds**. Both typechecks and diff checks passed. Two inline scripts
+parsed successfully. Marketing HTML/CSS are served directly; the unchanged
+application bundle already passed the preceding slice's Vite build.
+
+The native toolchain inventory ran **0 tests / 0 builds / 0 native UI checks**.
+iOS/Watch simulator toolchains are available. Android references missing
+assets and an absent test preset; development Electron lacks its binary.
+Installed native applications have unverified source freshness. These are
+next-slice prerequisites, recorded in `docs/plans/ui-e2e-program.md`.
+
+Commercial implication: phone visitors can reach navigation, read setup
+instructions, and follow a working installation handoff. Corrected claims
+set more accurate expectations. No conversion or revenue lift is claimed.
+
+Next pick: auth recovery/pair/claim states, repair the misleading transcript
+E2E case, then native simulator verification and the remaining workspace
+matrix one bounded slice at a time. GET verification of the Settings/public
+releases remains pending; do not create duplicate deployment triggers while
+hosted Actions billing is blocked.

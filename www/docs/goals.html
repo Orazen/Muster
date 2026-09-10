@@ -92,7 +92,8 @@ bot:      round 3 — writes up the report with evidence…      GOAL COMPLETE
     <p>While a goal runs on the conversation, the <strong>goal banner</strong> sits above the composer: <code>Goal · round N/M</code>, the goal text, and a <strong>Stop</strong> button. Stop ends the loop immediately, no further rounds dispatch, and the run records that it was <strong>stopped by the user</strong> — you get the honest status, not a pretend completion. The banner plus the usage chip beside it always show what the goal is and what it's spending.</p>
 
     <h2>Goal outcomes</h2>
-    <table>
+    <div class="table-scroll" role="region" tabindex="0" aria-label="Goal outcomes table">
+<table>
       <thead>
         <tr><th>Status</th><th>What it means</th></tr>
       </thead>
@@ -103,6 +104,7 @@ bot:      round 3 — writes up the report with evidence…      GOAL COMPLETE
         <tr><td><code>failed</code></td><td>The turn never started (bot gone, dispatch error) — the outcome carries the reason.</td></tr>
       </tbody>
     </table>
+    </div>
 
     <h2>Goal mode or normal turns?</h2>
     <ul>

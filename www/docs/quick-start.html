@@ -51,7 +51,7 @@
   <main class="docs-content">
 
     <h1>Quick start</h1>
-    <p class="lead">From zero to a working workforce in about ten minutes: install Muster, start the local server, claim the workspace from your phone, give a bot an engine, and send your first message. Everything below runs on your machine — no account signup, no cloud dependency.</p>
+    <p class="lead">From zero to a working workforce in about ten minutes: install Muster, start the local server, claim the workspace from your phone, give a bot an engine, and send your first message. This guide covers a local server; remote engines and connected services use their own accounts and network connections.</p>
 
     <div class="pill-row">
       <span class="pill">~10 minutes</span>
@@ -117,10 +117,10 @@ chmod +x muster
 <span class="c"># watch status and receipts</span>
 ./muster status
 ./muster receipts</code></pre>
-    <p>When the bot wants to run a shell command or edit a file, it asks first: the action surfaces as an approval card you Allow or Deny. Every settled task ends in a job receipt — bot, duration, tokens, cost. See <a href="/docs/approvals">Approvals &amp; privacy</a>.</p>
+    <p>When the engine requests permission, the action surfaces as an approval card you Allow or Deny. Open a task receipt to review recorded turns, duration, token usage, and cost when the engine reports it. See <a href="/docs/approvals">Approvals &amp; privacy</a>.</p>
 
     <h2>Where your data lives</h2>
-    <p>Muster is local-first. Transcripts, keys, events, the database, and the auth secret live in <code>~/.muster</code> on the machine running the server — not in a cloud. A detached server keeps its record and log there too, under <code>~/.muster/run/</code>. The only traffic that leaves your machine is the model call itself, which goes to whichever engine provider you configured. Back up <code>~/.muster</code> and you've backed up your workforce.</p>
+    <p>For a local install, Muster stores transcripts, keys, events, the database, and the auth secret in <code>~/.muster</code> by default. A detached server keeps its record and log under <code>~/.muster/run/</code>. Model providers, connected apps, backups, and other online features can make external requests. Back up the server's data directory along with any working folders your bots use.</p>
 
     <h2>Next steps</h2>
     <div class="card-grid section-cards">
