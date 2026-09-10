@@ -6817,12 +6817,11 @@ let requestUserEmail = "";
       );
     }
 
-    // ── Workspace sync (portable encrypted bundle + Google Drive) ───────
-    // The account-sync design (docs/plans/account-sync-portable-profile.md):
-    // the workspace exports as one AES-256-GCM bundle under a user
-    // passphrase; the Drive transport (drive.appdata) holds only ciphertext.
-    // Keys never leave the machine. Restore skips existing ids and never
-    // overwrites a local memory file the human was last editing.
+    // ── Legacy local workspace bundle + provider transports ────────────
+    // Hosted routes are rejected earlier: this format contains global
+    // workspace state and derives its key using the deployment secret.
+    // Provider access alone does not make the bundle account-scoped or
+    // portable. Restore preserves existing IDs and local memory files.
     if (path === "/api/workspace/export" && method === "POST") {
       const body = await readBody(req);
       const passphrase = isText(body?.passphrase) ? body.passphrase : "";
@@ -6898,6 +6897,9 @@ let requestUserEmail = "";
       try {
         const token = await driveSync.refreshDriveToken(refreshToken);
         const payload = await driveSync.downloadBundle(token.accessToken);
+        if (cfg.driveSync?.refreshToken !== refreshToken) {
+          return json(res, 409, { error: "Google Drive connection changed during download — check the connection and try again." });
+        }
         if (!payload) return json(res, 404, { error: "no workspace bundle exists in Drive yet — push from the other device first" });
         const { workspace } = workspaceBundle.decryptBundle(payload, passphrase, deploymentSigningSecret());
         const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
@@ -6909,11 +6911,9 @@ let requestUserEmail = "";
       }
     }
 
-    // ── Login-scoped Drive sync (Continue with Google IS the backup) ────
-    // Same bundle, same encryption, different token source: the Google
-    // tokens better-auth stored at login (drive.appdata scope) instead of
-    // a manually pasted code. Requires a signed-in account — the tokens
-    // are per-user, so this is scoped by construction.
+    // ── Google-login token source for legacy local Drive transport ──────
+    // Tokens belong to the signed-in account; the bundle itself is still
+    // global local workspace state. Login does not trigger a backup.
     if (path === "/api/workspace/google/push" && method === "POST") {
       // Session truth on every deployment: cloud/self-host resolve it above;
       // on the desktop (SELF_HOSTED=false, loopback-only) there is exactly
@@ -6970,12 +6970,9 @@ let requestUserEmail = "";
     }
 
     // ── Telegram sync ───────────────────────────────────────────────────
-    // Same encrypted bundle as Drive, dropped into the private chat with a
-    // bot the owner created via @BotFather — a free cloud store the user
-    // already has. The chat only ever holds ciphertext; the bot token alone
-    // cannot decrypt a workspace (the passphrase + server signing secret
-    // derive the key). Flow: paste the BotFather token → send /start to the
-    // bot in Telegram → Connect (which discovers the chat) → Push/Pull.
+    // Same legacy bundle as Drive. Latest-message discovery does not prove
+    // chat ownership; explicit confirmation remains future work. Flow:
+    // paste a BotFather token → send /start → Connect → manual Push/Pull.
     if (path === "/api/workspace/telegram/connect" && method === "POST") {
       const body = await readBody(req);
       const botToken = isText(body?.botToken) ? body.botToken.trim() : "";
@@ -6985,7 +6982,10 @@ let requestUserEmail = "";
         // not save and surface as errors in every later push.
         const username = await telegramSync.verifyBot(botToken);
         const chat = await telegramSync.discoverChat(botToken);
-        saveConfig({ telegramSync: { botToken, chatId: chat.chatId, chatLabel: chat.label } });
+        saveConfig({ telegramSync: {
+          botToken, chatId: chat.chatId, chatLabel: chat.label,
+          lastFileId: telegramSync.telegramFileIdAfterConnect(cfg.telegramSync, botToken, chat.chatId),
+        } });
         Object.assign(cfg, loadConfig());
         return json(res, 200, { connected: true, bot: username ? `@${username}` : "", chat: chat.label });
       } catch (e) {
@@ -7008,6 +7008,9 @@ let requestUserEmail = "";
         const bundle = workspaceBundle.buildBundle(store, DATA_DIR);
         const { payload, counts } = workspaceBundle.encryptBundle(bundle, passphrase, deploymentSigningSecret());
         const fileId = await telegramSync.pushBundle(botToken, chatId, payload);
+        if (!telegramSync.telegramConnectionMatches(cfg.telegramSync, botToken, chatId)) {
+          return json(res, 409, { error: "Telegram connection changed during upload — check the connection and try again." });
+        }
         saveConfig({ telegramSync: { lastFileId: fileId } });
         Object.assign(cfg, loadConfig());
         return json(res, 200, { uploaded: fileId, counts });
@@ -7020,6 +7023,7 @@ let requestUserEmail = "";
       const passphrase = isText(body?.passphrase) ? body.passphrase : "";
       if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
       const botToken = cfg.telegramSync?.botToken;
+      const chatId = cfg.telegramSync?.chatId ?? null;
       if (!botToken) return json(res, 400, { error: "Telegram is not connected yet — paste a @BotFather token and connect first" });
       try {
         // Pull order: the file_id recorded at push time first (works beyond
@@ -7028,12 +7032,15 @@ let requestUserEmail = "";
         // forwarded muster-workspace.enc to the bot).
         let fileId = cfg.telegramSync?.lastFileId ?? "";
         if (!fileId) {
-          fileId = (await telegramSync.resolveLatestFileId(botToken, cfg.telegramSync?.chatId ?? null)) ?? "";
+          fileId = (await telegramSync.resolveLatestFileId(botToken, chatId)) ?? "";
         }
         if (!fileId) {
           return json(res, 404, { error: "no workspace bundle in the Telegram chat yet — push from the other device first" });
         }
         const payload = await telegramSync.downloadBundle(botToken, fileId);
+        if (!telegramSync.telegramRestoreConnectionMatches(cfg.telegramSync, botToken, chatId)) {
+          return json(res, 409, { error: "Telegram connection changed during download — check the connection and try again." });
+        }
         const { workspace } = workspaceBundle.decryptBundle(payload, passphrase, deploymentSigningSecret());
         const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
         await reloadProviders();

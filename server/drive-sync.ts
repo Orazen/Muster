@@ -1,13 +1,10 @@
-// Google Drive transport for the workspace bundle — drive.appdata scope
-// (app-private folder, invisible in the user's Drive UI). One file:
-// muster-workspace.enc. OAuth tokens come from the user completing
-// Google's device-code or web flow out-of-band; Muster only stores the
-// refresh token (write-only config) and talks to Drive's REST API.
-//
-// Server-side URL requests here go to exactly two validated https hosts:
-// oauth2.googleapis.com and www.googleapis.com. Loopback/private/reserved
-// targets are structurally impossible — the paths are fixed constants.
+// Drive transport for the legacy local workspace bundle, using the app's
+// private drive.appdata folder. Manual and Google-login token sources share
+// this implementation. Sequential uploads update the newest matching file;
+// these transport helpers do not provide cross-device synchronization or
+// portable encryption. Hosted global workspace routes remain disabled.
 import { z } from "zod";
+import { randomBytes } from "node:crypto";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files";
@@ -91,9 +88,11 @@ export async function refreshDriveToken(refreshToken: string): Promise<DriveToke
 }
 
 async function driveFetch(accessToken: string, url: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  headers.set("authorization", `Bearer ${accessToken}`);
   const res = await fetch(url, {
     ...init,
-    headers: { authorization: `Bearer ${accessToken}`, ...(init?.headers ?? {}) },
+    headers,
     signal: AbortSignal.timeout(60_000),
   });
   if (res.status === 401) throw new Error("Drive token expired — reconnect Google Drive in Settings");
@@ -102,8 +101,10 @@ async function driveFetch(accessToken: string, url: string, init?: RequestInit):
 
 /** Upload (create or overwrite) the workspace bundle in the app folder. */
 export async function uploadBundle(accessToken: string, payload: string): Promise<{ id: string }> {
-  const metadata = JSON.stringify({ name: BUNDLE_NAME, parents: [APPDATA_FOLDER] });
-  const boundary = "muster-bundle-boundary";
+  const fileId = await findBundleFile(accessToken);
+  // Updating content must not try to move the file's parent folder.
+  const metadata = JSON.stringify(fileId ? { name: BUNDLE_NAME } : { name: BUNDLE_NAME, parents: [APPDATA_FOLDER] });
+  const boundary = `muster-${randomBytes(8).toString("hex")}`;
   const body = [
     `--${boundary}`,
     "Content-Type: application/json; charset=UTF-8",
@@ -117,39 +118,59 @@ export async function uploadBundle(accessToken: string, payload: string): Promis
   ].join("\r\n");
   const res = await driveFetch(
     accessToken,
-    `${UPLOAD_URL}?uploadType=multipart&fields=id`,
+    fileId ? `${UPLOAD_URL}/${encodeURIComponent(fileId)}?uploadType=multipart&fields=id` : `${UPLOAD_URL}?uploadType=multipart&fields=id`,
     {
-      method: "POST",
+      method: fileId ? "PATCH" : "POST",
       headers: { "content-type": `multipart/related; boundary=${boundary}` },
       body,
     },
   );
   if (!res.ok) throw new Error(`Drive upload failed: HTTP ${res.status}`);
-  // SAFETY: Drive's upload response is JSON with the created file id; only
-  // the id field is read.
-  return (await res.json()) as { id: string };
+  const result = driveUploadSchema.safeParse(await res.json().catch(() => null));
+  if (!result.success) throw new Error("Drive returned an unreadable upload response");
+  if (fileId && result.data.id !== fileId) throw new Error("Drive returned a different backup file after updating it");
+  return result.data;
 }
 
+const driveFileIdSchema = z.string().min(1)
+  .refine((id) => id.trim() === id && id !== "." && id !== ".." && !/[\s/\\?#\p{Cc}]/u.test(id));
+const driveUploadSchema = z.object({ id: driveFileIdSchema });
 const driveListSchema = z.object({
-  files: z.array(z.object({ id: z.string(), name: z.string() })).default([]),
-});
+  files: z.array(z.object({ id: driveFileIdSchema })).default([]),
+  nextPageToken: z.string().min(1).optional(),
+  incompleteSearch: z.boolean().optional(),
+  kind: z.literal("drive#fileList").optional(),
+}).strict();
 
 /** Find the existing bundle file id, if any. */
 export async function findBundleFile(accessToken: string): Promise<string | null> {
-  const res = await driveFetch(
-    accessToken,
-    `${LIST_URL}?spaces=appDataFolder&q=name%20%3D%20'${BUNDLE_NAME}'&fields=files(id,name)`,
-  );
-  if (!res.ok) throw new Error(`Drive list failed: HTTP ${res.status}`);
-  const parsed = driveListSchema.safeParse(await res.json().catch(() => null));
-  return parsed.success ? (parsed.data.files[0]?.id ?? null) : null;
+  const query = new URLSearchParams({
+    spaces: APPDATA_FOLDER, q: `name = '${BUNDLE_NAME}' and trashed = false`,
+    orderBy: "modifiedTime desc", pageSize: "100", fields: "files(id),nextPageToken,incompleteSearch",
+  });
+  const seenPages = new Set<string>();
+  for (let page = 0; page < 10; page++) {
+    const res = await driveFetch(accessToken, `${LIST_URL}?${query}`);
+    if (!res.ok) throw new Error(`Drive list failed: HTTP ${res.status}`);
+    const parsed = driveListSchema.safeParse(await res.json().catch(() => null));
+    if (!parsed.success) throw new Error("Drive returned an unreadable file list");
+    if (parsed.data.incompleteSearch) throw new Error("Drive could not complete the backup search — try again");
+    const fileId = parsed.data.files[0]?.id;
+    if (fileId) return fileId;
+    const next = parsed.data.nextPageToken;
+    if (!next) return null;
+    if (seenPages.has(next)) throw new Error("Drive repeated a backup search page");
+    seenPages.add(next);
+    query.set("pageToken", next);
+  }
+  throw new Error("Drive backup search exceeded its page limit — try again");
 }
 
 /** Download the bundle payload. Returns null when no bundle exists yet. */
 export async function downloadBundle(accessToken: string): Promise<string | null> {
   const fileId = await findBundleFile(accessToken);
   if (!fileId) return null;
-  const res = await driveFetch(accessToken, `${FILE_URL}/${fileId}?alt=media`);
+  const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(fileId)}?alt=media`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Drive download failed: HTTP ${res.status}`);
   return await res.text();

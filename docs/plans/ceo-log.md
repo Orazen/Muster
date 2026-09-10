@@ -1547,3 +1547,66 @@ harness/contracts8files29errors1warning; companion/CLI7files32errors5warnings.
 Start with provider input/persistence contracts. Preserve queue snapshot
 semantics and audit genuine linter false positives instead of weakening
 types or globally disabling rules. No new desktop release is claimed.
+
+## Loop 28 — Provider transport and vault preservation — 2026-09-10
+
+Loop27 **1be0aea** is pushed. This slice repairs the provider storage/transport
+lint bucket while preserving the hosted workspace containment gate. Google
+account and manual Drive connections now share checked upload/list/download
+contracts. Failed, malformed, incomplete or cyclic searches cannot silently
+become an empty backup or trigger a new upload. Searches request newest
+modified files first, follow empty pages, exclude trash, and stop at ten
+pages. Sequential uploads update the newest matching file; creates alone
+set the app-data parent. Opaque file IDs and upload receipts are validated.
+Stored Google token rows are validated per account; a fresh access token
+works without requiring a refresh token until renewal is necessary.
+
+Telegram validates both HTTP/envelope status and method results without
+stripping the result during shared validation. An explicit chat cannot fall
+back to another chat's document. Reconnect preserves a cached file only for
+the same complete bot/chat binding. Review caught late-transfer races:
+upload cache writes and local restores now reject a changed connection;
+manual Drive restore also checks its captured refresh-token binding before
+writing. Deferred mocked transfer cases cover the Telegram decision boundary.
+Legacy null-chat discovery remains supported and does not prove ownership.
+
+The key vault parses individual account/provider entries, keeps valid
+neighbors readable, and refuses mutations when the existing structure is
+damaged or unreadable. Disk bytes remain available for repair. Missing files
+alone initialize a new vault; readers never migrate. Existing v1 migration,
+per-file salts, timestamps and mode0600 are covered. Same-account merge is a
+no-op; own-key maps avoid inherited account/provider names. Existing policy
+is retained: a structurally valid but undecryptable v2 target entry still
+wins a conflicting merge. This needs a separate recovery-policy decision.
+
+Focused verification: **3 files / 166 passed / 0 skipped in2.23s**. Both
+typechecks and scoped lint pass. Full build/suite results follow below.
+Global lint now reports **61 errors / 6 warnings across15 files**, reduced
+by31errors/2warnings. Remaining buckets: harness/contracts29errors/1warning
+in8files; companion/CLI32errors/5warnings in7files. No rules were disabled.
+
+Provider API tests use mocked fetch and in-memory/temporary fixtures only;
+this is not Google/Telegram browser E2E or cross-device recovery evidence.
+References: Google Drive [files.list](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list)
+and [uploads](https://developers.google.com/workspace/drive/api/guides/manage-uploads).
+Concurrent first uploads can still create duplicate Drive files; no old
+duplicates were deleted. The v1 bundle remains global and deployment-secret
+bound, and hosted routes remain disabled. No real vault, provider backup,
+demo session, release asset or external account was mutated by verification.
+
+Commercial implication: trustworthy recovery behavior is a prerequisite for
+paid use, not evidence of sales or revenue. Next: clear the harness lint
+bucket, then companion/CLI readiness and atomic/monotonic mirror promotion
+before preparing a release candidate. Native Google login, GUI/install/update,
+Android/Watch UI, VM, portable recovery/sync and Mimosa remain open.
+
+Loop28 final verification: **215 files / 2670 passed / 8 skipped in236.29s**,
+exit0, **147 additional passes** versus Loop27. An earlier full pass ran
+while review fixes were landing; `loop28-full.log` is the authoritative
+rerun after all source changes froze. Build passed (Vite5.17s, existing
+large-chunk warning), both types and scoped lint passed. Reviewed hashes
+are in `loop28-reviewed-source.json`; full/scoped diagnostic logs are beside
+it. Final review found no remaining material blocker within this slice.
+Public updater GET returned200 and still reports **1.10.4**. Source push
+does not establish deployment or a new desktop release. Allowance now
+**18% used / 82% remaining**; no reset consumed. Rebase was up to date.

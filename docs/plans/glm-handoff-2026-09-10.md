@@ -686,3 +686,55 @@ contracts:29errors/1warning8files; companion/CLI:32errors/5warnings7files.
 Do not weaken input boundaries or asynchronous queue snapshot semantics to
 silence lint. The companion package also needs its own dependency/test
 readiness checked rather than relying on root tooling accidentally.
+
+## Loop 28 — Provider transport and vault preservation
+
+Loop27 **1be0aea** is pushed. The provider lint bucket is repaired in
+account-drive, drive-sync, telegram-sync(+tests), user-keys(+tests), plus
+new drive-transport tests and the bounded connection guards in index.ts.
+Drive token sources share validated list/upload/download behavior, newest
+file selection, bounded empty-page traversal, failed-search refusal and
+create-versus-update metadata. Sequential pushes update a matching file;
+concurrent first pushes can still duplicate files. No remote files deleted.
+Google rows are account-scoped and parsed; fresh access tokens need no
+refresh token until renewal. Login itself is not an automatic backup.
+
+Telegram shared parsing retains method data and checks HTTP/envelope status.
+Explicit chat lookup never falls back across chats. Cached file IDs survive
+only an unchanged complete bot/chat connection. Late upload/cache and
+download/restore results are rejected after connection changes; manual
+Drive restore checks its original refresh-token binding before local writes.
+Null-chat legacy discovery remains, with ownership confirmation still owed.
+
+Vault readers salvage valid entries without writing. Structural corruption
+or an unreadable existing file blocks all mutations, preserving bytes for
+repair; missing files initialize normally. v1 migration, salts/timestamps,
+permissions and own-key account/provider lookup remain covered. Same-account
+merge cannot delete itself. Retained limitation: a structurally valid but
+undecryptable v2 target entry wins a conflicting merge; do not silently
+change this data policy during a later lint pass.
+
+Focused **3files/166passed/0skipped in2.23s**; frontend/server types and scoped
+lint pass. Global lint reduced from92errors/8warnings to **61errors/6warnings
+in15files**. Full build/suite final counts follow before commit. Evidence is
+in `.omb-scratch/verification/loop28-*`. All provider calls were mocked;
+there is no actual Google/Telegram restore or browser E2E claim. Hosted
+global workspace routes remain disabled, and v1 recovery remains tied to
+the original deployment secret. No real provider account or demo mutation.
+
+Next slice: harness/contracts lint29errors/1warning8files, then companion/CLI
+32errors/5warnings7files. Preserve queued-goal iteration snapshots. Finish
+atomic/monotonic public mirror promotion and stale bump-script guidance
+before a versioned candidate. Native GUI/install/update, native Google,
+Android/Watch UI, VM, portable sync/recovery and Mimosa remain unverified.
+The broad active goal and existing hourly heartbeat remain in effect.
+
+Final Loop28 gates: **215files/2670passed/8skipped in236.29s**, exit0,
+**+147 passes** over Loop27. Authoritative `loop28-full.log` ran after the
+final connection guards froze; earlier overlapping review run is retained
+as `loop28-full-before-final-guards.log`. Build passed (Vite5.17s with the
+existing large-chunk warning), both typechecks and scoped lint passed.
+Global lint remains61errors/6warnings. Public updater GET200 still reports
+1.10.4; no new release/deployment proof is implied. Allowance18%used/82%
+remaining, no reset consumed. Final review found no material blocker in
+this bounded slice; read-only next-slice preflight is complete.

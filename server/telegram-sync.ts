@@ -1,13 +1,10 @@
 // Telegram Bot API transport for the workspace bundle — the same encrypted
-// bundle Drive gets, uploaded as one document into the user's private chat
-// with a bot they create via @BotFather. The chat is a free cloud store the
-// user already owns; it only ever holds ciphertext, so the bot token alone
-// can never read a workspace.
+// bundle Drive gets, uploaded as one document into the connected bot/chat.
+// Chat discovery currently selects the latest incoming message; it does not
+// establish who owns that chat. Callers provide the encrypted bundle.
 //
-// Server-side URL requests here go to exactly one validated https host:
-// api.telegram.org. Every URL is a fixed-path template over that constant
-// and the bot token is format-checked before it is ever interpolated, so
-// loopback/private/reserved targets are structurally impossible.
+// Requests use the fixed https://api.telegram.org endpoint. Bot tokens are
+// format-checked before interpolation into method and download paths.
 import { z } from "zod";
 
 const API_BASE = "https://api.telegram.org";
@@ -31,10 +28,11 @@ function botUrl(token: string, method: string): string {
 const apiResponseSchema = z.object({
   ok: z.boolean(),
   description: z.string().optional(),
+  error_code: z.number().int().optional(),
 });
 
 const meSchema = apiResponseSchema.extend({
-  result: z.object({ username: z.string().optional() }).optional(),
+  result: z.object({ username: z.string().optional() }),
 });
 
 const updatesSchema = apiResponseSchema.extend({
@@ -54,47 +52,47 @@ const updatesSchema = apiResponseSchema.extend({
           })
           .optional(),
       }),
-    )
-    .default([]),
+    ),
 });
 
 const documentSentSchema = apiResponseSchema.extend({
-  result: z
-    .object({ document: z.object({ file_id: z.string() }).optional() })
-    .optional(),
+  result: z.object({ document: z.object({ file_id: z.string().min(1) }) }),
 });
 
 const filePathSchema = apiResponseSchema.extend({
-  result: z.object({ file_path: z.string() }).optional(),
+  result: z.object({ file_path: z.string().min(1) }),
 });
 
-function telegramError(what: string, status: number, data: { ok: boolean; description?: string }): Error {
+type TelegramEnvelope = z.infer<typeof apiResponseSchema>;
+
+function telegramError(what: string, status: number, data: TelegramEnvelope): Error {
   const detail = data.description ? ` — ${data.description}` : "";
-  const retry = status === 429 ? " (Telegram rate limit — wait a minute and try again)" : "";
-  return new Error(`${what}: HTTP ${status}${retry}${detail}`);
+  const retry = status === 429 || data.error_code === 429 ? " (Telegram rate limit — wait a minute and try again)" : "";
+  const code = data.error_code !== undefined && data.error_code !== status ? ` (Telegram code ${data.error_code})` : "";
+  return new Error(`${what}: HTTP ${status}${code}${retry}${detail}`);
 }
 
-// Minimal shape checked in callTelegram; each method re-parses the FULL raw
-// body with its own schema (a shared zod object would strip `result` before
-// the specific schema could see it).
-type TelegramEnvelope = { ok: boolean; description?: string };
-
-async function callTelegram(token: string, method: string, timeoutMs: number): Promise<{ status: number; data: unknown }> {
-  const res = await fetch(botUrl(token, method), { signal: AbortSignal.timeout(timeoutMs) });
+async function callTelegram<Schema extends z.ZodType>(
+  token: string, method: string, timeoutMs: number, schema: Schema, failure: string, init: RequestInit = {},
+): Promise<z.output<Schema>> {
+  const res = await fetch(botUrl(token, method), { ...init, signal: AbortSignal.timeout(timeoutMs) });
   const raw: unknown = await res.json().catch(() => null);
-  if (typeof raw !== "object" || raw === null || typeof (raw as { ok?: unknown }).ok !== "boolean") {
-    throw new Error(`Telegram returned an unreadable response for ${method}`);
+  const envelope = apiResponseSchema.safeParse(raw);
+  if (!envelope.success) {
+    throw telegramError(`Telegram returned an unreadable response for ${method}`, res.status, { ok: false });
   }
-  return { status: res.status, data: raw };
+  if (!res.ok || !envelope.data.ok) throw telegramError(failure, res.status, envelope.data);
+  // Parse the full raw payload again. Passing envelope.data would discard
+  // the method's result because the shared schema strips unknown fields.
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) throw telegramError(`Telegram returned an unreadable ${method} response`, res.status, envelope.data);
+  return parsed.data;
 }
 
 /** Validate the token against getMe; returns the bot's @username. */
 export async function verifyBot(token: string): Promise<string> {
-  const { status, data } = await callTelegram(token, "getMe", META_TIMEOUT);
-  const envelope = data as TelegramEnvelope;
-  if (!envelope.ok) throw telegramError("Telegram rejected that bot token", status, envelope);
-  const me = meSchema.safeParse(data);
-  return me.success ? (me.data.result?.username ?? "") : "";
+  const me = await callTelegram(token, "getMe", META_TIMEOUT, meSchema, "Telegram rejected that bot token");
+  return me.result.username ?? "";
 }
 
 export interface TelegramChat {
@@ -102,21 +100,56 @@ export interface TelegramChat {
   label: string;
 }
 
-/** Find the chat the owner already started with the bot (send /start to it
- * first). Picks the most recent message; a dedicated sync bot makes the
- * first private chat the owner by construction. Confirms the update so the
- * discovery does not replay on the next connect. */
+export interface TelegramFileBinding {
+  botToken?: string;
+  chatId?: number;
+  lastFileId?: string;
+}
+
+/** Check the binding again after a provider await before caching its file. */
+export function telegramConnectionMatches(
+  current: TelegramFileBinding | undefined,
+  botToken: string,
+  chatId: number,
+): boolean {
+  return BOT_TOKEN_RE.test(botToken) && Number.isSafeInteger(chatId) && chatId !== 0
+    && current?.botToken === botToken && current.chatId === chatId;
+}
+
+/** Restore also supports the existing unbound recent-document discovery
+ * mode, but only while that same token and null chat binding remain set. */
+export function telegramRestoreConnectionMatches(
+  current: TelegramFileBinding | undefined,
+  botToken: string,
+  chatId: number | null,
+): boolean {
+  if (!BOT_TOKEN_RE.test(botToken) || current?.botToken !== botToken) return false;
+  if (chatId !== null && (!Number.isSafeInteger(chatId) || chatId === 0)) return false;
+  return (current.chatId ?? null) === chatId;
+}
+
+/** A cached file belongs to the exact bot/chat that uploaded it. Preserve
+ * same-identity reconnects beyond the recent-update retention window. */
+export function telegramFileIdAfterConnect(
+  current: TelegramFileBinding | undefined,
+  nextBotToken: string,
+  nextChatId: number,
+): string {
+  if (!telegramConnectionMatches(current, nextBotToken, nextChatId)) return "";
+  return current?.lastFileId ?? "";
+}
+
+/** Discover the latest incoming chat after a message such as /start.
+ * This does not verify chat ownership; an explicit binding handshake is
+ * outside the current protocol. Confirms updates so discovery does not
+ * replay on the next connect. */
 export async function discoverChat(token: string): Promise<TelegramChat> {
-  const { status, data } = await callTelegram(token, "getUpdates", META_TIMEOUT);
-  const envelope = data as TelegramEnvelope;
-  if (!envelope.ok) throw telegramError("Telegram would not list recent messages", status, envelope);
-  const updates = updatesSchema.safeParse(data);
-  if (!updates.success) throw new Error("Telegram returned an unreadable updates response");
+  const updates = await callTelegram(token, "getUpdates", META_TIMEOUT, updatesSchema, "Telegram would not list recent messages");
   let lastUpdateId = 0;
-  for (const update of updates.data.result) {
+  for (const update of updates.result) {
     if (update.update_id && update.update_id > lastUpdateId) lastUpdateId = update.update_id;
   }
-  const withChat = updates.data.result.filter((u) => u.message?.chat?.id != null);
+  const withChat = updates.result.filter((u) => u.message?.chat?.id != null);
   const latest = withChat.at(-1);
   if (!latest?.message) {
     throw new Error("no message from you yet — open Telegram, send /start to the bot, then connect again");
@@ -134,20 +167,17 @@ export async function discoverChat(token: string): Promise<TelegramChat> {
   };
 }
 
-/** Scan recent updates for the newest document, preferring the connected
+/** Scan recent updates for the newest document in the connected
  * chat. Covers a fresh install: the owner forwards the muster-workspace.enc
  * file to the bot, and this finds it — getUpdates keeps updates for ~24h,
  * so pushes normally rely on the stored lastFileId instead. */
 export async function resolveLatestFileId(token: string, chatId: number | null): Promise<string | null> {
-  const { status, data } = await callTelegram(token, "getUpdates", META_TIMEOUT);
-  const envelope = data as TelegramEnvelope;
-  if (!envelope.ok) throw telegramError("Telegram would not list recent messages", status, envelope);
-  const updates = updatesSchema.safeParse(data);
-  if (!updates.success) return null;
-  const docs = updates.data.result.filter((u) => u.message?.document?.file_id);
+  const updates = await callTelegram(token, "getUpdates", META_TIMEOUT, updatesSchema, "Telegram would not list recent messages");
+  const docs = updates.result.filter((u) => u.message?.document?.file_id);
+  // Null is the existing fresh-install discovery mode. An explicit chat
+  // binding must never borrow another chat's document when it has none.
   const inChat = chatId == null ? docs : docs.filter((u) => u.message?.chat?.id === chatId);
-  const pool = inChat.length > 0 ? inChat : docs;
-  return pool.at(-1)?.message?.document?.file_id ?? null;
+  return inChat.at(-1)?.message?.document?.file_id ?? null;
 }
 
 /** Upload the encrypted bundle as one document into the bot chat. Returns
@@ -156,36 +186,24 @@ export async function pushBundle(token: string, chatId: number, payload: string)
   const form = new FormData();
   form.set("chat_id", String(chatId));
   form.set("document", new File([payload], BUNDLE_NAME, { type: "application/octet-stream" }));
-  const res = await fetch(botUrl(token, "sendDocument"), {
+  const sent = await callTelegram(token, "sendDocument", TRANSFER_TIMEOUT, documentSentSchema, "Telegram upload failed", {
     method: "POST",
     body: form,
-    signal: AbortSignal.timeout(TRANSFER_TIMEOUT),
   });
-  const parsed = documentSentSchema.safeParse(await res.json().catch(() => null));
-  if (!parsed.success) throw new Error("Telegram returned an unreadable upload response");
-  if (!parsed.data.ok || !parsed.data.result?.document?.file_id) {
-    throw telegramError("Telegram upload failed", res.status, parsed.data);
-  }
-  return parsed.data.result.document.file_id;
+  return sent.result.document.file_id;
 }
 
 /** Download a previously uploaded document by file_id (the payload is the
  * same base64 bundle string Drive holds). */
 export async function downloadBundle(token: string, fileId: string): Promise<string> {
-  const metaRes = await fetch(botUrl(token, "getFile"), {
+  const meta = await callTelegram(token, "getFile", META_TIMEOUT, filePathSchema, "Telegram could not resolve that file", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ file_id: fileId }),
-    signal: AbortSignal.timeout(META_TIMEOUT),
   });
-  const meta = filePathSchema.safeParse(await metaRes.json().catch(() => null));
-  if (!meta.success) throw new Error("Telegram returned an unreadable file reference");
-  if (!meta.data.ok || !meta.data.result?.file_path) {
-    throw telegramError("Telegram could not resolve that file", metaRes.status, meta.data);
-  }
   // Telegram file paths are "documents/file_N.ext". Validate segment-wise so
   // the interpolated download path stays under the fixed host.
-  const filePath = meta.data.result.file_path;
+  const filePath = meta.result.file_path;
   const segments = filePath.split("/");
   if (
     segments.length === 0 ||
