@@ -1,9 +1,9 @@
 // Zero-dependency QR encoder for the `muster up` terminal banner.
 //
-// The CLI's only contract is Node 22+ (it is copy-installed by curl users
-// and run by npm i -g), so a QR here cannot pull a package. This implements
+// The private bundled CLI requires Node 22+ and no external runtime
+// dependencies, so QR rendering stays in the bundle. This implements
 // the QR spec subset Muster needs: byte mode, EC levels L and M, versions
-// 1-10 (214-byte payload ceiling at M — a claim URL is ~45 chars), full
+// 1-10 (213-byte payload ceiling at M — a claim URL is ~45 chars), full
 // mask selection by penalty score. Reed-Solomon over GF(256), standard
 // zigzag placement, BCH format/version info.
 //
@@ -63,7 +63,7 @@ const gfMul = (a, b) => (a && b ? EXP[LOG[a] + LOG[b]] : 0);
 function rsEncode(data, ecLen) {
   let gen = [1];
   for (let i = 0; i < ecLen; i++) {
-    const next = new Array(gen.length + 1).fill(0);
+    const next = Array.from({ length: gen.length + 1 }, () => 0);
     for (let j = 0; j < gen.length; j++) {
       next[j] ^= gen[j];
       next[j + 1] ^= gfMul(gen[j], EXP[i]);
@@ -71,7 +71,7 @@ function rsEncode(data, ecLen) {
     gen = next;
   }
   // gen[j] is the coefficient of x^(ecLen-j)
-  const rem = new Array(ecLen).fill(0);
+  const rem = Array.from({ length: ecLen }, () => 0);
   for (const byte of data) {
     const factor = byte ^ rem[0];
     rem.shift();
@@ -107,7 +107,7 @@ function buildDataBits(payload, version, level) {
 // ── matrix scaffolding ─────────────────────────────────────────────────────
 function makeMatrix(version) {
   const size = 21 + 4 * (version - 1);
-  const m = Array.from({ length: size }, () => new Array(size).fill(null));
+  const m = Array.from({ length: size }, () => Array.from({ length: size }, () => null));
   const setFinder = (r0, c0) => {
     for (let dr = -1; dr <= 7; dr++) {
       for (let dc = -1; dc <= 7; dc++) {
@@ -280,7 +280,7 @@ export function qrMatrix(payload, level = "M", forcedMask) {
     const cap = g1b * g1d + g2b * g2d - (v <= 9 ? 2 : 3); // mode + count header
     if (bytes.length <= cap) { version = v; break; }
   }
-  if (!version) throw new Error(`payload too long for QR (${bytes.length} bytes; max is 214 at level M)`);
+  if (!version) throw new Error(`payload too long for QR (${bytes.length} bytes; max is ${level === "M" ? 213 : 271} at level ${level})`);
   const { bits } = buildDataBits(payload, version, level);
   const dataBytes = [];
   for (let i = 0; i < bits.length / 8; i++) {

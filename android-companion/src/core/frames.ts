@@ -11,6 +11,8 @@ import {
   ScreenFrame,
 } from "./types";
 
+import { botSchema, fleetSchema, frameEnvelopeSchema, type JsonValue, messageSchema, notificationSchema, roomSchema, runtimeEventSchema } from "./contracts";
+
 export type Frame =
   | { kind: "hello"; cursor: string; resumed: boolean }
   | { kind: "message"; threadId: string; message: Message }
@@ -32,173 +34,54 @@ export interface StreamFrame {
   seq: number | null;
 }
 
-function asString(v: unknown): string | undefined {
-  return typeof v === "string" ? v : undefined;
+export function decodeMessage(raw: JsonValue): Message | null {
+  const parsed = messageSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
-
-function asBool(v: unknown): boolean | undefined {
-  return typeof v === "boolean" ? v : undefined;
+export function decodeBot(raw: JsonValue): Bot | null {
+  const parsed = botSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
-
-function asNumber(v: unknown): number | undefined {
-  return typeof v === "number" ? v : undefined;
+export function decodeRoom(raw: JsonValue): Room | null {
+  const parsed = roomSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
-
-// Decodes a message without trusting the wire's kind string: a kind we don't
-// know renders as "unknown" instead of crashing, same as the iOS decoder.
-function decodeMessage(raw: any): Message {
-  const kind = asString(raw?.kind) ?? "unknown";
-  const known: Message["kind"][] = ["text", "options", "activity", "screen"];
-  return {
-    id: asString(raw?.id) ?? "",
-    role: raw?.role === "user" ? "user" : "bot",
-    kind: known.includes(kind as Message["kind"]) ? (kind as Message["kind"]) : "unknown",
-    at: asNumber(raw?.at) ?? 0,
-    text: asString(raw?.text),
-    card: raw?.card ?? null,
-    tool: raw?.tool ?? null,
-    parentId: raw?.parentId ?? null,
-    from: raw?.from ?? null,
-    reactions: Array.isArray(raw?.reactions) ? raw.reactions : null,
-    comm: raw?.comm ?? null,
-    hasImage: asBool(raw?.hasImage) ?? false,
-    png: asString(raw?.png) ?? null,
-    mime: asString(raw?.mime) ?? null,
-  };
-}
-
-function decodeBot(raw: any): Bot {
-  return {
-    id: asString(raw?.id) ?? "",
-    threadId: asString(raw?.threadId) ?? "",
-    name: asString(raw?.name) ?? "Bot",
-    title: asString(raw?.title),
-    description: asString(raw?.description),
-    notifications: asBool(raw?.notifications) ?? true,
-    color: asString(raw?.color),
-    unread: asNumber(raw?.unread) ?? 0,
-    modelSelection: raw?.modelSelection ?? null,
-    createdAt: asNumber(raw?.createdAt),
-    busy: asBool(raw?.busy),
-    pinned: asBool(raw?.pinned),
-    hidden: asBool(raw?.hidden),
-    chiefOfStaff: asBool(raw?.chiefOfStaff),
-    autoApprove: asBool(raw?.autoApprove),
-    alwaysAllow: Array.isArray(raw?.alwaysAllow) ? raw.alwaysAllow : undefined,
-    computer: asString(raw?.computer) ?? null,
-    speakReplies: asBool(raw?.speakReplies),
-    voice: asString(raw?.voice) ?? null,
-    mascotExpression: asString(raw?.mascotExpression) ?? null,
-    tasks: Array.isArray(raw?.tasks) ? raw.tasks : undefined,
-    messages: Array.isArray(raw?.messages) ? raw.messages.map(decodeMessage) : undefined,
-    activeLeafId: raw?.activeLeafId ?? null,
-    hasMore: asBool(raw?.hasMore),
-  };
-}
-
-function decodeRoom(raw: any): Room {
-  return {
-    id: asString(raw?.id) ?? "",
-    threadId: asString(raw?.threadId) ?? "",
-    name: asString(raw?.name),
-    memberIds: Array.isArray(raw?.memberIds) ? raw.memberIds : [],
-    defaultResponder: raw?.defaultResponder ?? { kind: "round-robin" },
-    bulletin: raw?.bulletin ?? null,
-    unread: asNumber(raw?.unread) ?? 0,
-    createdAt: asNumber(raw?.createdAt),
-    dm: asBool(raw?.dm),
-    busyBotId: asString(raw?.busyBotId) ?? null,
-    messages: Array.isArray(raw?.messages) ? raw.messages.map(decodeMessage) : undefined,
-    hasMore: asBool(raw?.hasMore),
-  };
-}
-
-function decodeNotification(raw: any): NotificationFrame {
-  return {
-    kind: asString(raw?.kind) ?? "done",
-    botId: asString(raw?.botId),
-    botName: asString(raw?.botName),
-    threadId: asString(raw?.threadId),
-    title: asString(raw?.title),
-    body: asString(raw?.body),
-  };
-}
-
-function decodeRuntimeEvent(raw: any): RuntimeEvent {
-  return {
-    type: asString(raw?.type) ?? "",
-    threadId: asString(raw?.threadId),
-    delta: asString(raw?.delta),
-    streamKind: asString(raw?.streamKind),
-  };
-}
-
-function decodeFleet(raw: any): Fleet {
-  return {
-    bots: Array.isArray(raw?.bots) ? raw.bots.map(decodeBot) : [],
-    groups: Array.isArray(raw?.groups) ? raw.groups.map(decodeRoom) : [],
-  };
-}
+export function decodeFleet(raw: JsonValue): Fleet { return fleetSchema.parse(raw); }
+export function decodeNotification(raw: JsonValue): NotificationFrame { return notificationSchema.parse(raw); }
 
 export function decodeFrame(data: string): Frame {
-  let raw: any;
-  try {
-    raw = JSON.parse(data);
-  } catch {
-    return { kind: "unknown", rawKind: "malformed" };
-  }
-  const kind = asString(raw?.kind) ?? "unknown";
+  let parsed;
+  try { parsed = frameEnvelopeSchema.safeParse(JSON.parse(data)); }
+  catch { return { kind: "unknown", rawKind: "malformed" }; }
+  if (!parsed.success) return { kind: "unknown", rawKind: "malformed" };
+  const raw = parsed.data;
+  const kind = raw.kind;
+  const unknown: Frame = { kind: "unknown", rawKind: kind };
   switch (kind) {
-    case "hello":
-      return {
-        kind: "hello",
-        cursor: asString(raw?.cursor) ?? "",
-        resumed: asBool(raw?.resumed) ?? false,
-      };
+    case "hello": return { kind, cursor: raw.cursor ?? "", resumed: raw.resumed ?? false };
     case "message":
     case "message.patch": {
-      const threadId = asString(raw?.threadId) ?? "";
-      if (!threadId || !raw?.message) return { kind: "unknown", rawKind: kind };
-      return { kind, threadId, message: decodeMessage(raw.message) };
+      const message = decodeMessage(raw.message ?? null);
+      return raw.threadId && message ? { kind, threadId: raw.threadId, message } : unknown;
     }
-    case "thread":
-      return {
-        kind: "thread",
-        threadId: asString(raw?.threadId) ?? "",
-        activeLeafId: raw?.activeLeafId ?? null,
-      };
-    case "bot":
-      return raw?.bot ? { kind: "bot", bot: decodeBot(raw.bot) } : { kind: "unknown", rawKind: kind };
-    case "bot.deleted":
-      return asString(raw?.botId)
-        ? { kind: "bot.deleted", botId: asString(raw?.botId)! }
-        : { kind: "unknown", rawKind: kind };
-    case "group":
-      return raw?.group ? { kind: "group", group: decodeRoom(raw.group) } : { kind: "unknown", rawKind: kind };
-    case "group.deleted":
-      return asString(raw?.groupId)
-        ? { kind: "group.deleted", groupId: asString(raw?.groupId)! }
-        : { kind: "unknown", rawKind: kind };
-    case "notify":
-      return { kind: "notify", notification: decodeNotification(raw?.notification) };
-    case "screen": {
-      const botId = asString(raw?.botId);
-      const png = asString(raw?.png);
-      if (!botId || !png) return { kind: "unknown", rawKind: kind };
-      return { kind: "screen", screen: { botId, png, mime: asString(raw?.mime) } };
+    case "thread": return raw.threadId ? { kind, threadId: raw.threadId, activeLeafId: raw.activeLeafId } : unknown;
+    case "bot": {
+      const bot = decodeBot(raw.bot ?? null);
+      return bot ? { kind, bot } : unknown;
     }
-    case "computer":
-      return {
-        kind: "computer",
-        botId: asString(raw?.botId) ?? "",
-        state: asString(raw?.state) ?? null,
-      };
-    case "config":
-      return { kind: "config" };
-    case "runtime":
-      return { kind: "runtime", event: decodeRuntimeEvent(raw?.event) };
-    default:
-      return { kind: "unknown", rawKind: kind };
+    case "bot.deleted": return raw.botId ? { kind, botId: raw.botId } : unknown;
+    case "group": {
+      const group = decodeRoom(raw.group ?? null);
+      return group ? { kind, group } : unknown;
+    }
+    case "group.deleted": return raw.groupId ? { kind, groupId: raw.groupId } : unknown;
+    case "notify": return { kind, notification: decodeNotification(raw.notification ?? null) };
+    case "screen": return raw.botId && raw.png
+      ? { kind, screen: { botId: raw.botId, png: raw.png, mime: raw.mime } } : unknown;
+    case "computer": return raw.botId ? { kind, botId: raw.botId, state: raw.state } : unknown;
+    case "config": return { kind };
+    case "runtime": return { kind, event: runtimeEventSchema.parse(raw.event) };
+    default: return unknown;
   }
 }
 
@@ -216,5 +99,3 @@ export function advanceCursor(current: string | null, id: string): string {
   if (curStreamId === streamId && curSeq >= seq) return current!;
   return `${streamId}:${seq}`;
 }
-
-export { decodeBot, decodeRoom, decodeMessage, decodeFleet, decodeNotification };

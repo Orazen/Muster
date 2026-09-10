@@ -13,14 +13,14 @@ export interface OptionCard {
   dismissed?: boolean;
   requestId?: string;
   tool?: string;
-  held?: boolean;
+  held?: string;
   allowKey?: string;
 }
 
 export interface ToolActivity {
   name: string;
   ok?: boolean;
-  spoken?: boolean;
+  spoken?: string;
   setup?: boolean;
 }
 

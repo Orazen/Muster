@@ -1692,3 +1692,87 @@ Final review found no material blocker in this slice. No new desktop
 version, provider/browser E2E, installer or native login verification is
 claimed. Allowance **20% used / 80% remaining**; no reset consumed. The
 active goal and existing heartbeat continue with companion/CLI readiness.
+
+## Loop 30 — Companion recovery and CLI process identity — 2026-09-11
+
+Starting from pushed Loop 29 `ab708a9`, this slice clears the remaining
+companion/CLI lint bucket while fixing the failures found by its audit.
+Android remains a standalone npm package outside root tests and types. Its
+declared Jest/Babel/Zod tools and committed lockfile now reproduce without
+relying on root dependencies. A clean `npm ci --ignore-scripts --no-audit
+--no-fund` installed **998 packages in 8.47s**; `npm ls --all` exits 0 with no
+peer problems. The lock matches package dependencies and resolves only to
+registry.npmjs.org, with no credential/query-bearing resolved URLs. Existing
+SDK dependency deprecation warnings remain in the install log.
+
+The native composition explicitly uses `expo/fetch`, whose streaming support
+is documented in the [SDK 52 release notes](https://expo.dev/changelog/2024-11-12-sdk-52)
+and present in installed Expo 52.0.49. The SDK 52 global React Native fetch is
+not assumed to stream; the old versioned documentation URL redirects to
+latest. HTTP defaults remain 8810; explicit HTTPS defaults 443 and bracketed
+IPv6 is preserved. Named wire contracts validate saved connections, REST
+envelopes and actual server fields while retaining valid neighboring rows.
+Unknown wire kinds do not masquerade as authentication revocation.
+
+Connection readiness now requires an accepted event stream with a reader.
+EOF/failure clears readiness; stop cancels readers, requests and retry timers.
+Review caught the server's hello-before-backlog ordering: a resumed hello's
+latest cursor must not skip replayed events. Duplicate committed event IDs
+are ignored. When replay is unavailable, a single recovery request refreshes
+the fleet; stale snapshots preserve newer SSE state and retry with capped
+250/500/1000/2000ms backoff, canceled on reset/disposal.
+
+The session controller fences old connection reads, pairing responses,
+frames, cursors, snapshots and pages. Serialized credential writes keep an
+old pairing from restoring itself after unpair/remount; requested deletion
+survives immediate disposal. Chat selection and retained actions require
+the current client and active bot/room thread. These are client-observed
+state checks, not an atomic server-side thread precondition.
+
+CLI run records now require bounded positive integer PID/port values.
+Health must identify the same Muster PID before SIGTERM, and again before
+SIGKILL; redirects cannot provide that evidence. Failed health alone is
+neither ownership nor exit. Exit is observed before reporting success;
+an absent PID permits stale-record cleanup without a stop signal. Failed
+verification preserves the run record, and a fingerprint check preserves
+records replaced while shutdown waits. This is not a cross-process lock.
+Startup readiness checks the spawned PID; up/setup refuse to overwrite an
+unverified record. Setup validates engine/model values without stringifying
+malformed IDs. The dependency-free parser has two reviewed, local
+`no-runtime-typeof` exceptions at its primitive JSON boundary; no global
+rule was disabled. QR buffers retain values/independent rows, and their
+capacity error now accurately reports 213 bytes at M or 271 at L.
+
+Final verification: root **216 files / 2,769 passed / 8 skipped in 235.19s**, exit 0,
+**+53 passes** versus Loop 29. The separate companion suite is
+**3 suites / 117 passed / 0 skipped in 1.277s** after the clean install. Android
+typecheck/local lint and forced-root custom lint pass. Global repository
+lint now passes with **0 errors / 0 warnings**, down from 32 errors / 5 warnings; the
+forced-root check disables nested-config loading so the standalone config
+cannot conceal repository rules. Root build includes both typechecks and
+passes (Vite 5.10s, existing large-chunk warning). CLI focused 53/53 passed;
+the built CLI passed syntax/help plus 1/1 owned-process stop smoke. QR has
+220 before/after output comparisons and 2 capacity-error checks; no physical
+decoder claim. Root source hashes stayed fixed during its full suite;
+Android was checked separately after its final review/freeze.
+
+Evidence: `.omb-scratch/verification/loop30-full.log`, build/lint/CLI/QR
+logs and `loop30-root-reviewed-source.json`; standalone commands, install
+results, dependency audit and source manifest are in `loop30-android/`.
+Final read-only review found no material blocker in this slice. Public
+updater GET returned 200 and still reports **1.10.4**. This source slice is
+not a new native release or deployment proof. No demo session was touched.
+
+Commercial implication: reliable reconnect, account recovery and predictable
+local control reduce avoidable lost work; no conversion/revenue evidence is
+claimed. Next release gate is staged, validated, atomic and monotonic public
+mirror promotion (current workflow still rsyncs stable files in place), then
+correct stale bump-script guidance and prepare a versioned candidate. Keep
+the existing signed/runtime/install/update acceptance gates and GitHub billing
+escalation intact. A newly identified companion follow-up: ChatViewScreen
+still clears composer text before an asynchronous send succeeds; preserve
+draft/error recovery in a separate UI slice before native acceptance.
+Camera/deep-link UI is unimplemented; native Google login, device streaming,
+Android/Watch UI, VM, portable account recovery/sync and Mimosa remain open.
+Allowance **22% used / 78% remaining**; no reset consumed. Broad goal and
+existing heartbeat remain active.

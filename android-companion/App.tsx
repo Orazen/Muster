@@ -1,14 +1,16 @@
 import React, { useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { useCompanion, ChatTarget } from "./src/hooks/useCompanion";
+import { useCompanion } from "./src/hooks/useCompanion";
+import { currentChatTarget, type ChatSelection } from "./src/hooks/companion-session";
 import { PairingScreen } from "./src/screens/PairingScreen";
 import { ChatListScreen } from "./src/screens/ChatListScreen";
 import { ChatViewScreen } from "./src/screens/ChatViewScreen";
 
 export default function App() {
   const companion = useCompanion();
-  const [target, setTarget] = useState<ChatTarget | null>(null);
+  const [selection, setSelection] = useState<ChatSelection | null>(null);
+  const target = currentChatTarget(selection, companion.client, companion.state);
   const [refreshing, setRefreshing] = useState(false);
 
   if (!companion.client) {
@@ -40,7 +42,7 @@ export default function App() {
         onSend={(text) => companion.send(target, text)}
         onRespond={companion.respond}
         onAlwaysAllow={companion.alwaysAllow}
-        onBack={() => setTarget(null)}
+        onBack={() => setSelection(null)}
         onLoadOlder={() => companion.loadOlder(target.threadId, companion.state.hasMore[target.threadId] ?? false)}
         viewThread={companion.viewThread}
       />
@@ -56,7 +58,7 @@ export default function App() {
         rooms={Object.values(companion.state.rooms)}
         connected={companion.connected}
         refreshing={refreshing}
-        onSelect={setTarget}
+        onSelect={(next) => setSelection({ client: companion.client, target: next })}
         onRefresh={async () => {
           setRefreshing(true);
           await companion.refresh();

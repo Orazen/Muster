@@ -23,9 +23,8 @@ testsprite_tests/TC*.py
 testsprite_tests/tmp/
 
 # android-companion is npm-installed (outside the pnpm workspace); keep its
-# lockfile + modules out of the repo
+# modules out of the repo; commit the standalone lockfile for reproducible tests
 android-companion/node_modules/
-android-companion/package-lock.json
 
 # Xcode: the .xcodeproj is generated (see ios/README.md), and xcodebuild
 # writes DerivedData-style output into ios/build when invoked from CLI

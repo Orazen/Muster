@@ -803,3 +803,58 @@ global lint remains32errors/5warnings. Final review found no material
 blocker inside this slice. No new desktop release or native/provider E2E
 claim. Allowance20%used/80%remaining; no reset consumed. Continue the next
 bounded companion/CLI slice under the same broad goal and heartbeat.
+
+## Loop 30 — Companion/CLI readiness verified — 2026-09-11
+
+Base: Loop 29 `ab708a9`. Final root suite **216 files / 2,769 passed / 8 skipped
+in 235.19s**, **+53** versus Loop 29. Separate Android package:
+**3 suites / 117 passed / 0 skipped in 1.277s**, after actual clean npm-ci installation
+of 998 packages in 8.47s with install scripts disabled. Android types/local lint,
+forced-root custom lint, global lint and root build/both types pass.
+Global lint is now **0 errors / 0 warnings** (previously 32/5). Vite 5.10s retains
+the existing large-chunk warning. CLI focused 53/53, bundle syntax/help and
+owned-process stop 1/1 pass; QR 220 parity comparisons plus 2 capacity errors
+pass. These supplementary checks are not added to the root suite count.
+
+Android package+lock declare their own parser/test tools. Removed missing
+jest-expo configuration; plain Jest 29 + Babel runs pure injected protocol and
+session tests. npm dependency tree has no peer problems; historical SDK
+deprecation warnings remain. `useCompanion` explicitly composes Expo52's
+named `expo/fetch`; no device-streaming claim. Readiness, cancellation,
+HTTPS/IPv6, saved connection and REST parsing now follow tested contracts.
+The server sends latest-cursor hello before replay: resumed hello preserves
+the old committed cursor until replay IDs apply. Unknown wire frames cannot
+revoke credentials. Failed replay triggers snapshot recovery that preserves
+newer SSE state and retries single-flight with capped backoff until recovered
+or disposed. Pairing/read/cursor/snapshot/page callbacks are bound to their
+session. Credential deletion survives unmount and is serialized before later
+pairing writes. Current bot/room thread checks invalidate stale selection
+and actions; remote thread changes are not atomically preconditioned.
+
+CLI `runtime-contracts.mjs` validates integer PID/port and setup engine/model
+responses. Same app+PID health, with redirects rejected, gates TERM and a
+fresh check gates KILL. Exit must be observed; missing PIDs permit harmless
+stale-record cleanup. Failed verification retains records; conditional
+fingerprint cleanup preserves replacements, without claiming a process lock.
+Startup checks its child PID and refuses to replace an unverified run record.
+Two narrow reviewed typeof lint exceptions implement primitive JSON boundary
+checks without an external CLI dependency. QR values/row independence remain
+unchanged; corrected maximums are213 at M / 271 at L. Official download guidance replaces
+the unsafe public npm package suggestion.
+
+Full/CLI/build/lint/QR evidence and root hashes: `.omb-scratch/verification/loop30-*`.
+Standalone logs, exact commands, clean-install/dependency results and final
+source hashes: `loop30-android/`. Final review found no material blocker in
+scope. Public updater GET 200 still reports 1.10.4; no new release/deployment
+or native UI claim. Demo 8845 untouched. Allowance 22% used / 78% remaining.
+
+Next: atomic/monotonic stable mirror staging and promotion (release workflow
+currently rsyncs in place); fix obsolete bump-script instructions; prepare
+and verify a versioned candidate under existing release/runtime/signing gates.
+Before native acceptance, fix companion ChatViewScreen's premature composer
+clear on failed async sends in a separate UI slice. Its camera/deep-link UI
+is still unimplemented. Native Google login, real provider/device/Watch/VM
+E2E, portable account backup/restore/sync and Mimosa remain outstanding.
+GitHub runner billing constraints remain separate from Codex allowance;
+do not retry unchanged blocked runs or spend to bypass them. Continue the
+same broad active goal and existing heartbeat; no new ownership deadline.

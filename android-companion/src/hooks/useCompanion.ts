@@ -1,216 +1,65 @@
-// Owns the client, the state fold, and the event-stream lifecycle.
-
-import { useCallback, useEffect, useRef, useState } from "react";
+// Native composition only; the session controller owns async identity fences.
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import * as SecureStore from "expo-secure-store";
-import { MusterClient, Connection, parseAddress } from "../core/client";
-import { applyFrame, CompanionState, hydrate, initialState, markViewed, prependPage, setCursor } from "../core/store";
-import { ThreadPage } from "../core/types";
+import { fetch } from "expo/fetch";
+import { MusterClient, parseAddress, parseConnection } from "../core/client";
+import {
+  CompanionSession, ConnectionPersistence, type ChatTarget,
+} from "./companion-session";
 
+export type { ChatTarget } from "./companion-session";
 const CREDENTIALS_KEY = "muster.connection";
 
-export interface ChatTarget {
-  kind: "bot" | "room";
-  id: string; // botId or groupId
-  threadId: string;
-}
-
-async function loadConnection(): Promise<Connection | null> {
-  try {
+// Shared across hook remounts, including outstanding native storage writes.
+const persistence = new ConnectionPersistence({
+  async load() {
     const raw = await SecureStore.getItemAsync(CREDENTIALS_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed?.host && parsed?.port && parsed?.token) return parsed as Connection;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function saveConnection(conn: Connection | null): Promise<void> {
-  if (!conn) return SecureStore.deleteItemAsync(CREDENTIALS_KEY);
-  return SecureStore.setItemAsync(CREDENTIALS_KEY, JSON.stringify(conn));
-}
+    return raw ? parseConnection(JSON.parse(raw)) : null;
+  },
+  async save(connection) {
+    if (connection) await SecureStore.setItemAsync(CREDENTIALS_KEY, JSON.stringify(connection));
+    else await SecureStore.deleteItemAsync(CREDENTIALS_KEY);
+  },
+});
 
 export function useCompanion() {
-  const [client, setClient] = useState<MusterClient | null>(null);
-  const [state, setState] = useState<CompanionState>(initialState);
-  const [connecting, setConnecting] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [pairing, setPairing] = useState(false);
-  const [pairError, setPairError] = useState<string | null>(null);
-  const stopStream = useRef<(() => void) | null>(null);
-  const cursorRef = useRef<string | null>(null);
+  const [session] = useState(() => new CompanionSession({
+    persistence,
+    createClient: (connection) => new MusterClient(connection, fetch),
+    async pair(input) {
+      const { host, port, scheme } = parseAddress(input.address);
+      const { response } = await MusterClient.pair(host, port, {
+        scheme,
+        credential: input.credential,
+        code: input.code,
+        deviceName: input.deviceName ?? "Muster Android",
+      }, fetch);
+      return { connection: { host, port, scheme, token: response.token }, response };
+    },
+  }));
+  const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
 
-  const refreshWith = useCallback(async (c: MusterClient) => {
-    try {
-      const fleet = await c.fleet();
-      setState((s) => hydrate(s, fleet));
-    } catch {
-      // Unreachable server; the stream loop keeps retrying underneath.
-    }
-  }, []);
-
-  // Boot: restore saved connection, hydrate the fleet, open the stream.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const conn = await loadConnection();
-      if (!conn || cancelled) return;
-      const c = new MusterClient(conn);
-      setClient(c);
-      await refreshWith(c);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshWith]);
+    void session.start();
+    return session.dispose;
+  }, [session]);
 
-  const refresh = useCallback(async () => {
-    if (client) await refreshWith(client);
-  }, [client, refreshWith]);
-
-  // Stream lifecycle: (re)open whenever the client changes.
-  useEffect(() => {
-    if (!client) return;
-    setConnecting(true);
-    let disposed = false;
-
-    const open = async () => {
-      const handle = await client.events(
-        cursorRef.current,
-        (frame) => {
-          if (frame.kind === "unknown" && frame.rawKind === "unauthorized") {
-            // Token revoked → drop credentials, back to pairing.
-            saveConnection(null);
-            setClient(null);
-            setState(initialState());
-            return;
-          }
-          setState((s) => applyFrame(s, frame));
-        },
-        (cursor) => {
-          cursorRef.current = cursor;
-          setState((s) => setCursor(s, cursor));
-        },
-      );
-      if (disposed) {
-        handle.stop();
-        return;
-      }
-      stopStream.current = handle.stop;
-      setConnecting(false);
-      setConnected(true);
-    };
-
-    open();
-    return () => {
-      disposed = true;
-      stopStream.current?.();
-      stopStream.current = null;
-      setConnected(false);
-    };
-  }, [client]);
-
-  const pair = useCallback(
-    async (input: { address: string; credential?: string; code?: string; deviceName?: string }) => {
-      setPairing(true);
-      setPairError(null);
-      try {
-        const { host, port } = parseAddress(input.address);
-        const { response } = await MusterClient.pair(host, port, {
-          credential: input.credential,
-          code: input.code,
-          deviceName: input.deviceName ?? "Muster Android",
-        });
-        const conn: Connection = { host, port, token: response.token };
-        await saveConnection(conn);
-        cursorRef.current = null;
-        setClient(new MusterClient(conn));
-        return { response };
-      } catch (err) {
-        setPairError((err as Error).message || "Pairing failed");
-        return null;
-      } finally {
-        setPairing(false);
-      }
-    },
-    [],
-  );
-
-  const unpair = useCallback(async () => {
-    stopStream.current?.();
-    await saveConnection(null);
-    cursorRef.current = null;
-    setClient(null);
-    setConnected(false);
-    setState(initialState());
-  }, []);
-
-  const send = useCallback(
-    async (target: ChatTarget, text: string) => {
-      if (!client) return;
-      if (target.kind === "bot") await client.sendToBot(target.id, text);
-      else await client.sendToGroup(target.id, text);
-    },
-    [client],
-  );
-
-  const respond = useCallback(
-    async (threadId: string, requestId: string, behavior: string, message?: string) => {
-      if (!client) return;
-      await client.respond(threadId, requestId, behavior, message);
-    },
-    [client],
-  );
-
-  const alwaysAllow = useCallback(
-    async (botId: string, allowKey: string) => {
-      if (!client) return;
-      await client.alwaysAllow(botId, allowKey);
-    },
-    [client],
-  );
-
-  const viewThread = useCallback(
-    async (threadId: string) => {
-      setState((s) => markViewed(s, threadId));
-      if (client) {
-        try {
-          await client.markRead(threadId);
-        } catch {}
-      }
-    },
-    [client],
-  );
-
-  const loadOlder = useCallback(
-    async (threadId: string, hasMore: boolean) => {
-      if (!client || !hasMore) return;
-      const list = state.messages[threadId] ?? [];
-      const oldest = list[0]?.id;
-      if (!oldest) return;
-      try {
-        const page: ThreadPage = await client.messages(threadId, { before: oldest, limit: 50 });
-        setState((s) => prependPage(s, threadId, page));
-      } catch {}
-    },
-    [client, state.messages],
-  );
+  // Capture the render's client so callbacks retained by an old screen
+  // cannot send to or modify the newly paired account.
+  const send = useCallback((target: ChatTarget, text: string) =>
+    session.send(snapshot.client, target, text), [session, snapshot.client]);
+  const respond = useCallback((threadId: string, requestId: string, behavior: string, message?: string) =>
+    session.respond(snapshot.client, threadId, requestId, behavior, message), [session, snapshot.client]);
+  const alwaysAllow = useCallback((botId: string, allowKey: string) =>
+    session.alwaysAllow(snapshot.client, botId, allowKey), [session, snapshot.client]);
+  const viewThread = useCallback((threadId: string) =>
+    session.viewThread(snapshot.client, threadId), [session, snapshot.client]);
+  const loadOlder = useCallback((threadId: string, hasMore: boolean) =>
+    session.loadOlder(snapshot.client, threadId, hasMore), [session, snapshot.client]);
 
   return {
-    client,
-    state,
-    connected,
-    connecting,
-    pairing,
-    pairError,
-    pair,
-    unpair,
-    refresh,
-    send,
-    respond,
-    alwaysAllow,
-    viewThread,
-    loadOlder,
+    ...snapshot,
+    pair: session.pair, unpair: session.unpair, refresh: session.refresh,
+    send, respond, alwaysAllow, viewThread, loadOlder,
   };
 }

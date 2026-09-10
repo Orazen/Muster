@@ -4,8 +4,8 @@
 // the same chip-code flow the desktop companion uses; local desktop
 // installs work with no pairing at all (loopback session).
 //
-// Zero dependencies beyond Node's own fetch — this file is copy-installed
-// by `curl` users and run by `npm i -g`, so the only contract is Node 22+.
+// The bundled CLI uses only Node built-ins and requires Node 22+.
+// Use the official Muster download or a private repository checkout.
 //
 //   muster up [-d] [--port 8799]   boot the server here + print a phone QR;
 //                                  -d keeps it running after the terminal closes
@@ -22,7 +22,7 @@
 //   muster status --json             machine-readable (agent callers)
 
 import { homedir, networkInterfaces } from "node:os";
-import { existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -30,6 +30,7 @@ import { createInterface } from "node:readline/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { renderTerminal } from "./qr.mjs";
+import { clearRunRecordAt, inspectRecordedServer, parseSetupInstances, readRunRecordAt, stopRecordedServer } from "./runtime-contracts.mjs";
 
 // Every on-disk path hangs off MUSTER_DIR (default ~/.muster). The env
 // override keeps multi-instance testing and second installs off a real one.
@@ -392,7 +393,7 @@ function freePort(preferred) {
 }
 
 function resolveRuntime() {
-  // 1. npm install layout: dist-server ships alongside cli/ in the package.
+  // 1. Packaged layout: dist-server ships alongside cli/.
   const pkgRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
   const bundled = join(pkgRoot, "dist-server", "index.js");
   if (existsSync(bundled)) return { cmd: process.execPath, args: [bundled], cwd: pkgRoot, static: join(pkgRoot, "dist") };
@@ -408,75 +409,42 @@ function resolveRuntime() {
     };
   }
   console.error(
-    "No Muster runtime found. Run this from a Muster repo checkout, or `npm i -g muster` for the packaged build.",
+    "No Muster runtime found. Run this from your private Muster checkout, or download Muster at https://muster.orazen.online/download.",
   );
   process.exit(1);
 }
 
 let child = null;
 
-/** Read the run record ({pid, port, started} JSON) or null. A record whose
- *  server no longer answers /api/health is treated as gone (crash, reboot,
- *  manual kill) — the health endpoint is the truth, not the PID. */
+/** Read a validated run record; health failure alone does not prove exit. */
 function readRunRecord() {
-  try {
-    const rec = JSON.parse(readFileSync(RUNTIME_PATH, "utf8"));
-    if (typeof rec?.pid === "number" && typeof rec?.port === "number") return rec;
-  } catch {
-    // no record or garbage — fall through
-  }
-  return null;
+  return readRunRecordAt(RUNTIME_PATH);
 }
 
 async function liveServer(rec) {
-  if (!rec) return null;
-  try {
-    const res = await fetch(`http://127.0.0.1:${rec.port}/api/health`, { signal: AbortSignal.timeout(1500) });
-    const body = await res.json().catch(() => null);
-    if (res.ok && body?.app === "muster") return rec;
-  } catch {
-    // not answering — gone or still booting
-  }
-  return null;
+  return rec && await inspectRecordedServer(rec) === "matching" ? rec : null;
 }
 
-function clearRunRecord() {
-  try {
-    unlinkSync(RUNTIME_PATH);
-  } catch {
-    // already gone
-  }
-}
-
-/** Stop the detached server: SIGTERM, wait for the health endpoint to go
- *  quiet, escalate to SIGKILL after 10s. */
+/** Stop only the verified recorded process, retaining recovery evidence on failure. */
 async function stopDaemon() {
   const rec = readRunRecord();
   if (!rec) {
+    if (existsSync(RUNTIME_PATH)) {
+      console.error("The background Muster record is unreadable. No stop signal was sent; the record was preserved for recovery.");
+      process.exitCode = 1;
+      return;
+    }
     console.log("No background Muster found. (`muster up -d` starts one.)");
     return;
   }
-  const wasLive = Boolean(await liveServer(rec));
-  try {
-    process.kill(rec.pid, "SIGTERM");
-  } catch {
-    // already gone
+  const result = await stopRecordedServer(rec);
+  if (!result.stopped) {
+    console.error(`${result.reason} The run record was preserved for recovery.`);
+    process.exitCode = 1;
+    return;
   }
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline && (await liveServer(rec))) {
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  if (await liveServer(rec)) {
-    try {
-      process.kill(rec.pid, "SIGKILL");
-    } catch {
-      // already gone
-    }
-    console.log(`Force-stopped Muster (port ${rec.port} ignored SIGTERM).`);
-  } else {
-    console.log(`Stopped Muster${wasLive ? "" : " (it was already down)"} — port ${rec.port} free.`);
-  }
-  clearRunRecord();
+  console.log(`${result.forced ? "Force-stopped" : "Stopped"} Muster (PID ${rec.pid}, recorded port ${rec.port}).`);
+  if (!clearRunRecordAt(RUNTIME_PATH, rec)) console.log("The run record changed during shutdown; it was left untouched.");
 }
 
 function logs() {
@@ -490,19 +458,11 @@ function logs() {
 }
 
 /** Readiness probe shared by foreground and detached boots. */
-async function waitHealthy(port, { timeoutMs = 60_000 } = {}) {
+async function waitHealthy(port, pid, { timeoutMs = 60_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (child && child.exitCode !== null) throw new Error(`server exited with code ${child.exitCode} during startup`);
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2000) });
-      if (res.ok) {
-        const body = await res.json().catch(() => null);
-        if (body?.app === "muster") return body;
-      }
-    } catch {
-      // not up yet
-    }
+    if (await inspectRecordedServer({ port, pid }) === "matching") return;
     if (Date.now() > deadline) throw new Error(`server did not become healthy within ${timeoutMs / 1000}s`);
     await new Promise((r) => setTimeout(r, 400));
   }
@@ -583,7 +543,7 @@ async function bootDetached(port, runtime) {
     JSON.stringify({ pid: daemon.pid, port, started: new Date().toISOString() }, null, 2) + "\n",
     { mode: 0o600 },
   );
-  await waitHealthy(port);
+  await waitHealthy(port, daemon.pid);
   return { pid: daemon.pid, port };
 }
 
@@ -604,7 +564,9 @@ async function up() {
     console.log("  (This foreground shell is only printing — Ctrl-C will not stop the running server.)");
     return;
   }
-  clearRunRecord();
+  // A failed health probe may mean a still-starting or inaccessible daemon.
+  // Keep its record until the owner has resolved it instead of replacing it.
+  if (existsSync(RUNTIME_PATH)) throw new Error("A background run record exists, but its Muster process could not be verified. Run `muster stop` to clear an exited process; otherwise inspect the recorded server before starting another.");
 
   const port = await freePort(Number(arg("--port") ?? 8799));
   const runtime = resolveRuntime();
@@ -624,7 +586,7 @@ async function up() {
   process.on("SIGTERM", () => stop("SIGTERM"));
   child.on("exit", (code) => process.exit(code ?? 0));
 
-  await waitHealthy(port);
+  await waitHealthy(port, child.pid);
   await mintAndPrint(port, { detached: false });
   // Keep the foreground child attached; the exit/forward handlers above own
   // the process lifetime from here.
@@ -693,6 +655,7 @@ async function setup() {
     // ── connect ──
     let rec = await liveServer(readRunRecord());
     if (!rec) {
+      if (existsSync(RUNTIME_PATH)) throw new Error("A background run record exists, but its Muster process could not be verified. Run `muster stop` to clear an exited process; otherwise inspect the recorded server before starting another.");
       const answer = await ask("No Muster server is running. Start one now? [Y/n] ", "y");
       if (!/^y/i.test(answer)) {
         console.log("Okay — run `muster up` (or `muster up -d`) first, then `muster setup` again.");
@@ -722,8 +685,8 @@ async function setup() {
     }
 
     // ── engine ──
-    const { instances } = await asJson(await api(cfg, "/api/instances"));
-    const available = instances.filter((i) => i.snapshot?.state === "available");
+    const instances = parseSetupInstances(await asJson(await api(cfg, "/api/instances")));
+    const available = instances.filter((i) => i.state === "available");
     if (!available.length) {
       console.log("");
       console.log("No engine is available yet — that's the one thing Muster can't do for you.");
@@ -736,12 +699,8 @@ async function setup() {
     available.forEach((inst, i) => console.log(`  ${i + 1}) ${inst.displayName} · ${inst.driverKind}`));
     const pick = Number(await ask(`Engine [1]: `, "1")) - 1;
     const engine = available[Number.isInteger(pick) && pick >= 0 && pick < available.length ? pick : 0];
-    let model = engine.models?.default ?? "";
-    // options entries are {id,label} objects on every current driver; accept
-    // bare strings too so a driver that ships plain ids still renders.
-    const options = (engine.models?.options ?? []).map((mo) =>
-      typeof mo === "string" ? { id: mo, label: mo } : { id: String(mo.id), label: String(mo.label ?? mo.id) },
-    );
+    let model = engine.models.default;
+    const options = engine.models.options;
     if (options.length > 1) {
       console.log("  Models:");
       options.forEach((mo, i) => console.log(`    ${i + 1}) ${mo.label}${mo.id === model ? "  (default)" : ""}`));

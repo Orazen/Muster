@@ -23,10 +23,12 @@ interface ChatListScreenProps {
   onUnpair: () => void;
 }
 
+interface ChatActivity { at: number; preview: string }
+
 function lastActivity(
   state: CompanionState,
   threadId: string,
-): { at: number; preview: string } {
+): ChatActivity {
   const list = state.messages[threadId] ?? [];
   const last = list[list.length - 1];
   const streams: StreamBuffers | undefined = state.streams[threadId];
@@ -55,8 +57,8 @@ export function ChatListScreen({
       : "";
 
   type Row =
-    | { key: string; kind: "bot"; bot: Bot; threadId: string; act: { at: number; preview: string } }
-    | { key: string; kind: "room"; room: Room; threadId: string; act: { at: number; preview: string } };
+    | { key: string; kind: "bot"; bot: Bot; threadId: string; act: ChatActivity }
+    | { key: string; kind: "room"; room: Room; threadId: string; act: ChatActivity };
 
   const rows: Row[] = [
     ...bots.map((bot) => ({

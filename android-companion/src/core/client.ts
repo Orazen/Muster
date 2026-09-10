@@ -1,56 +1,28 @@
-// HTTP client mirroring ios/Sources/CompanionCore/Client.swift.
-// Only endpoints in the sidecar's default-deny allowlist are callable.
-
-import { advanceCursor, decodeFleet, decodeFrame, Frame } from "./frames";
-import { SSEParser, SSEEvent } from "./sse";
-import {
-  Fleet,
-  Instance,
-  Message,
-  PairResponse,
-  ThreadPage,
-} from "./types";
-
-export const DEFAULT_PORT = 8810;
-
-export interface Connection {
-  host: string;
-  port: number;
-  token: string;
-}
+// HTTP and SSE client for the companion sidecar. Native callers inject expo/fetch.
+import { advanceCursor, decodeFleet, decodeFrame, type Frame } from "./frames";
+import { SSEParser, type SSEEvent } from "./sse";
+import { apiErrorSchema, instancesSchema, pairResponseSchema, threadPageSchema, type JsonValue } from "./contracts";
+import { connectionOrigin, parseConnection, type Connection, type ConnectionScheme } from "./connection";
+import type { ClientFetch, ClientResponse, ConnectionStatus, EventStream, StreamReader } from "./transport";
+import type { Fleet, Instance, PairResponse, ThreadPage } from "./types";
+export { DEFAULT_PORT, parseAddress, parseConnection, type Connection, type ParsedAddress } from "./connection";
+export type { ClientFetch, ClientResponse, ConnectionStatus } from "./transport";
 
 export class PairingError extends Error {}
 export class APIError extends Error {
-  status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
+  constructor(public status: number, message: string) { super(message); }
 }
+interface PairOptions { credential?: string; code?: string; deviceName: string; scheme?: ConnectionScheme }
+interface PairBody { deviceName: string; credential?: string; code?: string }
+interface RespondBody { requestId: string; behavior: string; message?: string }
+type RequestBody = { text: string } | RespondBody | { allowKey: string } | { emoji: string };
 
-export interface ParsedAddress {
-  host: string;
-  port: number;
-}
-
-// Strips scheme, handles IPv6 brackets, applies the default port — mirrors
-// Connection.parse on iOS.
-export function parseAddress(input: string): ParsedAddress {
-  let s = input.trim();
-  s = s.replace(/^https?:\/\//i, "");
-  s = s.replace(/\/+$/, "");
-  const bracket = s.match(/^\[([^\]]+)\](?::(\d+))?$/);
-  if (bracket) {
-    return { host: bracket[1], port: bracket[2] ? Number(bracket[2]) : DEFAULT_PORT };
-  }
-  const lastColon = s.lastIndexOf(":");
-  if (lastColon > 0 && (s.match(/:/g) ?? []).length === 1) {
-    const port = Number(s.slice(lastColon + 1));
-    if (Number.isFinite(port) && port > 0) {
-      return { host: s.slice(0, lastColon), port };
-    }
-  }
-  return { host: s, port: DEFAULT_PORT };
+async function errorDetail(response: ClientResponse): Promise<string> {
+  try {
+    const parsed = apiErrorSchema.safeParse(await response.json());
+    if (parsed.success) return parsed.data.error;
+  } catch { /* Non-JSON failures retain the HTTP description. */ }
+  return response.statusText;
 }
 
 export interface PairingInvite {
@@ -70,116 +42,66 @@ export function parsePairingURL(url: string): PairingInvite | null {
 }
 
 export class MusterClient {
-  conn: Connection;
-
-  constructor(conn: Connection) {
-    this.conn = conn;
+  readonly conn: Connection;
+  constructor(conn: Connection, private readonly fetchRequest: ClientFetch) {
+    const parsed = parseConnection({ ...conn });
+    if (!parsed) throw new Error("Invalid saved server connection");
+    this.conn = parsed;
   }
-
-  get base(): string {
-    return `http://${this.conn.host}:${this.conn.port}`;
+  get base(): string { return connectionOrigin(this.conn); }
+  private headers() {
+    return { Authorization: `Bearer ${this.conn.token}`, "Content-Type": "application/json" };
   }
-
-  private headers(): Record<string, string> {
-    return {
-      Authorization: `Bearer ${this.conn.token}`,
-      "Content-Type": "application/json",
-    };
-  }
-
-  private async request<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-    timeoutMs = 20_000,
-  ): Promise<T> {
+  private async request(method: string, path: string, body?: RequestBody): Promise<JsonValue> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), 20_000);
     try {
-      const res = await fetch(`${this.base}${path}`, {
-        method,
-        headers: this.headers(),
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal,
+      const response = await this.fetchRequest(`${this.base}${path}`, {
+        method, headers: this.headers(), body: body === undefined ? undefined : JSON.stringify(body),
+        signal: controller.signal, credentials: "omit",
       });
-      if (!res.ok) {
-        let detail = res.statusText;
-        try {
-          const errBody = await res.json();
-          if (typeof errBody?.error === "string") detail = errBody.error;
-        } catch {}
-        throw new APIError(res.status, detail);
-      }
-      if (res.status === 204) return undefined as T;
-      return (await res.json()) as T;
-    } finally {
-      clearTimeout(timer);
-    }
+      if (!response.ok) throw new APIError(response.status, await errorDetail(response));
+      return response.status === 204 ? null : await response.json();
+    } finally { clearTimeout(timer); }
   }
-
-  static async pair(
-    host: string,
-    port: number,
-    opts: { credential?: string; code?: string; deviceName: string },
-  ): Promise<{ response: PairResponse; token: string }> {
-    const body: Record<string, unknown> = { deviceName: opts.deviceName };
+  private async requestVoid(method: string, path: string, body?: RequestBody): Promise<void> {
+    await this.request(method, path, body);
+  }
+  static async pair(host: string, port: number, opts: PairOptions, fetchRequest: ClientFetch): Promise<{ response: PairResponse; token: string }> {
+    const address = parseConnection({ host, port, scheme: opts.scheme ?? "http", token: "pending" });
+    if (!address) throw new PairingError("Invalid server address");
+    const body: PairBody = { deviceName: opts.deviceName };
     if (opts.credential) body.credential = opts.credential;
     else if (opts.code) body.code = opts.code;
     else throw new PairingError("Need a QR credential or a 6-digit code");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 20_000);
     try {
-      const res = await fetch(`http://${host}:${port}/api/pair`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: controller.signal,
+      const res = await fetchRequest(`${connectionOrigin(address)}/api/pair`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body), signal: controller.signal, credentials: "omit",
       });
-      if (!res.ok) {
-        let detail = res.statusText;
-        try {
-          const errBody = await res.json();
-          if (typeof errBody?.error === "string") detail = errBody.error;
-        } catch {}
-        throw new PairingError(detail);
-      }
-      const response = (await res.json()) as PairResponse;
-      return { response, token: response.token };
-    } finally {
-      clearTimeout(timer);
-    }
+      if (!res.ok) throw new PairingError(await errorDetail(res));
+      const parsed = pairResponseSchema.safeParse(await res.json());
+      if (!parsed.success) throw new PairingError("The server returned an invalid pairing response");
+      return { response: parsed.data, token: parsed.data.token };
+    } finally { clearTimeout(timer); }
   }
-
-  async fleet(): Promise<Fleet> {
-    const raw = await this.request<unknown>("GET", "/api/bots?messages=50");
-    return decodeFleet(raw);
-  }
-
+  async fleet(): Promise<Fleet> { return decodeFleet(await this.request("GET", "/api/bots?messages=50")); }
   async messages(threadId: string, opts?: { before?: string; limit?: number }): Promise<ThreadPage> {
     const params = new URLSearchParams();
     if (opts?.before) params.set("before", opts.before);
     params.set("limit", String(opts?.limit ?? 50));
-    const raw = await this.request<unknown>(
-      "GET",
-      `/api/threads/${encodeURIComponent(threadId)}/messages?${params}`,
-    );
-    return {
-      messages: Array.isArray((raw as any)?.messages) ? (raw as any).messages : [],
-      hasMore: Boolean((raw as any)?.hasMore),
-    };
+    return threadPageSchema.parse(await this.request("GET", `/api/threads/${encodeURIComponent(threadId)}/messages?${params}`));
   }
-
-  async instances(): Promise<Instance[]> {
-    const raw = await this.request<unknown>("GET", "/api/instances");
-    return Array.isArray(raw) ? (raw as Instance[]) : [];
-  }
+  async instances(): Promise<Instance[]> { return instancesSchema.parse(await this.request("GET", "/api/instances")); }
 
   async sendToBot(botId: string, text: string): Promise<void> {
-    await this.request("POST", `/api/bots/${encodeURIComponent(botId)}/messages`, { text });
+    await this.requestVoid("POST", `/api/bots/${encodeURIComponent(botId)}/messages`, { text });
   }
 
   async sendToGroup(groupId: string, text: string): Promise<void> {
-    await this.request("POST", `/api/groups/${encodeURIComponent(groupId)}/messages`, { text });
+    await this.requestVoid("POST", `/api/groups/${encodeURIComponent(groupId)}/messages`, { text });
   }
 
   async respond(
@@ -188,108 +110,130 @@ export class MusterClient {
     behavior: "allow" | "allowAlways" | "deny" | string,
     message?: string,
   ): Promise<void> {
-    const body: Record<string, unknown> = { requestId, behavior };
+    const body: RespondBody = { requestId, behavior };
     if (message !== undefined) body.message = message;
-    await this.request("POST", `/api/threads/${encodeURIComponent(threadId)}/respond`, body);
+    await this.requestVoid("POST", `/api/threads/${encodeURIComponent(threadId)}/respond`, body);
   }
 
   async alwaysAllow(botId: string, allowKey: string): Promise<void> {
-    await this.request("POST", `/api/bots/${encodeURIComponent(botId)}/always-allow`, {
+    await this.requestVoid("POST", `/api/bots/${encodeURIComponent(botId)}/always-allow`, {
       allowKey,
     });
   }
 
   async markRead(threadId: string): Promise<void> {
-    await this.request("POST", `/api/threads/${encodeURIComponent(threadId)}/read`, {});
+    await this.requestVoid("POST", `/api/threads/${encodeURIComponent(threadId)}/read`);
   }
 
   async toggleReaction(threadId: string, messageId: string, emoji: string): Promise<void> {
-    await this.request(
+    await this.requestVoid(
       "POST",
       `/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/reactions`,
       { emoji },
     );
   }
 
-  // Event stream. `onFrame` fires for every decoded frame; the returned
-  // stopper cancels the connection. Reconnect with the returned cursor.
-  async events(
+  events(
     since: string | null,
     onFrame: (frame: Frame, seq: number | null) => void,
     onCursor: (cursor: string) => void,
-  ): Promise<{ stop: () => void }> {
-    const controller = new AbortController();
+    onStatus?: (status: ConnectionStatus) => void,
+  ): EventStream {
     let stopped = false;
-
-    (async () => {
+    let controller: AbortController | null = null;
+    let reader: StreamReader | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let wakeRetry: (() => void) | null = null;
+    const status = (value: ConnectionStatus) => { if (!stopped) onStatus?.(value); };
+    const frame = (value: Frame, seq: number | null) => { if (!stopped) onFrame(value, seq); };
+    const cursorChanged = (value: string) => { if (!stopped) onCursor(value); };
+    const releaseReader = async () => {
+      const active = reader;
+      reader = null;
+      if (!active) return;
+      try { await active.cancel(); } catch { /* Already failed or aborted. */ }
+      finally { active.releaseLock(); }
+    };
+    const run = async () => {
       let cursor = since;
       while (!stopped) {
+        status("connecting");
+        if (stopped) return;
+        controller = new AbortController();
         const parser = new SSEParser();
         try {
           const params = new URLSearchParams({ screens: "off" });
           if (cursor) params.set("since", cursor);
-          const res = await fetch(`${this.base}/api/events?${params}`, {
-            headers: {
-              Authorization: `Bearer ${this.conn.token}`,
-              Accept: "text/event-stream",
-            },
-            signal: controller.signal,
+          const res = await this.fetchRequest(`${this.base}/api/events?${params}`, {
+            headers: { Authorization: `Bearer ${this.conn.token}`, Accept: "text/event-stream" },
+            signal: controller.signal, credentials: "omit",
           });
-          if (!res.ok || !res.body) {
-            if (res.status === 401 || res.status === 403) {
-              onFrame({ kind: "unknown", rawKind: "unauthorized" }, null);
-              return;
-            }
-            throw new APIError(res.status, res.statusText);
+          reader = res.body?.getReader() ?? null;
+          if (stopped) return;
+          if (res.status === 401 || res.status === 403) {
+            status("unauthorized");
+            return;
           }
-          const reader = res.body.getReader();
+          const contentType = res.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+          if (!res.ok || !reader || contentType !== "text/event-stream") {
+            throw new APIError(res.status, "The server did not open an event stream");
+          }
+          status("connected");
           const decoder = new TextDecoder();
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done || stopped) break;
-            const chunk = decoder.decode(value, { stream: true });
-            for (const evt of parser.feed(chunk)) {
+          while (!stopped) {
+            const chunk = await reader.read();
+            if (stopped || chunk.done) break;
+            for (const evt of parser.feed(decoder.decode(chunk.value, { stream: true }))) {
               if (stopped) break;
-              cursor = this.handleEvent(evt, cursor, onFrame, onCursor);
+              cursor = this.handleEvent(evt, cursor, frame, cursorChanged);
             }
           }
-        } catch (err) {
-          if (stopped || (err as Error).name === "AbortError") return;
+        } catch {
+          // Network/read failures retry; cancellation is terminal below.
+        } finally {
+          controller?.abort();
+          controller = null;
+          await releaseReader();
         }
         if (stopped) return;
-        // Backoff, then resume from the last committed cursor.
-        await new Promise((r) => setTimeout(r, 2000));
+        status("disconnected");
+        if (stopped) return;
+        await new Promise<void>((resolve) => {
+          wakeRetry = resolve;
+          retryTimer = setTimeout(() => { retryTimer = null; wakeRetry = null; resolve(); }, 2000);
+        });
       }
-    })();
-
-    return {
-      stop: () => {
-        stopped = true;
-        controller.abort();
-      },
     };
+    void run();
+    return { stop: () => {
+      if (stopped) return;
+      stopped = true;
+      controller?.abort();
+      void releaseReader();
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      retryTimer = null;
+      wakeRetry?.();
+      wakeRetry = null;
+    } };
   }
 
-  // Returns the advanced cursor. The `id:` line carries "<streamId>:<seq>";
-  // the streamId prefix must survive across resumes. hello.cursor commits a
-  // server-issued cursor (fresh streams hand one over).
   private handleEvent(
-    evt: SSEEvent,
-    cursor: string | null,
+    evt: SSEEvent, cursor: string | null,
     onFrame: (frame: Frame, seq: number | null) => void,
     onCursor: (cursor: string) => void,
   ): string | null {
     let next = cursor;
     if (evt.id) {
       next = advanceCursor(cursor, evt.id);
-      if (next !== cursor) onCursor(next);
+      // Replayed events must not append runtime deltas a second time.
+      if (next === cursor) return cursor;
     }
     const frame = decodeFrame(evt.data);
-    if (frame.kind === "hello" && frame.cursor) {
-      next = frame.cursor;
-      onCursor(next);
-    }
+    // The server announces its latest cursor BEFORE sending missed events.
+    // On a resumed stream, commit only the replay IDs as they are applied.
+    if (frame.kind === "hello" && frame.cursor && !frame.resumed) next = frame.cursor;
     onFrame(frame, null);
+    if (next !== cursor && next !== null) onCursor(next);
     return next;
   }
 }
