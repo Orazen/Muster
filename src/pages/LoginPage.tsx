@@ -17,7 +17,7 @@ import { authDestination } from "@/lib/auth-navigation";
  * Whatever a deployment lacks renders as a last resort rather than bricking
  * the install — no path here is ever hidden behind another one. */
 export function LoginPage() {
-  const { capabilities, signInWithProvider, signIn, user, loading: authLoading, signOut } = useAuth();
+  const { capabilities, signInWithProvider, signIn, user, loading: authLoading, signOut, sessionError, retrySession } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = authDestination(params.get("next"));
@@ -137,12 +137,16 @@ export function LoginPage() {
     <AuthShell title="Welcome back" subtitle="Sign in to pick up where your team left off."
       footer={<>New to Muster? <Link to={`/sign-up?next=${encodeURIComponent(next)}`} className="auth-link">Create an account</Link></>}>
       <div className="auth-stack">
+        {sessionError && <div className="auth-notice auth-error" role="alert">
+          <p>{sessionError}</p>
+          <button type="button" className="auth-link" onClick={() => void retrySession()}>Check sign-in again</button>
+        </div>}
         {authErrorHint && (
           <div role="alert" className="auth-notice auth-error">
             {authErrorHint}
           </div>
         )}
-        {!authLoading && user && (
+        {!authLoading && !sessionError && user && (
           <div className={`flex flex-col gap-2.5 ${authCardBox}`}>
             <span>
               Already signed in as <span className="font-semibold">{user.email}</span>.
@@ -158,7 +162,9 @@ export function LoginPage() {
               <button
                 type="button"
                 onClick={async () => {
-                  await signOut();
+                  setError("");
+                  try { await signOut(); }
+                  catch { setError("Couldn’t finish signing out. Please try again."); }
                 }}
                 className="auth-link"
               >

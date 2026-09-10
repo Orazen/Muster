@@ -159,6 +159,7 @@ function ProfileFields() {
 function AccountSection() {
   const { user, signOut } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   if (!user) return null;
 
   return (
@@ -166,8 +167,11 @@ function AccountSection() {
       <button
         onClick={async () => {
           setBusy(true);
+          setError("");
           try {
             await signOut();
+          } catch {
+            setError("Couldn’t finish signing out. Please try again.");
           } finally {
             setBusy(false);
           }
@@ -177,6 +181,7 @@ function AccountSection() {
       >
         {busy ? "Signing out…" : "Sign out"}
       </button>
+      {error && <p role="alert" className="mt-2 text-sm text-ink-secondary">{error}</p>}
     </Card>
   );
 }

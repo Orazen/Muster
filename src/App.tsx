@@ -249,22 +249,10 @@ function AppShell() {
   );
 }
 
-// The marketing landing page ("/") is meant for a browser visitor who has
-// never used Muster — feature copy, download buttons for every platform,
-// GitHub links. The packaged desktop app is a completely different
-// audience: someone who already downloaded and opened Muster, on a window
-// that only ever shows this one app. Rendering the same marketing page
-// there (as this route did unconditionally before) meant every desktop
-// launch needed an extra click through content the user had already acted
-// on just by opening the app. window.ogb only exists inside Electron's
-// preload bridge — that's the same signal every other desktop-vs-browser
-// check in this codebase already uses (src/lib/desktop.ts).
+// Public marketing is served statically. React's root is also the packaged
+// desktop entry and must wait for a confirmed session before redirecting.
 function RootRoute() {
-  const { user, loading } = useAuth();
-  // The marketing site is the static www/index.html served at / — the React
-  // app never renders a second landing. Browser root funnels to auth.
-  if (loading) return null;
-  return <Navigate to={user ? "/app" : "/sign-in"} replace />;
+  return <AuthGate><Navigate to="/app" replace /></AuthGate>;
 }
 
 export default function App() {

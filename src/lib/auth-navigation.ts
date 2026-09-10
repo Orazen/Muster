@@ -15,3 +15,10 @@ export function authDestination(value: string | null): string {
 
 /** Matches server/auth.ts's minimum; used for new passwords only. */
 export const AUTH_PASSWORD_MIN_LENGTH = 12;
+
+/** The React desktop entry uses /, but public web / serves marketing.
+ * A sign-in callback from that entry must return to the actual workspace. */
+export function authGateReturnPath(location: { pathname: string; search: string; hash: string }): string {
+  const path = location.pathname === "/" ? "/app" : location.pathname;
+  return authDestination(path + location.search + location.hash);
+}

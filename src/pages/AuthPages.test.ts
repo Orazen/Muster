@@ -23,12 +23,14 @@ const baseCapabilities: AuthCapabilities = {
 
 beforeEach(() => vi.clearAllMocks());
 
-function renderPage(Page: ComponentType, capabilities: Partial<AuthCapabilities> = {}, path = "/sign-in") {
+function renderPage(Page: ComponentType, capabilities: Partial<AuthCapabilities> = {}, path = "/sign-in", sessionError: string | null = null) {
   mocks.useAuth.mockReturnValue({
     capabilities: { ...baseCapabilities, ...capabilities },
     user: null,
     session: null,
     loading: false,
+    sessionError,
+    retrySession: vi.fn(),
     signIn: vi.fn(),
     signUp: vi.fn(),
     signOut: vi.fn(),
@@ -48,6 +50,12 @@ function expectLabel(markup: string, id: string, text: string) {
 }
 
 describe("auth form contracts", () => {
+  it.each([LoginPage, SignupPage])("offers an existing-session check after a temporary failure", (Page) => {
+    const markup = renderPage(Page, {}, "/sign-up?next=%2Fos", "Temporary sign-in check failure");
+    expect(markup).toContain("Temporary sign-in check failure");
+    expect(markup).toContain("Check sign-in again</button>");
+    if (Page === SignupPage) expect(markup).toMatch(/<button type="submit" disabled=""[^>]*>Create account<\/button>/);
+  });
   it("keeps visible labels and password-manager hints on sign-in fields", () => {
     const markup = renderPage(LoginPage);
     expectLabel(markup, "email", "Email address");

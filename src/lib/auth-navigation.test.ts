@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { authDestination } from "./auth-navigation";
+import { authDestination, authGateReturnPath } from "./auth-navigation";
 
 describe("auth return destinations", () => {
+  it("returns desktop root sign-in to the workspace instead of public marketing", () => {
+    expect(authGateReturnPath({ pathname: "/", search: "", hash: "" })).toBe("/app");
+  });
+  it("retains a protected OS destination, template and fragment", () => {
+    expect(authGateReturnPath({ pathname: "/os", search: "?template=research", hash: "#work" })).toBe("/os?template=research#work");
+  });
+  it("retains root query intent while targeting the app", () => {
+    expect(authGateReturnPath({ pathname: "/", search: "?bot=fixture", hash: "#reply" })).toBe("/app?bot=fixture#reply");
+  });
   it.each([null, "", "app", "https://example.org/app", "javascript:alert(1)"])(
     "falls back to the app for a nonlocal destination: %s", (value) => {
       expect(authDestination(value)).toBe("/app");

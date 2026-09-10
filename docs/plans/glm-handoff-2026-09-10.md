@@ -469,3 +469,57 @@ measured allowance: **8% used / 92% remaining**; no credit/reset consumed.
 Preserve the earlier release stash. Finish the verified OS source push,
 GET-check its serving markers, then native/first-task gates one slice at a
 time. A source commit is not a desktop release.
+
+## Loop 24 — Session recovery and native release blocker
+
+Loop 23 is pushed as **55006b4**. Production GET at 20:25:17 UTC still
+served `index-D-RsCfsG.js`, without the new OS markers; deployment is pending.
+The active hourly heartbeat now points to current work. Allowance last
+measured 9% used / 91% remaining; no reset/credits consumed.
+
+Loop 24 distinguishes unavailable session checks from a confirmed sign-out,
+adds bounded retry to protected/root entry and auth pages, preserves the
+destination, verifies email sessions, prevents duplicate signup on recovery
+and displays sign-out errors. Google callback destinations use the existing
+local allowlist. Focused **55/55 in 16.13s** includes four real HTTP restart
+cases using the Docker entrypoint, exact account/bot checks and a memory
+canary. Typechecks/lint and Vite build (7.21s) passed. Final full suite: **206 files / 2209 passed / 8 skipped in 237.97s**,
+exit 0 (+31 passing tests over Loop 23). Final typecheck/lint passed; Vite
+rebuild took **6.06s**. The extra three navigation cases cover root returning
+to `/app` instead of public marketing after sign-in. Durable evidence is
+`.omb-scratch/verification/loop24-full-final.log` and companion final logs. No browser E2E this slice: CUA
+is absent. No production persistence claim follows from isolated tests.
+
+Next release blocker: vendored better-sqlite3 currently targets host Node22
+ABI127, while Electron43.4.0 requires ABI148. The addon load fails on actual
+Electron. Existing Node22 staged smoke passes startup and 7/7 proxy paths;
+updater14/14 and syntax8/8 pass. An owned source-copy app attempt hit ENOSPC
+before compilation; no installer was made. Do not publish a new version
+until the addon is staged for the target runtime and actually exercised.
+Apple unsigned build logs/manifests remain under ignored verification; their
+owned DerivedData was removed to recover space. No signing or native UI
+proof is implied. Preserve the earlier release stash.
+
+Native audit follow-up: the owned Electron source rebuild succeeded in
+30.36s against cached 43.4.0 headers. Actual Electron execution passed
+**9/9 checks in 4.34s** (HTTP startup, seven proxy paths, SQLite create/insert/
+read). This is an isolated repaired copy of 55006b4, not shipped source or
+an installer. The shared native binary remained unchanged. Evidence:
+`.omb-scratch/verification/mac-app-20260910T202440Z-37ffa2/electron-runtime-results.json`.
+Full package preparation stopped at ENOSPC before compilation; owned cleanup
+removed 581,918,720 allocated bytes, with all evidence preserved.
+
+The next source fix should rebuild only the packaged native resource copy
+in afterPack before signing, using the actual Electron version/platform/arch
+and correct builder resource path. Preserve standalone Node output. A
+separate release-control slice must prevent dry-run asset uploads and public
+mirroring of partial draft releases, fix the Intel runner selection, and
+run native checks under Electron instead of host Node. Do not dispatch the
+existing release workflow until those concrete gates are corrected.
+
+Loop 23 production closeout at **20:37:17 UTC**: normal GETs to `/os` and
+`/app` both return 200 and load `/assets/index-DXnIF41L.js`; its GET returns
+200 and contains all three OS markers (`Your next move.`, `Ready to read`,
+`Workspace overview`). This supersedes the earlier pending deployment
+observation. Exact deployed SHA and authenticated backend behavior remain
+unobserved. Loop 24 still needs its own post-push marker check.

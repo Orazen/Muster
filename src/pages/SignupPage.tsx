@@ -13,7 +13,7 @@ import { authDestination, AUTH_PASSWORD_MIN_LENGTH } from "@/lib/auth-navigation
  * The old version was Google-only: deployments without OAuth creds showed
  * an operator-facing env-var note and no way to create an account at all. */
 export function SignupPage() {
-  const { capabilities, signInWithProvider, signUp } = useAuth();
+  const { capabilities, signInWithProvider, signUp, sessionError, retrySession } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = authDestination(params.get("next"));
@@ -23,10 +23,25 @@ export function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
+  const [rechecking, setRechecking] = useState(false);
   const googleConfigured = capabilities.socialProviders.includes("google");
+
+  async function continueToWorkspace() {
+    // Only redeem after a confirmed session, including recovery from a
+    // successful account creation whose session check was unavailable.
+    const ref = params.get("ref");
+    if (ref) {
+      await fetch("/api/referral/redeem", {
+        method: "POST", headers: { "content-type": "application/json" },
+        credentials: "include", body: JSON.stringify({ code: ref }),
+      }).catch(() => {});
+    }
+    navigate(next);
+  }
 
   async function handleEmailSignUp(e?: React.FormEvent) {
     e?.preventDefault();
+    if (emailBusy || rechecking || sessionError) return;
     setError("");
     if (!name.trim() || !email.trim() || password.length < AUTH_PASSWORD_MIN_LENGTH) {
       setError(`Enter your name, email, and a password of at least ${AUTH_PASSWORD_MIN_LENGTH} characters.`);
@@ -39,19 +54,7 @@ export function SignupPage() {
         setError(result.error);
         return;
       }
-      // Attribution: an invite link (/sign-up?ref=CODE) redeems after the
-      // account exists — both sides get Pro days. Failures are silent:
-      // a bad or exhausted code must not block joining.
-      const ref = params.get("ref");
-      if (ref) {
-        await fetch("/api/referral/redeem", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ code: ref }),
-        }).catch(() => {});
-      }
-      navigate(next);
+      await continueToWorkspace();
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
@@ -63,7 +66,18 @@ export function SignupPage() {
     <AuthShell title="Create your account" subtitle="One workspace for your agents and their work."
       footer={<>Already have an account? <Link to={`/sign-in?next=${encodeURIComponent(next)}`} className="auth-link">Sign in</Link></>}>
       <div className="auth-stack">
-        {error && (
+        {sessionError && <div className="auth-notice auth-error" role="alert">
+          <p>{sessionError}</p>
+          <button type="button" className="auth-link" disabled={rechecking} onClick={async () => {
+            setRechecking(true);
+            setError("");
+            try {
+              if (await retrySession()) await continueToWorkspace();
+              else setError("No active sign-in was confirmed. Check again or use Sign in to continue with an existing account.");
+            } finally { setRechecking(false); }
+          }}>Check sign-in again</button>
+        </div>}
+        {error && !sessionError && (
           <div className="auth-notice auth-error" role="alert">
             {error}
           </div>
@@ -120,7 +134,7 @@ export function SignupPage() {
           <AuthPasswordField id="password" value={password} onChange={setPassword}
             autoComplete="new-password" minLength={AUTH_PASSWORD_MIN_LENGTH}
             hint={`Use at least ${AUTH_PASSWORD_MIN_LENGTH} characters.`} />
-          <button type="submit" disabled={emailBusy} className={authButtonCls}>
+          <button type="submit" disabled={emailBusy || rechecking || Boolean(sessionError)} className={authButtonCls}>
             {emailBusy ? "Creating account…" : "Create account"}
           </button>
         </form>

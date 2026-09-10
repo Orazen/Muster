@@ -1278,3 +1278,71 @@ The broader goal remains active; proceed with native release verification
 and durable first-task acceptance after this verified push. The next bounded
 auth slice addresses startup session-request failures being treated as
 sign-out; the observed sign-in page does not establish lost account data.
+
+Loop 23 source release: **55006b4** pushed. GET on `/os` at 20:25:17 UTC
+still served `index-D-RsCfsG.js`, without the three new OS markers. The
+source is verified; its deployment is pending. The hourly heartbeat was
+updated to the current goal and ledger; last allowance was 9% used / 91%
+remaining, with no reset or credits consumed.
+
+## Loop 24 — 2026-09-10 — Recover session checks without false sign-out
+
+Startup now distinguishes a confirmed null session from an unavailable or
+malformed response. An eight-second request deadline leads to an accessible
+retry screen, preserving the current destination and previously known
+identity. Request generations fence late retry/sign-out/unmount responses.
+The desktop root uses the same gate. Email sign-in/signup verify an actual
+session before reporting success; signup recovery rechecks the session
+instead of creating another account. Sign-out failures show an error at
+both callers. Google callbacks use the existing local-destination validator.
+
+Focused verification: **5 files / 55 passed / 0 skipped in 16.13s**. Four
+real HTTP cases exercise the actual Docker entrypoint with owned offline
+fixtures: unchanged explicit and generated secrets retain the exact session
+and owned bot; expired sessions and changed secrets reject old cookies
+while preserving account, bot ownership and a saved-memory canary. Frontend
+and server typechecks and scoped lint passed. Vite build passed in **7.21s**
+with the existing chunk-size advisory. Final full suite: **206 files / 2209 passed / 8 skipped in 237.97s**,
+exit 0, **31 additional passes** over Loop 23. The preceding run passed
+2206 tests; a final desktop-root callback correction warranted a second
+run after adding three navigation cases. Those cases plus gate checks
+passed **22/22 in 0.732s**. Final typecheck/lint passed and Vite rebuild
+took **6.06s**. Durable logs: `.omb-scratch/verification/loop24-full-final.log`,
+`loop24-types-final.log`, `loop24-lint-final.log`, `loop24-build-final.log`.
+Browser interaction is unverified in this slice because CUA is unavailable;
+static markup/controller tests are not browser E2E. Production mounts,
+Google/native session continuity and backend lookup-failure handling remain
+unverified. No production or demo sessions were changed by these tests.
+
+Commercial implication: temporary rollout failures no longer invite an
+unnecessary sign-in or duplicate signup attempt. Retention/revenue effects
+are unmeasured. Next bounded source slice is native SQLite runtime staging:
+the existing addon loads on Node 22 (ABI127), but fails to load on Electron
+43.4.0 (ABI148). The existing Node smoke passed startup plus 7 proxy paths;
+14 updater tests and 8 Electron syntax checks passed. Those checks did not
+establish native compatibility. An owned package attempt stopped at ENOSPC;
+only disposable owned build outputs were removed, retaining evidence.
+
+Native audit follow-up: the owned Electron source rebuild succeeded in
+30.36s against cached 43.4.0 headers. Actual Electron execution passed
+**9/9 checks in 4.34s** (HTTP startup, seven proxy paths, SQLite create/insert/
+read). This is an isolated repaired copy of 55006b4, not shipped source or
+an installer. The shared native binary remained unchanged. Evidence:
+`.omb-scratch/verification/mac-app-20260910T202440Z-37ffa2/electron-runtime-results.json`.
+Full package preparation stopped at ENOSPC before compilation; owned cleanup
+removed 581,918,720 allocated bytes, with all evidence preserved.
+
+The next source fix should rebuild only the packaged native resource copy
+in afterPack before signing, using the actual Electron version/platform/arch
+and correct builder resource path. Preserve standalone Node output. A
+separate release-control slice must prevent dry-run asset uploads and public
+mirroring of partial draft releases, fix the Intel runner selection, and
+run native checks under Electron instead of host Node. Do not dispatch the
+existing release workflow until those concrete gates are corrected.
+
+Loop 23 production closeout at **20:37:17 UTC**: normal GETs to `/os` and
+`/app` both return 200 and load `/assets/index-DXnIF41L.js`; its GET returns
+200 and contains all three OS markers (`Your next move.`, `Ready to read`,
+`Workspace overview`). This supersedes the earlier pending deployment
+observation. Exact deployed SHA and authenticated backend behavior remain
+unobserved. Loop 24 still needs its own post-push marker check.

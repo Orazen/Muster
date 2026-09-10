@@ -1,6 +1,7 @@
 import { createAuthClient } from "better-auth/client";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { z } from "zod";
+import { createSessionRecovery, INITIAL_SESSION, SESSION_UNAVAILABLE, type SessionPayload } from "./session-recovery";
+import { authDestination } from "./auth-navigation";
 
 // The server always serves the API from the same origin/port as the UI
 // (both dev proxy and the packaged/hosted server put them together), so
@@ -10,24 +11,8 @@ export const authClient = createAuthClient({
   baseURL: window.location.origin,
 });
 
-interface AuthUser {
-  id: string;
-  name: string;
-  email: string;
-  emailVerified: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-  image?: string | null;
-}
-
-interface AuthSession {
-  id: string;
-  userId: string;
-  expiresAt: Date;
-  token: string;
-  ipAddress?: string | null;
-  userAgent?: string | null;
-}
+type AuthUser = SessionPayload["user"];
+type AuthSession = SessionPayload["session"];
 
 /** Which optional auth features the server actually has wired up. */
 export interface AuthCapabilities {
@@ -62,6 +47,8 @@ interface AuthContextType {
   user: AuthUser | null;
   session: AuthSession | null;
   loading: boolean;
+  sessionError: string | null;
+  retrySession: () => Promise<boolean>;
   capabilities: AuthCapabilities;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (name: string, email: string, password: string) => Promise<{ error?: string }>;
@@ -74,15 +61,17 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [session, setSession] = useState<AuthSession | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [auth, setAuth] = useState(INITIAL_SESSION);
+  const [recovery] = useState(() => createSessionRecovery(setAuth));
+  const { user, session } = auth;
+  const loading = auth.status === "loading";
   const [capabilities, setCapabilities] = useState<AuthCapabilities>(NO_CAPABILITIES);
 
   useEffect(() => {
-    fetchSession();
-    fetchCapabilities();
-  }, []);
+    void recovery.refresh();
+    void fetchCapabilities();
+    return recovery.cancel;
+  }, [recovery]);
 
   /** Ask the server which optional flows exist, so the UI never offers a
    *  button that cannot work — a "forgot password" link that silently drops
@@ -110,27 +99,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function fetchSession() {
-    try {
-      const base = window.location.origin;
-      const res = await fetch(`${base}/api/auth/get-session`, { credentials: "include" });
-      const data = await res.json();
-      if (data?.user) {
-        setUser(data.user);
-        setSession(data.session);
-      }
-    } catch {
-      // session endpoint unreachable or no session
-    } finally {
-      setLoading(false);
-    }
+  async function retrySession() {
+    void fetchCapabilities();
+    const checked = await recovery.refresh();
+    return checked?.status === "ready" && Boolean(checked.user);
   }
 
   async function signIn(email: string, password: string): Promise<{ error?: string }> {
     try {
       const res = await authClient.signIn.email({ email, password });
       if (res.error) return { error: res.error.message ?? "Sign in failed" };
-      await fetchSession();
+      const checked = await recovery.refresh();
+      if (!checked || checked.status !== "ready") return { error: SESSION_UNAVAILABLE };
+      if (!checked.user) return { error: "Sign-in did not establish a session. Please try again." };
       return {};
     } catch (e) {
       return { error: e instanceof Error ? e.message : "Sign in failed" };
@@ -141,28 +122,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const res = await authClient.signUp.email({ name, email, password });
       if (res.error) return { error: res.error.message ?? "Sign up failed" };
-      await fetchSession();
-      // A proxy/harness failure (wrong port, dead server) surfaces as an
-      // HTTP error with an EMPTY body, which better-auth's client used to
-      // normalize into success-with-no-session — the form just sat there.
-      // A freshly created account must hold a session; verify directly
-      // instead of trusting the empty-looking response.
-      const check = await fetch("/api/auth/get-session", { credentials: "include" });
-      if (!check.ok) {
-        return {
-          error: `Sign-up could not reach a working server (HTTP ${check.status}). Check that the harness is running on the port Vite proxies to.`,
-        };
-      }
-      // SAFETY: get-session's contract is { user, session } | null; the
-      // zod check rejects anything else so a broken proxy can only show
-      // an error, never a false success.
-      const data = z
-        .object({ user: z.object({ id: z.string() }).passthrough() })
-        .nullish()
-        .safeParse(await check.json().catch(() => null));
-      if (!data.success || !data.data?.user) {
-        return { error: "Sign-up did not establish a session — check the harness server." };
-      }
+      const checked = await recovery.refresh();
+      if (!checked || checked.status !== "ready") return { error: SESSION_UNAVAILABLE };
+      if (!checked.user) return { error: "Sign-up did not establish a session. Please try signing in." };
       return {};
     } catch (e) {
       return { error: e instanceof Error ? e.message : "Sign up failed" };
@@ -170,9 +132,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
-    await authClient.signOut();
-    setUser(null);
-    setSession(null);
+    const result = await authClient.signOut();
+    if (result.error) throw new Error(result.error.message ?? "Sign out failed");
+    recovery.clear();
   }
 
   /** Hand off to an OAuth provider. On success the browser is redirected, so
@@ -186,9 +148,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signInWithProvider(provider: string): Promise<{ error?: string }> {
     try {
       try {
-        await authClient.signOut();
-        setUser(null);
-        setSession(null);
+        const result = await authClient.signOut();
+        if (!result.error) recovery.clear();
       } catch {
         // best effort — proceed with the OAuth handoff regardless
       }
@@ -201,7 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // callbackURL regardless of its trustedOrigins list, so this also
         // passes on deployments whose PUBLIC_BASE_URL doesn't match the
         // browser origin (self-hosts that never set OMB_PUBLIC_HOST)
-        callbackURL: "/app",
+        callbackURL: authDestination(new URLSearchParams(window.location.search).get("next")),
       });
       if (res.error) return { error: res.error.message ?? `Could not sign in with ${provider}` };
       return {};
@@ -240,6 +201,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         session,
         loading,
+        sessionError: auth.status === "unavailable" ? SESSION_UNAVAILABLE : null,
+        retrySession,
         capabilities,
         signIn,
         signUp,
