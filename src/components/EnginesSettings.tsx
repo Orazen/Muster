@@ -233,20 +233,19 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
 
   return (
     <div>
-      <div className="flex items-center gap-2 text-[13px]">
+      <div className="flex flex-wrap items-center gap-2 text-[13px]">
         <span className={cn("size-1.5 shrink-0 rounded-full", instance.cli ? "bg-accent" : "bg-raised-hover")} />
         <ProviderMark driverKind={instance.driverKind} size={14} />
-        <span className="shrink-0 text-ink">{instance.displayName}</span>
+        <span className="min-w-0 flex-1 basis-[100px] text-ink">{instance.displayName}</span>
         {instance.cli ? (
-          <span className="truncate font-mono text-[11.5px] text-accent" title={instance.cli}>
+          <span className="order-last w-full truncate font-mono text-[11.5px] text-accent" title={instance.cli}>
             {instance.cli}
           </span>
         ) : (
           instance.cliDefault && (
-            <span className="truncate text-[11px] text-ink-secondary">{instance.cliDefault} · default</span>
+            <span className="order-last w-full truncate text-[11px] text-ink-secondary">{instance.cliDefault} · default</span>
           )
         )}
-        <span className="flex-1" />
         {instance.cli && (
           <button
             onClick={reset}

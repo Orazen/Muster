@@ -155,7 +155,7 @@ export function ProviderHealthSection() {
         </div>
       ) : (
         <div className="flex flex-col">
-          <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-5 border-b border-hairline/40 pb-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">
+          <div className="hidden grid-cols-[1fr_auto_auto_auto_auto] gap-x-5 border-b border-hairline/40 pb-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary sm:grid">
             <span>Provider</span>
             <span className="text-right">Turns</span>
             <span className="text-right">Tokens</span>
@@ -167,9 +167,9 @@ export function ProviderHealthSection() {
             return (
               <div
                 key={row.provider}
-                className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-5 border-b border-hairline/20 py-2 text-[13px]"
+                className="grid grid-cols-3 items-start gap-3 border-b border-hairline/20 py-3 text-[13px] sm:grid-cols-[1fr_auto_auto_auto_auto] sm:items-center sm:gap-x-5 sm:py-2"
               >
-                <span className="min-w-0">
+                <span className="col-span-3 min-w-0 sm:col-span-1">
                   <span className="font-medium capitalize text-ink">{row.provider}</span>
                   <span className="block truncate text-[11.5px] text-ink-secondary">
                     {row.instances.length} instance{row.instances.length > 1 ? "s" : ""} ·{" "}
@@ -177,12 +177,20 @@ export function ProviderHealthSection() {
                     {row.instances.flatMap((i) => i.bots).length > 3 ? "…" : ""}
                   </span>
                 </span>
-                <span className="text-right tabular-nums text-ink-secondary">{row.turns}</span>
-                <span className="text-right tabular-nums text-ink">{formatTokens(row.tokensIn + row.tokensOut)}</span>
-                <span className="text-right tabular-nums text-ink">
+                <span className="tabular-nums text-ink-secondary sm:text-right">
+                  <span className="mb-1 block text-[11px] text-ink-secondary sm:hidden">Turns</span>
+                  {row.turns}
+                </span>
+                <span className="tabular-nums text-ink sm:text-right">
+                  <span className="mb-1 block text-[11px] text-ink-secondary sm:hidden">Tokens</span>
+                  {formatTokens(row.tokensIn + row.tokensOut)}
+                </span>
+                <span className="tabular-nums text-ink sm:text-right">
+                  <span className="mb-1 block text-[11px] text-ink-secondary sm:hidden">Cost</span>
                   {row.costUsd === null ? <span className="text-ink-secondary">—</span> : formatUsd(row.costUsd)}
                 </span>
-                <span className={`text-right text-[12px] font-medium ${TONE_CLASS[h.tone]}`}>
+                <span className={`col-span-3 text-[12px] font-medium sm:col-span-1 sm:text-right ${TONE_CLASS[h.tone]}`}>
+                  <span className="mr-2 text-ink-secondary sm:hidden">Health</span>
                   {h.label}
                   {h.tone === "hot" && row.lastHitAt !== null && (
                     <span className="block text-[11px] font-normal text-ink-secondary">{sinceCaption(row.lastHitAt)}</span>

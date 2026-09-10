@@ -25,6 +25,8 @@ import { McpServersSection } from "./McpServersSection";
 import { AuditPanel } from "./AuditPanel";
 import { WhyPanel } from "./WhyPanel";
 import { cn } from "@/lib/cn";
+import { TeamContextDraft } from "@/lib/team-context-draft";
+import "./settings-modal.css";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User; keywords: string[] }> = [
   { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "account", "updates", "turn cap", "diagnostics"] },
@@ -53,28 +55,22 @@ function sectionMatches(section: (typeof SECTIONS)[number], query: string): bool
  * every bot's system prompt as read-only shared context — agents cannot
  * edit it, only the user writes through this card. */
 function TeamContextCard() {
-  const { dispatch } = useStore();
-  const [text, setText] = useState("");
-  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [editor] = useState(() => new TeamContextDraft(
+    async () => {
+      const body: { text?: string } = await api("/api/team-context");
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- decode the text field of an untyped API response.
+      return typeof body?.text === "string" ? body.text : "";
+    },
+    async (text) => { await api("/api/team-context", { method: "PUT", body: JSON.stringify({ text }) }); },
+  ));
+  const [draft, setDraft] = useState(editor.state);
+  const { text, status, error } = draft;
 
   useEffect(() => {
-    void api("/api/team-context")
-      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- the response body is untyped JSON off the wire; this is the boundary decode for the single text field.
-      .then((body: { text?: string }) => setText(typeof body?.text === "string" ? body.text : ""))
-      .catch(() => undefined);
-  }, []);
-
-  const save = async (next: string) => {
-    setText(next);
-    setStatus("saving");
-    try {
-      await api("/api/team-context", { method: "PUT", body: JSON.stringify({ text: next }) });
-      setStatus("saved");
-    } catch (error) {
-      dispatch({ type: "error", message: error instanceof Error ? error.message : "Could not save team context" });
-      setStatus("error");
-    }
-  };
+    const unsubscribe = editor.subscribe(setDraft);
+    void editor.load();
+    return unsubscribe;
+  }, [editor]);
 
   return (
     <Card
@@ -82,22 +78,24 @@ function TeamContextCard() {
       subtitle="Everything every bot should know — goals, conventions, links, preferences. Read-only to bots; only you can edit it here."
     >
       <textarea
+        aria-label="Shared brain"
+        aria-busy={status === "loading"}
+        disabled={status === "loading" || status === "load-error"}
         value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          setStatus("idle");
-        }}
-        onBlur={() => {
-          if (status === "idle") void save(text);
-        }}
+        onChange={(event) => editor.edit(event.target.value)}
+        onBlur={() => void editor.save()}
         rows={6}
         maxLength={24_000}
-        placeholder="e.g. We ship under the Orazen brand. Deploy days are Tue/Thu. Never email clients directly."
-        className="w-full resize-y rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent"
+        placeholder={status === "loading" ? "Loading shared brain…" : status === "load-error" ? "Load your saved brief before editing." : "e.g. We ship under the Orazen brand. Deploy days are Tue/Thu. Never email clients directly."}
+        className="w-full resize-y rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent disabled:cursor-wait disabled:opacity-60"
       />
-      <div className="mt-1 text-[12px] text-ink-secondary">
-        {status === "saving" ? "Saving…" : status === "saved" ? "Saved" : status === "error" ? "Could not save" : `${text.length}/24,000 characters`}
+      <div className="mt-1 text-[12px] text-ink-secondary" role={status === "error" || status === "load-error" ? "alert" : status === "idle" ? undefined : "status"}>
+        {status === "loading" ? "Loading…" : status === "load-error" ? `Could not load shared brain: ${error}` : status === "saving" ? "Saving…" : status === "saved" ? "Saved" : status === "error" ? `Could not save: ${error}` : `${text.length}/24,000 characters`}
       </div>
+      {status === "load-error" && <button type="button" onClick={() => void editor.load()}
+        className="mt-2 min-h-9 rounded-lg border border-hairline/60 px-3 py-1.5 text-[13px] text-ink hover:bg-raised">Retry load</button>}
+      {status === "error" && <button type="button" onClick={() => void editor.save()}
+        className="mt-2 min-h-9 rounded-lg border border-hairline/60 px-3 py-1.5 text-[13px] text-ink hover:bg-raised">Retry save</button>}
     </Card>
   );
 }
@@ -133,15 +131,20 @@ function ProfileFields() {
     "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
   return (
     <div className="flex flex-col gap-3">
-      <input value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder="Your name" className={inputClass} />
+      <label className="space-y-1.5 text-[13px] text-ink-secondary">Name
+        <input aria-label="Your name" value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder="Your name" className={inputClass} />
+      </label>
+      <label className="space-y-1.5 text-[13px] text-ink-secondary">Email
       <input
         type="email"
+        aria-label="Profile email"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         onBlur={save}
         placeholder="you@example.com"
         className={inputClass}
       />
+      </label>
     </div>
   );
 }
@@ -492,6 +495,7 @@ export function SettingsModal() {
   const { state, dispatch } = useStore();
   const section = state.appSettingsSection;
   const dialogRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const audit = useAuditBotId();
   const auditBotId = audit.botId;
 
@@ -516,6 +520,10 @@ export function SettingsModal() {
   }, [dispatch, q, section]);
 
   useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+  }, [section]);
+
+  useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
     dialog?.focus();
@@ -530,9 +538,9 @@ export function SettingsModal() {
 
       const focusable = Array.from(
         dialog.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
         ),
-      );
+      ).filter((element) => element.getClientRects().length > 0 && element.tabIndex >= 0);
       if (focusable.length === 0) {
         event.preventDefault();
         dialog.focus();
@@ -542,10 +550,10 @@ export function SettingsModal() {
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       const active = document.activeElement;
-      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+      if (event.shiftKey && (active === dialog || active === first || !dialog.contains(active))) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && active === last) {
+      } else if (!event.shiftKey && (active === dialog || active === last || !dialog.contains(active))) {
         event.preventDefault();
         first.focus();
       }
@@ -562,23 +570,23 @@ export function SettingsModal() {
     <div
       // Above the onboarding wizard (z-50): the wizard's "Add a provider key"
       // shortcut opens this modal mid-onboarding.
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-6"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-3 sm:p-6"
       onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
     >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="app-settings-title"
+        aria-label="Settings"
         tabIndex={-1}
-        className="flex h-[560px] w-full max-w-[860px] overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none"
+        className="settings-dialog flex h-[min(760px,calc(100dvh-24px))] w-full max-w-[920px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none sm:h-[min(680px,calc(100dvh-48px))] sm:flex-row"
       >
         {/* section nav */}
-        <nav className="flex w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3">
-          <div id="app-settings-title" className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink">
+        <nav aria-label="Settings sections" className="hidden min-h-0 w-[200px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3 sm:flex">
+          <div className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink">
             Settings
           </div>
-          <div className="mb-1.5 flex items-center gap-2 rounded-lg bg-control/70 px-2.5 py-1.5">
+          <div className="mb-1.5 flex shrink-0 items-center gap-2 rounded-lg bg-control/70 px-2.5 py-1.5">
             <Search size={14} className="shrink-0 text-ink-secondary" />
             <input
               value={query}
@@ -594,6 +602,7 @@ export function SettingsModal() {
               className="w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
             />
           </div>
+          <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
           {visibleSections.length === 0 && (
             <div className="px-2.5 py-4 text-[12.5px] leading-relaxed text-ink-secondary">Nothing matches “{query.trim()}”</div>
           )}
@@ -603,7 +612,7 @@ export function SettingsModal() {
               onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: id })}
               aria-current={section === id ? "page" : undefined}
               className={cn(
-                "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[14px]",
+                "flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[14px]",
                 section === id ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
               )}
             >
@@ -611,23 +620,40 @@ export function SettingsModal() {
               {label}
             </button>
           ))}
+          </div>
         </nav>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center justify-between px-5 py-3">
-            <span className="text-[15px] font-semibold text-ink">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center justify-between border-b border-hairline/40 px-4 py-3 sm:px-5">
+            <span className="text-base font-semibold text-ink sm:hidden">Settings</span>
+            <span className="hidden text-base font-semibold text-ink sm:block">
               {sections.find((s) => s.id === section)?.label}
             </span>
             <button
               onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
               aria-label="Close settings"
-              className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+              className="flex size-9 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
             >
               <X size={18} />
             </button>
           </div>
 
-          <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 pb-5">
+          <label className="mx-4 my-3 flex shrink-0 items-center gap-3 text-sm text-ink-secondary sm:hidden">
+            Section
+            <select aria-label="Settings section" value={section}
+              onChange={(event) => {
+                const selected = sections.find((entry) => entry.id === event.target.value);
+                if (selected) {
+                  setQuery("");
+                  dispatch({ type: "toggleAppSettings", open: true, section: selected.id });
+                }
+              }}
+              className="min-h-11 min-w-0 flex-1 rounded-xl border border-hairline bg-inset px-3 text-sm font-medium text-ink">
+              {sections.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </label>
+
+          <div ref={contentRef} className="settings-content flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-5 sm:px-5 sm:pt-4">
             {section === "brain" && (
               <>
                 <TeamContextCard />

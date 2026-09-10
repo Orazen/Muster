@@ -64,8 +64,8 @@ const CREDENTIALS = {
     placeholder: "Paste your OpenSandbox server API key",
     description:
       "Self-hostable sandbox alternative to Box. Saving a key here stores it for future use — bot computer use doesn't run on it yet.",
-    href: "https://github.com/opensandbox-group/OpenSandbox",
-    linkLabel: "OpenSandbox on GitHub",
+    href: "/docs/self-host",
+    linkLabel: "Read the self-hosting guide",
     optional: true,
   },
   opencodeGo: {
@@ -89,7 +89,7 @@ const CREDENTIALS = {
     placeholder: "https://muster.orazen.online",
     description:
       "Opt in to one shared identity: the same email and password sign in here and on the Muster Cloud server you point this at. Bots, threads, and messages stay local to this install — only the account itself is shared, nothing syncs.",
-    href: "https://github.com/Orazen/Muster",
+    href: "/docs/self-host",
     linkLabel: "How it works",
     optional: true,
     warning: "This install will need internet access to sign in once this is set, and trusts that server with your login.",
@@ -122,6 +122,8 @@ function CredentialHelp({ section }: { section: ConfigSection }) {
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
       setOpen(false);
       buttonRef.current?.focus();
     };
@@ -135,7 +137,7 @@ function CredentialHelp({ section }: { section: ConfigSection }) {
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative ml-auto">
+    <div ref={rootRef} className="relative ml-auto shrink-0">
       <button
         ref={buttonRef}
         type="button"
@@ -152,7 +154,7 @@ function CredentialHelp({ section }: { section: ConfigSection }) {
           id={popoverId}
           role="group"
           aria-label={`${credential.label} help`}
-          className="animate-pop-in absolute right-0 z-30 mt-1.5 w-[270px] rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl"
+          className="animate-pop-in absolute right-0 z-30 mt-1.5 w-[min(270px,calc(100vw-6rem))] rounded-xl border border-hairline bg-panel p-3 text-left shadow-2xl"
         >
           <div className="text-[12px] leading-[1.45] text-ink-secondary">{credential.description}</div>
           {credential.warning && (
@@ -232,11 +234,11 @@ export function ApiKeyRow({
 
   return (
     <div>
-      <div className="mb-1.5 flex items-center gap-2 text-[13px] text-ink-secondary">
-        <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
-        <span>{credential.label}</span>
+      <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[13px] text-ink-secondary">
+        <span className={cn("size-1.5 shrink-0 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
+        <span className="min-w-0">{credential.label}</span>
         {credential.optional && (
-          <span className="rounded bg-raised px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
+          <span className="shrink-0 whitespace-nowrap rounded bg-raised px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
             Optional
           </span>
         )}
@@ -252,7 +254,7 @@ export function ApiKeyRow({
           placeholder={configured ? "••••••••  (paste to replace)" : credential.placeholder}
           aria-label={credential.label}
           autoComplete="off"
-          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+          className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
         />
         <button
           onClick={save}

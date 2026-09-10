@@ -1,0 +1,8 @@
+.settings-content > * {
+  min-width: 0;
+  flex-shrink: 0;
+  overflow-wrap: anywhere;
+}
+.settings-dialog input,
+.settings-dialog textarea,
+.settings-dialog select { max-width: 100%; }

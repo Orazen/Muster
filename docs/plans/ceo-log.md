@@ -212,3 +212,69 @@ Hosted Actions billing remains a board item; no billing setting was changed.
 
 Commercial implication: users can act on approvals and inspect real work from
 a phone without composer obstruction. No conversion or revenue lift is claimed.
+
+
+## Loop 5 — 2026-09-10 — Usable Settings and reliable saved drafts
+
+Resolved the Usage crash found in Loop 4. Invitation loading now runs in an
+abortable mount effect with visible retry; it no longer fetches or updates
+state during render. Copy failures retain a selectable link and honest error
+feedback. Wrapped clipboard retries reuse the existing link. Referral reward
+values, prices, and payment behavior are unchanged.
+
+Reworked Settings for phones: a native section selector replaces the fixed
+sidebar, the header and close action stay reachable, and section content
+scrolls independently within the viewport. Desktop navigation scrolls and
+retains search. Fixed initial keyboard focus trapping, textarea/select and
+native-disclosure navigation, Escape propagation in credential help, and
+mobile selection after desktop filtering. Engine paths and credential controls
+wrap; provider metrics use labeled summaries on phones. Profile fields have
+persistent labels. Credential help links point to the self-hosting guide.
+
+Browser testing exposed two Brain persistence hazards: the initial read could
+arrive during typing, and overlapping saves could finish out of order. Brain
+now loads the stored brief before enabling edits, offers separate load/save
+retries, serializes blurred drafts, and only lets the current draft update
+Saved/error feedback. Eleven delayed-response regression tests cover readiness,
+write ordering, stale failures, retries, deduplication, and unmount behavior.
+
+Verification: **45 Settings render/layout checks passed** — all **15 sections**
+at **320×568, 390×844, and 1280×900** — plus **12 focused hands-on browser
+checks**. The latter cover engine/help/provider fit, keyboard trapping and
+native disclosure, Brain save/reload, Usage totals and provider history,
+invitation copy, search/Escape/focus return, mobile selection after filtering,
+and appearance persistence. Initial phone engine/provider defects were fixed
+and checked again. Usage showed **6 fixture turns / 75 tokens**, and invitation
+copy wrote the expected local URL. Atelier persisted after reload; Midnight
+was restored. These are hands-on browser checks, not checked-in Playwright
+case counts or proof of every Settings action.
+
+The temporary test environment reset during the final pass. Rebuilt only the
+owned isolated server and browser fixture, then repeated the final Brain exact
+save/reload and Usage loading checks successfully; browser console errors
+were **0** in that final tab. No demo sessions on port 8845 were stopped or
+revoked. All test accounts and briefs were synthetic; external model/OAuth,
+payments, native clients, and provider connections were not exercised.
+
+Focused automated tests: **4 files / 33 passed / 0 skipped**, **1.13 seconds**.
+Final full suite after the last code changes: **185 files / 1829 passed /
+8 skipped**, **179.76 seconds**. This exceeds the handbook baseline and Loop 4.
+UI and server typechecks, scoped lint, diff checks, and Vite build passed
+(**5.70 seconds**). Large-chunk warnings remain. No security or comparative
+performance claim follows from these checks.
+
+Production GET follow-up confirms Loop 4 conversation assets are now served
+as `index-DsorEPai.js`, including the new conversation controls and receipt
+copy text. This is asset rollout evidence, not authenticated production E2E.
+The Settings release needs its own post-push GET check.
+
+Commercial implication: people can open Usage without losing the app, use
+Settings on phones, copy their invitation reliably, and save a team brief
+without silent stale writes. No conversion or revenue improvement is claimed.
+
+Next pick: the public-route/copy audit, then the remaining auth recovery,
+workspace, work-lifecycle, and native client checks in
+`docs/plans/ui-e2e-program.md`. A static review of fourteen public HTML files
+found a missing Docker anchor and unsupported network/backup/license/competitor
+claims. Correct those in a separate slice without changing live pricing.
+Hosted Actions billing remains a previously reported board item.

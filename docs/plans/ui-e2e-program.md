@@ -1,6 +1,6 @@
 # Muster UI and E2E audit program
 
-**Status: 2026-09-10, current UI slice in progress.** This is the inventory
+**Status: 2026-09-10, conversation and Settings slices verified locally.** This is the inventory
 for the board's request to improve and exercise every page and major feature
 on web, desktop, and mobile. Track **route × state × device**, rather than
 treating a page opening as proof that every feature on it works.
@@ -31,23 +31,31 @@ belong in [ceo-log.md](ceo-log.md). Unlisted outcomes remain unverified.
   empty receipt/missing usage, Copy receipt, Escape/focus return for receipt
   and Tools, Send-button clearance at 320px, and the duplicate waiting entry
   in fleet status. These remain part of the twenty-six hands-on checks.
-- **Settings inventory inspected:** **14 of 15 sections opened and read on
-  desktop**, including General and all available sections except Usage.
-  Opening a section does not verify every action, save, integration, or
-  failure state within it.
-- **Usage failure:** opening Usage blanks the application. The current
-  engineering audit diagnosed a render-phase fetch loop in `InviteSection`.
-  This is a failing flow, not a skipped or passing Settings check.
-- **Mobile Settings failure:** a **390px** screenshot shows the fixed
-  **190px** navigation column leaving roughly **100px** for content. The
-  content is unreadable. The next slice must fix this layout and the Usage
-  crash, then verify every Settings section again at the relevant widths.
+- **Settings follow-up:** all **15 sections** were opened and checked for
+  viewport fit at **320×568, 390×844, and 1280×900**: **45 render/layout
+  checks**. These do not verify every control or external integration.
+- **Usage crash resolved:** moved the invitation fetch out of render into
+  an abortable effect with retry. Usage now loads the fixture's **6 turns /
+  75 tokens** and provider history without blanking the app. Invitation
+  copying writes the expected URL and only confirms successful copying.
+- **Mobile Settings resolved:** a section selector replaces the fixed
+  navigation column on phones; all available sections remain accessible.
+  Follow-up fixes keep engine rows, credential help, and provider metrics
+  readable at 320px. Keyboard checks cover initial focus trapping,
+  disclosure navigation, search/Escape, focus return, and mobile selection
+  after desktop filtering. Brain waits for the stored brief before enabling edits and serializes
+  subsequent writes; load and save failures have separate retry actions. **12 focused browser checks** are recorded for this
+  slice, separately from the 45 layout checks. Settings focused tests:
+  **4 files / 33 passed / 0 skipped**; final full suite:
+  **185 files / 1829 passed / 8 skipped**, 179.76 seconds.
 - **Native iOS, Watch, Android, and packaged Electron checks have not run
   in this program.** Web viewport checks cannot substitute for them.
-- Production GET verification found the previous sign-in release's
-  `auth-shell`/`auth-password` bundle (`index-CpkiQPaW.js`). That confirms the
-  earlier auth rollout; deployment of this responsive slice is not verified
-  by that observation.
+- Production GET verification first found the account-entry release
+  (`index-CpkiQPaW.js`), also checked in a fresh browser. A later GET found
+  `index-DsorEPai.js` with the new Conversation controls and Copy receipt
+  strings, confirming the conversation assets rolled out. Authenticated
+  production interactions were not executed. Settings rollout needs its
+  own release check.
 
 ## Route matrix
 
@@ -101,27 +109,28 @@ orientations, zoom levels, and native keyboard behavior remain separate.
 
 Source: `src/components/SettingsModal.tsx`. There are thirteen standard
 sections; Audit and Why are inserted when reachable for the selected bot.
-All sections below except Usage were opened and read on desktop. **Every
-action/save/error-state entry below remains unverified unless explicitly
-reported elsewhere.** The mobile layout failure applies across this surface.
+All fifteen sections below were opened and checked for layout at 320, 390,
+and 1280px. **Every action/save/error-state entry below remains unverified
+unless explicitly reported elsewhere.** Layout coverage is not integration
+coverage.
 
 | Exact section name | Required functional checks / dependencies | Current state |
 | --- | --- | --- |
-| General | Profile persistence, channel turn cap, diagnostics, account/sign-out, merge, updates, VPS setup; real account/desktop/server dependencies where applicable | Opened/read on desktop |
-| Brain | Shared brief edit/save/reload, empty/error, saved text reaches intended fixture turn | Opened/read on desktop |
-| Appearance | Skin selection/persistence, contrast, reduced motion, keyboard focus across surfaces | Opened/read on desktop |
-| Connections | Configured/unconfigured states, key save/error, workspace sync; real service accounts separately | Opened/read on desktop |
-| Engines | Availability/refresh/setup, CLI path, unavailable reasons, selected model; real authenticated CLI separately | Opened/read on desktop |
-| Providers | Key save/error, configured flags, refresh and actual provider request; external account needed for live leg | Opened/read on desktop |
-| MCP Servers | Add/edit/remove isolated server, unavailable/error, tool discovery; real integrations separately | Opened/read on desktop |
-| Companion | Desktop capability gate, start/stop owned sidecar, pairing/cancel/expiry, reconnect/device management; native and network legs separate | Opened/read on desktop |
-| Local VM | Missing prerequisites, provision/start/stop owned VM, error recovery; supported local runtime required | Opened/read on desktop |
-| Voice | Voice selection/preview, dictation capability, microphone permission, playback; audio/native capabilities and optional vendor key | Opened/read on desktop |
-| Usage | Totals/history, provider health, invitations, loading/error; fixture data plus separately verified accounting | **Fails: blank app; render-phase fetch loop diagnosed in InviteSection** |
-| Vault | Configured/unconfigured, backup/list/restore isolated data, failure/recovery; external backup account for live leg | Opened/read on desktop |
-| Billing | Plan/read-only state, checkout unavailable/error, fixture checkout handoff; no live purchase implied | Opened/read on desktop |
-| Audit | Correct bot, allowed/denied/rule outcomes, filtering/history, empty/error | Opened/read on desktop when available |
-| Why | Correct bot, hypotheses/findings/outcomes, expansion/navigation, empty/error | Opened/read on desktop when available |
+| General | Profile persistence, channel turn cap, diagnostics, account/sign-out, merge, updates, VPS setup; real account/desktop/server dependencies where applicable | Layout at three widths; actions unverified |
+| Brain | Shared brief edit/save/reload, empty/error, saved text reaches intended fixture turn | Local edit/save/reload checked; delayed-read/write regressions covered separately; injection into a new turn remains unverified here |
+| Appearance | Skin selection/persistence, contrast, reduced motion, keyboard focus across surfaces | Atelier applies and persists after reload; Midnight restored; contrast and reduced-motion audit remain unverified |
+| Connections | Configured/unconfigured states, key save/error, workspace sync; real service accounts separately | Layout at three widths; actions unverified |
+| Engines | Availability/refresh/setup, CLI path, unavailable reasons, selected model; real authenticated CLI separately | Layout at three widths; actions unverified |
+| Providers | Key save/error, configured flags, refresh and actual provider request; external account needed for live leg | Layout at three widths; actions unverified |
+| MCP Servers | Add/edit/remove isolated server, unavailable/error, tool discovery; real integrations separately | Layout at three widths; actions unverified |
+| Companion | Desktop capability gate, start/stop owned sidecar, pairing/cancel/expiry, reconnect/device management; native and network legs separate | Layout at three widths; actions unverified |
+| Local VM | Missing prerequisites, provision/start/stop owned VM, error recovery; supported local runtime required | Layout at three widths; actions unverified |
+| Voice | Voice selection/preview, dictation capability, microphone permission, playback; audio/native capabilities and optional vendor key | Layout at three widths; actions unverified |
+| Usage | Totals/history, provider health, invitations, loading/error; fixture data plus separately verified accounting | Crash fixed; fixture totals, provider history, and invitation copy checked; live accounting and public Wrapped publication remain unverified |
+| Vault | Configured/unconfigured, backup/list/restore isolated data, failure/recovery; external backup account for live leg | Layout at three widths; actions unverified |
+| Billing | Plan/read-only state, checkout unavailable/error, fixture checkout handoff; no live purchase implied | Layout at three widths; actions unverified |
+| Audit | Correct bot, allowed/denied/rule outcomes, filtering/history, empty/error | Layout at three widths when available; actions unverified |
+| Why | Correct bot, hypotheses/findings/outcomes, expansion/navigation, empty/error | Layout at three widths when available; actions unverified |
 
 ## Native and packaged clients
 
@@ -170,14 +179,18 @@ slice's native UI. No checked-in native UI test suite was found in the audit.
 
 ## Next verified slices
 
-1. **Settings usability and Usage crash.** Fix the `InviteSection` request
-   lifecycle and responsive Settings layout. Exercise Usage without a blank
-   app or repeated requests; open all fifteen sections on desktop and mobile,
-   verify readable content and keyboard/focus behavior, then report numbers.
+1. **Settings follow-through.** The Usage crash and responsive navigation
+   slice is locally verified. Continue individual save/error and integration
+   flows from the matrix; opening all sections is not their completion.
 2. **Public routes and entry-state completeness.** Sweep marketing/docs and
    auth/pair/claim recovery states using isolated accounts and fixtures.
    Repair the misleading transcript E2E case and preserve an explicit record
-   of what the Google test does and does not cover.
+   of what the Google test does and does not cover. A read-only static sweep
+   of fourteen public HTML files found a missing `/download.html#docker`
+   anchor. Correct unsupported network, backup, license, and competitive
+   claims without changing pricing. Source has a PostHog integration but no
+   current `initAnalytics()` caller was found; actual transmission remains
+   unverified. Avoid claiming either active telemetry or no external traffic.
 3. **Workspace operations.** Verify roster, group chat, Teams import,
    Connected apps, Bot Settings, and OS windows one bounded slice at a time.
    Keep task-specific waiting/working/queued attention discoverable when
