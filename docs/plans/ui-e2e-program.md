@@ -1,6 +1,6 @@
 # Muster UI and E2E audit program
 
-**Status: 2026-09-10, conversation, Settings, and public-page slices verified locally.** This is the inventory
+**Status: 2026-09-10, conversation, Settings, public-page and approval slices verified locally.** This is the inventory
 for the board's request to improve and exercise every page and major feature
 on web, desktop, and mobile. Track **route × state × device**, rather than
 treating a page opening as proof that every feature on it works.
@@ -107,7 +107,7 @@ orientations, zoom levels, and native keyboard behavior remain separate.
 | **Chat** | Send/stream, retry/edit/branch, attachment/paste, older messages/search, scroll preservation, queued messages, Stop | Chat and Stop checked with fake ACP; remaining interactions unverified |
 | **Group chat** | Member selection/mentions, group send/stream, room bulletin and working folder, find, replies, failure/empty states | Unverified |
 | **Task / Model / Usage / Working folder pickers** | Open/close/focus, selection persistence, disabled reasons, long names, narrow columns | Task creation/switching, model controls/menu fit and responsive controls checked with fake ACP; usage/folder and full picker state matrix unverified |
-| **OptionCard / Pending approval** | Allow/Deny, keyboard choice, history/evidence/rehearsal, expired/already answered ask, exact sibling-task navigation | Deny, Allow once, re-ask and Stop/cancel ledger checked with fake ACP; other states unverified |
+| **OptionCard / Pending approval** | Allow/Deny, keyboard choice, history/evidence/rehearsal, expired/already answered ask, exact sibling-task navigation | Loop 12: Allow once and Deny checked with an engine that waits for the decision; same card survives pending/completed reload, actual ACP choice verified. Three local HTTP tests cover Allow, Deny and exact thread isolation. Earlier re-ask and Stop/cancel ledger checks remain; rehearsal, history and remaining states unverified |
 | **Goal mode / Job receipt** | Bounded goal progression/stop, completion/failure evidence, exact task receipt and copy/export | Receipt, empty/missing-usage state, copy, narrow fit and Escape/focus return checked with fake ACP; goal lifecycle and remaining receipt states unverified |
 | **Bot Settings** | Profile/persona, Chief of Staff, peer communication, model/effort, computer mode, folder, memory, Auto mode, voice | Unverified; real model/voice/computer effects need their runtimes |
 | **Computer / Browser** | Available/unavailable/error states, viewer controls, navigation/profile selection, take/release control | Unverified; actual control needs provisioned local/cloud runtime and relevant permissions |
@@ -180,7 +180,11 @@ slice's native UI. No checked-in native UI test suite was found in the audit.
 - `e2e/pairing.e2e.spec.ts` and `e2e/approval-card.e2e.spec.ts` contain six
   declared browser cases at the audit baseline. `playwright.config.ts`
   configures one 1280×900 browser viewport; it does not define mobile or
-  packaged Electron projects. Loop 11 typechecks and discovers all five repaired pairing cases but executes zero Playwright runner cases under the current CUA-only UI instructions. Nine separate hands-on browser checks exercise the pairing flow. The approval spec remains unrevised.
+  packaged Electron projects. Loop 12 now typechecks and discovers **7 cases
+  in 2 files**, including two rewritten approval cases. **0 Playwright runner
+  cases executed** under current CUA-only UI instructions. Loop 11 records
+  nine pairing browser checks; Loop 12 records ten approval browser checks.
+  Discovery does not establish that the runner cases pass.
 - Loop 11 replaces the false-positive **"sent messages actually RENDER in the
   transcript"** case. The revised test sends a unique message and requires
   visible user/reply text in unique transcript rows before and after reload.
@@ -189,8 +193,13 @@ slice's native UI. No checked-in native UI test suite was found in the audit.
 - The OAuth case asserts a Google authorization-URL redirect using dummy
   client credentials. It does not complete Google authentication or verify
   the final desktop session.
-- The approval spec does exercise message → fake ACP ask → Allow once →
-  rendered completion. It does not cover all approval outcomes or devices.
+- Loop 12 repairs an approval false positive: the old fake engine emitted
+  its successful reply before requesting permission. The new gated mode
+  emits success only after the exact Allow once response and a distinct
+  denied reply after Deny. Both rewritten browser cases pin the same card
+  through reload, assert no premature reply and verify actual ACP outcomes.
+  Shared fixtures own their ports, accounts, environment and cleanup;
+  unexpected browser errors and external requests fail the test.
 - `scripts/e2e-server.mjs` exercises HTTP APIs rather than browser UI. Its
   requests do not attach a session cookie, and it permits skipped engines
   and soft-passed approval legs. Do not run it against the existing demo
@@ -263,10 +272,20 @@ Consumed-code reuse leaves the desktop at sign-in. Nine CUA browser checks at
 browser console errors. This completes the isolated local bridge, not a
 packaged Electron or real-provider login. Nine focused harness tests cover
 environment isolation, ownership, pairing, fake-engine output and cleanup.
-The five repaired Playwright cases are discovered/typechecked, not executed;
-current computer-use instructions require CUA for browser actions. Before
-running the whole declared browser suite, repair the approval fixture's
-inherited provider environment, fixed port, cleanup and unasserted errors.
+Loop 12 replaces the approval fixture's inherited provider environment,
+fixed port, cleanup and unasserted errors with the shared owned fixture.
+Three automated local HTTP cases verify Allow, Deny and thread isolation.
+Ten CUA checks cover pairing/Quick start, pending state without a final reply,
+pending reload, decision/result and completed reload for each decision.
+Two direct outcome-file assertions verify the actual ACP selections; four
+tabs reported zero captured console errors. These use current-source built
+UI, two independent local cloud/desktop pairs and a fake engine. Browser
+window size changed during manual verification (final measured 566×817);
+no new device-layout matrix is claimed. Both fixture pairs and owned
+data were cleaned up. Seven declared cases are discovered/typechecked,
+not executed by the Playwright runner; current computer-use instructions
+require CUA for browser actions. Real Google, model and native outcomes
+remain separate gaps.
 
 1. **Settings follow-through.** The Usage crash and responsive navigation
    slice is locally verified. Continue individual save/error and integration
@@ -274,8 +293,9 @@ inherited provider environment, fixed port, cleanup and unasserted errors.
 2. **Public routes and entry-state completeness.** Sweep marketing/docs and
    auth/pair/claim recovery states using isolated accounts and fixtures.
    The misleading transcript case is repaired and its core flow checked via
-   CUA. Continue the approval fixture and preserve the distinction between
-   test discovery, hands-on checks and completed runner tests. Keep the Google
+   CUA. The approval fixture is now isolated and its Allow/Deny lifecycle
+   checked. Preserve the distinction between test discovery, hands-on checks
+   and completed runner tests. Keep the Google
    redirect test separate from a successful provider login. The public-page slice fixed the Docker
    anchor, mobile overflows, and selected unsupported network, backup,
    license, receipt, and competitive claims while preserving Muster pricing.
@@ -286,9 +306,12 @@ inherited provider environment, fixed port, cleanup and unasserted errors.
    Connected apps, Bot Settings, and OS windows one bounded slice at a time.
    Keep task-specific waiting/working/queued attention discoverable when
    simplifying navigation; alerts must land on the exact conversation.
-4. **Work lifecycle and evidence.** Expand fake-engine browser coverage to
-   queueing, goal limits, rehearsal/history, retry/failure, routine/webhook
-   outcomes, and receipt correctness. Use isolated data for mutations.
+4. **Work lifecycle and evidence.** Next P2: tool approval messages render
+   `ApprovalCard`, which omits persisted rehearsal/why/history displayed by
+   `OptionCard` and the pending composer. Keep that evidence visible after a
+   decision and reload, with exact-card browser checks. Then expand coverage
+   to queueing, goal limits, retry/failure, routine/webhook outcomes and
+   receipt correctness. Use isolated data for mutations.
 5. **Optional phone handoff and native clients.** Add a discoverable,
    skippable handoff after useful work, then verify pairing/reconnect and
    approval targeting on each supported client. Do not equate a mobile web

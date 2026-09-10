@@ -6,6 +6,8 @@
 // turn. Failure modes mirror how real ACP agents misbehave:
 //
 //   FAKE_ACP_MODE   happy (default) | empty-reply | exit-early | hang | no-auth | auth-required | permission
+//                   | permission-gated (reply only after the exact allow-once
+//                     response; any other decision produces a denied reply)
 //                   | die-midturn (engine exits code 9 mid-prompt while a
 //                     grandchild holds stdio open — the pipe-held crash the
 //                     liveness reaper exists for)
@@ -38,6 +40,9 @@
 //                        update and only its id in the permission callback
 //   FAKE_ACP_USAGE_ROOT  put the prompt result's usage at the root instead of
 //                        under _meta (what opencode 1.18.18 actually does)
+//   FAKE_ACP_PERMISSION_DUMP  optional path for the actual permission outcome
+//                        received in permission-gated mode (JSON, not inferred
+//                        from the visible reply)
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
@@ -109,7 +114,7 @@ const configCalls: Array<{ method: string; params: unknown }> = [];
 
 // pending server→client permission request id → resolver
 let pendingPermissionId: number | null = null;
-let onPermissionAnswered: (() => void) | null = null;
+let onPermissionAnswered: ((allowOnce: boolean) => void) | null = null;
 
 // ask-peer mode: the "agents" MCP server entry from session/new's mcpServers
 type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
@@ -196,7 +201,13 @@ function handle(msg: any) {
   // client's response to our permission request
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined) && msg.id === pendingPermissionId) {
     pendingPermissionId = null;
-    onPermissionAnswered?.();
+    const answered = onPermissionAnswered;
+    onPermissionAnswered = null;
+    const outcome = msg.result?.outcome;
+    if (mode === "permission-gated" && process.env.FAKE_ACP_PERMISSION_DUMP) {
+      writeFileSync(process.env.FAKE_ACP_PERMISSION_DUMP, JSON.stringify(outcome ?? null), { mode: 0o600 });
+    }
+    answered?.(outcome?.outcome === "selected" && outcome?.optionId === "allow-once");
     return;
   }
   if (!msg.method) return;
@@ -386,6 +397,31 @@ function handle(msg: any) {
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `delegate error: ${e.message}` } } } });
             complete();
           });
+        return;
+      }
+      if (mode === "permission-gated") {
+        pendingPermissionId = 9001;
+        onPermissionAnswered = (allowOnce) => {
+          // The ACP client wraps the selected option in result.outcome. A
+          // rejection, cancellation, malformed response or RPC error must
+          // never make the success assertion pass.
+          if (allowOnce) {
+            playTurn();
+          } else {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "permission denied by fake acp" } } } });
+          }
+          complete();
+        };
+        out({
+          jsonrpc: "2.0", id: pendingPermissionId, method: "session/request_permission",
+          params: {
+            toolCall: { kind: "execute", rawInput: { command: "echo hi" }, title: "echo hi" },
+            options: [
+              { optionId: "allow-once", kind: "allow_once" },
+              { optionId: "reject", kind: "reject_once" },
+            ],
+          },
+        });
         return;
       }
       if (mode !== "empty-reply") playTurn();

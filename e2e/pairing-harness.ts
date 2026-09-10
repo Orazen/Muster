@@ -190,17 +190,26 @@ export interface PairingHarness {
   rootDirectory: string;
   email: string;
   password: string;
+  /** Actual ACP response evidence, present only in permission-gated mode. */
+  permissionOutcomePath?: string;
   stop(): Promise<void>;
 }
 
+interface FakeEngineEnvironment {
+  FAKE_ACP_MODE: "happy" | "permission-gated";
+  FAKE_ACP_DUMP: string;
+  FAKE_ACP_PERMISSION_DUMP?: string;
+}
+
 export async function startPairingHarness(
-  { staticDir = join(ROOT, "dist") }: { staticDir?: string } = {},
+  { staticDir = join(ROOT, "dist"), engineMode = "happy" }: { staticDir?: string; engineMode?: "happy" | "permission-gated" } = {},
   { waitForServer = waitForOwnedServer }: { waitForServer?: typeof waitForOwnedServer } = {},
 ): Promise<PairingHarness> {
   if (process.platform === "win32") throw new Error("Pairing fixture requires POSIX process groups");
   const builtUi = resolve(staticDir);
   await access(join(builtUi, "index.html"));
   const rootDirectory = await mkdtemp(join(tmpdir(), "muster-pairing-e2e-"));
+  const permissionOutcomePath = engineMode === "permission-gated" ? join(rootDirectory, "desktop", "permission-outcome.json") : undefined;
   const children: OwnedChild[] = [];
   let stopping = false;
   let stopped: Promise<void> | undefined;
@@ -251,12 +260,16 @@ setInterval(() => { if (process.ppid !== owner) process.exit(0); }, 100).unref()
       for (const path of [home, dataDirectory, companionDirectory]) {
         await mkdir(path, { recursive: true, mode: 0o700 });
       }
+      const engineEnvironment: FakeEngineEnvironment = {
+        FAKE_ACP_MODE: engineMode,
+        FAKE_ACP_DUMP: join(directory, "fake-acp.json"),
+      };
+      if (permissionOutcomePath) engineEnvironment.FAKE_ACP_PERMISSION_DUMP = permissionOutcomePath;
       await writeFile(join(dataDirectory, "config.json"), JSON.stringify({
         instances: kind === "cloud"
           ? { ghost: { driver: "not-a-real-driver", displayName: "Offline fixture" } }
-          : { gemini: { driver: "geminiAgent", displayName: "Pairing test engine", environment: {
-            FAKE_ACP_MODE: "happy", FAKE_ACP_DUMP: join(directory, "fake-acp.json"),
-          }, config: { cli: fakeCli, fullAuto: false, workspace: home } } },
+          : { gemini: { driver: "geminiAgent", displayName: "Pairing test engine", environment: engineEnvironment,
+            config: { cli: fakeCli, fullAuto: false, workspace: home } } },
       }), { mode: 0o600 });
       const guard = join(directory, "block-outbound.mjs");
       await writeFile(guard, outboundGuard(kind === "desktop" ? cloudUrl : undefined), { mode: 0o600 });
@@ -297,7 +310,9 @@ setInterval(() => { if (process.ppid !== owner) process.exit(0); }, 100).unref()
     });
     if (!signup.ok) throw new Error(`Pairing fixture signup failed (${signup.status})`);
     await signup.arrayBuffer();
-    return { cloudUrl, desktopUrl, rootDirectory, email, password, stop };
+    const harness: PairingHarness = { cloudUrl, desktopUrl, rootDirectory, email, password, stop };
+    if (permissionOutcomePath) harness.permissionOutcomePath = permissionOutcomePath;
+    return harness;
   } catch (error) {
     try { await stop(); } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Pairing fixture startup and cleanup failed"); }
     throw error;

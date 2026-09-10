@@ -618,3 +618,55 @@ whole existing browser suite while that approval fixture still inherits
 ambient provider settings. Production proxy topology and real-provider
 login remain separate gaps. Hosted Actions billing remains the existing
 board item; avoid duplicate trigger commits or unchanged billing notices.
+
+
+## Loop 12 — 2026-09-10 — Approval tests that wait for approval
+
+P2 fixed: the old approval E2E could pass on a successful fake-engine reply
+emitted before the permission request. `server/testing/fake-acp-cli.ts` now
+has an opt-in `permission-gated` mode: no final reply before a decision,
+success only for exact `selected / allow-once`, and a distinct denied reply
+for rejection. It records the actual ACP outcome. Existing modes remain
+compatible. `e2e/pairing-harness.ts` exposes this mode and its evidence file.
+
+`e2e/browser-fixtures.ts` shares owned cloud/desktop servers, random accounts,
+ports, explicit environment, browser error assertions and awaited cleanup.
+Both specs use it; API checks follow zero redirects. The rewritten
+`e2e/approval-card.e2e.spec.ts` verifies Allow once and Deny, no premature
+reply, the exact card before/after pending reload, settled card/reply/idle
+state, actual ACP choice and completed reload. `tsconfig.e2e.json` now
+includes all E2E files. `server/approval-harness.test.ts` adds three real local
+HTTP cases for Allow, Deny and isolation between two pending threads,
+including actual engine choices and per-bot decision records.
+
+Focused verification: **46 passed / 0 skipped across 3 files**: new approval
+cases **3 in 7.43s**, pairing harness **9 in 5.00s**, ACP compatibility
+**34 in 13.19s**. Server/E2E typechecks, scoped lint and diff checks pass.
+Read-only review found no remaining blockers. Full Vitest: **190 files /
+1951 passed / 8 skipped**, **195.45 seconds**. This adds three passing tests
+over Loop 11 and exceeds the handbook baseline of 172 files / 1689 passed /
+8 skipped.
+
+**10 hands-on CUA browser checks passed**: pairing/Quick start, blocked
+pending state, pending reload, decision/result and completed reload for
+each of Allow and Deny. **2 separate outcome-file assertions** confirmed
+actual `allow-once` and `reject`; four tabs reported **0 captured console
+errors**. Both local fixture pairs, owned data, metadata and tabs were
+cleaned up. The browser window changed during verification (final measured
+**566×817**); **0 new device-layout matrix checks** are claimed. Current
+source UI was unchanged from the preceding build. **7 Playwright cases
+discovered/typechecked, 0 runner cases executed** under current CUA-only
+UI instructions. Real servers used a fake ACP engine; **0 real Google
+logins and 0 native UI checks** ran. Demo sessions on 8845 were untouched.
+
+Commercial implication: the approval regression test now proves the human
+decision reaches the engine, supporting reliable decision history. No
+conversion lift or real-model completion is claimed. This slice changes
+test infrastructure only; no new production UI marker is expected.
+
+Next P2: tool approvals render `ApprovalCard`, which omits persisted
+rehearsal/why/history evidence already shown by `OptionCard` and the pending
+composer. Restore that evidence after a decision and reload in one bounded
+UI slice. Track this in `docs/plans/ui-e2e-program.md`. Production OAuth
+topology, real-provider/native checks and the existing hosted Actions billing
+board item remain separate gaps; no duplicate trigger or billing notice.
