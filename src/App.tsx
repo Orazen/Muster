@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Menu } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Sidebar } from "@/components/Sidebar";
@@ -31,10 +31,25 @@ import { emailGateDone, serverGateDone } from "@/lib/analytics";
 import { PairPage } from "@/pages/PairPage";
 import { ClaimPage } from "@/pages/ClaimPage";
 import { DesktopShell } from "@/components/os/DesktopShell";
+import { resolveBotChatHandoff } from "@/state/bot-chat-route";
 
 function Shell() {
   const { state, dispatch } = useStore();
   const { user, loading: authLoading } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const consumedHandoff = useRef<string | null>(null);
+  const handoff = resolveBotChatHandoff(location.search, user?.id, state.rosterHydrated, state.bots);
+  useEffect(() => {
+    const intent = `${location.key}:${location.search}`;
+    const resolved = resolveBotChatHandoff(location.search, user?.id, state.rosterHydrated, state.bots);
+    if (resolved.kind !== "consume" || consumedHandoff.current === intent) return;
+    consumedHandoff.current = intent;
+    if (resolved.selectedId) dispatch({ type: "select", id: resolved.selectedId });
+    // Consume invalid targets too, so a future roster/account change cannot
+    // unexpectedly activate an old URL. Preserve unrelated query and hash.
+    navigate({ pathname: location.pathname, search: resolved.search, hash: location.hash }, { replace: true });
+  }, [location.key, location.search, location.pathname, location.hash, user?.id, state.rosterHydrated, state.bots, dispatch, navigate]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [scoutOpen, setScoutOpen] = useState(false);
   const [firstRun, setFirstRun] = useState(true);
@@ -101,6 +116,10 @@ function Shell() {
   useEffect(() => {
     setDrawerOpen(false);
   }, [state.selectedId, state.activeView, state.pluginsOpen, state.settingsOpen]);
+
+  if (handoff.kind === "wait" || (handoff.kind === "consume" && handoff.selectedId && handoff.selectedId !== state.selectedId)) {
+    return <main className="flex h-full items-center justify-center p-6 text-ink-secondary" role="status">Opening bot conversation…</main>;
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -212,12 +231,12 @@ function Shell() {
   );
 }
 
-function AccountStore({ children }: { children: ReactNode }) {
+function AccountStore({ children, readSelectedMessages = true }: { children: ReactNode; readSelectedMessages?: boolean }) {
   const { user } = useAuth();
   if (!user) return null;
   // A changed identity gets fresh state and closes the prior account's SSE
   // subscription before its pending hydration can reach this provider.
-  return <StoreProvider key={user.id} accountId={user.id}>{children}</StoreProvider>;
+  return <StoreProvider key={user.id} accountId={user.id} readSelectedMessages={readSelectedMessages}>{children}</StoreProvider>;
 }
 
 function AppShell() {
@@ -261,7 +280,7 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/app/*" element={<AuthGate><AppShell /></AuthGate>} />
-          <Route path="/os" element={<AuthGate><AccountStore><DesktopShell /></AccountStore></AuthGate>} />
+          <Route path="/os" element={<AuthGate><AccountStore readSelectedMessages={false}><DesktopShell /></AccountStore></AuthGate>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

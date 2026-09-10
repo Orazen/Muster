@@ -360,6 +360,10 @@ export type AppSettingsSection =
 export interface AppState {
   bots: Bot[];
   groups: Group[];
+  /** A successful roster snapshot has arrived for this account mount. */
+  rosterHydrated: boolean;
+  /** This provider renders conversations, rather than an OS overview. */
+  readSelectedMessages: boolean;
   instances: InstanceInfo[];
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
@@ -397,6 +401,21 @@ export interface AppState {
 }
 
 type BotAnnouncement = Omit<Bot, "messages"> & { messages?: Message[] };
+
+interface PreparedUnreadAnnouncement<T> {
+  record: T;
+  markRead: boolean;
+}
+
+/** Decide whether a live unread announcement represents a visible chat.
+ * Return an acknowledgement only for that case; never mutate SSE records. */
+export function prepareUnreadAnnouncement<T extends { id: string; unread?: boolean }>(
+  state: Pick<AppState, "readSelectedMessages" | "selectedId">,
+  record: T,
+): PreparedUnreadAnnouncement<T> {
+  const markRead = state.readSelectedMessages && record.id === state.selectedId && Boolean(record.unread);
+  return { record: markRead ? { ...record, unread: false } : record, markRead };
+}
 
 /** Fields a bot-settings PATCH may change; also what duplicateBot copies. */
 type BotPatch = Partial<
@@ -557,7 +576,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const bots = action.bots.map((b) => keepTranscripts(b, prevById.get(b.id)));
       const groups = (action.groups ?? []).map((g) => keepTranscripts(g, prevGroupById.get(g.id)));
       const selectedId = resolveChatSelection(state.selectedId, bots, groups);
-      return { ...state, bots, groups, selectedId };
+      return { ...state, bots, groups, selectedId, rosterHydrated: true };
     }
     case "showRoutines":
       return {
@@ -649,13 +668,13 @@ export function reducer(state: AppState, action: Action): AppState {
           ...state,
           activeView: "chat",
           selectedId: action.id,
-          groups: state.groups.map((g) => (g.id === action.id ? { ...g, unread: false } : g)),
+          groups: state.groups.map((g) => (g.id === action.id && state.readSelectedMessages ? { ...g, unread: false } : g)),
         };
       }
       return updateBot(
         withMascotMotion({ ...state, activeView: "chat", selectedId: action.id }, action.id, "switch"),
         action.id,
-        (b) => ({ ...b, unread: false }),
+        (b) => state.readSelectedMessages ? { ...b, unread: false } : b,
       );
     }
     // optimistic card settle; the server's message.patch confirms it later
@@ -999,6 +1018,8 @@ const MAX_KEPT_SCREEN_FRAMES = 8;
 export const initialState: AppState = {
   bots: [],
   groups: [],
+  rosterHydrated: false,
+  readSelectedMessages: true,
   instances: [],
   config: null,
   selectedId: "",
@@ -1068,12 +1089,17 @@ const StoreContext = createContext<{
   refreshInstances: () => Promise<void>;
 } | null>(null);
 
-export function StoreProvider({ accountId, children }: { accountId: string; children: ReactNode }) {
+export function StoreProvider({ accountId, readSelectedMessages = true, children }: {
+  accountId: string;
+  readSelectedMessages?: boolean;
+  children: ReactNode;
+}) {
   // The authenticated wrapper keys this provider by account. Restore once:
   // later snapshots must preserve a newer live choice, not replay storage.
   const [state, rawDispatch] = useReducer(reducer, accountId, (id) => ({
     ...initialState,
     selectedId: readChatSelection(id),
+    readSelectedMessages,
   }));
   useEffect(() => {
     saveChatSelection(accountId, state.selectedId);
@@ -1303,6 +1329,7 @@ export function StoreProvider({ accountId, children }: { accountId: string; chil
           );
           break;
         case "select": {
+          if (!stateRef.current.readSelectedMessages) break;
           const bot = stateRef.current.bots.find((b) => b.id === action.id);
           const group = stateRef.current.groups.find((g) => g.id === action.id);
           if (bot?.unread) {
@@ -1566,12 +1593,8 @@ export function StoreProvider({ accountId, children }: { accountId: string; chil
           // SAFETY: a `bot` stream frame always carries the full announcement
           // payload — the stream's own envelope contract for kind "bot".
           const bot = frame.bot as BotAnnouncement;
-          let announcedBot = bot;
-          // reading the selected chat clears its badge immediately
-          if (bot.unread && bot.id === stateRef.current.selectedId) {
-            // clone before clearing: mutating the frame object poisons any
-            // other consumer of it (replay buffers, logging)
-            announcedBot = { ...bot, unread: false };
+          const { record: announcedBot, markRead } = prepareUnreadAnnouncement(stateRef.current, bot);
+          if (markRead) {
             fetch(`/api/bots/${bot.id}`, {
               method: "PATCH",
               headers: { "content-type": "application/json" },
@@ -1587,10 +1610,8 @@ export function StoreProvider({ accountId, children }: { accountId: string; chil
           // SAFETY: a `group` stream frame carries the group record with its
           // id; only the fields read below are depended on.
           const group = frame.group as Partial<Group> & { id: string };
-          let announcedGroup = group;
-          // reading the selected room clears its badge immediately
-          if (group.unread && group.id === stateRef.current.selectedId) {
-            announcedGroup = { ...group, unread: false };
+          const { record: announcedGroup, markRead } = prepareUnreadAnnouncement(stateRef.current, group);
+          if (markRead) {
             fetch(`/api/groups/${group.id}`, {
               method: "PATCH",
               headers: { "content-type": "application/json" },
@@ -1604,11 +1625,8 @@ export function StoreProvider({ accountId, children }: { accountId: string; chil
         // the harness decided this was worth interrupting for; the toggle
         // in each bot's settings is what gates it, server-side
         case "notify":
-          // the wrapped dispatch, not rawDispatch: `select` clears the badge
-          // in local state either way, but only the wrapper PATCHes
-          // unread:false back. Opening a bot from its own notification and
-          // watching the badge return on the next hydration is exactly the
-          // bug that makes notifications feel broken.
+          // The wrapper persists read state only when this provider shows
+          // conversations. Selecting a bot on the OS overview is not a read.
           showNotification(frame.notification, (botId) => dispatch({ type: "select", id: botId }));
           break;
         case "group.deleted":

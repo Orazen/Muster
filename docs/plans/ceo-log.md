@@ -1189,3 +1189,92 @@ The verified source is ready for deployment. This push also updates the
 existing `.deploy-trigger` watched by Dokploy, because the hosted Actions
 runner remains blocked. Verify production with GET; no new release or
 deployment success is claimed before observing the result.
+
+Loop 22 release follow-up: committed/pushed **66846c6**. Production now
+serves `/assets/index-D-RsCfsG.js`, containing both the backup availability
+message and Loop 21's onboarding draft marker. App, health, updater and
+bundle GETs returned 200; updater remains 1.10.4. This supersedes the old
+absent-marker observation. CUA blocked the authenticated workspace GET with
+`net::ERR_BLOCKED_BY_CLIENT`; no live backend guard response was inspected.
+UI markers do not establish that missing API check or an exact deployed SHA.
+
+## Loop 23 — 2026-09-10 — A workspace organized around real work
+
+OS Home now shows decisions, active work and new replies beside the team.
+The canonical orange mascot accompanies the overview and each worker.
+Active-branch questions outrank busy; seed greetings never become results;
+unread replies are called replies rather than successful outcomes.
+Disconnected workers keep last-known details without a working animation.
+Home waits for actual roster hydration, including an empty roster.
+
+Summary cards open the exact conversation through a validated route target
+consumed after account hydration. Unrelated query/hash state survives;
+invalid/hidden/foreign IDs cannot select another record. The audit caught
+OS acknowledging the persisted selected bot as read while no conversation
+was visible. Its provider now preserves bot/group unread state; ordinary
+chat selection keeps its read behavior. Window reveal and dock-toggle
+intents resolve against the latest stack. Minimized windows reveal Home;
+repeated show does not duplicate windows; bot/app IDs have separate scopes.
+
+Phones prioritize populated sections, retain a direct app exit, wrap long
+names and display one contained focused window. Wider clients retain their
+stack. Window bounds adapt to the viewport; drags start from rendered
+geometry. Stop remains available. Reduced-motion CSS removes animation;
+the machine's motion preference was not changed for a separate runtime test.
+
+Verification before the continuation environment changed: **203 files /
+2178 passed / 8 skipped in 228.47s**, exit 0; **57 additional passing
+tests** over Loop 22. Focused selector 27/27, route/store 31/31, window
+intent 5/5. Frontend/server typechecks, scoped lint and Vite build passed.
+The final mobile CSS refinements were rebuilt and browser-checked; final
+build took 7.89s with the existing large-chunk advisory. The subsequent
+continuation changed Node to 22.22.3, removed the temporary logs and no
+longer exposed CUA. Fresh verification on Node 22.22.3 passed **203 files /
+2178 tests / 8 skipped in 214.13s**, exit 0, plus frontend typecheck exit 0.
+Durable local evidence: `.omb-scratch/verification/loop23-node22-vitest.log`
+and `loop23-node22-types.log`.
+
+**12 manual CUA scenarios passed** on one isolated synthetic account,
+two bots and fake ACP modes (happy, permission-gated, hang):
+
+1. Seed-only roster shows zero tasks/results with both teammates available.
+2. Non-first agent Open chat selects its exact bot; valid route targeting is consumed and selection survives reload.
+3. Invalid target is consumed without changing chat; template/tag/hash survive.
+4. Explicit command submission returns 202 and surfaces the pending request only in the decision section.
+5. Decision opens the correct approval; Allow once produces the fake reply and clears the request.
+6. The selected bot's reply remains unread on OS through reload/window use until its conversation opens.
+7. Minimize reveals Home; dock windows retain identities, with only the focused one shown on phones.
+8. Long unbroken names and agent/Rooms windows fit at 320/390/768/1440; measured document width equals viewport and visible window content does not overflow.
+9. A synthetic hanging task appears as Working; the OS stop control returns it to idle.
+10. A populated reply section appears before empty sections at 320px.
+11. Mascot wave announces a response; Command-K opens the console and Escape dismisses it without sending.
+12. Owned-server shutdown retains last-known state, disables task submission and removes working dots; the mobile app exit was exercised before shutdown.
+
+One task was submitted through the browser; two later sends were fixture
+control setup, not browser sends. Zero captured console errors before the
+deliberate shutdown. Owned processes, data and tabs were removed; viewport
+reset; demo 8845 untouched. Temporary browser/test logs are no longer on
+disk after continuation; the executed tool results above remain the evidence.
+
+Independent native verification: `swift test --package-path ios` passed
+**8 suites / 91 tests / 0 failures / 0 skipped**, command 8.56s. This is
+macOS-hosted CompanionCore, not simulator UI, Watch execution or native
+Google login. No tracked iOS changes were made. Preflight found Electron
+43.4.0 runtime missing despite cached archives; Xcode 26.6 and 16 available
+Apple simulators; Android tooling with incomplete native/test setup; and
+stopped Colima. Subsequent unsigned simulator builds passed: **iOS 52.15s,
+Watch 23.71s**, both exit 0, zero compiler errors and zero signing steps.
+Both produced arm64/x86_64 executables, version 1.0.0. These are two build
+gates, not simulator UI or signing proof. Commands, source manifest and logs
+are retained under `.omb-scratch/verification/apple-build-20260910T201202Z-eeebfb`.
+Electron's cached runtime was restored and CLI-verified as **43.4.0 / arm64**
+with embedded Node 24.18.1. No desktop GUI or packaged installer was launched.
+
+Research, backup architecture, commercial hypotheses and ranked release
+gates are in `muster-os-execution-2026-09-10.md`. Commercial implication:
+returning users can find consequential work and reach the right teammate
+without losing unread replies. Conversion/revenue lift is unmeasured.
+The broader goal remains active; proceed with native release verification
+and durable first-task acceptance after this verified push. The next bounded
+auth slice addresses startup session-request failures being treated as
+sign-out; the observed sign-in page does not establish lost account data.

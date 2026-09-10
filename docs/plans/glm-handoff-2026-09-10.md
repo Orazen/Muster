@@ -423,3 +423,49 @@ The verified source push includes the existing `.deploy-trigger` mechanism
 to request Dokploy deployment independently of the blocked Actions runner.
 Confirm with GET after push. Desktop updater version remains 1.10.4 until
 a verified installer is actually published; no new version is claimed here.
+
+## Loop 23 — OS overview and preserved unread state
+
+Loop 22 is pushed as **66846c6**. Production now serves
+`index-D-RsCfsG.js` with backup-limit and onboarding draft markers; the
+old absent-marker observation is superseded. Updater still says 1.10.4.
+CUA blocked the authenticated workspace GET, so the production API guard
+has not been directly inspected.
+
+Loop 23 adds the real-state OS overview, operational mascot expressions,
+exact validated bot-to-chat targeting after roster hydration, and distinct
+window reveal/dock-toggle behavior. OS providers preserve unread replies;
+ordinary chat selection still marks them read. Phones prioritize populated
+work, retain an app exit and contain one focused window. Long names and
+resized desktop windows remain inside their viewport.
+
+Verified before continuation: **203 files / 2178 passed / 8 skipped in
+228.47s**, exit 0. Focused selector 27/27, route/store 31/31, window intent
+5/5. Typechecks, lint and Vite build pass. **12 CUA scenarios**, four widths,
+one browser task and two control setup tasks are detailed in CEO Loop 23.
+Fixtures/data/tabs removed, viewport reset, demo untouched. Final CSS
+refinements were rebuilt and visually checked after logic verification.
+
+Continuation changed the available tools/runtime: Node 22.22.3, CUA absent,
+temporary logs gone. Fresh full suite passed **203 files / 2178 tests /
+8 skipped in 214.13s**, exit 0, and frontend typecheck passed. Logs are
+retained in `.omb-scratch/verification/loop23-node22-vitest.log` and
+`loop23-node22-types.log`. Do not pretend browser
+automation remains available or the earlier temporary log paths still exist.
+
+Native core: **8 Swift suites / 91 tests / 0 failures / 0 skipped**,
+not simulator/device/UI proof. Preflight found cached Electron archives but
+no runtime, available Apple simulators, incomplete Android native/test
+configuration and stopped Colima. Subsequent unsigned iOS and Watch
+simulator builds passed in **52.15s / 23.71s**, zero compiler errors or
+signing steps. Evidence is in `.omb-scratch/verification/apple-build-20260910T201202Z-eeebfb`.
+Electron runtime was restored and CLI-verified as **43.4.0 arm64**; no
+packaged launch yet. Native UI/signing, actual VM work and Mimosa remain
+separate gates. Read the new
+`muster-os-execution-2026-09-10.md` for cited research and the ranked queue.
+
+The active goal and existing CEO heartbeat continue under Astra. Last
+measured allowance: **8% used / 92% remaining**; no credit/reset consumed.
+Preserve the earlier release stash. Finish the verified OS source push,
+GET-check its serving markers, then native/first-task gates one slice at a
+time. A source commit is not a desktop release.

@@ -91,10 +91,13 @@ export function WindowFrame({
       mode,
       startClientX: e.clientX,
       startClientY: e.clientY,
-      originX: geometry.x,
-      originY: geometry.y,
-      originWidth: geometry.width,
-      originHeight: geometry.height,
+      // CSS contains the frame after a viewport change. Start a new drag
+      // from its rendered position, so restoring on a smaller screen
+      // cannot jump back to the old off-screen geometry.
+      originX: frame.offsetLeft,
+      originY: frame.offsetTop,
+      originWidth: frame.offsetWidth,
+      originHeight: frame.offsetHeight,
     };
     setDragging(true);
   };
@@ -147,7 +150,13 @@ export function WindowFrame({
       data-focused={focused ? "true" : "false"}
       data-minimized={minimized ? "true" : "false"}
       data-dragging={dragging ? "true" : "false"}
-      style={{ zIndex, left: geometry.x, top: geometry.y, width: geometry.width, height: geometry.height }}
+      style={{
+        zIndex,
+        left: `clamp(8px, ${geometry.x}px, max(8px, calc(100% - ${geometry.width}px - 8px)))`,
+        top: `clamp(8px, ${geometry.y}px, max(8px, calc(100% - ${geometry.height}px - 8px)))`,
+        width: geometry.width,
+        height: geometry.height,
+      }}
       onPointerDown={onFocus}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}

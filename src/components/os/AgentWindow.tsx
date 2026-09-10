@@ -2,20 +2,24 @@
 // several open at once. The shared WindowFrame owns drag/resize/focus
 // chrome; this file adds the agent identity (avatar, live activity,
 // model chips, "Open chat") from the same SSE-fed store as the dock.
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import type { Bot } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "@/components/Avatar";
 import { WindowFrame } from "@/components/os/Window";
+import { botChatRoute } from "@/state/bot-chat-route";
+import { operationalAvatarState } from "@/components/os/workspace-state";
 
-/** Short human label for what a bot is doing right now. Mirrors the
- * sidebar's preview priority: waiting-on-you outranks busy. Shared with
- * the dock, which uses it for aria-labels on the same roster. */
-export function activityLabel(bot: Bot): string {
-  if (bot.activity === "waiting-on-you") return "Waiting for you…";
-  if (bot.busy) return "Working…";
+/** Text companion to the operational mascot state, shared with the dock. */
+export function activityLabel(bot: Bot, connected = true): string {
+  if (!connected) return "Connection unavailable";
   if (bot.activity === "no-signal") return "No signal";
   if (bot.activity === "dead") return "Offline";
+  const avatar = operationalAvatarState(bot, connected);
+  if (avatar === "curious") return "Waiting for you…";
+  if (avatar === "working") return "Working…";
+  if (avatar === "notifying") return "New reply";
+  if (bot.busy) return "Status updating";
   return "Idle";
 }
 
@@ -42,9 +46,11 @@ export function AgentWindow({
   onMinimize,
   onClose,
 }: AgentWindowProps) {
+  const { state } = useStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const openChat = () => {
-    navigate("/app");
+    navigate(botChatRoute(bot.id, location.search));
   };
 
   return (
@@ -63,13 +69,13 @@ export function AgentWindow({
     >
       <div className="os-window-body">
         <div className="os-window-hero">
-          <AgentAvatar color={bot.color} character={bot.character} state={bot.busy ? "working" : "idle"} size={52} label={bot.name} />
+          <AgentAvatar color={bot.color} character={bot.character} state={operationalAvatarState(bot, state.connected)} size={52} label={bot.name} />
           <div className="min-w-0">
             <div className="os-window-name">{bot.name}</div>
             <div className="os-window-role">{bot.title}</div>
           </div>
         </div>
-        <div className="os-window-activity">{activityLabel(bot)}</div>
+        <div className="os-window-activity">{activityLabel(bot, state.connected)}</div>
         <div className="os-window-meta">
           <span className="os-chip">{engineName ?? bot.modelSelection.model}</span>
           <span className="os-chip">{bot.modelSelection.model}</span>
