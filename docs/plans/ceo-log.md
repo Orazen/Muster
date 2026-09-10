@@ -1928,3 +1928,114 @@ failures or spend to bypass them. Device/Watch UI, VM, portable recovery/sync an
 Mimosa remain open. Commercial intent is fewer lost first tasks; no measured
 retention or revenue uplift is claimed. Allowance **27% used / 73% remaining**;
 no reset consumed. The broad goal and existing heartbeat stay active.
+
+
+## Loop 33 — Verified CLI release payload and 1.10.5 candidate (2026-09-11)
+
+Starting source: `8b766a4`, main clean and pull up to date. Loop 32 was verified
+progress, not completion of the broader OS/native/recovery goal. Audit found
+that the release workflow never built or published the CLI repaired in Loop 30;
+preserving the old public file could not distribute those fixes.
+
+Candidate package version is now **1.10.5**. The public download page keeps its
+actual **1.10.4** fallback badge until release metadata changes. No tag, workflow
+dispatch, notarization submission, signing identity change, VPS write or public
+release was performed in this slice. An explicit candidate version is not a
+claim that installers are available.
+
+The new CLI builder embeds the supplied exact version and full source SHA,
+checks that the package version matches, and produces a standalone Node 22
+bundle with built-in imports only. It writes immutable
+`Muster-<version>-cli.mjs`, identical `muster-cli.mjs`, and exactly two SHA256
+records in `SHA256SUMS-cli.txt`. The same helper verifies downloaded artifacts
+without modifying them. It snapshots no-follow regular files, executes the
+already-hashed bytes, rechecks originals after verification and rejects linked
+output ancestors before creating directories. Five subprocess checks run with
+owned home/data/cache/temp paths and no inherited credentials or Node hooks:
+syntax, help, JSON identity, human identity and empty-log behavior. CI provides
+Git provenance; the helper validates its inputs and bytes rather than claiming
+to attest Git. Unbundled `--version --json` reports package version and null SHA.
+
+The macOS arm64 job builds/verifies the CLI in dry and real runs and uploads
+both files and checksums under the existing draft gate. Publication first
+validates the downloaded hashes, then re-verifies the actual CLI identity and
+commands before release. New complete payloads require the exact CLI pair and
+dedicated checksums; partial drafts may omit the entire set, never an unchecked
+subset. The latest metadata and transport manifest now include the stable CLI
+and immutable target. CLI files cannot be updater feed targets.
+
+The Python promoter makes the CLI part of atomic publication. For an old flat
+CLI absent from old release metadata, it snapshots an auxiliary file without
+inventing old release provenance. That works for flat desktop mirrors, already
+managed generations and roots containing only an old CLI. Equivalent snapshots
+preserve old GET bytes while links migrate; actual interruption/retry tests
+then confirm one final switch. Previously published CLI URLs remain immutable;
+future releases cannot drop the CLI. Existing version/SHA, checksum, lock,
+platform, collision and non-downgrade gates remain. Read the updated
+[download publication runbook](../release-mirror.md).
+
+Focused verification: **172 producer/workflow tests across 2 files in 1.33s**;
+**56 promoter/integration tests across 2 files in 8.32s**, including real process
+death and loopback HTTP reads; **78 CLI/artifact tests across 2 files in 7.50s**.
+These are subsets of the root suite, not extra counts to add. Final full suite:
+**220 files / 2,904 passed / 8 skipped in 244.38s**, exit 0 (**68 additional passes** over Loop 32). Root build/both types pass (Vite **4.97s**, existing chunk
+warning); global and scoped lint pass. Actionlint reports no diagnostics across
+4 workflows; ShellCheck remains unavailable. Python syntax checks pass. Final
+read-only review found no material blocker after fixing verifier snapshot,
+ancestor-path and home-isolation gaps. Twelve source files were frozen for
+verification; evidence is `.omb-scratch/verification/loop33-*` and `loop33-mirror/`.
+
+Native candidate build/verification: local **1.10.5 arm64 DMG, ZIP and app built successfully**. Preparation
+38.05s, speech helper3.22s, CUA staging2.44s, native packaging65.33s; the original
+packaged Electron smoke passed **9/9 in5.32s**. Independent inspection passed
+**15 artifact assertions**, including DMG verification, integrity of all **1,250
+ZIP entries**, app/ZIP version, arm64 architecture, feed sizes/hashes and deep
+strict signature checks. The DMG was mounted read-only/nobrowse, its app copied
+into an owned installation directory and the mount detached in finally. That
+copied app passed **9/9 runtime checks in6.389s**: owned HTTP1, proxy paths7 and
+native database1, using Electron43.4.0 / Node24.18.1 / ABI148. Signature is
+explicitly ad-hoc, not Developer ID or notarized; no GUI or real profile was
+opened. Evidence and installers are in
+`.omb-scratch/verification/mac-candidate-loop33-e0e30177df/`, including
+`artifact-verification.json`. Source/runtime inputs stayed fixed; only the
+expected generated updater bundle changed inside the owned build snapshot.
+The shared host-native addon hash remained unchanged.
+
+A live read-only Dependabot API audit confirms **35 open alerts: 1 critical,
+25 high, 9 medium**, all in `android-companion/package-lock.json`. Six transitive
+packages account for them. The critical `tar` 6.2.1 advisory and related highs
+come through Expo CLI/cacache archive tooling; `@xmldom/xmldom`, PostCSS and
+image-size are primarily Expo/Metro build/prebuild dependencies. No alert in
+this response names the root desktop/server lock, and no direct affected import
+was found in companion source. That does not establish project safety. Actual
+navigation/UUID callsite checks did not establish the advisory-specific runtime
+paths. Details, primary advisory URLs and validation steps are preserved in
+`.omb-scratch/verification/loop33-dependency-audit.json`.
+
+Next Android dependency slice should verify compatible tar 7.5.22, xmldom
+0.8.15 and PostCSS fixes with a clean install, Metro export and actual Expo
+archive/plist paths. image-size's two advisories have no published fixed version
+in the inspected data, so evaluate mitigation/replacement separately. Do not
+blindly switch CommonJS consumers to ESM-only decode-uri-component or UUID.
+No alerts were dismissed and no dependencies were changed by this audit.
+
+Remaining release gates include recorded GitHub runner billing restrictions,
+trusted VPS access/serving/cache acceptance, native installation/update/signing
+and platform-specific builds. Native Google, device/Watch UI, VM, portable
+account recovery/sync and Mimosa remain open. The demo at 127.0.0.1:8845 was not
+used or changed. Commercial intent is distributing the corrected CLI and a
+verifiable desktop candidate; no adoption or revenue result is claimed. The full goal and existing heartbeat remain active. Allowance **29% used /
+71% remaining**; no reset consumed.
+
+Two no-window Electron-only probes (both exit0, 0.451s and0.413s) confirmed that
+`--user-data-dir` confines userData/sessionData, while macOS Electron home and
+appData still resolve to the real user despite an owned HOME environment. Node
+os.homedir honors HOME; Electron temp ignores TMPDIR but honors
+MAC_CHROMIUM_TMPDIR. Packaged updater startup also checks externally, so a
+broker URL override alone is not a network boundary. No Muster app or
+Google flow was launched in that probe. Combined with packaged startup always
+requesting CUA permissions, this means environment-only GUI testing is not
+fully isolated. Next native acceptance needs a disposable OS session or a
+product startup change that makes computer access opt-in and defines a complete
+profile path. Evidence: `loop33-electron-path-probe/` and the primary-source
+notes in `loop33-packaged-gui-isolation.md` in the verification folder.

@@ -315,6 +315,14 @@ jobs:
           [ -f "release/latest-mac.yml" ] || { echo "::error::missing latest-mac.yml (auto-update feed)"; exit 1; }
           [ -f "release/Muster.dmg" ] || { echo "::error::missing Muster.dmg (stable download name)"; exit 1; }
 
+      - name: Build and verify the standalone CLI
+        id: cli-build
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          CLI_OUT_DIR: release
+        run: node scripts/build-cli.mjs
+
       # Artifact quota on this private repo is 500MB and each platform's
       # bundle is ~500MB — upload-artifact can never fit. The feed files and
       # installer are handed to the publish job through a DRAFT GitHub
@@ -328,7 +336,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/release-state.mjs assert-draft
-          gh release upload "v$RELEASE_VERSION" release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml release/SHA256SUMS-macos-arm64.txt --clobber
+          gh release upload "v$RELEASE_VERSION" release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml release/SHA256SUMS-macos-arm64.txt "release/Muster-${RELEASE_VERSION}-cli.mjs" release/muster-cli.mjs release/SHA256SUMS-cli.txt --clobber
 
   # ── macOS (Intel / x64) ───────────────────────────────────────────────────
   # Unsigned direct download only, by policy: no Developer ID cert is applied
@@ -619,6 +627,13 @@ jobs:
         env:
           REQUIRE_COMPLETE: ${{ steps.draft.outputs.value == 'false' }}
         run: node scripts/release-payload.mjs validate
+
+      - name: Verify the downloaded CLI identity and behavior
+        id: cli-verify
+        if: ${{ success() && needs.macos.result == 'success' }}
+        env:
+          CLI_OUT_DIR: assets
+        run: node scripts/build-cli.mjs verify
 
       - name: Recheck draft identity before publication
         run: node scripts/release-state.mjs assert-draft

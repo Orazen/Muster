@@ -23,8 +23,8 @@ const Feed = z.object({
   path: FlatName.optional(), sha512: Sha512.optional(), size: Size.optional(),
 });
 const FEEDS = ["latest-mac.yml", "latest.yml", "latest-linux.yml"];
-const CHECKSUMS = ["SHA256SUMS-macos-arm64.txt", "SHA256SUMS-macos-x64.txt", "SHA256SUMS-windows-x64.txt", "SHA256SUMS-linux-x64.txt"];
-const STABLE = ["Muster.dmg", "Muster-setup.exe", "Muster.deb", "Muster.AppImage", "Muster-intel.dmg"];
+const CHECKSUMS = ["SHA256SUMS-macos-arm64.txt", "SHA256SUMS-macos-x64.txt", "SHA256SUMS-windows-x64.txt", "SHA256SUMS-linux-x64.txt", "SHA256SUMS-cli.txt"];
+const STABLE = ["Muster.dmg", "Muster-setup.exe", "Muster.deb", "Muster.AppImage", "Muster-intel.dmg", "muster-cli.mjs"];
 const GENERATED = ["latest.json", "mirror-files.txt", "mirror-manifest.json"];
 
 function fail(message) { throw new Error(message); }
@@ -155,6 +155,14 @@ export async function validateReleasePayload(options) {
     }
     await alias(intel[0], [intel[1]], true);
     selected.add(intel[2]);
+  }
+  const cli = ["muster-cli.mjs", `Muster-${version}-cli.mjs`];
+  if (requireComplete || [...cli, "SHA256SUMS-cli.txt"].some((name) => files.has(name))) {
+    const checksums = checksumEntries.get("SHA256SUMS-cli.txt");
+    if (!cli.every((name) => files.has(name) && checksums?.has(name)) || checksums.size !== cli.length) {
+      fail("CLI release needs stable/versioned bundles and their exact dedicated checksums");
+    }
+    await alias(cli[0], [cli[1]], true);
   }
   if (requireComplete) {
     if (!FEEDS.every((name) => feeds.has(name))) fail("A complete release requires all three update feeds");

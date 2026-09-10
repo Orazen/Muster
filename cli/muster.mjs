@@ -858,6 +858,7 @@ async function evalCommand() {
 
 const HELP = `muster — the CLI for your AI workforce
 
+  muster --version [--json]        version and embedded source commit (unbundled checkout: null)
   muster up [-d] [--port 8799]    boot the server here; scan the QR with your phone.
                                   -d keeps it running after the terminal closes.
   muster setup                    guided first run: connect, pick an engine, meet your first bot
@@ -875,8 +876,24 @@ const HELP = `muster — the CLI for your AI workforce
   muster eval capture.json scorecard.json  grade captured fleet probes locally; no fleet actions
   muster help`;
 
+function printVersion() {
+  // The release builder replaces this import.meta field with immutable inputs.
+  // A checkout reports its package version but makes no Git provenance claim.
+  const identity = import.meta.musterCliBuild ?? {
+    version: JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version,
+    sha: null,
+  };
+  console.log(has("--json") ? JSON.stringify(identity)
+    : `Muster ${identity.version} (source ${identity.sha ?? "unbundled checkout"})`);
+}
+
 try {
   switch (command) {
+    case "--version":
+    case "-v":
+    case "version":
+      printVersion();
+      break;
     case "up":
       await up();
       break;

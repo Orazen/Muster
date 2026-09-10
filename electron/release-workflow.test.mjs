@@ -24,6 +24,18 @@ describe('release control decision matrix', () => {
   });
 
   const regressions = [
+    ['missing CLI build', (w) => { w.jobs.macos.steps = w.jobs.macos.steps.filter((s) => s.id !== 'cli-build'); }],
+    ['skipped CLI dry-run verification', (w) => { w.jobs.macos.steps.find((s) => s.id === 'cli-build').if = "${{ needs.prepare.outputs.dry_run == 'false' }}"; }],
+    ['ignored CLI build failure', (w) => { w.jobs.macos.steps.find((s) => s.id === 'cli-build')['continue-on-error'] = true; }],
+    ['wrong CLI build identity', (w) => { w.jobs.macos.steps.find((s) => s.id === 'cli-build').env.RELEASE_SHA = '${{ github.sha }}'; }],
+    ['CLI build after upload', (w) => { const all = w.jobs.macos.steps; const i = all.findIndex((s) => s.id === 'cli-build'); all.push(...all.splice(i, 1)); }],
+    ['missing immutable CLI upload', (w) => { const s = upload(w, 'macos'); s.run = s.run.replace('"release/Muster-${RELEASE_VERSION}-cli.mjs" ', ''); }],
+    ['missing CLI checksums upload', (w) => { const s = upload(w, 'macos'); s.run = s.run.replace(' release/SHA256SUMS-cli.txt', ''); }],
+    ['missing downloaded CLI verification', (w) => { w.jobs.publish.steps = w.jobs.publish.steps.filter((s) => s.id !== 'cli-verify'); }],
+    ['downloaded CLI verification bypass', (w) => { w.jobs.publish.steps.find((s) => s.id === 'cli-verify').run = 'true'; }],
+    ['ignored downloaded CLI failure', (w) => { w.jobs.publish.steps.find((s) => s.id === 'cli-verify')['continue-on-error'] = true; }],
+    ['CLI verification before hash checks', (w) => { const all = w.jobs.publish.steps; const i = all.findIndex((s) => s.id === 'cli-verify'); all.splice(1, 0, ...all.splice(i, 1)); }],
+    ['skipped published CLI verification', (w) => { w.jobs.publish.steps.find((s) => s.id === 'cli-verify').if = 'false'; }],
     ['missing selected-commit tests', (w) => { w.jobs.prepare.steps = w.jobs.prepare.steps.filter((s) => s.id !== 'tests'); }],
     ['ignored selected-commit failures', (w) => { w.jobs.prepare.steps.find((s) => s.id === 'tests')['continue-on-error'] = true; }],
     ['conditional selected-commit tests', (w) => { w.jobs.prepare.steps.find((s) => s.id === 'tests').if = 'false'; }],

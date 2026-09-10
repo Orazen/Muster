@@ -34,12 +34,15 @@ function complete(intel = false, archNames = ["amd64", "x86_64"]) {
   feed("latest-mac.yml", [zip]); feed("latest.yml", [exe]); feed("latest-linux.yml", [appimage]);
   checksums("SHA256SUMS-macos-arm64.txt", [dmg, zip, "Muster.dmg"]);
   checksums("SHA256SUMS-linux-x64.txt", [deb, appimage, "Muster.deb", "Muster.AppImage"]);
+  const cli = `Muster-${version}-cli.mjs`;
+  put(cli); put("muster-cli.mjs", bytes(cli));
+  checksums("SHA256SUMS-cli.txt", [cli, "muster-cli.mjs"]);
   if (intel) {
     const intelDmg = `Muster-${version}-intel.dmg`, intelZip = `Muster-${version}-x64.zip`;
     put(intelDmg); put(intelZip); put("Muster-intel.dmg", bytes(intelDmg));
     checksums("SHA256SUMS-macos-x64.txt", [intelDmg, intelZip, "Muster-intel.dmg"]);
   }
-  return { dmg, zip, exe, deb, appimage };
+  return { dmg, zip, exe, deb, appimage, cli };
 }
 function partial() { const zip = `Muster-${version}-arm64.zip`; put(zip); feed("latest-mac.yml", [zip]); return zip; }
 
@@ -47,7 +50,7 @@ describe("release payload validation", () => {
   it("validates a real-builder-shaped complete set without Intel or writing outputs", async () => {
     const { exe, appimage } = complete(); const before = readdirSync(assetsDir).sort();
     const result = await validateReleasePayload(options());
-    expect(result.feeds).toHaveLength(3); expect(result.stableFiles).toHaveLength(4);
+    expect(result.feeds).toHaveLength(3); expect(result.stableFiles).toHaveLength(5);
     expect(result.files).toEqual(expect.arrayContaining([exe, appimage, "Muster.deb"]));
     expect(result.files.some((name) => name.includes("intel"))).toBe(false);
     expect(readdirSync(assetsDir).sort()).toEqual(before);
@@ -188,6 +191,56 @@ describe("release payload validation", () => {
   it("refuses an Intel ZIP omitted from otherwise valid Intel checksums", async () => {
     complete(true); checksums("SHA256SUMS-macos-x64.txt", [`Muster-${version}-intel.dmg`, "Muster-intel.dmg"]);
     await expect(validateReleasePayload(options())).rejects.toThrow(/Optional Intel release/);
+  });
+
+  it.each(["muster-cli.mjs", `Muster-${version}-cli.mjs`, "SHA256SUMS-cli.txt"])("refuses a complete release missing CLI artifact %s", async (name) => {
+    complete(); remove(name);
+    await expect(validateReleasePayload(options())).rejects.toThrow();
+  });
+
+  it("refuses a platform-complete legacy payload without a verified CLI", async () => {
+    const { cli } = complete();
+    for (const name of [cli, "muster-cli.mjs", "SHA256SUMS-cli.txt"]) remove(name);
+    await expect(validateReleasePayload(options())).rejects.toThrow(/CLI release needs/);
+    await expect(validateReleasePayload(options(false))).resolves.toMatchObject({ stableFiles: expect.not.arrayContaining(["muster-cli.mjs"]) });
+  });
+
+  it.each(["muster-cli.mjs", `Muster-${version}-cli.mjs`, "SHA256SUMS-cli.txt"])("rejects incomplete CLI %s even in a partial release", async (name) => {
+    partial();
+    put(name, name.endsWith(".txt") ? `${hash("absent", "sha256", "hex")}  muster-cli.mjs\n` : "partial CLI");
+    await expect(validateReleasePayload(options(false))).rejects.toThrow();
+  });
+
+  it("refuses individually checksummed CLI aliases containing different bytes", async () => {
+    const { cli } = complete();
+    put("muster-cli.mjs", "old but individually checksummed CLI");
+    checksums("SHA256SUMS-cli.txt", [cli, "muster-cli.mjs"]);
+    await expect(validateReleasePayload(options())).rejects.toThrow(/Stable alias bytes mismatch/);
+  });
+
+  it("does not accept CLI hashes hidden in another platform's checksums", async () => {
+    const { cli, dmg, zip } = complete();
+    remove("SHA256SUMS-cli.txt");
+    checksums("SHA256SUMS-macos-arm64.txt", [dmg, zip, "Muster.dmg", cli, "muster-cli.mjs"]);
+    await expect(validateReleasePayload(options())).rejects.toThrow(/CLI release needs/);
+  });
+
+  it("rejects unrelated entries in the dedicated CLI checksum file", async () => {
+    const { cli, zip } = complete();
+    checksums("SHA256SUMS-cli.txt", [cli, "muster-cli.mjs", zip]);
+    await expect(validateReleasePayload(options())).rejects.toThrow(/CLI release needs/);
+  });
+
+  it("selects both CLI files and binds the stable CLI into latest metadata and the transport manifest", async () => {
+    const { cli } = complete();
+    const result = await prepareMirrorPayload(options());
+    expect(result.files).toEqual(expect.arrayContaining([cli, "muster-cli.mjs"]));
+    expect(result.mirrorFiles).not.toContain("SHA256SUMS-cli.txt");
+    const expected = { size: bytes(cli).length, sha256: hash(bytes(cli), "sha256", "hex") };
+    expect(result.latest.files["muster-cli.mjs"]).toEqual(expected);
+    expect(result.latest.checksums["muster-cli.mjs"]).toBe(expected.sha256);
+    expect(result.manifest.files.filter((entry) => [cli, "muster-cli.mjs"].includes(entry.name)))
+      .toEqual([cli, "muster-cli.mjs"].sort().map((name) => ({ name, ...expected })));
   });
 });
 

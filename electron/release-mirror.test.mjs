@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile, readdir, realpath, rm, symlink, stat, lstat } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, readdir, readlink, realpath, rm, symlink, stat, lstat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,19 +9,21 @@ const helper = resolve("scripts/promote-release-mirror.py");
 const sha = "a".repeat(40);
 const roots = [];
 const pythonEnv = { ...process.env, PYTHONDONTWRITEBYTECODE: "1" };
-const stable = ["Muster.dmg", "Muster-setup.exe", "Muster.deb", "Muster.AppImage", "Muster-intel.dmg"];
+const desktopStable = ["Muster.dmg", "Muster-setup.exe", "Muster.deb", "Muster.AppImage", "Muster-intel.dmg"];
+const cli = "muster-cli.mjs";
+const stable = [...desktopStable, cli];
 const feeds = ["latest-mac.yml", "latest.yml", "latest-linux.yml"];
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 async function tree() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "muster-mirror-")));
   roots.push(root); await mkdir(join(root, ".incoming")); return root;
 }
-async function candidate(root, version = "1.10.5", sourceSha = sha, intel = true) {
+async function candidate(root, version = "1.10.5", sourceSha = sha, intel = true, includeCli = true) {
   const directory = join(root, ".incoming", `run-${(await readdir(join(root, ".incoming"))).length}`);
   await mkdir(directory);
   const entries = [], files = {}, checksums = {};
-  for (const name of [...stable.filter((name) => intel || name !== "Muster-intel.dmg"), ...feeds, `Muster-${version}-arm64.zip`]) {
-    const bytes = Buffer.from(`${version}:${name}`); await writeFile(join(directory, name), bytes);
+  for (const name of [...desktopStable.filter((name) => intel || name !== "Muster-intel.dmg"), ...feeds, `Muster-${version}-arm64.zip`, ...(includeCli ? [cli, `Muster-${version}-cli.mjs`] : [])]) {
+    const bytes = Buffer.from(`${version}:${name.endsWith("-cli.mjs") ? cli : name}`); await writeFile(join(directory, name), bytes);
     entries.push({ name, size: bytes.length, sha256: digest(bytes) });
     if (stable.includes(name)) { files[name] = { size: bytes.length, sha256: digest(bytes) }; checksums[name] = digest(bytes); }
   }
@@ -38,13 +40,39 @@ function args(root, c) { return [helper, "--root", root, "--candidate", c.direct
 function promote(root, c) { return spawnSync("python3", args(root, c), { encoding: "utf8", timeout: 5000, env: pythonEnv }); }
 async function published(root) { return JSON.parse(await readFile(join(root, "latest.json"), "utf8")); }
 async function legacy(root, version = "1.10.4") {
-  const c = await candidate(root, version);
+  const c = await candidate(root, version, sha, true, false);
   for (const entry of c.manifest.files) await writeFile(join(root, entry.name), await readFile(join(c.directory, entry.name)));
+  await writeFile(join(root, cli), `${version}:untracked-cli`);
+  return c;
+}
+async function managedLegacy(root) {
+  const c = await legacy(root);
+  const relative = ".generations/release-old";
+  const generation = join(root, relative);
+  await mkdir(generation, { recursive: true });
+  for (const entry of c.manifest.files) {
+    await writeFile(join(generation, entry.name), await readFile(join(root, entry.name)));
+    if ([...desktopStable, ...feeds, "latest.json"].includes(entry.name)) {
+      await rm(join(root, entry.name)); await symlink(`.current/${entry.name}`, join(root, entry.name));
+    }
+  }
+  await writeFile(join(generation, ".mirror-state.json"), JSON.stringify({
+    schemaVersion: 1, kind: "release", version: c.version, sha: c.sha,
+    files: Object.fromEntries(c.manifest.files.map((entry) => [entry.name, entry])), manifestSha256: c.hash,
+  }));
+  await symlink(relative, join(root, ".current"));
   return c;
 }
 async function rewriteManifest(c, change) {
   change(c.manifest); const text = JSON.stringify(c.manifest);
   await writeFile(join(c.directory, "mirror-manifest.json"), text); c.hash = digest(text);
+}
+async function replaceCandidateFile(c, name, bytes) {
+  await writeFile(join(c.directory, name), bytes);
+  await rewriteManifest(c, (manifest) => {
+    const entry = manifest.files.find((entry) => entry.name === name);
+    entry.size = Buffer.byteLength(bytes); entry.sha256 = digest(bytes);
+  });
 }
 const importHelper = `import importlib.util,sys,os,time,json\nspec=importlib.util.spec_from_file_location('mirror',sys.argv[1]);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)\n`;
 function interrupt(root, c, phase, detail = "") {
@@ -54,15 +82,17 @@ function interrupt(root, c, phase, detail = "") {
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe.skipIf(process.platform === "win32")("Unix release mirror promotion", () => {
-  it("promotes, keeps the bind root inode, retains updater URLs and leaves unrelated CLI bytes", async () => {
+  it("promotes CLI with the desktop release, retains updater URLs and leaves unrelated files", async () => {
     const root = await tree(); const old = await legacy(root); const next = await candidate(root);
-    await writeFile(join(root, "muster-cli.mjs"), "old CLI"); const inode = (await stat(root)).ino;
+    await writeFile(join(root, "support.txt"), "unrelated support"); const inode = (await stat(root)).ino;
     const result = promote(root, next); expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout).status).toBe("promoted"); expect((await published(root)).version).toBe(next.version);
     expect((await stat(root)).ino).toBe(inode); expect((await lstat(join(root, "latest.json"))).isSymbolicLink()).toBe(true);
     expect((await lstat(join(root, `Muster-${old.version}-arm64.zip`))).isFile()).toBe(true);
     expect(await readFile(join(root, `Muster-${old.version}-arm64.zip`), "utf8")).toBe(`${old.version}:Muster-${old.version}-arm64.zip`);
-    expect(await readFile(join(root, "muster-cli.mjs"), "utf8")).toBe("old CLI");
+    expect(await readFile(join(root, cli), "utf8")).toBe(`${next.version}:${cli}`);
+    expect(await readlink(join(root, cli))).toBe(`.current/${cli}`);
+    expect(await readFile(join(root, "support.txt"), "utf8")).toBe("unrelated support");
     const retry = promote(root, next); expect(retry.status, retry.stderr).toBe(0); expect(JSON.parse(retry.stdout).status).toBe("unchanged");
   });
   it.each(["generation-ready", "legacy-current-ready", "alias-ready", "target-ready", "before-promote", "promoted"])("recovers a killed legacy migration at %s", async (phase) => {
@@ -70,13 +100,102 @@ describe.skipIf(process.platform === "win32")("Unix release mirror promotion", (
     const result = interrupt(root, next, phase, phase === "generation-ready" ? "legacy-" : "");
     expect(result.status, result.stderr).toBe(97);
     expect((await published(root)).version).toBe(phase === "promoted" ? next.version : "1.10.4");
-    for (const name of [...stable, ...feeds]) expect(await readFile(join(root, name), "utf8")).toBe(`${phase === "promoted" ? next.version : "1.10.4"}:${name}`);
+    for (const name of [...desktopStable, ...feeds]) expect(await readFile(join(root, name), "utf8")).toBe(`${phase === "promoted" ? next.version : "1.10.4"}:${name}`);
+    expect(await readFile(join(root, cli), "utf8")).toBe(phase === "promoted" ? `${next.version}:${cli}` : "1.10.4:untracked-cli");
     const retry = promote(root, next); expect(retry.status, retry.stderr).toBe(0); expect((await published(root)).version).toBe(next.version);
   });
   it.each(["empty-current-ready", "alias-ready", "target-ready", "before-promote"])("recovers an interrupted first-ever mirror at %s", async (phase) => {
     const root = await tree(); const next = await candidate(root);
     expect(interrupt(root, next, phase).status).toBe(97);
     const retry = promote(root, next); expect(retry.status, retry.stderr).toBe(0); expect((await published(root)).version).toBe(next.version);
+  });
+  it.each(["generation-ready", "auxiliary-current-ready", "alias-ready", "before-promote", "promoted"])("preserves an old managed mirror's flat CLI through interruption at %s", async (phase) => {
+    const root = await tree(); await managedLegacy(root); const next = await candidate(root);
+    const previousLatest = await readFile(join(root, "latest.json"));
+    const result = interrupt(root, next, phase, phase === "alias-ready" ? cli : "");
+    expect(result.status, result.stderr).toBe(97);
+    const promoted = phase === "promoted";
+    expect(await readFile(join(root, cli), "utf8")).toBe(promoted ? `${next.version}:${cli}` : "1.10.4:untracked-cli");
+    if (!promoted) {
+      expect(await readFile(join(root, "latest.json"))).toEqual(previousLatest);
+      expect((await published(root)).files[cli]).toBeUndefined();
+      if (phase !== "generation-ready") {
+        const current = join(root, await readlink(join(root, ".current")));
+        const state = JSON.parse(await readFile(join(current, ".mirror-state.json"), "utf8"));
+        expect(state.auxiliary[cli].sha256).toBe(digest("1.10.4:untracked-cli"));
+        expect(state.files[cli]).toBeUndefined();
+      }
+    }
+    const retry = promote(root, next); expect(retry.status, retry.stderr).toBe(0);
+    expect(await readFile(join(root, cli), "utf8")).toBe(`${next.version}:${cli}`);
+    expect((await published(root)).files[cli].sha256).toBe(digest(`${next.version}:${cli}`));
+  });
+  it.each(["empty-current-ready", "alias-ready", "before-promote"])("preserves a CLI-only legacy root before first promotion at %s", async (phase) => {
+    const root = await tree(); await writeFile(join(root, cli), "standalone old CLI");
+    const next = await candidate(root);
+    expect(interrupt(root, next, phase, phase === "alias-ready" ? cli : "").status).toBe(97);
+    expect(await readFile(join(root, cli), "utf8")).toBe("standalone old CLI");
+    await expect(readFile(join(root, "latest.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    const retry = promote(root, next); expect(retry.status, retry.stderr).toBe(0);
+    expect(await readFile(join(root, cli), "utf8")).toBe(`${next.version}:${cli}`);
+  });
+  it.each(["missing CLI", "missing immutable CLI", "mismatched immutable CLI", "corrupt CLI", "wrong CLI version", "CLI symlink"])("rejects %s before legacy promotion", async (fault) => {
+    const root = await tree(); await legacy(root);
+    const next = await candidate(root, "1.10.5", sha, true, fault !== "missing CLI");
+    const target = `Muster-${next.version}-cli.mjs`;
+    if (fault === "missing immutable CLI" || fault === "wrong CLI version") {
+      const bytes = await readFile(join(next.directory, target)); await rm(join(next.directory, target));
+      await rewriteManifest(next, (manifest) => { manifest.files = manifest.files.filter((entry) => entry.name !== target); });
+      if (fault === "wrong CLI version") {
+        const name = "Muster-1.10.4-cli.mjs";
+        await writeFile(join(next.directory, name), bytes);
+        await rewriteManifest(next, (manifest) => {
+          manifest.files.push({ name, size: bytes.length, sha256: digest(bytes) });
+          manifest.files.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+        });
+      }
+    }
+    if (fault === "mismatched immutable CLI") await replaceCandidateFile(next, target, "different checksummed CLI");
+    if (fault === "corrupt CLI") await writeFile(join(next.directory, cli), "tampered CLI");
+    if (fault === "CLI symlink") { await rm(join(next.directory, cli)); await symlink(join(root, cli), join(next.directory, cli)); }
+    const previousLatest = await readFile(join(root, "latest.json"));
+    const result = promote(root, next); expect(result.status, result.stdout).toBe(1);
+    expect(await readFile(join(root, "latest.json"))).toEqual(previousLatest);
+    expect((await lstat(join(root, "latest.json"))).isFile()).toBe(true);
+    expect(await readFile(join(root, cli), "utf8")).toBe("1.10.4:untracked-cli");
+  });
+  it("retains old immutable CLI URLs and repairs the current target on an identical retry", async () => {
+    const root = await tree(); const old = await candidate(root); expect(promote(root, old).status).toBe(0);
+    const next = await candidate(root, "1.10.6"); expect(promote(root, next).status).toBe(0);
+    expect(await readFile(join(root, `Muster-${old.version}-cli.mjs`), "utf8")).toBe(`${old.version}:${cli}`);
+    const name = `Muster-${next.version}-cli.mjs`; await rm(join(root, name));
+    const result = promote(root, next); expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).status).toBe("unchanged");
+    expect(await readFile(join(root, name))).toEqual(await readFile(join(root, cli)));
+  });
+  it("rejects immutable CLI collisions before adopting an old flat CLI", async () => {
+    const root = await tree(); await managedLegacy(root); const next = await candidate(root);
+    const before = await readlink(join(root, ".current"));
+    await writeFile(join(root, `Muster-${next.version}-cli.mjs`), "previous immutable bytes");
+    const result = promote(root, next); expect(result.status).toBe(1); expect(result.stderr).toContain("collision");
+    expect(await readlink(join(root, ".current"))).toBe(before);
+    expect((await lstat(join(root, cli))).isFile()).toBe(true);
+    expect(await readFile(join(root, cli), "utf8")).toBe("1.10.4:untracked-cli");
+  });
+  it("refuses same-version CLI replacement, downgrade and removing a published CLI", async () => {
+    const root = await tree(); const current = await candidate(root); expect(promote(root, current).status).toBe(0);
+    const changed = await candidate(root); const bytes = "different release CLI";
+    await replaceCandidateFile(changed, cli, bytes);
+    await replaceCandidateFile(changed, `Muster-${changed.version}-cli.mjs`, bytes);
+    const latest = JSON.parse(await readFile(join(changed.directory, "latest.json"), "utf8"));
+    latest.files[cli] = { size: Buffer.byteLength(bytes), sha256: digest(bytes) }; latest.checksums[cli] = digest(bytes);
+    await replaceCandidateFile(changed, "latest.json", JSON.stringify(latest));
+    const downgrade = await candidate(root, "1.10.4");
+    const dropped = await candidate(root, "1.10.6", sha, true, false);
+    const before = await readlink(join(root, ".current"));
+    for (const next of [changed, downgrade, dropped]) expect(promote(root, next).status).toBe(1);
+    expect(await readlink(join(root, ".current"))).toBe(before);
+    expect(await readFile(join(root, cli), "utf8")).toBe(`${current.version}:${cli}`);
   });
   it("rejects downgrade, changed SHA, changed same-version bytes and removed Intel", async () => {
     const root = await tree(); const first = await candidate(root); expect(promote(root, first).status).toBe(0);

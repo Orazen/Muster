@@ -17,8 +17,11 @@ import stat
 import sys
 import uuid
 
-STABLE = {"Muster.dmg", "Muster-intel.dmg", "Muster-setup.exe", "Muster.deb", "Muster.AppImage"}
-BASE_STABLE = STABLE - {"Muster-intel.dmg"}
+CLI = "muster-cli.mjs"
+DESKTOP_STABLE = {"Muster.dmg", "Muster-intel.dmg", "Muster-setup.exe", "Muster.deb", "Muster.AppImage"}
+STABLE = DESKTOP_STABLE | {CLI}
+# Old published metadata predates the CLI inventory. Only new candidates require it.
+BASE_STABLE = DESKTOP_STABLE - {"Muster-intel.dmg"}
 FEEDS = {"latest-mac.yml", "latest.yml", "latest-linux.yml"}
 ALIASES = STABLE | FEEDS | {"latest.json"}
 FLAT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
@@ -151,8 +154,15 @@ def metadata(path, version, sha, entries):
 
 
 def versioned(name, version):
-    return (name.startswith("Muster-" + version + "-") or name == "Muster-" + version + ".dmg") \
+    return name == "Muster-" + version + "-cli.mjs" or (name.startswith("Muster-" + version + "-") or name == "Muster-" + version + ".dmg") \
         and name.endswith((".zip", ".dmg", ".exe", ".deb", ".AppImage", ".blockmap"))
+
+
+def validate_cli(entries, version):
+    cli_target = "Muster-" + version + "-cli.mjs"
+    require(cli_target in entries, "Missing immutable CLI target")
+    require(all(entries[CLI][field] == entries[cli_target][field] for field in ("size", "sha256")),
+            "Stable CLI differs from immutable CLI target")
 
 
 def load_candidate(root, candidate, version, sha, expected_manifest):
@@ -179,7 +189,8 @@ def load_candidate(root, candidate, version, sha, expected_manifest):
         entries[name] = entry
     require(list(entries) == sorted(entries), "Manifest files must be sorted")
     require(set(os.listdir(candidate)) == set(entries) | {"mirror-manifest.json"}, "Unexpected candidate directory entry")
-    require(BASE_STABLE | FEEDS | {"latest.json"} <= entries.keys(), "Incomplete candidate payload")
+    require(BASE_STABLE | FEEDS | {"latest.json", CLI} <= entries.keys(), "Incomplete candidate payload")
+    validate_cli(entries, version)
     latest = metadata(candidate / "latest.json", version, sha, entries)
     return candidate, entries, latest
 
@@ -194,33 +205,59 @@ def read_generation(root):
     state = read_json(generation / STATE)
     require(isinstance(state, dict) and state.get("kind") in ("legacy", "release", "empty")
             and state.get("schemaVersion") == 1, "Invalid generation state")
+    auxiliary = state.get("auxiliary", {})
+    require(isinstance(auxiliary, dict) and auxiliary.keys() <= {CLI}, "Invalid auxiliary inventory")
+    for name, entry in auxiliary.items():
+        require(descriptor(generation / name) == entry, "Auxiliary legacy bytes changed: " + name)
     if state["kind"] == "empty":
-        require(set(state) == {"schemaVersion", "kind", "files"} and state["files"] == {}, "Invalid empty generation")
+        require(set(state) - {"auxiliary"} == {"schemaVersion", "kind", "files"} and state["files"] == {}, "Invalid empty generation")
         return {**state, "path": generation}
     parse_version(state.get("version"))
     require(isinstance(state.get("sha"), str) and SHA.fullmatch(state["sha"]), "Invalid generation SHA")
     entries = state.get("files")
     require(isinstance(entries, dict) and BASE_STABLE | FEEDS | {"latest.json"} <= entries.keys(), "Incomplete generation")
+    require(not (entries.keys() & auxiliary.keys()), "Auxiliary file duplicates published inventory")
     for name, entry in entries.items():
         require(isinstance(name, str) and FLAT.fullmatch(name)
                 and (name in ALIASES or versioned(name, state["version"])), "Invalid generation file")
         require(descriptor(generation / name) == entry, "Published generation bytes changed: " + name)
+    if CLI in entries:
+        validate_cli(entries, state["version"])
     metadata(generation / "latest.json", state["version"], state["sha"], entries)
     return {**state, "path": generation}
 
 
 def inspect_legacy(root):
-    present = {name for name in ALIASES if os.path.lexists(root / name)}
+    present = {name for name in ALIASES - {CLI} if os.path.lexists(root / name)}
     if not present:
         return None
     require(BASE_STABLE | FEEDS | {"latest.json"} <= present, "Legacy mirror is incomplete; repair before promotion")
-    entries = {name: descriptor(root / name) for name in sorted(present)}
     latest = read_json(root / "latest.json")
     require(isinstance(latest, dict), "Invalid legacy metadata")
     parse_version(latest.get("version"))
     require(isinstance(latest.get("sha"), str) and SHA.fullmatch(latest["sha"]), "Invalid legacy SHA")
+    if isinstance(latest.get("files"), dict) and CLI in latest["files"]:
+        present |= {CLI, "Muster-" + latest["version"] + "-cli.mjs"}
+    entries = {name: descriptor(root / name) for name in sorted(present)}
+    if CLI in entries:
+        validate_cli(entries, latest["version"])
     metadata(root / "latest.json", latest["version"], latest["sha"], entries)
     return {"schemaVersion": 1, "kind": "legacy", "version": latest["version"], "sha": latest["sha"], "files": entries}
+
+
+def untracked_cli(root, current):
+    """Capture old public CLI bytes without inventing release provenance for them."""
+    if CLI in current["files"] or CLI in current.get("auxiliary", {}):
+        return None
+    target = root / CLI
+    if not os.path.lexists(target):
+        return None
+    if target.is_symlink():
+        # A first-ever install may have stopped after creating a dangling alias.
+        require(os.readlink(target) == ".current/" + CLI and not target.exists(),
+                "Unexpected untracked CLI alias")
+        return None
+    return descriptor(target)
 
 
 def check_monotonic(current, version, sha, entries):
@@ -241,12 +278,14 @@ def check_monotonic(current, version, sha, entries):
     return False
 
 
-def make_generation(root, source, state, checkpoint):
+def make_generation(root, source, state, checkpoint, auxiliary_source=None):
     directory = ensure_directory(root / ".generations")
     generation = directory / (state["kind"] + "-" + state.get("version", "initial") + "-" + uuid.uuid4().hex)
     generation.mkdir(mode=0o755)
     for name, entry in state["files"].items():
         copy_verified(source / name, generation / name, entry)
+    for name, entry in state.get("auxiliary", {}).items():
+        copy_verified((auxiliary_source or source) / name, generation / name, entry)
     write_json(generation / STATE, state)
     sync_directory(generation)
     sync_directory(directory)
@@ -267,14 +306,15 @@ def replace_pointer(root, generation):
 def ensure_aliases(root, current, candidate_entries, checkpoint):
     # During first migration both forms expose the same legacy bytes. A crash
     # may leave a mixture of files and aliases; this loop safely resumes it.
-    for name in sorted(ALIASES & (current["files"].keys() | candidate_entries.keys())):
+    current_files = {**current["files"], **current.get("auxiliary", {})}
+    for name in sorted(ALIASES & (current_files.keys() | candidate_entries.keys())):
         target = root / name
         expected_link = ".current/" + name
         if target.is_symlink():
             require(os.readlink(target) == expected_link, "Unexpected public alias: " + name)
             continue
         if os.path.lexists(target):
-            require(name in current["files"] and descriptor(target) == current["files"][name], "Legacy alias changed: " + name)
+            require(name in current_files and descriptor(target) == current_files[name], "Legacy alias changed: " + name)
         temporary = root / (".alias-" + uuid.uuid4().hex)
         try:
             os.symlink(expected_link, temporary)
@@ -329,18 +369,26 @@ def promote(root, candidate, version, sha, manifest_sha256, checkpoint=None):
         for name, entry in entries.items():
             if name not in ALIASES and os.path.lexists(root / name):
                 require(descriptor(root / name) == entry, "Immutable updater target collision: " + name)
+        if current is None:
+            current = {"schemaVersion": 1, "files": {}, "kind": "empty"}
+        auxiliary_cli = untracked_cli(root, current)
+        if auxiliary_cli is not None:
+            state = {key: value for key, value in current.items() if key != "path"}
+            state["auxiliary"] = {CLI: auxiliary_cli}
+            if "path" in current:
+                # Preserve an already-managed generation's exact published bytes
+                # while giving the unrelated flat CLI a resumable old-byte alias.
+                state["path"] = make_generation(root, current["path"], state, checkpoint, auxiliary_source=root)
+                replace_pointer(root, state["path"])
+                checkpoint("auxiliary-current-ready", "")
+            current = state
         if current is not None and "path" not in current:
             current["path"] = make_generation(root, root, current, checkpoint)
             replace_pointer(root, current["path"])
-            checkpoint("legacy-current-ready", "")
-        if current is None:
             # Persist an empty generation before creating aliases, so a crash
             # during the first-ever install can resume without mistaking its
             # dangling aliases for a corrupt legacy mirror.
-            current = {"schemaVersion": 1, "files": {}, "kind": "empty"}
-            current["path"] = make_generation(root, root, current, checkpoint)
-            replace_pointer(root, current["path"])
-            checkpoint("empty-current-ready", "")
+            checkpoint("empty-current-ready" if current["kind"] == "empty" else "legacy-current-ready", "")
         ensure_aliases(root, current, entries, checkpoint)
         publish_versioned(root, candidate, entries, checkpoint)
         if unchanged and current["kind"] == "release":

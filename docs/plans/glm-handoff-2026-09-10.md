@@ -948,3 +948,69 @@ isolated packaged/signing/native acceptance. Recorded runner billing and VPS
 host-trust/routing prerequisites remain. Keep broader OS/device/Watch/VM,
 portable account recovery/sync and Mimosa work open. Allowance **27% used /
 73% remaining**; no reset. Full goal and existing heartbeat remain active.
+
+
+### Loop 33 — CLI release pipeline and candidate 1.10.5
+
+Base `8b766a4`. Package version is now candidate **1.10.5**, while the public
+page's fallback badge remains actual release **1.10.4**. No release/tag, workflow
+dispatch, notarization, VPS write or payment action.
+
+New `scripts/build-cli.mjs` build/verify entrypoints consume pinned version/SHA
+and CLI_OUT_DIR. They produce the standalone immutable/stable CLI plus exact
+SHA256 sums, check built-in imports only, and execute five commands in owned
+home/cache/temp/data paths. Snapshot hashes bind the executed bytes; unchanged
+checks and ancestor validation reject replacements/links. Bundled version
+reports its embedded SHA; direct checkout version reports null SHA. GitHub
+provenance remains the workflow's responsibility.
+
+The macOS arm64 job produces the CLI and publication re-verifies downloaded
+bytes/identity before release. Complete payloads require CLI; incomplete
+optional sets fail. The Python promoter atomically switches CLI with desktop
+metadata, preserving an old untracked flat CLI through auxiliary snapshots and
+resumable migration without inventing old metadata provenance. Immutable CLI
+URLs are retained and later releases cannot drop the CLI. Updated contract:
+`docs/release-mirror.md`.
+
+Focused: **172 producer/workflow**, **56 mirror**, **78 CLI** tests pass.
+Final root: **220 files / 2,904 passed / 8 skipped in 244.38s**, exit 0 (**68 additional passes** over Loop 32). Build/both types pass (Vite4.97s, existing chunk
+warning); global/scoped lint, Actionlint four workflows and Python syntax pass.
+ShellCheck unavailable. Twelve source files stayed fixed through verification;
+final independent review found no material blocker. Evidence `loop33-*` and
+`loop33-mirror/` under `.omb-scratch/verification/`.
+
+Native candidate: local **1.10.5 arm64 DMG, ZIP and app built successfully**. Preparation
+38.05s, speech helper3.22s, CUA staging2.44s, native packaging65.33s; the original
+packaged Electron smoke passed **9/9 in5.32s**. Independent inspection passed
+**15 artifact assertions**, including DMG verification, integrity of all **1,250
+ZIP entries**, app/ZIP version, arm64 architecture, feed sizes/hashes and deep
+strict signature checks. The DMG was mounted read-only/nobrowse, its app copied
+into an owned installation directory and the mount detached in finally. That
+copied app passed **9/9 runtime checks in6.389s**: owned HTTP1, proxy paths7 and
+native database1, using Electron43.4.0 / Node24.18.1 / ABI148. Signature is
+explicitly ad-hoc, not Developer ID or notarized; no GUI or real profile was
+opened. Evidence and installers are in
+`.omb-scratch/verification/mac-candidate-loop33-e0e30177df/`, including
+`artifact-verification.json`. Source/runtime inputs stayed fixed; only the
+expected generated updater bundle changed inside the owned build snapshot.
+The shared host-native addon hash remained unchanged.
+
+Live read-only dependency audit found **35 open alerts (1 critical,25 high,
+9 medium)**, all in the separate Android lockfile. Details and exact next
+validation plan: `.omb-scratch/verification/loop33-dependency-audit.json`.
+Patch compatible Expo tar/xmldom/PostCSS tooling with actual archive/plist/Metro
+checks in a separate slice; image-size lacks a fixed version in inspected data.
+Avoid ESM-only overrides for CommonJS consumers. No alert was dismissed, no
+exploit run and no whole-project security claim made.
+
+Continue release acceptance, Android remediation, native Google/device/Watch,
+VM and portable backup/recovery/sync. Existing runner/VPS/signing prerequisites
+remain; do not infer deployment from push. Demo8845 untouched; full goal active.
+
+Packaged GUI isolation finding: two actual no-window Electron43.4 probes (exit0,0.451s/0.413s) showed
+that --user-data-dir isolates browser data but HOME does not move Electron's
+macOS home/appData; MAC_CHROMIUM_TMPDIR, not TMPDIR, moves Electron temp. Packaged CUA startup
+also requests permissions before the UI. No real Muster profile/app was opened.
+Use a disposable OS session or correct opt-in/profile startup before authentic
+packaged GUI acceptance; do not repeat the incomplete env-only approach. Probe
+evidence: `loop33-electron-path-probe/`. Allowance **29% used /71% remaining**.

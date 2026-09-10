@@ -128,6 +128,17 @@ export function verifyReleaseWorkflow(workflow) {
       }
     }
   }
+  const cliBuild = one(jobs.macos, (step) => step.id === 'cli-build');
+  const cliUpload = one(jobs.macos, (step) => /gh release upload/.test(shell(step)));
+  const macNative = one(jobs.macos, (step) => step.id === 'native-smoke');
+  check(shell(cliBuild) === 'node scripts/build-cli.mjs' && cliBuild.if === undefined && cliBuild['continue-on-error'] === undefined &&
+    cliBuild.env?.RELEASE_VERSION === '${{ needs.prepare.outputs.version }}' &&
+    cliBuild.env?.RELEASE_SHA === '${{ needs.prepare.outputs.sha }}' && cliBuild.env?.CLI_OUT_DIR === 'release' &&
+    steps(jobs.macos).indexOf(cliBuild) > steps(jobs.macos).indexOf(macNative) &&
+    steps(jobs.macos).indexOf(cliBuild) < steps(jobs.macos).indexOf(cliUpload),
+    'CLI must build and verify pinned identity before upload, including dry runs');
+  check(shell(cliUpload).includes('"release/Muster-${RELEASE_VERSION}-cli.mjs" release/muster-cli.mjs release/SHA256SUMS-cli.txt'),
+    'Mac upload must include both exact CLI filenames and dedicated checksums');
   const notarize = one(jobs.macos, (step) => /notarytool submit/.test(shell(step)));
   const gatekeeper = one(jobs.macos, (step) => /spctl --assess/.test(shell(step)));
   check(notarize.id === 'notarize' && notarize['continue-on-error'] === undefined && gatekeeper['continue-on-error'] === undefined &&
@@ -169,6 +180,16 @@ export function verifyReleaseWorkflow(workflow) {
     'Publication must validate payload and recheck the draft first');
   check(release.if === undefined && steps(publish)[payloadIndex].if === undefined,
     'Publication and its payload gate must require all preceding steps to succeed');
+  const cliVerify = one(publish, (step) => step.id === 'cli-verify');
+  check(shell(cliVerify) === 'node scripts/build-cli.mjs verify' && cliVerify.env?.CLI_OUT_DIR === 'assets' &&
+    publish.env?.RELEASE_VERSION === '${{ needs.prepare.outputs.version }}' &&
+    publish.env?.RELEASE_SHA === '${{ needs.prepare.outputs.sha }}' && cliVerify['continue-on-error'] === undefined &&
+    steps(publish).indexOf(cliVerify) > payloadIndex && steps(publish).indexOf(cliVerify) < releaseIndex,
+    'Downloaded CLI identity and behavior must verify after hashes and before publication');
+  for (const success of [true, false]) for (const mac of ['success', 'failure', 'skipped', '']) {
+    check(evaluateGuard(cliVerify.if, { success, needs: { macos: { result: mac } } }) === (success && mac === 'success'),
+      'CLI publication verification must run for every successful CLI-producing platform');
+  }
   for (const prepare of ['success', 'failure', 'skipped', '']) {
     for (const dry of ['true', 'false', '']) for (const cancelled of [true, false]) {
       for (const mac of ['success', 'failure']) for (const linux of ['success', 'failure']) {

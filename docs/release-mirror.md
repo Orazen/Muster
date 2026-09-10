@@ -1,6 +1,6 @@
-# Desktop download publication
+# Desktop and CLI download publication
 
-The Release workflow publishes validated desktop downloads without replacing
+The Release workflow publishes validated desktop and CLI downloads without replacing
 the public download directory or copying new bytes over active feeds. This
 document describes the filesystem contract; a passing local fixture does not
 prove production routing, native installation or updater behavior.
@@ -27,6 +27,27 @@ aliases. Every updater URL must name a versioned immutable artifact. It writes:
 - `mirror-files.txt`: the exact transfer list, including the transport manifest.
   The list itself is a local transfer instruction and is not served.
 
+Every new complete payload also requires `muster-cli.mjs`, the identical
+`Muster-<version>-cli.mjs`, and `SHA256SUMS-cli.txt` containing exactly those two
+file hashes. A partial draft may omit the CLI entirely, but cannot contain an
+incomplete or unchecked CLI set. The checksum text is a validation input; the
+served manifest contains both bundles and the stable CLI's metadata.
+
+The macOS arm64 job runs `node scripts/build-cli.mjs` in both dry and real
+builds, with pinned `RELEASE_VERSION`/`RELEASE_SHA` and `CLI_OUT_DIR=release`.
+The builder checks the source package version, creates a standalone Node 22
+bundle, verifies its syntax/help/version and isolated no-log behavior, then
+writes the two aliases and checksums. The bundle's `--version --json` reports
+its embedded version/SHA. A direct checkout reports its package version and
+`sha:null`; the helper does not independently attest Git provenance.
+
+After downloading and hash-checking staging assets, publication reruns
+`node scripts/build-cli.mjs verify` with `CLI_OUT_DIR=assets` whenever the CLI
+job's macOS platform succeeded. A wrong identity or failed command blocks
+publication. This confirms the transferred executable, not merely a build
+command's exit status. The standalone CLI still needs an existing Muster
+runtime for commands that start the server; it is not a bundled server installer.
+
 The remote command receives the locally calculated manifest SHA256 separately
 from the transfer. The Python standard-library helper rechecks the manifest,
 every file's bytes, current publication state and immutable filename collisions
@@ -51,7 +72,8 @@ latest.yml                       -> .current/latest.yml
 latest-linux.yml                 -> .current/latest-linux.yml
 Muster.dmg, other stable names    -> .current/<stable name>
 Muster-<version>-<target>          independent immutable regular files
-muster-cli.mjs                    existing unrelated file, preserved
+muster-cli.mjs                    -> .current/muster-cli.mjs
+Muster-<version>-cli.mjs           independent immutable regular CLI file
 ```
 
 The lock spans current-state validation, version comparison and publication.
@@ -75,6 +97,15 @@ each managed flat alias with an equivalent link. Interruption during this
 conversion continues to expose the old bytes; the next invocation resumes
 the partial conversion. A first-ever empty mirror uses a persisted empty
 generation so a retry can recognize unfinished initialization.
+
+Older mirrors can have a flat CLI that their `latest.json` never described.
+The helper snapshots those actual bytes as an auxiliary legacy file without
+adding invented release provenance to the old metadata. This also works when
+desktop aliases have already migrated but the CLI is still a separate file.
+An equivalent snapshot exposes the old CLI until the final pointer switch;
+interrupted conversion resumes from its auxiliary state. Once a release
+inventories the CLI, future candidates cannot omit it or change its immutable
+versioned bytes.
 
 The next generation is fully copied and synchronized before promotion. If a
 transfer, hash check or copy fails, existing feeds keep their old content.
@@ -121,9 +152,10 @@ Local tests use inert installer bytes, owned temporary roots, actual subprocess
 interruption/locking and an ephemeral loopback HTTP server. Native updater,
 installer, signing and platform acceptance gates remain separate. The mirror
 does not yet copy uploaded blockmaps, so full-download fallback is expected;
-successful differential updating has not been verified. `muster-cli.mjs` is
-preserved by this desktop publisher; building and publishing its updated bundle
-must be included explicitly when preparing the release candidate.
+successful differential updating has not been verified. CLI build/verification
+is now in the source release workflow, but public downloads remain 1.10.4 until
+a new candidate actually passes release and deployment acceptance. A source
+version bump or locally built candidate does not publish an installer.
 
 References: [GitHub concurrency behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
 does not guarantee release dispatch ordering; filesystem promotion therefore
