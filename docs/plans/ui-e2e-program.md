@@ -312,8 +312,10 @@ remain separate gaps.
    rehearsal/why/history in `ApprovalCard`. Eight final browser evidence
    checks and six layouts at 320/390/1440px passed using actual local runtime
    journals and fake engine events. Reload checks explicitly reselected the
-   original bot because selection reset is a separate P2. Next restore bot
-   and group selection per account/tab, then cover queueing, goal limits,
+   original bot because selection reset was a separate P2. Loop 16 now
+   restores bots/groups per account and tab; six local browser workflows
+   passed. Room selection survives a 320px reload, but its header overflows
+   to 450px and is the next layout slice. Then cover queueing, goal limits,
    retry/failure, routine/webhook outcomes and receipt correctness.
 5. **Optional phone handoff and native clients.** Add a discoverable,
    skippable handoff after useful work, then verify pairing/reconnect and

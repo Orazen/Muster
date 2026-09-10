@@ -854,3 +854,48 @@ with the existing large-chunk warning; diff check passes. Read-only review
 found no remaining blocker after the mobile focus correction. Latest usage
 snapshot: **6% remaining**. The existing CEO heartbeat was found **PAUSED**;
 its state is preserved, with no duplicate automation created.
+
+## Loop 16 — 2026-09-10 — Restore the selected conversation
+
+Reproduced on the previous build: select non-first Miso, reload, and Comet
+becomes selected. The authenticated app and OS now pass the existing account
+ID through a keyed store wrapper. One versioned selection is saved per
+account in sessionStorage, so each tab owns its choice. Initialization reads
+it once; later hydration preserves a newer valid live selection. Missing or
+hidden targets fall back to a visible bot, then a room, then no selection.
+Corrupt/blocked storage leaves in-memory navigation usable. Account changes
+remount the store; existing cleanup fences late prior-provider hydration.
+
+**196 files / 2027 passed / 8 skipped in 214.36s**. Focused storage/reducer
+verification: **2 files / 18 passed / 0 skipped in 0.889s**, including 14 new
+cases. Frontend typecheck, scoped lint and diff check pass. Vite build
+**6.52s**, with the existing large-chunk warning. Read-only review found no
+blockers. Unit tests do not mount-switch React identities with an outstanding
+request; that race remains source-reviewed, not an executed browser case.
+
+**6 browser workflows passed:** non-first bot reload, room reload, two tabs
+retaining different selections, Alpha → Beta → Alpha sign-in preserving each
+account's choice, app → OS → app preserving the room, and archived-bot
+fallback after reload. The owned local-server fixture shares its workspace
+roster between these synthetic accounts; this tests selection namespacing,
+not hosted tenant isolation. A 320px phone reload also retained the room.
+The final main tab captured **0 console errors/warnings**. No real provider,
+Google OAuth, native app, VM or Playwright runner was executed.
+
+**Separate P2, next slice:** the room at 320×568 overflows to **450px**.
+`GroupView.tsx` places the Default responder select at x219.7 with width171,
+ending at x390.7, followed by member avatars. Mobile restoration passes;
+the room layout does not. Keep this explicit in the handoff. The room-create
+button changed its label after member selection, causing one locator timeout;
+a fresh label recovered it. Two initial settings clicks targeted the closed
+mobile sidebar; opening the visible desktop layout recovered the check.
+These attempts are not additional passing checks.
+
+All owned Loop 16 processes/data/helper scripts and both tabs were removed,
+viewport reset, and demo 8845 untouched. Loop 15 was pushed as **6e092b7**.
+Production GET at **08:53:48 UTC** still served `/assets/index-Cd59czyZ.js`
+with HTTP200 and no Loop13/14/15 markers; deployment remains unconfirmed.
+Usage is **2% remaining** at the latest snapshot; finalize the GLM handoff
+without starting another code slice. Existing automation remains PAUSED.
+Commercial implication: people return to the work they selected; no retention
+or conversion lift is claimed.

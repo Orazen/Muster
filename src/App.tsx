@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Menu } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
@@ -212,12 +212,20 @@ function Shell() {
   );
 }
 
+function AccountStore({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (!user) return null;
+  // A changed identity gets fresh state and closes the prior account's SSE
+  // subscription before its pending hydration can reach this provider.
+  return <StoreProvider key={user.id} accountId={user.id}>{children}</StoreProvider>;
+}
+
 function AppShell() {
   return (
     <DesktopCapabilitiesProvider>
-      <StoreProvider>
+      <AccountStore>
         <Shell />
-      </StoreProvider>
+      </AccountStore>
     </DesktopCapabilitiesProvider>
   );
 }
@@ -253,7 +261,7 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/app/*" element={<AuthGate><AppShell /></AuthGate>} />
-          <Route path="/os" element={<AuthGate><StoreProvider><DesktopShell /></StoreProvider></AuthGate>} />
+          <Route path="/os" element={<AuthGate><AccountStore><DesktopShell /></AccountStore></AuthGate>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

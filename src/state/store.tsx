@@ -20,6 +20,7 @@ import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib
 import { currentCall } from "@/lib/call";
 import { showNotification } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
+import { readChatSelection, resolveChatSelection, saveChatSelection } from "./chat-selection";
 
 export type { AgentColor } from "@/lib/mascot";
 
@@ -555,9 +556,7 @@ export function reducer(state: AppState, action: Action): AppState {
         !incoming.messages?.length && prev?.messages?.length ? ({ ...incoming, messages: prev.messages } as T) : incoming;
       const bots = action.bots.map((b) => keepTranscripts(b, prevById.get(b.id)));
       const groups = (action.groups ?? []).map((g) => keepTranscripts(g, prevGroupById.get(g.id)));
-      const known = (id: string) => bots.some((b) => b.id === id) || groups.some((g) => g.id === id);
-      const selectedId =
-        state.selectedId && known(state.selectedId) ? state.selectedId : (bots[0]?.id ?? "");
+      const selectedId = resolveChatSelection(state.selectedId, bots, groups);
       return { ...state, bots, groups, selectedId };
     }
     case "showRoutines":
@@ -1068,8 +1067,16 @@ const StoreContext = createContext<{
   refreshInstances: () => Promise<void>;
 } | null>(null);
 
-export function StoreProvider({ children }: { children: ReactNode }) {
-  const [state, rawDispatch] = useReducer(reducer, initialState);
+export function StoreProvider({ accountId, children }: { accountId: string; children: ReactNode }) {
+  // The authenticated wrapper keys this provider by account. Restore once:
+  // later snapshots must preserve a newer live choice, not replay storage.
+  const [state, rawDispatch] = useReducer(reducer, accountId, (id) => ({
+    ...initialState,
+    selectedId: readChatSelection(id),
+  }));
+  useEffect(() => {
+    saveChatSelection(accountId, state.selectedId);
+  }, [accountId, state.selectedId]);
   const stateRef = useRef(state);
   stateRef.current = state;
   // per-frame stream-delta batching (see the "runtime" SSE case); stream

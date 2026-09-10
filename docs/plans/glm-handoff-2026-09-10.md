@@ -153,21 +153,39 @@ performing destructive cleanup to make status look clean.
   runtime check is claimed. Production GET at 08:16:48 UTC still served `/assets/index-Cd59czyZ.js`;
   both Loop 13 and Loop 14 markers were absent. Pushed, deployment unconfirmed.
 
-- Loop 15: browser preview truthfulness, navigation errors/reload, polling
+- Loop 15: **6e092b7**, pushed; browser preview truthfulness, navigation errors/reload, polling
   lifecycle, valid frame ACKs, restored-tab activation, and mobile keyboard
   focus. **195 files / 2013 passed / 8 skipped in 205.47s**; focused server
   22 passes and UI/lifecycle 30 passes. Both typechecks and scoped lint pass;
   build 5.17s. Seven browser workflows and four final layouts passed against
   installed Brave with fresh profiles; 0 captured console errors/warnings.
   The first reopen attempt failed before the activation fix; final retry
-  rendered actual Example Domain. Commit identifier belongs in the next
-  log/update; this ledger is part of that verified commit.
+  rendered actual Example Domain.
+- Loop 16: selected bot/room restoration, account-keyed app/OS store and
+  per-tab sessionStorage. **196 files / 2027 passed / 8 skipped in 214.36s**;
+  focused 18 passes across 2 files in 0.889s, frontend typecheck/scoped lint
+  pass, build 6.52s. Six real local browser workflows passed (reload, rooms,
+  two tabs, account switch, OS round trip, archived fallback). No mounted
+  pending-request account-switch race test is claimed. This ledger and the
+  latest CEO entry are committed with that slice; use `git log -1` for its ID.
 
-Next bounded file set: selected bot/room restoration in `src/state/store.tsx`
-and a small selection persistence helper/tests. Rows 1 and 2 are verified;
-begin row 3, preserving account isolation and reconnect behavior. All owned
-Loop 14/15 fixtures, data, helper scripts and tabs were cleaned up; viewport
-reset. Full suite has no failures. Latest usage snapshot: **6% remaining**.
+Next bounded file set: **`src/components/GroupView.tsx` and narrowly related
+layout styles/tests**. Rows 1–3 are verified. A newly reproduced P2 takes
+priority: at **320×568**, the room document is **450px wide**. The Default
+responder select starts at x219.7 and ends at x390.7; member avatars also
+consume header width. Make room controls wrap/collapse without losing the
+selected responder, members, search/call/folder access or composer. Verify
+320/390/768/1440 widths, long room/member names, keyboard and preserved
+selection on reload, then full-suite gate. Afterwards resume row 4 brand
+exports and row 5 interactive landing; do not restart completed research.
+
+All owned Loop 14–16 fixtures, data, helper scripts and tabs were cleaned up;
+viewport reset. No owned audit process remains from these loops; the earlier
+18861/15199 services are separate and require ownership checks. Full suite
+has no failures. Local log files remain at `/tmp/muster-loop15-vitest-final.log`
+and `/tmp/muster-loop16-vitest.log`. There is no required running command.
+Production GET at 08:53:48 UTC still served the old bundle without Loop
+13–15 markers; push is not deployment. Latest usage snapshot: **2% remaining**.
 The existing CEO heartbeat
 was found PAUSED; preserve that state unless the board resumes it. Native
 CUA access is blocked by pending OS permissions; do
