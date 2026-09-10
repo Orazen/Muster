@@ -196,10 +196,24 @@ performing destructive cleanup to make status look clean.
   `www/`-only; no production surface touched. This ledger and the CEO entry
   are committed with the slice; use `git log -1` for its ID.
 
-Next bounded slice: **the P2 room overflow at 320×568
-(`src/components/GroupView.tsx` and narrowly related layout styles/tests)**,
-then iOS/Android brand catalogs. Rows 1–5 are verified. Do not restart
-completed research.
+- Loop 19: P2 room overflow at 320×568 — closed. The wrap fix already landed
+  on main in **1a80066** ("Wrap room header controls at narrow widths"); this
+  loop re-verified it live on current main instead of re-fixing. Isolated
+  harness (server 8793, vite 5198, fresh `OMB_DATA_DIR`), room with 3 members
+  including a long bot name, long room name ("Quarterly Launch War Room — Q4
+  Cross-Team Coordination Epic") and a long pinned working-folder chip set via
+  `PATCH /api/groups/:id`. **5/5 PASS with zero horizontal overflow and zero
+  console errors**: room view at 320/390/768/1440, find bar open with a typed
+  query at 320. Responder select visible and fitting, composer visible, header
+  controls wrap below their own lines, screenshot reviewed at 320. Typecheck
+  passes. No code change was needed; no test exercises pixel overflow (jsdom
+  cannot), so browser evidence is the proof. This ledger and the CEO entry
+  are committed with this record; use `git log -1` for its ID.
+
+Next bounded slice: **iOS/Android brand catalogs** (regenerate
+`ios/App/Assets.xcassets/AppIcon.appiconset/icon-1024.png` from the canonical
+mascot; add `icon` and Android adaptive icon to the Expo app config). Rows
+1–5 and the P2 overflow are verified. Do not restart completed research.
 
 All owned Loop 14–16 fixtures, data, helper scripts and tabs were cleaned up;
 viewport reset. No owned audit process remains from these loops; the earlier

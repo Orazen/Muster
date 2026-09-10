@@ -971,3 +971,34 @@ surface touched (`www/` only), no real approval path exercised, no
 deployment. Demo 8845 untouched; no owned processes remain. Commercial
 implication: a visitor can now feel the product's core trust loop before
 installing; conversion impact unmeasured.
+
+## Loop 19 — 2026-09-10 — The room overflow was already wrapped; re-proven live
+
+Loop 16 recorded a P2: the room at 320×568 forced the document to 450px, with
+the Default responder select ending at x390.7. Reaching for that slice found
+the fix had already landed on main in **1a80066** ("Wrap room header controls
+at narrow widths") — the header name truncates and the controls row wraps
+below md — but the P2 had never been re-verified against current main, so the
+handoff still carried it as an open slice. This loop closed it with fresh
+browser evidence rather than re-fixing working code.
+
+An isolated harness (fresh `OMB_DATA_DIR`, server on 8793, vite on 5198) got
+a 3-member room including a deliberately long bot name, the room was renamed
+to "Quarterly Launch War Room — Q4 Cross-Team Coordination Epic", and a long
+pinned working-folder chip was set through `PATCH /api/groups/:id` (the
+server validates the folder exists, so a real long path under /tmp was used).
+**5/5 PASS, zero horizontal overflow, zero console errors**: the room view at
+320/390/768/1440 with the worst-case long name and long folder chip, plus the
+find bar open with a typed query at 320. In every case the responder select
+is visible and fits inside the viewport, the composer stays reachable, and
+the header controls wrap onto their own lines instead of widening the
+document. The 320px screenshot was reviewed directly: name truncates with an
+ellipsis, the folder chip and responder select share a wrapped row, member
+avatars render. Typecheck passes. No code change was made; no jsdom test
+claims to cover pixel overflow — browser evidence is the proof.
+
+Not claimed: packaged app, native apps, deployment. The rig (server, vite,
+data dir, cookie jar, helper scripts) was removed after verification; demo
+8845 untouched. Commercial implication: none directly — this restores
+usability of rooms on the narrowest supported phones, which mobile visitors
+were previously locked out of.
