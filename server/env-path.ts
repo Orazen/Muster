@@ -75,6 +75,7 @@ function windowsKnownDirs(): string[] {
 let cached: string | null = null;
 let probed = false;
 let loginShellPath: string | null = null;
+let cachedProfile = process.env.MUSTER_PROFILE_ROOT;
 
 /** Drop the memoized PATH so the next augmentedPath() rescans. Called when
  * the app re-probes engines, so "check again" can find something installed
@@ -91,6 +92,15 @@ export function resetPathCache(): void {
 
 /** Current best PATH, synchronously. Cheap after the first call. */
 export function augmentedPath(): string {
+  const profile = process.env.MUSTER_PROFILE_ROOT;
+  if (profile !== cachedProfile) {
+    // Normally fixed at process startup. Also fence a late shell callback if
+    // an embedding host changes its environment before the next discovery.
+    cached = null;
+    loginShellPath = null;
+    probed = false;
+    cachedProfile = profile;
+  }
   if (cached === null) {
     cached = mergePaths([
       ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
@@ -98,7 +108,7 @@ export function augmentedPath(): string {
       // Keep the last successful login-shell result while a rescan starts a
       // fresh asynchronous probe. Otherwise resetPathCache() would make
       // rc-only CLIs disappear again for the response that triggered it.
-      ...(loginShellPath ? loginShellPath.split(delimiter) : []),
+      ...(profile === undefined && loginShellPath ? loginShellPath.split(delimiter) : []),
       // Both platforms scan their standard install locations; only the
       // login-shell probe below stays unix-only, since Windows has no
       // equivalent rc file to source.
@@ -108,7 +118,7 @@ export function augmentedPath(): string {
   // belt-and-braces: fold in the login shell's PATH once, in the
   // background — catches anything the known-dirs list doesn't (custom
   // rc exports). Never blocks a spawn; the next one benefits.
-  if (!probed && !process.env.VITEST && process.platform !== "win32") {
+  if (!probed && profile === undefined && !process.env.VITEST && process.platform !== "win32") {
     probed = true;
     probeLoginShellPath();
   }
@@ -128,6 +138,9 @@ function probeLoginShellPath(): void {
     ["-l", "-i", "-c", 'printf "__OMB_PATH__%s" "$PATH"'],
     { timeout: 5000 },
     (err, stdout) => {
+      // A named desktop profile uses its supplied PATH and profile-local
+      // discovery. It must not source the ordinary user's login shell files.
+      if (process.env.MUSTER_PROFILE_ROOT !== undefined) return;
       if (err || !stdout) return;
       const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
       if (!m || !m[1]) return;
@@ -142,6 +155,7 @@ export function resetPathCacheForTests(): void {
   cached = null;
   probed = false;
   loginShellPath = null;
+  cachedProfile = process.env.MUSTER_PROFILE_ROOT;
 }
 
 /** Every `name` binary on the augmented PATH as absolute paths, in PATH

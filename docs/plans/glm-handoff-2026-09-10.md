@@ -1106,3 +1106,88 @@ and sync, Mimosa and recorded runner/VPS/signing gates remain open. Commercial
 intent is a clearer first run with explicit desktop access; no conversion or
 revenue uplift measured. Allowance **32% used /68% remaining** at the final actual check;
 no reset consumed.
+
+
+## Loop 35 — Explicit desktop profiles and packaged acceptance (2026-09-11)
+
+Base `9e6fb2a`, pull/rebase up to date. The desktop now supports an explicit
+`MUSTER_PROFILE_ROOT` paired with the matching launch-time `--user-data-dir`.
+It validates the actual Electron browser path before changing other paths,
+then configures app, server, companion, engine-home and temporary directories
+before application imports capture them. Default launches remain unchanged.
+See [Desktop profiles](../desktop-profiles.md) for the supported command,
+layout and limits. This is app-data separation, not an OS or network sandbox.
+
+The migration audit found that an explicit custom data directory could take
+an existing legacy fleet. Migration now runs only for the implicit default;
+explicit blank overrides fail. Profile launches skip the login-shell probe
+and fence late results. MCP children receive only the explicit profile path
+allowlist in addition to their existing minimal environment; deliberately
+configured target overrides remain last.
+
+Focused tests: profile configuration **1 file /35 passed /0 skipped in333ms**;
+config/MCP **5 files /64 passed /0 skipped in3.67s**; discovery **2 files /16
+passed /7 skipped in1.43s**. These overlap the full suite. Full verification:
+**228 files /3,041 passed /8 skipped in250.37s**, exit0, **58 additional passes**
+over Loop34. Build/both types pass (Vite4.88s, existing large-chunk warning),
+global/scoped lint and diff checks pass. Thirteen reviewed source hashes were
+frozen. The profile runbook is documentation only.
+
+Actual no-window Electron43.4.0 / Node24.18.1 profile and utility-child probe:
+**37/37 checks in15.807s**, exit0. It validates all seven Electron paths,
+parent/child home/temp/cwd and the child path environment without importing
+Muster main or invoking native permission APIs. The first fixture timed out
+because top-level `await app.whenReady()` deadlocked ESM initialization;
+changing the fixture to `.then(...)` resolved it. Evidence:
+`.omb-scratch/verification/loop35-electron-path-694e3ba9b2/`.
+
+New Mac arm64 candidate: `.omb-scratch/verification/mac-candidate-loop35-bb659817d0/`.
+Preparation37.35s, speech3.26s, CUA2.58s, package58.73s; native smoke **9/9 in5.32s**.
+Independent verification passed **15 artifact assertions**, including ZIP1251
+entries, DMG integrity, version1.10.5, arm64, feed sizes/hashes and deep-strict
+ad-hoc signatures. A copy from the read-only DMG passed **9/9 native checks
+in6.662s**; the mount was detached. Shared host-native bytes stayed unchanged.
+The build uses existing dependencies and a cached CUA input; it is not a fresh
+install or notarization attestation. The updater vendor bundle is regenerated
+by the build and recorded separately from authored source hashes.
+
+Actual packaged GUI acceptance passed **10/10 in17.411s**, exit0, with no
+renderer page errors. A fresh local email account completed quick start, sent
+one task through the sole configured fake ACP engine, rendered its reply and
+restored the account/onboarding/transcript after renderer reload. The real
+packaged preload executed IPC, the bundled utility process served health and
+the app used all seven profile paths. Computer access stayed off throughout.
+The app archive, executable, bundled server and UI entry bytes were unchanged.
+Root visually inspected sign-in/chat screenshots. Evidence:
+`.omb-scratch/verification/loop35-packaged-gui-36dcXp/`.
+
+This acceptance uses an empty synthetic Gemini credential-presence fixture,
+an owned broker returning503 and harness-configured Electron session proxies.
+It is not real Google/model/VM acceptance. The automatic updater request was
+observed after15s and rejected at the owned proxy; download/install remains
+unverified. The fixture configures supported `session.setProxy` on the real
+default/updater sessions, not a source bootstrap or replacement renderer.
+Before launch it checks24 package/build conditions:14 authored startup modules
+against frozen source and ASAR bytes, generated updater bytes, five successful
+build stages, six compiled server modules, UI entry and package main/version.
+All owned app/server/engine/proxy/broker processes close; evidence stays local.
+
+Preliminary packaged runs are preserved, not counted as accepted: **1 pass /
+1 failure in2.669s** because Electron43 omits preload from its preference
+snapshot, then **2 passes /1 failure in10.851s** because command-line proxy
+flags did not configure the updater partition. The corrected preload check
+combines exact packaged bytes with execution of the actual bridge. Network
+configuration is disclosed explicitly; no OS-network isolation claim is made.
+
+Next audit findings: the packaged auth footer still offers a desktop download
+inside the desktop app. Also, source search found no caller for `initAnalytics`,
+so activation-event calls are currently gated by an uninitialized tracker;
+measurements must not be claimed. Treat UI context and a deliberate telemetry
+policy as separate future slices, not a reason to silently enable collection.
+
+No public release/tag, CI dispatch, signing change, production mutation or
+real provider credentials were used. Demo127.0.0.1:8845 remains untouched.
+The goal remains active. Google/device/Watch/VM acceptance, the Android
+35-alert remediation, portable recovery/sync, Mimosa and the recorded
+runner/VPS/signing gates remain open. No conversion/revenue result is claimed.
+Allowance at the actual check: **34% used /66% remaining**; no reset consumed.

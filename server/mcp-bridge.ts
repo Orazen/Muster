@@ -25,6 +25,7 @@ import { StringDecoder } from "node:string_decoder";
 
 import { CONTROL_REFUSAL_PLAIN, createControlClient } from "./control-client.ts";
 import { augmentedPath } from "./env-path.ts";
+import { profilePathEnvironment } from "./profile-environment.ts";
 
 // 45s of TOTAL silence before the bridge even probes. An MCP session is
 // legitimately quiet between tool calls and a slow screenshot can take tens
@@ -134,7 +135,8 @@ export interface BridgeOptions {
    * endpoint plus its per-boot token. Absent → fully transparent bridge. */
   gate?: { url: string; token: string };
   /** Extra env for the target server (e.g. CUA runtime flags). Merged over
-   * the minimal allowlist base — never over the harness process.env. */
+   * the minimal allowlist and explicit profile paths. Deliberate overrides
+   * are supported; a profile is not a sandbox. */
   env?: Record<string, string>;
 }
 
@@ -217,6 +219,7 @@ export function runMcpBridge(options: BridgeOptions): void {
       HOME: process.env.HOME,
       LANG: process.env.LANG,
       TMPDIR: process.env.TMPDIR,
+      ...profilePathEnvironment(),
       ...options.env,
     },
     stdio: ["pipe", "pipe", "pipe"],

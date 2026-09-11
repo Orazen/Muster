@@ -158,7 +158,11 @@ export function parseConfigPatch(value: JsonValue): ConfigPatch {
 }
 
 // OMB_DATA_DIR isolates test/soak rigs from the user's real fleet.
-export const DATA_DIR = process.env.OMB_DATA_DIR ?? join(homedir(), ".muster");
+const configuredDataDir = process.env.OMB_DATA_DIR;
+if (configuredDataDir !== undefined && configuredDataDir.trim() === "") {
+  throw new Error("OMB_DATA_DIR must be a nonempty directory path when set");
+}
+export const DATA_DIR = configuredDataDir ?? join(homedir(), ".muster");
 const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");
@@ -216,9 +220,9 @@ export function vpsSshAlias(cfg: AppConfig): string | null {
 }
 
 export function ensureDirs() {
-  // one-time migration from the pre-rename data dir — bots, transcripts,
-  // config and keys all carry over
-  if (!existsSync(DATA_DIR) && existsSync(LEGACY_DATA_DIR)) {
+  // Only an implicit default directory participates in the rename migration.
+  // An explicit override is an isolation boundary, even if it names ~/.muster.
+  if (configuredDataDir === undefined && !existsSync(DATA_DIR) && existsSync(LEGACY_DATA_DIR)) {
     try {
       renameSync(LEGACY_DATA_DIR, DATA_DIR);
     } catch {

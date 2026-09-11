@@ -1,3 +1,6 @@
+// Configure an explicitly selected profile before any dependency captures
+// Electron paths or creates credentials, logs, sockets or child processes.
+import { desktopProfile } from "./profile-paths.mjs";
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, safeStorage, session, shell, systemPreferences, utilityProcess } from "electron";
 import fs from "node:fs";
 import path from "node:path";
@@ -195,10 +198,12 @@ async function startServerOn(port) {
     childEnv.OMB_COMPOSIO_BROKER_URL = composioBrokerUrl();
     childEnv.OMB_COMPOSIO_BROKER_TOKEN = secureCredentials.composioBrokerToken;
   }
-  const proc = utilityProcess.fork(entry, [], {
+  const childOptions = {
     env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
-  });
+  };
+  if (desktopProfile) childOptions.cwd = desktopProfile.cwd;
+  const proc = utilityProcess.fork(entry, [], childOptions);
   proc.stdout?.on("data", (d) => slog(`[out] ${String(d).trimEnd()}`));
   proc.stderr?.on("data", (d) => slog(`[err] ${String(d).trimEnd()}`));
   proc.once("spawn", () => slog(`spawned pid=${proc.pid}`));

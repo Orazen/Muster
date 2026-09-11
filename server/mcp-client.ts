@@ -12,6 +12,7 @@
 // agents-proxy.ts, dweb-proxy.ts) actually needs from a client.
 import { spawn, type ChildProcess } from "node:child_process";
 
+import { profilePathEnvironment } from "./profile-environment.ts";
 import type { JsonObject, JsonValue } from "./schema.ts";
 
 export interface McpTool {
@@ -45,13 +46,15 @@ export async function connectMcpStdio(
   // MCP servers are often third-party binaries from npm; handing them the
   // whole harness process.env would leak BETTER_AUTH_SECRET, BOX_TOKEN,
   // COMPOSIO_API_KEY and every other credential to one malicious package.
-  // Spawn with a minimal allowlist plus the entry's own declared env.
+  // Spawn with a minimal allowlist, explicit profile paths, and the entry's
+  // own declared env. Deliberate target overrides remain last.
   const child: ChildProcess = spawn(command, args, {
     env: {
       PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
       HOME: process.env.HOME,
       LANG: process.env.LANG,
       TMPDIR: process.env.TMPDIR,
+      ...profilePathEnvironment(),
       ...env,
     },
     stdio: ["pipe", "pipe", "pipe"],

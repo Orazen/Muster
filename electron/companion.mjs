@@ -11,6 +11,7 @@
 // narrow list of things the renderer may ask for is written down in one
 // place rather than implied by whatever the control server happens to serve.
 import { app, utilityProcess } from "electron";
+import { desktopProfile } from "./profile-paths.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -103,7 +104,7 @@ async function start({ resourcesPath, harnessPort, log }) {
   }
   log?.(`companion fork ${entry}`);
 
-  const child = utilityProcess.fork(entry, [], {
+  const childOptions = {
     env: {
       ...process.env,
       OMB_PORT: String(harnessPort),
@@ -111,7 +112,9 @@ async function start({ resourcesPath, harnessPort, log }) {
       OMB_CONTROL_PORT: String(CONTROL_PORT),
     },
     stdio: ["ignore", "pipe", "pipe"],
-  });
+  };
+  if (desktopProfile) childOptions.cwd = desktopProfile.cwd;
+  const child = utilityProcess.fork(entry, [], childOptions);
   child.stdout?.on("data", (d) => log?.(`[companion] ${String(d).trimEnd()}`));
   child.stderr?.on("data", (d) => log?.(`[companion err] ${String(d).trimEnd()}`));
 
