@@ -2199,3 +2199,64 @@ remain open. This slice does not establish a new native release. Allowance85%use
 15%remaining, no reset consumed; keep the active goal and single existing heartbeat
 subject to user pause and the2%/1% handoff rules. Post-push GET and scheduler
 readback are separate receipts.
+
+
+## Loop 47 — main-only repository and the next ecosystem build plan (2026-09-11)
+
+The board's newest references were reviewed in parallel while Loop46 completed.
+The Cadu TestFlight invitation identifies a separate Hermes client; no beta was
+installed or signed in. OpenMausBot's public demo is explicitly scripted. Public
+star pages were sampled, not exhaustively audited. Gumloop, Life Recorder,
+SwiftUI skills, iphone-duo and FrostFold contribute bounded interaction/queue
+patterns with the license and platform limits recorded in
+`docs/plans/ecosystem-reference-and-release-plan-2026-09-11.md`. These observations
+are not evidence that arbitrary models become AGI/ASI or that an app is released.
+
+**Main-only cleanup is verified:** removed8 ancestor-merged remote branches and
+2 local audit branches. There are now1 local and1 remote branch, both main.
+Main's code commit `fc13c71f6aab49dc92901554593c7a14c603fb23` was unchanged by
+cleanup;0 openPRs; original stash `4d13860fa6cb858efc48713dba9fb4637c7101e7`
+preserved. Local `audit/develop-fixes` had a unique commit identity, `a0c6b2b`,
+whose patch exactly matches main's `3803813`; its original identity is archived.
+No remote force-push or history rewrite occurred. Tags, releases and the stale
+detached worktree registration were not changed.
+
+A self-contained private Git bundle preserves all13 recorded branch/tracking/
+stash refs before deletion: `.omb-scratch/verification/loop47-main-only/verified-before-cleanup.bundle`,
+SHA256 `bca88750d80f8d61a514cbd0d149d50c859fe371d12d3115396cabb5f7a3548c` (10886669bytes). It passed Git's bundle verification
+and exact ref comparison. The first archive comparison caught7 stale local
+tracking refs before any deletion; the earlier audit's claim that those tracking
+refs matched was incorrect. Root fetched all current heads, created and verified
+a second archive, and retained the original mismatch evidence. Each removed
+remote tip was checked as an ancestor of main. A temporary pre-push guard checked
+the server-advertised exact tips and the entire intended deletion set; the remote
+operation was atomic and would refuse a moved/unreviewed tip.
+
+**Actual checks:** deletion guard4/4passed (exact set, moved tip, incomplete set,
+main protection); cleanup postconditions9/9passed;13 archive refs verified;
+8 remote and2 local branches deleted. No product source changed in this loop.
+Application suites were not redundantly rerun: unchanged product source retains
+Loop46's236files/3257passed/8skipped,222Swift,7/7native and42/42HTTP results.
+Evidence: `.omb-scratch/verification/loop47-main-only/`. Research and GitHub audit
+source notes remain under `loop46-ios-composer/`.
+
+**Release remains blocked:** inspected GitHub CI, autodeploy and release jobs
+were refused before steps because of the actual account payment/spending-limit
+condition. The fresh fc13c71 audit confirms2 failed runs/4 blocked jobs/0 executed
+steps; its receipt is `loop47-main-only/current-sha-actions-fc13c71.json`. No
+workflow was retried, no billing changed, no tag/release published.
+The model subscription upgrade does not change this GitHub condition. The board
+must resolve it before a selected current-SHA runner can start. Existing Developer
+ID/notary/Intel, VPS identity, immutable mirror/payload/native updater, real Google,
+Watch/minimum-iOS17, portable backup/sync, VM and Mimosa gates remain as recorded.
+GitHub latest release1.10.3 and the public1.10.4 download mirror are distinct;
+production GET after fc13c71 still returns the older bundle and no new message-send
+capability. Do not describe a source push or archived branches as a desktop release.
+
+Next execution order and per-slice acceptance are in the new ecosystem plan;
+start with native Always allow correctness, then visible canonical mascot/task
+identity, explicit existing Google connection state, durable backup/verified
+restore, and separately specified live sync. Keep the original release gates and
+active goal; continue with one verified slice at a time. Allowance last observed
+85%used/15%remaining, no reset used;2%/1% handoff rules remain. The existing
+heartbeat must be updated with the final documentation commit, not duplicated.
