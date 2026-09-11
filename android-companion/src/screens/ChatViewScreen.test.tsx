@@ -1,4 +1,4 @@
-import React, { type ComponentProps } from "react";
+import React, { useState, type ComponentProps } from "react";
 import { Text, TextInput, TouchableOpacity } from "react-native";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, describe, expect, it, jest } from "@jest/globals";
@@ -36,7 +36,9 @@ function props(overrides: Partial<ScreenProps> = {}): ScreenProps {
     onAlwaysAllow: () => undefined,
     onBack: () => undefined,
     onLoadOlder: () => undefined,
-    viewThread: () => undefined,
+    viewConversation: () => () => undefined,
+    readError: null,
+    onRetryRead: () => undefined,
     ...overrides,
   };
 }
@@ -58,10 +60,126 @@ function render(screenProps: ScreenProps) {
     },
     edit(text: string) { act(() => input().props.onChangeText(text)); },
     alerts: () => rendered.root.findAllByType(Text).filter((node) => node.props.accessibilityRole === "alert"),
+    buttons: (label: string) => rendered.root.findAllByType(TouchableOpacity).filter((node) => node.props.accessibilityLabel === label),
     update(next: ScreenProps) { act(() => rendered.update(<ChatViewScreen {...next} />)); },
     unmount() { act(() => rendered.unmount()); trees.splice(trees.indexOf(rendered), 1); },
   };
 }
+
+describe("ChatViewScreen read visibility", () => {
+  it.each([
+    { kind: "bot", id: "bot-owner", threadId: "bot-thread" },
+    { kind: "room", id: "room-owner", threadId: "room-thread" },
+  ] satisfies ScreenProps["target"][])("registers the exact $kind target and releases it on unmount", (target) => {
+    const cleanup = jest.fn<() => void>();
+    const viewConversation = jest.fn<ScreenProps["viewConversation"]>().mockReturnValue(cleanup);
+    const screen = render(props({ target, viewConversation }));
+    expect(viewConversation).toHaveBeenCalledTimes(1);
+    expect(viewConversation).toHaveBeenCalledWith(target);
+    expect(cleanup).not.toHaveBeenCalled();
+    screen.unmount();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the view lease across draft edits and unrelated screen updates", () => {
+    const cleanup = jest.fn<() => void>();
+    const viewConversation = jest.fn<ScreenProps["viewConversation"]>().mockReturnValue(cleanup);
+    const original = props({ viewConversation });
+    const screen = render(original);
+    screen.edit("My draft stays independent");
+    screen.update({ ...original, target: { ...original.target }, readError: "Read status could not be shared." });
+    expect(viewConversation).toHaveBeenCalledTimes(1);
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(screen.input().props.value).toBe("My draft stays independent");
+  });
+
+  it("releases the previous owner before registering a new kind, owner or thread", () => {
+    const events: string[] = [];
+    const viewConversation: ScreenProps["viewConversation"] = (target) => {
+      const key = `${target.kind}:${target.id}:${target.threadId}`;
+      events.push(`view:${key}`);
+      return () => { events.push(`leave:${key}`); };
+    };
+    const original = props({ viewConversation });
+    const screen = render(original);
+    screen.update({ ...original, target: { ...original.target, kind: "room" } });
+    screen.update({ ...original, target: { kind: "room", id: "room-owner", threadId: "basil-thread" } });
+    screen.update({ ...original, target: { kind: "room", id: "room-owner", threadId: "room-thread" } });
+    screen.unmount();
+    expect(events).toEqual([
+      "view:bot:basil:basil-thread", "leave:bot:basil:basil-thread",
+      "view:room:basil:basil-thread", "leave:room:basil:basil-thread",
+      "view:room:room-owner:basil-thread", "leave:room:room-owner:basil-thread",
+      "view:room:room-owner:room-thread", "leave:room:room-owner:room-thread",
+    ]);
+  });
+
+  it("releases the old captured client callback when connection callbacks change", () => {
+    const oldCleanup = jest.fn<() => void>();
+    const nextCleanup = jest.fn<() => void>();
+    const oldView = jest.fn<ScreenProps["viewConversation"]>().mockReturnValue(oldCleanup);
+    const nextView = jest.fn<ScreenProps["viewConversation"]>().mockReturnValue(nextCleanup);
+    const original = props({ viewConversation: oldView });
+    const screen = render(original);
+    screen.update({ ...original, connection: connection("second"), viewConversation: nextView });
+    expect(oldCleanup).toHaveBeenCalledTimes(1);
+    expect(nextView).toHaveBeenCalledWith(original.target);
+    expect(nextCleanup).not.toHaveBeenCalled();
+    screen.unmount();
+    expect(nextCleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the view when Back returns the parent to the chat list", () => {
+    const cleanup = jest.fn<() => void>();
+    const viewConversation = jest.fn<ScreenProps["viewConversation"]>().mockReturnValue(cleanup);
+    const screenProps = props({ viewConversation });
+    function Navigation() {
+      const [open, setOpen] = useState(true);
+      return open ? <ChatViewScreen {...screenProps} onBack={() => setOpen(false)} /> : <Text>Chats</Text>;
+    }
+    let tree: ReactTestRenderer | undefined;
+    act(() => { tree = create(<Navigation />); });
+    if (!tree) throw new Error("Navigation did not render");
+    const rendered = tree;
+    trees.push(rendered);
+    const back = rendered.root.findAllByType(TouchableOpacity).find((node) => node.props.accessibilityLabel === "Back to chats");
+    if (!back) throw new Error("Accessible Back button is missing");
+    act(() => back.props.onPress());
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(rendered.root.findAllByType(ChatViewScreen)).toHaveLength(0);
+  });
+
+  it("retries visible read errors without submitting or clearing a draft", () => {
+    const onRetryRead = jest.fn<() => void>();
+    const onSend = jest.fn<(text: string) => Promise<boolean>>().mockResolvedValue(true);
+    const original = props({ readError: "Could not share read status: connection lost.", onRetryRead, onSend });
+    const screen = render(original);
+    screen.edit("  Preserve my unsent task\nexactly  ");
+    expect(screen.alerts().map((node) => node.props.children)).toContain(original.readError);
+    const retry = screen.buttons("Retry read status");
+    expect(retry).toHaveLength(1);
+    expect(retry[0].props.accessibilityRole).toBe("button");
+    act(() => retry[0].props.onPress());
+    expect(onRetryRead).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.input().props.value).toBe("  Preserve my unsent task\nexactly  ");
+    screen.update({ ...original, readError: null });
+    expect(screen.buttons("Retry read status")).toHaveLength(0);
+    expect(screen.alerts()).toHaveLength(0);
+    expect(screen.input().props.value).toBe("  Preserve my unsent task\nexactly  ");
+  });
+
+  it("keeps the composer failure when an independent read retry starts", async () => {
+    const original = props({ readError: "Read status is unavailable.", onSend: async () => { throw new Error("Task was not accepted."); } });
+    const screen = render(original);
+    screen.edit("Retry this task later");
+    await act(async () => screen.send().props.onPress());
+    expect(screen.alerts().map((node) => node.props.children)).toEqual(expect.arrayContaining(["Read status is unavailable.", "Task was not accepted."]));
+    screen.update({ ...original, readError: null });
+    expect(screen.alerts().map((node) => node.props.children)).toEqual(["Task was not accepted."]);
+    expect(screen.input().props.value).toBe("Retry this task later");
+  });
+});
 
 describe("ChatViewScreen asynchronous composer", () => {
   it("keeps the exact failed draft and exposes the actual error, then retries without retyping", async () => {

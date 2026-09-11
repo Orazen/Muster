@@ -40,6 +40,8 @@ class FixtureClient implements CompanionClient {
   fleetResponses: Array<Promise<Fleet>> = [];
   pageResponses: Array<Promise<ThreadPage>> = [];
   sendResponses: Array<Promise<void>> = [];
+  readResponses: Array<Promise<void>> = [];
+  reads: Array<{ kind: "bot" | "room"; id: string; signal?: AbortSignal }> = [];
   streams: Stream[] = [];
   actions: string[] = [];
   pages: Array<{ threadId: string; before?: string }> = [];
@@ -65,7 +67,14 @@ class FixtureClient implements CompanionClient {
   async sendToGroup(id: string, text: string): Promise<void> { this.actions.push(`group:${id}:${text}`); await this.sendResponses.shift(); }
   async respond(thread: string, request: string, behavior: string): Promise<void> { this.actions.push(`respond:${thread}:${request}:${behavior}`); }
   async alwaysAllow(bot: string, key: string): Promise<void> { this.actions.push(`always:${bot}:${key}`); }
-  async markRead(thread: string): Promise<void> { this.actions.push(`read:${thread}`); }
+  async markBotRead(id: string, signal?: AbortSignal): Promise<void> {
+    this.reads.push({ kind: "bot", id, signal });
+    await this.readResponses.shift();
+  }
+  async markGroupRead(id: string, signal?: AbortSignal): Promise<void> {
+    this.reads.push({ kind: "room", id, signal });
+    await this.readResponses.shift();
+  }
 }
 
 type PairResult = { connection: Connection; response: PairResponse };
@@ -133,6 +142,243 @@ async function pairWith(f: ReturnType<typeof fixture>, connection = B): Promise<
   expect(await result).toEqual({ response: paired(connection).response });
   await settleMicrotasks();
 }
+
+const readBot = { kind: "bot", id: "a", threadId: "thread" } as const;
+const readRoom = { kind: "room", id: "room", threadId: "room-thread" } as const;
+const room = { id: "room", threadId: "room-thread", memberIds: ["a"], defaultResponder: { kind: "any" }, unread: 1 };
+
+async function readingFixture(foreground = true) {
+  const f = fixture();
+  f.a.fleetResponses.push(Promise.resolve({
+    bots: [{ ...fleet("a").bots[0], unread: 1 }, { id: "other", name: "Other", threadId: "other-thread", unread: 1 }],
+    groups: [room],
+  }));
+  f.session.setForeground(foreground);
+  await boot(f);
+  f.a.streams[0].status("connected");
+  return f;
+}
+
+describe("shared conversation read state", () => {
+  it.each([readBot, readRoom])("acknowledges the $kind owner after acceptance without clearing its neighbors", async (target) => {
+    const f = await readingFixture(); const request = deferred<void>();
+    f.a.readResponses.push(request.promise);
+    f.session.viewConversation(f.a, target);
+    expect(f.a.reads).toMatchObject([{ kind: target.kind, id: target.id }]);
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(1);
+    expect(f.session.getSnapshot().state.rooms.room.unread).toBe(1);
+    request.resolve(); await settleMicrotasks();
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(target.kind === "bot" ? 0 : 1);
+    expect(f.session.getSnapshot().state.rooms.room.unread).toBe(target.kind === "room" ? 0 : 1);
+    expect(f.session.getSnapshot().state.bots.other.unread).toBe(1);
+    expect(f.session.getSnapshot().readError).toBeNull();
+  });
+
+  it("keeps a different owner sharing the viewed thread unread", async () => {
+    const f = await readingFixture();
+    f.a.streams[0].frame({ kind: "group", group: { ...room, threadId: "thread" } }, null);
+    f.session.viewConversation(f.a, readBot); await settleMicrotasks();
+    f.a.streams[0].frame({ kind: "message", threadId: "thread", message: { ...newest, id: "shared" } }, null);
+    await settleMicrotasks();
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(0);
+    expect(f.session.getSnapshot().state.rooms.room.unread).toBe(2);
+    expect(f.a.reads.map((read) => [read.kind, read.id])).toEqual([["bot", "a"], ["bot", "a"]]);
+  });
+
+  it.each(["missing", "hidden", "changed-thread", "stale-client"])("does not acknowledge a %s target", async (invalid) => {
+    const f = await readingFixture();
+    if (invalid === "hidden") f.a.streams[0].frame({ kind: "bot", bot: { ...fleet("a").bots[0], hidden: true } }, null);
+    f.session.viewConversation(invalid === "stale-client" ? f.b : f.a, {
+      ...readBot, id: invalid === "missing" ? "absent" : "a", threadId: invalid === "changed-thread" ? "former-thread" : "thread",
+    });
+    await settleMicrotasks();
+    expect(f.a.reads).toHaveLength(0); expect(f.b.reads).toHaveLength(0);
+    expect(f.session.getSnapshot().state.viewedTarget).toBeNull();
+  });
+
+  it("waits for foreground and acknowledges again after returning from background", async () => {
+    const f = await readingFixture(false);
+    f.session.viewConversation(f.a, readBot);
+    expect(f.a.reads).toHaveLength(0);
+    expect(f.session.getSnapshot().state.viewedTarget).toBeNull();
+    f.session.setForeground(true); await settleMicrotasks();
+    expect(f.a.reads).toHaveLength(1);
+    f.session.setForeground(false);
+    expect(f.session.getSnapshot().state.viewedTarget).toBeNull();
+    f.a.streams[0].frame({ kind: "message", threadId: "thread", message: { ...newest, id: "while-away" } }, null);
+    await settleMicrotasks();
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(1);
+    expect(f.a.reads).toHaveLength(1);
+    f.session.setForeground(true); await settleMicrotasks();
+    expect(f.a.reads).toHaveLength(2);
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(0);
+  });
+
+  it("clears the view on leaving and counts later messages without sending reads", async () => {
+    const f = await readingFixture();
+    const leave = f.session.viewConversation(f.a, readBot); await settleMicrotasks();
+    leave();
+    f.a.streams[0].frame({ kind: "message", threadId: "thread", message: { ...newest, id: "after-back" } }, null);
+    expect(f.session.getSnapshot().state.viewedTarget).toBeNull();
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(1);
+    expect(f.a.reads).toHaveLength(1);
+  });
+
+  it("allows only the current screen lease to clear visibility, even for the same target", async () => {
+    const f = await readingFixture(); const pending = deferred<void>();
+    f.a.readResponses.push(pending.promise);
+    const leaveFirst = f.session.viewConversation(f.a, readBot);
+    const leaveSecond = f.session.viewConversation(f.a, readBot);
+    expect(f.a.reads).toHaveLength(1);
+    expect(f.a.reads[0].signal?.aborted).toBe(true);
+    leaveFirst(); await settleMicrotasks();
+    expect(f.a.reads).toHaveLength(2);
+    expect(f.session.getSnapshot().state.viewedTarget).toEqual(readBot);
+    pending.reject(new APIError(401, "Old request")); await settleMicrotasks();
+    expect(f.session.getSnapshot().client).toBe(f.a);
+    leaveSecond(); expect(f.session.getSnapshot().state.viewedTarget).toBeNull();
+  });
+
+  it("does not erase a newer unread event with an older acceptance and coalesces pending events", async () => {
+    const f = await readingFixture(); const first = deferred<void>(); const second = deferred<void>();
+    f.a.readResponses.push(first.promise, second.promise);
+    f.session.viewConversation(f.a, readBot);
+    const stream = f.a.streams[0];
+    stream.frame({ kind: "bot", bot: { ...fleet("a").bots[0], unread: 2 } }, null);
+    stream.frame({ kind: "message", threadId: "thread", message: { ...newest, id: "new-reading" } }, null);
+    expect(f.a.reads).toHaveLength(1);
+    first.resolve(); await settleMicrotasks();
+    expect(f.a.reads).toHaveLength(2);
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(2);
+    second.resolve(); await settleMicrotasks();
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(0);
+    expect(f.a.reads).toHaveLength(2);
+  });
+
+  it("ignores read broadcasts, unrelated owners, message patches, and replayed messages", async () => {
+    const f = await readingFixture(); f.session.viewConversation(f.a, readBot); await settleMicrotasks();
+    const stream = f.a.streams[0];
+    stream.frame({ kind: "bot", bot: { ...fleet("a").bots[0], unread: 0 } }, null);
+    stream.frame({ kind: "group", group: room }, null);
+    stream.frame({ kind: "message", threadId: "thread", message: newest }, null);
+    stream.frame({ kind: "message.patch", threadId: "thread", message: { ...newest, text: "Patch" } }, null);
+    stream.cursor("live:25"); await settleMicrotasks();
+    expect(f.a.reads).toHaveLength(1);
+  });
+
+  it("reconciles reconnects and an unread hydration without losing the rendered owner", async () => {
+    const f = await readingFixture(); f.session.viewConversation(f.a, readRoom); await settleMicrotasks();
+    f.a.streams[0].status("disconnected"); f.a.streams[0].status("connected");
+    await settleMicrotasks(); expect(f.a.reads).toHaveLength(2);
+    f.a.fleetResponses.push(Promise.resolve({ bots: fleet("a").bots, groups: [room] }));
+    await f.session.refresh(); await settleMicrotasks();
+    expect(f.a.reads).toHaveLength(3);
+    expect(f.session.getSnapshot().state.viewedTarget).toEqual(readRoom);
+    expect(f.session.getSnapshot().state.rooms.room.unread).toBe(0);
+    f.a.streams[0].status("connected"); await settleMicrotasks();
+    expect(f.a.reads).toHaveLength(3);
+  });
+
+  it.each(["deleted", "hidden", "switched-thread"])("aborts a read and clears visibility when its owner is %s", async (change) => {
+    const f = await readingFixture(); const pending = deferred<void>(); f.a.readResponses.push(pending.promise);
+    f.session.viewConversation(f.a, readBot);
+    if (change === "deleted") f.a.streams[0].frame({ kind: "bot.deleted", botId: "a" }, null);
+    else f.a.streams[0].frame({ kind: "bot", bot: { ...fleet("a").bots[0], hidden: change === "hidden", threadId: change === "switched-thread" ? "replacement" : "thread", unread: 1 } }, null);
+    expect(f.a.reads[0].signal?.aborted).toBe(true);
+    expect(f.session.getSnapshot().state.viewedTarget).toBeNull();
+    pending.reject(new APIError(401, "Former owner")); await settleMicrotasks();
+    expect(f.session.getSnapshot().client).toBe(f.a);
+    expect(f.session.getSnapshot().readError).toBeNull();
+  });
+
+  it("retries transient errors with bounded backoff, preserves unread, and supports explicit recovery", async () => {
+    jest.useFakeTimers(); const f = await readingFixture();
+    const fail = () => { const pending = deferred<void>(); f.a.readResponses.push(pending.promise); return pending; };
+    let pending = fail(); f.session.viewConversation(f.a, readBot);
+    pending.reject(new APIError(503, "Computer unavailable")); await settleMicrotasks();
+    expect(f.session.getSnapshot().readError).toMatchObject({ target: readBot, message: expect.stringContaining("Computer unavailable") });
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(1);
+    pending = fail(); await jest.advanceTimersByTimeAsync(499); expect(f.a.reads).toHaveLength(1);
+    await jest.advanceTimersByTimeAsync(1); pending.reject(new Error("Network unavailable")); await settleMicrotasks();
+    pending = fail(); await jest.advanceTimersByTimeAsync(999); expect(f.a.reads).toHaveLength(2);
+    await jest.advanceTimersByTimeAsync(1); pending.reject(new APIError(429, "Try later")); await settleMicrotasks();
+    await jest.advanceTimersByTimeAsync(30_000); expect(f.a.reads).toHaveLength(3);
+    expect(jest.getTimerCount()).toBe(0);
+    f.session.retryRead(f.a, readRoom); expect(f.a.reads).toHaveLength(3);
+    f.session.retryRead(f.a, readBot); await settleMicrotasks();
+    expect(f.a.reads).toHaveLength(4);
+    expect(f.session.getSnapshot().readError).toBeNull();
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(0);
+  });
+
+  it("does not automatically retry a permanent API error", async () => {
+    jest.useFakeTimers(); const f = await readingFixture(); const pending = deferred<void>(); f.a.readResponses.push(pending.promise);
+    f.session.viewConversation(f.a, readRoom); pending.reject(new APIError(404, "Room unavailable")); await settleMicrotasks();
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(f.a.reads).toHaveLength(1); expect(jest.getTimerCount()).toBe(0);
+    expect(f.session.getSnapshot().state.rooms.room.unread).toBe(1);
+    expect(f.session.getSnapshot().readError?.message).toContain("Room unavailable");
+  });
+
+  it("bounds a hung transport by a cancellable ten-second deadline and ignores its late acceptance", async () => {
+    jest.useFakeTimers(); const f = await readingFixture(); const pending = deferred<void>(); const retry = deferred<void>();
+    f.a.readResponses.push(pending.promise, retry.promise); f.session.viewConversation(f.a, readBot);
+    await jest.advanceTimersByTimeAsync(9_999); expect(f.a.reads[0].signal?.aborted).toBe(false);
+    await jest.advanceTimersByTimeAsync(1); expect(f.a.reads[0].signal?.aborted).toBe(true);
+    expect(f.session.getSnapshot().readError?.message).toContain("timed out");
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(1);
+    await jest.advanceTimersByTimeAsync(500); expect(f.a.reads).toHaveLength(2);
+    pending.resolve(); await settleMicrotasks();
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(1);
+    retry.resolve(); await settleMicrotasks();
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(0);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("cancels pending work on background and fences a late unauthorized response from the new focus", async () => {
+    const f = await readingFixture(); const pending = deferred<void>(); const retry = deferred<void>();
+    f.a.readResponses.push(pending.promise, retry.promise); f.session.viewConversation(f.a, readBot);
+    f.session.setForeground(false); expect(f.a.reads[0].signal?.aborted).toBe(true);
+    f.session.setForeground(true); await settleMicrotasks(); expect(f.a.reads).toHaveLength(2);
+    pending.reject(new APIError(403, "Old focus")); await settleMicrotasks();
+    expect(f.session.getSnapshot().client).toBe(f.a);
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(1);
+    retry.resolve(); await settleMicrotasks(); expect(f.session.getSnapshot().state.bots.a.unread).toBe(0);
+  });
+
+  it.each(["leave", "background", "unpair", "dispose"])("cancels a scheduled retry on %s", async (operation) => {
+    jest.useFakeTimers(); const f = await readingFixture(); const pending = deferred<void>(); f.a.readResponses.push(pending.promise);
+    const leave = f.session.viewConversation(f.a, readBot); pending.reject(new Error("Network unavailable")); await settleMicrotasks();
+    expect(jest.getTimerCount()).toBe(1);
+    if (operation === "leave") leave();
+    if (operation === "background") f.session.setForeground(false);
+    if (operation === "unpair") await f.session.unpair();
+    if (operation === "dispose") f.session.dispose();
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(f.a.reads).toHaveLength(1); expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("does not let a former account read clear a newly paired owner with the same ID", async () => {
+    const f = await readingFixture(); const pending = deferred<void>(); f.a.readResponses.push(pending.promise);
+    f.session.viewConversation(f.a, readBot);
+    f.b.fleetResponses.push(Promise.resolve({ bots: [{ ...fleet("a").bots[0], unread: 1 }], groups: [] }));
+    await pairWith(f);
+    expect(f.a.reads[0].signal?.aborted).toBe(true);
+    pending.reject(new APIError(401, "Old account revoked")); await settleMicrotasks();
+    expect(f.session.getSnapshot().client).toBe(f.b);
+    expect(f.session.getSnapshot().state.bots.a.unread).toBe(1);
+    expect(f.session.getSnapshot().state.viewedTarget).toBeNull();
+    expect(f.b.reads).toHaveLength(0);
+  });
+
+  it.each([401, 403])("clears the current connection on a current read authorization failure %s", async (status) => {
+    const f = await readingFixture(); const pending = deferred<void>(); f.a.readResponses.push(pending.promise);
+    f.session.viewConversation(f.a, readBot); pending.reject(new APIError(status, "Revoked")); await settleMicrotasks();
+    expect(f.session.getSnapshot().client).toBeNull(); expect(f.stored()).toBeNull();
+    expect(f.session.getSnapshot().state.viewedTarget).toBeNull();
+    expect(f.session.getSnapshot().pairError).toMatch(/expired|revoked/);
+  });
+});
 
 describe("companion session lifecycle", () => {
   it("reports connected only from stream readiness, and clears it throughout reconnect", async () => {
@@ -536,9 +782,10 @@ describe("companion session lifecycle", () => {
     await expect(f.session.send(f.a, target, "old screen")).resolves.toBe(false);
     await f.session.respond(f.a, "thread", "request", "allow");
     await f.session.alwaysAllow(f.a, "a", "tool");
-    await f.session.viewThread(f.a, "thread");
+    f.session.viewConversation(f.a, target);
     expect(f.a.actions).toEqual([]); expect(f.b.actions).toEqual([]);
-    expect(f.session.getSnapshot().state.viewedThread).toBeNull();
+    expect(f.a.reads).toEqual([]); expect(f.b.reads).toEqual([]);
+    expect(f.session.getSnapshot().state.viewedTarget).toBeNull();
   });
 
   it("reports acceptance for a current room send only after transport completion", async () => {

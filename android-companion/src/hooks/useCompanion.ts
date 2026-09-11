@@ -1,5 +1,6 @@
 // Native composition only; the session controller owns async identity fences.
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { AppState, Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { fetch } from "expo/fetch";
 import { MusterClient, parseAddress, parseConnection } from "../core/client";
@@ -43,8 +44,27 @@ export function useCompanion() {
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
 
   useEffect(() => {
+    let appState = AppState.currentState;
+    // AppState has no synchronous Android window-focus getter. An active
+    // app starts focused; blur/focus events refine that independently.
+    let windowFocused = true;
+    const updateForeground = () => session.setForeground(appState === "active" && windowFocused);
+    const subscriptions = [AppState.addEventListener("change", (nextState) => {
+      appState = nextState;
+      updateForeground();
+    })];
+    if (Platform.OS === "android") {
+      subscriptions.push(
+        AppState.addEventListener("blur", () => { windowFocused = false; updateForeground(); }),
+        AppState.addEventListener("focus", () => { windowFocused = true; updateForeground(); }),
+      );
+    }
+    updateForeground();
     void session.start();
-    return session.dispose;
+    return () => {
+      for (const subscription of subscriptions) subscription.remove();
+      session.dispose();
+    };
   }, [session]);
 
   // Capture the render's client so callbacks retained by an old screen
@@ -55,14 +75,16 @@ export function useCompanion() {
     session.respond(snapshot.client, threadId, requestId, behavior, message), [session, snapshot.client]);
   const alwaysAllow = useCallback((botId: string, allowKey: string) =>
     session.alwaysAllow(snapshot.client, botId, allowKey), [session, snapshot.client]);
-  const viewThread = useCallback((threadId: string) =>
-    session.viewThread(snapshot.client, threadId), [session, snapshot.client]);
+  const viewConversation = useCallback((target: ChatTarget) =>
+    session.viewConversation(snapshot.client, target), [session, snapshot.client]);
+  const retryRead = useCallback((target: ChatTarget) =>
+    session.retryRead(snapshot.client, target), [session, snapshot.client]);
   const loadOlder = useCallback((threadId: string, hasMore: boolean) =>
     session.loadOlder(snapshot.client, threadId, hasMore), [session, snapshot.client]);
 
   return {
     ...snapshot,
     pair: session.pair, unpair: session.unpair, refresh: session.refresh,
-    send, respond, alwaysAllow, viewThread, loadOlder,
+    send, respond, alwaysAllow, viewConversation, retryRead, loadOlder,
   };
 }

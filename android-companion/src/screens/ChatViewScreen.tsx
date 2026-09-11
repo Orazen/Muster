@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import React, { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -27,7 +27,9 @@ interface ChatViewScreenProps {
   onAlwaysAllow: (botId: string, allowKey: string) => void;
   onBack: () => void;
   onLoadOlder: () => void;
-  viewThread: (threadId: string) => void;
+  viewConversation: (target: ChatTarget) => () => void;
+  readError: string | null;
+  onRetryRead: () => void;
 }
 
 function Bubble({
@@ -162,7 +164,9 @@ export function ChatViewScreen({
   onAlwaysAllow,
   onBack,
   onLoadOlder,
-  viewThread,
+  viewConversation,
+  readError,
+  onRetryRead,
 }: ChatViewScreenProps) {
   const listRef = useRef<FlatList<Message | null>>(null);
   const threadId = target.threadId;
@@ -173,9 +177,9 @@ export function ChatViewScreen({
   const title = bot?.name ?? room?.name ?? "Chat";
   const color = bot?.color ?? "#f0460e";
 
-  useEffect(() => {
-    viewThread(threadId);
-  }, [threadId, viewThread]);
+  useLayoutEffect(() => viewConversation({
+    kind: target.kind, id: target.id, threadId: target.threadId,
+  }), [target.kind, target.id, target.threadId, viewConversation]);
 
   const rows: (Message | null)[] = useMemo(() => {
     const out: (Message | null)[] = [...transcript];
@@ -192,7 +196,7 @@ export function ChatViewScreen({
     >
       <StatusBar style="light" />
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} hitSlop={12}>
+        <TouchableOpacity onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="Back to chats">
           <Text style={styles.back}>‹</Text>
         </TouchableOpacity>
         <View style={styles.headerTitle}>
@@ -255,6 +259,15 @@ export function ChatViewScreen({
         }}
         style={styles.list}
       />
+
+      {readError ? (
+        <View style={styles.readStatus}>
+          <Text style={styles.readError} accessibilityRole="alert" accessibilityLiveRegion="polite">{readError}</Text>
+          <TouchableOpacity onPress={onRetryRead} accessibilityRole="button" accessibilityLabel="Retry read status" style={styles.readRetry}>
+            <Text style={styles.readRetryText}>Retry read status</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       <ChatComposer
         key={composerContextKey(connection, target)}
@@ -340,6 +353,10 @@ const styles = StyleSheet.create({
   cardDeny: { backgroundColor: "transparent", borderWidth: 1, borderColor: "#3a3a3e" },
   cardDenyText: { color: "#9a9a9e", fontWeight: "600", fontSize: 13 },
   cardAnswered: { color: "#8a8a8e", fontSize: 12, marginTop: 8 },
+  readStatus: { paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#222" },
+  readError: { color: "#ff8a80", fontSize: 13, lineHeight: 18 },
+  readRetry: { alignSelf: "flex-start", paddingVertical: 10, marginTop: 2 },
+  readRetryText: { color: "#f6f6f7", fontSize: 13, fontWeight: "600" },
   composerSection: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#222" },
   sendError: { color: "#ff8a80", paddingHorizontal: 16, paddingTop: 10, fontSize: 13, lineHeight: 18 },
   composer: {

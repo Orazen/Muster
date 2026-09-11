@@ -2,16 +2,13 @@
 import { APIError } from "../core/client";
 import type { Connection, MusterClient } from "../core/client";
 import type { PairResponse } from "../core/types";
+import type { Frame } from "../core/frames";
 import {
-  applyFrame, hydrate, initialState, markViewed, prependPage, setCursor,
+  acknowledgeViewed, applyFrame, hydrate, initialState, markViewed, prependPage, setCursor,
 } from "../core/store";
-import type { CompanionState } from "../core/store";
+import type { CompanionState, ViewedConversation } from "../core/store";
 
-export interface ChatTarget {
-  kind: "bot" | "room";
-  id: string;
-  threadId: string;
-}
+export type ChatTarget = ViewedConversation;
 
 export interface PairInput {
   address: string;
@@ -21,7 +18,7 @@ export interface PairInput {
 }
 
 export type CompanionClient = Pick<MusterClient,
-  "fleet" | "messages" | "events" | "sendToBot" | "sendToGroup" | "respond" | "alwaysAllow" | "markRead"
+  "fleet" | "messages" | "events" | "sendToBot" | "sendToGroup" | "respond" | "alwaysAllow" | "markBotRead" | "markGroupRead"
 >;
 
 export interface ChatSelection { client: CompanionClient | null; target: ChatTarget }
@@ -79,10 +76,11 @@ export interface CompanionSnapshot {
   connecting: boolean;
   pairing: boolean;
   pairError: string | null;
+  readError: { target: ChatTarget; message: string } | null;
 }
 
 function emptySnapshot(): CompanionSnapshot {
-  return { client: null, state: initialState(), connected: false, connecting: false, pairing: false, pairError: null };
+  return { client: null, state: initialState(), connected: false, connecting: false, pairing: false, pairError: null, readError: null };
 }
 
 interface FleetRecovery {
@@ -94,6 +92,26 @@ interface FleetRecovery {
 }
 type RefreshResult = "applied" | "stale" | "failed" | "inactive";
 
+interface ConversationView {
+  client: CompanionClient;
+  target: ChatTarget;
+  generation: number;
+  focus: number;
+  revision: number;
+  acknowledged: number;
+  attempts: number;
+  retry: ReturnType<typeof setTimeout> | null;
+}
+interface ReadAttempt {
+  view: ConversationView;
+  abort: AbortController;
+  timer: ReturnType<typeof setTimeout> | null;
+  timedOut: boolean;
+}
+const READ_TIMEOUT_MS = 10_000;
+const READ_ATTEMPTS = 3;
+const readKey = (target: ChatTarget): string => JSON.stringify([target.kind, target.id, target.threadId]);
+
 export class CompanionSession {
   private snapshot = emptySnapshot();
   private listeners = new Set<() => void>();
@@ -104,6 +122,9 @@ export class CompanionSession {
   private pageRequests = new Map<string, number>();
   private stopStream: (() => void) | null = null;
   private recovery: FleetRecovery | null = null;
+  private foreground = false;
+  private view: ConversationView | null = null;
+  private readAttempts = new Map<string, ReadAttempt>();
 
   constructor(private readonly dependencies: CompanionDependencies) {}
 
@@ -130,6 +151,7 @@ export class CompanionSession {
     this.stopStream = null;
     stop?.();
     this.cancelRecovery();
+    this.clearViews();
     this.dataRevision++;
     this.pageRequests.clear();
     this.update({ ...emptySnapshot(), pairing, pairError });
@@ -157,6 +179,7 @@ export class CompanionSession {
     this.stopStream?.();
     this.stopStream = null;
     this.cancelRecovery();
+    this.clearViews();
     // Queue immediately on the shared writer, before a new mount can write.
     // An established connection remains available for normal app restarts.
     if (pendingPair) void this.dependencies.persistence.write(null, () => true).catch(() => undefined);
@@ -179,11 +202,13 @@ export class CompanionSession {
               if (!frame.resumed) this.recoverFleet(client, generation);
               return;
             }
-            const state = applyFrame(this.snapshot.state, frame);
+            const previous = this.snapshot.state;
+            const state = applyFrame(previous, frame);
             if (state !== this.snapshot.state) {
               this.dataRevision++;
               this.update({ state });
             }
+            this.reconcileView(frame, previous);
           },
           (cursor) => {
             if (!this.current(generation)) return;
@@ -196,7 +221,9 @@ export class CompanionSession {
                 void this.clear("Connection expired or was revoked. Pair again.");
                 return;
               }
+              const reconnected = status === "connected" && !this.snapshot.connected;
               this.update({ connected: status === "connected", connecting: status === "connecting" });
+              if (reconnected && this.view && this.foreground) this.queueRead(this.view, true);
             }
           },
         );
@@ -260,6 +287,7 @@ export class CompanionSession {
       if (this.current(generation) && request === this.fleetRequest && revision === this.dataRevision) {
         this.dataRevision++;
         this.update({ state: hydrate(this.snapshot.state, fleet) });
+        this.reconcileView("hydrate");
         return "applied";
       }
       return "stale";
@@ -337,13 +365,174 @@ export class CompanionSession {
     if (this.owns(client)) await client.alwaysAllow(botId, allowKey);
   }
 
-  async viewThread(client: CompanionClient | null, threadId: string): Promise<void> {
-    if (!this.owns(client) || !this.activeThread(threadId)) return;
-    const generation = this.generation;
-    this.dataRevision++;
-    this.update({ state: markViewed(this.snapshot.state, threadId) });
-    try { await client.markRead(threadId); }
-    catch (error) { this.requestFailed(error instanceof Error ? error : new Error("Could not mark the thread read."), generation); }
+  private viewedState(target: ChatTarget | null): void {
+    const state = markViewed(this.snapshot.state, target);
+    if (state !== this.snapshot.state) {
+      this.dataRevision++;
+      this.update({ state });
+    }
+  }
+
+  private currentView(view: ConversationView): boolean {
+    return this.view === view && this.current(view.generation) && this.owns(view.client)
+      && currentChatTarget({ client: view.client, target: view.target }, view.client, this.snapshot.state) !== null;
+  }
+
+  private cancelRetry(view: ConversationView): void {
+    if (view.retry !== null) clearTimeout(view.retry);
+    view.retry = null;
+  }
+
+  private abortRead(attempt: ReadAttempt): void {
+    if (attempt.timer !== null) clearTimeout(attempt.timer);
+    attempt.timer = null;
+    attempt.abort.abort();
+  }
+
+  private leaveView(view: ConversationView): void {
+    if (this.view !== view) return;
+    this.view = null;
+    this.cancelRetry(view);
+    const attempt = this.readAttempts.get(readKey(view.target));
+    if (attempt?.view === view) this.abortRead(attempt);
+    this.viewedState(null);
+    this.update({ readError: null });
+  }
+
+  private clearViews(): void {
+    if (this.view) this.leaveView(this.view);
+    for (const attempt of this.readAttempts.values()) this.abortRead(attempt);
+    this.readAttempts.clear();
+  }
+
+  // A lease identifies the rendered owner, not merely a reused thread ID.
+  // Cleanup from an older screen cannot clear a more recent view.
+  viewConversation(client: CompanionClient | null, target: ChatTarget): () => void {
+    if (!this.owns(client) || !currentChatTarget({ client, target }, client, this.snapshot.state)) return () => undefined;
+    if (this.view) this.leaveView(this.view);
+    const view: ConversationView = {
+      client, target: { ...target }, generation: this.generation, focus: 0,
+      revision: 1, acknowledged: 0, attempts: 0, retry: null,
+    };
+    this.view = view;
+    this.viewedState(this.foreground ? view.target : null);
+    this.pumpRead(view);
+    return () => this.leaveView(view);
+  }
+
+  setForeground(foreground: boolean): void {
+    if (this.foreground === foreground) return;
+    this.foreground = foreground;
+    const view = this.view;
+    if (!view) return;
+    if (!this.currentView(view)) { this.leaveView(view); return; }
+    view.focus++;
+    this.cancelRetry(view);
+    const attempt = this.readAttempts.get(readKey(view.target));
+    if (attempt?.view === view) this.abortRead(attempt);
+    this.viewedState(foreground ? view.target : null);
+    this.update({ readError: null });
+    if (foreground) this.queueRead(view, true);
+  }
+
+  retryRead(client: CompanionClient | null, target: ChatTarget): void {
+    const view = this.view;
+    if (!view || !this.owns(client) || view.client !== client || !this.currentView(view)
+      || !this.foreground || readKey(target) !== readKey(view.target)
+      || this.readAttempts.has(readKey(target))) return;
+    this.queueRead(view, true);
+  }
+
+  private queueRead(view: ConversationView, resetAttempts = false): void {
+    if (!this.currentView(view) || !this.foreground) return;
+    view.revision++;
+    if (resetAttempts) {
+      view.attempts = 0;
+      this.cancelRetry(view);
+    }
+    this.pumpRead(view);
+  }
+
+  private reconcileView(reason: Frame | "hydrate", previous?: CompanionState): void {
+    const view = this.view;
+    if (!view) return;
+    if (!this.currentView(view)) { this.leaveView(view); return; }
+    if (!this.foreground) return;
+    const target = view.target;
+    const owner = target.kind === "bot" ? this.snapshot.state.bots[target.id] : this.snapshot.state.rooms[target.id];
+    const ownerChanged = reason === "hydrate"
+      || (reason.kind === "bot" && target.kind === "bot" && reason.bot.id === target.id)
+      || (reason.kind === "group" && target.kind === "room" && reason.group.id === target.id);
+    const newMessage = reason !== "hydrate" && reason.kind === "message"
+      && reason.threadId === target.threadId && reason.message.role === "bot"
+      && !previous?.messages[target.threadId]?.some((message) => message.id === reason.message.id);
+    if ((ownerChanged && (owner?.unread ?? 0) > 0) || newMessage) this.queueRead(view);
+  }
+
+  private pumpRead(view: ConversationView): void {
+    const key = readKey(view.target);
+    if (!this.currentView(view) || !this.foreground || view.retry !== null
+      || view.attempts >= READ_ATTEMPTS || view.acknowledged >= view.revision || this.readAttempts.has(key)) return;
+    const attempt: ReadAttempt = { view, abort: new AbortController(), timer: null, timedOut: false };
+    this.readAttempts.set(key, attempt);
+    this.update({ readError: null });
+    void this.runRead(attempt, key);
+  }
+
+  private async runRead(attempt: ReadAttempt, key: string): Promise<void> {
+    const view = attempt.view;
+    const revision = view.revision;
+    const focus = view.focus;
+    let abortListener: () => void = () => undefined;
+    const cancelled = new Promise<void>((_resolve, reject) => {
+      abortListener = () => reject(new Error(attempt.timedOut ? "The read-status request timed out." : "Read-status request cancelled."));
+      attempt.abort.signal.addEventListener("abort", abortListener, { once: true });
+      attempt.timer = setTimeout(() => {
+        attempt.timedOut = true;
+        attempt.abort.abort();
+      }, READ_TIMEOUT_MS);
+    });
+    try {
+      const request = view.target.kind === "bot"
+        ? view.client.markBotRead(view.target.id, attempt.abort.signal)
+        : view.client.markGroupRead(view.target.id, attempt.abort.signal);
+      await Promise.race([request, cancelled]);
+      if (!this.currentView(view) || !this.foreground || view.focus !== focus) return;
+      view.acknowledged = revision;
+      view.attempts = 0;
+      this.update({ readError: null });
+      // A late acceptance must not erase an unread event seen after dispatch.
+      if (view.revision === revision) {
+        const state = acknowledgeViewed(this.snapshot.state, view.target);
+        if (state !== this.snapshot.state) {
+          this.dataRevision++;
+          this.update({ state });
+        }
+      }
+    } catch (failure) {
+      if (!this.currentView(view) || !this.foreground || view.focus !== focus) return;
+      const error = failure instanceof Error ? failure : new Error("Could not update read status.");
+      if (error instanceof APIError && (error.status === 401 || error.status === 403)) {
+        this.requestFailed(error, view.generation);
+        return;
+      }
+      const retryable = !(error instanceof APIError) || error.status === 408 || error.status === 429 || error.status >= 500;
+      view.attempts = retryable ? view.attempts + 1 : READ_ATTEMPTS;
+      this.update({ readError: { target: view.target, message: `Read status hasn't synced with your computer. ${error.message}` } });
+      if (view.attempts < READ_ATTEMPTS) {
+        view.retry = setTimeout(() => {
+          view.retry = null;
+          this.pumpRead(view);
+        }, 500 * 2 ** (view.attempts - 1));
+      }
+    } finally {
+      if (attempt.timer !== null) clearTimeout(attempt.timer);
+      attempt.abort.signal.removeEventListener("abort", abortListener);
+      if (this.readAttempts.get(key) === attempt) {
+        this.readAttempts.delete(key);
+        if (this.view) this.pumpRead(this.view);
+      }
+    }
   }
 
   async loadOlder(client: CompanionClient | null, threadId: string, hasMore: boolean): Promise<void> {

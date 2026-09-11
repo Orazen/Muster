@@ -20,6 +20,12 @@ export interface StreamBuffers {
   reasoning: string;
 }
 
+export interface ViewedConversation {
+  kind: "bot" | "room";
+  id: string;
+  threadId: string;
+}
+
 export interface CompanionState {
   cursor: string | null;
   bots: Record<string, Bot>;
@@ -30,7 +36,7 @@ export interface CompanionState {
   streams: Record<string, StreamBuffers>;
   notifications: NotificationFrame[];
   screens: Record<string, { png: string; mime?: string }>;
-  viewedThread: string | null;
+  viewedTarget: ViewedConversation | null;
 }
 
 export const MAX_NOTIFICATIONS = 100;
@@ -46,7 +52,7 @@ export function initialState(): CompanionState {
     streams: {},
     notifications: [],
     screens: {},
-    viewedThread: null,
+    viewedTarget: null,
   };
 }
 
@@ -89,16 +95,15 @@ function patchMessage(state: CompanionState, threadId: string, message: Message)
 }
 
 function bumpUnread(state: CompanionState, threadId: string): CompanionState {
-  if (state.viewedThread === threadId) return state;
   const bots = { ...state.bots };
   for (const id of Object.keys(bots)) {
-    if (bots[id].threadId === threadId) {
+    if (bots[id].threadId === threadId && !isViewed(state, { kind: "bot", id, threadId })) {
       bots[id] = { ...bots[id], unread: (bots[id].unread ?? 0) + 1 };
     }
   }
   const rooms = { ...state.rooms };
   for (const id of Object.keys(rooms)) {
-    if (rooms[id].threadId === threadId) {
+    if (rooms[id].threadId === threadId && !isViewed(state, { kind: "room", id, threadId })) {
       rooms[id] = { ...rooms[id], unread: (rooms[id].unread ?? 0) + 1 };
     }
   }
@@ -186,7 +191,7 @@ export function applyFrame(state: CompanionState, frame: Frame): CompanionState 
       if (frame.message.role === "bot" && frame.message.kind === "text") {
         next = clearStream(next, frame.threadId);
       }
-      if (wasNew && frame.message.role === "bot" && state.viewedThread !== frame.threadId) {
+      if (wasNew && frame.message.role === "bot") {
         next = bumpUnread(next, frame.threadId);
       }
       return next;
@@ -285,20 +290,28 @@ export function prependPage(state: CompanionState, threadId: string, page: Threa
   return setMessages(state, threadId, [...older, ...existing], page.hasMore ?? false);
 }
 
-export function markViewed(state: CompanionState, threadId: string): CompanionState {
-  const bots = { ...state.bots };
-  for (const id of Object.keys(bots)) {
-    if (bots[id].threadId === threadId && (bots[id].unread ?? 0) > 0) {
-      bots[id] = { ...bots[id], unread: 0 };
-    }
+function isViewed(state: CompanionState, target: ViewedConversation): boolean {
+  const viewed = state.viewedTarget;
+  return viewed?.kind === target.kind && viewed.id === target.id && viewed.threadId === target.threadId;
+}
+
+// Viewing suppresses new local badges only for this owner. Shared read state
+// changes through server frames or a still-current accepted acknowledgement.
+export function markViewed(state: CompanionState, target: ViewedConversation | null): CompanionState {
+  if (target ? isViewed(state, target) : state.viewedTarget === null) return state;
+  return { ...state, viewedTarget: target ? { ...target } : null };
+}
+
+export function acknowledgeViewed(state: CompanionState, target: ViewedConversation): CompanionState {
+  if (!isViewed(state, target)) return state;
+  if (target.kind === "bot") {
+    const bot = state.bots[target.id];
+    if (!bot || bot.threadId !== target.threadId || !bot.unread) return state;
+    return { ...state, bots: { ...state.bots, [target.id]: { ...bot, unread: 0 } } };
   }
-  const rooms = { ...state.rooms };
-  for (const id of Object.keys(rooms)) {
-    if (rooms[id].threadId === threadId && (rooms[id].unread ?? 0) > 0) {
-      rooms[id] = { ...rooms[id], unread: 0 };
-    }
-  }
-  return { ...state, viewedThread: threadId, bots, rooms };
+  const room = state.rooms[target.id];
+  if (!room || room.threadId !== target.threadId || !room.unread) return state;
+  return { ...state, rooms: { ...state.rooms, [target.id]: { ...room, unread: 0 } } };
 }
 
 export function setCursor(state: CompanionState, cursor: string): CompanionState {

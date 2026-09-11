@@ -38,6 +38,10 @@ function CompanionApp() {
       : undefined;
 
   if (target && (bot || room)) {
+    const readError = companion.readError;
+    const targetReadError = readError?.target.kind === target.kind
+      && readError.target.id === target.id && readError.target.threadId === target.threadId
+      ? readError.message : null;
     return (
       <ChatViewScreen
         state={companion.state}
@@ -50,7 +54,9 @@ function CompanionApp() {
         onAlwaysAllow={companion.alwaysAllow}
         onBack={() => setSelection(null)}
         onLoadOlder={() => companion.loadOlder(target.threadId, companion.state.hasMore[target.threadId] ?? false)}
-        viewThread={companion.viewThread}
+        viewConversation={companion.viewConversation}
+        readError={targetReadError}
+        onRetryRead={() => companion.retryRead(target)}
       />
     );
   }

@@ -16,7 +16,7 @@ export class APIError extends Error {
 interface PairOptions { credential?: string; code?: string; deviceName: string; scheme?: ConnectionScheme }
 interface PairBody { deviceName: string; credential?: string; code?: string }
 interface RespondBody { requestId: string; behavior: string; message?: string }
-type RequestBody = { text: string } | RespondBody | { allowKey: string } | { emoji: string };
+type RequestBody = { text: string } | RespondBody | { allowKey: string } | { emoji: string } | Record<string, never>;
 
 async function errorDetail(response: ClientResponse): Promise<string> {
   try {
@@ -47,8 +47,11 @@ export class MusterClient {
   private headers() {
     return { Authorization: `Bearer ${this.conn.token}`, "Content-Type": "application/json" };
   }
-  private async request(method: string, path: string, body?: RequestBody): Promise<JsonValue> {
+  private async request(method: string, path: string, body?: RequestBody, signal?: AbortSignal): Promise<JsonValue> {
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => controller.abort(), 20_000);
     try {
       const response = await this.fetchRequest(`${this.base}${path}`, {
@@ -57,10 +60,13 @@ export class MusterClient {
       });
       if (!response.ok) throw new APIError(response.status, await errorDetail(response));
       return response.status === 204 ? null : await response.json();
-    } finally { clearTimeout(timer); }
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+    }
   }
-  private async requestVoid(method: string, path: string, body?: RequestBody): Promise<void> {
-    await this.request(method, path, body);
+  private async requestVoid(method: string, path: string, body?: RequestBody, signal?: AbortSignal): Promise<void> {
+    await this.request(method, path, body, signal);
   }
   static async pair(host: string, port: number, opts: PairOptions, fetchRequest: ClientFetch): Promise<{ response: PairResponse; token: string }> {
     const address = parseConnection({ host, port, scheme: opts.scheme ?? "http", token: "pending" });
@@ -116,8 +122,13 @@ export class MusterClient {
     });
   }
 
-  async markRead(threadId: string): Promise<void> {
-    await this.requestVoid("POST", `/api/threads/${encodeURIComponent(threadId)}/read`);
+  async markBotRead(botId: string, signal?: AbortSignal): Promise<void> {
+    // Expo's Android transport requires a non-null POST body.
+    await this.requestVoid("POST", `/api/bots/${encodeURIComponent(botId)}/read`, {}, signal);
+  }
+
+  async markGroupRead(groupId: string, signal?: AbortSignal): Promise<void> {
+    await this.requestVoid("POST", `/api/groups/${encodeURIComponent(groupId)}/read`, {}, signal);
   }
 
   async toggleReaction(threadId: string, messageId: string, emoji: string): Promise<void> {

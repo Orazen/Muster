@@ -129,6 +129,23 @@ An authentication failure is distinct from an unknown wire event. Unknown event
 kinds remain harmless; malformed REST envelopes fail instead of erasing the
 current roster. Valid neighboring messages and bots survive malformed entries.
 
+Read status follows the visible conversation's bot or room ID. Android sends
+the owner's read endpoint an explicit JSON object, which Expo's native POST
+transport requires. An unread owner stays unread until the server broadcasts
+the change or accepts the still-current request. Other owners keep their flags,
+including owners sharing a thread ID.
+
+Leaving the conversation, backgrounding the app or losing Android window focus
+ends that active view and cancels pending reads. Returning, reconnecting or
+receiving new work while viewing reconciles read status again. Pending events
+share one request at a time per target; a newer event cannot be cleared by an
+older response. Each request has a ten-second deadline. Transient errors get
+at most three attempts, with 500ms and 1s retry delays, then wait for explicit
+retry or a new foreground/reconnection. The screen explains a failed read sync
+and offers **Retry read status** independently of the message composer. Losing
+the connection's authorization returns to pairing. This is shared owner-level
+read state, not per-message read receipts.
+
 ## Native development gates
 
 Loop 38 built and installed the debug APK on an owned Android 14 / API 34 arm64
@@ -140,10 +157,18 @@ a synthetic fleet and replies. This is emulator evidence, not real-model,
 physical-device, release-variant or store acceptance; see the CEO log for counts
 and retained failures.
 
-Two follow-ups remain explicit: Android read acknowledgements currently use a
-thread route that the sidecar does not expose, and the generated debug manifest's
-HTTP allowance does not prove local HTTP pairing in a release build. Inspect the
-merged release manifest and test a bundled release variant before distribution.
+Loop 39 reproduced the native bodyless-POST failure and verified the corrected
+bot/room read routes against actual server persistence and another paired device's
+event stream. The owned debug emulator also exercised leaving the chat,
+backgrounding, cancellation and bounded failure/retry at 320dp. Synthetic failure
+and hold controls surround an unmodified server; successful reads reach its real
+store. This does not establish cloud-account isolation or production acceptance.
+
+The generated debug manifest's HTTP allowance does not prove local HTTP pairing
+in a release build. Inspect the merged release manifest and test a bundled release
+variant before distribution. Native question cards also need a separate contract
+fix: the current renderer presents Allow/Deny for every options card, including
+the seeded onboarding question. Full native card interaction is not accepted.
 The development reload also hit a React Native HostTarget assertion during setup;
 cold launches worked after selecting the owned Metro address.
 

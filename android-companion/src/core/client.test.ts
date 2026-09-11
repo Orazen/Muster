@@ -84,9 +84,93 @@ describe("HTTP client", () => {
     expect(JSON.parse(f.calls[0].init?.body ?? "")).toEqual({ text: "hello" });
     f.requests[0].resolve(response({ error: "denied" }, 403));
     await expect(send).rejects.toEqual(new APIError(403, "denied"));
-    const read = f.client.markRead("t1"); const res = response(null, 204);
+    const groupSend = f.client.sendToGroup("g1", "hello"); const res = response(null, 204);
     res.json = async () => { throw new Error("must not read 204"); };
-    f.requests[1].resolve(res); await expect(read).resolves.toBeUndefined();
+    f.requests[1].resolve(res); await expect(groupSend).resolves.toBeUndefined();
+  });
+  test("acknowledges bot and room owner IDs with explicit native POST bodies", async () => {
+    const f = fixture({ host: "read.fixture.invalid", port: 443, scheme: "https", token: "owned-read-token" });
+    const bot = { id: "orbit-owner", threadId: "orbit-thread", name: "Orbit", unread: false };
+    const group = { id: "room-owner", threadId: "room-thread", memberIds: [bot.id], unread: false };
+    const botRead = f.client.markBotRead(bot.id);
+    const groupRead = f.client.markGroupRead(group.id);
+    expect(f.calls.map(({ url, init }) => ({ url, method: init?.method, body: init?.body }))).toEqual([
+      { url: "https://read.fixture.invalid:443/api/bots/orbit-owner/read", method: "POST", body: "{}" },
+      { url: "https://read.fixture.invalid:443/api/groups/room-owner/read", method: "POST", body: "{}" },
+    ]);
+    for (const call of f.calls) {
+      expect(call.init).toMatchObject({
+        credentials: "omit", headers: { Authorization: "Bearer owned-read-token", "Content-Type": "application/json" },
+      });
+    }
+    // Real routes return owner envelopes with200. Read acknowledgement does
+    // not return a stale owner object for a caller to merge over newer SSE.
+    f.requests[0].resolve(response({ bot }, 200));
+    f.requests[1].resolve(response({ group }, 200));
+    await expect(botRead).resolves.toBeUndefined();
+    await expect(groupRead).resolves.toBeUndefined();
+  });
+  test.each([401, 403, 404, 503])("preserves bot and room read refusal status %i", async (status) => {
+    const f = fixture();
+    const botRead = f.client.markBotRead("bot-owner");
+    f.requests[0].resolve(response({ error: "Bot read was not accepted" }, status));
+    await expect(botRead).rejects.toEqual(new APIError(status, "Bot read was not accepted"));
+    const groupRead = f.client.markGroupRead("room-owner");
+    f.requests[1].resolve(response({ error: "Room read was not accepted" }, status));
+    await expect(groupRead).rejects.toEqual(new APIError(status, "Room read was not accepted"));
+  });
+  test("does not acknowledge a read before transport completes and preserves network failure", async () => {
+    const f = fixture();
+    let acknowledged = false;
+    const read = f.client.markGroupRead("room-owner");
+    const result = read.then(() => { acknowledged = true; }, (error: Error) => error);
+    await flush();
+    expect(acknowledged).toBe(false);
+    const failure = new Error("Owned transport connection lost");
+    f.requests[0].reject(failure);
+    await expect(result).resolves.toBe(failure);
+    expect(acknowledged).toBe(false);
+  });
+  test.each(["bot", "room"])("relays caller cancellation to the %s read transport", async (kind) => {
+    jest.useFakeTimers();
+    const f = fixture();
+    const caller = new AbortController();
+    const read = kind === "bot"
+      ? f.client.markBotRead("bot-owner", caller.signal)
+      : f.client.markGroupRead("room-owner", caller.signal);
+    expect(f.calls[0].init?.body).toBe("{}");
+    expect(f.calls[0].init?.signal?.aborted).toBe(false);
+    caller.abort();
+    expect(f.calls[0].init?.signal?.aborted).toBe(true);
+    const cancellation = new Error("Owned transport aborted the read");
+    f.requests[0].reject(cancellation);
+    await expect(read).rejects.toBe(cancellation);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+  test.each(["bot", "room"])("passes an already-aborted caller into %s read transport as aborted", async (kind) => {
+    jest.useFakeTimers();
+    const f = fixture();
+    const caller = new AbortController();
+    caller.abort();
+    const read = kind === "bot"
+      ? f.client.markBotRead("bot-owner", caller.signal)
+      : f.client.markGroupRead("room-owner", caller.signal);
+    expect(f.calls[0].init?.signal?.aborted).toBe(true);
+    const cancellation = new Error("Native transport rejected an already-aborted request");
+    f.requests[0].reject(cancellation);
+    await expect(read).rejects.toBe(cancellation);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+  test("removes the caller cancellation listener after a successful read", async () => {
+    jest.useFakeTimers();
+    const f = fixture();
+    const caller = new AbortController();
+    const read = f.client.markGroupRead("room-owner", caller.signal);
+    f.requests[0].resolve(response({ group: { id: "room-owner", unread: false } }));
+    await read;
+    caller.abort();
+    expect(f.calls[0].init?.signal?.aborted).toBe(false);
+    expect(jest.getTimerCount()).toBe(0);
   });
   test("aborts timed-out requests and releases successful request timers", async () => {
     jest.useFakeTimers(); const f = fixture(); const request = f.client.fleet();

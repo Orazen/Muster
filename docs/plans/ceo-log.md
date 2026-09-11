@@ -2515,3 +2515,111 @@ real Google, VM, portable backup/sync and full Mimosa acceptance remain open.
 Demo 8845, real accounts and the existing release-handoff stash are untouched.
 No dependency version or live-provider configuration changed. Full goal remains
 active. Allowance: **46% used / 54% remaining**, no reset consumed.
+
+## Loop 39 — 2026-09-11 — Android conversation read state
+
+Android now acknowledges the visible bot or room through its actual owner route,
+with an explicit `{}` body required by Expo's native POST transport. Opening a
+conversation retains unread state until a current acceptance or server event.
+Exact client/owner/thread leases clear on leaving, backgrounding and Android
+window blur. Returning, reconnecting and new visible work reconcile again.
+Pending events coalesce; late responses cannot clear newer events or a replacement
+view/account. Requests have a ten-second deadline, up to three transient attempts
+with 500ms/1s backoff, and an independent visible retry action. Permanent failures
+wait for user recovery; current authorization failures return to pairing. This
+is shared owner-level read state, not per-message receipts or portable sync.
+
+The prior native gap is now reproduced: **6/6 baseline assertions** on source
+`0542ad3` captured both original bot and room read invocations and the actual
+`IllegalArgumentException: method POST must have a request body`. Neither request
+reached the gateway; both owners remained unread. The baseline owned copy added
+declared logging/rethrow only. Zero unread was never an invocation guard, and
+no native 404 is claimed. The absent thread-read route is independently evident
+in the server/sidecar source.
+
+Validation:
+
+- Root full Vitest: **229 files / 3,063 passed / 8 skipped**, **253.87s**.
+- Android full Jest: **6 suites / 264 passed / 0 skipped**, **1.862s**,
+  up from 218. Focused controller: **65/65**, including 27 new read regressions.
+- Android typecheck, package lint and root custom scoped lint pass. Initial
+  typecheck found the empty JSON-body type and a missing test-room field; both
+  were corrected before the final gates. Root build/types were not rerun for
+  this Android-only runtime change.
+- Actual server/client composition: **21/21 checks**, **0.963s**. This uses the
+  current Android client with Node fetch, unmodified server routes/store and
+  actual pairing registry, route proxy, JSON/SSE scrubber and second observer.
+  It checks wrong-owner-ID rejection, explicit bodies, accepted read persistence,
+  failures, cancellation and restart. Its wrong-ID probe is `/api/bots/<threadId>/read`,
+  not the old `/api/threads/<threadId>/read` request.
+- Final native acceptance: **42/42 assertions in a 363.933s observation window**, separate from Jest and the
+  baseline. Actual Expo fetch sends owner routes and two-byte `{}` bodies;
+  server/disk unread flags and second-device events agree. Reading the bot leaves
+  the room unread. List/background/window-blur states issue no automatic reads.
+  Leaving or backgrounding a held request cancels through the actual proxy;
+  abandoned requests are not forwarded. Reopening the same target, bounded
+  failures, explicit retry, deadline, actual server restart/reconnect, full
+  native process restore, target-specific room errors, and persistent unpairing
+  all passed. Cancellation cannot undo a request already accepted by a server.
+
+Native setup used owned SDK/Gradle/Java/AVD and dedicated ports. Expo prebuild
+passed in **3.986s**; debug arm64 build passed in **128.299s / 644 tasks executed**;
+install passed in **0.928s**. Compiling the owned Metro port avoided the prior
+default-port setup error. The APK is **148,313,221 bytes**, SHA-256
+`5fc6a714a62b9325ba7278e84f5cc96a793d17dee50d75071511a10799deb848`.
+The same debug APK served both runs: only application TypeScript changed, then
+the final owned Metro source was refreshed and baseline logging removed.
+Root independently compared **41/43 tracked package files**; only README and
+Expo-generated tsconfig differ. All runtime/config/assets match. Prebuilt other
+ABI libraries in the APK do not establish their execution.
+
+Root visually reviewed the final 320dp error/recovery screenshots: wrapped error,
+retry and composer fit, then the error disappears on success. Density changes
+recreated the activity and returned to the roster; the initial UI wait timed out
+and is retained, then the intended conversation was selected before acceptance.
+No unrelated card was clicked. These are owned debug/emulator checks, not release
+variant, physical device, packaged sidecar, Google, model, cloud-account isolation
+or store acceptance. Synthetic error/hold controls surround the actual single-user
+server; successful reads reach its real store. No real providers were invoked.
+
+Evidence: `.omb-scratch/verification/loop39-*.log`,
+`loop39-read-sidecar/`, and `android-read-loop39-86c25f970b/` (baseline/final
+assertions, source comparison, build receipts, raw journals and screenshots).
+
+All owned native processes stopped: **9/9 cleanup checks**, four ports free.
+The actual server fixture stopped with **13/13 cleanup checks**, five ports closed,
+zero held reads and zero outbound-guard attempts. Earlier fixture cleanup passed
+**3/3** before its isolated failure-mode enhancement; original evidence is retained.
+
+Next: the native screenshots exposed an existing card-contract defect: Android
+renders the seeded onboarding question as Allow/Deny and ignores its choices.
+Source review also found live questions send `allow` without answer text, Deny
+sends invalid `dismiss`, response outcomes are discarded, and Always starts
+grant/decision concurrently. Provider-specific consequences are source-traced,
+not new native execution results. Fix live card classification and decision
+recovery first: permissions use `allow`/`deny`; questions use `answer` with exact
+text on the allowed thread-scoped `/respond` route. Preserve the actual
+`allowed-once`, `rejected`, `answered` or `unavailable` outcome. Fence the exact
+client/target/message/request, prevent double actions, expose failures, and do
+not automatically replay an ambiguous approval. Only eligible direct-bot grants
+can offer Always, with deliberate ordering and failure recovery.
+
+No-request seed cards need a separate narrow persistence/task contract; the web's
+generic card PATCH is not companion-allowlisted and must not be exposed wholesale.
+Native rehearsal/why/history evidence parity follows these action-correctness
+slices. The exact fields, routes, provider differences and native acceptance
+matrix are in `loop40-native-cards-audit.md`. Then verify a bundled RELEASE
+variant and the actual merged HTTP policy; debug's allowance is not release proof.
+Any explicit app-wide HTTP allowance must preserve HTTPS and cannot be described
+as LAN-only. No native card interaction or release policy changed in this slice.
+
+Desktop candidate `8966619`, public release/CI billing/VPS identity/signing/mirror,
+iOS/Watch, real Google, VM, portable backup/sync and full Mimosa gates remain open.
+The demo at 8845, real accounts and existing release-handoff stash are untouched.
+No dependency or live-provider configuration changed. The full goal remains active.
+Latest allowance is **49% used / 51% remaining**; no reset consumed.
+
+Pre-commit pull/rebase is up to date; the existing stash is preserved.
+Post-push GET-only reachability and download metadata are recorded separately in
+`.omb-scratch/verification/loop39-production-get.json`; HTTP 200 is not evidence
+of a newly deployed source SHA or published desktop binary.
