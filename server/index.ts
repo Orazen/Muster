@@ -2,7 +2,7 @@
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFileSync, statSync, unlinkSync } from "node:fs";
+import { readFileSync, existsSync, statSync, unlinkSync } from "node:fs";
 import { writeFileAtomic } from "./atomic.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
@@ -39,7 +39,7 @@ import { SeedAnswerDispatcher, seedAnswerInputSchema, seedStartInputSchema, seed
 import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
-import { resolveLocalObscuraMount, OBSCURA_TOOLS } from "./obscura.ts";
+import { installObscuraLocal, resolveObscuraMount, OBSCURA_TOOLS } from "./obscura.ts";
 import { exportSoulMd, parseSoulMd } from "./soul-md.ts";
 import {
   CUSTOM_MODELS_MIN,
@@ -2219,7 +2219,7 @@ async function startTurn(
       // obscura silently degrades to "no browser tools" rather than
       // failing every turn with a spawn error.
       if (bot.browser === true && instance.adapter.capabilities.customMcp === true) {
-        const obscuraMount = resolveLocalObscuraMount((name) => findCliCandidates(name)[0]);
+        const obscuraMount = resolveObscuraMount(DATA_DIR, (name) => findCliCandidates(name)[0]);
         if (obscuraMount) {
           integrations.custom = [
             ...(integrations.custom ?? []),
@@ -6775,7 +6775,7 @@ let requestUserEmail = "";
     // this the toggle happily reads ON while every turn silently runs with
     // zero browser tools (the mount is skipped when the binary is absent).
     if (path === "/api/browser-status" && method === "GET") {
-      const mount = resolveLocalObscuraMount((name) => findCliCandidates(name)[0]);
+      const mount = resolveObscuraMount(DATA_DIR, (name) => findCliCandidates(name)[0]);
       const botsWithBrowser = store.bots.filter((b) => b.browser === true && !b.hidden).map((b) => ({ id: b.id, name: b.name }));
       return json(res, 200, {
         available: Boolean(mount),
@@ -6783,6 +6783,20 @@ let requestUserEmail = "";
         bots: botsWithBrowser,
         tools: OBSCURA_TOOLS.length,
       });
+    }
+
+    // ── Browser (Obscura) auto-install ──────────────────────────────────
+    // One click in the settings card: download the official release binary
+    // for this platform into the data dir and verify it runs. Concurrent
+    // calls share one flight inside installObscuraLocal; the mount re-resolves
+    // per bot turn, so no restart is needed after a successful install.
+    if (path === "/api/browser-install" && method === "POST") {
+      if (process.platform === "win32") {
+        return json(res, 200, { ok: false, error: "Automatic install isn't available on Windows yet — extract the release .zip manually." });
+      }
+      const result = await installObscuraLocal(DATA_DIR);
+      if (!result.ok) return json(res, 200, { ok: false, error: result.error ?? "Install failed." });
+      return json(res, 200, { ok: true, command: result.command });
     }
 
     // ── Browser panel (human-visible Chromium, per bot) ─────────────────

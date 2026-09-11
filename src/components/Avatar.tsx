@@ -15,7 +15,7 @@ import {
 } from "react";
 import { AGENT_COLORS, type AgentCharacter, type AgentColor, type AgentMotion, type AgentState } from "@/lib/mascot";
 import { TEAMMATE_BODY_SILHOUETTES } from "@/lib/avatar-shapes";
-import { BlobBot } from "@/lib/musterbot";
+import { BlobBot, FlowerBot, MUSTERBOT_ORANGE } from "@/lib/musterbot";
 import { LottieCharacter } from "./LottieCharacter";
 import { StarTeammate } from "./StarTeammate";
 import {
@@ -146,10 +146,10 @@ export type AgentAvatarProps = {
 function AgentAvatarComponent(
   {
     color,
-    // The musterbot blob is the default teammate body — every bot is a
-    // blob unless the user explicitly picks the star, cursor mascot or a
-    // lottie character in settings.
-    character = "blob",
+    // The app-icon flower is the default teammate body — every bot wears
+    // the brand mark unless the user explicitly picks the star, blob,
+    // cursor mascot or a lottie character in settings.
+    character = "flower",
     state = "idle",
     expression,
     size = 44,
@@ -220,6 +220,19 @@ function AgentAvatarComponent(
         seed={seed ?? label ?? `blob-${color}`}
         color={AGENT_COLORS[color] ?? AGENT_COLORS.green}
         state={motionState ?? state}
+        size={size}
+        label={label}
+        animated={animated}
+        gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
+      />
+    );
+  }
+
+  if (character === "flower") {
+    return (
+      <FlowerBot
+        state={motionState ?? state}
+        color={AGENT_COLORS[color] ?? MUSTERBOT_ORANGE}
         size={size}
         label={label}
         animated={animated}

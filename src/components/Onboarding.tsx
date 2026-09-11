@@ -286,7 +286,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [botName, setBotName] = useState("");
   const [botRole, setBotRole] = useState("");
   const [botColor, setBotColor] = useState<AgentColor>("orange");
-  const [botCharacter, setBotCharacter] = useState<AgentCharacter>("blob");
+  const [botCharacter, setBotCharacter] = useState<AgentCharacter>("flower");
 
 
   // personality state

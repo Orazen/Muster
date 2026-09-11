@@ -83,3 +83,47 @@ describe("resolveLocalObscuraMount", () => {
     expect(resolveLocalObscuraMount(() => undefined)).toBeUndefined();
   });
 });
+
+describe("obscuraInstallAsset", () => {
+  it("maps this machine's platform/arch onto the official release asset", async () => {
+    const { obscuraInstallAsset } = await import("./obscura.ts");
+    const macArm = obscuraInstallAsset("darwin", "arm64");
+    expect(macArm).toEqual({
+      archive: "obscura-aarch64-macos.tar.gz",
+      url: "https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-aarch64-macos.tar.gz",
+    });
+    expect(obscuraInstallAsset("linux", "x64")!.archive).toBe("obscura-x86_64-linux.tar.gz");
+  });
+
+  it("has no automated path for Windows", async () => {
+    const { obscuraInstallAsset } = await import("./obscura.ts");
+    expect(obscuraInstallAsset("win32", "x64")).toBeUndefined();
+  });
+});
+
+describe("resolveObscuraMount", () => {
+  it("prefers the PATH candidate over the auto-installed binary", async () => {
+    const { resolveObscuraMount } = await import("./obscura.ts");
+    const mount = resolveObscuraMount("/data", (name) => (name === "obscura" ? "/usr/local/bin/obscura" : undefined));
+    expect(mount!.command).toBe("/usr/local/bin/obscura");
+  });
+
+  it("falls back to the auto-installed binary under <dataDir>/bin", async () => {
+    const { resolveObscuraMount } = await import("./obscura.ts");
+    const { mkdtempSync, writeFileSync, mkdirSync, chmodSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "obscura-mount-"));
+    mkdirSync(join(dir, "bin"), { recursive: true });
+    const bin = join(dir, "bin", "obscura");
+    writeFileSync(bin, "#!/bin/sh\n");
+    chmodSync(bin, 0o755);
+    const mount = resolveObscuraMount(dir, () => undefined);
+    expect(mount!.command).toBe(bin);
+  });
+
+  it("returns undefined when neither PATH nor the data dir has a binary", async () => {
+    const { resolveObscuraMount } = await import("./obscura.ts");
+    expect(resolveObscuraMount("/nonexistent-omb-data", () => undefined)).toBeUndefined();
+  });
+});

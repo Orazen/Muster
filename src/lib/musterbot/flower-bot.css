@@ -1,0 +1,62 @@
+/* FlowerBot — pose morphs are CSS transitions on the pose groups, so an
+ * expression change eases in fast and relaxes back to idle slower
+ * (mirroring the blobatar timing feel: 300ms in, 400ms out). */
+.flower-bot {
+  display: block;
+  flex: none;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.flower-bot__body {
+  transform-box: view-box;
+  transform-origin: center;
+  transition: transform 300ms ease-in-out;
+}
+
+.flower-bot__eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 300ms ease-in-out;
+}
+
+.flower-bot[data-pose="idle"] .flower-bot__body,
+.flower-bot[data-pose="idle"] .flower-bot__eye {
+  transition-duration: 400ms;
+}
+
+.flower-bot__eyelid {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.flower-bot[data-animated="true"] .flower-bot__eyelid {
+  animation: flower-bot-blink 5.7s ease-in-out infinite;
+}
+
+/* Float animates the path child, not the body group — a CSS animation on
+ * the group would override its inline pose translate for the duration. */
+.flower-bot[data-animated="true"] .flower-bot__body > path {
+  animation: flower-bot-float 6s ease-in-out infinite;
+  transform-box: view-box;
+  transform-origin: center;
+}
+
+@keyframes flower-bot-float {
+  0%, 100% { transform: translateY(0) rotate(-0.6deg); }
+  50% { transform: translateY(-2px) rotate(0.6deg); }
+}
+
+@keyframes flower-bot-blink {
+  0%, 45%, 49%, 100% { transform: scaleY(1); }
+  47% { transform: scaleY(0.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flower-bot,
+  .flower-bot *,
+  .flower-bot *::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}

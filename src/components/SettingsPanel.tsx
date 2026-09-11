@@ -355,12 +355,30 @@ function SoulCard({ botId }: { botId: string }) {
  * makes that state impossible to miss. */
 function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
   const [status, setStatus] = useState<{ available: boolean; command: string | null; tools: number } | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
 
   useEffect(() => {
     api("/api/browser-status")
       .then((data: { available: boolean; command: string | null; tools: number }) => setStatus(data))
       .catch(() => setStatus(null));
   }, []);
+
+  const install = async () => {
+    setInstalling(true);
+    setInstallError(null);
+    try {
+      const data = await api("/api/browser-install", { method: "POST" }) as { ok: boolean; error?: string };
+      if (!data.ok) setInstallError(data.error ?? "Install failed.");
+    } catch {
+      setInstallError("Install failed — is the Muster server running?");
+    } finally {
+      setInstalling(false);
+      api("/api/browser-status")
+        .then((data: { available: boolean; command: string | null; tools: number }) => setStatus(data))
+        .catch(() => {});
+    }
+  };
 
   const enabled = Boolean(bot.browser);
   const available = status?.available === true;
@@ -428,9 +446,22 @@ function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
           )
         ) : (
           <>
-            The browser engine isn't on this machine yet. Install it once, then restart Muster:{" "}
-            <code className="rounded bg-inset px-1.5 py-0.5 font-mono text-[12px] text-ink">npm i -g obscura-browser</code>{" "}
-            — on cloud computers it's already there.
+            The browser engine isn't on this machine yet.{" "}
+            {installError && <span className="text-danger">{installError} </span>}
+            <button
+              type="button"
+              onClick={install}
+              disabled={installing}
+              className={cn(
+                "ml-1 rounded-lg bg-accent px-3 py-1 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90",
+                installing && "opacity-60",
+              )}
+            >
+              {installing ? "Installing…" : "Install automatically"}
+            </button>
+            <span className="mt-1 block">
+              Takes a moment — no restart needed. On cloud computers it's already there.
+            </span>
           </>
         )}
       </div>
