@@ -32,13 +32,34 @@ final class WatchSession: ObservableObject {
         case offline(String)
     }
 
-    @Published private(set) var state = CompanionState()
+    @Published private(set) var state = CompanionState() {
+        didSet { approvalCoordinator.reconcile() }
+    }
+    @Published private(set) var approvalSessionId = UUID()
+    @Published private(set) var approvalActions: [ApprovalActionKey: ApprovalActionState] = [:]
     @Published private(set) var connection: Connection?
-    @Published private(set) var status: Status = .unpaired
+    @Published private(set) var status: Status = .unpaired {
+        didSet { if status != .live { approvalCoordinator.connectionChanged() } }
+    }
     /// Transient, user-facing failures from an action they just took.
     @Published var actionError: String?
 
-    private var client: CompanionClient?
+    private var client: CompanionClient? {
+        didSet {
+            streamGeneration += 1
+            streamTask?.cancel()
+            streamTask = nil
+            approvalSessionId = UUID()
+            approvalCoordinator.bind(sessionId: approvalSessionId, transport: client)
+        }
+    }
+    private var pairingGeneration = 0
+    private lazy var approvalCoordinator = ApprovalActionCoordinator(
+        readState: { [weak self] in self?.state ?? CompanionState() },
+        changed: { [weak self] in self?.approvalActions = $0 },
+        unauthorized: { [weak self] in self?.status = .unauthorized },
+        confirmed: { _, _ in WKInterfaceDevice.current().play(.success) }
+    )
     private var streamTask: Task<Void, Never>?
     /// Identifies the task currently stored in `streamTask`. A cancelled task
     /// can finish after its replacement starts; its cleanup must not clear
@@ -95,11 +116,15 @@ final class WatchSession: ObservableObject {
     /// to defaults, deliberately apart, so the thing that gets backed up is
     /// never the credential.
     func pair(with connection: Connection, credential: String) async throws {
+        pairingGeneration += 1
+        let generation = pairingGeneration
         let paired = try await CompanionClient.pair(
             connection: connection,
             credential: credential,
             deviceName: WKInterfaceDevice.current().name
         )
+        try Task.checkCancellation()
+        guard pairingGeneration == generation else { throw CancellationError() }
         // prefer the name the computer calls itself over the Bonjour label
         var stored = connection
         if !paired.serverName.isEmpty { stored.name = paired.serverName }
@@ -115,6 +140,8 @@ final class WatchSession: ObservableObject {
     }
 
     func signOut() {
+        pairingGeneration += 1
+        streamGeneration += 1
         streamTask?.cancel()
         streamTask = nil
         restorePending = false
@@ -133,13 +160,15 @@ final class WatchSession: ObservableObject {
         // A restore that found the keychain locked left `client` nil on
         // purpose. Coming to the front is the moment worth retrying on.
         if client == nil, restorePending { restore() }
-        guard client != nil, streamTask == nil else { return }
+        guard let client, streamTask == nil else { return }
+        let identity = approvalSessionId
+        status = .connecting
         reconnectDelay = 0
         streamGeneration += 1
         let generation = streamGeneration
         streamTask = Task { [weak self] in
             guard let self else { return }
-            await self.run()
+            await self.run(client: client, identity: identity, generation: generation)
             guard self.streamGeneration == generation else { return }
             self.streamTask = nil
         }
@@ -150,13 +179,21 @@ final class WatchSession: ObservableObject {
     /// deliberately means the cursor is written down at a known point
     /// instead of wherever the socket happened to die.
     func disconnect() {
+        streamGeneration += 1
+        approvalCoordinator.connectionChanged()
         streamTask?.cancel()
         streamTask = nil
     }
 
-    private func run() async {
-        while !Task.isCancelled {
-            guard let client else { return }
+    func setForeground(_ active: Bool) { approvalCoordinator.setForeground(active) }
+
+    private func currentStream(_ identity: UUID, _ generation: Int) -> Bool {
+        !Task.isCancelled && approvalSessionId == identity && streamGeneration == generation && client != nil
+    }
+
+    private func run(client: CompanionClient, identity: UUID, generation: Int) async {
+        while currentStream(identity, generation) {
+            approvalCoordinator.connectionChanged()
             status = .connecting
             log.info("opening stream, cursor=\(self.state.cursor ?? "none", privacy: .public)")
             do {
@@ -164,7 +201,7 @@ final class WatchSession: ObservableObject {
                 // seconds is the one thing a watch connection must never ask
                 // the harness for.
                 for try await frame in try client.events(since: state.cursor, screens: false) {
-                    if Task.isCancelled { return }
+                    guard currentStream(identity, generation) else { return }
                     reconnectDelay = 0
 
                     if case let .hello(cursor, resumed) = frame.frame {
@@ -173,7 +210,9 @@ final class WatchSession: ObservableObject {
                         // the one case that costs a full hydrate. Commit the
                         // hello cursor only after that hydrate succeeds.
                         if !resumed {
-                            try await hydrate()
+                            let fleet = try await client.fleet(messages: 50)
+                            guard currentStream(identity, generation) else { return }
+                            state.hydrate(fleet)
                             state.resetCursor(cursor)
                         }
                         status = .live
@@ -182,17 +221,22 @@ final class WatchSession: ObservableObject {
                     state.apply(frame)
                     state.advance(to: frame.seq)
                 }
+                guard currentStream(identity, generation) else { return }
+                approvalCoordinator.connectionChanged()
                 log.notice("stream ended without an error")
                 status = .offline("Lost the connection.")
             } catch let error as APIError where error.isUnauthorized {
+                guard currentStream(identity, generation) else { return }
+                approvalCoordinator.connectionChanged()
                 log.error("stream refused: unauthorized")
                 status = .unauthorized
                 return
             } catch {
-                if Task.isCancelled || error is CancellationError {
+                if !currentStream(identity, generation) || error is CancellationError {
                     log.info("stream closed by us")
                     return
                 }
+                approvalCoordinator.connectionChanged()
                 log.error("stream failed: \(error.localizedDescription, privacy: .public)")
                 status = .offline(error.localizedDescription)
             }
@@ -203,13 +247,6 @@ final class WatchSession: ObservableObject {
             reconnectDelay = reconnectDelay == 0 ? 1 : min(reconnectDelay * 2, 15)
             try? await Task.sleep(nanoseconds: reconnectDelay * 1_000_000_000)
         }
-    }
-
-    private func hydrate() async throws {
-        guard let client else { return }
-        let fleet = try await client.fleet(messages: 50)
-        log.info("hydrated \(fleet.bots.count, privacy: .public) bots, \(fleet.groups.count, privacy: .public) rooms")
-        state.hydrate(fleet)
     }
 
     // MARK: - Actions
@@ -227,29 +264,35 @@ final class WatchSession: ObservableObject {
         await perform { try await $0.send(text: text, toRoom: room.id) }
     }
 
-    /// Answer an approval or a question, addressed by thread. Permission
-    /// cards answer allow/deny; a question answers with the chosen text.
-    /// The harness tells them apart by `behavior`.
-    func answer(threadId: String, card: OptionCard, choice: String) async {
-        guard let requestId = card.requestId else { return }
-        await perform {
-            if card.isPermission {
-                try await $0.respond(
-                    threadId: threadId,
-                    requestId: requestId,
-                    behavior: choice.lowercased() == "allow" ? "allow" : "deny"
-                )
-            } else {
-                try await $0.respond(threadId: threadId, requestId: requestId, behavior: "answer", message: choice)
-            }
-        }
+    func approvalContext(threadId: String) -> ComposerContext? {
+        let bots = state.bots.filter { $0.threadId == threadId }
+        let rooms = state.rooms.filter { $0.threadId == threadId }
+        guard bots.count + rooms.count == 1 else { return nil }
+        let target: ComposerTarget
+        if let bot = bots.first {
+            target = ComposerTarget(kind: .bot, ownerId: bot.id, threadId: threadId)
+        } else if let room = rooms.first {
+            target = ComposerTarget(kind: .room, ownerId: room.id, threadId: threadId)
+        } else { return nil }
+        return ComposerContext(sessionId: approvalSessionId, target: target)
     }
 
-    /// "Always allow" — the grant key comes from the card, never from
-    /// anything derived here.
-    func alwaysAllow(bot: Bot, card: OptionCard) async {
-        guard let key = card.allowKey else { return }
-        await perform { try await $0.alwaysAllow(botId: bot.id, key: key) }
+    func viewApproval(_ context: ComposerContext) -> ApprovalViewLease { approvalCoordinator.enter(context) }
+    func leaveApproval(_ lease: ApprovalViewLease) { approvalCoordinator.leave(lease) }
+    func approvalReference(threadId: String, message: Message) -> ApprovalReference? {
+        guard let context = approvalContext(threadId: threadId) else { return nil }
+        return approvalCoordinator.reference(for: context, message: message)
+    }
+    func approvalState(threadId: String, message: Message) -> ApprovalActionState? {
+        guard let context = approvalContext(threadId: threadId), let requestId = message.card?.requestId else { return nil }
+        return approvalCoordinator.actionState(for: context, cardId: message.id, requestId: requestId)
+    }
+    func canSubmitApproval(_ reference: ApprovalReference, lease: ApprovalViewLease?) -> Bool {
+        status == .live && approvalCoordinator.canSubmit(reference, lease: lease)
+    }
+    func submitApproval(_ reference: ApprovalReference, action: ApprovalAction, lease: ApprovalViewLease?) {
+        guard canSubmitApproval(reference, lease: lease) else { return }
+        approvalCoordinator.submit(reference, action: action, lease: lease)
     }
 
     func interrupt(bot: Bot) async {
@@ -266,11 +309,14 @@ final class WatchSession: ObservableObject {
 
     private func perform(quietly: Bool = false, _ body: (CompanionClient) async throws -> Void) async {
         guard let client else { return }
+        let identity = approvalSessionId
         do {
             try await body(client)
         } catch let error as APIError where error.isUnauthorized {
+            guard identity == approvalSessionId else { return }
             status = .unauthorized
         } catch {
+            guard identity == approvalSessionId else { return }
             if !quietly { actionError = error.localizedDescription }
         }
     }

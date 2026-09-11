@@ -30,6 +30,7 @@ public final class ApprovalActionCoordinator {
         var stage = Stage.preparing
         var grantSaved = false
         var invalidated = false
+        var confirmationEmitted = false
         var task: Task<Void, Never>?
         var timer: Task<Void, Never>?
         init(reference: ApprovalReference, action: ApprovalAction, lease: ApprovalViewLease, transport: any ApprovalTransport) {
@@ -46,14 +47,18 @@ public final class ApprovalActionCoordinator {
     private let readState: () -> CompanionState
     private let changed: ([ApprovalActionKey: ApprovalActionState]) -> Void
     private let unauthorized: () -> Void
+    private let confirmed: (ApprovalReference, ApprovalOutcome) -> Void
     private let timeoutNanoseconds: UInt64
     private let maximumContexts: Int
 
     public init(readState: @escaping () -> CompanionState,
                 changed: @escaping ([ApprovalActionKey: ApprovalActionState]) -> Void,
-                unauthorized: @escaping () -> Void = {}, timeoutNanoseconds: UInt64 = 20_000_000_000,
+                unauthorized: @escaping () -> Void = {},
+                confirmed: @escaping (ApprovalReference, ApprovalOutcome) -> Void = { _, _ in },
+                timeoutNanoseconds: UInt64 = 20_000_000_000,
                 maximumContexts: Int = 64) {
         self.readState = readState; self.changed = changed; self.unauthorized = unauthorized
+        self.confirmed = confirmed
         self.timeoutNanoseconds = timeoutNanoseconds; self.maximumContexts = max(1, maximumContexts)
     }
 
@@ -192,6 +197,11 @@ public final class ApprovalActionCoordinator {
                 let prefix = request.grantSaved ? "The preference was saved. " : ""
                 let result = outcome == .allowedOnce ? "Allowed once." : outcome == .rejected ? "Denied." : "Answer delivered."
                 publish(request, phase: .settled, message: prefix + result, outcome: outcome)
+                // Publication can synchronously retire the session or view.
+                // Feedback belongs only to this still-current checked receipt.
+                guard !Task.isCancelled, current(request, pending: false), !request.confirmationEmitted else { return }
+                request.confirmationEmitted = true
+                confirmed(request.reference, outcome)
             }
         } catch {
             guard owns(request) else { return }

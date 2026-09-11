@@ -146,7 +146,10 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # Single-target watch app: no extension, no companion embedding.
         WKApplication: true
-        WKRunsIndependentlyOfCompanionApp: true
+        # This target pairs directly with the harness, with no iPhone bundle.
+        # Use only WKWatchOnly: declaring independence from an iPhone
+        # companion at the same time makes watchOS reject installation.
+        WKWatchOnly: true
         # Keep the shared Bonjour declarations. Apple TN3179 does not list
         # watchOS as supporting local-network privacy; do not assume these
         # keys produce an iOS-style permission prompt on the watch.

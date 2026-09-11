@@ -34,12 +34,16 @@ private final class ApprovalHarness {
     var identity = ApprovalFixtures.sessionId
     var changes = 0
     var unauthorized = 0
+    var confirmations: [(reference: ApprovalReference, outcome: ApprovalOutcome)] = []
+    var onChange: (([ApprovalActionKey: ApprovalActionState]) -> Void)?
     let transport = HeldApprovalTransport()
     var lease: ApprovalViewLease!
     let timeout: UInt64
     let maximum: Int
     lazy var coordinator = ApprovalActionCoordinator(readState: { [unowned self] in state },
-        changed: { [unowned self] _ in changes += 1 }, unauthorized: { [unowned self] in unauthorized += 1 },
+        changed: { [unowned self] actions in changes += 1; onChange?(actions) },
+        unauthorized: { [unowned self] in unauthorized += 1 },
+        confirmed: { [unowned self] reference, outcome in confirmations.append((reference, outcome)) },
         timeoutNanoseconds: timeout, maximumContexts: maximum)
     var context: ComposerContext { .init(sessionId: identity, target: ApprovalFixtures.context.target) }
     var reference: ApprovalReference { coordinator.reference(for: context, message: state.messages["thread"]![0])! }
@@ -69,6 +73,60 @@ private final class ApprovalHarness {
 }
 
 final class ApprovalCoordinatorTests: XCTestCase {
+    @MainActor func testCheckedAnswerOutcomesConfirmOnceWithoutReplay() async {
+        for (action, outcome) in [(ApprovalAction.allow, ApprovalOutcome.allowedOnce), (.deny, .rejected), (.answer("Allow"), .answered)] {
+            let h = ApprovalHarness()
+            if case .answer = action { h.state = ApprovalFixtures.state(message: ApprovalFixtures.message(tool: nil)) }
+            let reference = h.reference
+            XCTAssertNotNil(h.submit(action)); await h.calls(1)
+            XCTAssertTrue(h.confirmations.isEmpty)
+            await h.transport.respond(outcome); await h.closed(reference)
+            XCTAssertEqual(h.confirmations.count, 1)
+            XCTAssertEqual(h.confirmations.first?.outcome, outcome)
+            XCTAssertEqual(h.confirmations.first?.reference.context, reference.context)
+            XCTAssertEqual(h.confirmations.first?.reference.key, reference.key)
+            XCTAssertEqual(h.confirmations.first?.reference.signature, reference.signature)
+            h.coordinator.reconcile(); h.coordinator.setForeground(false); h.coordinator.setForeground(true)
+            h.coordinator.leave(h.lease); h.lease = h.coordinator.enter(h.context)
+            XCTAssertNil(h.submit(action)); await h.assertCallCount(1)
+            XCTAssertEqual(h.confirmations.count, 1, "Rendering, reconciliation and reopening do not replay feedback")
+        }
+    }
+
+    @MainActor func testGrantReceiptDoesNotConfirmBeforeThePermissionAnswer() async {
+        let h = ApprovalHarness(); let reference = h.reference
+        h.submit(); await h.calls(1); XCTAssertTrue(h.confirmations.isEmpty)
+        await h.transport.grant(); await h.calls(2)
+        XCTAssertTrue(h.coordinator.actionState(for: reference)!.grantSaved)
+        XCTAssertTrue(h.confirmations.isEmpty, "Saving a preference is not permission delivery")
+        await h.transport.respond(index: 1); await h.closed(reference)
+        XCTAssertEqual(h.confirmations.count, 1); XCTAssertEqual(h.confirmations.first?.outcome, .allowedOnce)
+    }
+
+    @MainActor func testSettlementPublicationRetirementSuppressesConfirmation() async {
+        for retirement in 0..<4 {
+            let h = ApprovalHarness(); let reference = h.reference
+            h.submit(.allow); await h.calls(1)
+            var retired = false
+            h.onChange = { [unowned h] actions in
+                guard !retired, actions[reference.key]?.phase == .settled else { return }
+                retired = true
+                switch retirement {
+                case 0: h.coordinator.leave(h.lease)
+                case 1:
+                    h.identity = UUID(); h.coordinator.bind(sessionId: h.identity, transport: h.transport)
+                case 2: h.coordinator.setForeground(false)
+                default: h.state.messages["thread"]?[0].card?.allowKey = "Bash:replacement"
+                }
+            }
+            await h.transport.respond()
+            let deadline = Date().addingTimeInterval(2)
+            while !retired && Date() < deadline { await Task.yield() }
+            XCTAssertTrue(retired); await h.closed(reference)
+            XCTAssertTrue(h.confirmations.isEmpty, "Publication retired context \(retirement) before feedback")
+        }
+    }
+
     @MainActor func testSynchronousPhysicalLockAndGrantThenAnswerOrdering() async throws {
         let h = ApprovalHarness(); let reference = h.reference
         XCTAssertNotNil(h.submit()); XCTAssertNil(h.submit(.allow)); XCTAssertNil(h.submit(.deny))
@@ -91,6 +149,7 @@ final class ApprovalCoordinatorTests: XCTestCase {
         XCTAssertEqual(state.phase, .failed); XCTAssertFalse(state.grantSaved)
         XCTAssertTrue(state.message!.contains("No permission answer was sent"))
         XCTAssertTrue(state.message!.contains("Remove an existing saved tool"))
+        XCTAssertTrue(h.confirmations.isEmpty)
         await h.assertCallCount(1)
     }
 
@@ -117,6 +176,7 @@ final class ApprovalCoordinatorTests: XCTestCase {
         let state = h.coordinator.actionState(for: reference)!
         XCTAssertTrue(state.grantSaved); XCTAssertEqual(state.phase, .failed)
         XCTAssertTrue(state.message!.contains("preference was saved")); XCTAssertTrue(state.message!.contains("Couldn't confirm the answer"))
+        XCTAssertTrue(h.confirmations.isEmpty)
         await h.assertCallCount(2)
     }
 
@@ -129,6 +189,7 @@ final class ApprovalCoordinatorTests: XCTestCase {
         let state = h.coordinator.actionState(for: h.context, cardId: reference.cardId, requestId: reference.requestId)
         XCTAssertEqual(state?.phase, .failed); XCTAssertEqual(state?.outcome, .unavailable); XCTAssertEqual(state?.grantSaved, true)
         XCTAssertTrue(state!.message!.contains("not delivered")); XCTAssertNil(h.submit(.allow, reference: reference))
+        XCTAssertTrue(h.confirmations.isEmpty)
     }
 
     @MainActor func testAcceptedReceiptArrivingAfterSSEIsStillAccepted() async {
@@ -136,6 +197,7 @@ final class ApprovalCoordinatorTests: XCTestCase {
         h.state.messages["thread"]?[0].card?.answered = "deny"; h.coordinator.reconcile()
         await h.transport.respond(.rejected); await h.closed(reference)
         XCTAssertEqual(h.coordinator.actionState(for: reference)?.outcome, .rejected)
+        XCTAssertEqual(h.confirmations.count, 1); XCTAssertEqual(h.confirmations.first?.outcome, .rejected)
     }
 
     @MainActor func testUnknownOrWrongOutcomeCannotSettle() async {
@@ -143,6 +205,7 @@ final class ApprovalCoordinatorTests: XCTestCase {
         await h.transport.respond(.allowedOnce); await h.closed(reference)
         XCTAssertEqual(h.coordinator.actionState(for: reference)?.phase, .failed)
         XCTAssertNil(h.coordinator.actionState(for: reference)?.outcome)
+        XCTAssertTrue(h.confirmations.isEmpty)
     }
 
     @MainActor func testLeaveBeforeTaskDispatchDoesNothing() async {
@@ -182,7 +245,9 @@ final class ApprovalCoordinatorTests: XCTestCase {
         XCTAssertTrue(h.coordinator.actionState(for: reference)!.inFlight); XCTAssertNil(h.submit(.allow))
         await h.transport.grant(); await h.closed(reference)
         await h.assertCallCount(1)
+        XCTAssertTrue(h.confirmations.isEmpty)
         XCTAssertNotNil(h.submit(.deny)); await h.calls(2); await h.transport.respond(.rejected, index: 1); await h.closed(reference)
+        XCTAssertEqual(h.confirmations.count, 1)
     }
 
     @MainActor func testBackgroundAndReconnectCancelWithoutAutomaticReplay() async {
@@ -191,6 +256,7 @@ final class ApprovalCoordinatorTests: XCTestCase {
             if reconnect { h.coordinator.connectionChanged() } else { h.coordinator.setForeground(false); h.coordinator.setForeground(true) }
             XCTAssertNil(h.submit(.allow)); await h.transport.respond(); await h.closed(reference)
             XCTAssertEqual(h.coordinator.actionState(for: reference)?.phase, .failed)
+            XCTAssertTrue(h.confirmations.isEmpty)
             await h.assertCallCount(1)
         }
     }
@@ -200,6 +266,7 @@ final class ApprovalCoordinatorTests: XCTestCase {
         await h.failed(reference); XCTAssertTrue(h.coordinator.actionState(for: reference)!.inFlight); XCTAssertNil(h.submit(.allow))
         await h.transport.respond(); await h.closed(reference)
         XCTAssertNil(h.coordinator.actionState(for: reference)?.outcome); XCTAssertEqual(h.coordinator.actionState(for: reference)?.phase, .failed)
+        XCTAssertTrue(h.confirmations.isEmpty)
     }
 
     @MainActor func testNewSessionDoesNotAdoptOldGrantOrUseReplacementTransport() async {
@@ -222,6 +289,7 @@ final class ApprovalCoordinatorTests: XCTestCase {
         let deadline = Date().addingTimeInterval(2)
         while h.changes == changes && Date() < deadline { await Task.yield() }
         XCTAssertGreaterThan(h.changes, changes); XCTAssertTrue(h.coordinator.canSubmit(reference, lease: h.lease))
+        XCTAssertTrue(h.confirmations.isEmpty)
     }
 
     @MainActor func testOldLeaseCannotSubmitOrDismissNewLease() {

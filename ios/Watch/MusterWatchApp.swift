@@ -14,8 +14,13 @@ struct MusterWatchApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(session)
+                .task {
+                    session.setForeground(scenePhase == .active)
+                    if scenePhase == .active { session.connect() }
+                }
         }
         .onChange(of: scenePhase) { _, phase in
+            session.setForeground(phase == .active)
             switch phase {
             case .active:
                 session.connect()

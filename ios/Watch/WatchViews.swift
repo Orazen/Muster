@@ -141,7 +141,9 @@ struct PairingView: View {
 
                 Section("Pairing code") {
                     TextField("6-digit code", text: $code)
+                        .accessibilityIdentifier("watch-pairing-code")
                     Button("Pair") { pair() }
+                        .accessibilityIdentifier("watch-pairing-submit")
                         .disabled(pairing || chosen == nil || code.count < 6)
                 }
 
@@ -159,6 +161,7 @@ struct PairingView: View {
                             error = "Enter an HTTPS address or a host and port from the Companion panel."
                         }
                     }
+                    .accessibilityIdentifier("watch-use-address")
                     .disabled(manualAddress.isEmpty)
                 }
 
@@ -233,6 +236,7 @@ struct FleetView: View {
                             )) {
                                 ApprovalRow(approval: approval)
                             }
+                            .accessibilityIdentifier("watch-approval-row-\(approval.message.id)")
                         }
                     }
                 }
@@ -350,7 +354,9 @@ struct ApprovalView: View {
     let threadId: String
     let messageId: String
 
-    @State private var busy = false
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var lease: ApprovalViewLease?
+    @State private var visible = false
     @State private var showingPreviousRun = false
 
     /// Resolved live from state, not held by value: the answer arrives as a
@@ -358,6 +364,28 @@ struct ApprovalView: View {
     /// it the moment that lands.
     private var message: Message? {
         session.state.transcript(forThread: threadId).first { $0.id == messageId }
+    }
+
+    private var reference: ApprovalReference? {
+        guard let message else { return nil }
+        return session.approvalReference(threadId: threadId, message: message)
+    }
+    private var actionState: ApprovalActionState? {
+        guard let message else { return nil }
+        return session.approvalState(threadId: threadId, message: message)
+    }
+    private var canSubmit: Bool {
+        guard scenePhase == .active, let reference else { return false }
+        return session.canSubmitApproval(reference, lease: lease)
+    }
+    private var permissionOptions: [(index: Int, label: String, action: ApprovalAction?)] {
+        guard let reference else { return [] }
+        return reference.options.enumerated().map {
+            (index: $0.offset, label: $0.element, action: ApprovalContract.action(for: $0.element, reference: reference))
+        }.sorted { lhs, rhs in
+            if (lhs.action == .deny) != (rhs.action == .deny) { return lhs.action == .deny }
+            return lhs.index < rhs.index
+        }
     }
 
     var body: some View {
@@ -410,36 +438,48 @@ struct ApprovalView: View {
                         }
                     }
 
-                    if busy {
-                        ProgressView()
-                    } else if card.answered != nil || card.dismissed == true {
-                        Text("Answered — the bot carries on.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if card.isPermission {
-                        Button {
-                            decide(choice: "deny")
-                        } label: {
-                            Label("Deny", systemImage: "xmark")
-                        }
-                        .tint(.red)
-                        Button {
-                            decide(choice: "allow")
-                        } label: {
-                            Label("Allow", systemImage: "checkmark")
-                        }
-                        .tint(.green)
-                        if let bot = session.state.bot(forThread: threadId), card.allowKey != nil {
-                            Button {
-                                decideAlways(bot: bot, card: card)
-                            } label: {
-                                Label("Always allow", systemImage: "checkmark.seal")
+                    if card.isPending {
+                        if let reference {
+                            if card.isPermission {
+                                ForEach(permissionOptions, id: \.index) { option in
+                                    Button(option.label) {
+                                        if let action = option.action { submit(action) }
+                                    }
+                                    .tint(option.action == .deny ? .red : .accentColor)
+                                    .disabled(!canSubmit || option.action == nil)
+                                    .accessibilityIdentifier("watch-approval-option-\(option.index)")
+                                }
+                                if ApprovalContract.canAlwaysAllow(reference),
+                                   !card.options.contains(where: ApprovalContract.isAlwaysAllowOption) {
+                                    Button("Always allow") { submit(.alwaysAllow) }
+                                        .disabled(!canSubmit)
+                                        .accessibilityIdentifier("watch-approval-always")
+                                }
+                            } else {
+                                ForEach(Array(card.options.enumerated()), id: \.offset) { index, option in
+                                    Button(option) { submit(.answer(option)) }
+                                        .disabled(!canSubmit)
+                                        .accessibilityIdentifier("watch-approval-option-\(index)")
+                                }
                             }
                         }
-                    } else {
-                        ForEach(card.options, id: \.self) { option in
-                            Button(option) { decide(choice: option) }
+                        if reference == nil || permissionOptions.contains(where: { $0.action == nil }) {
+                            Text("Review this request on your computer. This watch cannot confirm these choices.")
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
+                    } else if actionState?.message == nil {
+                        Text("This request is no longer pending.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if actionState?.inFlight == true {
+                        ProgressView("Confirming your choice…")
+                            .font(.caption2)
+                            .accessibilityIdentifier("watch-approval-progress")
+                    }
+                    if let feedback = actionState?.message {
+                        Text(feedback).font(.caption2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("watch-approval-recovery")
                     }
                 } else {
                     Text("That approval is no longer here.")
@@ -449,30 +489,25 @@ struct ApprovalView: View {
             .padding(.horizontal)
         }
         .navigationTitle("Approve")
-    }
-
-    /// Settle the card with an allow/deny or a chosen option. Always-allow
-    /// goes through `decideAlways` because the harness expects two calls:
-    /// the answer settles this card, the grant key stops the next one.
-    private func decide(choice: String) {
-        guard let card = message?.card, !busy else { return }
-        busy = true
-        Task {
-            await session.answer(threadId: threadId, card: card, choice: choice)
-            WKInterfaceDevice.current().play(.success)
-            busy = false
+        .onAppear { visible = true; enter() }
+        .onChange(of: session.approvalSessionId) { _, _ in if visible { enter() } }
+        .onChange(of: threadId) { _, _ in if visible { enter() } }
+        .onChange(of: messageId) { _, _ in if visible { enter() } }
+        .onDisappear {
+            visible = false
+            if let lease { session.leaveApproval(lease) }
+            lease = nil
         }
     }
 
-    private func decideAlways(bot: Bot, card: OptionCard) {
-        guard !busy else { return }
-        busy = true
-        Task {
-            await session.answer(threadId: threadId, card: card, choice: "allow")
-            await session.alwaysAllow(bot: bot, card: card)
-            WKInterfaceDevice.current().play(.success)
-            busy = false
-        }
+    private func enter() {
+        if let lease { session.leaveApproval(lease) }
+        lease = session.approvalContext(threadId: threadId).map { session.viewApproval($0) }
+    }
+
+    private func submit(_ action: ApprovalAction) {
+        guard canSubmit, let reference else { return }
+        session.submitApproval(reference, action: action, lease: lease)
     }
 }
 

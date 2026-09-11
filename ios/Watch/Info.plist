@@ -43,7 +43,7 @@
 	<string>Muster finds your computer on this network so your bots can reach you here.</string>
 	<key>WKApplication</key>
 	<true/>
-	<key>WKRunsIndependentlyOfCompanionApp</key>
+	<key>WKWatchOnly</key>
 	<true/>
 </dict>
 </plist>
