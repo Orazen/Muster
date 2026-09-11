@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, AlertTriangle, Loader2, Mic, ArrowLeft, Sparkles } from "lucide-react";
+import { Check, AlertTriangle, Loader2, Mic, ArrowLeft, Sparkles, ShieldCheck } from "lucide-react";
 import { MusterBloom } from "./MusterBloom";
 import { AgentAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, track } from "@/lib/analytics";
@@ -486,6 +486,16 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           A roster of AI agents that do real work on their own computer. Let&rsquo;s set yours up —
           it takes a minute.
         </p>
+        {/* Trust line: the top question a first-run user has is "where does
+            my stuff go" — answer it before they type anything (pattern from
+            local-first peers). Desktop is genuinely local; web holds provider
+            keys per account, so say "yours" without claiming on-device. */}
+        <p className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-secondary">
+          <ShieldCheck size={13} className="shrink-0 text-[#38d591]" />
+          {isDesktop
+            ? "Local-first: your keys and transcripts stay on your machine, and every bot asks before acting."
+            : "Your keys stay yours, and every bot asks before acting on anything risky."}
+        </p>
         <input
           autoFocus
           type="text"
@@ -896,6 +906,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         <button onClick={finish} disabled={creating} className="mt-3 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-40">
           Skip for now
         </button>
+        {/* Set the expectation before the handoff: the wizard closes into a
+            working conversation, not a dashboard — say so, and repeat the
+            approval guarantee once now that a real task is about to run. */}
+        <p className="mt-3 text-center text-[12px] leading-relaxed text-ink-secondary">
+          {botName.trim() ? `${botName.trim()} gets` : "Your bot gets"} straight to work — you&rsquo;ll see it think and act,
+          and it asks you before anything risky.
+        </p>
       </div>
     ),
   ];
