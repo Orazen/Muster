@@ -19,7 +19,7 @@ struct ChatView: View {
     let chat: Chat
     @EnvironmentObject private var session: Session
     @Environment(\.dismiss) private var dismiss
-    @State private var draft = ""
+    @State private var composerLease: ComposerViewLease?
     @State private var showingTasks = false
     @State private var shareFile: ShareFile?
     @State private var seedLease: UUID?
@@ -48,6 +48,7 @@ struct ChatView: View {
         // array as a unit; repeatedly reaching through ObservableObject for
         // every row only recomputes the same value.
         let transcript = messages
+        let composerContext = session.composerContext(for: chat)
         // A VStack with the composer as a sibling, rather than a scroll view
         // with `.safeAreaInset`. The inset version sized itself to its
         // content, so a short transcript left the composer floating in the
@@ -150,7 +151,7 @@ struct ChatView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            composer
+            composer(context: composerContext, lease: composerLease)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .navigationBarTitleDisplayMode(.inline)
@@ -242,15 +243,24 @@ struct ChatView: View {
         .onAppear {
             seedVisible = true
             if seedLease == nil { seedLease = session.viewSeedConversation(chat) }
+            if composerLease == nil { composerLease = session.viewComposer(composerContext) }
         }
         .onChange(of: session.seedSessionId) { _, _ in
             if let seedLease { session.leaveSeedConversation(seedLease) }
             seedLease = seedVisible ? session.viewSeedConversation(chat) : nil
+            if let composerLease { session.leaveComposer(composerLease) }
+            composerLease = seedVisible ? session.viewComposer(session.composerContext(for: chat)) : nil
+        }
+        .onChange(of: chat.threadId) { _, _ in
+            if let composerLease { session.leaveComposer(composerLease) }
+            composerLease = seedVisible ? session.viewComposer(session.composerContext(for: chat)) : nil
         }
         .onDisappear {
             seedVisible = false
             if let seedLease { session.leaveSeedConversation(seedLease) }
             seedLease = nil
+            if let composerLease { session.leaveComposer(composerLease) }
+            composerLease = nil
         }
     }
 
@@ -261,52 +271,67 @@ struct ChatView: View {
         return messages[index].at - messages[index - 1].at > 30 * 60 * 1000
     }
 
-    private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    private func submit() {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        draft = ""
-        Task { await session.send(text, to: current) }
-    }
-
-    private var composer: some View {
-        HStack(spacing: 10) {
-            TextField("Ask \(current.name)", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Capsule().fill(Color.secondary.opacity(0.16)))
-                .focused($composerFocused)
-                .submitLabel(.send)
-                // Return sends, Shift+Return breaks the line — the shape
-                // every chat app has. `.ignored` hands the keypress back to
-                // the text field, which is what inserts the newline; there is
-                // no way to type one otherwise once Return is claimed.
-                .onKeyPress(.return, phases: .down) { press in
-                    guard !press.modifiers.contains(.shift) else { return .ignored }
-                    submit()
-                    return .handled
-                }
-                // software keyboards have no Shift+Return, so their Return
-                // key is a send — which is what `.submitLabel(.send)` promises
-                .onSubmit(submit)
-
-            Button {
-                submit()
-            } label: {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(Color(uiColor: .systemBackground))
-                    .frame(width: 36, height: 36)
-                    .background(
-                        Circle().fill(canSend ? Color.primary : Color.secondary.opacity(0.35))
-                    )
+    private func composer(context: ComposerContext, lease: ComposerViewLease?) -> some View {
+        let draft = session.composerDraft(context)
+        let canSend = session.canSendComposer(context, lease: lease)
+        let canEdit = session.canEditComposer(context, lease: lease)
+        let submit = { session.submitComposer(context, lease: lease) }
+        return VStack(alignment: .leading, spacing: 8) {
+            if let message = draft.message {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("composer-recovery")
+            } else if draft.inFlight {
+                Text("Sending…").font(.footnote).foregroundStyle(.secondary)
+            } else if !canEdit {
+                Text("Reopen this conversation to write in its current task.")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
-            .disabled(!canSend)
-            .animation(.easeOut(duration: 0.15), value: canSend)
+            HStack(spacing: 10) {
+                TextField("Ask \(chat.name)", text: Binding(
+                    get: { session.composerDraft(context).text },
+                    set: { session.editComposer($0, context: context, lease: lease) }
+                ), axis: .vertical)
+                    .lineLimit(1...5)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(Color.secondary.opacity(0.16)))
+                    .focused($composerFocused)
+                    .disabled(!canEdit)
+                    .accessibilityLabel("Message draft")
+                    .accessibilityIdentifier("composer-field")
+                    .submitLabel(.send)
+                    // Return sends, Shift+Return breaks the line — the shape
+                    // every chat app has. `.ignored` hands the keypress back to
+                    // the text field, which is what inserts the newline; there is
+                    // no way to type one otherwise once Return is claimed.
+                    .onKeyPress(.return, phases: .down) { press in
+                        guard !press.modifiers.contains(.shift) else { return .ignored }
+                        submit()
+                        return .handled
+                    }
+                    // software keyboards have no Shift+Return, so their Return
+                    // key is a send — which is what `.submitLabel(.send)` promises
+                    .onSubmit(submit)
+
+                Button {
+                    submit()
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Color(uiColor: .systemBackground))
+                        .frame(width: 44, height: 44)
+                        .background(
+                            Circle().fill(canSend ? Color.primary : Color.secondary.opacity(0.35))
+                        )
+                }
+                .disabled(!canSend)
+                .accessibilityLabel("Send")
+                .accessibilityIdentifier("composer-send")
+                .animation(.easeOut(duration: 0.15), value: canSend)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

@@ -2128,3 +2128,74 @@ portability, VM and Mimosa gates. Allowance80%used/20%remaining; no reset consum
 Single existing heartbeat stays active subject to user pause and2%/1% handoff rules.
 Goal remains active. Post-push GET metadata and scheduler readback are recorded
 separately; a source push is not a native release.
+
+
+## Loop 46 — ordinary iPhone drafts and conversation-bound sends (2026-09-11)
+
+**Verified slice:** ordinary bot/room sending preserves the exact draft until a
+checked acknowledgement. The paired session owns drafts across navigation;
+synchronous request locks prevent duplicate taps and stay held until transport
+settles. Captured client, original displayed thread, view lease and edit revision
+prevent retired or late work from clearing a newer draft. Leaving/backgrounding
+cancels pending work without an automatic retry. Drafts are in memory, with at
+most 64 retained contexts; this is not app-restart backup.
+
+The client probes the same computer's authenticated, uncached health endpoint
+for `messageSendVersion: 1` before POST. Older desktops retain the draft and show
+update guidance. Requests carry `expectedThreadId`; the server validates it
+before writing or queuing and echoes a captured `threadId`, including queued
+acceptance. Client checks require HTTP202, true `ok`, matching thread and strictly
+typed optional echo fields. Raw Unicode/whitespace edits and the encoded
+1,000,000-byte request limit are covered. Existing Watch sends and seed-card
+coordination keep their contracts. Send has a 44pt target and readable recovery
+copy that tells the person to check chat before explicitly trying again.
+
+**Actual gates:** 236 root files / 3257 passed / 8 skipped, 287.63s; 222 Swift passed / 0 failed, 0.957s; 33 focused composer tests; 42/42 final-runtime HTTP checks, 2.472s; 7/7 native scenarios, 353.518s; cleanup 67/67 checks.
+Server typecheck, root lint and the ad hoc iPhoneSE3/iOS26.5 app build pass.
+All 73 non-Markdown iOS inputs match the accepted native source copy.
+The final native batch covers bot and room acceptance; failed-send retention and
+manual retry; double tap plus a newer edit; navigation with cancellation/scoped
+drafts; real accepted-response loss with one Store echo and no replay; and legacy
+health with zero message POSTs. Screenshots and exact request counters are kept
+in the ignored evidence. HTTP checks also cover malformed/stale targets, busy
+queueing and task switches around held original requests/responses. The response
+hold happens after server acceptance; it does not reproduce a switch during the
+server's internal start-turn await. That thread capture is source-reviewed.
+
+An acknowledgement establishes in-process acceptance, not completed work or
+durable storage: Store can catch SQLite write failures and busy queues live in
+memory. Some server errors occur after appending; missing acknowledgements must
+never trigger automatic resubmission. Separately observed SQLite rows in this
+fixture do not strengthen the production contract.
+
+**Retained failures:** initial native build launched 0 tests because of a harness
+callback annotation; initial native run passed 6/7, with its first case stopped by
+the OS keyboard tutorial before composer entry. Coordinate taps inserted slashes
+into the pairing address; the harness now checks tutorial dismissal and the exact
+address. Product iOS source stayed frozen. The first full root suite passed but
+lint rejected the parser's boundary style; the final parser uses Zod and the full
+suite was repeated. Initial HTTP42/42 and final-runtime HTTP42/42 are separate.
+A fixture provider edit raced launch: that identity ran no acceptance tests and
+was discarded. Its preflight was18/18 before launch and17/18 afterward; shutdown
+reported2passed/2failed while a zombie group probe returned EPERM. Independent
+14/14 checks proved its PIDs/groups and11ports gone with no extra signals. The
+fresh final fixture observes exact process groups and completed the final cleanup
+above. Both receipts remain; the earlier failure is not overwritten. Final-fixture cleanup first stopped at24passed/1failed because an interrupted offline provider left a stale PID receipt. Its exact owner and absent PID/group were verified before removing only that receipt, with no signals; cleanup was then rerun with a separate result file.
+
+Evidence: `.omb-scratch/verification/loop46-ios-composer/` (`verification.json`,
+`failed-runs.json`, final ownership/source manifests, both HTTP runs, native
+xcresults and cleanup), `loop46-composer/`, discarded `loop46-native-composer/`,
+and stopped `loop46-native-composer-final/`. Only the owned simulator and its
+fixture CA were deleted; all26 pre-existing devices and demo8845 were preserved.
+The original release-handoff stash remains. No test fixture service remains.
+
+**Next:** fix Always allow's swallowed grant error and client reacquisition;
+handle unavailable outcomes and permission choices explicitly with one bounded
+operation. Then replace the visible native cursor avatars with the canonical
+flower and reactions. Published desktop1.10.4/local1.10.5 remain distinct. Signing,
+Intel/mirror, CI billing, VPS trust, Google, Watch/minimum-iOS17 hardware, real
+models, Android release policy, backup ownership/portability, VM and Mimosa gates
+remain open. This slice does not establish a new native release. Allowance85%used/
+15%remaining, no reset consumed; keep the active goal and single existing heartbeat
+subject to user pause and the2%/1% handoff rules. Post-push GET and scheduler
+readback are separate receipts.

@@ -40,7 +40,7 @@ public enum APIError: Error, LocalizedError, Sendable {
     }
 }
 
-public struct CompanionClient: Sendable, SeedCardTransport {
+public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport {
     public let connection: Connection
     private let token: String?
     private let session: URLSession
@@ -268,6 +268,40 @@ public struct CompanionClient: Sendable, SeedCardTransport {
 
     public func send(text: String, toRoom groupId: String) async throws {
         try await send(try makeRequest("POST", "/api/groups/\(groupId)/messages", body: ["text": text]))
+    }
+
+    /// Ordinary iOS composer acknowledgment. The legacy send methods above
+    /// retain their existing Watch contract. A fresh capability probe avoids
+    /// submitting to old desktops that silently ignore expectedThreadId.
+    public func sendOrdinary(text: String, to target: ComposerTarget) async throws -> ComposerAcknowledgment {
+        guard target.isValid, !ComposerText.normalized(text).isEmpty else { throw APIError.badURL }
+        try Task.checkCancellation()
+        let collection = target.kind == .bot ? "bots" : "groups"
+        let request = try makeRequest("POST", "/api/\(collection)/\(target.ownerId)/messages",
+            body: ["text": text, "expectedThreadId": target.threadId])
+        guard (request.httpBody?.count ?? 0) <= 1_000_000 else { throw ComposerSendError.tooLarge }
+        var health = try makeRequest("GET", "/api/health")
+        health.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        health.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        let (healthData, healthResponse) = try await perform(health)
+        try Task.checkCancellation()
+        try Self.check(healthResponse, healthData)
+        struct Health: Decodable { let app: String; let messageSendVersion: Int }
+        guard (healthResponse as? HTTPURLResponse)?.statusCode == 200,
+              let capability = try? JSONDecoder().decode(Health.self, from: healthData),
+              capability.app == "muster", capability.messageSendVersion == 1 else {
+            throw ComposerSendError.upgradeRequired
+        }
+        // Cancellation may have occurred while the health response was in
+        // flight. Never turn a retired view's preflight into a later POST.
+        try Task.checkCancellation()
+        let (data, response) = try await perform(request)
+        try Task.checkCancellation()
+        try Self.check(response, data)
+        guard (response as? HTTPURLResponse)?.statusCode == 202 else {
+            throw APIError.transport("The computer did not confirm this send.")
+        }
+        return try ComposerAcknowledgment.decode(data, expectedThreadId: target.threadId, rawText: text)
     }
 
     /// Answer an approval or a question.

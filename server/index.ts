@@ -21,6 +21,7 @@ import {
 import type { JsonValue } from "./schema.ts";
 import { modelAcceptsImages } from "./contracts.ts";
 import { isSameOrigin, needsSameOriginMutationCheck } from "./origin-gate.ts";
+import { MESSAGE_SEND_VERSION, requireMessageThread } from "./message-send-contract.ts";
 import {
   customerThreadKey,
   parseInboundMessages,
@@ -5767,11 +5768,12 @@ let requestUserEmail = "";
       // echo contract: same as the 1:1 messages route above
       const group = store.group(m[1]);
       if (!group) return json(res, 404, { error: "no such room" });
-      const before = store.messagesFor(group.threadId).length;
+      const threadId = requireMessageThread(body, group.threadId);
+      const before = store.messagesFor(threadId).length;
       startGroupTurn(m[1], text);
-      const message = store.messagesFor(group.threadId)[before];
-      if (message) return json(res, 202, { ok: true, message });
-      return json(res, 202, { ok: true });
+      const message = store.messagesFor(threadId)[before];
+      if (message) return json(res, 202, { ok: true, threadId, message });
+      return json(res, 202, { ok: true, threadId });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/interrupt$/);
     if (m && method === "POST") {
@@ -6124,22 +6126,23 @@ let requestUserEmail = "";
       if (!text) return json(res, 400, { error: "text required" });
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      const threadId = requireMessageThread(body, bot.threadId);
       // A busy bot no longer refuses the message: it lands in the thread
       // now (marked queued) and auto-sends when the turn settles — see the
       // steer-queue drain above. Synchronous from the busy check to the
       // queue insert, so a settle can't slip between them and strand it.
       if (bot.busy) {
         const message = queueSteeredMessage(store, bot, text);
-        return json(res, 202, { ok: true, queued: true, messageId: message.id, message });
+        return json(res, 202, { ok: true, threadId, queued: true, messageId: message.id, message });
       }
       // Echo the stored user message back: clients fold it on ack so the
       // sender sees their own bubble even when the SSE frame is lost or
       // replayed. Client-side id-dedupe makes the stream copy harmless.
-      const before = store.messagesFor(bot.threadId).length;
-      await startTurn(bot.id, text);
-      const message = store.messagesFor(bot.threadId)[before];
-      if (message) return json(res, 202, { ok: true, message });
-      return json(res, 202, { ok: true });
+      const before = store.messagesFor(threadId).length;
+      await startTurn(bot.id, text, { threadId });
+      const message = store.messagesFor(threadId)[before];
+      if (message) return json(res, 202, { ok: true, threadId, message });
+      return json(res, 202, { ok: true, threadId });
     }
 
     // start a goal on this bot: round 1 dispatches now, the loop continues
@@ -6375,7 +6378,7 @@ let requestUserEmail = "";
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "muster", pid: process.pid, static: Boolean(STATIC_DIR) });
+      return json(res, 200, { app: "muster", pid: process.pid, static: Boolean(STATIC_DIR), messageSendVersion: MESSAGE_SEND_VERSION });
     }
 
     // ── billing (cloud only) ───────────────────────────────────────────

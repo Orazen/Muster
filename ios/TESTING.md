@@ -444,3 +444,31 @@ is deleted, all26 pre-existing devices are unchanged, and evidence is preserved.
 Artifacts: `.omb-scratch/verification/loop45-ios-pairing/` and
 `loop45-native-pairing/`. These simulator checks do not establish distribution or
 cross-platform release readiness.
+
+
+## Ordinary composer acceptance — Loop 46 (2026-09-11)
+
+236 root files / 3257 passed / 8 skipped, 287.63s; 222 Swift passed / 0 failed, 0.957s; 33 focused composer tests; 42/42 final-runtime HTTP checks, 2.472s; 7/7 native scenarios, 353.518s; cleanup 67/67 checks. Server typecheck, root lint and ad hoc iPhoneSE3/iOS26.5 build passed.
+The actual app uses an isolated Keychain and simulator-only CA, real server/proxy
+and an offline provider. Seven native cases cover bot/room acceptance,503/manual
+retry, duplicate taps/newer edits, navigation/cancellation, accepted-response loss,
+and an old desktop's health response. Root evidence and all failures are retained
+under `.omb-scratch/verification/loop46-ios-composer/`; see the Loop46 CEO ledger.
+
+`ChatView` routes ordinary sends through the separate `ComposerCoordinator` and
+`ComposerTransport`. Capture the original displayed thread, paired client and
+edit revision synchronously. Only a valid202 receipt for that thread may clear
+that revision. Preflight `messageSendVersion: 1` on the same authenticated client;
+older hosts get update guidance and no POST. On uncertainty, preserve raw text,
+show recovery and require the person to check the conversation before retrying.
+Never infer acceptance from matching SSE text. Guard the full encoded JSON body
+at1,000,000bytes. Watch legacy sends and seed-card actions are separate contracts.
+
+Draft retention is within the in-memory paired session, not process restart or
+cross-device backup. The server receipt confirms acceptance, not durable SQLite
+storage, guaranteed dispatch or idempotency. The final fixture server was
+explicitly restarted for the final Zod boundary parser; source hashes and owner
+identities are pinned. Initial native6/7 and a discarded fixture cleanup failure
+remain documented alongside final7/7 and final cleanup. All26 original simulators
+were preserved and the owned simulator/testCA removed. PhysicaliOS17, Watch,
+Google sign-in, real models and distributable release are still separate gates.

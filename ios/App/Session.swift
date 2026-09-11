@@ -31,11 +31,12 @@ final class Session: ObservableObject {
     }
 
     @Published private(set) var state = CompanionState() {
-        didSet { stateRevision &+= 1; seedCoordinator.reconcile() }
+        didSet { stateRevision &+= 1; seedCoordinator.reconcile(); composerCoordinator.reconcile() }
     }
     private var stateRevision: UInt64 = 0
     @Published private(set) var seedSessionId = UUID()
     @Published private(set) var seedActions: [SeedActionKey: SeedActionState] = [:]
+    @Published private(set) var composerDrafts: [ComposerContext: ComposerDraft] = [:]
     @Published private(set) var connection: Connection?
     @Published private(set) var status: Status = .unpaired
     /// Transient, user-facing failures from an action they just took.
@@ -52,6 +53,7 @@ final class Session: ObservableObject {
             streamTask?.cancel(); streamTask = nil
             seedSessionId = UUID()
             seedCoordinator.bind(sessionId: seedSessionId, transport: client)
+            composerCoordinator.bind(sessionId: seedSessionId, transport: client)
         }
     }
     private var pairingGeneration = 0
@@ -59,6 +61,11 @@ final class Session: ObservableObject {
         readState: { [weak self] in self?.state ?? CompanionState() },
         writeState: { [weak self] in self?.state = $0 },
         changed: { [weak self] in self?.seedActions = $0 },
+        unauthorized: { [weak self] in self?.status = .unauthorized }
+    )
+    private lazy var composerCoordinator = ComposerCoordinator(
+        readState: { [weak self] in self?.state ?? CompanionState() },
+        changed: { [weak self] in self?.composerDrafts = $0 },
         unauthorized: { [weak self] in self?.status = .unauthorized }
     )
     private var streamTask: Task<Void, Never>?
@@ -365,7 +372,33 @@ final class Session: ObservableObject {
 
     // MARK: - Actions
 
-    func setForeground(_ active: Bool) { seedCoordinator.setForeground(active) }
+    func setForeground(_ active: Bool) {
+        seedCoordinator.setForeground(active)
+        composerCoordinator.setForeground(active)
+    }
+
+    func composerContext(for chat: Chat) -> ComposerContext {
+        let kind: ComposerTarget.Kind
+        switch chat { case .bot: kind = .bot; case .room: kind = .room }
+        return ComposerContext(sessionId: seedSessionId, target: ComposerTarget(
+            kind: kind, ownerId: chat.id, threadId: chat.threadId))
+    }
+
+    func viewComposer(_ context: ComposerContext) -> ComposerViewLease { composerCoordinator.enter(context) }
+    func leaveComposer(_ lease: ComposerViewLease) { composerCoordinator.leave(lease) }
+    func composerDraft(_ context: ComposerContext) -> ComposerDraft { composerCoordinator.draft(for: context) }
+    func canEditComposer(_ context: ComposerContext, lease: ComposerViewLease?) -> Bool {
+        composerCoordinator.canEdit(context, lease: lease)
+    }
+    func canSendComposer(_ context: ComposerContext, lease: ComposerViewLease?) -> Bool {
+        composerCoordinator.canSend(context, lease: lease)
+    }
+    func editComposer(_ text: String, context: ComposerContext, lease: ComposerViewLease?) {
+        composerCoordinator.edit(text, context: context, lease: lease)
+    }
+    func submitComposer(_ context: ComposerContext, lease: ComposerViewLease?) {
+        composerCoordinator.submit(context, lease: lease)
+    }
 
     func viewSeedConversation(_ chat: Chat) -> UUID {
         // A room lease cannot authorize a direct-bot seed with the same IDs.
