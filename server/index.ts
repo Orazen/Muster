@@ -22,6 +22,7 @@ import type { JsonValue } from "./schema.ts";
 import { modelAcceptsImages } from "./contracts.ts";
 import { isSameOrigin, needsSameOriginMutationCheck } from "./origin-gate.ts";
 import { MESSAGE_SEND_VERSION, requireMessageThread } from "./message-send-contract.ts";
+import { APPROVAL_ACTION_VERSION, prepareApprovalGrant } from "./approval-action-contract.ts";
 import {
   customerThreadKey,
   parseInboundMessages,
@@ -5824,25 +5825,15 @@ let requestUserEmail = "";
     m = path.match(/^\/api\/bots\/([\w-]+)\/always-allow$/);
     if (m && method === "POST") {
       const body = await readBody(req);
-      const allowKey = isText(body.allowKey) ? body.allowKey : "";
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      if (!allowKey) return json(res, 400, { error: "allowKey required" });
-      const pending = store.messagesFor(bot.threadId).some((message) =>
-        message.card?.requestId &&
-        !message.card.answered &&
-        message.card.dismissed !== true &&
-        message.card.allowKey === allowKey
-      );
-      if (!pending) {
-        return json(res, 409, { error: "that grant is not on a pending approval for this bot" });
-      }
+      const prepared = prepareApprovalGrant(body, bot, store.messagesFor(bot.threadId), store.activePath(bot.threadId));
       const updated = store.patchBot(bot.id, {
-        alwaysAllow: [...new Set([...(bot.alwaysAllow ?? []), allowKey])].slice(0, 200),
+        alwaysAllow: prepared.alwaysAllow,
       })!;
       const visible = wireBot(updated);
       broadcast({ kind: "bot", bot: visible });
-      return json(res, 200, { bot: visible });
+      return json(res, 200, prepared.grant ? { bot: visible, grant: prepared.grant } : { bot: visible });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/audit$/);
     if (m && method === "GET") {
@@ -6378,7 +6369,7 @@ let requestUserEmail = "";
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "muster", pid: process.pid, static: Boolean(STATIC_DIR), messageSendVersion: MESSAGE_SEND_VERSION });
+      return json(res, 200, { app: "muster", pid: process.pid, static: Boolean(STATIC_DIR), messageSendVersion: MESSAGE_SEND_VERSION, approvalActionVersion: APPROVAL_ACTION_VERSION });
     }
 
     // ── billing (cloud only) ───────────────────────────────────────────

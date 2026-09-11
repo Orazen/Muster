@@ -23,6 +23,8 @@ These references motivate engineering proposals. They establish neither AGI/ASI 
 
 **Acceptance:** real owned broker/HTTP and native tests for grant failure/lost response, success ordering, duplicate taps, unavailable outcomes, exact permission behavior, and account/task retirement. Require zero approval requests until the authorized continuation. No real tool permission is needed for this fixture.
 
+**Loop 48 update:** the iPhone operation is now verified: root 3,352 passed / 8 skipped, Swift 267 passed, HTTP 32 checks, and six distinct iPhone scenarios across an initial 5 passes / 1 OS tutorial failure plus a targeted 1 pass rerun. See the latest CEO/handoff entries for scope and retained failures. Native Watch is still separate: `WatchViews.decideAlways` answers before saving, and both decision handlers play success after swallowed errors. Port the checked transport/coordinator semantics and prove Watch behavior in its own slice. The iPhone screenshots retain the old cursor avatar and truncated task title; those remain the next visual work. No new distributed native version is established.
+
 ### 2. Canonical native mascot and readable task identity
 
 Reuse the authored flower from `src/components/MusterMascot.tsx` and teammate semantics in `src/components/Avatar.tsx`; retain bot colors and truthful status. `server/store.ts` assigns stable bot/thread IDs independently of names. Apply that identity to `ios/App/ChatView.swift` and native roster surfaces, with a readable task label/full-context reveal. Expressions must not substitute for approval, uncertainty, or completion text.

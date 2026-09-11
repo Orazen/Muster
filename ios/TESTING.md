@@ -472,3 +472,12 @@ identities are pinned. Initial native6/7 and a discarded fixture cleanup failure
 remain documented alongside final7/7 and final cleanup. All26 original simulators
 were preserved and the owned simulator/testCA removed. PhysicaliOS17, Watch,
 Google sign-in, real models and distributable release are still separate gates.
+
+
+## Checked live approval operations
+
+Run `swift test --package-path ios` for the portable grant receipt, exact choice mapping and captured-operation regressions. Loop 48 added 45 tests; its full package result was 267 passed. iPhone composition lives in Session and CardView; the existing WatchSession uses separate methods and is not covered by iPhone runtime evidence.
+
+Native acceptance must use a freshly owned simulator and isolated fixture, with a simulator-only CA and real companion pairing. Verify strict success, grant failure with zero follow-up response, partial-save/unavailable recovery, double taps, view retirement between requests and malformed receipts. Check complete recovery text and 44-point minimum controls on the actual screen. Keep request IDs exact, permit only known permission choices, and never infer acceptance from SSE alone.
+
+Loop 48 verified six distinct scenarios across initial 5 passed / 1 OS setup failure and a targeted 1 passed rerun on the initialized keyboard session. The first-use English/Hindi tutorial can intercept XCTest incorrectly; its failed screenshot and slash insertion are retained. This is an explicit simulator setup limitation, not a proven cold-start fix. Never hide that run or treat it as an approval failure. Exact receipts and screenshots live locally under `.omb-scratch/verification/loop48-approval/` and `loop48-native-approval/`; prior fixture identities and simulator UDIDs have been retired. Google, real tool execution, physical devices, minimum iOS and Watch runtime remain separate acceptance gates.

@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
+import { observeOwnedPosixGroup } from "./owned-posix-processes.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { values } = parseArgs({ options: {
@@ -116,21 +117,20 @@ async function stopOwnedChild(child) {
   const exited = () => child.exitCode !== null || child.signalCode !== null;
   const groupAlive = () => {
     if (process.platform === "win32") return !exited();
-    try { process.kill(-child.pid, 0); return true; }
-    catch (error) { if (error.code === "ESRCH") return false; throw error; }
+    return observeOwnedPosixGroup(child.pid).liveMembers.length > 0;
   };
   if (process.platform === "win32" && !exited()) {
     // A Node/Electron child may own helper processes. Restrict taskkill to
     // this exact child tree, then await exit before removing fixture data.
     await promisify(execFile)("taskkill", ["/pid", String(child.pid), "/T", "/F"]).catch(() => {});
-  } else if (process.platform !== "win32") {
+  } else if (process.platform !== "win32" && groupAlive()) {
     try { process.kill(-child.pid, "SIGTERM"); } catch (error) { if (error.code !== "ESRCH") throw error; }
   }
   const deadline = Date.now() + 5_000;
   while ((!exited() || groupAlive()) && Date.now() < deadline) await delay(50);
   if (!exited() || groupAlive()) {
     if (process.platform === "win32") child.kill("SIGKILL");
-    else { try { process.kill(-child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } }
+    else if (groupAlive()) { try { process.kill(-child.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") throw error; } }
     const forcedDeadline = Date.now() + 5_000;
     while ((!exited() || groupAlive()) && Date.now() < forcedDeadline) await delay(50);
   }

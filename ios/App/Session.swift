@@ -31,12 +31,13 @@ final class Session: ObservableObject {
     }
 
     @Published private(set) var state = CompanionState() {
-        didSet { stateRevision &+= 1; seedCoordinator.reconcile(); composerCoordinator.reconcile() }
+        didSet { stateRevision &+= 1; seedCoordinator.reconcile(); composerCoordinator.reconcile(); approvalCoordinator.reconcile() }
     }
     private var stateRevision: UInt64 = 0
     @Published private(set) var seedSessionId = UUID()
     @Published private(set) var seedActions: [SeedActionKey: SeedActionState] = [:]
     @Published private(set) var composerDrafts: [ComposerContext: ComposerDraft] = [:]
+    @Published private(set) var approvalActions: [ApprovalActionKey: ApprovalActionState] = [:]
     @Published private(set) var connection: Connection?
     @Published private(set) var status: Status = .unpaired
     /// Transient, user-facing failures from an action they just took.
@@ -54,6 +55,8 @@ final class Session: ObservableObject {
             seedSessionId = UUID()
             seedCoordinator.bind(sessionId: seedSessionId, transport: client)
             composerCoordinator.bind(sessionId: seedSessionId, transport: client)
+            approvalViewLease = nil
+            approvalCoordinator.bind(sessionId: seedSessionId, transport: client)
         }
     }
     private var pairingGeneration = 0
@@ -68,6 +71,12 @@ final class Session: ObservableObject {
         changed: { [weak self] in self?.composerDrafts = $0 },
         unauthorized: { [weak self] in self?.status = .unauthorized }
     )
+    private lazy var approvalCoordinator = ApprovalActionCoordinator(
+        readState: { [weak self] in self?.state ?? CompanionState() },
+        changed: { [weak self] in self?.approvalActions = $0 },
+        unauthorized: { [weak self] in self?.status = .unauthorized }
+    )
+    private var approvalViewLease: ApprovalViewLease?
     private var streamTask: Task<Void, Never>?
     /// Identifies the task currently stored in `streamTask`. A cancelled task
     /// can finish after its replacement starts; its cleanup must not clear
@@ -263,7 +272,7 @@ final class Session: ObservableObject {
     /// cursor survives, so this is a gap, not a reset.
     private func restartStream() {
         guard streamTask != nil else { return }
-        seedCoordinator.connectionChanged()
+        seedCoordinator.connectionChanged(); approvalCoordinator.connectionChanged()
         streamTask?.cancel()
         streamTask = nil
         connect()
@@ -276,7 +285,7 @@ final class Session: ObservableObject {
         streamGeneration += 1
         streamTask?.cancel()
         streamTask = nil
-        seedCoordinator.connectionChanged()
+        seedCoordinator.connectionChanged(); approvalCoordinator.connectionChanged()
     }
 
     private func owns(_ identity: UUID) -> Bool { seedSessionId == identity && client != nil }
@@ -289,7 +298,7 @@ final class Session: ObservableObject {
         var firstConnection = true
         while !Task.isCancelled {
             guard currentStream(identity, generation) else { return }
-            if !firstConnection { seedCoordinator.connectionChanged() }
+            if !firstConnection { seedCoordinator.connectionChanged(); approvalCoordinator.connectionChanged() }
             firstConnection = false
             status = .connecting
             log.info("opening stream, cursor=\(self.state.cursor ?? "none", privacy: .public)")
@@ -327,13 +336,13 @@ final class Session: ObservableObject {
                     state.advance(to: frame.seq)
                 }
                 guard currentStream(identity, generation) else { return }
-                seedCoordinator.connectionChanged()
+                seedCoordinator.connectionChanged(); approvalCoordinator.connectionChanged()
                 // the stream ended without an error — the harness went away
                 log.notice("stream ended without an error")
                 status = .offline("Lost the connection.")
             } catch let error as APIError where error.isUnauthorized {
                 guard currentStream(identity, generation) else { return }
-                seedCoordinator.connectionChanged()
+                seedCoordinator.connectionChanged(); approvalCoordinator.connectionChanged()
                 log.error("stream refused: unauthorized")
                 status = .unauthorized
                 return
@@ -344,7 +353,7 @@ final class Session: ObservableObject {
                     log.info("stream closed by us")
                     return
                 }
-                seedCoordinator.connectionChanged()
+                seedCoordinator.connectionChanged(); approvalCoordinator.connectionChanged()
                 log.error("stream failed: \(error.localizedDescription, privacy: .public)")
                 status = .offline(error.localizedDescription)
             }
@@ -375,6 +384,7 @@ final class Session: ObservableObject {
     func setForeground(_ active: Bool) {
         seedCoordinator.setForeground(active)
         composerCoordinator.setForeground(active)
+        approvalCoordinator.setForeground(active)
     }
 
     func composerContext(for chat: Chat) -> ComposerContext {
@@ -398,6 +408,34 @@ final class Session: ObservableObject {
     }
     func submitComposer(_ context: ComposerContext, lease: ComposerViewLease?) {
         composerCoordinator.submit(context, lease: lease)
+    }
+
+    func viewApprovalConversation(_ chat: Chat) -> ApprovalViewLease {
+        let lease = approvalCoordinator.enter(composerContext(for: chat))
+        approvalViewLease = lease
+        return lease
+    }
+
+    func leaveApprovalConversation(_ lease: ApprovalViewLease) {
+        approvalCoordinator.leave(lease)
+        if approvalViewLease == lease { approvalViewLease = nil }
+    }
+
+    func approvalReference(chat: Chat, message: Message) -> ApprovalReference? {
+        approvalCoordinator.reference(for: composerContext(for: chat), message: message)
+    }
+
+    func approvalState(chat: Chat, message: Message) -> ApprovalActionState? {
+        guard let requestId = message.card?.requestId else { return nil }
+        return approvalCoordinator.actionState(for: composerContext(for: chat), cardId: message.id, requestId: requestId)
+    }
+
+    func canSubmitApproval(_ reference: ApprovalReference) -> Bool {
+        approvalCoordinator.canSubmit(reference, lease: approvalViewLease)
+    }
+
+    func submitApproval(_ reference: ApprovalReference, action: ApprovalAction) {
+        approvalCoordinator.submit(reference, action: action, lease: approvalViewLease)
     }
 
     func viewSeedConversation(_ chat: Chat) -> UUID {
@@ -433,31 +471,6 @@ final class Session: ObservableObject {
             case let .room(room): try await $0.send(text: text, toRoom: room.id)
             }
         }
-    }
-
-    func answer(threadId: String, card: OptionCard, choice: String) async {
-        guard let requestId = card.requestId else { return }
-        await perform {
-            // Permission cards answer allow/deny; a question answers with
-            // the chosen text. The harness tells them apart by `behavior`.
-            if card.isPermission {
-                try await $0.respond(
-                    threadId: threadId,
-                    requestId: requestId,
-                    behavior: choice.lowercased() == "allow" ? "allow" : "deny"
-                )
-            } else {
-                try await $0.respond(threadId: threadId, requestId: requestId, behavior: "answer", message: choice)
-            }
-        }
-    }
-
-    /// "Always allow" — the grant key comes from the card, never from
-    /// anything derived here, so the phone and the harness cannot disagree
-    /// about what was just permitted.
-    func alwaysAllow(bot: Bot, card: OptionCard) async {
-        guard let key = card.allowKey else { return }
-        await perform { try await $0.alwaysAllow(botId: bot.id, key: key) }
     }
 
     /// Make a new bot. The harness chooses its name, colour and greeting, so

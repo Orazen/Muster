@@ -1,6 +1,6 @@
 // Process-cleanup contracts only: the staged server and database below are
 // deliberately fake. Actual native loading has a separate packaged smoke gate.
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -22,8 +22,22 @@ async function until(check, timeout = 10_000) {
 
 function alive(pid, group = false) {
   if (!Number.isSafeInteger(pid) || pid <= 1) return false;
-  try { process.kill(group ? -pid : pid, 0); return true; }
-  catch (error) { if (error.code === "ESRCH") return false; throw error; }
+  // Independent of the script's observer: assert exact fixture-marker IDs
+  // against a fresh process table. Darwin kill(-pgid, 0) can return EPERM after
+  // termination. A zombie is not live; this check does not claim PID absence.
+  const output = execFileSync("/bin/ps", ["-axo", "pid=,pgid=,stat="], {
+    encoding: "utf8", timeout: 2_000, maxBuffer: 1_000_000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const lines = output.trim().split("\n");
+  return lines.map((line) => {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length !== 3 || !fields.slice(0, 2).every((value) => /^\d+$/.test(value))
+        || !/^[A-Za-z?][A-Za-z0-9+<>=-]*$/.test(fields[2])) throw new Error(`Independent fixture process observation failed: ${JSON.stringify(line)}`);
+    const [processId, processGroup] = fields.slice(0, 2).map(Number);
+    if (![processId, processGroup].every(Number.isSafeInteger)) throw new Error("Independent fixture process IDs invalid");
+    return (group ? processGroup : processId) === pid && fields[2][0] !== "Z";
+  }).some(Boolean);
 }
 
 function forceStop(pid, group = false) {
@@ -126,6 +140,8 @@ async function withFixture(mode, run) {
       forceStop(pid);
     }
     await until(() => result, 3_000);
+    await until(() => ["probe", "server", "descendant"].every((name) => !alive(readMarker(marker(name))?.pid))
+      && !alive(child.pid, true) && !alive(readMarker(marker("server"))?.pid, true), 3_000);
     rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
@@ -169,7 +185,7 @@ describe.skipIf(process.platform === "win32")("packaged smoke POSIX cleanup", ()
         expect(result.signal, result.stderr).toBeNull();
         expect(result.stdout).not.toContain('"passed":');
         try { await until(() => !alive(active.pid), 3_000); }
-        catch { throw new Error(`Interrupted ${phase} ${active.pid} survived smoke exit:\n${result.stderr}`); }
+        catch (error) { throw new Error(`Interrupted ${phase} ${active.pid} cleanup observation failed: ${error.message}\n${result.stderr}`, { cause: error }); }
         expect(alive(active.pid, true)).toBe(false);
         expect(alive(child.pid, true)).toBe(false);
         expect(readdirSync(temporary)).toEqual([]);

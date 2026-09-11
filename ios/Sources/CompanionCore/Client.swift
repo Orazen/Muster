@@ -40,7 +40,7 @@ public enum APIError: Error, LocalizedError, Sendable {
     }
 }
 
-public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport {
+public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport, ApprovalTransport {
     public let connection: Connection
     private let token: String?
     private let session: URLSession
@@ -302,6 +302,51 @@ public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport {
             throw APIError.transport("The computer did not confirm this send.")
         }
         return try ComposerAcknowledgment.decode(data, expectedThreadId: target.threadId, rawText: text)
+    }
+
+    /// The iPhone's guarded grant path. Legacy Watch calls retain their
+    /// public API below; they cannot silently opt into this two-stage contract.
+    public func grantApproval(_ reference: ApprovalReference) async throws -> ApprovalGrantReceipt {
+        guard reference.context.target.isValid, ComposerTarget.validId(reference.cardId),
+              ApprovalContract.validRequestId(reference.requestId), ApprovalContract.canAlwaysAllow(reference),
+              let key = reference.allowKey else { throw ApprovalError.invalidReference }
+        try Task.checkCancellation()
+        let request = try makeRequest("POST", "/api/bots/\(reference.context.target.ownerId)/always-allow", body: [
+            "allowKey": key, "expectedThreadId": reference.context.target.threadId,
+            "requestId": reference.requestId, "cardId": reference.cardId,
+        ])
+        var health = try makeRequest("GET", "/api/health")
+        health.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        health.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        let (healthData, healthResponse) = try await perform(health)
+        try Task.checkCancellation()
+        try Self.check(healthResponse, healthData)
+        struct Health: Decodable { let app: String; let approvalActionVersion: Int }
+        guard (healthResponse as? HTTPURLResponse)?.statusCode == 200,
+              let capability = try? JSONDecoder().decode(Health.self, from: healthData),
+              capability.app == "muster", capability.approvalActionVersion == 1 else { throw ApprovalError.upgradeRequired }
+        try Task.checkCancellation()
+        let (data, response) = try await perform(request)
+        try Task.checkCancellation()
+        try Self.check(response, data)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw ApprovalError.invalidReceipt }
+        return try ApprovalGrantReceipt.decode(data, reference: reference)
+    }
+
+    public func respondToApproval(_ reference: ApprovalReference, action: ApprovalAction) async throws -> ApprovalOutcome {
+        guard reference.context.target.isValid, ComposerTarget.validId(reference.cardId),
+              ApprovalContract.validRequestId(reference.requestId), ApprovalContract.allows(action, reference: reference) else {
+            throw ApprovalError.invalidReference
+        }
+        try Task.checkCancellation()
+        var body: [String: Any] = ["requestId": reference.requestId, "behavior": action.behavior]
+        if let answer = action.answer { body["message"] = answer }
+        let request = try makeRequest("POST", "/api/threads/\(reference.context.target.threadId)/respond", body: body)
+        let (data, response) = try await perform(request)
+        try Task.checkCancellation()
+        try Self.check(response, data)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw ApprovalError.invalidReceipt }
+        return try ApprovalContract.response(data, action: action)
     }
 
     /// Answer an approval or a question.

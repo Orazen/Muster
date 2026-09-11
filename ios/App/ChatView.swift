@@ -20,6 +20,7 @@ struct ChatView: View {
     @EnvironmentObject private var session: Session
     @Environment(\.dismiss) private var dismiss
     @State private var composerLease: ComposerViewLease?
+    @State private var approvalLease: ApprovalViewLease?
     @State private var showingTasks = false
     @State private var shareFile: ShareFile?
     @State private var seedLease: UUID?
@@ -244,16 +245,21 @@ struct ChatView: View {
             seedVisible = true
             if seedLease == nil { seedLease = session.viewSeedConversation(chat) }
             if composerLease == nil { composerLease = session.viewComposer(composerContext) }
+            if approvalLease == nil { approvalLease = session.viewApprovalConversation(chat) }
         }
         .onChange(of: session.seedSessionId) { _, _ in
             if let seedLease { session.leaveSeedConversation(seedLease) }
             seedLease = seedVisible ? session.viewSeedConversation(chat) : nil
             if let composerLease { session.leaveComposer(composerLease) }
             composerLease = seedVisible ? session.viewComposer(session.composerContext(for: chat)) : nil
+            if let approvalLease { session.leaveApprovalConversation(approvalLease) }
+            approvalLease = seedVisible ? session.viewApprovalConversation(chat) : nil
         }
         .onChange(of: chat.threadId) { _, _ in
             if let composerLease { session.leaveComposer(composerLease) }
             composerLease = seedVisible ? session.viewComposer(session.composerContext(for: chat)) : nil
+            if let approvalLease { session.leaveApprovalConversation(approvalLease) }
+            approvalLease = seedVisible ? session.viewApprovalConversation(chat) : nil
         }
         .onDisappear {
             seedVisible = false
@@ -261,6 +267,8 @@ struct ChatView: View {
             seedLease = nil
             if let composerLease { session.leaveComposer(composerLease) }
             composerLease = nil
+            if let approvalLease { session.leaveApprovalConversation(approvalLease) }
+            approvalLease = nil
         }
     }
 
@@ -537,28 +545,24 @@ struct CardView: View {
     let chat: Chat
     let message: Message
     @EnvironmentObject private var session: Session
-    @State private var answering = false
+    @Environment(\.scenePhase) private var scenePhase
 
-    /// The option this card offers that means "go ahead".
-    ///
-    /// Deliberately not the literal string "Allow". `options` is whatever the
-    /// harness sent, and it only falls back to ["Allow", "Deny"] when the
-    /// provider event named no choices of its own (`server/index.ts`) — a card
-    /// is free to say "Yes", "Approve", "Allow once". Answering with a string
-    /// the card never offered writes the grant and then hands the harness a
-    /// choice it can reject, so the bot stays stopped with nothing on screen
-    /// to explain it. The conventional label wins when it is present, which
-    /// keeps the ordinary permission card behaving exactly as before.
-    private var allowChoice: String? {
-        guard let options = message.card?.options else { return nil }
-        return options.first { $0.caseInsensitiveCompare("Allow") == .orderedSame }
-            ?? options.first { !Self.isRefusal($0) }
+    private var reference: ApprovalReference? { session.approvalReference(chat: chat, message: message) }
+    private var actionState: ApprovalActionState? { session.approvalState(chat: chat, message: message) }
+
+    private func action(for option: String) -> ApprovalAction? {
+        guard let reference else { return nil }
+        return ApprovalContract.action(for: option, reference: reference)
     }
 
-    /// One definition of "the refusal", shared by the button tint and the
-    /// choice above so the two cannot drift apart.
-    private static func isRefusal(_ option: String) -> Bool {
-        option.caseInsensitiveCompare("Deny") == .orderedSame
+    private func submit(_ action: ApprovalAction) {
+        guard scenePhase == .active, let reference, session.canSubmitApproval(reference) else { return }
+        session.submitApproval(reference, action: action)
+    }
+
+    private var canSubmit: Bool {
+        guard scenePhase == .active, let reference else { return false }
+        return session.canSubmitApproval(reference)
     }
 
     var body: some View {
@@ -607,44 +611,56 @@ struct CardView: View {
                 }
 
                 if card.isPending {
-                    HStack(spacing: 10) {
-                        ForEach(card.options, id: \.self) { option in
-                            Button(option) {
-                                answering = true
-                                Task {
-                                    await session.answer(threadId: chat.threadId, card: card, choice: option)
-                                    answering = false
-                                }
+                    // Vertical options retain complete labels and a 44-point
+                    // touch target on narrow screens and with larger text.
+                    VStack(spacing: 10) {
+                        ForEach(Array(card.options.enumerated()), id: \.offset) { index, option in
+                            let choice = action(for: option)
+                            Button { if let choice { submit(choice) } } label: {
+                                Text(option).multilineTextAlignment(.center)
+                                    .frame(maxWidth: .infinity, minHeight: 44)
                             }
                             .buttonStyle(.borderedProminent)
-                            .tint(Self.isRefusal(option) ? Color.secondary : Color.accentColor)
-                            .disabled(answering)
+                            .tint(choice == .deny ? Color.secondary : Color.accentColor)
+                            .disabled(!canSubmit || choice == nil)
+                            .accessibilityIdentifier("approval-option-\(index)")
                         }
                     }
 
-                    // The grant key comes from the card. The phone never
-                    // derives its own, so it cannot permit something subtly
-                    // wider than the computer would have. The same goes for
-                    // the answer: it is one of the options the card offered,
-                    // never a string invented here.
-                    if card.allowKey != nil, let allow = allowChoice, case let .bot(bot) = chat {
-                        Button("Always allow this tool") {
-                            answering = true
-                            Task {
-                                await session.alwaysAllow(bot: bot, card: card)
-                                await session.answer(threadId: chat.threadId, card: card, choice: allow)
-                                answering = false
-                            }
+                    if let reference, ApprovalContract.canAlwaysAllow(reference),
+                       !card.options.contains(where: ApprovalContract.isAlwaysAllowOption) {
+                        Button { submit(.alwaysAllow) } label: {
+                            Text("Always allow this tool")
+                                .frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .font(.system(size: 14))
-                        .disabled(answering)
+                        .buttonStyle(.bordered)
+                        .disabled(!canSubmit)
+                        .accessibilityIdentifier("approval-always-allow")
+                    }
+                    if reference == nil || card.options.contains(where: { action(for: $0) == nil }) {
+                        Text("Review this request on your computer. This app cannot confirm these choices.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 } else if let answered = card.answered {
                     Label(answered, systemImage: "checkmark.circle")
                         .font(.system(size: 14))
                         .foregroundStyle(Color.secondary)
                 }
+                if let actionState {
+                    if actionState.inFlight {
+                        ProgressView("Confirming your choice…").font(.footnote)
+                    }
+                    if let feedback = actionState.message {
+                        Text(feedback).font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("approval-recovery")
+                    }
+                }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("approval-card-\(message.id)")
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
