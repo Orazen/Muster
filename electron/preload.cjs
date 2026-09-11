@@ -6,6 +6,13 @@ contextBridge.exposeInMainWorld("ogb", {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
   platform: process.platform,
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
+  /** Enable host computer control for this app session after a user action. */
+  enableComputerAccess: () => ipcRenderer.invoke("cua:enable"),
+  onComputerAccessChanged: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("cua:changed", handler);
+    return () => ipcRenderer.removeListener("cua:changed", handler);
+  },
   /** The companion sidecar: the one part of this app that listens off the
    * machine, so it runs as its own process and is off until switched on.
    * Every call answers with the whole state, so the panel never has to

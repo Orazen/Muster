@@ -49,4 +49,15 @@ describe("desktop capabilities", () => {
     expect(localComputerReady("darwin", { mode: "unavailable" })).toBe(false);
     expect(localComputerReady("darwin", { mode: "standalone" })).toBe(true);
   });
+
+  it("distinguishes session opt-in from a failed driver without hiding other Mac features", () => {
+    const off = desktopCapabilities({ platform: "darwin", localConnection: { mode: "unavailable", reason: "computer-access-off" } });
+    expect(off.localComputer).toEqual({ available: false, support: "unsupported", reasonCode: "computer-access-off" });
+    expect(off.screenPreview.available).toBe(true);
+    expect(off.dictation.available).toBe(true);
+    const failed = desktopCapabilities({ platform: "darwin", localConnection: { mode: "unavailable", reason: "permission denied" } });
+    expect(failed.localComputer.reasonCode).toBe("cua-driver-unavailable");
+    const linux = desktopCapabilities({ platform: "linux", localConnection: { mode: "unavailable", reason: "computer-access-off" } });
+    expect(linux.localComputer.reasonCode).toBe("unsupported-platform");
+  });
 });

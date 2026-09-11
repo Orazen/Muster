@@ -34,6 +34,10 @@ declare global {
     ogb?: {
       platform: NodeJS.Platform;
       getCapabilities(): Promise<DesktopCapabilities>;
+      /** Explicit opt-in to host computer control until this app quits. */
+      enableComputerAccess?(): Promise<{ mode: string; reason?: string }>;
+      /** Payload-free invalidation; read capabilities again after native setup settles. */
+      onComputerAccessChanged?(listener: () => void): () => void;
       screenFrame(): Promise<string | null>;
       /** Start native dictation. Call mode supplies endpointMs so silence
        * finalizes a turn; composer dictation omits it and remains manual. */

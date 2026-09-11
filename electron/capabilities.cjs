@@ -54,7 +54,9 @@ function desktopCapabilities({
   };
   if (!localAvailable) {
     localComputer.reasonCode =
-      hostPlatform === "darwin" ? "cua-driver-unavailable" : "unsupported-platform";
+      hostPlatform === "darwin"
+        ? localConnection?.reason === "computer-access-off" ? "computer-access-off" : "cua-driver-unavailable"
+        : "unsupported-platform";
   }
 
   return {

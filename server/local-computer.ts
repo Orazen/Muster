@@ -28,7 +28,8 @@ const isRecord = (v: JsonValue | undefined): v is JsonObject =>
   v instanceof Object && !Array.isArray(v);
 
 function decodeDescriptor(value: ConnectionDescriptor): LocalComputerConnection | null {
-  if (!value || value.mode === "unavailable" || !isText(value.mcpCommand)) return null;
+  if (!value || (value.mode !== "embedded" && value.mode !== "standalone")
+      || !isText(value.mcpCommand) || value.mcpCommand.trim().length === 0) return null;
   if (value.mcpArgs !== undefined && !Array.isArray(value.mcpArgs)) return null;
 
   const args: string[] = [];
@@ -64,8 +65,10 @@ export function readCuaConnection({
   if (platform === "linux") return null;
 
   const candidates = userData ? [join(userData, "cua-connection.json")] : [];
-  if (platform === "darwin") {
-    // Legacy/dev fallback. Packaged Electron passes its exact userData path.
+  if (!userData && platform === "darwin") {
+    // Legacy/dev fallback is only for callers without an explicit profile.
+    // Packaged Electron's exact profile is authoritative, including when its
+    // descriptor is missing, invalid, or records that computer access is off.
     for (const dir of ["Muster", "muster", "OpenGrokBot", "opengrokbot"]) {
       candidates.push(join(home, "Library", "Application Support", dir, "cua-connection.json"));
     }

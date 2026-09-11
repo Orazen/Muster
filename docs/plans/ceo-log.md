@@ -2039,3 +2039,95 @@ fully isolated. Next native acceptance needs a disposable OS session or a
 product startup change that makes computer access opt-in and defines a complete
 profile path. Evidence: `loop33-electron-path-probe/` and the primary-source
 notes in `loop33-packaged-gui-isolation.md` in the verification folder.
+
+Loop33 post-commit evidence: pushed `d60446438c34b5171e64752dcb9a857209b34fc7`.
+The recorded candidate's 934 source files match the commit except the two
+ledger documents; this is a source comparison, not a fresh dependency-install
+attestation. Actual exact-commit CLI build and downloaded-byte verification
+passed **5/5 each (10 executions)**. A flat selection of the real Mac arm64 and
+CLI candidate passed partial payload validation for **6 selected artifacts in
+863ms**. It lacks Intel/Windows/Linux and is not a complete release. Evidence:
+`loop33-cli-candidate.json` and candidate `committed-source-verification.json`
+under `.omb-scratch/verification/`. Post-push production GET **200** still reports
+**1.10.4 / cb5db9c**. The existing hourly heartbeat was updated, not duplicated.
+
+
+## Loop 34 — Computer access starts with an explicit choice (2026-09-11)
+
+Base `d604464`, pull/rebase up to date. Scope is per-session host computer
+control, not a full profile sandbox or native release. Every desktop startup
+atomically replaces the active profile's old connection with
+`computer-access-off` before server startup. Failure to invalidate stops app
+startup with a recovery message. Startup does not resolve the CUA binary,
+import its SDK, request its permissions or connect to a standalone daemon.
+Existing users now explicitly enable computer control after each full app
+quit/reopen; closing a Mac window without quitting is still the same session.
+
+The Runs on card has an **Enable for this session** action explaining Mac
+permissions and its scope across This Mac/Auto bots. It does not choose a bot
+assignment or send a task. Its buttons wrap and the panel fits a 320px viewport.
+Only a live app-owned main frame at the current app origin can invoke native
+enablement. Non-Mac platforms fail closed before driver access. Concurrent
+clicks share a single attempt; failures show their actual message and permit
+retry after confirmed cleanup. Unconfirmed partial-host cleanup requires an
+app restart rather than allowing another daemon. Shutdown invalidates first,
+fences late SDK/host/socket completion and cleans up the owned embedded host;
+it does not stop a standalone daemon belonging to another app or revoke OS
+permissions.
+
+The harness treats an explicit userData descriptor as authoritative. Missing,
+corrupt, unavailable or off descriptors cannot fall through to a legacy
+profile. Legacy lookup remains for callers without a supplied profile; Linux
+remains unavailable. Only embedded/standalone descriptors with a nonempty
+command are accepted.
+
+Capabilities are read afresh after activation, including failures. Shared
+request/lifecycle guards reject stale results. A payload-free notification
+from main tells all current renderers to re-read state after native activation
+settles, covering a page reload while an old page's request is pending.
+Listeners attach before the initial read and unsubscribe on detach. Same
+provider remounts also reconcile after pending work. Failed capability reads
+show an unconfirmed status instead of claiming access is off.
+
+Verification: focused backend/Electron **5 files /64 passed /0 skipped in1.01s**;
+frontend **2 files /26 passed /0 skipped in502ms**. These are subsets of the root
+suite. Final full suite: **224 files /2,983 passed /8 skipped in248.18s**, exit0 (**79 additional passes** over Loop33). Final build and both types pass
+(Vite4.90s; existing large-chunk warning), global/scoped lint pass. Final
+independent review found no remaining source blocker. Seventeen reviewed
+source hashes stayed fixed for verification.
+
+Desktop UI verification: **14/14 checks in7.787s**, exit0, with readable non-overlapping 320px consent and wrapped destination controls. Accepted evidence and screenshots: `.omb-scratch/verification/loop34-gui-1P89qN/`; source script and logs: `loop34-desktop-gui*` in the verification folder. The fixture uses actual Electron
+window/preload and owned pairing servers, fake ACP, and an owned standalone
+socket-presence fixture. It is not authentic packaged GUI or real CUA/Google
+acceptance. A native capture guard and an Off fixture bot bound the final run;
+no OS permission is granted. A preliminary invocation failed before startup
+because tsx is not installed; native Node type stripping is the working runner.
+The first GUI attempt passed10 checks then failed its success fixture because
+its125-byte Unix socket path was too long. An intermediate13-pass run allowed
+Auto to reach the native screen-preview path, so it is excluded from isolated
+acceptance; no permission grant was made. The corrected fixture uses a short
+owned home, explicitly keeps its bot Off, guards native capture, and waits for
+the mobile drawer transition before taking the accepted screenshot. All owned
+app/browser/server/socket processes close, and the temporary short home is
+removed. Demo127.0.0.1:8845 is untouched.
+
+The actual 1.10.5 DMG/ZIP built in Loop33 is still tied to d604464; it does not
+contain this later source change. No new public release, tag, workflow dispatch,
+notarization, dependency change, VM launch or production mutation occurred.
+The broader goal and existing heartbeat remain active.
+
+Next native acceptance prerequisite: an early documented profile bootstrap
+before imports capture Electron home/log/credential/socket paths. Explicitly
+map Electron userData/sessionData/home/appData/logs/temp/crashDumps and child
+home/cache/config/data/temp/cwd roots. OMB_DATA_DIR alone does not prevent
+legacy-home migration; engine-specific home overrides and login-shell startup
+also need review. Native permissions, LaunchServices, Terminal and installed
+Tailscale remain OS-user scoped. Profile roots are not a filesystem/network
+sandbox: broker registration and updater checks remain separate boundaries.
+Begin with a no-window actual Electron path/child-env probe; do not label a
+bootstrap-patched development shell as packaged acceptance. The separate
+Android35-alert remediation, native Google/device/Watch/VM, portable recovery
+and sync, Mimosa and recorded runner/VPS/signing gates remain open. Commercial
+intent is a clearer first run with explicit desktop access; no conversion or
+revenue uplift measured. Allowance **32% used /68% remaining** at the final actual check;
+no reset consumed.

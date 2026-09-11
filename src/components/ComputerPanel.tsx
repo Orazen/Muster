@@ -22,7 +22,7 @@ import { useStore, type Bot } from "@/state/store";
 import type { Routine } from "@/lib/routines";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
-import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { ComputerAccessControl, useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutineEditor } from "./RoutinesPage";
 
 const isText = <T,>(value: T): value is T & string => String(value) === value;
@@ -129,7 +129,7 @@ function ControlHold({ botId }: { botId: string }) {
 
 export function ComputerPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
-  const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
+  const { capabilities, ready: capabilitiesReady, error: capabilitiesError } = useDesktopCapabilities();
   const localAvailable = capabilities.localComputer.available;
   const [phase, setPhase] = useState<Phase>("checking");
   const [boxState, setBoxState] = useState<string | null>(null);
@@ -387,7 +387,11 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
     starting: "Starting your bot's computer…",
     unconfigured: "No cloud computer configured",
     "local-unavailable":
-      capabilities.host.platform === "linux"
+      capabilitiesError
+        ? "Computer access could not be confirmed. Retry the capability check below."
+        : capabilities.localComputer.reasonCode === "computer-access-off"
+        ? "Computer access is off for this session. Enable it below."
+        : capabilities.host.platform === "linux"
         ? "Local computer control isn't available on Linux yet. Use a cloud box instead."
         : capabilities.host.label === "Browser"
           ? "Local computer control requires the desktop app."
@@ -398,7 +402,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   } satisfies Record<Exclude<Phase, "ready" | "local" | "vm">, string>;
 
   return (
-    <aside className="glass-panel animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l-0">
+    <aside className="glass-panel animate-panel-in flex h-full w-[min(400px,100vw)] min-w-0 max-w-full shrink-0 flex-col border-l-0">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button
@@ -522,7 +526,9 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             <div className="text-[15px] font-medium text-ink">Runs on</div>
             <div className="mt-0.5 text-[13px] text-ink-secondary">
               {!bot.computer &&
-                (localAvailable
+                (capabilitiesError
+                  ? "Auto uses a cloud box when one exists. Availability of this Mac could not be confirmed. "
+                  : localAvailable
                   ? "Auto uses a cloud box when one exists, otherwise this computer. "
                   : "Auto uses a cloud box when one is configured; otherwise computer use stays off. ")}
               Pick where this bot's computer lives. <b className="text-ink">Local VM</b> is a Cua-controlled Linux desktop
@@ -532,7 +538,8 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           {/* macOS-style segmented control: a recessed track with a raised
               thumb. Long names move to the tooltip — five segments can't
               afford "This computer" at this width. */}
-          <div className="mt-3 flex rounded-[10px] bg-inset p-0.5">
+          <ComputerAccessControl />
+          <div className="mt-3 flex flex-wrap gap-0.5 rounded-[10px] bg-inset p-0.5">
             {(
               [
                 ["cloud", "Cloud", "Cloud box"],
@@ -568,7 +575,11 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                         : mode === "local" && !computerToolSupported
                         ? "This model engine's driver doesn't mount computer tools yet" + switchEngineHint
                         : mode === "local" && !localAvailable
-                          ? capabilities.host.platform === "linux"
+                          ? capabilitiesError
+                            ? "Computer access could not be confirmed"
+                            : capabilities.localComputer.reasonCode === "computer-access-off"
+                            ? "Enable computer access for this session first"
+                            : capabilities.host.platform === "linux"
                             ? "Local computer control isn't available on Linux yet"
                             : capabilities.host.label === "Browser"
                               ? "Local computer control requires the desktop app"
@@ -582,7 +593,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 title={title}
                 onClick={() => dispatch({ type: "updateBot", botId: bot.id, patch: { computer: mode } })}
                 className={cn(
-                  "flex-1 rounded-lg py-1.5 text-[12.5px] font-medium transition-colors",
+                  "min-w-[64px] flex-1 whitespace-normal rounded-lg px-1 py-1.5 text-[12.5px] font-medium transition-colors",
                   disabled && "cursor-not-allowed opacity-40",
                   bot.computer === mode
                     ? "bg-raised text-ink shadow-sm"

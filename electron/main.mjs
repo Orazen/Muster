@@ -2,7 +2,8 @@ import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, safeSt
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { startCua, stopCua, registerCuaIpc } from "./cua.mjs";
+import { initializeCua, getCuaConnection, stopCua, registerCuaIpc } from "./cua.mjs";
+import { isComputerAccessSender } from "./computer-access-sender.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
@@ -253,7 +254,7 @@ const ERROR_PAGE =
     `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#070707;color:#fcfcfc;font:15px -apple-system,system-ui"><div style="text-align:center;max-width:360px"><div style="font-size:40px">🐭</div><h2 style="font-weight:600;margin:12px 0 6px">Couldn't start the bot server</h2><p style="color:#fcfcfc99;line-height:1.5">Something else is using its ports. Quit and reopen Muster — if it keeps happening, restart your computer.</p></div></body>`,
   );
 
-let cuaReady = Promise.resolve({ mode: "unavailable", reason: "not-started" });
+const appContents = new Set();
 
 function createWindow() {
   const isMac = process.platform === "darwin";
@@ -285,6 +286,9 @@ function createWindow() {
     },
   });
 
+  const contents = win.webContents;
+  appContents.add(contents);
+  contents.once("destroyed", () => appContents.delete(contents));
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
@@ -502,7 +506,7 @@ ipcMain.handle("desktop:capabilities", async () =>
     platform: process.platform,
     env: process.env,
     packaged: app.isPackaged,
-    localConnection: await cuaReady,
+    localConnection: getCuaConnection(),
   }),
 );
 
@@ -533,6 +537,17 @@ ipcMain.handle("credential:set", async (_event, name, value) => {
 });
 
 app.whenReady().then(async () => {
+  // Every app session begins with computer control off. Invalidate the exact
+  // profile's previous descriptor before starting a server or accepting IPC.
+  // If this write fails, do not let a stale connection reach the harness.
+  try {
+    initializeCua();
+  } catch (error) {
+    dialog.showErrorBox("Could not prepare computer access", "Muster could not reset computer access for this session. Check that its app data folder is writable, then reopen the app.");
+    slog(`computer access initialization failed: ${error?.message ?? error}`);
+    app.quit();
+    return;
+  }
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   if (app.isPackaged) {
     secureCredentials = await loadSecureCredentials();
@@ -554,18 +569,15 @@ app.whenReady().then(async () => {
       { useSystemPicker: false },
     );
   }
-  registerCuaIpc();
+  registerCuaIpc((event) => isComputerAccessSender(event, appContents,
+    app.isPackaged ? `http://127.0.0.1:${SERVER_PORT}` : DEV_URL), () => {
+    for (const contents of appContents) {
+      try { if (!contents.isDestroyed()) contents.send("cua:changed"); } catch { /* Window closed during startup. */ }
+    }
+  });
   registerUpdaterIpc();
-  // Start the CUA daemon before the window so the harness can pick up the
-  // connection descriptor on first render. Never blocks window creation on
-  // failure — computer use degrades to "unavailable", the rest still works.
-  cuaReady =
-    process.platform === "darwin"
-      ? startCua().catch((e) => {
-          console.error("[cua] start failed:", e);
-          return { mode: "unavailable", reason: String(e) };
-        })
-      : Promise.resolve({ mode: "unavailable", reason: "unsupported-platform" });
+  // The driver and its permission prompts start only after the explicit
+  // Enable for this session action in the bot's Computer panel.
   if (app.isPackaged) serverReady = await startServerPackaged();
   const win = createWindow();
   // in-app auto-update (packaged only) — checks GitHub releases, downloads on
