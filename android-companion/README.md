@@ -16,6 +16,7 @@ Use Node 22 or newer, npm, and an Android SDK/JDK for native builds.
 ```sh
 cd android-companion
 npm ci
+npm run verify:toolchain
 npm test
 npm run typecheck
 npm run lint
@@ -31,6 +32,39 @@ lint rules are checked separately from its root.
 The tests cover wire parsing, HTTPS and IPv6 addresses, pairing responses,
 HTTP acceptance, stream status and cancellation, replay cursors, and session
 isolation during delayed requests and credential writes.
+
+## Pinned toolchain dependencies
+
+The lockfile uses tar 7.5.22, PostCSS 8.5.28 and UUID 11.1.1. Expo's older
+xmldom branch is overridden to 0.8.15; the existing 0.9.12 branch is retained.
+The unused React Navigation packages are removed, including their old URI
+decoder dependency. The remaining native support packages are unchanged.
+
+Expo CLI 0.22.28 expects tar's old CommonJS default export. The patched tar
+release exposes a namespace instead, so `npm ci` runs a local `postinstall`
+step that adjusts exactly two generated Expo archive imports. The preparation
+script verifies the package versions and original or already-prepared file
+hashes before writing. Unexpected upstream bytes fail installation and require
+review; it does not silently patch a newer Expo release. Revisit this small
+compatibility patch when upgrading Expo.
+
+When deliberately disabling all dependency install scripts, run the reviewed
+local preparation step explicitly:
+
+```sh
+npm ci --ignore-scripts --no-audit --no-fund
+npm run prepare:toolchain
+npm run verify:toolchain
+```
+
+The offline compatibility checks exercise Expo's JavaScript archive fallback,
+local template extraction, plist parsing, UUID consumers and Metro's PostCSS
+path with owned fixtures. They complement the app tests and Android export;
+they do not prove native installation or device behavior.
+
+The two reviewed `image-size` parser advisories remain unresolved; updating
+these other packages is not a whole-project security assessment. The remaining
+asset-parser work and its verification gates are tracked in the CEO ledger.
 
 ## Runtime transport
 

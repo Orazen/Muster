@@ -1191,3 +1191,95 @@ The goal remains active. Google/device/Watch/VM acceptance, the Android
 35-alert remediation, portable recovery/sync, Mimosa and the recorded
 runner/VPS/signing gates remain open. No conversion/revenue result is claimed.
 Allowance at the actual check: **34% used /66% remaining**; no reset consumed.
+
+
+Loop35 post-commit evidence: pushed `8966619d9cad4c081e186332c1bf61bdbb6ecffc`.
+The candidate's947 recorded source files match that commit except the two
+ledger documents; the new profile runbook is outside the snapshot. Exact-SHA
+CLI build and byte/executable verification each passed **5/5** (10 executions),
+50,344bytes, SHA256 `1c7bb5489bc61689a83b4de472b470c00bb087740fcb0f0642e28b6fd69f0b53`.
+Evidence: `loop35-cli-candidate.json` and candidate
+`committed-source-verification.json` in the verification folder. Production
+GET200 at00:30UTC still served desktop1.10.4/cb5db9c. Existing heartbeat updated.
+
+## Loop 36 — Android dependency and toolchain compatibility (2026-09-11)
+
+Base `8966619`, clean main and pull/rebase up to date. A fresh GitHub API read
+confirmed **35 open alerts:1 critical,25 high,9 medium**, all in the Android
+lockfile. Targeted overrides select tar7.5.22, PostCSS8.5.28 and UUID11.1.1;
+the old xmldom branch moves to0.8.15 while0.9.12 remains. Source review found
+React Navigation unused: the app switches pairing/list/chat through local
+state. Removing its two direct packages also removes the old URI decoder.
+Other native support dependencies stay unchanged. Comparing the fresh advisory
+ranges with the final lockfile leaves **2 affected advisories**, both image-size;
+33 no longer match a locked version. This comparison does not itself close
+GitHub alerts or establish whole-project security.
+
+The real caller tests caught an integration failure hidden by the app suite:
+Expo52's generated `.default.extract` imports fail with tar7's CommonJS
+namespace. Initial compatibility result was **8/10 passed,2 failed**. A local
+postinstall now adjusts exactly those two imports. Preparation pins Expo
+CLI0.22.28/tar7.5.22 and both original/prepared source hashes, validates both
+inputs before writing, supports unchanged reapplication and interrupted-pair
+recovery, and fails on unexpected bytes or versions. No dependency code or
+network is invoked by this preparation step. Ignore-scripts installations
+have an explicit `prepare:toolchain` command. The README documents this
+maintenance requirement; no framework major upgrade or generic patching
+package was introduced.
+
+Final validation: **228 root files /3,041 passed /8 skipped in242.02s**, unchanged
+from Loop35; **4 Android Jest suites /132 passed /0 skipped in0.972s**. Root
+build and both types pass (Vite5.26s, existing chunk warning); Android typecheck,
+local lint, root custom scoped lint, script syntax and diff checks pass.
+**15/15 offline toolchain checks** exercise both real Expo archive callers,
+plist/XML roundtrips, Xcode/Bunyan UUID use, Metro CSS and five preparation
+regressions. They pass with ordinary and repository-local temporary paths.
+
+Clean install with scripts disabled installed978packages in7s and npm ls
+passed. A separate fresh owned installation with normal lifecycle scripts
+installed978packages in15.7s, successfully applied postinstall, and passed
+npm ls. Its final compatibility check passed **15/15 in0.430s**. Evidence:
+`.omb-scratch/verification/android-install-loop36-10ca2b54ae/`.
+An independent copy exposed a verifier portability bug: generated CommonJS
+PostCSS config inherited the repository's ESM type, producing **13/15**. The
+fixture now declares its own CommonJS package; original failed logs remain.
+Only that verifier file was refreshed after the successful fresh installation.
+A preliminary Xcode fixture also lacked required section comments; its
+correction and original evidence are preserved. None of those fixture
+failures is counted as successful acceptance.
+
+Actual offline Android Metro export passed in**11.818s**, bundling650modules
+in7038ms and producing1,389,696bytes of Hermes HBC96 plus a5,201,235byte source
+map. **13/13 artifact checks** pass. All650 real mapped source contents match
+the independent source/dependency copy, including14Muster runtime modules;
+two additional map entries are virtual polyfills. Final copied compatibility
+also passed **15/15 in0.429s**. The36final source files match the checkout,
+with the explicitly recorded verifier-only change after export; prepared
+CLI bytes remain unchanged. Evidence:
+`.omb-scratch/verification/android-export-loop36-5a288f42df/`.
+No runtime assets were exported. The three configured1024px PNGs exist, but
+this does not prove native launcher/splash rendering, APK installation,
+keyboard, camera, pairing or device streaming behavior.
+
+Residual: npm audit exits1 with6high package nodes tracing to the same two
+image-size advisories (not6independent advisories), no critical/moderate nodes
+in that report. Current registry latest2.0.2 still has no published fix for
+these two advisories. A next bounded mitigation must reach Metro's main and
+complete worker paths before image-size calculation; extension filtering or
+late asset plugins are insufficient. Installed1.2.1 checks disabled types
+after detection but before the affected calculation loops. Its current
+validator scanner advances; a blanket validator-hang assertion was corrected.
+Any mitigation still needs timeout-bounded real Metro asset-buffer tests and
+worker export verification. Do not dismiss the alerts or claim a full scan.
+Primary sources: [archive advisory](https://github.com/isaacs/node-tar/security/advisories/GHSA-23hp-3jrh-7fpw),
+[xmldom advisory](https://github.com/xmldom/xmldom/security/advisories/GHSA-c7q8-3ch8-vqpv),
+[ICNS advisory](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr),
+[JXL/HEIF advisory](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq).
+Fresh API/registry/lock/audit evidence is in the ignored `loop36-*` files.
+
+This slice improves Android build readiness; it is not a native app release,
+Google/device acceptance, VM execution or measured revenue result. Desktop
+candidate8966619 remains the latest locally verified Mac GUI build. Public
+release/CI/VPS/signing, Mimosa, portable recovery and sync gates remain open.
+Demo127.0.0.1:8845 and real credentials are untouched. Full goal remains active.
+Allowance: **37% used /63% remaining**; no reset consumed.
