@@ -53,6 +53,8 @@ function CompanionApp() {
         onCardAction={companion.actOnCard}
         cardActions={companion.cardActions}
         onRefreshCards={companion.refreshCards}
+        onSeedAction={companion.actOnSeed}
+        seedActions={companion.seedActions}
         onBack={() => setSelection(null)}
         onLoadOlder={() => companion.loadOlder(target.threadId, companion.state.hasMore[target.threadId] ?? false)}
         viewConversation={companion.viewConversation}

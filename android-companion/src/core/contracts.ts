@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { Message } from "./types";
+import { seedAnswerReceiptSchema, seedWireMetadataSchema } from "./seed-card";
 
 export const jsonSchema = z.json();
 export type JsonValue = z.infer<typeof jsonSchema>;
@@ -20,18 +22,35 @@ const strings = entries(z.string());
 const cardSchema = z.object({
   title: z.string().catch(""), subtitle: text, options: strings,
   answered: nullableText, dismissed: flag, requestId: text, tool: text,
-  held: text, allowKey: text,
+  held: text, allowKey: text, purpose: text, seedAnswer: seedAnswerReceiptSchema.optional().catch(undefined),
 }).nullable().catch(null);
 const toolSchema = z.object({ name: z.string().catch(""), ok: flag, spoken: text, setup: flag }).nullable().catch(null);
 const senderSchema = z.object({ botId: text, name: text, color: text }).nullable().catch(null);
 const reactionsSchema = entries(z.object({ emoji: z.string(), by: z.string() })).nullable().catch(null);
 const commSchema = z.object({ groupId: id, withBotId: text, withName: text, withColor: text }).nullable().catch(null);
-export const messageSchema = z.object({
+const lossyMessageSchema = z.object({
   id, role: z.enum(["user", "bot"]).catch("bot"),
   kind: z.enum(["text", "options", "activity", "screen", "unknown"]).catch("unknown"),
   at: z.number().finite().catch(0), text, card: cardSchema, tool: toolSchema,
   parentId: nullableText, from: senderSchema, reactions: reactionsSchema,
   comm: commSchema, hasImage: z.boolean().catch(false), png: nullableText, mime: nullableText,
+});
+const seedMessageContextSchema = z.object({
+  role: z.enum(["bot", "user"]), kind: z.enum(["text", "options", "activity", "screen", "unknown"]),
+  parentId: z.string().nullable().optional(),
+  from: z.object({ botId: z.string().optional(), name: z.string().optional(), color: z.string().optional() }).nullable().optional(),
+});
+export const messageSchema = jsonSchema.transform((raw, context): Message => {
+  const decoded = lossyMessageSchema.safeParse(raw);
+  if (!decoded.success) {
+    context.addIssue({ code: "custom", message: "Invalid message identity" });
+    return z.NEVER;
+  }
+  const message = seedMessageContextSchema.safeParse(raw).success ? decoded.data : { ...decoded.data, seedContextInvalid: true };
+  // Preserve ordinary lossy display, but never authorize actions from fields
+  // that were removed or normalized after invalid wire input.
+  return message.card && !seedWireMetadataSchema.safeParse(raw).success
+    ? { ...message, card: { ...message.card, seedInvalid: true } } : message;
 });
 export const messagesSchema = entries(messageSchema);
 const taskSchema = z.object({ threadId: id, title: z.string(), createdAt: z.number().finite() });

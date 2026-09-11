@@ -66,8 +66,9 @@ history and do not offer status or startup actions.
 
 The generic card PATCH endpoint now returns HTTP 405; clients
 must use the dedicated seed route or the existing live-request response route.
-This slice adds the exact three companion proxy routes; Android, iOS and Watch
-welcome-card controls require separate implementation and native verification.
+The companion proxy exposes these exact three routes. Android implements the
+direct-bot controls described below. iOS and Watch still require their own
+welcome-card implementation and native verification.
 An older cached web page or desktop binary that still uses split PATCH/message
 writes does not gain the new client recovery flow; it needs an updated bundle.
 
@@ -75,24 +76,40 @@ The browser/server tests use synthetic accounts and offline provider fixtures.
 They do not verify Google OAuth, real model execution or a published native
 release. Current run evidence and counts are recorded in the CEO ledger.
 
-## Next native slice
+## Android welcome answers
 
-Enable direct-bot welcome answers on Android first, with a separate seed
-operation ledger in `android-companion/src/hooks/companion-session.ts` and a
-separate branch in `RequestCard.tsx`. Preserve the existing live request flow.
-Add `purpose` and typed receipts to the native contracts without letting a
-malformed receipt become an actionable unanswered card. Android normalizes absent
-`from` to null; adapt that wire shape before applying the legacy recognition rule.
+Android uses a separate seed operation ledger and card component; live questions
+and permissions keep their existing request-ID protocol. Choice and custom
+answers preserve exact text. A failed request retains the draft and offers
+Check status, with Retry same answer when the card remains unanswered. Only a
+recorded or not-started receipt offers Start saved task, using the current
+attempt. Reconnect, refresh and foreground changes never resend an answer.
 
-Use a narrow receipt/echo fold. The current Android message reducer deduplicates
-an existing message but still selects its leaf: feeding an API receipt's user
-echo through that ordinary SSE path would rewind a newer reply. Preserve later
-attempts, replies, branch selection and stream state. Reuse connection, view,
-thread, card-signature and foreground identity fences. Keep room seeds inert.
+The decoder records invalid original metadata before ordinary display decoding
+can discard it. A malformed purpose, receipt, sender or legacy greeting cannot
+become an actionable unanswered seed. Legacy recognition requires the original
+root greeting and second message to be loaded. Room seeds and already-answered
+legacy cards without receipts remain readable history.
 
-Verify duplicate taps, exact multiline text, accepted-response loss with GET
-recovery, explicit versioned retry, uncertain/restart behavior, stale callbacks,
-later-user rejection and a real 320dp keyboard flow. Rerun the existing live-card
-regressions. This is a read-only integration audit, not completed native work.
+A narrow receipt/echo fold preserves later attempts, replies, branch selection
+and live streams. Replayed SSE user echoes cannot rewind the conversation after
+an HTTP acknowledgement inserted that same saved answer. Invalid echo linkage
+leaves the receipt unconfirmed and exposes recovery. Account, connection, view,
+thread, card signature and foreground changes fence stale callbacks. If a
+cancelled transport continues running, its physical request lock remains until
+it settles; controls explain the wait and prevent another dispatch. Custom
+answers use a keyboard-aware editor with normal scrolling in the chat's own
+window. Its state lives outside the virtualized transcript, so row recycling
+cannot discard the draft. Back and Close retain the draft for that account,
+conversation and card. Closing the editor does not cancel a request already
+sent. Android window-focus and background guards remain active; a native Dialog
+cannot be used here because it blurs the Activity before Send can run.
+
+Android's standalone Jest suite is separate from root Vitest. Emulator checks
+use a fresh paired fixture, actual server/proxy/SQLite, and an offline provider.
+They do not establish real Google OAuth, model work, physical-device behavior,
+release transport policy or Play Store distribution. The ledger records exact
+source hashes, native acceptance and cleanup evidence.
+
 iOS needs its own typed models/session/UI slice; do not broaden its live
 `isPending` predicate, which also feeds Watch and approval lists.

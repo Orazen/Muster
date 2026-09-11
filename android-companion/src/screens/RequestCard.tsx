@@ -7,8 +7,9 @@ import {
 import { isCardPending, isPermissionCard, type Bot, type Message } from "../core/types";
 import type { ChatTarget, CompanionClient } from "../hooks/companion-session";
 import { composerContextKey } from "./composer-draft";
+import { SeedRequestCard, type SeedRequestCardProps } from "./SeedRequestCard";
 
-export interface RequestCardProps {
+export interface RequestCardProps extends SeedRequestCardProps {
   message: Message;
   target: ChatTarget;
   connection: CompanionClient;
@@ -21,6 +22,7 @@ export interface RequestCardProps {
 // Identity includes the connection even when two accounts reuse every wire ID.
 // Server settlement does not change the signature or discard a typed answer.
 export function RequestCard(props: RequestCardProps) {
+  if (!props.message.card?.requestId) return <SeedRequestCard {...props} />;
   const reference = cardReference(props.target, props.message);
   const key = JSON.stringify([
     composerContextKey(props.connection, props.target), props.message.id,

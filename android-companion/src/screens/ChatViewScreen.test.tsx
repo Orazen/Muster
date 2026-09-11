@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, jest } from "@jest/globals";
 import { MusterClient } from "../core/client";
 import { initialState } from "../core/store";
 import { cardActionKey, cardReference } from "../core/card-actions";
+import { SEED_CARD_OPTIONS, SEED_CARD_SUBTITLE, SEED_CARD_TITLE } from "../core/seed-card";
+import { seedReference } from "../hooks/companion-session";
 import type { Message } from "../core/types";
 import { ChatViewScreen } from "./ChatViewScreen";
 
@@ -12,7 +14,10 @@ import { ChatViewScreen } from "./ChatViewScreen";
 // composer, hooks and JSX run unchanged; these are not device/keyboard tests.
 type ScreenProps = ComponentProps<typeof ChatViewScreen>;
 const trees: ReactTestRenderer[] = [];
-afterEach(() => { act(() => { for (const tree of trees.splice(0)) tree.unmount(); }); });
+afterEach(() => {
+  act(() => { for (const tree of trees.splice(0)) tree.unmount(); });
+  jest.restoreAllMocks();
+});
 
 function deferred() {
   let resolve: (accepted: boolean) => void = () => { throw new Error("Deferred not initialized"); };
@@ -37,6 +42,8 @@ function props(overrides: Partial<ScreenProps> = {}): ScreenProps {
     onCardAction: async () => undefined,
     cardActions: {},
     onRefreshCards: async () => undefined,
+    onSeedAction: async () => undefined,
+    seedActions: {},
     onBack: () => undefined,
     onLoadOlder: () => undefined,
     viewConversation: () => () => undefined,
@@ -72,6 +79,24 @@ function render(screenProps: ScreenProps) {
 }
 
 describe("ChatViewScreen card integration", () => {
+  it("routes an actual welcome card through the seed API and preserves the separate task draft", async () => {
+    const message: Message = { id: "welcome-seed", kind: "options", role: "bot", at: 1,
+      card: { purpose: "onboarding-v1", title: SEED_CARD_TITLE, subtitle: SEED_CARD_SUBTITLE, options: [...SEED_CARD_OPTIONS] } };
+    const onSeedAction = jest.fn<ScreenProps["onSeedAction"]>().mockResolvedValue(undefined);
+    const onCardAction = jest.fn<ScreenProps["onCardAction"]>();
+    const onSend = jest.fn<ScreenProps["onSend"]>();
+    const original = props({ state: { ...initialState(), bots: { basil: { id: "basil", name: "Basil", threadId: "basil-thread" } },
+      messages: { "basil-thread": [message] }, leaves: { "basil-thread": message.id } }, onSeedAction, onCardAction, onSend });
+    const screen = render(original);
+    screen.edit("A separate task draft");
+    await act(async () => screen.buttons("Life admin")[0].props.onPress());
+    expect(onSeedAction).toHaveBeenCalledWith(seedReference(original.state, original.target, message), { kind: "answer", text: "Life admin" });
+    expect(onCardAction).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.input().props.value).toBe("A separate task draft");
+    expect(screen.buttons("Allow once")).toHaveLength(0);
+  });
+
   it("routes a transcript question to a typed answer without sending the task composer", async () => {
     const message: Message = { id: "ask-message", kind: "options", role: "bot", at: 1,
       card: { title: "Choose", options: ["Allow", "Deny"], requestId: "ask-request" } };

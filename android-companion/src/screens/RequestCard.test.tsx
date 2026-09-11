@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, jest } from "@jest/globals";
 import { MusterClient } from "../core/client";
 import { cardActionKey, cardReference, type CardActionState } from "../core/card-actions";
 import type { Message } from "../core/types";
+import { initialState } from "../core/store";
 import { RequestCard, type RequestCardProps } from "./RequestCard";
 
 // Actual component/hooks with React Native host stubs, not native layout proof.
@@ -31,6 +32,7 @@ const permission: Message = {
 };
 function props(overrides: Partial<RequestCardProps> = {}): RequestCardProps {
   return {
+    state: initialState(), seedActions: {}, onSeedAction: async () => undefined,
     message: question, connection: connection(), target: { kind: "bot", id: "basil", threadId: "thread" },
     bot: { id: "basil", name: "Basil", threadId: "thread" }, cardActions: {},
     onCardAction: async () => undefined, onRefreshCards: async () => undefined, ...overrides,

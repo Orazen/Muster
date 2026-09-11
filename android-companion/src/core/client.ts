@@ -4,8 +4,9 @@ import { SSEParser, type SSEEvent } from "./sse";
 import { apiErrorSchema, instancesSchema, pairResponseSchema, requestResponseSchema, threadPageSchema, type JsonValue } from "./contracts";
 import { connectionOrigin, parseConnection, type Connection, type ConnectionScheme } from "./connection";
 import { parsePairingInvite } from "./pairing";
+import { seedAnswerTextSchema, seedCardResultSchema } from "./seed-card";
 import type { ClientFetch, ClientResponse, ConnectionStatus, EventStream, StreamReader } from "./transport";
-import type { Fleet, Instance, PairResponse, RequestBehavior, RequestOutcome, ThreadPage } from "./types";
+import type { Fleet, Instance, PairResponse, RequestBehavior, RequestOutcome, ThreadPage, SeedCardResult } from "./types";
 export { DEFAULT_PORT, parseAddress, parseConnection, type Connection, type ParsedAddress } from "./connection";
 export type { ClientFetch, ClientResponse, ConnectionStatus } from "./transport";
 
@@ -15,8 +16,9 @@ export class APIError extends Error {
 }
 interface PairOptions { credential?: string; code?: string; deviceName: string; scheme?: ConnectionScheme }
 interface PairBody { deviceName: string; credential?: string; code?: string }
+interface SeedResponseIdentity { cardId: string; answer?: string }
 interface RespondBody { requestId: string; behavior: RequestBehavior; message?: string }
-type RequestBody = { text: string } | RespondBody | { allowKey: string } | { emoji: string } | Record<string, never>;
+type RequestBody = { threadId: string; answer: string } | { threadId: string; expectedAttempt: number } | { text: string } | RespondBody | { allowKey: string } | { emoji: string } | Record<string, never>;
 
 async function errorDetail(response: ClientResponse): Promise<string> {
   try {
@@ -116,6 +118,28 @@ export class MusterClient {
     const result = requestResponseSchema.safeParse(await this.request("POST", `/api/threads/${encodeURIComponent(threadId)}/respond`, body));
     if (!result.success) throw new Error("Your computer returned an unrecognized response. Check the request status before responding again.");
     return result.data.outcome;
+  }
+
+  private seedPath(botId: string, cardId: string): string {
+    return `/api/bots/${encodeURIComponent(botId)}/cards/${encodeURIComponent(cardId)}/answer`;
+  }
+  private async seedRequest(method: "GET" | "POST", path: string, expected: SeedResponseIdentity, body?: RequestBody, signal?: AbortSignal): Promise<SeedCardResult> {
+    const parsed = seedCardResultSchema.safeParse(await this.request(method, path, body, signal));
+    if (!parsed.success || parsed.data.cardMessage.id !== expected.cardId || expected.answer !== undefined && parsed.data.userMessage?.text !== expected.answer || method === "POST" && (!parsed.data.outcome || !parsed.data.userMessage || !parsed.data.cardMessage.card.seedAnswer)) {
+      throw new Error("Your computer returned an unrecognized saved-answer receipt. Check status before trying again.");
+    }
+    return parsed.data;
+  }
+  async answerSeedCard(botId: string, cardId: string, threadId: string, answer: string, signal?: AbortSignal): Promise<SeedCardResult> {
+    if (!seedAnswerTextSchema.safeParse(answer).success) throw new Error("Enter a nonblank answer of up to 4,000 characters.");
+    return this.seedRequest("POST", this.seedPath(botId, cardId), { cardId, answer }, { threadId, answer }, signal);
+  }
+  async seedCardStatus(botId: string, cardId: string, threadId: string, signal?: AbortSignal): Promise<SeedCardResult> {
+    return this.seedRequest("GET", `${this.seedPath(botId, cardId)}?threadId=${encodeURIComponent(threadId)}`, { cardId }, undefined, signal);
+  }
+  async startSeedCard(botId: string, cardId: string, threadId: string, expectedAttempt: number, signal?: AbortSignal): Promise<SeedCardResult> {
+    if (!Number.isSafeInteger(expectedAttempt) || expectedAttempt < 0 || expectedAttempt >= Number.MAX_SAFE_INTEGER) throw new Error("A valid saved-answer attempt is required.");
+    return this.seedRequest("POST", `${this.seedPath(botId, cardId)}/start`, { cardId }, { threadId, expectedAttempt }, signal);
   }
 
   async alwaysAllow(botId: string, allowKey: string): Promise<void> {

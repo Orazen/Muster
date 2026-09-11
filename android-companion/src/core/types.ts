@@ -7,6 +7,20 @@ export type MessageKind = "text" | "options" | "activity" | "screen" | "unknown"
 export type RequestBehavior = "allow" | "deny" | "answer";
 export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavailable";
 
+export type SeedAnswerStatus = "recorded" | "starting" | "started" | "not-started" | "uncertain";
+export interface SeedAnswerReceipt {
+  messageId: string;
+  attempt: number;
+  status: SeedAnswerStatus;
+  error?: string;
+}
+export interface SeedCardResult {
+  ok: true;
+  outcome?: "recorded" | "already-recorded" | "starting" | "already-requested";
+  cardMessage: Message;
+  userMessage: Message | null;
+}
+
 export interface OptionCard {
   title: string;
   subtitle?: string;
@@ -17,6 +31,10 @@ export interface OptionCard {
   tool?: string;
   held?: string;
   allowKey?: string;
+  purpose?: string;
+  seedAnswer?: SeedAnswerReceipt;
+  /** Local decoder flag: malformed wire metadata must never authorize a seed action. */
+  seedInvalid?: boolean;
 }
 
 export interface ToolActivity {
@@ -45,6 +63,8 @@ export interface CommChip {
 }
 
 export interface Message {
+  /** Decoder provenance for seed recognition; never supplied as write authority. */
+  seedContextInvalid?: boolean;
   id: string;
   role: Role;
   kind: MessageKind;

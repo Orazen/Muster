@@ -16,6 +16,8 @@ import { CompanionState, StreamBuffers, visibleTranscript } from "../core/store"
 import type { ChatTarget, CompanionClient } from "../hooks/companion-session";
 import { ComposerDraft, composerContextKey } from "./composer-draft";
 import { RequestCard, type RequestCardProps } from "./RequestCard";
+import { SeedCardHost } from "./SeedCardHost";
+import { SeedCardOwner } from "./SeedRequestCard";
 
 interface ChatViewScreenProps {
   state: CompanionState;
@@ -27,6 +29,8 @@ interface ChatViewScreenProps {
   onCardAction: RequestCardProps["onCardAction"];
   cardActions: RequestCardProps["cardActions"];
   onRefreshCards: RequestCardProps["onRefreshCards"];
+  onSeedAction: RequestCardProps["onSeedAction"];
+  seedActions: RequestCardProps["seedActions"];
   onBack: () => void;
   onLoadOlder: () => void;
   viewConversation: (target: ChatTarget) => () => void;
@@ -120,6 +124,8 @@ export function ChatViewScreen({
   onCardAction,
   cardActions,
   onRefreshCards,
+  onSeedAction,
+  seedActions,
   onBack,
   onLoadOlder,
   viewConversation,
@@ -147,7 +153,12 @@ export function ChatViewScreen({
     return out;
   }, [transcript, streams]);
 
+
   return (
+    <SeedCardHost key={composerContextKey(connection, target)}>
+      {transcript.filter((message) => message.kind === "options" && message.card && !message.card.requestId).map((message) =>
+        <SeedCardOwner key={message.id} state={state} message={message} target={target} connection={connection}
+          seedActions={seedActions} onSeedAction={onSeedAction} />)}
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -198,7 +209,8 @@ export function ChatViewScreen({
               }
             >
               {item.kind === "options" && item.card ? (
-                <RequestCard message={item} target={target} connection={connection} bot={bot}
+                <RequestCard state={state} message={item} target={target} connection={connection} bot={bot}
+                  seedActions={seedActions} onSeedAction={onSeedAction}
                   cardActions={cardActions} onCardAction={onCardAction} onRefreshCards={onRefreshCards} />
               ) : <Bubble message={item} color={color} />}
             </View>
@@ -222,6 +234,7 @@ export function ChatViewScreen({
         onSend={onSend}
       />
     </KeyboardAvoidingView>
+    </SeedCardHost>
   );
 }
 

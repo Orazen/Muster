@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, jest } from "@jest/globals";
 import { APIError, type Connection } from "../core/client";
-import type { Fleet, Message, PairResponse, RequestBehavior, RequestOutcome, ThreadPage } from "../core/types";
+import type { Fleet, Message, PairResponse, RequestBehavior, RequestOutcome, SeedAnswerStatus, SeedCardResult, ThreadPage } from "../core/types";
 import { cardActionKey, cardReference, type CardAction, type CardReference } from "../core/card-actions";
+import { SEED_CARD_OPTIONS, SEED_CARD_PURPOSE, SEED_CARD_SUBTITLE, SEED_CARD_TITLE } from "../core/seed-card";
 import {
-  CompanionSession, ConnectionPersistence, currentChatTarget,
-  type CompanionClient, type CompanionDependencies, type PairInput,
+  CompanionSession, ConnectionPersistence, currentChatTarget, seedActionKey, seedReference,
+  type CompanionClient, type CompanionDependencies, type PairInput, type SeedAction,
 } from "./companion-session";
 
 function deferred<T>() {
@@ -44,6 +45,8 @@ class FixtureClient implements CompanionClient {
   readResponses: Array<Promise<void>> = [];
   responseResults: Array<Promise<RequestOutcome>> = [];
   grantResults: Array<Promise<void>> = [];
+  seedResults: Array<Promise<SeedCardResult>> = [];
+  seedCalls: Array<{ kind: "answer" | "check" | "start"; botId: string; cardId: string; threadId: string; answer?: string; attempt?: number; signal?: AbortSignal }> = [];
   decisions: Array<{ thread: string; request: string; behavior: RequestBehavior; message?: string }> = [];
   reads: Array<{ kind: "bot" | "room"; id: string; signal?: AbortSignal }> = [];
   streams: Stream[] = [];
@@ -82,6 +85,21 @@ class FixtureClient implements CompanionClient {
   async markGroupRead(id: string, signal?: AbortSignal): Promise<void> {
     this.reads.push({ kind: "room", id, signal });
     await this.readResponses.shift();
+  }
+  async answerSeedCard(botId: string, cardId: string, threadId: string, answer: string, signal?: AbortSignal): Promise<SeedCardResult> {
+    this.seedCalls.push({ kind: "answer", botId, cardId, threadId, answer, signal });
+    return await this.nextSeedResult();
+  }
+  async seedCardStatus(botId: string, cardId: string, threadId: string, signal?: AbortSignal): Promise<SeedCardResult> {
+    this.seedCalls.push({ kind: "check", botId, cardId, threadId, signal });
+    return await this.nextSeedResult();
+  }
+  async startSeedCard(botId: string, cardId: string, threadId: string, attempt: number, signal?: AbortSignal): Promise<SeedCardResult> {
+    this.seedCalls.push({ kind: "start", botId, cardId, threadId, attempt, signal });
+    return await this.nextSeedResult();
+  }
+  private nextSeedResult(): Promise<SeedCardResult> {
+    return this.seedResults.shift() ?? Promise.reject(new Error("No saved-answer fixture response configured."));
   }
 }
 
@@ -189,6 +207,304 @@ async function cardFixture(permission = false, inRoom = false) {
   const act = (action: CardAction) => f.session.actOnCard(f.a, reference, action);
   return { ...f, target, message, reference, leave, emit, state, act };
 }
+
+const seedGreeting: Message = { id: "seed-greeting", role: "bot", kind: "text", text: "Hey — I'm Original. Nice to meet you.", at: 1, parentId: null };
+const seedQuestion: Message = { id: "welcome-card", role: "bot", kind: "options", at: 2, parentId: seedGreeting.id, card: {
+  purpose: SEED_CARD_PURPOSE, title: SEED_CARD_TITLE, subtitle: SEED_CARD_SUBTITLE, options: [...SEED_CARD_OPTIONS],
+} };
+function seedResult(answer = "Life admin", status: SeedAnswerStatus = "starting", attempt = status === "recorded" ? 0 : 1): SeedCardResult {
+  return {
+    ok: true, outcome: "starting",
+    cardMessage: { ...seedQuestion, card: { ...seedQuestion.card!, answered: answer,
+      seedAnswer: { messageId: "saved-answer", status, attempt } } },
+    userMessage: { id: "saved-answer", role: "user", kind: "text", text: answer, at: 3, parentId: seedQuestion.id },
+  };
+}
+async function seedFixture() {
+  const f = await readingFixture();
+  const seededBot = { ...fleet("a").bots[0], name: "Renamed", busy: false, hasMore: false,
+    messages: [seedGreeting, seedQuestion], activeLeafId: seedQuestion.id };
+  const stream = f.a.streams[0];
+  stream.frame({ kind: "bot", bot: seededBot }, null);
+  const leave = f.session.viewConversation(f.a, readBot);
+  await settleMicrotasks();
+  const reference = seedReference(f.session.getSnapshot().state, readBot, seedQuestion);
+  if (!reference) throw new Error("Fixture requires a recognized welcome card");
+  const state = () => f.session.getSnapshot().seedActions[seedActionKey(reference)];
+  const card = () => f.session.getSnapshot().state.messages.thread.find((message) => message.id === seedQuestion.id)?.card;
+  const act = (action: SeedAction) => f.session.actOnSeed(f.a, reference, action);
+  const patch = (message: Message) => stream.frame({ kind: "message.patch", threadId: "thread", message }, null);
+  const append = (message: Message) => stream.frame({ kind: "message", threadId: "thread", message }, null);
+  const settle = (result: SeedCardResult) => { patch(result.cardMessage); if (result.userMessage) append(result.userMessage); };
+  return { ...f, seededBot, stream, reference, leave, state, card, act, patch, append, settle };
+}
+
+describe("native durable welcome answers", () => {
+  it("does not write on hydration, view registration, foreground changes or reconnect", async () => {
+    const f = await seedFixture();
+    f.session.setForeground(false); f.session.setForeground(true);
+    f.stream.status("disconnected"); f.stream.status("connected");
+    f.stream.frame({ kind: "hello", cursor: "7", resumed: true }, 7);
+    await settleMicrotasks();
+    expect(f.a.seedCalls).toEqual([]);
+    expect(f.a.actions).toEqual([]);
+    expect(f.card()?.answered).toBeUndefined();
+  });
+
+  it("sends exact multiline text to the owner/card/current thread once and keeps recording separate from startup", async () => {
+    const f = await seedFixture();
+    const pending = deferred<SeedCardResult>(); f.a.seedResults.push(pending.promise);
+    const text = "  Work & projects\n  keep the spaces  ";
+    const sending = f.act({ kind: "answer", text });
+    await f.act({ kind: "answer", text });
+    await f.act({ kind: "check" });
+    await f.act({ kind: "start" });
+    expect(f.a.seedCalls).toHaveLength(1);
+    expect(f.a.seedCalls[0]).toMatchObject({ kind: "answer", botId: "a", cardId: seedQuestion.id, threadId: "thread", answer: text });
+    expect(f.card()?.answered).toBeUndefined();
+    expect(f.state()).toMatchObject({ phase: "pending", operation: "answer", lastAnswer: text, message: null });
+    pending.resolve(seedResult(text)); await sending;
+    expect(f.card()?.answered).toBe(text);
+    expect(f.card()?.seedAnswer?.status).toBe("starting");
+    expect(f.state()).toMatchObject({ phase: "settled", operation: "answer", lastAnswer: text, message: null });
+    expect(f.session.getSnapshot().state.messages.thread.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(f.a.actions).toEqual([]);
+  });
+
+  it.each(["", "  \n ", "x".repeat(4001)])("rejects a blank or oversized answer before transport (%#)", async (text) => {
+    const f = await seedFixture(); await f.act({ kind: "answer", text });
+    expect(f.a.seedCalls).toEqual([]); expect(f.state()?.message).toContain("4,000");
+  });
+
+  it.each([400, 404, 409, 422, 408, 503, "network"] as const)("keeps failure %s recoverable without optimism or automatic retry", async (status) => {
+    jest.useFakeTimers(); const f = await seedFixture();
+    const pending = deferred<SeedCardResult>(); f.a.seedResults.push(pending.promise);
+    const sending = f.act({ kind: "answer", text: "  Keep my answer\n" });
+    pending.reject(status === "network" ? new Error("Connection lost") : new APIError(status, "Fixture refusal"));
+    await sending; await jest.advanceTimersByTimeAsync(60_000);
+    expect(f.state()).toMatchObject({ phase: "failed", lastAnswer: "  Keep my answer\n" });
+    expect(f.state()?.message).toContain(status === "network" || status === 408 || status === 503 ? "Could not confirm" : "not accepted");
+    expect(f.card()?.answered).toBeUndefined(); expect(f.a.seedCalls).toHaveLength(1);
+  });
+
+  it("recovers accepted response loss through GET without another send or user bubble", async () => {
+    const f = await seedFixture();
+    const lost = deferred<SeedCardResult>(); f.a.seedResults.push(lost.promise);
+    const sending = f.act({ kind: "answer", text: "Life admin" });
+    lost.reject(new Error("Response lost after acceptance")); await sending;
+    f.a.seedResults.push(Promise.resolve({ ...seedResult("Life admin", "started"), outcome: undefined }));
+    await f.act({ kind: "check" });
+    expect(f.a.seedCalls.map((call) => call.kind)).toEqual(["answer", "check"]);
+    expect(f.card()?.seedAnswer?.status).toBe("started");
+    expect(f.session.getSnapshot().state.messages.thread.filter((message) => message.id === "saved-answer")).toHaveLength(1);
+    expect(f.state()).toMatchObject({ phase: "settled", operation: "check", lastAnswer: "Life admin", message: null });
+  });
+
+  it("replays the same answer explicitly without calling start, and rejects a conflicting answer locally", async () => {
+    const f = await seedFixture(); f.settle(seedResult("  Life admin\n", "not-started"));
+    f.a.seedResults.push(Promise.resolve({ ...seedResult("  Life admin\n", "not-started"), outcome: "already-recorded" }));
+    await f.act({ kind: "answer", text: "  Life admin\n" });
+    expect(f.a.seedCalls.map((call) => call.kind)).toEqual(["answer"]);
+    expect(f.card()?.seedAnswer?.status).toBe("not-started");
+    await f.act({ kind: "answer", text: "Different answer" });
+    expect(f.a.seedCalls).toHaveLength(1); expect(f.state()?.message).toContain("already has a saved answer");
+  });
+
+  it.each(["recorded", "not-started"] as const)("starts a saved %s answer only on an explicit click with its exact attempt", async (status) => {
+    const f = await seedFixture(); const previous = seedResult("Life admin", status); f.settle(previous);
+    const attempt = previous.cardMessage.card!.seedAnswer!.attempt;
+    expect(f.a.seedCalls).toHaveLength(0);
+    f.a.seedResults.push(Promise.resolve(seedResult("Life admin", "starting", attempt + 1)));
+    await f.act({ kind: "start" });
+    expect(f.a.seedCalls).toEqual([expect.objectContaining({ kind: "start", botId: "a", cardId: seedQuestion.id, threadId: "thread", attempt })]);
+    expect(f.card()?.seedAnswer).toMatchObject({ status: "starting", attempt: attempt + 1 });
+    expect(f.session.getSnapshot().state.messages.thread.filter((message) => message.role === "user")).toHaveLength(1);
+  });
+
+  it.each(["starting", "started", "uncertain"] as const)("does not restart a %s receipt", async (status) => {
+    const f = await seedFixture(); f.settle(seedResult("Life admin", status));
+    await f.act({ kind: "start" });
+    expect(f.a.seedCalls).toEqual([]); expect(f.state()?.message).toContain("cannot be started again");
+  });
+
+  it.each(["busy", "newer-user", "later-than-saved"])("blocks %s writes while allowing status reads", async (blocked) => {
+    const f = await seedFixture();
+    if (blocked === "busy") f.stream.frame({ kind: "bot", bot: { ...f.seededBot, busy: true } }, null);
+    if (blocked === "later-than-saved") f.settle(seedResult("Life admin", "not-started"));
+    if (blocked !== "busy") f.append({ id: "newer-user", role: "user", kind: "text", text: "New work", at: 4, parentId: blocked === "later-than-saved" ? "saved-answer" : seedQuestion.id });
+    await f.act(blocked === "later-than-saved" ? { kind: "start" } : { kind: "answer", text: "Life admin" });
+    expect(f.a.seedCalls).toEqual([]); expect(f.state()?.phase).toBe("failed");
+    f.a.seedResults.push(Promise.resolve(blocked === "later-than-saved" ? seedResult("Life admin", "not-started") : { ok: true, cardMessage: seedQuestion, userMessage: null }));
+    await f.act({ kind: "check" });
+    expect(f.a.seedCalls.map((call) => call.kind)).toEqual(["check"]);
+  });
+
+  it.each(["legacy-settled", "unknown-purpose", "request", "wrong-thread", "hidden", "background", "left-view", "room"])("rejects %s seed actions before any request", async (invalid) => {
+    const f = await seedFixture();
+    if (invalid === "legacy-settled") f.patch({ ...seedQuestion, card: { ...seedQuestion.card!, purpose: undefined, answered: "Previously answered" } });
+    if (invalid === "unknown-purpose") f.patch({ ...seedQuestion, card: { ...seedQuestion.card!, purpose: "unknown-purpose" } });
+    if (invalid === "request") f.patch({ ...seedQuestion, card: { ...seedQuestion.card!, requestId: "real-live-request" } });
+    if (invalid === "wrong-thread") f.stream.frame({ kind: "bot", bot: { ...f.seededBot, threadId: "different-thread" } }, null);
+    if (invalid === "hidden") f.stream.frame({ kind: "bot", bot: { ...f.seededBot, hidden: true } }, null);
+    if (invalid === "background") f.session.setForeground(false);
+    if (invalid === "left-view") f.leave();
+    if (invalid === "room") f.session.viewConversation(f.a, readRoom);
+    await f.act({ kind: "answer", text: "Life admin" }); await f.act({ kind: "check" }); await f.act({ kind: "start" });
+    expect(f.a.seedCalls).toEqual([]);
+  });
+
+  it.each(["leave-back", "background-back", "connection", "thread", "branch", "content", "unpair", "dispose"])("discards an old result after %s without leaking status or messages", async (change) => {
+    const f = await seedFixture(); const response = deferred<SeedCardResult>(); f.a.seedResults.push(response.promise);
+    const sending = f.act({ kind: "answer", text: "Life admin" });
+    if (change === "leave-back") { f.leave(); f.session.viewConversation(f.a, readBot); }
+    if (change === "background-back") { f.session.setForeground(false); f.session.setForeground(true); }
+    if (change === "connection") { f.stream.status("disconnected"); f.stream.status("connected"); }
+    if (change === "thread") f.stream.frame({ kind: "bot", bot: { ...f.seededBot, threadId: "changed" } }, null);
+    if (change === "branch") f.stream.frame({ kind: "thread", threadId: "thread", activeLeafId: seedGreeting.id }, null);
+    if (change === "content") f.patch({ ...seedQuestion, card: { ...seedQuestion.card!, subtitle: "Changed question" } });
+    if (change === "unpair") await f.session.unpair();
+    if (change === "dispose") f.session.dispose();
+    response.resolve(seedResult()); await sending;
+    expect(f.a.seedCalls[0].signal?.aborted).toBe(true);
+    expect(f.session.getSnapshot().state.messages.thread?.some((message) => message.id === "saved-answer") ?? false).toBe(false);
+    if (change !== "dispose") expect(f.state()).toBeUndefined();
+  });
+
+  it("does not merge a result after switching sibling branches sharing the same seed", async () => {
+    const f = await seedFixture();
+    const first: Message = { id: "first-branch", role: "bot", kind: "text", text: "First", at: 3, parentId: seedQuestion.id };
+    const second = { ...first, id: "second-branch", text: "Second" };
+    f.append(first);
+    const response = deferred<SeedCardResult>(); f.a.seedResults.push(response.promise);
+    const sending = f.act({ kind: "answer", text: "Life admin" });
+    f.append(second);
+    response.resolve(seedResult()); await sending;
+    expect(f.session.getSnapshot().state.leaves.thread).toBe(second.id);
+    expect(f.card()?.answered).toBeUndefined(); expect(f.state()).toBeUndefined();
+  });
+
+  it("does not let an old account's late authorization failure revoke the new connection", async () => {
+    const f = await seedFixture(); const response = deferred<SeedCardResult>(); f.a.seedResults.push(response.promise);
+    const sending = f.act({ kind: "answer", text: "Old answer" });
+    await pairWith(f);
+    response.reject(new APIError(401, "Old account revoked")); await sending;
+    expect(f.session.getSnapshot().client).toBe(f.b);
+    expect(f.session.getSnapshot().seedActions).toEqual({});
+    expect(f.a.seedCalls).toHaveLength(1); expect(f.b.seedCalls).toHaveLength(0);
+  });
+
+  it.each([401, 403])("clears the current account on seed authorization failure %s", async (status) => {
+    const f = await seedFixture(); const response = deferred<SeedCardResult>(); f.a.seedResults.push(response.promise);
+    const sending = f.act({ kind: "check" }); response.reject(new APIError(status, "Revoked")); await sending; await settleMicrotasks();
+    expect(f.session.getSnapshot().client).toBeNull(); expect(f.stored()).toBeNull();
+    expect(f.session.getSnapshot().seedActions).toEqual({});
+  });
+
+  it("bounds an unresponsive provider transport, clears its timer, and never retries it automatically", async () => {
+    jest.useFakeTimers(); const f = await seedFixture();
+    f.a.seedResults.push(new Promise<SeedCardResult>(() => {}));
+    const sending = f.act({ kind: "answer", text: "Keep this answer" });
+    await jest.advanceTimersByTimeAsync(10_000); await sending;
+    expect(f.a.seedCalls[0].signal?.aborted).toBe(true);
+    expect(f.state()).toMatchObject({ phase: "failed", lastAnswer: "Keep this answer" });
+    expect(f.state()?.message).toContain("timed out");
+    await jest.advanceTimersByTimeAsync(60_000);
+    expect(f.a.seedCalls).toHaveLength(1); expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("retains the physical lock after an ignored abort until the original promise settles", async () => {
+    jest.useFakeTimers(); const f = await seedFixture();
+    const response = deferred<SeedCardResult>(); f.a.seedResults.push(response.promise);
+    const sending = f.act({ kind: "answer", text: "Life admin" });
+    await jest.advanceTimersByTimeAsync(10_000); await sending;
+    expect(f.state()).toMatchObject({ phase: "failed", inFlight: true });
+    expect(f.state()?.message).toContain("previous request to close");
+    f.leave(); f.session.viewConversation(f.a, readBot);
+    await f.act({ kind: "answer", text: "Life admin" }); await f.act({ kind: "check" });
+    expect(f.a.seedCalls).toHaveLength(1);
+    response.resolve(seedResult("Life admin", "started")); await settleMicrotasks();
+    expect(f.state()?.inFlight).toBe(false);
+    expect(f.card()?.answered).toBeUndefined();
+    f.a.seedResults.push(Promise.resolve(seedResult("Life admin", "started")));
+    await f.act({ kind: "check" });
+    expect(f.a.seedCalls.map((call) => call.kind)).toEqual(["answer", "check"]);
+    expect(f.card()?.seedAnswer?.status).toBe("started");
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("does not cancel a request on duplicate connected notifications or the initial stream handshake", async () => {
+    const f = await seedFixture(); f.stream.status("disconnected");
+    const response = deferred<SeedCardResult>(); f.a.seedResults.push(response.promise);
+    const sending = f.act({ kind: "answer", text: "Life admin" });
+    f.stream.status("connected"); f.stream.status("connected");
+    f.stream.frame({ kind: "hello", cursor: "1", resumed: true }, 1);
+    expect(f.a.seedCalls[0].signal?.aborted).toBe(false);
+    response.resolve(seedResult()); await sending;
+    expect(f.card()?.answered).toBe("Life admin");
+  });
+
+  it("invalidates an in-flight request when a later stream handshake announces a reconnect", async () => {
+    const f = await seedFixture(); f.stream.frame({ kind: "hello", cursor: "1", resumed: true }, 1);
+    const response = deferred<SeedCardResult>(); f.a.seedResults.push(response.promise);
+    const sending = f.act({ kind: "answer", text: "Life admin" });
+    f.stream.frame({ kind: "hello", cursor: "2", resumed: true }, 2);
+    response.resolve(seedResult()); await sending;
+    expect(f.a.seedCalls[0].signal?.aborted).toBe(true); expect(f.card()?.answered).toBeUndefined();
+  });
+
+  it.each(["card", "answer", "echo", "outcome"])("rejects a mismatched %s receipt without optimistic settlement", async (mismatch) => {
+    const f = await seedFixture(); const result = seedResult(mismatch === "answer" ? "Different answer" : "Life admin");
+    if (mismatch === "card") result.cardMessage = { ...result.cardMessage, id: "other-card" };
+    if (mismatch === "echo") result.userMessage = { ...result.userMessage!, id: "wrong-user" };
+    if (mismatch === "outcome") delete result.outcome;
+    f.a.seedResults.push(Promise.resolve(result)); await f.act({ kind: "answer", text: "Life admin" });
+    expect(f.state()?.phase).toBe("failed"); expect(f.card()?.answered).toBeUndefined();
+  });
+
+  it("preserves newer receipt, reply, cursor and live stream when an older HTTP result arrives", async () => {
+    const f = await seedFixture(); const response = deferred<SeedCardResult>(); f.a.seedResults.push(response.promise);
+    const sending = f.act({ kind: "answer", text: "Life admin" });
+    f.settle(seedResult("Life admin", "started"));
+    f.append({ id: "new-reply", role: "bot", kind: "text", text: "A real reply", at: 4, parentId: "saved-answer" });
+    f.stream.frame({ kind: "runtime", event: { type: "content.delta", streamKind: "assistant_text", threadId: "thread", delta: "Current stream" } }, null);
+    f.stream.cursor("11");
+    response.resolve(seedResult()); await sending;
+    const state = f.session.getSnapshot().state;
+    expect(f.card()?.seedAnswer?.status).toBe("started");
+    expect(state.leaves.thread).toBe("new-reply"); expect(state.cursor).toBe("11");
+    expect(state.messages.thread.filter((message) => message.id === "saved-answer")).toHaveLength(1);
+    expect(state.streams.thread?.text).toBe("Current stream");
+  });
+
+  it.each([undefined, "another-parent"])("reports an invalid echo parent %s as failed instead of clearing recovery controls", async (parentId) => {
+    const f = await seedFixture(); const result = seedResult(); result.userMessage = { ...result.userMessage!, parentId };
+    f.a.seedResults.push(Promise.resolve(result)); await f.act({ kind: "answer", text: "Life admin" });
+    expect(f.state()).toMatchObject({ phase: "failed", inFlight: false });
+    expect(f.state()?.message).toContain("Check the saved status");
+    expect(f.card()?.answered).toBeUndefined();
+    expect(f.session.getSnapshot().state.messages.thread.some((message) => message.id === "saved-answer")).toBe(false);
+  });
+
+  it("rejects a replay with a colliding echo parent without replacing an existing valid receipt", async () => {
+    const f = await seedFixture(); f.settle(seedResult("Life admin", "started"));
+    const result = seedResult(); result.userMessage = { ...result.userMessage!, parentId: "another-parent" };
+    f.a.seedResults.push(Promise.resolve(result)); await f.act({ kind: "check" });
+    expect(f.state()).toMatchObject({ phase: "failed", inFlight: false });
+    expect(f.state()?.message).toContain("Could not check");
+    expect(f.card()?.seedAnswer?.status).toBe("started");
+    expect(f.session.getSnapshot().state.messages.thread.find((message) => message.id === "saved-answer")?.parentId).toBe(seedQuestion.id);
+  });
+
+  it("revalidates synchronous changes before transport without replaying after they settle", async () => {
+    const f = await seedFixture();
+    const unsubscribe = f.session.subscribe(() => {
+      if (f.state()?.phase === "pending") { unsubscribe(); f.session.setForeground(false); }
+    });
+    await f.act({ kind: "answer", text: "Life admin" });
+    f.session.setForeground(true); await settleMicrotasks();
+    expect(f.a.seedCalls).toEqual([]); expect(f.state()).toBeUndefined();
+  });
+});
 
 describe("native question and permission decisions", () => {
   it.each(["Allow", "Deny", "  custom\nanswer  "])("sends %s as exact question text, never a permission", async (text) => {

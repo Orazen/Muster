@@ -1848,3 +1848,112 @@ Latest allowance: **61% used /39% remaining**; no reset consumed. Full goal stay
 active. Post-push GET reachability/download metadata are recorded separately in
 `loop41-production-get.json`; push/HTTP 200 do not prove a desktop release or the
 exact deployed backend SHA.
+
+
+## Loop 42 — Android welcome answers and native recovery (2026-09-11)
+
+Shipped scope: Android direct-bot welcome-card controls, strict receipt decoding,
+client routes, a separate seed-operation ledger and monotonic receipt/echo merge.
+The existing live question/permission protocol stays separate. Contract and next
+native work: `docs/seed-answers.md`. Main was pulled before this slice; all source
+changes belong to this verified scope. No server/web implementation changed.
+
+Choice and custom answers use the durable Loop41 API. Identical retries reuse the
+saved user message; only a recorded/not-started receipt exposes explicit,
+versioned Start saved task. Check status is read-only. Backgrounding, reconnect,
+refresh and restart never resubmit work. Malformed purpose/receipt/sender/legacy
+context cannot become an actionable unanswered card. Room seeds, unknown history
+and legacy settled cards without receipts stay inert. The receipt fold preserves
+newer attempts, replies, branches and streams; replayed user echoes cannot rewind
+the leaf. Account, client, view, foreground, thread, branch and card identities
+fence callbacks. An ignored abort retains the physical request lock until its
+transport settles; invalid echo linkage never becomes a false success.
+
+Native testing found two actual UI defects before this slice shipped. The
+inverted list displaced a focused multiline field when the keyboard resized it;
+synchronous and deferred scroll anchoring both failed. A normal-scrolling native
+Modal fixed layout but opened an Android Dialog, causing Activity blur. An
+ignored-clone trace confirmed explicit Send reached the controller with
+foreground=false and made zero API requests. The final editor uses the chat's
+own window, with safe-area padding and normal scrolling. Its state lives above
+FlatList; row recycling cannot drop the draft or request lock. Opening epochs
+fence stale callbacks; Close/Back preserve the unsent draft. The underlying chat
+is hidden from touches and accessibility while editing. AppState guards were
+preserved, without a dialog or background-focus exemption.
+
+Final verification:
+
+- Root Vitest: **235 files /3,241 passed /8 skipped /270.57s**, unchanged from
+  Loop41. Android is excluded from this root suite; no root runtime changed
+  afterward.
+- Android Jest: **11 suites /555 passed /0 skipped /2.428s** (command3.758s),
+  versus Loop40's8/367/0: +3 suites and +188 passed. Typecheck and package/root
+  custom lint all exit0. All **54 source/config hashes** matched before/after.
+- Final focused UI: **4 suites /96 passed /0 skipped /2.209s**. Toolchain
+  **15/15**, Metro asset policy **29/29**, autolinking **19/19** pass; native build
+  inputs did not change.
+- Actual Android/server acceptance: **58/58 final assertions, 0 failed**:
+  choice7, custom13, focus8, loss/setup/restart12, newer-work5, live question and
+  permission4, cold app restart2, independent observer/idle7. Exact whitespace,
+  rapid taps, injected pre-forward503, accepted-response loss, GET recovery,
+  explicit attempt2, actual server restart and native cold launch were checked
+  against actual SQLite and offline driver prompt counts. The second paired SSE
+  observer received matching answers/receipts for all six seed cases.
+- At320dp with the actual keyboard open, the full84px input and44px-or-larger
+  Send control were visible. Root visually inspected keyboard, recovery,
+  notification shade and newer-work screens. Home/resume retained draft with no
+  send; NotificationShade took window focus and cancelled a held transport before
+  forwarding. Return sent nothing; explicit retry made one saved user/one prompt.
+
+Evidence boundaries: the fresh owned API34 arm64 emulator reused the owned debug
+APK (148,313,221 bytes; SHA256
+`2b37bf7381be2593122c51708e9e52502be017b4446e8463d3d8751db25ffdbc`).
+Only JS/TS changed: **32 source files matched** the frozen Metro clone,
+**11 native inputs matched**, and diagnostic logging was absent (**44/44 checks**).
+This is not a new native release build, Google login, real model execution,
+physical-device or release transport-policy proof. Debug HTTP allowance is not
+release proof and must never be described as LAN-only.
+
+Initial failures remain in the phase evidence. The first model fixture key and
+readiness timing were corrected. Failed anchoring, dialog focus, intermediate
+unit/type/fake-timer checks and all earlier gate reports remain recorded; removed
+anchoring tests were replaced with host lifecycle tests. The final native run's
+ordinary composer send was deliberately rejected by the fixture gateway, which
+only allows card actions and reads. Its draft survived. Newer work was then
+created through a separately identified owner POST to the actual owned server;
+this verifies native receipt/guard updates, not native ordinary-message transport.
+Roster selectors were corrected for reordering and the visible unread marker;
+existing live requests were answered without recreating them. No projected GET
+responses were used in this slice.
+
+Cleanup: **54/54 fixture +13/13 native +14/14 historical Metro checks =81/81**.
+Manager, two actual servers and38 provider/probe/watchdog PIDs are absent; nine
+owned fixture/native ports closed. The native app, emulator, ADB, Metro and their
+supervisors stopped;14 unique historical Metro/supervisor PIDs are absent. All
+owned queues were idle, with no held request, provider marker or blocked outbound
+attempt. Earlier preflight cleanup6/6 remains separate. The demo8845, real
+accounts and existing release-handoff stash were untouched.
+
+Evidence: `.omb-scratch/verification/loop42-*` and
+`android-seed-loop42-4ea666b/`; final gate reports live in `loop42-integrated-host/`.
+`loop42-phase-notes.json` indexes failed approaches and final acceptance. Before
+commit, GET-only production checks returned200 for health/app/download metadata.
+The served web entry had changed to`index-DtqgTb0F.js`, with4/4 Loop41 welcome
+recovery markers; exact backend SHA is unproven. Desktop downloads still identify
+1.10.4 at`cb5db9c3b37df22dea1f3b13ab1e9ca110bc3ddd`. Post-push GET results are kept
+separately in `loop42-production-get.json`; a push does not establish a release.
+
+Revenue relevance: native first-task recovery no longer loses answers or starts
+work twice; no conversion or revenue increase is claimed. Next bounded slice:
+iOS direct-bot seed DTO/client/session/UI parity using this contract. Preserve its
+live request predicate because Watch and approval lists depend on it. Verify
+malformed metadata, monotonic receipts, exact drafts, explicit current-attempt
+retry and no replay before any native distribution claim. Android release HTTP
+policy, native mascot/evidence parity and physical-device checks remain queued.
+
+Public desktop release remains gated by CI billing, signing/notarization, VPS
+identity and mirror acceptance; candidate8966619 is still a prior local build.
+Real Google, iOS/Watch, VM, portable backup/sync and full Mimosa remain unverified.
+The broad OS/release goal stays active. Latest allowance: **70% used /30%
+remaining**; no reset consumed. Pre-commit pull/rebase is up to date; the verified
+source hashes still match and the existing release-handoff stash is preserved.

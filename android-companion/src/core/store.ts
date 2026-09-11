@@ -3,6 +3,7 @@
 // identity change.
 
 import { advanceCursor } from "./frames";
+import { preserveSeedReceipt } from "./seed-card";
 import { Frame } from "./frames";
 import {
   Bot,
@@ -90,7 +91,7 @@ function appendMessage(state: CompanionState, threadId: string, message: Message
 function patchMessage(state: CompanionState, threadId: string, message: Message): CompanionState {
   const list = state.messages[threadId] ?? [];
   const idx = list.findIndex((m) => m.id === message.id);
-  const next = idx >= 0 ? list.map((m) => (m.id === message.id ? message : m)) : [...list, message];
+  const next = idx >= 0 ? list.map((m) => (m.id === message.id ? preserveSeedReceipt(m, message) : m)) : [...list, message];
   return setMessages(state, threadId, next);
 }
 
@@ -186,6 +187,9 @@ export function applyFrame(state: CompanionState, frame: Frame): CompanionState 
       const wasNew = !(state.messages[frame.threadId] ?? []).some(
         (m) => m.id === frame.message.id,
       );
+      // A receipt can insert its user echo before this SSE event. Replaying
+      // that echo must not select an older leaf or disturb an active stream.
+      if (!wasNew && (state.messages[frame.threadId] ?? []).some((message) => message.card?.seedAnswer?.messageId === frame.message.id)) return state;
       let next = appendMessage(state, frame.threadId, frame.message);
       next = setLeaf(next, frame.threadId, frame.message.id);
       if (frame.message.role === "bot" && frame.message.kind === "text") {

@@ -2,6 +2,7 @@ import { APIError, MusterClient, type ClientFetch, type ClientResponse, type Con
 import { jsonSchema, type JsonValue } from "./contracts";
 import type { ClientRequest, StreamReader } from "./transport";
 import type { Frame } from "./frames";
+import { SEED_CARD_PURPOSE, SEED_CARD_TITLE, SEED_CARD_SUBTITLE, SEED_CARD_OPTIONS } from "./seed-card";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -288,4 +289,85 @@ describe("SSE lifecycle", () => {
     expect(f.statuses).toEqual(["connecting", "connected"]); f.handle.stop(); await flush();
   });
 
+});
+
+
+function seedReply() {
+  return {
+    ok: true, outcome: "starting",
+    cardMessage: { id: "card_1", role: "bot", kind: "options", at: 2, parentId: "hello",
+      card: { purpose: SEED_CARD_PURPOSE, title: SEED_CARD_TITLE, subtitle: SEED_CARD_SUBTITLE, options: [...SEED_CARD_OPTIONS],
+        answered: "  Plan my day\nplease  ", seedAnswer: { messageId: "answer", attempt: 1, status: "starting" } } },
+    userMessage: { id: "answer", role: "user", kind: "text", at: 3, parentId: "card_1", text: "  Plan my day\nplease  " },
+  };
+}
+
+describe("dedicated welcome-answer HTTP methods", () => {
+  test("rejects a saved receipt for another card or another exact answer", async () => {
+    const f = fixture(); const first = f.client.seedCardStatus("bot", "different-card", "thread");
+    f.requests[0].resolve(response(seedReply())); await expect(first).rejects.toThrow("unrecognized");
+    const second = f.client.answerSeedCard("bot", "card_1", "thread", "Plan my day\nplease");
+    f.requests[1].resolve(response(seedReply())); await expect(second).rejects.toThrow("unrecognized");
+    expect(f.calls).toHaveLength(2);
+  });
+  test("uses exact direct-bot routes, untrimmed text and explicit native POST bodies", async () => {
+    const f = fixture({ host: "::1", port: 443, scheme: "https", token: "owned-seed-token" });
+    const answer = "  Plan my day\nplease  ";
+    const write = f.client.answerSeedCard("bot/1", "card_1", "thread?1", answer);
+    const read = f.client.seedCardStatus("bot/1", "card_1", "thread?1");
+    const start = f.client.startSeedCard("bot/1", "card_1", "thread?1", 1);
+    expect(f.calls.map(({ url, init }) => ({ url, method: init?.method, body: init?.body }))).toEqual([
+      { url: "https://[::1]:443/api/bots/bot%2F1/cards/card_1/answer", method: "POST", body: JSON.stringify({ threadId: "thread?1", answer }) },
+      { url: "https://[::1]:443/api/bots/bot%2F1/cards/card_1/answer?threadId=thread%3F1", method: "GET", body: undefined },
+      { url: "https://[::1]:443/api/bots/bot%2F1/cards/card_1/answer/start", method: "POST", body: JSON.stringify({ threadId: "thread?1", expectedAttempt: 1 }) },
+    ]);
+    for (const call of f.calls) expect(call.init).toMatchObject({ credentials: "omit", headers: { Authorization: "Bearer owned-seed-token", "Content-Type": "application/json" } });
+    for (const request of f.requests) request.resolve(response(seedReply(), 202));
+    await expect(write).resolves.toMatchObject({ userMessage: { text: answer } });
+    await expect(read).resolves.toMatchObject({ cardMessage: { card: { seedAnswer: { attempt: 1 } } } });
+    await expect(start).resolves.toMatchObject({ outcome: "starting" });
+    expect(f.calls).toHaveLength(3);
+  });
+  test.each(["", " \n ", "x".repeat(4001)])("rejects invalid text before network %#", async (answer) => {
+    const f = fixture();
+    await expect(f.client.answerSeedCard("bot", "card", "thread", answer)).rejects.toThrow("4,000");
+    expect(f.calls).toHaveLength(0);
+  });
+  test.each([-1, 1.2, Number.MAX_SAFE_INTEGER, Infinity, NaN])("rejects invalid attempt before network %s", async (attempt) => {
+    const f = fixture();
+    await expect(f.client.startSeedCard("bot", "card", "thread", attempt)).rejects.toThrow("attempt");
+    expect(f.calls).toHaveLength(0);
+  });
+  test.each([400, 401, 403, 404, 409, 503])("retains HTTP%s provider or ownership failure without sending a second request", async (status) => {
+    const f = fixture(); const operation = f.client.answerSeedCard("bot", "card", "thread", "Answer");
+    f.requests[0].resolve(response({ error: "Current conversation unavailable" }, status));
+    await expect(operation).rejects.toEqual(new APIError(status, "Current conversation unavailable"));
+    expect(f.calls).toHaveLength(1);
+  });
+  test.each([null, { ok: true }, { ...seedReply(), outcome: "future" }, { ...seedReply(), userMessage: null }, { ...seedReply(), ok: false }])("rejects malformed 2xx saved receipts %#", async (body) => {
+    const f = fixture(); const operation = f.client.answerSeedCard("bot", "card_1", "thread", "Answer");
+    f.requests[0].resolve(response(body));
+    await expect(operation).rejects.toThrow("unrecognized saved-answer receipt");
+    expect(f.calls).toHaveLength(1);
+  });
+  test("GET permits an unanswered record but POST requires the durable saved receipt", async () => {
+    const f = fixture(); const raw = seedReply();
+    const blank = { ok: true, cardMessage: { ...raw.cardMessage, card: { purpose: SEED_CARD_PURPOSE, title: SEED_CARD_TITLE, subtitle: SEED_CARD_SUBTITLE, options: [...SEED_CARD_OPTIONS] } }, userMessage: null };
+    const read = f.client.seedCardStatus("bot", "card_1", "thread");
+    f.requests[0].resolve(response(blank)); await expect(read).resolves.toMatchObject({ userMessage: null });
+    const write = f.client.answerSeedCard("bot", "card_1", "thread", "Answer");
+    f.requests[1].resolve(response(blank)); await expect(write).rejects.toThrow("unrecognized");
+  });
+  test("forwards caller cancellation through every method without an automatic retry", async () => {
+    const f = fixture(); const abort = new AbortController();
+    const read = f.client.seedCardStatus("bot", "card", "thread", abort.signal);
+    const write = f.client.answerSeedCard("bot", "card", "thread", "Answer", abort.signal);
+    const start = f.client.startSeedCard("bot", "card", "thread", 0, abort.signal);
+    const rejected = Promise.allSettled([read, write, start]);
+    abort.abort();
+    expect(f.calls.every((call) => call.init?.signal?.aborted)).toBe(true);
+    for (const request of f.requests) request.reject(new Error("cancelled"));
+    expect((await rejected).every((outcome) => outcome.status === "rejected")).toBe(true);
+    expect(f.calls).toHaveLength(3);
+  });
 });

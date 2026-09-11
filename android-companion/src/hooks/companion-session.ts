@@ -1,7 +1,7 @@
 // Owns one mounted companion's connection and asynchronous state boundaries.
 import { APIError } from "../core/client";
 import type { Connection, MusterClient } from "../core/client";
-import type { PairResponse } from "../core/types";
+import type { PairResponse, SeedCardResult } from "../core/types";
 import { isCardPending, type Message } from "../core/types";
 import { cardActionKey, cardDecision, cardReference, outcomeMessage, type CardAction, type CardActionState, type CardReference } from "../core/card-actions";
 import type { Frame } from "../core/frames";
@@ -9,6 +9,7 @@ import {
   acknowledgeViewed, applyFrame, hydrate, initialState, markViewed, prependPage, setCursor, visibleTranscript,
 } from "../core/store";
 import type { CompanionState, ViewedConversation } from "../core/store";
+import { matchesSeedCardResult, mergeSeedCardResult, seedCardOnActiveBranch, seedCardSignature, seedCardWriteBlocker } from "../core/seed-card";
 
 export type ChatTarget = ViewedConversation;
 
@@ -21,7 +22,29 @@ export interface PairInput {
 
 export type CompanionClient = Pick<MusterClient,
   "fleet" | "messages" | "events" | "sendToBot" | "sendToGroup" | "respond" | "alwaysAllow" | "markBotRead" | "markGroupRead"
+  | "answerSeedCard" | "seedCardStatus" | "startSeedCard"
 >;
+
+export interface SeedReference { botId: string; threadId: string; cardId: string; signature: string }
+export type SeedAction = { kind: "answer"; text: string } | { kind: "check" } | { kind: "start" };
+export interface SeedActionState {
+  reference: SeedReference;
+  phase: "pending" | "failed" | "settled";
+  operation: SeedAction["kind"];
+  message: string | null;
+  lastAnswer?: string;
+  /** A timed-out transport may still be closing; keep the physical request single-flight. */
+  inFlight?: boolean;
+}
+export function seedActionKey(reference: SeedReference): string {
+  return JSON.stringify([reference.botId, reference.threadId, reference.cardId]);
+}
+export function seedReference(state: CompanionState, target: ChatTarget, message: Message): SeedReference | null {
+  if (target.kind !== "bot") return null;
+  const current = seedCardOnActiveBranch(state, target.id, target.threadId, message.id);
+  if (!current || seedCardSignature(current) !== seedCardSignature(message)) return null;
+  return { botId: target.id, threadId: target.threadId, cardId: message.id, signature: seedCardSignature(current) };
+}
 
 export interface ChatSelection { client: CompanionClient | null; target: ChatTarget }
 
@@ -80,10 +103,11 @@ export interface CompanionSnapshot {
   pairError: string | null;
   readError: { target: ChatTarget; message: string } | null;
   cardActions: Record<string, CardActionState>;
+  seedActions: Record<string, SeedActionState>;
 }
 
 function emptySnapshot(): CompanionSnapshot {
-  return { client: null, state: initialState(), connected: false, connecting: false, pairing: false, pairError: null, readError: null, cardActions: {} };
+  return { client: null, state: initialState(), connected: false, connecting: false, pairing: false, pairError: null, readError: null, cardActions: {}, seedActions: {} };
 }
 
 interface FleetRecovery {
@@ -123,6 +147,21 @@ interface CardOperation {
 }
 const requestKey = (reference: CardReference): string => JSON.stringify([reference.target.threadId, reference.requestId]);
 
+interface SeedOperation {
+  client: CompanionClient;
+  reference: SeedReference;
+  generation: number;
+  view: ConversationView;
+  focus: number;
+  kind: SeedAction["kind"];
+  abort: AbortController;
+  invalidated: boolean;
+  timedOut: boolean;
+  transportPending: boolean;
+  finished: boolean;
+}
+const SEED_TIMEOUT_MS = 10_000;
+
 export class CompanionSession {
   private snapshot = emptySnapshot();
   private listeners = new Set<() => void>();
@@ -137,6 +176,7 @@ export class CompanionSession {
   private view: ConversationView | null = null;
   private readAttempts = new Map<string, ReadAttempt>();
   private cardRequests = new Map<string, CardOperation>();
+  private seedRequests = new Map<string, SeedOperation>();
 
   constructor(private readonly dependencies: CompanionDependencies) {}
 
@@ -153,7 +193,9 @@ export class CompanionSession {
 
   private update(patch: Partial<CompanionSnapshot>): void {
     if (!this.active) return;
+    const previous = this.snapshot.state;
     this.snapshot = { ...this.snapshot, ...patch };
+    if (patch.state) this.reconcileSeeds(previous);
     for (const listener of this.listeners) listener();
   }
 
@@ -165,6 +207,8 @@ export class CompanionSession {
     this.cancelRecovery();
     this.clearViews();
     this.cardRequests.clear();
+    this.cancelSeeds();
+    this.seedRequests.clear();
     this.dataRevision++;
     this.pageRequests.clear();
     this.update({ ...emptySnapshot(), pairing, pairError });
@@ -194,6 +238,8 @@ export class CompanionSession {
     this.cancelRecovery();
     this.clearViews();
     this.cardRequests.clear();
+    this.cancelSeeds();
+    this.seedRequests.clear();
     // Queue immediately on the shared writer, before a new mount can write.
     // An established connection remains available for normal app restarts.
     if (pendingPair) void this.dependencies.persistence.write(null, () => true).catch(() => undefined);
@@ -208,11 +254,14 @@ export class CompanionSession {
     void this.refreshWith(client, generation).then(() => {
       if (!this.current(generation)) return;
       try {
+        let sawHello = false;
         const handle = client.events(
           this.snapshot.state.cursor,
           (frame) => {
             if (!this.current(generation)) return;
             if (frame.kind === "hello") {
+              if (sawHello) this.cancelSeeds();
+              sawHello = true;
               if (!frame.resumed) this.recoverFleet(client, generation);
               return;
             }
@@ -231,6 +280,7 @@ export class CompanionSession {
           },
           (status) => {
             if (this.current(generation)) {
+              if (this.snapshot.connected && status !== "connected") this.cancelSeeds();
               if (status === "unauthorized") {
                 void this.clear("Connection expired or was revoked. Pair again.");
                 return;
@@ -493,6 +543,193 @@ export class CompanionSession {
     }
   }
 
+  private seedMessage(client: CompanionClient | null, reference: SeedReference): Message | null {
+    if (!this.owns(client)) return null;
+    const message = seedCardOnActiveBranch(this.snapshot.state, reference.botId, reference.threadId, reference.cardId);
+    return message && seedCardSignature(message) === reference.signature ? message : null;
+  }
+
+  private currentSeedOperation(operation: SeedOperation): boolean {
+    return !operation.invalidated && this.current(operation.generation) && this.owns(operation.client)
+      && this.seedRequests.get(seedActionKey(operation.reference)) === operation
+      && this.currentView(operation.view) && this.foreground && operation.view.focus === operation.focus
+      && !!this.seedMessage(operation.client, operation.reference);
+  }
+
+  private cancelSeeds(view?: ConversationView): void {
+    for (const operation of this.seedRequests.values()) {
+      if (view && operation.view !== view) continue;
+      operation.invalidated = true;
+      operation.abort.abort();
+    }
+  }
+
+  private reconcileSeeds(previous: CompanionState): void {
+    for (const operation of this.seedRequests.values()) {
+      const threadId = operation.reference.threadId;
+      const previousLeaf = previous.leaves[threadId];
+      const branchChanged = previousLeaf && previousLeaf !== this.snapshot.state.leaves[threadId]
+        && !visibleTranscript(this.snapshot.state, threadId).some((message) => message.id === previousLeaf);
+      if (!this.currentSeedOperation(operation) || branchChanged) {
+        operation.invalidated = true;
+        operation.abort.abort();
+      }
+    }
+  }
+
+  private publishSeed(operation: SeedOperation, phase: SeedActionState["phase"], message: string | null, answer?: string): void {
+    if (!this.currentSeedOperation(operation)) return;
+    const key = seedActionKey(operation.reference);
+    const previous = this.snapshot.seedActions[key];
+    const lastAnswer = answer ?? (previous?.reference.signature === operation.reference.signature ? previous.lastAnswer : undefined);
+    this.update({ seedActions: { ...this.snapshot.seedActions, [key]: {
+      reference: operation.reference, operation: operation.kind, phase, message, lastAnswer,
+      inFlight: operation.transportPending,
+    } } });
+  }
+
+  private async seedRequest(operation: SeedOperation, request: () => Promise<SeedCardResult>): Promise<SeedCardResult> {
+    let onAbort = () => {};
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(new Error("Saved answer request cancelled."));
+      operation.abort.signal.addEventListener("abort", onAbort, { once: true });
+    });
+    const timer = setTimeout(() => { operation.timedOut = true; operation.abort.abort(); }, SEED_TIMEOUT_MS);
+    try {
+      operation.transportPending = true;
+      let requestPromise: Promise<SeedCardResult>;
+      try { requestPromise = request(); }
+      catch (error) { operation.transportPending = false; throw error; }
+      const observed = requestPromise.then((result) => {
+        operation.transportPending = false;
+        this.finishSeedOperation(operation);
+        return result;
+      }, (error) => {
+        operation.transportPending = false;
+        this.finishSeedOperation(operation);
+        throw error;
+      });
+      return await Promise.race([observed, cancelled]);
+    } finally {
+      clearTimeout(timer);
+      operation.abort.signal.removeEventListener("abort", onAbort);
+    }
+  }
+
+  private finishSeedOperation(operation: SeedOperation): void {
+    const key = seedActionKey(operation.reference);
+    if (!operation.finished || this.seedRequests.get(key) !== operation) return;
+    const state = this.snapshot.seedActions[key];
+    const ownsState = this.current(operation.generation) && state?.reference.signature === operation.reference.signature;
+    if (operation.transportPending) {
+      if (ownsState && state.phase === "pending") this.update({ seedActions: { ...this.snapshot.seedActions, [key]: {
+        ...state, phase: "failed", inFlight: true,
+        message: "The previous request is still closing. Check status after it finishes.",
+      } } });
+      return;
+    }
+    this.seedRequests.delete(key);
+    if (!ownsState) return;
+    const seedActions = { ...this.snapshot.seedActions };
+    if (state.phase === "pending") delete seedActions[key];
+    else seedActions[key] = { ...state, inFlight: false };
+    this.update({ seedActions });
+  }
+
+  /** Welcome answers have durable receipts, not live request IDs. Each click makes at most one request. */
+  async actOnSeed(client: CompanionClient | null, input: SeedReference, action: SeedAction): Promise<void> {
+    const view = this.view;
+    if (!this.owns(client) || !view || !this.currentView(view) || !this.foreground
+      || view.client !== client || view.target.kind !== "bot" || view.target.id !== input.botId
+      || view.target.threadId !== input.threadId || this.seedRequests.has(seedActionKey(input))) return;
+    const initial = this.seedMessage(client, input);
+    if (!initial?.card) return;
+    const reference = { ...input };
+    const operation: SeedOperation = {
+      client, reference, generation: this.generation, view, focus: view.focus, kind: action.kind,
+      abort: new AbortController(), invalidated: false, timedOut: false,
+      transportPending: false, finished: false,
+    };
+    const key = seedActionKey(reference);
+    this.seedRequests.set(key, operation);
+    try {
+      if (action.kind === "answer" && (!action.text.trim() || action.text.length > 4000)) {
+        this.publishSeed(operation, "failed", "Enter a nonblank answer of up to 4,000 characters.");
+        return;
+      }
+      if (action.kind === "answer" && initial.card.answered != null && initial.card.answered !== action.text) {
+        this.publishSeed(operation, "failed", "This question already has a saved answer. Check its status before continuing.");
+        return;
+      }
+      const receipt = initial.card.seedAnswer;
+      if (action.kind === "start" && (!receipt || (receipt.status !== "recorded" && receipt.status !== "not-started"))) {
+        this.publishSeed(operation, "failed", "This saved task cannot be started again. Check status and review the conversation.");
+        return;
+      }
+      this.publishSeed(operation, "pending", null, action.kind === "answer" ? action.text : undefined);
+      // A subscriber may navigate, unpair or receive a new server state while pending is published.
+      if (!this.currentSeedOperation(operation)) return;
+      const current = this.seedMessage(client, reference);
+      if (!current?.card) return;
+      if (action.kind !== "check") {
+        const blocked = seedCardWriteBlocker(this.snapshot.state, reference.botId, reference.threadId, reference.cardId);
+        if (blocked) { this.publishSeed(operation, "failed", blocked); return; }
+      }
+      if (action.kind === "start" && (current.card.seedAnswer?.attempt !== receipt?.attempt || current.card.seedAnswer?.status !== receipt?.status)) {
+        this.publishSeed(operation, "failed", "The saved task changed. Check its status before starting it.");
+        return;
+      }
+      const result = await this.seedRequest(operation, () => action.kind === "answer"
+        ? client.answerSeedCard(reference.botId, reference.cardId, reference.threadId, action.text, operation.abort.signal)
+        : action.kind === "check"
+          ? client.seedCardStatus(reference.botId, reference.cardId, reference.threadId, operation.abort.signal)
+          : client.startSeedCard(reference.botId, reference.cardId, reference.threadId, receipt!.attempt, operation.abort.signal));
+      if (!this.currentSeedOperation(operation)) return;
+      const fresh = this.seedMessage(client, reference);
+      if (!fresh || !matchesSeedCardResult(fresh, result)
+        || action.kind !== "check" && (!result.outcome || !result.userMessage || !result.cardMessage.card?.seedAnswer)
+        || action.kind === "answer" && result.userMessage?.text !== action.text
+        || action.kind === "start" && result.userMessage?.id !== receipt?.messageId) {
+        throw new Error("Your computer returned an unrecognized saved-answer receipt.");
+      }
+      const state = mergeSeedCardResult(this.snapshot.state, reference.botId, reference.threadId, reference.cardId, result);
+      const returnedReceipt = result.cardMessage.card?.seedAnswer;
+      if (returnedReceipt) {
+        const currentCard = seedCardOnActiveBranch(state, reference.botId, reference.threadId, reference.cardId)?.card;
+        const transcript = visibleTranscript(state, reference.threadId);
+        const cardIndex = transcript.findIndex((message) => message.id === reference.cardId);
+        const echoIndex = transcript.findIndex((message) => message.id === returnedReceipt.messageId);
+        const echo = transcript[echoIndex];
+        if (currentCard?.seedAnswer?.messageId !== returnedReceipt.messageId || currentCard.answered !== result.cardMessage.card?.answered
+          || cardIndex < 0 || echoIndex <= cardIndex || !echo || echo.role !== "user" || echo.kind !== "text"
+          || echo.text !== currentCard.answered || echo.parentId !== result.userMessage?.parentId) {
+          throw new Error("The saved answer could not be matched to this conversation. Check its status.");
+        }
+      }
+      if (state !== this.snapshot.state) {
+        this.dataRevision++;
+        this.update({ state });
+      }
+      this.publishSeed(operation, "settled", null);
+    } catch (failure) {
+      if (!this.currentSeedOperation(operation)) return;
+      const error = failure instanceof Error ? failure : new Error("Could not confirm the saved answer.");
+      if (error instanceof APIError && (error.status === 401 || error.status === 403)) {
+        this.requestFailed(error, operation.generation);
+        return;
+      }
+      const definite = error instanceof APIError && error.status >= 400 && error.status < 500 && error.status !== 408;
+      const message = action.kind === "check"
+        ? `Could not check the saved status. ${operation.timedOut ? "The request timed out." : error.message} Try checking again.`
+        : definite ? `The request was not accepted. ${error.message}`
+          : `${operation.timedOut ? "The request timed out. " : ""}Could not confirm the request response. Check the saved status before trying again.`;
+      this.publishSeed(operation, "failed", operation.transportPending ? `${message} Waiting for the previous request to close.` : message);
+    } finally {
+      operation.finished = true;
+      this.finishSeedOperation(operation);
+    }
+  }
+
   private viewedState(target: ChatTarget | null): void {
     const state = markViewed(this.snapshot.state, target);
     if (state !== this.snapshot.state) {
@@ -519,6 +756,7 @@ export class CompanionSession {
 
   private leaveView(view: ConversationView): void {
     if (this.view !== view) return;
+    this.cancelSeeds(view);
     this.view = null;
     this.cancelRetry(view);
     const attempt = this.readAttempts.get(readKey(view.target));
@@ -551,6 +789,7 @@ export class CompanionSession {
   setForeground(foreground: boolean): void {
     if (this.foreground === foreground) return;
     this.foreground = foreground;
+    this.cancelSeeds();
     const view = this.view;
     if (!view) return;
     if (!this.currentView(view)) { this.leaveView(view); return; }

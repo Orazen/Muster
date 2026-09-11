@@ -7,7 +7,7 @@ import { MusterClient, parseAddress, parseConnection } from "../core/client";
 import { resolvePairingInput } from "../core/pairing";
 import type { CardAction, CardReference } from "../core/card-actions";
 import {
-  CompanionSession, ConnectionPersistence, type ChatTarget,
+  CompanionSession, ConnectionPersistence, type ChatTarget, type SeedAction, type SeedReference,
 } from "./companion-session";
 
 export type { ChatTarget } from "./companion-session";
@@ -74,6 +74,8 @@ export function useCompanion() {
     session.send(snapshot.client, target, text), [session, snapshot.client]);
   const actOnCard = useCallback((reference: CardReference, action: CardAction) =>
     session.actOnCard(snapshot.client, reference, action), [session, snapshot.client]);
+  const actOnSeed = useCallback((reference: SeedReference, action: SeedAction) =>
+    session.actOnSeed(snapshot.client, reference, action), [session, snapshot.client]);
   const refreshCards = useCallback(() => session.refreshCards(snapshot.client), [session, snapshot.client]);
   const viewConversation = useCallback((target: ChatTarget) =>
     session.viewConversation(snapshot.client, target), [session, snapshot.client]);
@@ -85,6 +87,6 @@ export function useCompanion() {
   return {
     ...snapshot,
     pair: session.pair, unpair: session.unpair, refresh: session.refresh,
-    send, actOnCard, refreshCards, viewConversation, retryRead, loadOlder,
+    send, actOnCard, actOnSeed, refreshCards, viewConversation, retryRead, loadOlder,
   };
 }
