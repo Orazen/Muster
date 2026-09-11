@@ -1,7 +1,9 @@
-// The larger brand mascot. A real button owns the optional interaction;
-// static marks and roster avatars reuse the same authored SVG underneath.
+// The larger brand mascot, in the musterbot blob style. A real button owns
+// the optional interaction; static marks and roster avatars reuse the same
+// authored mark underneath (see src/lib/musterbot — canonical source in the
+// Orazen/musterbot repo).
 import { forwardRef, useState } from "react";
-import { MusterMascot, MUSTER_ORANGE } from "./MusterMascot";
+import { MusterBotMark, MUSTERBOT_ORANGE } from "@/lib/musterbot";
 
 export type BloomMood = "idle" | "working" | "thinking" | "happy";
 
@@ -22,14 +24,13 @@ export const MusterBloom = forwardRef<
   ref,
 ) {
   const [wave, setWave] = useState(0);
+  const eyes = wave || mood === "happy" ? "happy" : "open";
   const mascot = (
-    <MusterMascot
+    <MusterBotMark
       size={size}
-      eyes={mood === "happy" ? "happy" : "open"}
-      eyeOpenness={mood === "working" ? 0.82 : mood === "thinking" ? 0.9 : 1}
+      eyes={eyes}
       label={interactive ? undefined : "Muster teammate"}
-      animated={animated}
-      reaction={interactive ? wave : 0}
+      animated={animated || wave > 0}
     />
   );
 
@@ -49,7 +50,7 @@ export const MusterBloom = forwardRef<
       {wordmark && (
         <span
           aria-hidden="true"
-          style={{ color: MUSTER_ORANGE, fontSize: size * 0.11, letterSpacing: "0.42em", fontWeight: 700 }}
+          style={{ color: MUSTERBOT_ORANGE, fontSize: size * 0.11, letterSpacing: "0.42em", fontWeight: 700 }}
         >
           MUSTER
         </span>

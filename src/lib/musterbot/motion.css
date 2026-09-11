@@ -1,0 +1,19 @@
+/* Musterbot motion — keyframes only; components reference them inline. */
+
+@keyframes musterbot-wobble {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  30% { transform: rotate(-1.6deg) scale(1.012); }
+  60% { transform: rotate(1.4deg) scale(0.99); }
+}
+
+@keyframes musterbot-blink {
+  0%, 94%, 100% { transform: scaleY(1); }
+  96% { transform: scaleY(0.08); }
+  98% { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [style*="musterbot-wobble"], [style*="musterbot-blink"] {
+    animation: none !important;
+  }
+}

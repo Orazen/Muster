@@ -9,11 +9,11 @@ export const AGENT_STATES = CURSOR_STATES;
  * `lottie` is the bundled .lottie bot character. `star` is the
  * musterbot star: every teammate is a star. */
 export type AgentCharacter =
-  | "cursor" | "lottie" | "star"
+  | "cursor" | "lottie" | "star" | "blob"
   | "hexagon" | "triangle" | "egg" | "drop" | "heart"
   | "pebble" | "squircle" | "capsule" | "cloud" | "ball" | "sparkle" | "circle";
 export const AGENT_CHARACTERS: AgentCharacter[] = [
-  "star", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
+  "star", "blob", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
   "pebble", "squircle", "capsule", "cloud", "ball", "sparkle", "circle",
 ];
 

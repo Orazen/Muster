@@ -16,11 +16,9 @@ const body = (markup: string) => {
 };
 
 describe("the shared Muster mascot", () => {
-  it("keeps one authored flower and flat orange across brand and default star surfaces", () => {
+  it("keeps one authored flower across the flower-based surfaces", () => {
     const surfaces = [
       createElement(MusterMascot),
-      createElement(MusterBloom, { interactive: false }),
-      createElement(MusterbotMark),
       createElement(StarTeammate, { color: "orange" }),
     ];
     const bodies = surfaces.map((surface) => body(render(surface)));
@@ -28,6 +26,18 @@ describe("the shared Muster mascot", () => {
     for (const entry of bodies) {
       expect(entry.path).toMatch(/^M92\.79 0\.33C91\.27/);
       expect(entry.fill).toBe("#f08a24");
+    }
+  });
+
+  it("renders brand surfaces as the musterbot blob mark in brand orange", () => {
+    for (const surface of [
+      createElement(MusterBloom, { interactive: false }),
+      createElement(MusterbotMark),
+    ]) {
+      const markup = render(surface);
+      expect(markup).toContain('stop-color="#f08a24"');
+      expect(markup).not.toMatch(/^M92\.79 0\.33C91\.27/);
+      expect(markup).toContain("<ellipse");
     }
   });
 
@@ -69,14 +79,26 @@ describe("the shared Muster mascot", () => {
     }
   });
 
-  it("keeps happy eyes and distinct static working and thinking expressions", () => {
-    expect(render(createElement(MusterBloom, { mood: "happy", interactive: false }))).toContain('data-eyes="happy"');
-    for (const [mood, openness] of [["idle", 1], ["working", 0.82], ["thinking", 0.9]] as const) {
-      const markup = render(createElement(MusterBloom, { mood, interactive: false }));
-      expect(markup).toContain('data-eyes="open"');
-      expect(markup).toContain('data-animated="false"');
-      expect(markup.split(`transform="scale(1 ${openness})"`)).toHaveLength(3);
-    }
+  it("keeps happy eyes on the blob mark for the happy mood", () => {
+    // Happy eyes are stroked arcs; open eyes are ellipses.
+    // Happy eyes are stroked arcs; open eyes are ellipses. The body keeps
+    // one white highlight ellipse either way, so count them.
+    const happy = render(createElement(MusterBloom, { mood: "happy", interactive: false }));
+    expect(happy).not.toContain("<ellipse");
+    expect(happy.match(/stroke="#f9f9f9"/g)).toHaveLength(3);
+    const idle = render(createElement(MusterBloom, { mood: "idle", interactive: false }));
+    expect(idle).toContain("<ellipse");
+  });
+
+  it("keeps blob avatars deterministic per seed and state-mapped", () => {
+    const a = render(createElement(AgentAvatar, { color: "green", character: "blob", seed: "scout" }));
+    const b = render(createElement(AgentAvatar, { color: "green", character: "blob", seed: "scout" }));
+    expect(a).toBe(b);
+    const other = render(createElement(AgentAvatar, { color: "green", character: "blob", seed: "pilot" }));
+    expect(other).not.toBe(a);
+    const happy = render(createElement(AgentAvatar, { color: "green", character: "blob", seed: "scout", state: "happy" }));
+    // Highlight ellipse only — the happy eyes are stroked arcs.
+    expect(happy.match(/<ellipse/g)).toHaveLength(1);
   });
 
   it("keeps noninteractive marks static unless motion is explicitly requested", () => {
@@ -87,11 +109,11 @@ describe("the shared Muster mascot", () => {
       createElement(StarTeammate, { color: "orange" }),
     ]) {
       const markup = render(surface);
-      expect(markup).toContain('data-animated="false"');
+      expect(markup).not.toContain("musterbot-wobble");
       expect(markup).not.toContain("data-wave");
       expect(markup).not.toContain("<button");
     }
-    expect(render(createElement(MusterBloom, { interactive: false, animated: true }))).toContain('data-animated="true"');
+    expect(render(createElement(MusterBloom, { interactive: false, animated: true }))).toContain("musterbot-wobble");
     expect(render(createElement(StarTeammate, { color: "orange", animated: true }))).toContain('data-animated="true"');
   });
 
@@ -99,16 +121,16 @@ describe("the shared Muster mascot", () => {
     const markup = render(createElement(MusterBloom));
     expect(markup.match(/<button /g)).toHaveLength(1);
     expect(markup).toMatch(/<button[^>]*type="button"[^>]*aria-label="Wave to Muster"/);
-    expect(markup).toMatch(/<svg[^>]*aria-hidden="true"[^>]*focusable="false"/);
+    expect(markup).toMatch(/<svg[^>]*aria-hidden="true"/);
     expect(markup).not.toContain('role="img"');
     expect(markup).toContain('role="status"');
-    expect(markup).toContain('data-animated="true"');
+    expect(markup).toContain("musterbot-wobble");
   });
 
   it("honors an explicit static setting on an interactive mascot", () => {
     const markup = render(createElement(MusterBloom, { interactive: true, animated: false }));
     expect(markup).toContain('aria-label="Wave to Muster"');
-    expect(markup).toContain('data-animated="false"');
+    expect(markup).not.toContain("musterbot-wobble");
   });
 
   it("names informative images and hides unlabeled teammate decoration", () => {

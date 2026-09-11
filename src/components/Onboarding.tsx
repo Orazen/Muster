@@ -286,7 +286,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [botName, setBotName] = useState("");
   const [botRole, setBotRole] = useState("");
   const [botColor, setBotColor] = useState<AgentColor>("orange");
-  const [botCharacter, setBotCharacter] = useState<AgentCharacter>("star");
+  const [botCharacter, setBotCharacter] = useState<AgentCharacter>("blob");
 
 
   // personality state
@@ -896,14 +896,14 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 </button>
               ))}
               <button
-                onClick={() => setBotCharacter("star")}
-                aria-label="Star"
-                aria-pressed={botCharacter === "star"}
+                onClick={() => setBotCharacter("blob")}
+                aria-label="Blob"
+                aria-pressed={botCharacter === "blob"}
                 className={`flex size-[52px] shrink-0 items-center justify-center rounded-xl border transition ${
-                  botCharacter === "star" ? "border-accent bg-raised" : "border-hairline/30 hover:bg-raised"
+                  botCharacter === "blob" ? "border-accent bg-raised" : "border-hairline/30 hover:bg-raised"
                 }`}
               >
-                <AgentAvatar color={botColor} character="star" size={38} state="idle" animated={false} />
+                <AgentAvatar color={botColor} character="blob" size={38} state="idle" animated={false} seed="picker-blob" />
               </button>
             </div>
           </div>

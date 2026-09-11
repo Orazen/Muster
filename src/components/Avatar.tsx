@@ -15,6 +15,7 @@ import {
 } from "react";
 import { AGENT_COLORS, type AgentCharacter, type AgentColor, type AgentMotion, type AgentState } from "@/lib/mascot";
 import { TEAMMATE_BODY_SILHOUETTES } from "@/lib/avatar-shapes";
+import { BlobBot } from "@/lib/musterbot";
 import { LottieCharacter } from "./LottieCharacter";
 import { StarTeammate } from "./StarTeammate";
 import {
@@ -115,6 +116,8 @@ export type AgentAvatarProps = {
   expression?: number;
   size?: number;
   label?: string;
+  /** Identity for the blob character — any string; stable per value. */
+  seed?: string;
   motion?: AgentMotion;
   motionKey?: number;
   /** Head turn in degrees. */
@@ -143,14 +146,15 @@ export type AgentAvatarProps = {
 function AgentAvatarComponent(
   {
     color,
-    // The musterbot star is the default teammate body — every bot is a
-    // star unless the user explicitly picks the cursor mascot or a lottie
-    // character in settings.
-    character = "star",
+    // The musterbot blob is the default teammate body — every bot is a
+    // blob unless the user explicitly picks the star, cursor mascot or a
+    // lottie character in settings.
+    character = "blob",
     state = "idle",
     expression,
     size = 44,
     label,
+    seed,
     motion = "none",
     motionKey = 0,
     turn,
@@ -206,6 +210,20 @@ function AgentAvatarComponent(
         size={size}
         animated={animated}
         label={label}
+      />
+    );
+  }
+
+  if (character === "blob") {
+    return (
+      <BlobBot
+        seed={seed ?? label ?? `blob-${color}`}
+        color={AGENT_COLORS[color] ?? AGENT_COLORS.green}
+        state={motionState ?? state}
+        size={size}
+        label={label}
+        animated={animated}
+        gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
       />
     );
   }
