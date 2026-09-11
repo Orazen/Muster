@@ -779,6 +779,21 @@ body {
 
 .onboarding-card { position: relative; z-index: 1; }
 
+/* Tour panels swap in place with a soft slide — same grammar as
+   wizard-step, but the card itself doesn't move between panels. */
+.tour-panel {
+  animation: tour-panel-in 0.38s ease-out both;
+}
+
+@keyframes tour-panel-in {
+  from { transform: translateX(14px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-panel { animation: none; }
+}
+
 @media (max-width: 640px) {
   .onboarding-petal-a { left: -260px; top: -180px; }
   .onboarding-petal-b { right: -200px; bottom: -160px; }

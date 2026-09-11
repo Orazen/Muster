@@ -86,7 +86,7 @@ const CREDENTIALS = {
   },
   musterCloud: {
     label: "Muster Cloud account",
-    placeholder: "https://muster.orazen.online",
+    placeholder: "https://muster.today",
     description:
       "Opt in to one shared identity: the same email and password sign in here and on the Muster Cloud server you point this at. Bots, threads, and messages stay local to this install — only the account itself is shared, nothing syncs.",
     href: "/docs/self-host",

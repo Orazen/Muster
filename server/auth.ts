@@ -421,7 +421,7 @@ function socialProviders() {
 export function pairCloudUrl(): string | null {
   const explicit = process.env.OMB_PAIR_CLOUD_URL?.trim() || null;
   if (explicit) return explicit;
-  return SELF_HOSTED ? null : "https://muster.orazen.online";
+  return SELF_HOSTED ? null : "https://muster.today";
 }
 
 export function authCapabilities() {

@@ -10,7 +10,7 @@ import { authDestination } from "@/lib/auth-navigation";
  *   1. Continue with Google        — direct OAuth on deployments with creds;
  *                                    on the DESKTOP this becomes the cloud
  *                                    handoff: the browser does Google against
- *                                    muster.orazen.online, the app receives
+ *                                    muster.today, the app receives
  *                                    the identity over loopback (no codes)
  *   2. Pairing code bridge         (desktop fallback for the same flow)
  *   3. Email + password            (always available; sign-up lives at /sign-up)
@@ -36,7 +36,7 @@ export function LoginPage() {
         ? `Sign-in failed (${authError}). Please try again.`
         : "";
 
-  // desktop pairing bridge: code typed from muster.orazen.online/pair
+  // desktop pairing bridge: code typed from muster.today/pair
   const [pairCode, setPairCode] = useState("");
   const [pairBusy, setPairBusy] = useState(false);
 
@@ -186,7 +186,7 @@ export function LoginPage() {
             onClick={async () => {
               setError("");
               if (desktopOAuthHandoff) {
-                const cloud = (capabilities.pairingCloudUrl ?? "https://muster.orazen.online").replace(/\/$/, "");
+                const cloud = (capabilities.pairingCloudUrl ?? "https://muster.today").replace(/\/$/, "");
                 const url = `${cloud}/desktop-auth/start?redirect=${encodeURIComponent(window.location.origin)}`;
                 if (window.ogb?.openExternal) window.ogb.openExternal(url);
                 else window.open(url, "_blank", "noopener");
@@ -232,7 +232,7 @@ export function LoginPage() {
             if (!pairBusy && pairCode.trim().length >= 4) void handlePair();
           }}>
             <p className="auth-hint">
-              Sign in once on muster.orazen.online with Google, then type the
+              Sign in once on muster.today with Google, then type the
               code it shows here. Codes last five minutes.
             </p>
             <div className="auth-pair-row">
@@ -260,13 +260,13 @@ export function LoginPage() {
             <button
               type="button"
               onClick={() => {
-                const url = `${(capabilities.pairingCloudUrl ?? "https://muster.orazen.online").replace(/\/$/, "")}/pair`;
+                const url = `${(capabilities.pairingCloudUrl ?? "https://muster.today").replace(/\/$/, "")}/pair`;
                 if (window.ogb?.openExternal) window.ogb.openExternal(url);
                 else window.open(url, "_blank", "noopener");
               }}
               className="auth-link"
             >
-              Open muster.orazen.online/pair ↗
+              Open muster.today/pair ↗
             </button>
           </form>
         )}

@@ -1,5 +1,21 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, AlertTriangle, Loader2, Mic, ArrowLeft, Sparkles, ShieldCheck } from "lucide-react";
+import {
+  Check,
+  AlertTriangle,
+  Loader2,
+  Mic,
+  ArrowLeft,
+  Sparkles,
+  ShieldCheck,
+  GitBranch,
+  MessageSquare,
+  Mail,
+  Calendar,
+  Globe,
+  MessagesSquare,
+  BellRing,
+  Lock,
+} from "lucide-react";
 import { MusterBloom } from "./MusterBloom";
 import { AgentAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, track } from "@/lib/analytics";
@@ -27,7 +43,7 @@ import {
 
 type InstanceRow = InstanceInfo;
 
-const STEP_LABELS = ["Welcome", "Engines", "Teammate", "Permissions", "First task"] as const;
+const STEP_LABELS = ["Welcome", "Tour", "Engines", "Phone", "Teammate", "Permissions", "First task"] as const;
 
 function StatusRow({
   ok,
@@ -149,12 +165,117 @@ const SUGGESTIONS = [
   { title: "Draft from rough notes", prompt: "I'll paste some rough notes — turn them into a polished first draft." },
 ];
 
+/* ── Tour: what your bots can do ──
+ * Animated product panels in the onboarding (pattern from OpenMausBot's
+ * tour step): auto-advance with a manual Next, built from real DOM mocks
+ * like LandingPage so every claim mirrors a shipped feature. Reduced
+ * motion keeps the panels static — dots and Next still work. */
+const TOUR: { title: string; caption: string; body: ReactNode }[] = [
+  {
+    title: "Every chat is a real agent",
+    caption: "Give a task in plain words — your bot plans, runs commands, and reports back.",
+    body: (
+      <div className="flex flex-col gap-2 text-[13px]">
+        <div className="self-end rounded-2xl rounded-br-sm bg-accent px-3 py-1.5 text-white">
+          Run the test suite and tell me what&rsquo;s broken.
+        </div>
+        <div className="self-start max-w-[85%] rounded-2xl rounded-bl-sm bg-raised px-3 py-1.5 text-ink">
+          <div className="text-[11.5px] text-ink-secondary">Running pnpm test…</div>
+          42 passed · 0 failed — all green.
+        </div>
+      </div>
+    ),
+  },
+  {
+    title: "They have hands",
+    caption: "The Computer panel shows every click and screenshot — and bots ask before anything risky.",
+    body: (
+      <div className="rounded-lg border border-hairline/40 bg-inset p-3 font-mono text-[12px] text-ink">
+        <div className="font-sans text-[11px] uppercase tracking-wide text-ink-secondary">Computer</div>
+        <div className="mt-1.5">&rarr; Clicking &quot;Book the 3 pm slot&quot;</div>
+        <div className="mt-1 flex items-center gap-1.5 text-[#38d591]">
+          <Check size={12} /> Confirmed — screenshot saved
+        </div>
+      </div>
+    ),
+  },
+  {
+    title: "Connected apps",
+    caption: "Sign in once and every bot can use them as tools.",
+    body: (
+      <div className="flex flex-wrap justify-center gap-2.5">
+        {[
+          { icon: GitBranch, label: "Repos" },
+          { icon: MessageSquare, label: "Chat" },
+          { icon: Mail, label: "Mail" },
+          { icon: Calendar, label: "Calendar" },
+          { icon: Globe, label: "Web" },
+        ].map(({ icon: Icon, label }) => (
+          <span
+            key={label}
+            className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised px-3 py-1.5 text-[12.5px] text-ink"
+          >
+            <Icon size={14} className="text-ink-secondary" /> {label}
+          </span>
+        ))}
+      </div>
+    ),
+  },
+  {
+    title: "Put bots in a room",
+    caption: "Add teammates to a group chat, @mention them, and merge the answers.",
+    body: (
+      <div className="flex flex-col gap-2 text-[13px]">
+        <div className="text-[11.5px] font-medium text-ink-secondary"># launch</div>
+        <div className="self-start rounded-2xl rounded-bl-sm bg-raised px-3 py-1.5 text-ink">
+          @Scout research the top three competitors by Friday
+        </div>
+        <div className="self-start rounded-2xl rounded-bl-sm bg-raised px-3 py-1.5 text-ink text-ink-secondary">
+          Scout is on it — drafting the brief…
+        </div>
+      </div>
+    ),
+  },
+  {
+    title: "Set it and forget it",
+    caption: "Routines run on a schedule — weekly reports, webhooks, recurring chores.",
+    body: (
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2.5 rounded-lg border border-hairline/40 bg-raised px-3 py-2 text-[13px] text-ink">
+          <Calendar size={15} className="shrink-0 text-ink-secondary" /> Every Monday 9:00 — draft the weekly report
+        </div>
+        <div className="flex items-center gap-2.5 rounded-lg border border-hairline/40 bg-raised px-3 py-2 text-[13px] text-ink">
+          <Globe size={15} className="shrink-0 text-ink-secondary" /> POST a webhook whenever a task finishes
+        </div>
+      </div>
+    ),
+  },
+  {
+    title: "Run it from the terminal too",
+    caption: "The same roster, scriptable — one command and your workspace is ready.",
+    body: (
+      <div className="rounded-lg bg-[#0b0b0b] p-3 font-mono text-[12px] leading-relaxed">
+        <div className="text-ink-secondary">$ muster</div>
+        <div className="mt-1 text-ink">workspace ready — 3 bots online</div>
+      </div>
+    ),
+  },
+];
+
+const PHONE_POINTS = [
+  { icon: MessagesSquare, title: "Your conversations", detail: "Every chat answers from another device, right where you left off." },
+  { icon: BellRing, title: "Quick approvals", detail: "When a bot asks before something risky, approve it from your phone." },
+  { icon: Lock, title: "Private by default", detail: "Only devices you approve can connect to your Muster." },
+];
+
 export function Onboarding({ onDone }: { onDone: () => void }) {
   const { capabilities } = useDesktopCapabilities();
   const { state, dispatch } = useStore();
   const { user } = useAuth();
 
   const [step, setStep] = useState(0);
+  // tour panel index for the "What your bots can do" step (step 1)
+  const [tourStep, setTourStep] = useState(0);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [instances, setInstances] = useState<InstanceRow[] | null>(null);
@@ -311,8 +432,17 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [user?.id, onDone, finishSession]);
 
+  // Tour auto-advance — only while the tour step is showing, and never
+  // under prefers-reduced-motion (the panel then stays put; Next/dots work).
   useEffect(() => {
     if (step !== 1) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const t = setInterval(() => setTourStep((v) => (v + 1) % TOUR.length), 3600);
+    return () => clearInterval(t);
+  }, [step]);
+
+  useEffect(() => {
+    if (step !== 2) return;
     let active = true;
     let latestRequest = 0;
     const refresh = () => {
@@ -331,7 +461,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   }, [step]);
 
   useEffect(() => {
-    if (step === 3 && capabilities.dictation.available) {
+    if (step === 5 && capabilities.dictation.available) {
       const poll = () => window.ogb?.permStatus?.().then(setPerms).catch(() => {});
       poll();
       // keep polling — the user may grant in System Settings and come back
@@ -341,7 +471,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   }, [step, capabilities.dictation.available]);
 
   useEffect(() => {
-    if (step !== 3 || isDesktop) return;
+    if (step !== 5 || isDesktop) return;
     navigator.permissions
       ?.query(
         // SAFETY: "microphone" is valid at runtime in every browser that
@@ -476,7 +606,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
   if (!decided || !draftReady) return null;
 
-  // dense array indexed by step — steps are 0..5 by construction
+  // dense array indexed by step — steps are 0..6 by construction
   const stepContent = [
     (
       <div className="flex flex-col items-center">
@@ -553,6 +683,51 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     ),
 
     (
+      // The video's "What your bots can do" beat: show the product working
+      // before asking for any setup. Panels are DOM mocks of real features
+      // (chat, Computer panel, connectors, group chat, routines, CLI).
+      <div className="flex flex-col">
+        <h1 className="text-center text-[18px] font-semibold text-ink">What your bots can do</h1>
+        <div key={tourStep} className="tour-panel mt-4 flex min-h-[168px] flex-col justify-center rounded-xl border border-hairline/40 bg-card p-4">
+          {TOUR[tourStep].body}
+          <div className="mt-3 text-[13.5px] font-medium text-ink">{TOUR[tourStep].title}</div>
+          <div className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">{TOUR[tourStep].caption}</div>
+        </div>
+        <div className="mt-3 flex justify-center gap-1.5">
+          {TOUR.map((panel, i) => (
+            <button
+              key={panel.title}
+              onClick={() => setTourStep(i)}
+              aria-label={`Tour panel ${i + 1}: ${panel.title}`}
+              aria-pressed={i === tourStep}
+              className={`h-1.5 rounded-full transition-all ${i === tourStep ? "w-5 bg-accent" : "w-1.5 bg-hairline"}`}
+            />
+          ))}
+        </div>
+        <div className="mt-5 flex gap-3">
+          <button
+            onClick={() => setStep(0)}
+            className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[15px] text-ink-secondary hover:bg-raised hover:text-ink"
+          >
+            Back
+          </button>
+          <button
+            onClick={() => (tourStep < TOUR.length - 1 ? setTourStep(tourStep + 1) : setStep(2))}
+            className="flex-1 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
+          >
+            {tourStep < TOUR.length - 1 ? "Next" : "Set up my bots"}
+          </button>
+        </div>
+        <button
+          onClick={() => setStep(2)}
+          className="mt-2 self-center text-[12px] text-ink-secondary hover:text-ink"
+        >
+          Skip tour
+        </button>
+      </div>
+    ),
+
+    (
       <div className="flex min-h-0 flex-col">
         <h1 className="text-[18px] font-semibold text-ink">
           {isDesktop ? "Your engines" : "Connect a provider"}
@@ -619,17 +794,67 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           </button>
         )}
         <button
-          onClick={() => setStep(2)}
+          onClick={() => setStep(3)}
           className="mt-5 w-full shrink-0 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
         >
           Continue
         </button>
         <button
-          onClick={() => setStep(2)}
+          onClick={() => setStep(3)}
           className="mt-2 w-full shrink-0 text-[12.5px] text-ink-secondary transition-colors hover:text-ink"
         >
           Set up later
         </button>
+      </div>
+    ),
+
+    (
+      // The video's "Your phone" beat: companion device promise, fully
+      // skippable. On the web the primary button opens this very server's
+      // /pair page; desktop IS the trusted device, so it just continues.
+      <div className="flex flex-col">
+        <h1 className="text-[18px] font-semibold text-ink">Your phone</h1>
+        <p className="mt-1 text-[13.5px] text-ink-secondary">
+          Your roster travels with you — check in and approve work from anywhere.
+        </p>
+        <div className="mt-4 flex flex-col gap-2.5">
+          {PHONE_POINTS.map(({ icon: Icon, title, detail }) => (
+            <div key={title} className="flex items-start gap-3 rounded-xl bg-card p-3.5">
+              <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary">
+                <Icon size={13} />
+              </span>
+              <div className="min-w-0">
+                <div className="text-[14px] font-medium text-ink">{title}</div>
+                <div className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">{detail}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 flex gap-3">
+          <button
+            onClick={() => setStep(2)}
+            className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[15px] text-ink-secondary hover:bg-raised hover:text-ink"
+          >
+            Back
+          </button>
+          <button
+            onClick={() => {
+              if (!isDesktop) window.open(`${window.location.origin}/pair`, "_blank", "noopener");
+              setStep(4);
+            }}
+            className="flex-1 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
+          >
+            {isDesktop ? "Continue" : "Set up another device"}
+          </button>
+        </div>
+        {!isDesktop && (
+          <button
+            onClick={() => setStep(4)}
+            className="mt-2 self-center text-[12px] text-ink-secondary hover:text-ink"
+          >
+            Not now
+          </button>
+        )}
       </div>
     ),
 
@@ -757,14 +982,14 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
           <div className="mt-2 flex w-full max-w-sm gap-3">
             <button
-              onClick={() => setStep(1)}
+              onClick={() => setStep(3)}
               disabled={creating}
               className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[14px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
             >
-              Back to Engines
+              Back
             </button>
             <button
-              onClick={() => (botName.trim() ? setStep(3) : finish())}
+              onClick={() => (botName.trim() ? setStep(5) : finish())}
               disabled={creating}
               className="flex-1 rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white disabled:opacity-40"
             >
@@ -837,13 +1062,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         </div>
         <div className="mt-5 flex gap-3">
           <button
-            onClick={() => setStep(2)}
+            onClick={() => setStep(4)}
             className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[15px] text-ink-secondary hover:bg-raised hover:text-ink"
           >
             Back
           </button>
           <button
-            onClick={() => setStep(4)}
+            onClick={() => setStep(6)}
             className="flex-1 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
           >
             Continue
@@ -890,7 +1115,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         </div>
         <div className="mt-5 flex gap-3">
           <button
-            onClick={() => setStep(3)}
+            onClick={() => setStep(5)}
             className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[15px] text-ink-secondary hover:bg-raised hover:text-ink"
           >
             Back
@@ -964,7 +1189,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             <span>{setupError}</span>
           </div>
         )}
-        {step === 1 && (
+        {step === 2 && (
           <button
             onClick={() => setStep(step - 1)}
             className="mt-4 flex items-center gap-1 self-center text-[12px] text-ink-secondary hover:text-ink"

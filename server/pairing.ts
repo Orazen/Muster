@@ -2,7 +2,7 @@
 // Google sign-in without shipping OAuth credentials to desktop installs.
 //
 // Flow: a signed-in cloud user generates a short-lived code on
-// muster.orazen.online (/pair), types it into their desktop app, and the
+// muster.today (/pair), types it into their desktop app, and the
 // local server redeems it against the cloud's verify endpoint. The code IS
 // the credential (same trust model as OAuth device activation): high
 // entropy, single-use, five-minute TTL, and redeem attempts are rate-
@@ -172,7 +172,7 @@ export class VerifyError extends Error {
  * owning user id — the caller resolves identity from its own auth store. */
 export function consumeCode(code: string, ip = "unknown", now = Date.now()): string {
   const normalized = String(code ?? "").trim().toUpperCase();
-  if (!normalized) throw new VerifyError("enter the code shown on muster.orazen.online/pair");
+  if (!normalized) throw new VerifyError("enter the code shown on muster.today/pair");
   const window = verifyAttempts.get(ip);
   if (!window || window.windowStart + VERIFY_WINDOW_MS <= now) {
     verifyAttempts.set(ip, { count: 1, windowStart: now });
@@ -193,7 +193,7 @@ export function consumeCode(code: string, ip = "unknown", now = Date.now()): str
     console.log(
       `[pair] rejected ${normalized.slice(0, 2)}*** len=${normalized.length} ip=${ip} pending=${pending.size}`,
     );
-    throw new VerifyError("that code isn't valid — generate a fresh one on muster.orazen.online/pair");
+    throw new VerifyError("that code isn't valid — generate a fresh one on muster.today/pair");
   }
   pending.delete(normalized);
   persistStore();
