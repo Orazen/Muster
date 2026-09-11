@@ -840,20 +840,28 @@ async function mcpCommand() {
   );
 }
 
-async function evalCommand() {
+async function gradeCommand(entry, usage) {
   if (!subject || !rest[0] || rest.length !== 1) {
-    console.error("Usage: muster eval capture.json scorecard.json (see the fleet eval playbook)");
+    console.error(usage);
     process.exitCode = 2;
     return;
   }
   const input = resolve(subject);
   const output = resolve(rest[0]);
-  const rt = resolveFleetRuntime("fleet-eval");
+  const rt = resolveFleetRuntime(entry);
   process.exitCode = await new Promise((finish) => {
     const child = spawn(rt.cmd, [...rt.args, input, output], { cwd: rt.cwd, stdio: "inherit" });
     child.on("error", () => finish(2));
     child.on("exit", (code) => finish(code ?? 2));
   });
+}
+
+async function evalCommand() {
+  await gradeCommand("fleet-eval", "Usage: muster eval capture.json scorecard.json (see the fleet eval playbook)");
+}
+
+async function benchCommand() {
+  await gradeCommand("role-eval", "Usage: muster bench capture.json scorecard.json (see the per-role benchmark playbook)");
 }
 
 const HELP = `muster — the CLI for your AI workforce
@@ -874,6 +882,7 @@ const HELP = `muster — the CLI for your AI workforce
   muster sessions [--json]        active sign-in sessions; --revoke <prefix|other|all>
   muster mcp [--serve]            print MCP client config for Muster (--serve runs the stdio server)
   muster eval capture.json scorecard.json  grade captured fleet probes locally; no fleet actions
+  muster bench capture.json scorecard.json grade captured per-role benchmarks; no fleet actions
   muster help`;
 
 function printVersion() {
@@ -931,6 +940,9 @@ try {
       break;
     case "eval":
       await evalCommand();
+      break;
+    case "bench":
+      await benchCommand();
       break;
     case "mcp":
       await mcpCommand();
