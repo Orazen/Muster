@@ -117,6 +117,10 @@ struct PairingView: View {
                 Section("Your computer") {
                     if let chosen {
                         Label(chosen.name, systemImage: "laptopcomputer")
+                        Text(chosen.displayAddress)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     } else if discovery.found.isEmpty {
                         Text(discovery.failure ?? "Looking for computers on this network…")
                             .foregroundStyle(.secondary)
@@ -142,13 +146,17 @@ struct PairingView: View {
                 }
 
                 Section("Or enter an address") {
-                    TextField("host:port", text: $manualAddress)
+                    TextField("Computer address", text: $manualAddress)
+                        .accessibilityIdentifier("pairing-address-input")
+                    Text("For example, https://computer.example or 192.168.1.42:8810. Use the address from the Companion panel.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     Button("Use address") {
                         if let parsed = Connection.parse(manualAddress) {
                             chosen = parsed
                             error = nil
                         } else {
-                            error = "That address doesn't look right."
+                            error = "Enter an HTTPS address or a host and port from the Companion panel."
                         }
                     }
                     .disabled(manualAddress.isEmpty)
@@ -664,9 +672,10 @@ struct WatchSettingsView: View {
             if let connection = session.connection {
                 Section("Connected to") {
                     Text(connection.name)
-                    Text("\(connection.host):\(connection.port)")
+                    Text(connection.displayAddress)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             if let error = session.actionError {

@@ -128,14 +128,16 @@ struct PairingView: View {
 
     private var manualSection: some View {
         Section {
-            TextField("192.168.1.42:8810", text: $manualAddress)
+            TextField("https://computer.example", text: $manualAddress)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
+                .accessibilityLabel("Computer address")
+                .accessibilityIdentifier("pairing-address-input")
             Button("Continue") {
                 failure = nil
                 guard let connection = Self.parse(manualAddress) else {
-                    failure = "That should look like 192.168.1.42:8810."
+                    failure = "Enter an address such as https://computer.example or 192.168.1.42:8810."
                     return
                 }
                 scannedCredential = nil
@@ -145,7 +147,7 @@ struct PairingView: View {
         } header: {
             Text("Or enter the address")
         } footer: {
-            Text("Whatever the Companion panel shows — an address on this network, or a Tailscale name like macbook.tail1234.ts.net:8810, which works from anywhere.")
+            Text("Enter the address from the Companion panel, including https:// when shown. A local address such as 192.168.1.42:8810 also works when reachable from this phone.")
         }
     }
 
@@ -162,10 +164,16 @@ struct PairingView: View {
 
     private func codeSection(for connection: Connection) -> some View {
         Section(scannedCredential == nil ? connection.name : "Confirm computer") {
-            if let credential = scannedCredential {
+            if scannedCredential != nil {
                 Label(connection.name, systemImage: "desktopcomputer")
                     .font(.headline)
-                LabeledContent("Address", value: "\(connection.host):\(connection.port)")
+            }
+            LabeledContent("Address") {
+                Text(connection.displayAddress)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let credential = scannedCredential {
                 Text("Only continue if this is the computer whose QR code you just scanned. This phone will be able to open chats, send work, and answer approvals on it.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -260,11 +268,10 @@ struct PairingView: View {
         #endif
     }
 
-    /// "192.168.1.42:8810", or a bare host on the default companion port.
+    /// An explicit HTTP/HTTPS address, or a bare host on companion port 8810.
     static func parse(_ text: String) -> Connection? {
-        // 8810 is the companion's default. It is not 8800, which is the
-        // harness's webhook receiver — a bare hostname sent there would get
-        // a 404 from a server that is not this one.
+        // The shared parser preserves explicit schemes and their default
+        // ports; an address without a scheme keeps companion port 8810.
         Connection.parse(text)
     }
 }

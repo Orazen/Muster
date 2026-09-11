@@ -7,170 +7,6 @@
 // rather than present and failing at runtime.
 import Foundation
 
-/// Where a companion connects, and with what. The token is *not* held here
-/// — it lives in the keychain and is handed to the client at construction,
-/// so a `Connection` can be written to disk without writing a credential.
-public struct Connection: Codable, Hashable, Identifiable, Sendable {
-    public var id: String
-    /// What the computer calls itself, e.g. "Ada Lovelace's computer".
-    public var name: String
-    public var host: String
-    public var port: Int
-
-    public init(id: String = UUID().uuidString, name: String, host: String, port: Int) {
-        self.id = id
-        self.name = name
-        self.host = Self.urlHost(host)
-        self.port = port
-    }
-
-    /// The representation `URLComponents.host` accepts for a literal IPv6
-    /// address. It adds brackets exactly once and leaves DNS/IPv4 names alone.
-    /// A scope zone on a link-local address is intentionally retained;
-    /// URLComponents percent-encodes it when it builds the URL.
-    public static func urlHost(_ host: String) -> String {
-        let bare: String
-        if host.hasPrefix("["), host.hasSuffix("]") {
-            bare = String(host.dropFirst().dropLast())
-        } else {
-            bare = host
-        }
-        return bare.contains(":") ? "[\(bare)]" : bare
-    }
-
-    /// Parse a manually entered companion address. A bare IPv6 literal uses
-    /// the default port; an explicit IPv6 port must use `[address]:port`, the
-    /// same unambiguous form browsers and command-line tools use.
-    public static func parse(_ text: String, defaultPort: Int = 8810) -> Connection? {
-        var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        for prefix in ["http://", "https://"] where trimmed.lowercased().hasPrefix(prefix) {
-            trimmed.removeFirst(prefix.count)
-            break
-        }
-        while trimmed.hasSuffix("/") { trimmed.removeLast() }
-        guard !trimmed.isEmpty else { return nil }
-
-        var host = trimmed
-        var port = defaultPort
-        if trimmed.hasPrefix("[") {
-            guard let close = trimmed.firstIndex(of: "]") else { return nil }
-            host = String(trimmed[trimmed.index(after: trimmed.startIndex)..<close])
-            let rest = trimmed[trimmed.index(after: close)...]
-            if !rest.isEmpty {
-                guard rest.hasPrefix(":"), let parsed = Int(rest.dropFirst()) else { return nil }
-                port = parsed
-            }
-        } else {
-            let colonCount = trimmed.reduce(into: 0) { count, character in
-                if character == ":" { count += 1 }
-            }
-            if colonCount == 1, let colon = trimmed.lastIndex(of: ":") {
-                host = String(trimmed[..<colon])
-                guard let parsed = Int(trimmed[trimmed.index(after: colon)...]) else { return nil }
-                port = parsed
-            }
-        }
-
-        guard !host.isEmpty,
-              !host.contains(where: { $0.isWhitespace || "/?#[]".contains($0) }),
-              (1...65535).contains(port)
-        else { return nil }
-        return Connection(name: host, host: host, port: port)
-    }
-
-    /// Plain HTTP, and that is a real limitation rather than an oversight.
-    ///
-    /// The bearer token goes out in a header on every request, so anyone who
-    /// can observe the path between phone and computer can lift it and use it
-    /// until the device is revoked. What that means in practice depends
-    /// entirely on how you reach the computer, and the two supported routes
-    /// are not equivalent:
-    ///
-    /// - **Over a tailnet** — the recommended route, and the only one that
-    ///   works away from home — the traffic is inside WireGuard before it
-    ///   reaches any network, so it is encrypted and authenticated end to end
-    ///   even though this URL says `http`.
-    /// - **Over a LAN**, it is cleartext on that network. Trust it exactly as
-    ///   far as you trust everyone on the wifi: fine at home, not fine on a
-    ///   café or conference network — pair over the tailnet there instead.
-    ///
-    /// TLS is not a drop-in improvement here, which is why it is not simply
-    /// switched on. A self-signed certificate on a LAN address is a
-    /// certificate nothing can validate, so it would have to be pinned at
-    /// pairing time and re-pinned whenever the sidecar regenerates it — a
-    /// meaningful amount of machinery whose benefit, on the tailnet path, is
-    /// zero. The honest position is: the tailnet carries the encryption, the
-    /// LAN path is documented as trusted-network-only, and pinned TLS is what
-    /// this needs before it could claim otherwise. See `docs/ios-companion.md`.
-    public var baseURL: URL? {
-        var components = URLComponents()
-        components.scheme = "http"
-        // Normalize here too so connections saved by older builds with an
-        // unbracketed IPv6 host remain usable after an update.
-        components.host = Self.urlHost(host)
-        components.port = port
-        return components.url
-    }
-}
-
-/// A pairing window handed from the desktop to the app as a QR/deep link.
-/// It contains only the address and a short-lived, single-use credential.
-/// New desktop builds put a high-entropy token in the QR; older builds carry
-/// the same six-digit code shown on screen. The long-lived device token is
-/// created later by `CompanionClient.pair` and never appears in the link.
-public struct PairingInvite: Equatable, Sendable {
-    public let connection: Connection
-    public let credential: String
-
-    public init(connection: Connection, credential: String) {
-        self.connection = connection
-        self.credential = credential
-    }
-
-    public static func parse(_ url: URL) -> PairingInvite? {
-        guard url.scheme?.lowercased() == "muster",
-              url.host?.lowercased() == "pair",
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        else { return nil }
-
-        var values: [String: String] = [:]
-        for item in components.queryItems ?? [] {
-            guard values[item.name] == nil, let value = item.value else { return nil }
-            values[item.name] = value
-        }
-        guard let address = values["address"],
-              let credential = Self.credential(from: values),
-              var connection = Connection.parse(address)
-        else { return nil }
-
-        if let name = values["name"]?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-            let cleaned = name.filter {
-                (!$0.isASCII && !$0.isNewline) || $0.asciiValue.map { $0 >= 32 && $0 != 127 } == true
-            }
-            if !cleaned.isEmpty { connection.name = String(cleaned.prefix(80)) }
-        }
-        return PairingInvite(connection: connection, credential: credential)
-    }
-
-    private static func credential(from values: [String: String]) -> String? {
-        if let token = values["token"] {
-            guard token.hasPrefix("omb_pair_"),
-                  token.utf8.count == 52,
-                  token.dropFirst("omb_pair_".count).utf8.allSatisfy({
-                      (48...57).contains($0) || (65...90).contains($0) ||
-                      (97...122).contains($0) || $0 == 45 || $0 == 95
-                  })
-            else { return nil }
-            return token
-        }
-        guard let code = values["code"],
-              code.utf8.count == 6,
-              code.utf8.allSatisfy({ (48...57).contains($0) })
-        else { return nil }
-        return code
-    }
-}
-
 public enum APIError: Error, LocalizedError, Sendable {
     /// The harness answered, and said no.
     case status(code: Int, message: String?)
@@ -259,8 +95,9 @@ public struct CompanionClient: Sendable, SeedCardTransport {
     }
 
     private func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        try APIRedirectPolicy.validate(session)
         do {
-            return try await session.data(for: request)
+            return try await session.data(for: request, delegate: APIRedirectPolicy.shared)
         } catch {
             throw APIError.transport(error.localizedDescription)
         }
@@ -271,6 +108,7 @@ public struct CompanionClient: Sendable, SeedCardTransport {
     /// Muster → Settings → Companion"), so passing them through beats
     /// inventing a worse one here.
     static func check(_ response: URLResponse, _ data: Data) throws {
+        try APIRedirectPolicy.check(response)
         guard let http = response as? HTTPURLResponse else { return }
         guard !(200...299).contains(http.statusCode) else { return }
         let message = try? JSONDecoder().decode(APIErrorBody.self, from: data).error

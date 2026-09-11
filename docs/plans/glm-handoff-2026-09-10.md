@@ -2007,3 +2007,69 @@ Published desktop remains1.10.4 pending GET recheck; this source push is not a
 new desktop release. Allowance last read74% used/26% remaining, no reset used.
 Preserve the active goal and existing heartbeat; do not revive the old GLM/reset
 deadline or duplicate automation. Handoff at2%, notify/pause at1% still applies.
+
+
+## Loop 44 — Astra native HTTPS transport handoff (2026-09-11)
+
+Shared iOS/Watch Connection now preserves scheme. ExplicitHTTPS defaults443,
+explicitHTTP80, bare addresses8810; explicit ports survive. Legacy JSON lacking
+scheme preserves ID/name/host/port and HTTP so existing Keychain tokens still
+resolve. Malformed saved schemes fail. Strict address/invite validation, IPv6
+zones and decoded duplicate-query rules are covered. Native confirmation/settings
+show the full scheme/address. REST, pairing and SSE refuse every redirect through
+one per-task delegate, including injected ordinary sessions and same-origin route
+changes; background configurations reject before any request. Default app OS trust
+is unchanged, with no fallback or certificate bypass. ATS values did not change.
+This does not install TLS on the computer's ordinary HTTP companion listener.
+
+Ownership/files: `ios/Sources/CompanionCore/Connection.swift` (extracted types,
+parser/persistence), `APIRedirectPolicy.swift`, `Client.swift`, `SSE.swift`,
+`ConnectionTests.swift`, `TransportRedirectTests.swift`; native pairing/settings
+and Watch display; comment-only `ios/project.yml`; `ios/TESTING.md` and both ledgers.
+All source originates in this slice; no unexpected work was included.
+
+Actual gates: root **235files /3241passed /8skipped**,257.68s; Swift **189passed
+/0failed**,0.664s, up28 from161. Focused47+23 overlap the full core. Native initial
+batch **6passed /1failed test of7**,271.512s; corrected expired-certificate rerun
+**1passed /0failed**,29.839s. Thus seven distinct transport scenarios are accepted
+across runs; do not claim one all-green7-case run. The initial expired case stopped
+before a request when the eight-second discovery help shifted Continue below the
+keyboard. Transport rerun waits for stable help and scrolls virtualized controls.
+
+Native proof uses an owned iPhoneSE3/iOS26.5, real app/Keychain/proxy/DeviceRegistry/
+server REST/SSE, a simulator-only testCA and controlled valid/expired/wrong-host/
+untrusted leaves. It covers HTTPS pairing+authenticated REST/SSE+cold restore,
+HTTP compatibility, pairing redirects and authenticated redirects/recovery.
+Redirect sinks received0requests; no plaintext request reached a TLS listener.
+App ad hoc and Watch unsigned simulator builds, servertsc and rootlint passed.
+No Swift compiler warnings; SwiftLint unavailable.69 non-Markdown iOS inputs matched at acceptance;68 remain byte-identical and
+Connection only loses one redundant EOF blank line, recorded in verification.json. Both native TLS errors and deliberate redirected
+calls use actual URLSession, not URLProtocol substitution.
+
+**39/39 cleanup checks passed**: all11 ports closed and captured PIDs absent;
+owned simulator62468A50-F657-4E75-A1FA-F989DED4D7EF and its testCA removed; all26
+original simulators preserved. No services from this slice remain. Test/runtime
+artifacts are retained under `.omb-scratch/verification/loop44-native-transport/`
+and `loop44-native-tls/`, runtime `/tmp/muster44-yR6q7d`. Do not resume those deleted
+or stopped resources; use a fresh isolated fixture/simulator for the next slice.
+All failures and failed preflight assertions remain in `failed-runs.json` and logs.
+
+Next bounded UI slice: eliminate delayed discovery-help movement during manual
+pairing and expose the entire connection error above/without the number keyboard.
+The expiry screenshot currently shows only its opening lines; accessibility
+existence is not full visibility. Then address ordinary iOS send draft loss and
+the live Always allow grant/respond continuation across errors/account changes.
+Preserve Loop43 seed coordinator/receipt/hydration behavior. Native Google,
+physical device/iOS17/Watch runtime, Watch welcome/mascot parity, Android release
+HTTP policy, portable Drive/Telegram recovery and VM are separate open gates.
+
+Desktop source work is not a release: published1.10.4 and local source8966619
+candidate1.10.5 remain distinct. Preserve CI billing, VPS host-key trust, exact-SHA
+signing/Intel/mirror/update acceptance gates; never spend/bypass/retry unchanged
+blocked runs. Full Mimosa unavailable. Keep the existing release-handoff stash,
+main-only scoped commits, GET-only production checks and single existing heartbeat.
+The full mascot-led OS/ecosystem goal stays active; Loop44 is progress, not its
+completion. Refresh allowance and post-push metadata at this boundary.
+
+At this boundary allowance is77% used /23% remaining; no reset consumed. The
+existing heartbeat remains active; preserve a user pause and the2%/1% handoff rules.

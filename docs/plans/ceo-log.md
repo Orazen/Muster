@@ -3073,3 +3073,85 @@ retry unchanged paid release infrastructure or describe this source push as a
 native release. Post-push GET-only evidence is recorded separately. Latest
 allowance observed: **74% used /26% remaining**; no reset consumed. Broad goal
 remains active; existing heartbeat continues with these concrete follow-ups.
+
+
+## Loop 44 — Preserve native HTTPS and bound API redirects (2026-09-11)
+
+The shared iOS/Watch companion no longer discards an explicit HTTPS address.
+Connection and pairing-invite parsing now live in a separate core module, retain
+scheme/explicit port, use443 for explicit HTTPS and80 for explicit HTTP, and keep
+8810 for bare legacy companion addresses. Saved records without a scheme preserve
+their exact ID/name/host/port and default to HTTP, retaining Keychain lookup.
+Malformed present schemes fail; they never silently downgrade. Public mutable
+address fields are revalidated before every baseURL use. Strict authorities,
+ordinary IPv4, bracketed IPv6 and scope zones are covered; credentials, non-root
+paths, queries/fragments, unsupported schemes, invalid ports and ambiguous numeric
+IPv4 forms are rejected. ASCII DNS/punycode is supported; raw Unicode DNS is not.
+One-time QR/code credential precedence remains strict, including decoded duplicate
+fields. Both native confirmation/settings screens show the complete scheme/address.
+
+REST, pairing and SSE use a shared per-task redirect delegate. Every redirect is
+refused, including a new route on the same origin, avoiding mutation replay and
+redirect forwarding of body/bearer data. The original3xx produces a direct-address
+error. Injected ordinary sessions receive the same redirect policy; background
+sessions fail before starting because their redirect behavior bypasses this hook.
+No authentication challenge, trust override, TLS exception or HTTP fallback was
+added. The actual app retains OS certificate evaluation. A caller-supplied session's
+separate authentication delegate remains its own responsibility. ATS plist values
+are unchanged; inaccurate private-subnet/CIDR comments were corrected against
+Apple documentation. This slice adds no TLS server or automatic certificate setup.
+
+Verified final program bytes:
+
+- Root Vitest: **235files /3241passed /8skipped /0failed**,257.68s, exit0.
+- Swift core: **189passed /0failed /0skipped**,0.664s test time (0.683s aggregate),
+  up28 from161. No Swift compiler warnings. Focused47 connection/decoding and23
+  redirect/seed-client/stream tests overlap the full core count.
+- Native initial run: **7tests /6passed /1failed test** (2 assertion failures),
+  271.512s, exit65. The failed expired case never reached transport: delayed
+  discovery-help rows moved Continue below the keyboard between hit testing and
+  tapping. Targeted corrected rerun: **1passed /0failed**,29.839s, exit0. Seven
+  distinct transport scenarios have accepted evidence across the runs, not a
+  single all-green seven-case execution.
+- Native passing scenarios cover actual HTTPS manual pairing, Keychain/cold fleet
+  and stream restoration, explicit HTTP pairing/restore, expired/wrong-host/
+  untrusted certificates, all three pairing redirect destinations, and authenticated
+  REST/SSE downgrade/cross-origin rejection followed by recovery. Both redirect
+  sinks received0requests; TLS listeners recorded0plain-HTTP requests. Tests use a
+  real isolated proxy/DeviceRegistry/server and an explicit offline provider.
+- iPhoneSE3(375x667pt)/iOS26.5 local ad hoc simulator build and Watch unsigned
+  simulator build succeeded. Server typecheck/root lint exited0; SwiftLint is
+  unavailable.75 iOS inputs were snapshotted, and69 non-Markdown inputs matched before final formatting:68 remain
+  byte-identical, with only one redundant EOF blank line removed from Connection.
+- Cleanup: **39/39passed**. All11 owned ports closed, all captured owned processes
+  absent, fresh simulator62468A50-F657-4E75-A1FA-F989DED4D7EF deleted with its test
+  CA/trust store, and all26 pre-existing device IDs/names/states preserved. There
+  was no shared Mac or existing-device trust modification. Runtime evidence remains.
+
+Earlier failed probes are retained: the valid TLS health route correctly required
+bearer401 while preflight expected200; three warmups stopped at the OS keyboard
+tutorial, an input-selection gesture, and SwiftUI's combined address label. A
+further expiry rerun initially waited for an off-screen virtualized field before
+scrolling. These were harness failures before pairing/certificate requests. The
+redirect unit fixture also initially expected the wrong cached-origin request
+count; its protected redirect target never received the sentinel. No failed run
+was reclassified as passed.
+
+Read-only independent review found no remaining blocker in this transport scope.
+Evidence: `.omb-scratch/verification/loop44-native-transport/verification.json`,
+`failed-runs.json`, both native result bundles, frozen source/69 runtime hashes,
+TLS journal and39-check cleanup receipt. Connection/transport reviews are in the
+neighboring `loop44-ios-connection` and `loop44-ios-redirect` folders. `ios/TESTING.md`
+records standard-port semantics, exact evidence and primary Apple references.
+
+Next: fix the native pairing form's delayed movement and complete error visibility
+(the certificate screenshot shows lower text behind the number keyboard), then
+ordinary iOS draft loss before send acceptance and the live Always allow chain's
+failure/account fences. Watch runtime/welcome/mascot parity, physical devices,
+minimum supported OS runtime, native Google, portable backups/sync and VM remain
+open. This is source progress; published desktop1.10.4 and release/signing/CI/VPS/
+mirror gates are unchanged pending the post-push GET check. Full Mimosa remains
+unavailable. The full OS/ecosystem/release goal stays active.
+
+At this boundary allowance is77% used /23% remaining; no reset consumed. The
+existing heartbeat remains active; preserve a user pause and the2%/1% handoff rules.

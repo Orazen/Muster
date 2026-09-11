@@ -101,7 +101,9 @@ public func eventStream(
     AsyncThrowingStream { continuation in
         let task = Task {
             do {
-                let (bytes, response) = try await session.bytes(for: request)
+                try APIRedirectPolicy.validate(session)
+                let (bytes, response) = try await session.bytes(for: request, delegate: APIRedirectPolicy.shared)
+                try APIRedirectPolicy.check(response)
                 if let http = response as? HTTPURLResponse, http.statusCode != 200 {
                     throw APIError.status(code: http.statusCode, message: nil)
                 }

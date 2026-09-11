@@ -318,9 +318,79 @@ onAppear was insufficient in this run. Card controls have a containing accessibl
 group so the parent identifier does not replace each button identifier. Select the
 sheet's visible scrolling viewport, excluding the keyboard suggestion bar.
 
-Keep follow-up transport and action gates explicit: current explicit HTTPS input
-is downgraded by the shared connection parser; ordinary iOS sends still clear the
-draft before acceptance; the live Always allow chain needs same-context/error
-fencing across grant and response. Welcome-card verification does not close those
-separate issues. The owned fixture and simulator were fully stopped, with32/32
-cleanup checks and all16 pre-existing devices preserved.
+At the Loop43 boundary, explicit HTTPS input was still downgraded by the shared
+parser; Loop44 addresses that separate transport issue below. Ordinary iOS sends
+still clear the draft before acceptance, and the live Always allow chain needs
+same-context/error fencing across grant and response. Welcome-card verification
+does not close those action issues. The Loop43 fixture and simulator were fully
+stopped, with32/32 cleanup checks and all16 pre-existing devices preserved.
+
+
+## Companion address and transport contract — Loop44
+
+The shared iOS/Watch client preserves the scheme shown during pairing and in
+Settings. Use the exact address from the computer's Companion panel. HTTPS needs
+a TLS endpoint that serves the companion API directly; this client change does
+not add TLS to the computer's default HTTP listener.
+
+| Entered address | Result |
+|---|---|
+| `https://computer.example` | HTTPS, port443 |
+| `http://computer.example` | HTTP, port80 |
+| `computer.local` | Legacy companion HTTP, port8810 |
+| `https://computer.example:8443` | HTTPS, explicit port8443 |
+| `[::1]:8810` | IPv6 companion HTTP, explicit port8810 |
+
+Saved connections without a scheme retain HTTP and the original persisted ID,
+name, host and port, preserving Keychain lookup. New records include the scheme.
+Malformed saved schemes fail instead of silently becoming HTTP. Input rejects
+credentials, non-root paths, queries, fragments, unsupported schemes, malformed
+ports/authorities and ambiguous numeric IPv4 forms. ASCII DNS/punycode, ordinary
+IPv4 and bracketed IPv6 (including scope zones) are supported; raw Unicode DNS
+names are not accepted by this parser.
+
+Pairing, REST and SSE refuse every redirect, including a new path on the same
+origin. A redirect error asks for the direct server address. There is no automatic
+HTTPS-to-HTTP fallback, mutation replay or redirect-token forwarding. Per-task
+policy also applies with an injected ordinary URLSession; background session
+configurations are rejected before requests start. The app leaves certificate
+validation to the operating system. A deliberately supplied session's separate
+authentication delegate remains the caller's responsibility.
+
+ATS configuration values are unchanged. NSAllowsLocalNetworking is not a private
+IP-subnet allowlist; its OS-version behavior and local-network privacy are separate
+checks. Test the actual supported OS/device/network combination before making
+release claims. See [Apple's ATS documentation](https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsallowslocalnetworking)
+and [redirect callback semantics](https://developer.apple.com/documentation/foundation/urlsessiontaskdelegate/urlsession(_:task:willperformhttpredirection:newrequest:completionhandler:)).
+
+
+Loop44 verification on2026-09-11: **189 Swift core tests passed**, with no failures
+or skips (0.664s; previous161). Root Vitest separately passed **235files /3241tests
+/8skipped** in257.68s. iOS local ad hoc simulator and Watch unsigned simulator
+builds succeeded. These do not establish Watch runtime or distribution readiness.
+
+The fresh iPhoneSE3/iOS26.5 acceptance used the actual native app, Keychain,
+companion proxy/DeviceRegistry/server and REST/SSE. A generated test CA was trusted
+only inside that disposable simulator; the app used ordinary OS certificate
+validation. Valid HTTPS pairing, authenticated REST/SSE, cold identity restore,
+explicit HTTP compatibility, pairing redirects, authenticated redirects/recovery,
+and expired/wrong-host/untrusted certificate rejection were exercised.
+
+Counts are **6 passed /1 failed in the initial seven-case native run**, then
+**1 passed /0 failed in the targeted expired-certificate rerun**. The initial
+failure was before a network request: delayed discovery help moved Continue
+behind the keyboard. The rerun waits for that layout to settle and scrolls
+virtualized form controls into view. All seven distinct transport scenarios have
+passing evidence; there was no single all-green seven-case run. Do not turn this
+into a claim that the pairing interface is fully verified. The certificate-error
+screenshot also shows the lower error text partly behind the number keyboard.
+Remove delayed form movement and make the complete error readable next.
+
+Evidence and failed runs are in `.omb-scratch/verification/loop44-native-transport/`;
+its source snapshot records69 non-Markdown inputs (68 byte-identical after acceptance; Connection
+only loses one redundant final blank line, recorded in verification.json).
+The companion fixture is in `loop44-native-tls/`. All39 cleanup checks passed:
+11ports closed, owned processes absent, the test simulator and its trust store
+deleted, all26 pre-existing simulators preserved. No shared Mac trust change was
+made. Physical devices, minimum iOS17 runtime, Watch runtime, Google and native
+release signing remain separate gates.

@@ -15,7 +15,11 @@ struct SettingsView: View {
             Section("Computer") {
                 if let connection = session.connection {
                     LabeledContent("Name", value: connection.name)
-                    LabeledContent("Address", value: "\(connection.host):\(connection.port)")
+                    LabeledContent("Address") {
+                        Text(connection.displayAddress)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 LabeledContent("Connection", value: statusText)
             }
