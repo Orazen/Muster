@@ -71,10 +71,16 @@ jobs:
             grep -q "provider: generic" "$res/app-update.yml" && \
               grep -q "url: https://muster.orazen.online/downloads" "$res/app-update.yml" || {
               echo "::error::app-update.yml does not point at the muster.orazen.online/downloads mirror"; fail=1; }
-            # while the build is unsigned, a publisherName makes
-            # electron-updater reject every update as untrusted
-            if grep -q "publisherName" "$res/app-update.yml"; then
-              echo "::error::app-update.yml carries publisherName on an unsigned build"; fail=1
+            # the build may be unsigned or signed; publisherName must only
+            # appear when CSC_LINK is set, or electron-updater rejects every
+            # update as untrusted (unsigned) / trusts nothing (signed, absent)
+            if [ -n "$CSC_LINK" ]; then
+              grep -q "publisherName" "$res/app-update.yml" || {
+                echo "::error::signed build but app-update.yml lacks publisherName"; fail=1; }
+            else
+              if grep -q "publisherName" "$res/app-update.yml"; then
+                echo "::error::app-update.yml carries publisherName on an unsigned build"; fail=1
+              fi
             fi
           fi
           echo "--- app-update.yml ---"; cat "$res/app-update.yml" 2>/dev/null || true
@@ -83,28 +89,13 @@ jobs:
       # index.js EXISTING is not the same as index.js RUNNING. 0.1.24 shipped a
       # server that died instantly on ERR_MODULE_NOT_FOUND because tsc left a
       # bare `zod` import in a tree that carries no node_modules — and the
-      # existence check above passed it. Start the real packaged copy here,
-      # where node_modules genuinely is not present.
-      - name: start the packaged server
-        shell: bash
-        run: |
-          res=release/win-unpacked/resources
-          HOME="$RUNNER_TEMP/omb-smoke" USERPROFILE="$RUNNER_TEMP/omb-smoke" \
-            OMB_PORT=21987 node "$res/server/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
-          pid=$!
-          for _ in $(seq 1 90); do
-            if curl -fsS --max-time 2 http://127.0.0.1:21987/api/health >/dev/null 2>&1; then
-              echo "packaged server answered /api/health ✓"
-              kill $pid 2>/dev/null || true
-              exit 0
-            fi
-            kill -0 $pid 2>/dev/null || break
-            sleep 1
-          done
-          echo "::error::the packaged server never served /api/health"
-          cat "$RUNNER_TEMP/server.log" || true
-          kill $pid 2>/dev/null || true
-          exit 1
+      # existence check above passed it. Prove the real packaged copy here with
+      # the same gate release.yml runs: the packaged Electron runtime, native
+      # database, proxy paths, and owned server — not the runner's host Node,
+      # which masks exactly that failure class.
+      - name: "Gate: actual packaged Electron storage and server"
+        id: native-smoke
+        run: node scripts/release-native-smoke.mjs --platform win32 --arch x64
 
       - uses: actions/upload-artifact@v4
         with:
