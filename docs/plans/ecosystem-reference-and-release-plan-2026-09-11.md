@@ -45,9 +45,9 @@ First address consistency and write-failure semantics in `server/store.ts` and `
 
 ### 5. Watch and platform acceptance
 
-Audit `ios/Watch/WatchViews.swift` against the existing live pending-card predicate before extending welcome or approval behavior. Keep a bounded bot/task/question surface with evidence handoff to iPhone.
+The next correctness slice is Watch approval handling. `ios/Watch/WatchViews.swift` currently answers before saving an Always allow preference; its decision handlers play a success haptic after methods that swallow failures. Reuse the checked `ApprovalTransport` and captured-operation semantics introduced on iPhone, bind them to `WatchSession` and the visible task, and emit success only after a matching outcome. A failed grant must send zero follow-up answers; an older server must show update guidance without sending the grant. Preserve exact permission choices, partial-save recovery, lifecycle retirement and physical duplicate protection. Keep a bounded bot/task/question surface with evidence handoff to iPhone.
 
-**Acceptance:** actual Watch pairing, reconnect, stale decisions, duplicate taps, phone handoff, and lifecycle behavior; minimum-iOS and physical-device checks remain distinct from simulator builds. Required hardware, signing/provisioning, and distribution access are external prerequisites. Retain the ledger's separate Android release-policy gate.
+**Acceptance:** actual owned Watch pairing, successful grant-then-answer ordering, grant failure, unavailable or lost answers, stale decisions, duplicate taps, reconnect, phone handoff and lifecycle retirement. Confirm both readable recovery and the absence of false success feedback. Portable Swift tests or a Watch compile alone cannot establish this runtime behavior. Minimum-iOS and physical-device checks remain distinct from simulator builds. Required hardware, signing/provisioning and distribution access are external prerequisites. Retain the ledger's separate Android release-policy gate.
 
 ### 6. Release one explicitly pinned current SHA
 
@@ -55,4 +55,4 @@ The GitHub audit observed billing/spending refusal before inspected CI/release j
 
 Use `.github/workflows/release.yml`, `scripts/release-native-smoke.mjs`, `scripts/release-payload.mjs`, and `scripts/promote-release-mirror.py`. Require current-SHA platform/CLI artifacts, packaged-runtime and installer/update acceptance, and the intended signing/notarization evidence. `.github/workflows/package-win.yml` still checks a host-Node server and cannot replace packaged-runtime proof. Independently verify VPS host identity before writing; runtime `ssh-keyscan` alone is insufficient. Follow [mirror promotion](../release-mirror.md), preserve immutable old targets/Intel support, and reconcile publication provenance. Billing, signing credentials, runner/platform access, and production serving identity remain external gates.
 
-Detailed research and dated GitHub observations are retained under `.omb-scratch/verification/loop46-ios-composer/`; this handoff changes documentation only.
+Detailed research and dated GitHub observations are retained under `.omb-scratch/verification/loop46-ios-composer/`. Loop 48 implementation and verification receipts are under `.omb-scratch/verification/loop48-approval/`; its product commit is `bc69ca7`. This reference plan distinguishes those verified changes from the remaining proposals above.
