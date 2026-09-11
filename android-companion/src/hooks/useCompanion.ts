@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import * as SecureStore from "expo-secure-store";
 import { fetch } from "expo/fetch";
 import { MusterClient, parseAddress, parseConnection } from "../core/client";
+import { resolvePairingInput } from "../core/pairing";
 import {
   CompanionSession, ConnectionPersistence, type ChatTarget,
 } from "./companion-session";
@@ -27,11 +28,13 @@ export function useCompanion() {
     persistence,
     createClient: (connection) => new MusterClient(connection, fetch),
     async pair(input) {
-      const { host, port, scheme } = parseAddress(input.address);
+      const result = resolvePairingInput(input);
+      if (!result.ok) throw new Error(result.error);
+      const { host, port, scheme } = parseAddress(result.value.address);
       const { response } = await MusterClient.pair(host, port, {
         scheme,
-        credential: input.credential,
-        code: input.code,
+        credential: result.value.credential,
+        code: result.value.code,
         deviceName: input.deviceName ?? "Muster Android",
       }, fetch);
       return { connection: { host, port, scheme, token: response.token }, response };

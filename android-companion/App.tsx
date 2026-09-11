@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useCompanion } from "./src/hooks/useCompanion";
 import { currentChatTarget, type ChatSelection } from "./src/hooks/companion-session";
 import { PairingScreen } from "./src/screens/PairingScreen";
@@ -8,6 +9,10 @@ import { ChatListScreen } from "./src/screens/ChatListScreen";
 import { ChatViewScreen } from "./src/screens/ChatViewScreen";
 
 export default function App() {
+  return <SafeAreaProvider><CompanionApp /></SafeAreaProvider>;
+}
+
+function CompanionApp() {
   const companion = useCompanion();
   const [selection, setSelection] = useState<ChatSelection | null>(null);
   const target = currentChatTarget(selection, companion.client, companion.state);

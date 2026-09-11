@@ -12,8 +12,8 @@
 // The panel is deliberately blunt about what it does. "Your bots can run
 // shell commands" is the honest reason a network switch here deserves a
 // sentence of explanation rather than a bare toggle.
-import { useCallback, useEffect, useState } from "react";
-import { Loader2, Smartphone, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, Copy, Loader2, Smartphone, Trash2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { companionPairingLink } from "../lib/companion-pairing";
 import { Card } from "./SettingsPrimitives";
@@ -58,6 +58,33 @@ type Bridge = {
   revoke: (deviceId: string) => Promise<CompanionState>;
 };
 
+/** Polls cannot replace the result of a newer poll or a pairing mutation. */
+export class CompanionStateRequests {
+  private revision = 0;
+  private mutationPending = false;
+  get mutating() { return this.mutationPending; }
+  invalidate() { this.revision++; }
+
+  async read(call: () => Promise<CompanionState>): Promise<CompanionState | null> {
+    if (this.mutationPending) return null;
+    const revision = ++this.revision;
+    const state = await call();
+    return revision === this.revision ? state : null;
+  }
+
+  async mutate(call: () => Promise<CompanionState>): Promise<CompanionState | null> {
+    if (this.mutationPending) return null;
+    this.mutationPending = true;
+    const revision = ++this.revision;
+    try {
+      const state = await call();
+      return revision === this.revision ? state : null;
+    } finally {
+      this.mutationPending = false;
+    }
+  }
+}
+
 const bridge = (): Bridge | null =>
   // SAFETY: the preload owns `ogb.companion`; every call is still guarded for browser builds where it is absent.
   (globalThis as { ogb?: { companion?: Bridge } }).ogb?.companion ?? null;
@@ -72,29 +99,91 @@ const relative = (at: number) => {
   return `${Math.round(hours / 24)} d ago`;
 };
 
+/** Clipboard completion belongs only to the still-current pairing window. */
+export async function copyCompanionPairingLink(
+  link: string | null,
+  expiresAt: number,
+  writeText: (text: string) => Promise<void>,
+  isCurrent: () => boolean,
+): Promise<"copied" | "error" | null> {
+  const available = () => expiresAt > Date.now() && isCurrent();
+  if (!link || !available()) return null;
+  try {
+    await writeText(link);
+    return available() ? "copied" : null;
+  } catch {
+    return available() ? "error" : null;
+  }
+}
+
+/** The parent keys this control by link and expiry, clearing old feedback. */
+export function CompanionPairingCopy({ link, expiresAt, disabled = false }: {
+  link: string | null;
+  expiresAt: number;
+  disabled?: boolean;
+}) {
+  const [status, setStatus] = useState<"idle" | "copying" | "copied" | "error">("idle");
+  const active = useRef(true);
+  const pending = useRef(false);
+  useEffect(() => {
+    active.current = true;
+    return () => { active.current = false; };
+  }, []);
+
+  const copy = async () => {
+    if (disabled || pending.current || !active.current) return;
+    pending.current = true;
+    setStatus("copying");
+    const result = await copyCompanionPairingLink(
+      link, expiresAt, (text) => navigator.clipboard.writeText(text), () => active.current,
+    );
+    pending.current = false;
+    if (active.current) setStatus(result ?? "idle");
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        disabled={disabled || !link || !(expiresAt > Date.now()) || status === "copying"}
+        onClick={() => void copy()}
+        className="inline-flex items-center gap-2 rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-raised disabled:opacity-40"
+      >
+        {status === "copied" ? <Check size={14} /> : <Copy size={14} />}
+        {status === "copying" ? "Copying…" : "Copy pairing link"}
+      </button>
+      {status === "copied" && <div role="status" className="mt-2 text-[13px] text-success">Link copied. Paste it in Muster on your phone.</div>}
+      {status === "error" && <div role="alert" className="mt-2 text-[13px] text-danger">Could not copy the link. Try again, or enter the address and code on your phone.</div>}
+    </div>
+  );
+}
+
 export function CompanionSection() {
   const [state, setState] = useState<CompanionState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [requests] = useState(() => new CompanionStateRequests());
 
   const load = useCallback(async () => {
     const companion = bridge();
     if (!companion) return;
     try {
-      setState(await companion.state());
+      const next = await requests.read(() => companion.state());
+      if (next) setState(next);
     } catch {
       /* the main process is gone; the rest of the app already says so */
     }
-  }, []);
+  }, [requests]);
 
   const act = async (call: (companion: Bridge) => Promise<CompanionState>) => {
     const companion = bridge();
-    if (!companion) return;
+    if (!companion || requests.mutating) return;
     setBusy(true);
     setError(null);
     try {
-      setState(await call(companion));
+      const next = await requests.mutate(() => call(companion));
+      if (next) setState(next);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -104,7 +193,8 @@ export function CompanionSection() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    return () => requests.invalidate();
+  }, [load, requests]);
 
   // Two cadences, because the panel has two jobs.
   //
@@ -155,7 +245,7 @@ export function CompanionSection() {
   const tailnet = state.tailnetName;
   const address = tailnet ?? state.lan ?? state.addresses?.find((candidate) => candidate !== state.tailscale);
   const pairingLink =
-    state.pairing && address
+    state.enabled && !state.error && !error && state.pairing && state.pairing.expiresAt > now && address
       ? companionPairingLink({
           address,
           port: state.port,
@@ -242,8 +332,10 @@ export function CompanionSection() {
         subtitle={
           state.pairing
             ? pairingLink
-              ? "Scan with your phone's Camera, then confirm in MusterMobile. You can also use the code manually."
-              : "Open MusterMobile, choose this computer, and enter the code."
+              ? "Copy the pairing link and paste it in Muster on your phone, or enter this computer's address and code."
+              : state.pairing.expiresAt <= now
+                ? "This pairing window has expired. Cancel it, then set up your phone again."
+                : "A pairing link is unavailable. Check the computer's connection above."
             : state.enabled
               ? "Open a short, single-use pairing window for a trusted phone."
               : "This turns on Companion and opens a short, single-use pairing window in one step."
@@ -267,13 +359,21 @@ export function CompanionSection() {
                   Or open the mobile app and choose “{state.discovery.name}” under On this network.
                 </div>
               )}
-              <button
-                disabled={busy}
-                onClick={() => void act((c) => c.pairing(false))}
-                className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-raised disabled:opacity-40"
-              >
-                Cancel
-              </button>
+              <div className="mt-3 flex flex-wrap items-start gap-2">
+                <CompanionPairingCopy
+                  key={`${pairingLink ?? "unavailable"}:${state.pairing.expiresAt}`}
+                  link={pairingLink}
+                  expiresAt={state.pairing.expiresAt}
+                  disabled={busy}
+                />
+                <button
+                  disabled={busy}
+                  onClick={() => void act((c) => c.pairing(false))}
+                  className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-raised disabled:opacity-40"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         ) : (

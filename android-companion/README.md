@@ -2,9 +2,10 @@
 
 The companion pairs with a running Muster desktop sidecar to read transcripts,
 answer approval cards and send tasks. Its Expo 52 / React Native 0.76 implementation
-contains manual address/code pairing, roster and chat screens. QR scanning and
-deep-link handling remain unimplemented. Native installation and real-device
-streaming require separate device verification; passing the tests below
+contains manual address/code pairing, pasted invitation pairing, roster and chat
+screens. QR scanning and automatic deep-link delivery remain unimplemented.
+Native installation and real-device streaming require separate verification;
+passing the tests below
 does not establish those results or Play Store availability.
 
 ## Standalone development and checks
@@ -18,6 +19,7 @@ cd android-companion
 npm ci
 npm run verify:toolchain
 npm run verify:metro-assets
+npm run verify:autolinking
 npm test
 npm run typecheck
 npm run lint
@@ -33,6 +35,21 @@ lint rules are checked separately from its root.
 The tests cover wire parsing, HTTPS and IPv6 addresses, pairing responses,
 HTTP acceptance, stream status and cancellation, replay cursors, and session
 isolation during delayed requests and credential writes.
+
+## Pairing with your computer
+
+In the desktop app, open **Settings → Companion → Set up a phone** (or
+**Pair another phone**). Copy the pairing link into the phone's first field,
+or enter the displayed address and six-digit code. The desktop's cloud/account
+sign-in codes are a separate flow and do not pair this companion.
+
+Pasting never sends a request. The screen shows the destination and waits for
+**Pair with computer**. Current token invitations and explicit legacy code-only
+invitations are supported. A malformed token never falls back to an embedded or
+typed code. Leading zeros in codes are preserved. Immediate repeated submits
+share one pending attempt; fields stay fixed until it settles, and failures keep
+the input for retry. The form scrolls and uses native safe-area insets; native
+keyboard/layout acceptance is separate from its React host tests.
 
 ## Pinned toolchain dependencies
 
@@ -83,6 +100,15 @@ They remain tracked even with this local mitigation; this is not a whole-project
 security assessment. Native packaging may use other image tools and requires its
 own verification.
 
+Native autolinking is confined to this package's installed dependencies,
+including Expo's nested SDK modules. Expo 52 runs parts of discovery from the
+generated Android directory, so the local config plugin gives Gradle absolute
+paths derived from that project's root. Keep both the package search paths and
+the registered plugin when regenerating native projects. The plugin rejects
+unrecognized templates instead of silently linking unrelated ancestor packages.
+The standalone autolinking checks complement actual Expo prebuild/native builds;
+they do not establish device behavior.
+
 ## Runtime transport
 
 The native composition explicitly imports `fetch` from `expo/fetch`, available
@@ -105,6 +131,22 @@ current roster. Valid neighboring messages and bots survive malformed entries.
 
 ## Native development gates
 
+Loop 38 built and installed the debug APK on an owned Android 14 / API 34 arm64
+emulator. Native checks covered the 392.7dp and 320dp pairing layouts, the numeric
+keyboard, rejected-code recovery, full invitation copy/paste, pairing, send
+failure/retry, event-stream reconnect and connection restoration after a full
+app-process restart. The sidecar used the actual pairing registry and proxy with
+a synthetic fleet and replies. This is emulator evidence, not real-model,
+physical-device, release-variant or store acceptance; see the CEO log for counts
+and retained failures.
+
+Two follow-ups remain explicit: Android read acknowledgements currently use a
+thread route that the sidecar does not expose, and the generated debug manifest's
+HTTP allowance does not prove local HTTP pairing in a release build. Inspect the
+merged release manifest and test a bundled release variant before distribution.
+The development reload also hit a React Native HostTarget assertion during setup;
+cold launches worked after selecting the owned Metro address.
+
 ```sh
 npm start
 # With a compatible Android SDK, emulator/device and Expo development setup:
@@ -126,5 +168,6 @@ a separate release slice. The obsolete `expo build:android` command is not used.
 
 Pairing credentials use `expo-secure-store`. The sidecar's route allowlist controls
 access: this client reads transcripts, sends messages and answers approvals. It
-does not manage desktop API keys or drive the computer. Camera dependencies and
-a pairing-URL parser exist, but neither a scanner UI nor deep-link delivery is wired.
+does not manage desktop API keys or drive the computer. Camera dependencies exist,
+but neither a scanner UI nor automatic deep-link delivery is wired. Paste a
+pairing invitation or enter the address/code instead.

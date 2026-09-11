@@ -15,8 +15,14 @@
     "typecheck": "tsc --noEmit",
     "verify:toolchain": "node scripts/verify-toolchain.mjs",
     "verify:metro-assets": "node scripts/verify-metro-assets.mjs",
+    "verify:autolinking": "node --test plugins/with-companion-autolinking.test.cjs",
     "prepare:toolchain": "node scripts/prepare-toolchain.mjs",
     "postinstall": "node scripts/prepare-toolchain.mjs"
+  },
+  "expo": {
+    "autolinking": {
+      "searchPaths": ["./node_modules", "./node_modules/expo/node_modules"]
+    }
   },
   "dependencies": {
     "expo": "~52.0.0",

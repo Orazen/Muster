@@ -3,6 +3,7 @@ import { advanceCursor, decodeFleet, decodeFrame, type Frame } from "./frames";
 import { SSEParser, type SSEEvent } from "./sse";
 import { apiErrorSchema, instancesSchema, pairResponseSchema, threadPageSchema, type JsonValue } from "./contracts";
 import { connectionOrigin, parseConnection, type Connection, type ConnectionScheme } from "./connection";
+import { parsePairingInvite } from "./pairing";
 import type { ClientFetch, ClientResponse, ConnectionStatus, EventStream, StreamReader } from "./transport";
 import type { Fleet, Instance, PairResponse, ThreadPage } from "./types";
 export { DEFAULT_PORT, parseAddress, parseConnection, type Connection, type ParsedAddress } from "./connection";
@@ -32,13 +33,7 @@ export interface PairingInvite {
 
 // muster://pair?address=host:port&token=omb_pair_…|code=…&name=…
 export function parsePairingURL(url: string): PairingInvite | null {
-  if (!url.startsWith("muster://pair?")) return null;
-  const query = url.slice("muster://pair?".length);
-  const params = new URLSearchParams(query.replace(/\|/g, "&"));
-  const address = params.get("address");
-  const token = params.get("token");
-  if (!address || !token || !token.startsWith("omb_pair_") || token.length < 8) return null;
-  return { address, token };
+  return parsePairingInvite(url);
 }
 
 export class MusterClient {

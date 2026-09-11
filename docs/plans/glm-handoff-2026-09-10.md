@@ -1356,3 +1356,137 @@ modules and 2 virtual entries). There are no unexplained mapped inputs.
 That additional diagnostic export completed in 9.928s and produced the same
 Hermes and source-map bytes as the accepted image export; it is not counted
 as another unique acceptance case.
+
+## Loop 38 — Reliable companion invitations and native Android acceptance (2026-09-11)
+
+Base `bb95198`, clean main and initial pull up to date. Android previously enabled
+pasted invitations but sent the whole URI to its plain-address parser. The form
+also directed users to an unrelated account-pairing command. Desktop Companion
+now offers an explicit Copy pairing link action, and Android accepts that exact
+invitation through one shared normalizer at both the screen and native request
+boundary. Current tokens and explicit legacy code-only invitations are accepted;
+malformed tokens never fall back to a code. Leading zeros, HTTPS and bracketed
+IPv6 are preserved. Ambiguous parameters, malformed encoding and unsupported
+address shapes are rejected before a request.
+
+The canonical mascot now appears in Android's warm, dark pairing screen. Visible
+labels, destination confirmation, safe-area insets and a scrollable form support
+small screens. Pasting never submits. A synchronous pending guard prevents two
+redemptions before React rerenders; failed attempts retain input and expose the
+real error. Editing clears stale feedback. Desktop copy has failure/retry and
+expiry handling; an older status poll can no longer restore a cancelled or
+replaced pairing window.
+
+Native prebuild exposed Expo discovery escaping to an unrelated ancestor package.
+Package search paths retain both local dependencies and Expo's nested SDK modules.
+A registered Expo config plugin derives absolute Gradle search paths from the
+generated project root, preserving the template and rejecting unknown layouts.
+Both paths are necessary: the first alone drops four required nested Expo modules.
+No dependency version was changed for this slice.
+
+Verification: **229 root files / 3,063 passed / 8 skipped in 246.54s**;
+**6 Android suites / 218 passed / 0 skipped in 1.36s**; **19/19 autolinking plugin
+checks in 91.694ms**. Root build and both types pass (Vite 8.19s, existing large
+chunk warning); Android typecheck, local lint, root custom scoped lint and diff
+checks pass. A preliminary custom lint run rejected a safe-area module mock and
+unknown result types; the final screen tests inject the actual safe-area context
+and use the named pairing response contract. Its 12 focused tests also pass.
+
+**21/21 browser checks passed in 9.336s** at 320px and 1280px using the actual
+CompanionSection, styles and invitation producer. Exact click-only copy, failure
+and retry, pending-click suppression, replacement state, expiry, cancelled-window
+poll ordering and horizontal fit passed, with no console errors or external
+requests. The bridge and clipboard are declared synthetic adapters; this is not
+OS clipboard/preload or native-phone proof. Initial fixture Tailwind scanning and
+Vite reload failures are retained separately, corrected only in ignored fixtures.
+Final screenshots were visually reviewed. Evidence:
+`.omb-scratch/verification/loop38-desktop-copy-Tmjflm/` and `loop38-*` check logs.
+
+Native build environment: an APFS-cloned SDK, copied existing
+license files, owned home/cache/Gradle/AVD and a dedicated ADB server preserve the
+host's normal devices and SDK. Required NDK 26.1 installed only in that copy;
+all seven license-file hashes remained unchanged. Actual Expo prebuild with the
+registered plugin passed in 2.417s and generated the accepted absolute paths.
+A subsequent arm64 debug build failed after 258.755s / 426 tasks: Prefab itself
+exited zero, but AGP treated Java's JAVA_TOOL_OPTIONS environment notice on stderr
+as a generic CXX1210 failure. This is verifier environment interference, not a
+proven native dependency incompatibility. Debug cleartext policy and generated
+debug signing
+do not establish release transport, signing or store readiness.
+
+The quiet, owned Java launcher preserved the original/shared JDK hashes and
+verified child home/temp paths. The isolated failing native configure then passed
+in 29.397s (14 tasks). Actual debug APK build passed in **62.785s / 644 tasks**
+(241 executed, 403 up to date); install passed in **0.997s**. Compilation targets
+the arm64 emulator; prebuilt dependency libraries for other ABIs remain in the
+APK, so this is not proof of other architectures. The APK is 148,313,221 bytes.
+
+Initial debug launch used the default Metro address and failed to load a script.
+After setting this owned installation's debug host, a developer reload hit React
+Native's HostTarget instance assertion; its log is retained as a debug-reload
+limitation. A cold launch then passed in 3.917s and loaded the actual app from the
+owned Metro server (770 modules, 5.587s). First-render screenshot at 392.7dp was
+visually reviewed: canonical mascot and full pairing form fit without clipping.
+All runtime source, assets and build plugin match the working tree. Independent
+comparison matches 38/43 package files; differences are three tests, README and
+Expo-generated tsconfig includes, not altered runtime implementation.
+
+Native transport fixture: **18/18 HTTP checks passed in 0.473s**. Actual device
+registry, invitation producer, route allowlist/proxy and JSON/SSE scrubber serve
+an explicitly synthetic Orbit/Fern fleet and deterministic replies. Fresh owned
+loopback services and a dedicated emulator ADB server use no demo, real accounts,
+providers, public tunnels or ordinary host development ports.
+
+Actual native interaction evidence now includes the 320dp viewport (1080px at
+540dpi), code input above the numeric keyboard, and a swipe dismissing the keyboard
+to expose the full button/footer. A real rejected code returned 401; correction
+paired once and opened Expo's native event stream with both fixture bots. Full
+app process stop/relaunch restored its SecureStore connection with no second
+pairing. A synthetic upstream 503 preserved the exact send draft and error;
+explicit retry produced exactly one accepted user/bot exchange. Disconnection,
+a resumed cursor and an offline message were observed after the controlled outage.
+Native invitation redemption passed after copy/delete/paste. The first exact
+full-string comparison was 130/140 characters; a bounded repeat established that
+rapid test typing had already prepared incomplete input before copying. After
+verifying all 140 characters were present, copy/delete/paste preserved all 140,
+including the full optional name, and that invitation redeemed successfully.
+Both incomplete-input preparations are preserved; clipboard loss was not
+established. Unpairing followed by a full process restart returned to an empty
+setup form without opening another event stream. Larger text (1.3 scale at 320dp)
+kept labels/button/footer reachable; the single-line placeholder scrolls/clips.
+
+**30/30 native/build receipt assertions passed**, plus four explicit visual
+observations; these are separate from the Jest count. The native source check
+matched all 31 inspected runtime/config/asset files. No read-acknowledgement
+request occurred in this zero-unread fixture, so that finding remains a source
+audit gap rather than an observed native 404. The APK SHA-256 is
+`19f74e0f495c9d2bacc5f3ff2cefd9d82da657fd8e3f39602a3ae9c59158a69f`.
+APK integrity, badging and debug-signature checks passed. Initial am-start returned
+an exit-zero timeout, so it is not counted as successful rendering; later cold
+startup and native screens provide that evidence. This is a debug APK with Metro,
+an owned emulator and a synthetic upstream, not a release variant, packaged
+sidecar, physical device, Google/provider or store acceptance.
+
+All owned app, Metro, emulator, ADB and fixture services are stopped; their seven
+ports are free and the sidecar stopped identity matches its receipt. Native
+runtime/source and build receipts live under
+`.omb-scratch/verification/android-native-loop38-e6e5008c52/`; sidecar controls,
+18-check result and cleanup are in `loop38-native-sidecar/`.
+
+Next bounded native fixes: read acknowledgements currently post a thread-read
+route absent from the actual sidecar/server bot/group route allowlists, so shared
+unread persistence is not established. Also inspect/build a RELEASE variant:
+debug's explicit HTTP allowance does not establish local HTTP pairing in release.
+The generated main manifest lacks the allowance, so denial is expected from the
+platform default; no merged release result is claimed. Any intended app-wide
+HTTP allowance must be explicit, preserve HTTPS and be verified on the actual
+release variant. It would not be a LAN-only restriction. Source/receipt:
+`loop38-release-transport-audit.md`, [Android configuration guidance](https://developer.android.com/privacy-and-security/security-config)
+and [Expo SDK 52 implementation](https://raw.githubusercontent.com/expo/expo/sdk-52/packages/expo-build-properties/src/android.ts).
+
+Pre-commit pull/rebase is up to date. Desktop candidate `8966619` and public
+release/CI billing/VPS identity/signing/mirror gates remain unchanged. iOS/Watch,
+real Google, VM, portable backup/sync and full Mimosa acceptance remain open.
+Demo 8845, real accounts and the existing release-handoff stash are untouched.
+No dependency version or live-provider configuration changed. Full goal remains
+active. Allowance: **46% used / 54% remaining**, no reset consumed.
