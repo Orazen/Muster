@@ -1283,3 +1283,76 @@ candidate8966619 remains the latest locally verified Mac GUI build. Public
 release/CI/VPS/signing, Mimosa, portable recovery and sync gates remain open.
 Demo127.0.0.1:8845 and real credentials are untouched. Full goal remains active.
 Allowance: **37% used /63% remaining**; no reset consumed.
+
+## Loop 37 — Metro image-parser mitigation (2026-09-11)
+
+Base `6f73d86`, clean main and initial pull up to date. GitHub has processed
+Loop 36: a fresh API read now shows **2 open high alerts**, both image-size,
+down from 35. Neither remaining advisory lists a published fix. This slice
+disables ICNS, HEIF (including AVIF), JXL and JXL-stream dimension calculation
+using the installed library's API. Resolution follows Expo's actual Metro
+Assets caller, and initialization runs before both the parent config and the
+complete Expo worker. The worker preserves upstream exports/cache inputs and
+includes policy/wrapper bytes in its cache key. Exact Expo Metro config
+0.19.12, Metro 0.81.5 and image-size 1.2.1 versions require explicit review
+when changed. No dependency file is patched by this image policy.
+
+The policy blocks the reviewed calculation paths, including affected content
+renamed as PNG. Format validators still run. It is not a general sanitizer,
+an upstream fix, native image-loader acceptance or a whole-project security
+assessment. The two alerts remain open. Primary current references:
+[ICNS advisory](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr) and
+[JXL/HEIF advisory](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq).
+
+Verification: **228 root files / 3,041 passed / 8 skipped in 248.98s**
+(unchanged count), **4 Android suites / 132 passed in 0.962s**, and **15/15
+toolchain checks**. Root build/both types pass (Vite 5.30s, existing chunk
+warning); Android typecheck, lint and root custom scoped lint pass.
+**29/29 separate Metro API checks passed in 8.589s**: four unguarded ICNS/JXL
+controls reach an owned 500ms deadline after operation-start confirmation;
+16 guarded buffer/file cases reject affected formats; eight checks preserve
+PNG/JPEG dimensions and @2x scaling; one grouped cache contract preserves
+upstream inputs and invalidates policy/wrapper changes. Each child is awaited
+after termination; startup/dispatch failures do not count as parser timeouts.
+The worker cases initialize its wrapper then call Assets directly. The actual
+transform path is established separately by the exports below.
+
+Four actual offline Android exports in independent owned copies matched their
+expected outcomes: real app exit 0 in 11.502s (650 modules); PNG/JPEG fixture
+exit 0 in 9.750s (CLI reports 545 modules), both 1024px images preserved byte
+for byte; renamed ICNS exit 1 in 7.007s and renamed JXL exit 1 in 6.707s, with
+their exact disabled-format errors through Expo's asset worker. No export
+timed out or required leftover process cleanup. The app still exports zero
+runtime assets; the positive image fixture is separate from app rendering.
+
+Evidence: `.omb-scratch/verification/loop37-*`,
+`loop37-assets/metro-assets-checks.log`, and
+`android-assets-loop37-0c0648c442/`. A preliminary verifier cleanup change
+had a local signal-name shadowing error; the failed log is retained separately
+and the corrected final verifier passed. No product failure was hidden.
+
+Next user-facing slice: pasted companion invitations. Read-only audit found
+the screen enables a pasted token-bearing URL but the hook sends the whole
+URL to the plain-address parser, so that route fails. Scanner instructions
+also promise an unimplemented feature; keyboard-visible layout remains
+unmeasured. JDK 17, SDK platforms 34/35/36 and an API 34 ARM64 system image
+are installed. Native projects are ungenerated, and RN's specified NDK 26.1
+is absent (installed NDK 28.2 is not an assumed substitute). Use a fresh owned
+snapshot, AVD, ADB server and sidecar for native acceptance; see the ignored
+`loop37-android-native-readiness.md` receipt. No native build or emulator
+was started in this slice.
+
+Desktop candidate remains source `8966619`; native installation/pairing,
+Google acceptance, VM, portable recovery/sync, full Mimosa and public release
+gates remain open. Demo 8845 and real credentials are untouched. Full goal
+remains active. Allowance read: **38% used / 62% remaining**, no reset consumed.
+
+Final artifact acceptance is **15/15**. The initial **14/15** inspection
+incorrectly equated Metro's progress count with source-map entries; its
+failed report is preserved. Serializer observation reconciled the positive
+fixture exactly: 545 graph modules + 6 prepended modules - 3 inputs without
+mapped positions = 548 entries (544 exact text files, 2 generated image
+modules and 2 virtual entries). There are no unexplained mapped inputs.
+That additional diagnostic export completed in 9.928s and produced the same
+Hermes and source-map bytes as the accepted image export; it is not counted
+as another unique acceptance case.

@@ -17,6 +17,7 @@ Use Node 22 or newer, npm, and an Android SDK/JDK for native builds.
 cd android-companion
 npm ci
 npm run verify:toolchain
+npm run verify:metro-assets
 npm test
 npm run typecheck
 npm run lint
@@ -62,9 +63,25 @@ local template extraction, plist parsing, UUID consumers and Metro's PostCSS
 path with owned fixtures. They complement the app tests and Android export;
 they do not prove native installation or device behavior.
 
-The two reviewed `image-size` parser advisories remain unresolved; updating
-these other packages is not a whole-project security assessment. The remaining
-asset-parser work and its verification gates are tracked in the CEO ledger.
+Metro's parent process and complete Expo transform worker disable ICNS, HEIF
+(including AVIF), JXL and JXL-stream dimension parsing, including content renamed
+with a supported extension such as `.png`. Use PNG or JPEG for companion images.
+The worker retains Expo's transforms and cache key, adding the local policy bytes
+so a policy change invalidates cached transforms. This uses the installed parser's
+`disableTypes` API and does not edit its dependency files.
+
+The policy is reviewed for Expo Metro config 0.19.12, Metro 0.81.5 and image-size
+1.2.1; a version change stops Metro until the policy is reviewed. Detection still
+runs before the disabled-format check. The bounded child-process checks exercise
+the known ICNS/JXL loops and rejection through Metro's buffer and file asset APIs,
+alongside ordinary PNG/JPEG dimensions. They are a build-tool mitigation, not a
+general image sanitizer or a device-runtime check. Asset plugins and a Babel-only
+transformer are too late to apply this policy.
+
+The two upstream image-size advisories still have no published fixed version.
+They remain tracked even with this local mitigation; this is not a whole-project
+security assessment. Native packaging may use other image tools and requires its
+own verification.
 
 ## Runtime transport
 

@@ -14,6 +14,7 @@
     "build:android:production": "eas build --platform android --profile production",
     "typecheck": "tsc --noEmit",
     "verify:toolchain": "node scripts/verify-toolchain.mjs",
+    "verify:metro-assets": "node scripts/verify-metro-assets.mjs",
     "prepare:toolchain": "node scripts/prepare-toolchain.mjs",
     "postinstall": "node scripts/prepare-toolchain.mjs"
   },
