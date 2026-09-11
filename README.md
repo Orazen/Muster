@@ -71,6 +71,9 @@ More screens: [model picker](docs/screenshots/model-picker.png) ·
 
 ## What's new
 
+- **Saved welcome answers** — the welcome question records one answer with its first task message.
+  Status checks never resend work; a confirmed setup failure can start the saved task after you fix
+  the issue. [Recording and recovery contract](docs/seed-answers.md).
 - **Goal mode** — set an outcome instead of managing turns: bots loop plan → act → verify under a
   turn budget, with pause/stop controls and a live goal banner. Bounded autonomy you can trust.
 - **Provenance on every turn** — each bot reply is stamped with the engine instance and model that

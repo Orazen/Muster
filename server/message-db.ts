@@ -13,8 +13,10 @@
 import { chmodSync, closeSync, existsSync, openSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 
 import { DATA_DIR } from "./config.ts";
+import { SeedAnswerError } from "./seed-card.ts";
 import type { Message } from "./store.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
@@ -162,6 +164,59 @@ export function updateMessage(threadId: string, message: Message): void {
   db()
     .prepare("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ? WHERE thread_id = ? AND id = ?")
     .run(message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), threadId, message.id);
+}
+
+/** Seed recording/dispatch receipts have stricter durability than ordinary turn folding. */
+export function commitSeedAnswer(
+  threadId: string,
+  expected: Message,
+  next: Message,
+  userMessage?: Message,
+  expectedActiveLeaf?: string | null,
+): void {
+  const database = db();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    // SAFETY: the query selects exactly the serialized Message JSON column.
+    const row = database.prepare("SELECT json FROM messages WHERE thread_id = ? AND id = ?")
+      .get(threadId, expected.id) as { json: string } | undefined;
+    if (!row) throw new SeedAnswerError(409, "the seed card changed; refresh this conversation");
+    const current = rowToMessage(row);
+    // Store supplies parent links for pre-branching legacy rows on read.
+    if (current.parentId === undefined) current.parentId = expected.parentId;
+    if (!isDeepStrictEqual(current, JSON.parse(JSON.stringify(expected)))) throw new SeedAnswerError(409, "the seed card changed; refresh this conversation");
+    if (expectedActiveLeaf !== undefined) {
+      // SAFETY: these queries select their single named TEXT columns.
+      const state = database.prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?")
+        .get(threadId) as { active_leaf_id: string | null } | undefined;
+      // SAFETY: the fallback query selects the last Message's id column.
+      const last = database.prepare("SELECT id FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1")
+        .get(threadId) as { id: string } | undefined;
+      if ((state?.active_leaf_id ?? last?.id ?? null) !== expectedActiveLeaf) {
+        throw new SeedAnswerError(409, "the conversation branch changed; refresh before answering");
+      }
+    }
+    const updated = database.prepare("UPDATE messages SET json = ? WHERE thread_id = ? AND id = ? AND json = ?")
+      .run(JSON.stringify(next), threadId, expected.id, row.json);
+    if (updated.changes !== 1) throw new SeedAnswerError(409, "the seed card changed; refresh this conversation");
+    if (userMessage) {
+      database.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(threadId, userMessage.id, userMessage.at, userMessage.role, userMessage.kind, userMessage.text ?? null, JSON.stringify(userMessage));
+      setActiveLeaf(threadId, userMessage.id);
+    }
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/** Only interrupted seed dispatch receipts need transcript loading at startup. */
+export function startingSeedCards(threadId: string): Message[] {
+  // SAFETY: the query selects serialized Message JSON from known transcript rows.
+  const rows = db().prepare("SELECT json FROM messages WHERE thread_id = ? AND json_extract(json, '$.card.purpose') = 'onboarding-v1' AND json_extract(json, '$.card.seedAnswer.status') = 'starting'")
+    .all(threadId) as Array<{ json: string }>;
+  return rows.map(rowToMessage);
 }
 
 export function setActiveLeaf(threadId: string, leafId: string | null): void {

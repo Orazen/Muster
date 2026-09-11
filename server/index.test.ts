@@ -557,13 +557,44 @@ describe("harness HTTP API", () => {
     expect(after.modelSelection.effort).toBeUndefined();
   });
 
-  it("persists an answered onboarding card", async () => {
-    const { body } = await api("GET", "/api/bots");
-    const bot = body.bots[0];
+  it("records one welcome answer and exposes its durable startup receipt", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
     const card = bot.messages.find((m: { kind: string }) => m.kind === "options");
-    const res = await api("PATCH", `/api/bots/${bot.id}/cards/${card.id}`, { answered: card.card.options[0] });
-    expect(res.status).toBe(200);
-    expect(res.body.message.card.answered).toBe(card.card.options[0]);
+    const path = `/api/bots/${bot.id}/cards/${card.id}/answer`;
+    const answer = "  Writing & research\n";
+    const res = await api("POST", path, { threadId: bot.threadId, answer });
+    expect(res.status).toBe(202);
+    expect(res.body.userMessage.text).toBe(answer);
+    expect(res.body.cardMessage.card).toMatchObject({ answered: answer, purpose: "onboarding-v1", seedAnswer: { messageId: res.body.userMessage.id, attempt: 1 } });
+
+    const replay = await api("POST", path, { threadId: bot.threadId, answer });
+    expect(replay.status).toBe(202);
+    expect(replay.body.outcome).toBe("already-recorded");
+    expect(replay.body.userMessage.id).toBe(res.body.userMessage.id);
+    const status = await api("GET", `${path}?threadId=${bot.threadId}`);
+    expect(status.status).toBe(200);
+    expect(status.body.userMessage.id).toBe(res.body.userMessage.id);
+    expect(status.body.cardMessage.card.seedAnswer.attempt).toBe(1);
+    const conflict = await api("POST", path, { threadId: bot.threadId, answer: "Different task" });
+    expect(conflict.status).toBe(409);
+    const fresh = (await api("GET", "/api/bots")).body.bots.find((b: { id: string }) => b.id === bot.id);
+    expect(fresh.messages.filter((m: { role: string }) => m.role === "user")).toHaveLength(1);
+  });
+
+  it("rejects generic card settlement and invalid seed requests without saving an answer", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const card = bot.messages.find((m: { kind: string }) => m.kind === "options");
+    const path = `/api/bots/${bot.id}/cards/${card.id}`;
+    expect((await api("PATCH", path, { answered: "Forged answer", dismissed: true })).status).toBe(405);
+    expect((await api("POST", `${path}/answer`, { threadId: bot.threadId, answer: " \n " })).status).toBe(400);
+    expect((await api("POST", `${path}/answer`, { threadId: "wrong-thread", answer: "Task" })).status).toBe(404);
+    expect((await api("GET", `${path}/answer?threadId=${bot.threadId}&threadId=${bot.threadId}`)).status).toBe(400);
+    expect((await api("POST", `${path}/answer/start`, { threadId: bot.threadId, expectedAttempt: -1 })).status).toBe(400);
+    const status = await api("GET", `${path}/answer?threadId=${bot.threadId}`);
+    expect(status.status).toBe(200);
+    expect(status.body.cardMessage.card.answered).toBeUndefined();
+    expect(status.body.cardMessage.card.dismissed).toBeUndefined();
+    expect(status.body.userMessage).toBeNull();
   });
 
   it("validates approval decisions and reports a request that is no longer open", async () => {

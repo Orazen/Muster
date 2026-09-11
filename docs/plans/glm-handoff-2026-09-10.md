@@ -1767,3 +1767,84 @@ Pre-commit pull/rebase is up to date; the existing release-handoff stash is
 preserved. Post-push GET-only reachability and published download metadata are
 recorded separately in `.omb-scratch/verification/loop40-production-get.json`.
 HTTP 200 does not identify the deployed source SHA or a newly released binary.
+
+
+## Loop 41 — durable welcome answers and honest startup recovery (2026-09-11)
+
+Shipped scope: dedicated seed-answer/status/start API, SQLite recording and
+attempt receipts, web welcome-card recovery and exact companion route allowlist.
+Implementation: `server/seed-card.ts`, `server/seed-answer-dispatch.ts`,
+`server/store.ts`, `server/message-db.ts`, `server/index.ts`, web store/session,
+`SeedOptionCard`, `OptionCard`, `ChatView`, `seed-turn-retry`, companion routes and
+focused tests. Contract and native continuation: `docs/seed-answers.md`.
+
+A canonical welcome answer, linked user message and branch head commit together
+before memory/SSE publication. Same-answer retries reuse the recorded message;
+conflicting answers, wrong owner/current thread/branch, busy bots and newer work
+cannot create a fresh seed task. Startup is durably claimed by attempt before
+calling the existing turn harness. Only recorded/not-started receipts expose an
+explicit versioned Start saved task. A process-interrupted start becomes
+uncertain; no automatic replay. Started means driver acceptance, not task success.
+
+Web preserves exact multiline drafts through request failure and fences account,
+connection, bot, thread, branch and message callbacks. Check status is GET-only.
+Generic card PATCH now returns 405. Unknown cards and legacy settled answers
+without receipts remain inert history. Older split-write clients need an updated
+bundle. General error retry and reply regeneration cannot fork an unresolved
+saved welcome task; already-started ordinary turns retain explicit regeneration.
+
+Final verification: **235 files / 3,241 passed / 8 skipped / 266.04s** (prior
+Loop 40: 229 /3,063 /8; +6 files, +178 passed). Complete build including frontend/server
+types passed; Vite **25.89s**, entry `index-DhhntpNv.js`; existing large-chunk
+warning remains. Scoped custom lint: **20 files, exit0**. Final frontend focused:
+**4files /90passed /0skipped /1.23s**. Real API/coordinator focused: **2 /73 /0 /
+3.14s**. Store owner reported **3 /116 /0 /2.54s**, including 60 new SQLite tests,
+and actual Node22 strip-loader **3/3**; those focused raw tool outputs were not
+saved as files. Complete-build/full-suite logs cover the final source. Companion
+transport: **2files /60passed /0skipped /529ms**, controlled upstream, not main
+server semantic proof. Real SQLite fault tests cover card/user/branch/COMMIT,
+claim/finish/startup writes, rollback, stale state, restart and late callbacks.
+
+Browser: **47 actual-server checks +6 separately labeled UI projection checks =
+53 passed, 0 failed**. Phase1:38 checks/13.045s on `index-DEMBCuOa.js`; final source:
+9 actual +6 projection checks/7.132s. Synthetic email logins, real SQLite, offline
+ACP prompt counts, independent observer, exact raw answer, concurrent replay,
+accepted-response loss, pre-forward 503 recovery, failed setup→explicit attempt 2,
+wrong owner/thread, newer-work guard and real server restart were verified.
+Final source also removes both generic retry paths. Legacy and uncertain UI
+projections changed owned GET responses only; durable DB stayed unchanged. They
+are not actual legacy migration or provider-uncertainty execution proof.
+
+Root visually reviewed desktop 1280 and mobile 320 screens, including visible
+recovery controls. Measured innerWidth=scrollWidth at both sizes. Final served
+assets match local build **334/334**; changed runtime inputs match **12/12**.
+Cleanup **69/69**: manager, two servers and 56 observed provider/probe/watchdog PIDs
+absent; four ports closed; no owned browser process, busy task, held request or
+outbound attempt. Original offline engine configuration restored exactly.
+
+Retained initial failures: Node22 rejected constructor parameter properties;
+in-progress test/shared type boundaries and fixture expectations were corrected.
+Two full-suite runs were deliberately interrupted for reviewed UI fixes; an
+intermediate complete run passed 234 files / 3,227 tests / 8 skips/291.31s. Browser signup
+setup 403 came from Node fetch discarding custom Host; the ignored fixture now
+uses explicit HTTP transport. Offline ACP exit-early produced started followed
+by an initialization error, not uncertain. Preflight stops and original evidence
+remain in `.omb-scratch/verification/loop41-*` and `loop41-seed-answer/`.
+
+Revenue relevance: recover a failed first task without losing its answer or
+forking duplicate work; no conversion or revenue improvement is claimed.
+Next: Android direct-bot welcome controls using this contract. Preserve Loop 40
+live approvals. Add strict receipt metadata and a monotonic receipt/echo fold:
+ordinary native message replay currently moves the leaf even for a duplicate ID.
+Keep room seeds inert. iOS/Watch need separate typed/session/UI work; do not
+broaden their live pending predicate. Details and acceptance are in the contract.
+
+Public release, CI billing/signing/VPS identity/mirror gates remain open. Desktop
+candidate 8966619 remains a prior local candidate; real Google, native release,
+physical iOS/Watch, VM, portable backup/sync and full Mimosa remain unverified.
+No model credentials, dependency versions, real accounts or demo 8845 changed.
+Pre-commit pull/rebase is up to date; existing release-handoff stash preserved.
+Latest allowance: **61% used /39% remaining**; no reset consumed. Full goal stays
+active. Post-push GET reachability/download metadata are recorded separately in
+`loop41-production-get.json`; push/HTTP 200 do not prove a desktop release or the
+exact deployed backend SHA.

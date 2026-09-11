@@ -33,6 +33,7 @@ import {
 import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from "./whatsapp-threads.ts";
 import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER, type WhyEntry } from "./why-journal.ts";
 import { readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
+import { SeedAnswerDispatcher, seedAnswerInputSchema, seedStartInputSchema, seedStatusInputSchema } from "./seed-answer-dispatch.ts";
 import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
@@ -413,6 +414,7 @@ async function defaultSelection(forUserId?: string) {
 }
 let bootSelection = { instanceId: "", model: "" };
 const store = new Store(() => bootSelection);
+const seedAnswers = new SeedAnswerDispatcher(store, startTurn);
 bootSelection = await defaultSelection();
 
 // Startup reconciliation: a bot persisted mid-turn lost its turn when the
@@ -1759,7 +1761,9 @@ async function startTurn(
      * The prompt is control-plane context: it reaches the provider without
      * masquerading as another message authored by the user. */
     connectorContinuation?: boolean;
-    onDispatchError?: (message: string) => void;
+    onDispatchError?: (message: string, uncertain?: boolean) => void;
+    /** Confirms that the driver accepted the turn, not that its task succeeded. */
+    onDispatched?: () => void;
   },
 ) {
   const bot = store.bot(botId);
@@ -1964,6 +1968,7 @@ async function startTurn(
   turnUsage.delete(threadId);
 
   void (async () => {
+    let driverInvoked = false;
     try {
       const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
       // the user's connected apps, but only to a driver that can mount
@@ -2297,6 +2302,7 @@ async function startTurn(
         }
       }
 
+      driverInvoked = true;
       await instance.adapter.sendTurn({
         threadId,
         // the shield's rewrite wins when active — raw turnText must never
@@ -2358,6 +2364,7 @@ async function startTurn(
         integrations,
         cwd,
       });
+      opts?.onDispatched?.();
       // dispatched: the rewind is spent, and the old cursors are dead
       if (rewound) store.patchBot(bot.id, { rewound: false, resumeCursors: {} });
       // and this engine now owns the thread's most recent turn
@@ -2386,7 +2393,7 @@ async function startTurn(
         tool: { name: `error: ${message.slice(0, 160)}`, ok: false },
       });
       store.setActivity(bot.id, "idle");
-      opts?.onDispatchError?.(message);
+      opts?.onDispatchError?.(message, driverInvoked);
       // a dispatch failure never emits turn.completed, so the settle-driven
       // drain would strand anything queued behind this turn
       drainQueuedSends();
@@ -6073,19 +6080,42 @@ let requestUserEmail = "";
       return json(res, 200, { name, text });
     }
 
-    // onboarding/ask cards persist their answered/dismissed state
+    // A welcome answer and its user message are one durable operation. Reads
+    // and acknowledgement retries never dispatch another task; retrying a known
+    // startup failure is a separate explicit, versioned action.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/cards\/([\w-]+)\/answer(?:\/(start))?$/);
+    if (m) {
+      const botId = m[1];
+      const cardId = m[2];
+      const retry = m[3] === "start";
+      if (method === "GET" && !retry) {
+        const parsed = seedStatusInputSchema.safeParse(Object.fromEntries(url.searchParams));
+        if (!parsed.success || url.searchParams.getAll("threadId").length !== 1) {
+          return json(res, 400, { error: "A valid current threadId is required." });
+        }
+        return json(res, 200, { ok: true, ...store.seedAnswerStatus(botId, parsed.data.threadId, cardId) });
+      }
+      if (method !== "POST") return json(res, 405, { error: "Use the card's answer action." });
+      const body = await readBody(req);
+      // Body delivery can await another request that changed the record. Check
+      // the same account authority again immediately before the durable write.
+      const bot = store.bot(botId);
+      if (!bot || !ownsRecord(bot)) return json(res, 404, { error: "no such bot" });
+      if (retry) {
+        const parsed = seedStartInputSchema.safeParse(body);
+        if (!parsed.success) return json(res, 400, { error: "A current threadId and nonnegative integer expectedAttempt are required." });
+        return json(res, 202, seedAnswers.start(botId, parsed.data.threadId, cardId, parsed.data.expectedAttempt));
+      }
+      const parsed = seedAnswerInputSchema.safeParse(body);
+      if (!parsed.success) return json(res, 400, { error: "A current threadId and nonblank answer of at most 4000 characters are required." });
+      return json(res, 202, seedAnswers.answer(botId, parsed.data.threadId, cardId, parsed.data.answer));
+    }
+
+    // The old generic patch could change a live card without answering its
+    // broker, or overwrite a recorded welcome answer. It has no write authority.
     m = path.match(/^\/api\/bots\/([\w-]+)\/cards\/([\w-]+)$/);
     if (m && method === "PATCH") {
-      const bot = store.bot(m[1]);
-      if (!bot) return json(res, 404, { error: "no such bot" });
-      const existing = store.messagesFor(bot.threadId).find((msg) => msg.id === m![2]);
-      if (!existing?.card) return json(res, 404, { error: "no such card" });
-      const body = await readBody(req);
-      const card = { ...existing.card };
-      if (body.answered !== undefined) card.answered = body.answered;
-      if (body.dismissed !== undefined) card.dismissed = body.dismissed;
-      const patched = store.patchMessage(bot.threadId, m[2], { card });
-      return json(res, 200, { message: patched });
+      return json(res, 405, { error: "Reload Muster and use the card's dedicated answer or permission action." });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages$/);
     if (m && method === "POST") {

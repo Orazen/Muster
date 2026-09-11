@@ -14,6 +14,11 @@ import { newId, type ModelSelection, type ThreadId } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactApprovalWhy, type ApprovalWhy } from "./approval-why.ts";
 import { redactSecretsInText } from "./redact.ts";
+import type { JsonValue } from "./schema.ts";
+import {
+  createOnboardingCard, isRecognizedSeedCard, SeedAnswerError, seedAnswerReceiptSchema, SEED_CARD_PURPOSE, validateSeedAnswer,
+  type SeedAnswerClaim, type SeedAnswerFinishStatus, type SeedAnswerReceipt, type SeedAnswerResult, type SeedAnswerState,
+} from "./seed-card.ts";
 
 export type AgentColor =
   | "green"
@@ -44,6 +49,9 @@ export const AGENT_CHARACTERS: readonly AgentCharacter[] = [
 ];
 
 export interface OptionCardData {
+  /** Server-created onboarding action, distinct from a live provider request. */
+  purpose?: string;
+  seedAnswer?: SeedAnswerReceipt;
   why?: ApprovalWhy;
   rehearsal?: { plannedSteps: number; matchedSteps: number; matchedRuns: number; reviewedRuns: number; summary: string };
   title: string;
@@ -431,12 +439,6 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   return [];
 }
 
-const onboardingCard = (): OptionCardData => ({
-  title: "What do you mostly want help with?",
-  subtitle: "Pick whatever's closest; we can always expand from there.",
-  options: ["Work & projects", "Writing & research", "Life admin", "A bit of everything"],
-});
-
 /** Messages form a tree (forks appear when a message is edited); the
  * visible conversation is the path from the root to activeLeafId. */
 interface ThreadState {
@@ -549,6 +551,15 @@ export class Store {
     for (const threadId of knownThreads) {
       const legacyFile = messagesFile(threadId);
       if (existsSync(legacyFile)) mdb.readThread(threadId, legacyFile);
+    }
+    // A claimed dispatch may have reached the provider before the process
+    // exited. Preserve that uncertainty; startup never replays the work.
+    for (const threadId of knownThreads) {
+      for (const message of mdb.startingSeedCards(threadId)) {
+        const parsed = seedAnswerReceiptSchema.safeParse(message.card?.seedAnswer);
+        if (!parsed.success) continue;
+        this.finishSeedAnswerDispatch(threadId, message.id, parsed.data.attempt, "uncertain", "Muster restarted before task dispatch could be confirmed.");
+      }
     }
   }
 
@@ -801,6 +812,100 @@ export class Store {
     return t.messages[idx];
   }
 
+  /** A read never accepts or dispatches a seed answer. */
+  seedAnswerStatus(botId: string, threadId: string, cardId: string): SeedAnswerState<Message> {
+    const bot = this.bot(botId);
+    if (!bot || bot.hidden || bot.threadId !== threadId) throw new SeedAnswerError(404, "no such current bot conversation");
+    const messages = this.messagesFor(threadId);
+    const cardMessage = messages.find((message) => message.id === cardId);
+    if (!cardMessage || !isRecognizedSeedCard(messages, cardMessage)) throw new SeedAnswerError(404, "no such onboarding question");
+    const path = this.activePath(threadId);
+    if (!path.some((message) => message.id === cardId)) throw new SeedAnswerError(409, "the onboarding question is not on the current branch");
+    const rawReceipt = cardMessage.card?.seedAnswer;
+    if (rawReceipt === undefined) return { cardMessage, userMessage: null };
+    const parsed = seedAnswerReceiptSchema.safeParse(rawReceipt);
+    if (!parsed.success) throw new SeedAnswerError(409, "the recorded answer could not be confirmed");
+    const userMessage = path.find((message) => message.id === parsed.data.messageId);
+    if (!userMessage || userMessage.role !== "user" || userMessage.kind !== "text"
+      || userMessage.text !== cardMessage.card?.answered || !userMessage.text?.trim()
+      || path.findIndex((message) => message.id === userMessage.id) <= path.findIndex((message) => message.id === cardId)) {
+      throw new SeedAnswerError(409, "the recorded answer is not on the current branch");
+    }
+    return { cardMessage, userMessage };
+  }
+
+  answerSeedCard(botId: string, threadId: string, cardId: string, answer: JsonValue | undefined): SeedAnswerResult<Message> {
+    const text = validateSeedAnswer(answer);
+    const current = this.seedAnswerStatus(botId, threadId, cardId);
+    const card = current.cardMessage.card!;
+    if (card.dismissed === true) throw new SeedAnswerError(409, "this onboarding question was dismissed");
+    if (current.userMessage) {
+      if (current.userMessage.text !== text) throw new SeedAnswerError(409, "this onboarding question already has a different answer");
+      return { outcome: "already-recorded", cardMessage: current.cardMessage, userMessage: current.userMessage };
+    }
+    if (card.answered !== undefined) throw new SeedAnswerError(409, "this onboarding question is already answered");
+    const bot = this.bot(botId)!;
+    if (bot.busy) throw new SeedAnswerError(409, "the bot is working; wait before answering this question");
+    const path = this.activePath(threadId);
+    const seedIndex = path.findIndex((message) => message.id === cardId);
+    if (path.slice(seedIndex + 1).some((message) => message.role === "user")) {
+      throw new SeedAnswerError(409, "this conversation already contains newer work");
+    }
+    const thread = this.thread(threadId);
+    const userMessage: Message = { id: newId(), at: Date.now(), parentId: thread.activeLeafId, role: "user", kind: "text", text };
+    const cardMessage: Message = { ...current.cardMessage, card: { ...card, purpose: SEED_CARD_PURPOSE, answered: text, seedAnswer: { messageId: userMessage.id, attempt: 0, status: "recorded" } } };
+    mdb.commitSeedAnswer(threadId, current.cardMessage, cardMessage, userMessage, thread.activeLeafId);
+    thread.messages[thread.messages.findIndex((message) => message.id === cardId)] = cardMessage;
+    thread.messages.push(userMessage);
+    thread.activeLeafId = userMessage.id;
+    this.emit({ type: "message.patch", threadId, message: cardMessage });
+    this.emit({ type: "message", threadId, message: userMessage });
+    return { outcome: "recorded", cardMessage, userMessage };
+  }
+
+  claimSeedAnswerDispatch(botId: string, threadId: string, cardId: string, expectedAttempt: number): SeedAnswerClaim<Message> {
+    if (!Number.isSafeInteger(expectedAttempt) || expectedAttempt < 0) throw new SeedAnswerError(400, "expectedAttempt must be a nonnegative safe integer");
+    const current = this.seedAnswerStatus(botId, threadId, cardId);
+    const card = current.cardMessage.card!;
+    if (!current.userMessage || !card.seedAnswer) throw new SeedAnswerError(409, "record an answer before starting its task");
+    const receipt = card.seedAnswer;
+    if (expectedAttempt < receipt.attempt) return { outcome: "already-claimed", cardMessage: current.cardMessage, userMessage: current.userMessage };
+    if (expectedAttempt !== receipt.attempt || !["recorded", "not-started"].includes(receipt.status)) {
+      throw new SeedAnswerError(409, "this dispatch attempt cannot be started again");
+    }
+    if (card.dismissed === true || this.bot(botId)!.busy) throw new SeedAnswerError(409, "the bot cannot start this answer now");
+    const path = this.activePath(threadId);
+    const userIndex = path.findIndex((message) => message.id === current.userMessage!.id);
+    if (path.slice(userIndex + 1).some((message) => message.role === "user")) throw new SeedAnswerError(409, "this conversation already contains newer work");
+    if (receipt.attempt === Number.MAX_SAFE_INTEGER) throw new SeedAnswerError(409, "the dispatch attempt limit was reached");
+    const cardMessage: Message = { ...current.cardMessage, card: { ...card, seedAnswer: { messageId: receipt.messageId, attempt: receipt.attempt + 1, status: "starting" } } };
+    const thread = this.thread(threadId);
+    mdb.commitSeedAnswer(threadId, current.cardMessage, cardMessage, undefined, thread.activeLeafId);
+    thread.messages[thread.messages.findIndex((message) => message.id === cardId)] = cardMessage;
+    this.emit({ type: "message.patch", threadId, message: cardMessage });
+    return { outcome: "claimed", cardMessage, userMessage: current.userMessage };
+  }
+
+  finishSeedAnswerDispatch(threadId: string, cardId: string, attempt: number, status: SeedAnswerFinishStatus, error?: string): Message | null {
+    if (!this.botByThread(threadId)) return null;
+    const thread = this.thread(threadId);
+    const index = thread.messages.findIndex((message) => message.id === cardId);
+    const existing = thread.messages[index];
+    if (!existing || !isRecognizedSeedCard(thread.messages, existing)) return null;
+    const parsed = seedAnswerReceiptSchema.safeParse(existing.card?.seedAnswer);
+    if (!parsed.success || parsed.data.status !== "starting" || parsed.data.attempt !== attempt) return null;
+    const userMessage = thread.messages.find((message) => message.id === parsed.data.messageId);
+    if (!userMessage || userMessage.role !== "user" || userMessage.kind !== "text" || userMessage.text !== existing.card?.answered) return null;
+    const receipt: SeedAnswerReceipt = { messageId: parsed.data.messageId, attempt, status };
+    if (error !== undefined) receipt.error = error;
+    const message: Message = { ...existing, card: { ...existing.card!, seedAnswer: receipt } };
+    try { mdb.commitSeedAnswer(threadId, existing, message); }
+    catch (cause) { if (cause instanceof SeedAnswerError) return null; throw cause; }
+    thread.messages[index] = message;
+    this.emit({ type: "message.patch", threadId, message });
+    return message;
+  }
+
   bot(id: string) {
     return this.bots.find((b) => b.id === id) ?? null;
   }
@@ -855,7 +960,7 @@ export class Store {
         kind: "text",
         text: `Hey — I'm ${name}. Nice to meet you.`,
       });
-      this.appendMessage(bot.threadId, { role: "bot", kind: "options", card: onboardingCard() });
+      this.appendMessage(bot.threadId, { role: "bot", kind: "options", card: createOnboardingCard() });
     }
     return bot;
   }

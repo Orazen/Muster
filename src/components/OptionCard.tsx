@@ -3,10 +3,27 @@ import { ApprovalWhyDetails } from "./ApprovalWhyDetails";
 import { X } from "lucide-react";
 import { useStore, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { seedCardKey, seedCardReference } from "@/state/seed-card-session";
+import { SeedOptionCard, UnavailableSeedCard } from "./SeedOptionCard";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 
-export function OptionCard({
+interface OptionCardProps {
+  botId: string;
+  message: Message;
+  hotkeys?: boolean;
+}
+
+export function OptionCard(props: OptionCardProps) {
+  const { state } = useStore();
+  if (!props.message.card) return null;
+  if (props.message.card.requestId) return <LiveOptionCard {...props} />;
+  const reference = seedCardReference(state, props.botId, props.message.id);
+  return reference ? <SeedOptionCard key={seedCardKey(reference)} reference={reference} card={props.message.card} hotkeys={props.hotkeys ?? false} />
+    : <UnavailableSeedCard card={props.message.card} />;
+}
+
+function LiveOptionCard({
   botId,
   message,
   hotkeys = false,

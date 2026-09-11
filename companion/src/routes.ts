@@ -64,6 +64,11 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
+  // Seed answers have durable recording and a separate explicit start retry.
+  // The legacy generic card PATCH remains unavailable to companions.
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/cards\/[\w-]+\/answer$/ },
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/cards\/[\w-]+\/answer$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/cards\/[\w-]+\/answer\/start$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/read$/ },
   // always-allow stays phone-accessible: the server 409s unless a card is

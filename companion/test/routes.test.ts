@@ -33,6 +33,9 @@ describe("what the app may do", () => {
     ["GET", "/api/bots"],
     ["POST", "/api/bots"],
     ["POST", "/api/bots/bot_123/messages"],
+    ["POST", "/api/bots/bot_123/cards/card_456/answer"],
+    ["GET", "/api/bots/bot_123/cards/card_456/answer"],
+    ["POST", "/api/bots/bot_123/cards/card_456/answer/start"],
     ["POST", "/api/bots/bot_123/interrupt"],
     ["POST", "/api/bots/bot_123/read"],
     ["POST", "/api/bots/bot_123/always-allow"],
@@ -56,6 +59,37 @@ describe("what the app may do", () => {
   for (const [method, path] of calls) {
     it(`allows ${method} ${path}`, () => expect(ask(method, path)).toBeNull());
   }
+});
+
+describe("seed answer route boundary", () => {
+  it.each([
+    ["POST", "/api/bots/bot_123/cards/card_456/answer"],
+    ["GET", "/api/bots/bot_123/cards/card_456/answer"],
+    ["POST", "/api/bots/bot_123/cards/card_456/answer/start"],
+  ])("requires pairing for %s %s", (method, path) => {
+    expect(ask(method, path, false)?.status).toBe(401);
+  });
+
+  it.each([
+    ["PATCH", "/api/bots/bot_123/cards/card_456"],
+    ["POST", "/api/bots/bot_123/cards/card_456"],
+    ["PATCH", "/api/bots/bot_123/cards/card_456/answer"],
+    ["DELETE", "/api/bots/bot_123/cards/card_456/answer"],
+    ["PUT", "/api/bots/bot_123/cards/card_456/answer"],
+    ["GET", "/api/bots/bot_123/cards/card_456/answer/start"],
+    ["PATCH", "/api/bots/bot_123/cards/card_456/answer/start"],
+    ["POST", "/api/bots/bot_123/cards/card_456/answer/start/again"],
+    ["POST", "/api/bots/bot_123/cards/card_456/answer/"],
+    ["POST", "/api/bots/bot_123/cards/card_456/answers"],
+    ["POST", "/api/groups/room_123/cards/card_456/answer"],
+    ["POST", "/api/threads/thread_123/cards/card_456/answer"],
+    ["POST", "/api/bots/bot_123/cards/card%2f..%2fother/answer"],
+    ["POST", "/api/bots/bot%2fother/cards/card_456/answer"],
+    ["POST", "/api/bots//cards/card_456/answer"],
+    ["POST", "/api/bots/bot_123/cards//answer"],
+  ])("does not widen the surface to %s %s", (method, path) => {
+    expect(ask(method, path)?.status).toBe(404);
+  });
 });
 
 describe("what it may not", () => {

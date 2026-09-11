@@ -45,6 +45,7 @@ import { EngineSetup } from "./EngineSetup";
 import { AgentAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { showWorkingDots } from "@/lib/turn-tail";
+import { canRegenerateSavedTurn } from "@/lib/seed-turn-retry";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { MessageBody } from "./MessageBody";
 import { CompactionDivider } from "./CompactionDivider";
@@ -677,7 +678,7 @@ const MessagesList = memo(function MessagesList({
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
   onSubmitEdit: (id: string, text: string) => void;
-  onRegenerate: () => void;
+  onRegenerate?: () => void;
 }) {
   const { dispatch } = useStore();
   const runPositions = useMemo(() => bubbleRunPositions(messages), [messages]);
@@ -868,13 +869,14 @@ export function ChatView({ bot }: { bot: Bot }) {
     () => [...messages].reverse().find((m) => m.role === "user" && m.kind === "text"),
     [messages],
   );
+  const canRegenerateLast = !bot.busy && canRegenerateSavedTurn(messages, lastUserMessage?.id);
   // regenerate = fork the last user message with the same text — reuses the
   // existing branch machinery, so the old answer stays reachable via ‹ ›
   const regenerate = useCallback(() => {
-    if (lastUserMessage?.text && !bot.busy) {
+    if (lastUserMessage?.text && canRegenerateLast) {
       dispatch({ type: "editMessage", botId: bot.id, messageId: lastUserMessage.id, text: lastUserMessage.text });
     }
-  }, [lastUserMessage, bot.busy, bot.id, dispatch]);
+  }, [lastUserMessage, canRegenerateLast, bot.id, dispatch]);
 
   // Scroll pinning: follow the bottom while the user hasn't scrolled away.
   // Follow breaks ONLY on an upward user gesture (wheel/touch), never on
@@ -1163,12 +1165,12 @@ export function ChatView({ bot }: { bot: Bot }) {
             messages={windowedMessages}
             editingId={editingId}
             lastBotTextId={lastBotTextId}
-            canRetryLast={!bot.busy && Boolean(lastUserMessage)}
+            canRetryLast={canRegenerateLast}
             engine={state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)}
             onStartEdit={startEdit}
             onCancelEdit={cancelEdit}
             onSubmitEdit={submitEdit}
-            onRegenerate={regenerate}
+            onRegenerate={canRegenerateLast ? regenerate : undefined}
           />
           {laterCount > 0 && (
             <div className="flex justify-center">

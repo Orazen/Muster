@@ -21,6 +21,7 @@ import { currentCall } from "@/lib/call";
 import { showNotification } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { readChatSelection, resolveChatSelection, saveChatSelection } from "./chat-selection";
+import { mergeSeedCardResult, SeedCardSession, seedCardReference, type SeedAnswer, type SeedCardReference, type SeedCardResult } from "./seed-card-session";
 
 export type { AgentColor } from "@/lib/mascot";
 
@@ -38,6 +39,8 @@ export interface ApprovalWhy {
 }
 
 export interface OptionCardData {
+  purpose?: string;
+  seedAnswer?: SeedAnswer;
   why?: ApprovalWhy;
   rehearsal?: { plannedSteps: number; matchedSteps: number; matchedRuns: number; reviewedRuns: number; summary: string };
   title: string;
@@ -482,6 +485,7 @@ export type Action =
   | { type: "switchBranch"; botId: string; messageId: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
   | { type: "answerCard"; botId: string; messageId: string; answer: string }
+  | { type: "seedCardRecorded"; reference: SeedCardReference; result: SeedCardResult }
   | { type: "dismissCard"; botId: string; messageId: string }
   // permission cards answer by THREAD, so a request raised inside a room
   // can be answered the same way as one in a 1:1 chat
@@ -677,15 +681,23 @@ export function reducer(state: AppState, action: Action): AppState {
         (b) => state.readSelectedMessages ? { ...b, unread: false } : b,
       );
     }
-    // optimistic card settle; the server's message.patch confirms it later
-    case "answerCard":
+    // Live asks retain their existing behavior; seed cards settle only from a server receipt.
+    case "answerCard": {
+      const card = state.bots.find((bot) => bot.id === action.botId)?.messages.find((message) => message.id === action.messageId)?.card;
+      if (!card?.requestId) return state;
       return withMascotMotion(
         patchCard(state, action.botId, action.messageId, { answered: action.answer }),
         action.botId,
         "working",
       );
-    case "dismissCard":
+    }
+    case "seedCardRecorded":
+      return mergeSeedCardResult(state, action.reference, action.result);
+    case "dismissCard": {
+      const card = state.bots.find((bot) => bot.id === action.botId)?.messages.find((message) => message.id === action.messageId)?.card;
+      if (!card?.requestId) return state;
       return patchCard(state, action.botId, action.messageId, { dismissed: true });
+    }
     case "decideRequest":
       return state; // the server's request.resolved patch settles the card
     case "botAdded":
@@ -1087,6 +1099,7 @@ const StoreContext = createContext<{
   dispatch: React.Dispatch<Action>;
   /** Re-fetch engine availability — after an install, without a restart. */
   refreshInstances: () => Promise<void>;
+  seedCards: SeedCardSession;
 } | null>(null);
 
 export function StoreProvider({ accountId, readSelectedMessages = true, children }: {
@@ -1106,6 +1119,13 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
   }, [accountId, state.selectedId]);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const [seedCards] = useState(() => new SeedCardSession({
+    getState: () => stateRef.current,
+    request: (url, init) => fetch(url, init),
+    apply: (reference, result) => rawDispatch({ type: "seedCardRecorded", reference, result }),
+  }));
+  seedCards.sync(state);
+  useEffect(() => seedCards.attach(), [seedCards]);
   // per-frame stream-delta batching (see the "runtime" SSE case); stream
   // state is intentionally OUTSIDE the reducer so token frames re-render
   // only StreamContext consumers
@@ -1156,16 +1176,17 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
       setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
     };
-    // fire-and-forget card persistence; the route is optional server-side
-    const persistCard = (botId: string, messageId: string, patch: Partial<OptionCardData>) => {
-      fetch(`/api/bots/${botId}/cards/${messageId}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(patch),
-      }).catch(() => {});
-    };
-
     const wrapped: React.Dispatch<Action> = (action) => {
+      if (action.type === "answerCard" || action.type === "dismissCard") {
+        const card = stateRef.current.bots.find((bot) => bot.id === action.botId)?.messages.find((message) => message.id === action.messageId)?.card;
+        if (!card?.requestId) {
+          if (action.type === "answerCard") {
+            const reference = seedCardReference(stateRef.current, action.botId, action.messageId);
+            if (reference) void seedCards.answer(reference, action.answer);
+          }
+          return;
+        }
+      }
       rawDispatch(action);
       switch (action.type) {
         case "createRoutine":
@@ -1269,12 +1290,6 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
                 message: behavior === "answer" ? action.answer : undefined,
               }),
             }).catch(showError);
-          } else {
-            persistCard(action.botId, action.messageId, { answered: action.answer });
-            api(`/api/bots/${action.botId}/messages`, {
-              method: "POST",
-              body: JSON.stringify({ text: action.answer }),
-            }).catch(showError);
           }
           break;
         }
@@ -1286,8 +1301,6 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
               method: "POST",
               body: JSON.stringify({ requestId: card.requestId, behavior: "deny", message: "Dismissed by user." }),
             }).catch(() => {});
-          } else {
-            persistCard(action.botId, action.messageId, { dismissed: true });
           }
           break;
         }
@@ -1540,8 +1553,8 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
     // The hydrate decision belongs to the hello frame, not to onopen: the
     // server replays what we missed when it can, and re-downloading every
     // transcript on a reconnect it already covered is pure waste.
-    es.onopen = () => rawDispatch({ type: "connected", value: true });
-    es.onerror = () => rawDispatch({ type: "connected", value: false });
+    es.onopen = () => { seedCards.connectionChanged(); rawDispatch({ type: "connected", value: true }); };
+    es.onerror = () => { seedCards.connectionChanged(); rawDispatch({ type: "connected", value: false }); };
     handleFrame = (frame) => {
       switch (frame.kind) {
         case "message": {
@@ -1759,7 +1772,7 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshInstances]);
 
-  const value = useMemo(() => ({ state, dispatch, refreshInstances }), [state, dispatch, refreshInstances]);
+  const value = useMemo(() => ({ state, dispatch, refreshInstances, seedCards }), [state, dispatch, refreshInstances, seedCards]);
   return (
     <StoreContext.Provider value={value}>
       <StreamContext.Provider value={stream}>{children}</StreamContext.Provider>
