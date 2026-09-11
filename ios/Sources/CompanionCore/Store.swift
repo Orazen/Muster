@@ -125,7 +125,9 @@ public struct CompanionState: Sendable {
         var byId = Dictionary(
             uniqueKeysWithValues: (messages[threadId] ?? []).map { ($0.id, $0) }
         )
-        for message in page.messages { byId[message.id] = message }
+        for message in page.messages {
+            byId[message.id] = byId[message.id].map { SeedCardContract.preserveReceipt($0, message) } ?? message
+        }
         messages[threadId] = byId.values.sorted {
             $0.at == $1.at ? $0.id < $1.id : $0.at < $1.at
         }
@@ -155,6 +157,17 @@ public struct CompanionState: Sendable {
             break
 
         case let .message(threadId, message):
+            // A saved user may arrive through HTTP before its SSE echo. Replays
+            // must not rewind a later branch or clear its live text.
+            let held = transcript(forThread: threadId)
+            if held.contains(where: { $0.id == message.id }), held.contains(where: {
+                SeedCardContract.canonical($0) && $0.card?.seedAnswer?.messageId == message.id
+            }) { break }
+            if let previous = held.first(where: { $0.id == message.id }),
+               SeedCardContract.canonical(previous), previous.card?.seedAnswer != nil {
+                append(SeedCardContract.preserveReceipt(previous, message), to: threadId)
+                break
+            }
             append(message, to: threadId)
             if let index = bots.firstIndex(where: { $0.threadId == threadId }) {
                 bots[index].activeLeafId = message.id
@@ -172,7 +185,7 @@ public struct CompanionState: Sendable {
         case let .messagePatch(threadId, message):
             var thread = messages[threadId] ?? []
             if let index = thread.firstIndex(where: { $0.id == message.id }) {
-                thread[index] = message
+                thread[index] = SeedCardContract.preserveReceipt(thread[index], message)
                 messages[threadId] = thread
             } else {
                 // a patch for something we never saw — the append is more
@@ -321,7 +334,7 @@ public struct CompanionState: Sendable {
     private mutating func append(_ message: Message, to threadId: String) {
         var thread = messages[threadId] ?? []
         if let index = thread.firstIndex(where: { $0.id == message.id }) {
-            thread[index] = message
+            thread[index] = SeedCardContract.preserveReceipt(thread[index], message)
         } else {
             thread.append(message)
         }

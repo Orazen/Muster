@@ -204,7 +204,7 @@ public enum APIError: Error, LocalizedError, Sendable {
     }
 }
 
-public struct CompanionClient: Sendable {
+public struct CompanionClient: Sendable, SeedCardTransport {
     public let connection: Connection
     private let token: String?
     private let session: URLSession
@@ -377,6 +377,45 @@ public struct CompanionClient: Sendable {
     }
 
     // MARK: - Doing
+
+    private func seedRequest(_ method: String, botId: String, cardId: String, threadId: String,
+                             start: Bool = false, body: [String: Any]? = nil) throws -> URLRequest {
+        // These routes accept server-generated IDs, never path fragments.
+        guard [botId, cardId, threadId].allSatisfy({ value in
+            !value.isEmpty && value.utf8.allSatisfy {
+                (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95
+            }
+        }) else { throw APIError.badURL }
+        let path = "/api/bots/\(botId)/cards/\(cardId)/answer" + (start ? "/start" : "")
+        return try makeRequest(method, path, query: method == "GET" ? [URLQueryItem(name: "threadId", value: threadId)] : [], body: body)
+    }
+
+    private func seedResult(_ request: URLRequest, cardId: String, answer: String? = nil) async throws -> SeedCardResult {
+        let result = try await send(request, as: SeedCardResult.self)
+        guard result.cardMessage.id == cardId,
+              request.httpMethod == "GET" || (result.outcome != nil && result.cardMessage.card?.seedAnswer != nil && result.userMessage != nil),
+              answer.map({ SeedCardContract.exactText($0, result.userMessage?.text ?? "") }) ?? true
+        else { throw APIError.transport("The computer returned an unrecognized saved-answer receipt.") }
+        return result
+    }
+
+    public func answerSeedCard(botId: String, cardId: String, threadId: String, answer: String) async throws -> SeedCardResult {
+        guard SeedCardContract.isValidAnswer(answer) else { throw APIError.transport("Enter a nonblank answer of up to 4,000 characters.") }
+        return try await seedResult(try seedRequest("POST", botId: botId, cardId: cardId, threadId: threadId,
+            body: ["threadId": threadId, "answer": answer]), cardId: cardId, answer: answer)
+    }
+
+    public func seedCardStatus(botId: String, cardId: String, threadId: String) async throws -> SeedCardResult {
+        try await seedResult(try seedRequest("GET", botId: botId, cardId: cardId, threadId: threadId), cardId: cardId)
+    }
+
+    public func startSeedCard(botId: String, cardId: String, threadId: String, expectedAttempt: Int) async throws -> SeedCardResult {
+        guard expectedAttempt >= 0 && expectedAttempt < SeedCardContract.maximumAttempt else {
+            throw APIError.transport("The saved task attempt is invalid. Check its status.")
+        }
+        return try await seedResult(try seedRequest("POST", botId: botId, cardId: cardId, threadId: threadId, start: true,
+            body: ["threadId": threadId, "expectedAttempt": expectedAttempt]), cardId: cardId)
+    }
 
     /// Make a new bot. The harness picks its name, colour and greeting — the
     /// phone deliberately does not, so a bot created here is indistinguishable

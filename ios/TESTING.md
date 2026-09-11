@@ -289,3 +289,38 @@ For Swift errors, the compiler's own output is the most useful thing — file,
 line, and message. For runtime problems, the harness log is usually more
 informative than the phone: it is where the pairing, auth and stream decisions
 are actually made.
+
+
+## Native welcome-answer verification — 2026-09-11
+
+CEO Loop43 records **161 Swift core tests passing** and **8 final native XCTest
+cases passing** on a fresh iPhone SE3/iOS26.5 simulator. The cases pair with an
+isolated real companion proxy/server and inspect real SQLite/SSE/driver receipts;
+the provider itself is an explicit offline fixture. Google, a physical phone,
+Watch runtime and App Store distribution are separate unverified gates.
+
+The preserved owned test target/harness, frozen source, exact commands, hashes,
+screenshots and failed runs are under
+`.omb-scratch/verification/loop43-ios/`. No native UI test target is added to the
+tracked XcodeGen specification. The companion's shared core remains runnable with
+`swift test --package-path ios`; this is separate from root Vitest.
+
+For native simulator behavior that accesses Keychain, use local ad hoc signing
+(`CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES`). An
+unsigned build compiled but failed real pairing-token storage because it lacked
+the simulated application identity. This local build setting is not distribution
+signing or a provisioning-profile test. Watch was compiled unsigned only.
+
+The welcome editor must autofocus on both first opening and reopening, retain
+exact multiline input after a failed request/Close, and keep Send above the actual
+keyboard. Its focus callback runs once after native presentation; SwiftUI's early
+onAppear was insufficient in this run. Card controls have a containing accessible
+group so the parent identifier does not replace each button identifier. Select the
+sheet's visible scrolling viewport, excluding the keyboard suggestion bar.
+
+Keep follow-up transport and action gates explicit: current explicit HTTPS input
+is downgraded by the shared connection parser; ordinary iOS sends still clear the
+draft before acceptance; the live Always allow chain needs same-context/error
+fencing across grant and response. Welcome-card verification does not close those
+separate issues. The owned fixture and simulator were fully stopped, with32/32
+cleanup checks and all16 pre-existing devices preserved.

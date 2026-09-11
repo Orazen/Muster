@@ -30,6 +30,10 @@ public struct OptionCard: Codable, Hashable, Sendable {
     /// A settled run's journal, attached by the harness as historical
     /// context. This is never the reason for the current approval request.
     public var why: ApprovalWhy?
+    public var purpose: String?
+    public var seedAnswer: SeedAnswerReceipt?
+    /// Local provenance marker: malformed optional wire data must stay inert.
+    public var seedInvalid: Bool = false
 
     /// A card is actionable while it is unanswered and still has a request
     /// behind it. Everything else is transcript.
@@ -147,6 +151,8 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     /// Screen messages in the full shape: base64 pixels, inline.
     public var png: String?
     public var mime: String?
+    /// Captured before permissive display decoding can erase invalid metadata.
+    public var seedContextInvalid: Bool = false
 
     public var date: Date { Date(timeIntervalSince1970: at / 1000) }
 }
@@ -406,4 +412,67 @@ struct ActiveBranchResponse: Codable, Sendable {
 
 struct BotResponse: Codable, Sendable {
     var bot: Bot
+}
+
+// Custom decoders live in extensions to preserve existing memberwise initializers.
+extension OptionCard {
+    private enum CodingKeys: String, CodingKey {
+        case title, subtitle, options, answered, dismissed, requestId, tool, held, allowKey, why
+        case purpose, seedAnswer, seedInvalid
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = try c.decode(String.self, forKey: .title)
+        subtitle = try c.decode(String.self, forKey: .subtitle)
+        options = try c.decode([String].self, forKey: .options)
+        answered = try? c.decodeIfPresent(String.self, forKey: .answered)
+        dismissed = try? c.decodeIfPresent(Bool.self, forKey: .dismissed)
+        requestId = try? c.decodeIfPresent(String.self, forKey: .requestId)
+        tool = try? c.decodeIfPresent(String.self, forKey: .tool)
+        held = try? c.decodeIfPresent(String.self, forKey: .held)
+        allowKey = try? c.decodeIfPresent(String.self, forKey: .allowKey)
+        why = try c.decodeIfPresent(ApprovalWhy.self, forKey: .why)
+        purpose = try? c.decode(String.self, forKey: .purpose)
+        seedAnswer = try? c.decode(SeedAnswerReceipt.self, forKey: .seedAnswer)
+        seedInvalid = (try? c.decode(Bool.self, forKey: .seedInvalid)) == true
+        for key in [CodingKeys.requestId, .tool, .held, .allowKey] where c.contains(key) {
+            // Even null presence is not a seed: never normalize it into absence.
+            if (try? c.decode(String.self, forKey: key)) == nil { seedInvalid = true }
+        }
+        if c.contains(.purpose) && purpose == nil { seedInvalid = true }
+        if c.contains(.seedAnswer) && seedAnswer == nil { seedInvalid = true }
+        if c.contains(.dismissed) && dismissed == nil { seedInvalid = true }
+        if c.contains(.answered), (try? c.decodeNil(forKey: .answered)) != true, answered == nil { seedInvalid = true }
+    }
+}
+
+extension Message {
+    private enum CodingKeys: String, CodingKey {
+        case id, role, kind, at, text, card, tool, parentId, from, reactions, comm, hasImage, png, mime, seedContextInvalid
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        at = try c.decode(Double.self, forKey: .at)
+        let rawRole = try? c.decode(String.self, forKey: .role)
+        let rawKind = try? c.decode(String.self, forKey: .kind)
+        role = rawRole.flatMap(Role.init(rawValue:)) ?? .bot
+        kind = rawKind.flatMap(Kind.init(rawValue:)) ?? .unknown
+        text = try c.decodeIfPresent(String.self, forKey: .text)
+        card = try c.decodeIfPresent(OptionCard.self, forKey: .card)
+        tool = try c.decodeIfPresent(ToolActivity.self, forKey: .tool)
+        parentId = try? c.decodeIfPresent(String.self, forKey: .parentId)
+        from = try? c.decodeIfPresent(Sender.self, forKey: .from)
+        reactions = try c.decodeIfPresent([Reaction].self, forKey: .reactions)
+        comm = try c.decodeIfPresent(CommChip.self, forKey: .comm)
+        hasImage = try c.decodeIfPresent(Bool.self, forKey: .hasImage)
+        png = try c.decodeIfPresent(String.self, forKey: .png)
+        mime = try c.decodeIfPresent(String.self, forKey: .mime)
+        seedContextInvalid = (try? c.decode(Bool.self, forKey: .seedContextInvalid)) == true
+            || rawRole.flatMap(Role.init(rawValue:)) == nil || rawKind.flatMap(Kind.init(rawValue:)) == nil
+        if c.contains(.parentId), (try? c.decodeNil(forKey: .parentId)) != true, parentId == nil { seedContextInvalid = true }
+        if c.contains(.from), (try? c.decodeNil(forKey: .from)) != true, from == nil { seedContextInvalid = true }
+    }
 }

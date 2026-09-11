@@ -66,9 +66,9 @@ history and do not offer status or startup actions.
 
 The generic card PATCH endpoint now returns HTTP 405; clients
 must use the dedicated seed route or the existing live-request response route.
-The companion proxy exposes these exact three routes. Android implements the
-direct-bot controls described below. iOS and Watch still require their own
-welcome-card implementation and native verification.
+The companion proxy exposes these exact three routes. Android and iOS implement
+the direct-bot controls described below. Watch welcome-answer controls remain
+unimplemented; its live request-ID approval flow is unchanged.
 An older cached web page or desktop binary that still uses split PATCH/message
 writes does not gain the new client recovery flow; it needs an updated bundle.
 
@@ -111,5 +111,51 @@ They do not establish real Google OAuth, model work, physical-device behavior,
 release transport policy or Play Store distribution. The ledger records exact
 source hashes, native acceptance and cleanup evidence.
 
-iOS needs its own typed models/session/UI slice; do not broaden its live
-`isPending` predicate, which also feeds Watch and approval lists.
+## iOS welcome answers
+
+iOS uses typed receipt responses and a separate welcome-answer coordinator.
+The decoder retains invalid original metadata before display decoding can
+normalize it: malformed purpose, receipt, sender or legacy greeting data cannot
+enable an unanswered seed. Canonical cards, current direct-bot ownership and the
+active branch are checked again before an action. Room seeds and legacy answers
+without receipts remain history. The live `isPending` predicate remains
+unchanged, including its use by Watch and approval lists.
+
+Choice and custom answers preserve their exact UTF-16 code units, including
+leading and trailing whitespace. The 4,000-unit limit matches the server;
+Unicode strings that render alike but use different code units are distinct
+answers. A failed response retains the submitted text for an explicit Retry
+same answer. Check status uses only GET. Start saved task is available only for
+recorded or not-started receipts and sends the current expected attempt. No
+answer or startup request is replayed by rendering, refresh or reconnect.
+
+The coordinator keeps one physical request active per card. A timeout or lost
+view cancels its task, but if the transport continues, the lock remains until
+that transport settles. The UI explains that wait. Client identity, exact view
+lease, scene activity, thread, branch and card signature fence late callbacks;
+inactive and background scenes cannot submit a new action. A validated receipt
+and its linked user message are merged without replacing newer attempts,
+replies or streaming content. Invalid linkage exposes recovery instead of
+claiming the answer was confirmed. Duplicate SSE echoes do not rewind the leaf.
+
+Cold-stream hydration checks the state revision before adopting a fleet
+snapshot. If a saved answer or another state update arrived during the read, it
+requests a fresh snapshot, with at most three reads per hydration. Exhaustion
+leaves recovery incomplete and returns to reconnect handling; the hello cursor
+is committed only after a current snapshot is adopted. Old-client and old-stream
+completions cannot populate a replacement session.
+
+The custom editor keeps a draft in its card view. Close and reopening that
+editor preserve the draft while the same view remains mounted; this does not
+promise draft persistence across navigation or app restart. Closing an editor
+does not replay or cancel an already submitted action. Ordinary Edit and retry
+is blocked for a linked saved user message while its receipt is recorded,
+starting, not-started or uncertain; recovery belongs to the saved question.
+
+The portable Swift tests and native acceptance have separate evidence in the
+ledger. These controls do not establish release readiness. iOS still drops an
+explicit HTTPS scheme when parsing a connection and constructs HTTP URLs;
+scheme-aware connection persistence remains a separate release gate. Ordinary
+composer acceptance and the existing Always allow → response chain also need
+their own failure and account-switch follow-up. None of those paths is changed
+by the dedicated welcome-answer coordinator.

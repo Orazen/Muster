@@ -22,6 +22,8 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var showingTasks = false
     @State private var shareFile: ShareFile?
+    @State private var seedLease: UUID?
+    @State private var seedVisible = false
     @FocusState private var composerFocused: Bool
 
     /// The live bubble's scroll target. A constant because there is at most
@@ -237,6 +239,19 @@ struct ChatView: View {
         .sheet(item: $shareFile) { file in
             ActivityShareSheet(items: [file.url])
         }
+        .onAppear {
+            seedVisible = true
+            if seedLease == nil { seedLease = session.viewSeedConversation(chat) }
+        }
+        .onChange(of: session.seedSessionId) { _, _ in
+            if let seedLease { session.leaveSeedConversation(seedLease) }
+            seedLease = seedVisible ? session.viewSeedConversation(chat) : nil
+        }
+        .onDisappear {
+            seedVisible = false
+            if let seedLease { session.leaveSeedConversation(seedLease) }
+            seedLease = nil
+        }
     }
 
     /// True when this message opens a fresh stretch of conversation — the
@@ -357,9 +372,11 @@ struct MessageRow: View {
             ForEach(Self.reactionChoices, id: \.self) { emoji in
                 Button(emoji) { Task { await session.react(to: message, in: chat.threadId, emoji: emoji) } }
             }
-            if message.role == .user, message.kind == .text, case let .bot(bot) = chat {
+            if message.role == .user, message.kind == .text, case let .bot(bot) = chat,
+               !session.state.unresolvedSeedAnswerUser(threadId: chat.threadId, messageId: message.id) {
                 Divider()
                 Button("Edit and retry", systemImage: "pencil") {
+                    guard !session.state.unresolvedSeedAnswerUser(threadId: chat.threadId, messageId: message.id) else { return }
                     editingText = message.text ?? ""
                     showingEdit = true
                 }
@@ -371,6 +388,7 @@ struct MessageRow: View {
             Button("Cancel", role: .cancel) {}
             if case let .bot(bot) = chat {
                 Button("Send") {
+                    guard !session.state.unresolvedSeedAnswerUser(threadId: chat.threadId, messageId: message.id) else { return }
                     let text = editingText.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { return }
                     Task { await session.edit(message, for: bot, text: text) }
@@ -387,7 +405,8 @@ struct MessageRow: View {
         case .text:
             TextBubble(message: message)
         case .options:
-            CardView(chat: chat, message: message)
+            if message.card?.requestId == nil { SeedCardView(chat: chat, message: message) }
+            else { CardView(chat: chat, message: message) }
         case .activity:
             ActivityChip(tool: message.tool)
         case .screen:

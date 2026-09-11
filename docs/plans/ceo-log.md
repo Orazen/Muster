@@ -2982,3 +2982,94 @@ Real Google, iOS/Watch, VM, portable backup/sync and full Mimosa remain unverifi
 The broad OS/release goal stays active. Latest allowance: **70% used /30%
 remaining**; no reset consumed. Pre-commit pull/rebase is up to date; the verified
 source hashes still match and the existing release-handoff stash is preserved.
+
+
+## Loop 43 — iOS welcome answers and native recovery (2026-09-11)
+
+Shipped the direct-bot welcome-answer contract to the iOS companion. The new
+card/editor, typed client routes and independent operation coordinator preserve
+exact UTF-16 answers and durable receipt recovery. Invalid original metadata,
+unknown history and room seeds stay inert. Watch/live approval `isPending` is
+unchanged. Choice/custom answer writes, read-only Check status and explicit
+current-attempt Start saved task use the existing server protocol.
+
+The coordinator fences account/client, view, thread, branch, card and scene
+changes, and retains a physical request lock until cancelled transport really
+settles. No foreground, reconnect or timeout replay is added. Receipt and user
+merges preserve newer attempts, active branches and streams. Unresolved saved
+users cannot enter ordinary Edit and retry. Review caught a stale hydration
+race: a reconnect GET begun before an accepted answer could replace that answer.
+Revision-guarded snapshot reads now retry at most three times, then reconnect
+without committing a cursor for a discarded snapshot. Older client callbacks
+cannot adopt state into a replacement pairing.
+
+Native testing found and fixed two UI issues: the card identifier propagated to
+all children, and the editor requested focus before its sheet rendered. The card
+now groups accessible controls explicitly. A per-opening focus scope requests
+focus once after native presentation, guards the current UUID/eligibility/scene,
+and clears its callback on dismantle. There are no focus timers or retries.
+Close retains the exact in-memory draft; process/navigation persistence is not
+claimed. Send remains reachable above the actual keyboard on iPhone SE.
+
+Verification on final source:
+
+- Root Vitest: **235 files /3241 passed /8 skipped**, 256.01 s, exit0.
+- Swift core: **161 passed /0 failed /0 skipped**, 0.691 s test time (0.718 s
+  aggregate wall), up from the independently archived **91-test** baseline.
+- Final native XCTest: **8 passed /0 failed**, 138.931 s test time, on a newly
+  created iPhone SE 3 simulator (375x667 points), iOS26.5. Separately, immutable
+  baseline pairing and Keychain cold-launch acceptance: **1 passed**,19.682 s.
+- iOS local ad hoc simulator build and Watch unsigned simulator build succeeded.
+  Server typecheck and root oxlint exited0. SwiftLint was unavailable; syntax
+  parsing is not described as lint. **72 iOS inputs matched** before acceptance;
+  the66 non-Markdown inputs remain exact after documentation updates.
+
+The eight native cases verify exact saved choice/one user/one attempt and cold
+receipt, rapid double-tap suppression, accepted HTTP202 response loss followed by
+GET-only reconciliation, multiline custom failure/Close/reopen/explicit exact
+retry with keyboard geometry, Home cancellation of an actually held request
+without forwarding or replay, real broker question and permission denial,
+missing engine plus actual server PID restart then one versioned Start, and a
+newer task sent through the real native composer that leaves the saved task
+inert. The saved-user context menu excludes Edit and retry. Evidence is actual
+native UI + DeviceRegistry/proxy/SSE/server/SQLite with an explicit offline CLI;
+it does not establish real model work, Google OAuth or a distributed native app.
+
+Failed runs and their artifacts remain. The warmup fixed a combined-address link
+assumption, a keyboard/Form Continue selector collision, and unsigned simulator
+Keychain failure (local ad hoc signing supplies simulated identity). An owned
+search route exclusion blocked three navigation cases; roster navigation fixed
+the harness. Autofocus was proved broken before the product fix: manual tapping
+opened the keyboard, reopening did not. A later retry check scrolled the
+underlying chat; selecting the actual sheet viewport fixed that harness error.
+
+Cleanup: **32/32 checks passed**, with the manager/supervisor, all3 actual server
+PIDs and71 provider/probe PIDs absent; all5 owned ports closed. The owned simulator
+was shut down/deleted and all16 pre-existing devices preserved. No held work,
+provider PID record or blocked outbound attempt remained. The first cleanup
+preflight stopped at6 passes/1 failure before any action because the launcher
+used a relative path; recovery resolved it against the process's actual cwd.
+The demo8845, real accounts and existing release-handoff stash were untouched.
+
+Evidence: `.omb-scratch/verification/loop43-ios/verification.json`, final native
+`final-acceptance.xcresult`/`final-attachments/`, immutable `final-source/`, unit and
+build logs, and `cleanup-recovery-result.json`; fixture evidence remains in
+`loop43-native-seed/` and its owned `/tmp/muster43-*` runtime. No persistent native
+UI test target was added; the exact owned acceptance harness is retained locally.
+
+Revenue relevance: first-task reliability now reaches iOS; no measured conversion
+or revenue lift is claimed. Next bounded slice is native transport: iOS currently
+strips explicit HTTPS and uses HTTP, including in the shared Watch client.
+Preserve legacy connection/token identity while adding scheme-aware persistence,
+strict URL validation and no downgrade/credential-forwarding fallback. Then fix
+ordinary iOS draft loss before send acceptance and the live Always allow chain
+that can continue after grant failure or account replacement. Watch welcome UI,
+native mascot/evidence parity and physical-device checks remain queued.
+
+Published desktop remains1.10.4 until a separately verified release. CI billing,
+signing/notarization, VPS identity/mirror acceptance, real Google, Watch runtime,
+VM execution, portable backup/sync and the full Mimosa re-run remain open. Do not
+retry unchanged paid release infrastructure or describe this source push as a
+native release. Post-push GET-only evidence is recorded separately. Latest
+allowance observed: **74% used /26% remaining**; no reset consumed. Broad goal
+remains active; existing heartbeat continues with these concrete follow-ups.

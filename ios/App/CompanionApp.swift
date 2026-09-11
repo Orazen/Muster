@@ -15,9 +15,10 @@ struct CompanionApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(session)
-                .onAppear { session.connect() }
+                .onAppear { session.setForeground(scenePhase == .active); session.connect() }
                 .onOpenURL { session.receivePairingURL($0) }
                 .onChange(of: scenePhase) { _, phase in
+                    session.setForeground(phase == .active)
                     switch phase {
                     case .active:
                         session.connect()

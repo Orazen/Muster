@@ -1957,3 +1957,53 @@ Real Google, iOS/Watch, VM, portable backup/sync and full Mimosa remain unverifi
 The broad OS/release goal stays active. Latest allowance: **70% used /30%
 remaining**; no reset consumed. Pre-commit pull/rebase is up to date; the verified
 source hashes still match and the existing release-handoff stash is preserved.
+
+
+## Loop 43 — Astra iOS welcome-answer completion (2026-09-11)
+
+The iOS direct-bot welcome flow now uses strict typed receipts, raw-metadata
+recognition, exact UTF-16 answers, a separate cancellable physical-operation
+ledger, monotonic receipt/echo merging and revision-guarded hydration. Account,
+view, thread, branch, card and foreground changes cannot replay old actions.
+Check status is GET-only; saved startup requires the current attempt. Unresolved
+saved answers cannot use ordinary Edit and retry. Live approval and Watch pending
+predicates are unchanged. The editor retains its view-local draft through request
+failure and Close, groups controls accessibly and focuses once after presentation.
+
+Final gates: root **235 files /3241 passed /8 skipped** (256.01 s); Swift core
+**161 passed /0 failed** (0.691 s, prior archived baseline91); final native
+**8/8 passed** (138.931 s), plus separate real pairing/Keychain cold-launch
+**1/1** on the immutable baseline. iOS ad hoc simulator and Watch unsigned builds
+succeeded; server typecheck and root lint exited0. Native proof uses a fresh
+owned iPhone SE/iOS26.5, actual server/proxy/SSE/SQLite and an offline provider.
+It proves neither Google login nor physical-device/distribution behavior.
+
+Native cases cover choice/duplicate taps/cold receipt, accepted response loss and
+GET-only recovery, exact multiline custom retry and keyboard bounds, cancelled
+held requests without replay, live question/permission routes, actual server
+restart before versioned saved start, and newer native composer work blocking
+saved startup. All failed harness/product iterations remain in evidence.
+Cleanup **32/32**: manager/supervisor,3 server PIDs and71 provider/probe PIDs absent;
+5 ports closed; owned simulator deleted; all16 original devices preserved. The
+first preflight's6 pass/1 failure caused no action and is retained separately.
+Demo8845 and the release-handoff stash were preserved.
+
+Source is scoped to `ios/App/{ChatView,CompanionApp,Session,SeedCardView}.swift`,
+shared core models/store/client and new seed contract/draft/coordinator helpers,
+plus five focused test files and contract/testing/ledger documentation. Exact
+verification and source hashes: `.omb-scratch/verification/loop43-ios/`; the owned
+native XCTest target exists only in its retained frozen copy. See CEO Loop43 for
+full evidence and limitations. Commit/push and GET receipts are kept separately
+in `loop43-commit-and-handoff.json` and `loop43-production-get.json`.
+
+Next: fix native HTTPS transport without breaking legacy pairing/token identity;
+verify scheme persistence, precise REST/SSE/pair routes, certificate failure with
+no fallback and redirect origin/credential policy. Follow with ordinary iOS
+composer draft retention and the Always allow grant/respond chain's stale-context
+and swallowed-error behavior. Watch welcome controls, physical-device/Watch
+runtime, release signing, Google and native brand parity stay open. Existing CI
+billing/VPS/mirror, VM, portable backup/sync and Mimosa gates are unchanged.
+Published desktop remains1.10.4 pending GET recheck; this source push is not a
+new desktop release. Allowance last read74% used/26% remaining, no reset used.
+Preserve the active goal and existing heartbeat; do not revive the old GLM/reset
+deadline or duplicate automation. Handoff at2%, notify/pause at1% still applies.

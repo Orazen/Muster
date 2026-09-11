@@ -2,8 +2,8 @@
 // and the stream that keeps it current.
 //
 // The parsing and folding live in CompanionCore. What lives here is the
-// part that cannot be unit-tested and is the actual hard problem in a phone
-// client — lifecycle. A phone loses its connection constantly: it locks, it
+// app composition around the testable seed coordinator and stream lifecycle.
+// A phone loses its connection constantly: it locks, it
 // backgrounds, it moves between wifi and cellular. So the stream is torn
 // down deliberately when the app leaves the screen, and on the way back the
 // server is asked what was missed rather than being asked for everything.
@@ -30,7 +30,12 @@ final class Session: ObservableObject {
         case offline(String)
     }
 
-    @Published private(set) var state = CompanionState()
+    @Published private(set) var state = CompanionState() {
+        didSet { stateRevision &+= 1; seedCoordinator.reconcile() }
+    }
+    private var stateRevision: UInt64 = 0
+    @Published private(set) var seedSessionId = UUID()
+    @Published private(set) var seedActions: [SeedActionKey: SeedActionState] = [:]
     @Published private(set) var connection: Connection?
     @Published private(set) var status: Status = .unpaired
     /// Transient, user-facing failures from an action they just took.
@@ -41,7 +46,21 @@ final class Session: ObservableObject {
     /// A short-lived desktop handoff waiting for PairingView to present it.
     @Published private(set) var pairingInvite: PairingInvite?
 
-    private var client: CompanionClient?
+    private var client: CompanionClient? {
+        didSet {
+            streamGeneration += 1
+            streamTask?.cancel(); streamTask = nil
+            seedSessionId = UUID()
+            seedCoordinator.bind(sessionId: seedSessionId, transport: client)
+        }
+    }
+    private var pairingGeneration = 0
+    private lazy var seedCoordinator: SeedActionCoordinator = SeedActionCoordinator(
+        readState: { [weak self] in self?.state ?? CompanionState() },
+        writeState: { [weak self] in self?.state = $0 },
+        changed: { [weak self] in self?.seedActions = $0 },
+        unauthorized: { [weak self] in self?.status = .unauthorized }
+    )
     private var streamTask: Task<Void, Never>?
     /// Identifies the task currently stored in `streamTask`. A cancelled task
     /// can finish after its replacement starts; its cleanup must not clear
@@ -120,11 +139,14 @@ final class Session: ObservableObject {
     /// to the keychain and the connection to defaults — deliberately apart,
     /// so the thing that gets backed up is never the credential.
     func pair(with connection: Connection, credential: String, deviceName: String) async throws {
+        pairingGeneration += 1
+        let pairing = pairingGeneration
         let paired = try await CompanionClient.pair(
             connection: connection,
             credential: credential,
             deviceName: deviceName
         )
+        guard pairing == pairingGeneration, !Task.isCancelled else { throw CancellationError() }
         // prefer the name the computer calls itself over the Bonjour label
         var stored = connection
         if !paired.serverName.isEmpty { stored.name = paired.serverName }
@@ -132,9 +154,9 @@ final class Session: ObservableObject {
         try Keychain.save(paired.token, for: stored.id)
         UserDefaults.standard.set(try? JSONEncoder().encode(stored), forKey: Self.connectionKey)
 
+        self.state = CompanionState()
         self.connection = stored
         self.client = CompanionClient(connection: stored, token: paired.token)
-        self.state = CompanionState()
         // A fresh pairing settles any restore that was still waiting on the
         // keychain — the token is in hand, so there is nothing left to retry.
         restorePending = false
@@ -158,6 +180,7 @@ final class Session: ObservableObject {
     }
 
     func signOut() {
+        pairingGeneration += 1
         streamTask?.cancel()
         streamTask = nil
         restorePending = false
@@ -178,13 +201,14 @@ final class Session: ObservableObject {
         // purpose. Coming to the front is the moment worth retrying on: the
         // app is on screen, so the phone is in someone's hand and unlocked.
         if client == nil, restorePending { restore() }
-        guard client != nil, streamTask == nil else { return }
+        guard let client, streamTask == nil else { return }
         reconnectDelay = 0
         streamGeneration += 1
         let generation = streamGeneration
+        let identity = seedSessionId
         streamTask = Task { [weak self] in
             guard let self else { return }
-            await self.run()
+            await self.run(client: client, identity: identity, generation: generation)
             guard self.streamGeneration == generation else { return }
             self.streamTask = nil
         }
@@ -232,6 +256,7 @@ final class Session: ObservableObject {
     /// cursor survives, so this is a gap, not a reset.
     private func restartStream() {
         guard streamTask != nil else { return }
+        seedCoordinator.connectionChanged()
         streamTask?.cancel()
         streamTask = nil
         connect()
@@ -241,13 +266,24 @@ final class Session: ObservableObject {
     /// anyway; dropping it deliberately means the cursor is written down at
     /// a known point instead of wherever the socket happened to die.
     func disconnect() {
+        streamGeneration += 1
         streamTask?.cancel()
         streamTask = nil
+        seedCoordinator.connectionChanged()
     }
 
-    private func run() async {
+    private func owns(_ identity: UUID) -> Bool { seedSessionId == identity && client != nil }
+
+    private func currentStream(_ identity: UUID, _ generation: Int) -> Bool {
+        owns(identity) && streamGeneration == generation && !Task.isCancelled
+    }
+
+    private func run(client: CompanionClient, identity: UUID, generation: Int) async {
+        var firstConnection = true
         while !Task.isCancelled {
-            guard let client else { return }
+            guard currentStream(identity, generation) else { return }
+            if !firstConnection { seedCoordinator.connectionChanged() }
+            firstConnection = false
             status = .connecting
             log.info("opening stream, cursor=\(self.state.cursor ?? "none", privacy: .public)")
             do {
@@ -258,7 +294,7 @@ final class Session: ObservableObject {
                 // harness went away" path and flash a lost-connection banner
                 // on what is actually a deliberate reconnect.
                 for try await frame in try client.events(since: state.cursor, screens: screenWatchers > 0) {
-                    if Task.isCancelled { return }
+                    if !currentStream(identity, generation) { return }
                     reconnectDelay = 0
 
                     if case let .hello(cursor, resumed) = frame.frame {
@@ -269,7 +305,8 @@ final class Session: ObservableObject {
                         // the request dies halfway through replay/hydration,
                         // reconnecting must still ask for the missing gap.
                         if !resumed {
-                            try await hydrate()
+                            try await hydrate(client: client, identity: identity, generation: generation)
+                            guard currentStream(identity, generation) else { return }
                             state.resetCursor(cursor)
                         }
                         status = .live
@@ -282,20 +319,25 @@ final class Session: ObservableObject {
                     NotificationCoordinator.shared.setBadge(state.unreadCount)
                     state.advance(to: frame.seq)
                 }
+                guard currentStream(identity, generation) else { return }
+                seedCoordinator.connectionChanged()
                 // the stream ended without an error — the harness went away
                 log.notice("stream ended without an error")
                 status = .offline("Lost the connection.")
             } catch let error as APIError where error.isUnauthorized {
+                guard currentStream(identity, generation) else { return }
+                seedCoordinator.connectionChanged()
                 log.error("stream refused: unauthorized")
                 status = .unauthorized
                 return
             } catch {
                 // backgrounding cancels the stream on purpose; that is not a
                 // failure to report, and it must not be retried
-                if Task.isCancelled || error is CancellationError {
+                if !currentStream(identity, generation) || error is CancellationError {
                     log.info("stream closed by us")
                     return
                 }
+                seedCoordinator.connectionChanged()
                 log.error("stream failed: \(error.localizedDescription, privacy: .public)")
                 status = .offline(error.localizedDescription)
             }
@@ -308,15 +350,43 @@ final class Session: ObservableObject {
         }
     }
 
-    private func hydrate() async throws {
-        guard let client else { return }
-        let fleet = try await client.fleet(messages: 50)
-        log.info("hydrated \(fleet.bots.count, privacy: .public) bots, \(fleet.groups.count, privacy: .public) rooms")
-        state.hydrate(fleet)
-        NotificationCoordinator.shared.setBadge(state.unreadCount)
+    private func hydrate(client: CompanionClient, identity: UUID, generation: Int) async throws {
+        try await SeedSnapshotRefresh.hydrate(
+            read: { try await client.fleet(messages: 50) },
+            revision: { self.stateRevision },
+            current: { self.currentStream(identity, generation) },
+            apply: { fleet in
+                log.info("hydrated \(fleet.bots.count, privacy: .public) bots, \(fleet.groups.count, privacy: .public) rooms")
+                self.state.hydrate(fleet)
+                NotificationCoordinator.shared.setBadge(self.state.unreadCount)
+            }
+        )
     }
 
     // MARK: - Actions
+
+    func setForeground(_ active: Bool) { seedCoordinator.setForeground(active) }
+
+    func viewSeedConversation(_ chat: Chat) -> UUID {
+        // A room lease cannot authorize a direct-bot seed with the same IDs.
+        switch chat {
+        case let .bot(bot): return seedCoordinator.viewConversation(botId: bot.id, threadId: bot.threadId)
+        case .room: return seedCoordinator.viewConversation(botId: "", threadId: "")
+        }
+    }
+
+    func leaveSeedConversation(_ lease: UUID) { seedCoordinator.leaveConversation(lease) }
+
+    func seedReference(chat: Chat, message: Message) -> SeedReference? {
+        guard case let .bot(bot) = chat else { return nil }
+        guard let reference = seedCoordinator.reference(botId: bot.id, threadId: bot.threadId, cardId: message.id),
+              SeedCardContract.exactText(reference.signature, SeedCardContract.signature(message)) else { return nil }
+        return reference
+    }
+
+    func actOnSeed(_ reference: SeedReference, action: SeedAction) async {
+        await seedCoordinator.act(reference, action: action)
+    }
     //
     // Each of these does the thing and lets the event stream deliver the
     // result. Nothing here writes to `state` optimistically: the harness is
@@ -367,11 +437,14 @@ final class Session: ObservableObject {
     @discardableResult
     func createBot() async -> Bot? {
         guard let client else { return nil }
+        let identity = seedSessionId
         do {
             let bot = try await client.createBot()
+            guard owns(identity), !Task.isCancelled else { return nil }
             state.apply(.bot(bot))
             return bot
         } catch {
+            guard owns(identity), !Task.isCancelled else { return nil }
             actionError = error.localizedDescription
             return nil
         }
@@ -385,9 +458,13 @@ final class Session: ObservableObject {
     /// returns the value to a browser sheet and never writes it to app state.
     func cloudDesktop(for bot: Bot) async throws -> URL {
         guard let client else { throw APIError.transport("This computer is offline.") }
+        let identity = seedSessionId
         do {
-            return try await client.cloudDesktop(botId: bot.id).url
+            let url = try await client.cloudDesktop(botId: bot.id).url
+            guard owns(identity), !Task.isCancelled else { throw CancellationError() }
+            return url
         } catch let error as APIError where error.isUnauthorized {
+            guard owns(identity), !Task.isCancelled else { throw CancellationError() }
             status = .unauthorized
             throw error
         }
@@ -404,23 +481,34 @@ final class Session: ObservableObject {
 
     func loadOlder(threadId: String) async {
         guard let client, let oldest = state.transcript(forThread: threadId).first else { return }
+        let identity = seedSessionId
         do {
             let page = try await client.messages(threadId: threadId, before: oldest.id, limit: 50)
+            guard owns(identity), !Task.isCancelled else { return }
             state.prepend(page, toThread: threadId)
         } catch {
+            guard owns(identity), !Task.isCancelled else { return }
             actionError = error.localizedDescription
         }
     }
 
     func image(threadId: String, messageId: String) async -> Data? {
-        try? await client?.image(threadId: threadId, messageId: messageId)
+        guard let client else { return nil }
+        let identity = seedSessionId
+        let data = try? await client.image(threadId: threadId, messageId: messageId)
+        return owns(identity) && !Task.isCancelled ? data : nil
     }
 
     func search(_ query: String) async -> [SearchHit] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 2, let client else { return [] }
-        do { return try await client.search(trimmed) }
+        let identity = seedSessionId
+        do {
+            let results = try await client.search(trimmed)
+            return owns(identity) && !Task.isCancelled ? results : []
+        }
         catch {
+            guard owns(identity), !Task.isCancelled else { return [] }
             actionError = error.localizedDescription
             return []
         }
@@ -430,17 +518,21 @@ final class Session: ObservableObject {
     /// around it, and hand navigation the current chat record.
     func open(_ hit: SearchHit) async -> Chat? {
         guard let client else { return nil }
+        let identity = seedSessionId
         do {
             if let botId = hit.botId, var bot = state.bot(botId) {
                 if bot.threadId != hit.threadId {
                     bot = try await client.switchTask(botId: bot.id, threadId: hit.threadId)
+                    guard owns(identity), !Task.isCancelled else { return nil }
                     state.apply(.bot(bot))
                 }
                 if !hit.onActivePath {
                     let leaf = try await client.setActiveBranch(botId: bot.id, messageId: hit.messageId)
+                    guard owns(identity), !Task.isCancelled else { return nil }
                     state.apply(.thread(threadId: hit.threadId, activeLeafId: leaf))
                 }
                 let page = try await client.messages(threadId: hit.threadId, around: hit.messageId)
+                guard owns(identity), !Task.isCancelled else { return nil }
                 state.merge(page, intoThread: hit.threadId)
                 focusedMessageId = hit.messageId
                 return state.bot(bot.id).map(Chat.bot)
@@ -448,11 +540,12 @@ final class Session: ObservableObject {
             if let groupId = hit.groupId,
                let room = state.rooms.first(where: { $0.id == groupId }) {
                 let page = try await client.messages(threadId: hit.threadId, around: hit.messageId)
+                guard owns(identity), !Task.isCancelled else { return nil }
                 state.merge(page, intoThread: hit.threadId)
                 focusedMessageId = hit.messageId
                 return .room(room)
             }
-        } catch { actionError = error.localizedDescription }
+        } catch { if owns(identity), !Task.isCancelled { actionError = error.localizedDescription } }
         return nil
     }
 
@@ -462,59 +555,84 @@ final class Session: ObservableObject {
 
     func createTask(for bot: Bot, title: String?) async {
         guard let client else { return }
-        do { state.apply(.bot(try await client.createTask(botId: bot.id, title: title))) }
-        catch { actionError = error.localizedDescription }
+        let identity = seedSessionId
+        do {
+            let updated = try await client.createTask(botId: bot.id, title: title)
+            guard owns(identity), !Task.isCancelled else { return }
+            state.apply(.bot(updated))
+        } catch { if owns(identity), !Task.isCancelled { actionError = error.localizedDescription } }
     }
 
     func switchTask(_ task: BotTask, for bot: Bot) async {
         guard let client, task.threadId != bot.threadId else { return }
-        do { state.apply(.bot(try await client.switchTask(botId: bot.id, threadId: task.threadId))) }
-        catch { actionError = error.localizedDescription }
+        let identity = seedSessionId
+        do {
+            let updated = try await client.switchTask(botId: bot.id, threadId: task.threadId)
+            guard owns(identity), !Task.isCancelled else { return }
+            state.apply(.bot(updated))
+        } catch { if owns(identity), !Task.isCancelled { actionError = error.localizedDescription } }
     }
 
     func renameTask(_ task: BotTask, for bot: Bot, title: String) async {
         guard let client else { return }
+        let identity = seedSessionId
         do {
             try await client.renameTask(botId: bot.id, threadId: task.threadId, title: title)
+            guard owns(identity), !Task.isCancelled else { return }
             await refresh()
-        } catch { actionError = error.localizedDescription }
+        } catch { if owns(identity), !Task.isCancelled { actionError = error.localizedDescription } }
     }
 
     func deleteTask(_ task: BotTask, for bot: Bot) async {
         guard let client else { return }
-        do { state.apply(.bot(try await client.deleteTask(botId: bot.id, threadId: task.threadId))) }
-        catch { actionError = error.localizedDescription }
+        let identity = seedSessionId
+        do {
+            let updated = try await client.deleteTask(botId: bot.id, threadId: task.threadId)
+            guard owns(identity), !Task.isCancelled else { return }
+            state.apply(.bot(updated))
+        } catch { if owns(identity), !Task.isCancelled { actionError = error.localizedDescription } }
     }
 
     func react(to message: Message, in threadId: String, emoji: String) async {
         guard let client else { return }
+        let identity = seedSessionId
         do {
             let patched = try await client.toggleReaction(threadId: threadId, messageId: message.id, emoji: emoji)
+            guard owns(identity), !Task.isCancelled else { return }
             state.apply(.messagePatch(threadId: threadId, message: patched))
-        } catch { actionError = error.localizedDescription }
+        } catch { if owns(identity), !Task.isCancelled { actionError = error.localizedDescription } }
     }
 
     func edit(_ message: Message, for bot: Bot, text: String) async {
+        guard !state.unresolvedSeedAnswerUser(threadId: bot.threadId, messageId: message.id) else {
+            actionError = "Use the saved question to check status or start this task."
+            return
+        }
         await perform { try await $0.edit(botId: bot.id, messageId: message.id, text: text) }
     }
 
     func switchVersion(to message: Message, for bot: Bot) async {
         guard let client else { return }
+        let identity = seedSessionId
         do {
             let leaf = try await client.setActiveBranch(botId: bot.id, messageId: message.id)
+            guard owns(identity), !Task.isCancelled else { return }
             state.apply(.thread(threadId: bot.threadId, activeLeafId: leaf))
-        } catch { actionError = error.localizedDescription }
+        } catch { if owns(identity), !Task.isCancelled { actionError = error.localizedDescription } }
     }
 
     func export(threadId: String, format: String) async -> URL? {
         guard let client else { return nil }
+        let identity = seedSessionId
         do {
             let exported = try await client.export(threadId: threadId, format: format)
+            guard owns(identity), !Task.isCancelled else { return nil }
             let name = URL(fileURLWithPath: exported.filename).lastPathComponent
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
             try exported.data.write(to: url, options: .atomic)
             return url
         } catch {
+            guard owns(identity), !Task.isCancelled else { return nil }
             actionError = error.localizedDescription
             return nil
         }
@@ -549,11 +667,14 @@ final class Session: ObservableObject {
 
     private func perform(quietly: Bool = false, _ body: (CompanionClient) async throws -> Void) async {
         guard let client else { return }
+        let identity = seedSessionId
         do {
             try await body(client)
         } catch let error as APIError where error.isUnauthorized {
+            guard owns(identity), !Task.isCancelled else { return }
             status = .unauthorized
         } catch {
+            guard owns(identity), !Task.isCancelled else { return }
             if !quietly { actionError = error.localizedDescription }
         }
     }
