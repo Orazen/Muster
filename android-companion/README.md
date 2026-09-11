@@ -146,6 +146,41 @@ and offers **Retry read status** independently of the message composer. Losing
 the connection's authorization returns to pairing. This is shared owner-level
 read state, not per-message read receipts.
 
+## Questions and permissions
+
+Live questions show their actual choices and accept a custom answer. An option
+named Allow or Deny is still answer text; custom text preserves whitespace.
+Tool permissions use explicit **Allow once** and **Deny** decisions. Pending
+operations disable repeated actions, and a delivery outcome is kept until the
+server's settled card arrives. An unavailable request is shown as undelivered,
+even when its HTTP response was successful.
+
+The latest request and streaming reply sit beside the composer. The transcript
+remains chronological in storage; older history loads at the far end of the
+inverted conversation list.
+The roster's waiting count uses unanswered live cards in current conversations,
+including the active room speaker. Old notifications remain in history without
+being counted as pending approvals.
+
+Failures preserve the question draft and expose **Check status**. Checking only
+refreshes the conversation; it never sends the decision again. Retrying an action
+requires another explicit choice. Callbacks cannot act on a changed request,
+another account, a hidden branch or a different room speaker.
+An ambiguous connection failure reports uncertain delivery without claiming the
+computer is stopped; a confirmed refusal retains the computer's response detail.
+
+An eligible direct bot may offer **Always allow this tool** with the exact
+server-provided grant. The companion saves that preference before sending the
+permission decision, then rechecks the current card and foreground conversation.
+If the preference is accepted but the following response fails, the screen says
+the preference was saved; that accepted change is not automatically rolled back.
+Persistent grants are not offered for room requests.
+
+Onboarding cards without a provider request ID currently show their choices as
+transcript content and direct the user to the computer. Their persistence and
+first-task submission need a separate narrow server/companion contract. Native
+why/history/rehearsal evidence display also remains a separate parity slice.
+
 ## Native development gates
 
 Loop 38 built and installed the debug APK on an owned Android 14 / API 34 arm64
@@ -164,11 +199,18 @@ backgrounding, cancellation and bounded failure/retry at 320dp. Synthetic failur
 and hold controls surround an unmodified server; successful reads reach its real
 store. This does not establish cloud-account isolation or production acceptance.
 
+Loop 40 recorded 58 accepted native card checks: three initial seed/pairing
+checks, 49 live-card/recovery checks, and six final roster/error-copy rechecks.
+One initial selector failure remains in the raw evidence with its correction.
+The real server and permission broker received exact answers and ordered grants;
+an offline CLI supplied the requests without real model or tool execution.
+The final Android suite passed 367 tests across eight suites. See the CEO log for
+source phases, response-loss boundaries, retained setup errors and cleanup.
+
 The generated debug manifest's HTTP allowance does not prove local HTTP pairing
 in a release build. Inspect the merged release manifest and test a bundled release
-variant before distribution. Native question cards also need a separate contract
-fix: the current renderer presents Allow/Deny for every options card, including
-the seeded onboarding question. Full native card interaction is not accepted.
+variant before distribution. Live question/permission behavior is distinct from
+no-request onboarding cards; the latter still require their write contract.
 The development reload also hit a React Native HostTarget assertion during setup;
 cold launches worked after selecting the owned Metro address.
 

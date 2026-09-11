@@ -1,9 +1,11 @@
 import React, { useState, type ComponentProps } from "react";
-import { Text, TextInput, TouchableOpacity } from "react-native";
+import { FlatList, Text, TextInput, TouchableOpacity } from "react-native";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, describe, expect, it, jest } from "@jest/globals";
 import { MusterClient } from "../core/client";
 import { initialState } from "../core/store";
+import { cardActionKey, cardReference } from "../core/card-actions";
+import type { Message } from "../core/types";
 import { ChatViewScreen } from "./ChatViewScreen";
 
 // React Native's official test preset supplies native host stubs. The screen,
@@ -32,8 +34,9 @@ function props(overrides: Partial<ScreenProps> = {}): ScreenProps {
     target: { kind: "bot", id: "basil", threadId: "basil-thread" },
     bot: { id: "basil", name: "Basil", threadId: "basil-thread" },
     onSend: async () => true,
-    onRespond: () => undefined,
-    onAlwaysAllow: () => undefined,
+    onCardAction: async () => undefined,
+    cardActions: {},
+    onRefreshCards: async () => undefined,
     onBack: () => undefined,
     onLoadOlder: () => undefined,
     viewConversation: () => () => undefined,
@@ -49,7 +52,7 @@ function render(screenProps: ScreenProps) {
   if (!tree) throw new Error("Screen failed to render");
   const rendered = tree;
   trees.push(rendered);
-  const input = () => rendered.root.findByType(TextInput);
+  const input = () => rendered.root.findAllByType(TextInput).find((node) => node.props.accessibilityLabel === "Message draft")!;
   const send = () => rendered.root.findAllByType(TouchableOpacity).find((node) => node.props.accessibilityLabel === "Send message");
   return {
     input,
@@ -61,10 +64,96 @@ function render(screenProps: ScreenProps) {
     edit(text: string) { act(() => input().props.onChangeText(text)); },
     alerts: () => rendered.root.findAllByType(Text).filter((node) => node.props.accessibilityRole === "alert"),
     buttons: (label: string) => rendered.root.findAllByType(TouchableOpacity).filter((node) => node.props.accessibilityLabel === label),
+    list: () => rendered.root.findByType(FlatList),
+    text: () => rendered.root.findAllByType(Text).map((node) => node.props.children).flat().join(" "),
     update(next: ScreenProps) { act(() => rendered.update(<ChatViewScreen {...next} />)); },
     unmount() { act(() => rendered.unmount()); trees.splice(trees.indexOf(rendered), 1); },
   };
 }
+
+describe("ChatViewScreen card integration", () => {
+  it("routes a transcript question to a typed answer without sending the task composer", async () => {
+    const message: Message = { id: "ask-message", kind: "options", role: "bot", at: 1,
+      card: { title: "Choose", options: ["Allow", "Deny"], requestId: "ask-request" } };
+    const onCardAction = jest.fn<ScreenProps["onCardAction"]>().mockResolvedValue(undefined);
+    const onSend = jest.fn<ScreenProps["onSend"]>().mockResolvedValue(true);
+    const original = props({ state: { ...initialState(), messages: { "basil-thread": [message] } }, onCardAction, onSend });
+    const screen = render(original);
+    screen.edit("My separate task draft");
+    expect(screen.buttons("Allow once")).toHaveLength(0);
+    await act(async () => screen.buttons("Allow")[0].props.onPress());
+    expect(onCardAction).toHaveBeenCalledWith(cardReference(original.target, message), { kind: "answer", text: "Allow" });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.input().props.value).toBe("My separate task draft");
+  });
+
+  it("keeps card recovery separate from read retry and the composer", async () => {
+    const message: Message = { id: "ask-message", kind: "options", role: "bot", at: 1,
+      card: { title: "Choose", options: ["Research"], requestId: "ask-request" } };
+    const onRefreshCards = jest.fn<ScreenProps["onRefreshCards"]>().mockResolvedValue(undefined);
+    const onRetryRead = jest.fn<ScreenProps["onRetryRead"]>();
+    const onCardAction = jest.fn<ScreenProps["onCardAction"]>().mockResolvedValue(undefined);
+    const original = props({ state: { ...initialState(), messages: { "basil-thread": [message] } },
+      readError: "Read state could not sync.", onRefreshCards, onRetryRead, onCardAction });
+    const reference = cardReference(original.target, message)!;
+    original.cardActions = { [cardActionKey(reference)]: { reference, phase: "failed", message: "Answer delivery is uncertain.", outcome: null, grantSaved: false } };
+    const screen = render(original);
+    screen.edit("Keep my task draft");
+    expect(screen.alerts().map((node) => node.props.children)).toEqual(expect.arrayContaining(["Answer delivery is uncertain.", "Read state could not sync."]));
+    await act(async () => screen.buttons("Check status")[0].props.onPress());
+    expect(onRefreshCards).toHaveBeenCalledTimes(1);
+    expect(onRetryRead).not.toHaveBeenCalled();
+    expect(onCardAction).not.toHaveBeenCalled();
+    expect(screen.input().props.value).toBe("Keep my task draft");
+  });
+});
+
+describe("ChatViewScreen chronological transcript", () => {
+  const greeting: Message = { id: "greeting", role: "bot", kind: "text", at: 1, text: "Older greeting" };
+  const request: Message = { id: "user-request", role: "user", kind: "text", at: 2, parentId: "greeting", text: "Help me choose" };
+  const question: Message = { id: "new-question", role: "bot", kind: "options", at: 3, parentId: "user-request",
+    card: { title: "Newest question", options: ["Research"], requestId: "request-id" } };
+  const otherBranch: Message = { id: "other-branch", role: "bot", kind: "text", at: 4, parentId: "greeting", text: "Not the selected branch" };
+
+  it.each([
+    { text: "Newest streaming text", reasoning: "" },
+    { text: "", reasoning: "Newest reasoning" },
+    { text: "Newest streaming text", reasoning: "Earlier reasoning" },
+  ])("supplies newest-first parent-linked rows with one live row to the inverted list (%j)", (stream) => {
+    const messages = [greeting, request, question, otherBranch];
+    Object.freeze(messages);
+    const original = props({ state: {
+      ...initialState(), messages: { "basil-thread": messages }, leaves: { "basil-thread": question.id },
+      streams: { "basil-thread": stream },
+    } });
+    const screen = render(original);
+    expect(screen.list().props.inverted).toBe(true);
+    expect(screen.list().props.data).toEqual([null, question, request, greeting]);
+    expect(screen.text()).toContain(stream.text || stream.reasoning);
+    expect(screen.text()).not.toContain(otherBranch.text);
+    expect(messages).toEqual([greeting, request, question, otherBranch]);
+    const reply: Message = { id: "completed-reply", role: "bot", kind: "text", at: 5, parentId: question.id, text: "Completed reply" };
+    screen.update({ ...original, state: { ...original.state, messages: { "basil-thread": [...messages, reply] },
+      leaves: { "basil-thread": reply.id }, streams: {} } });
+    expect(screen.list().props.data).toEqual([reply, question, request, greeting]);
+  });
+
+  it("keeps older pagination at the far end and stops requesting when history is exhausted", () => {
+    const onLoadOlder = jest.fn<ScreenProps["onLoadOlder"]>();
+    const original = props({ onLoadOlder, state: { ...initialState(), messages: { "basil-thread": [request, question] },
+      leaves: { "basil-thread": question.id }, hasMore: { "basil-thread": true } } });
+    const screen = render(original);
+    expect(screen.list().props.data).toEqual([question, request]);
+    act(() => screen.list().props.onEndReached());
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    screen.update({ ...original, state: { ...original.state, messages: { "basil-thread": [greeting, request, question] },
+      hasMore: { "basil-thread": false } } });
+    expect(screen.list().props.data).toEqual([question, request, greeting]);
+    act(() => screen.list().props.onEndReached());
+    expect(onLoadOlder).toHaveBeenCalledTimes(1);
+    expect(screen.list().props.ListFooterComponent).toBeNull();
+  });
+});
 
 describe("ChatViewScreen read visibility", () => {
   it.each([

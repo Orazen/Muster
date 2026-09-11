@@ -11,10 +11,11 @@ import {
   View,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { Bot, isCardPending, Message, Room } from "../core/types";
+import { Bot, Message, Room } from "../core/types";
 import { CompanionState, StreamBuffers, visibleTranscript } from "../core/store";
 import type { ChatTarget, CompanionClient } from "../hooks/companion-session";
 import { ComposerDraft, composerContextKey } from "./composer-draft";
+import { RequestCard, type RequestCardProps } from "./RequestCard";
 
 interface ChatViewScreenProps {
   state: CompanionState;
@@ -23,8 +24,9 @@ interface ChatViewScreenProps {
   bot?: Bot;
   room?: Room;
   onSend: (text: string) => Promise<boolean>;
-  onRespond: (threadId: string, requestId: string, behavior: string, message?: string) => void;
-  onAlwaysAllow: (botId: string, allowKey: string) => void;
+  onCardAction: RequestCardProps["onCardAction"];
+  cardActions: RequestCardProps["cardActions"];
+  onRefreshCards: RequestCardProps["onRefreshCards"];
   onBack: () => void;
   onLoadOlder: () => void;
   viewConversation: (target: ChatTarget) => () => void;
@@ -35,15 +37,9 @@ interface ChatViewScreenProps {
 function Bubble({
   message,
   color,
-  onApprove,
-  onDeny,
-  onAllowAlways,
 }: {
   message: Message;
   color: string;
-  onApprove: (card: NonNullable<Message["card"]>) => void;
-  onDeny: (card: NonNullable<Message["card"]>) => void;
-  onAllowAlways: (card: NonNullable<Message["card"]>) => void;
 }) {
   const isUser = message.role === "user";
 
@@ -54,45 +50,6 @@ function Bubble({
         <Text style={styles.activityText}>
           {ok === false ? "✗" : "⚙"} {message.tool.name}
         </Text>
-      </View>
-    );
-  }
-
-  if (message.kind === "options" && message.card) {
-    const card = message.card;
-    const pending = isCardPending(card);
-    return (
-      <View style={[styles.card, !pending && styles.cardDone]}>
-        <Text style={styles.cardTitle}>{card.title}</Text>
-        {card.subtitle ? <Text style={styles.cardSubtitle}>{card.subtitle}</Text> : null}
-        {pending ? (
-          <View style={styles.cardActions}>
-            <TouchableOpacity
-              style={[styles.cardBtn, styles.cardAllow]}
-              onPress={() => onApprove(card)}
-            >
-              <Text style={styles.cardAllowText}>Allow</Text>
-            </TouchableOpacity>
-            {card.allowKey ? (
-              <TouchableOpacity
-                style={[styles.cardBtn, styles.cardAlways]}
-                onPress={() => onAllowAlways(card)}
-              >
-                <Text style={styles.cardAlwaysText}>Always</Text>
-              </TouchableOpacity>
-            ) : null}
-            <TouchableOpacity
-              style={[styles.cardBtn, styles.cardDeny]}
-              onPress={() => onDeny(card)}
-            >
-              <Text style={styles.cardDenyText}>Deny</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <Text style={styles.cardAnswered}>
-            {card.dismissed ? "Dismissed" : `Answered: ${card.answered ?? ""}`}
-          </Text>
-        )}
       </View>
     );
   }
@@ -160,8 +117,9 @@ export function ChatViewScreen({
   bot,
   room,
   onSend,
-  onRespond,
-  onAlwaysAllow,
+  onCardAction,
+  cardActions,
+  onRefreshCards,
   onBack,
   onLoadOlder,
   viewConversation,
@@ -182,9 +140,10 @@ export function ChatViewScreen({
   }), [target.kind, target.id, target.threadId, viewConversation]);
 
   const rows: (Message | null)[] = useMemo(() => {
-    const out: (Message | null)[] = [...transcript];
-    if (streams?.reasoning) out.push(null); // reasoning placeholder
-    if (streams?.text) out.push(null); // streaming placeholder
+    // An inverted list places index zero nearest the composer. Keep the
+    // stored transcript chronological and put one live row at that edge.
+    const out: (Message | null)[] = [...transcript].reverse();
+    if (streams?.reasoning || streams?.text) out.unshift(null);
     return out;
   }, [transcript, streams]);
 
@@ -210,6 +169,7 @@ export function ChatViewScreen({
         ref={listRef}
         data={rows}
         inverted
+        keyboardShouldPersistTaps="handled"
         keyExtractor={(item, i) => item?.id ?? `stream-${i}`}
         onEndReached={() => hasMore && onLoadOlder()}
         onEndReachedThreshold={0.4}
@@ -237,23 +197,10 @@ export function ChatViewScreen({
                     : undefined
               }
             >
-              <Bubble
-                message={item}
-                color={color}
-                onApprove={(card) =>
-                  card.requestId && onRespond(threadId, card.requestId, "allow")
-                }
-                onDeny={(card) =>
-                  card.requestId &&
-                  onRespond(threadId, card.requestId, card.tool ? "deny" : "dismiss")
-                }
-                onAllowAlways={(card) => {
-                  if (card.requestId && card.allowKey && bot) {
-                    onAlwaysAllow(bot.id, card.allowKey);
-                    onRespond(threadId, card.requestId, "allow");
-                  }
-                }}
-              />
+              {item.kind === "options" && item.card ? (
+                <RequestCard message={item} target={target} connection={connection} bot={bot}
+                  cardActions={cardActions} onCardAction={onCardAction} onRefreshCards={onRefreshCards} />
+              ) : <Bubble message={item} color={color} />}
             </View>
           );
         }}
@@ -326,33 +273,6 @@ const styles = StyleSheet.create({
   },
   activityRowUser: { alignSelf: "flex-end" },
   activityText: { color: "#9a9a9e", fontSize: 12, fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }) },
-  card: {
-    alignSelf: "flex-start",
-    backgroundColor: "#1c1c1e",
-    borderRadius: 14,
-    padding: 14,
-    marginHorizontal: 14,
-    marginVertical: 4,
-    maxWidth: "86%",
-    borderWidth: 1,
-    borderColor: "#3a3a3e",
-  },
-  cardDone: { opacity: 0.55, borderColor: "#2a2a2c" },
-  cardTitle: { color: "#f6f6f7", fontSize: 15, fontWeight: "600" },
-  cardSubtitle: { color: "#8a8a8e", fontSize: 13, marginTop: 3, lineHeight: 18 },
-  cardActions: { flexDirection: "row", gap: 8, marginTop: 12 },
-  cardBtn: {
-    borderRadius: 9,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  cardAllow: { backgroundColor: "#f0460e" },
-  cardAllowText: { color: "#fff", fontWeight: "700", fontSize: 13 },
-  cardAlways: { backgroundColor: "#2a2a2c" },
-  cardAlwaysText: { color: "#e8e8ea", fontWeight: "600", fontSize: 13 },
-  cardDeny: { backgroundColor: "transparent", borderWidth: 1, borderColor: "#3a3a3e" },
-  cardDenyText: { color: "#9a9a9e", fontWeight: "600", fontSize: 13 },
-  cardAnswered: { color: "#8a8a8e", fontSize: 12, marginTop: 8 },
   readStatus: { paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#222" },
   readError: { color: "#ff8a80", fontSize: 13, lineHeight: 18 },
   readRetry: { alignSelf: "flex-start", paddingVertical: 10, marginTop: 2 },

@@ -72,6 +72,10 @@ export const pairResponseSchema = z.object({
   device: z.object({ id, name: z.string(), createdAt: number, lastSeenAt: number }), serverName: text,
 });
 export const apiErrorSchema = z.object({ error: z.string() });
+export const requestResponseSchema = z.object({
+  ok: z.literal(true),
+  outcome: z.enum(["allowed-once", "rejected", "answered", "unavailable"]),
+});
 
 // Parse only the envelope here; each known payload has its own lossy decoder.
 export const frameEnvelopeSchema = z.object({

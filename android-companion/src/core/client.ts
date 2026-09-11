@@ -1,11 +1,11 @@
 // HTTP and SSE client for the companion sidecar. Native callers inject expo/fetch.
 import { advanceCursor, decodeFleet, decodeFrame, type Frame } from "./frames";
 import { SSEParser, type SSEEvent } from "./sse";
-import { apiErrorSchema, instancesSchema, pairResponseSchema, threadPageSchema, type JsonValue } from "./contracts";
+import { apiErrorSchema, instancesSchema, pairResponseSchema, requestResponseSchema, threadPageSchema, type JsonValue } from "./contracts";
 import { connectionOrigin, parseConnection, type Connection, type ConnectionScheme } from "./connection";
 import { parsePairingInvite } from "./pairing";
 import type { ClientFetch, ClientResponse, ConnectionStatus, EventStream, StreamReader } from "./transport";
-import type { Fleet, Instance, PairResponse, ThreadPage } from "./types";
+import type { Fleet, Instance, PairResponse, RequestBehavior, RequestOutcome, ThreadPage } from "./types";
 export { DEFAULT_PORT, parseAddress, parseConnection, type Connection, type ParsedAddress } from "./connection";
 export type { ClientFetch, ClientResponse, ConnectionStatus } from "./transport";
 
@@ -15,7 +15,7 @@ export class APIError extends Error {
 }
 interface PairOptions { credential?: string; code?: string; deviceName: string; scheme?: ConnectionScheme }
 interface PairBody { deviceName: string; credential?: string; code?: string }
-interface RespondBody { requestId: string; behavior: string; message?: string }
+interface RespondBody { requestId: string; behavior: RequestBehavior; message?: string }
 type RequestBody = { text: string } | RespondBody | { allowKey: string } | { emoji: string } | Record<string, never>;
 
 async function errorDetail(response: ClientResponse): Promise<string> {
@@ -108,12 +108,14 @@ export class MusterClient {
   async respond(
     threadId: string,
     requestId: string,
-    behavior: "allow" | "allowAlways" | "deny" | string,
+    behavior: RequestBehavior,
     message?: string,
-  ): Promise<void> {
+  ): Promise<RequestOutcome> {
     const body: RespondBody = { requestId, behavior };
     if (message !== undefined) body.message = message;
-    await this.requestVoid("POST", `/api/threads/${encodeURIComponent(threadId)}/respond`, body);
+    const result = requestResponseSchema.safeParse(await this.request("POST", `/api/threads/${encodeURIComponent(threadId)}/respond`, body));
+    if (!result.success) throw new Error("Your computer returned an unrecognized response. Check the request status before responding again.");
+    return result.data.outcome;
   }
 
   async alwaysAllow(botId: string, allowKey: string): Promise<void> {

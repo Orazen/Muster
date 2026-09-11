@@ -50,8 +50,9 @@ function CompanionApp() {
         bot={bot}
         room={room}
         onSend={(text) => companion.send(target, text)}
-        onRespond={companion.respond}
-        onAlwaysAllow={companion.alwaysAllow}
+        onCardAction={companion.actOnCard}
+        cardActions={companion.cardActions}
+        onRefreshCards={companion.refreshCards}
         onBack={() => setSelection(null)}
         onLoadOlder={() => companion.loadOlder(target.threadId, companion.state.hasMore[target.threadId] ?? false)}
         viewConversation={companion.viewConversation}

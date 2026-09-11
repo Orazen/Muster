@@ -8,9 +8,9 @@ import {
   View,
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { Bot, Room } from "../core/types";
+import { Bot, Room, isCardPending } from "../core/types";
 import { ChatTarget } from "../hooks/useCompanion";
-import { CompanionState, StreamBuffers } from "../core/store";
+import { CompanionState, StreamBuffers, visibleTranscript } from "../core/store";
 
 interface ChatListScreenProps {
   state: CompanionState;
@@ -24,6 +24,26 @@ interface ChatListScreenProps {
 }
 
 interface ChatActivity { at: number; preview: string }
+
+function waitingRequestCount(state: CompanionState): number {
+  const requests = new Set<string>();
+  const collect = (threadId: string, speaker?: string) => {
+    for (const message of visibleTranscript(state, threadId)) {
+      const card = message.card;
+      if (message.role === "bot" && message.kind === "options" && card?.requestId?.trim() && isCardPending(card)
+        && (speaker === undefined || message.from?.botId === speaker)) {
+        requests.add(JSON.stringify([threadId, card.requestId]));
+      }
+    }
+  };
+  for (const bot of Object.values(state.bots)) {
+    if (!bot.hidden) collect(bot.threadId);
+  }
+  for (const room of Object.values(state.rooms)) {
+    if (room.busyBotId?.trim()) collect(room.threadId, room.busyBotId);
+  }
+  return requests.size;
+}
 
 function lastActivity(
   state: CompanionState,
@@ -77,7 +97,7 @@ export function ChatListScreen({
     })),
   ].sort((a, b) => b.act.at - a.act.at);
 
-  const pendingCount = state.notifications.filter((n) => n.kind === "approval" || n.kind === "question").length;
+  const pendingCount = waitingRequestCount(state);
 
   return (
     <View style={styles.container}>
@@ -87,7 +107,7 @@ export function ChatListScreen({
           <Text style={styles.title}>Muster</Text>
           <Text style={styles.status}>
             {connected ? "Connected" : "Reconnecting…"}
-            {pendingCount > 0 ? `  ·  ${pendingCount} awaiting approval` : ""}
+            {pendingCount > 0 ? `  ·  ${pendingCount} waiting for you` : ""}
           </Text>
         </View>
         <TouchableOpacity onPress={onUnpair} hitSlop={12}>

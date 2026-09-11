@@ -4,6 +4,8 @@
 
 export type Role = "bot" | "user";
 export type MessageKind = "text" | "options" | "activity" | "screen" | "unknown";
+export type RequestBehavior = "allow" | "deny" | "answer";
+export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavailable";
 
 export interface OptionCard {
   title: string;

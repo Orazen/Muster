@@ -110,6 +110,24 @@ describe("HTTP client", () => {
     await expect(botRead).resolves.toBeUndefined();
     await expect(groupRead).resolves.toBeUndefined();
   });
+  test.each(["allowed-once", "rejected", "answered", "unavailable"])("preserves the actual decision outcome %s", async (outcome) => {
+    const f = fixture(); const result = f.client.respond("room/thread", "ask-id", "answer", "Allow\n  exact answer  ");
+    expect(f.calls[0].url).toContain("/api/threads/room%2Fthread/respond");
+    expect(JSON.parse(f.calls[0].init?.body ?? "")).toEqual({ requestId: "ask-id", behavior: "answer", message: "Allow\n  exact answer  " });
+    f.requests[0].resolve(response({ ok: true, outcome }));
+    await expect(result).resolves.toBe(outcome);
+  });
+  test.each([{ ok: true }, { ok: false, outcome: "answered" }, { ok: true, outcome: "future" }, null])("does not treat an unknown response envelope as approval %#", async (body) => {
+    const f = fixture(); const result = f.client.respond("thread", "permission", "allow");
+    f.requests[0].resolve(response(jsonSchema.parse(body)));
+    await expect(result).rejects.toThrow("unrecognized response");
+  });
+  test("retains a rejected decision's actual HTTP message", async () => {
+    const f = fixture(); const result = f.client.respond("thread", "permission", "deny");
+    expect(JSON.parse(f.calls[0].init?.body ?? "")).toEqual({ requestId: "permission", behavior: "deny" });
+    f.requests[0].resolve(response({ error: "Request is no longer waiting" }, 409));
+    await expect(result).rejects.toEqual(new APIError(409, "Request is no longer waiting"));
+  });
   test.each([401, 403, 404, 503])("preserves bot and room read refusal status %i", async (status) => {
     const f = fixture();
     const botRead = f.client.markBotRead("bot-owner");

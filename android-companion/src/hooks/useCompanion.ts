@@ -5,6 +5,7 @@ import * as SecureStore from "expo-secure-store";
 import { fetch } from "expo/fetch";
 import { MusterClient, parseAddress, parseConnection } from "../core/client";
 import { resolvePairingInput } from "../core/pairing";
+import type { CardAction, CardReference } from "../core/card-actions";
 import {
   CompanionSession, ConnectionPersistence, type ChatTarget,
 } from "./companion-session";
@@ -71,10 +72,9 @@ export function useCompanion() {
   // cannot send to or modify the newly paired account.
   const send = useCallback((target: ChatTarget, text: string) =>
     session.send(snapshot.client, target, text), [session, snapshot.client]);
-  const respond = useCallback((threadId: string, requestId: string, behavior: string, message?: string) =>
-    session.respond(snapshot.client, threadId, requestId, behavior, message), [session, snapshot.client]);
-  const alwaysAllow = useCallback((botId: string, allowKey: string) =>
-    session.alwaysAllow(snapshot.client, botId, allowKey), [session, snapshot.client]);
+  const actOnCard = useCallback((reference: CardReference, action: CardAction) =>
+    session.actOnCard(snapshot.client, reference, action), [session, snapshot.client]);
+  const refreshCards = useCallback(() => session.refreshCards(snapshot.client), [session, snapshot.client]);
   const viewConversation = useCallback((target: ChatTarget) =>
     session.viewConversation(snapshot.client, target), [session, snapshot.client]);
   const retryRead = useCallback((target: ChatTarget) =>
@@ -85,6 +85,6 @@ export function useCompanion() {
   return {
     ...snapshot,
     pair: session.pair, unpair: session.unpair, refresh: session.refresh,
-    send, respond, alwaysAllow, viewConversation, retryRead, loadOlder,
+    send, actOnCard, refreshCards, viewConversation, retryRead, loadOlder,
   };
 }

@@ -2623,3 +2623,172 @@ Pre-commit pull/rebase is up to date; the existing stash is preserved.
 Post-push GET-only reachability and download metadata are recorded separately in
 `.omb-scratch/verification/loop39-production-get.json`; HTTP 200 is not evidence
 of a newly deployed source SHA or published desktop binary.
+
+## Loop 40 — 2026-09-11 — Android questions and permission delivery
+
+The live Android card contract now distinguishes question answers from tool
+permissions. Questions render the provider's actual choices plus custom text;
+choices named Allow or Deny remain literal answers, and custom whitespace is
+preserved. Permissions send explicit allow/deny behavior and retain the actual
+allowed-once, rejected, answered or unavailable result. HTTP 200 with unavailable
+is visibly undelivered. Unknown successful envelopes fail visibly instead of
+being treated as approval. Ambiguous transport/5xx errors describe unknown
+delivery without repeating a proxy diagnosis that the computer is not running;
+the native lost-grant test showed that diagnosis after actual server acceptance.
+Definite 4xx refusals retain their actionable response detail.
+
+The controller validates the current connection, foreground conversation,
+visible transcript branch, message, request and card signature. Room actions
+also require the current speaker. A synchronous request lock covers duplicate
+taps and reused request IDs until transport settles. Old callbacks cannot act on
+replacement cards or accounts. Failures preserve drafts and offer Check status,
+which only refreshes state; ambiguous decisions are never automatically replayed.
+Only eligible direct bots offer a persistent grant. That write completes before
+the permission decision, with another card/view check between them. An accepted
+grant remains saved if the subsequent decision fails, and the UI reports that
+partial result rather than pretending to roll it back.
+
+Native inspection found the inverted list had received chronological rows,
+placing the newest card away from the composer. It now receives a reversed copy
+of the active transcript and exactly one newest streaming row; history storage
+and older pagination retain their ordering. Parent-linked branch/stream tests
+cover this correction. No-request onboarding cards now show their choices and
+an honest continue-on-computer message; their write contract remains separate.
+
+Native roster inspection also found eleven historical question/approval
+notifications counted as awaiting approval while no request remained pending.
+The header now counts distinct live request IDs on current active bot/room
+branches, excludes seeds/settled/hidden/stale threads and requires the active
+room speaker. Its wording covers questions and permissions: waiting for you.
+Notification history is preserved. Twelve focused screen tests include actual
+reducer settlement with all eleven notifications retained, branch/thread changes,
+room speaker identity and duplicate request handling.
+
+Verified automated checks:
+
+- Root full Vitest: **229 files / 3,063 passed / 8 skipped / 252.48 seconds**.
+- Android full Jest: **8 suites / 367 passed / 0 skipped / 2.206 seconds**.
+- Android typecheck and package lint pass; root scoped custom lint passes.
+  Root build/types were not rerun for Android-only runtime changes.
+- Actual server/companion/Claude permission-broker fixture with the current
+  Android client and Node fetch: **22/22 / 2.728 seconds**.
+- Separate post-acceptance response-loss proof: **6/6 / 1.183 seconds**.
+  It forwards to the actual server, verifies accepted HTTP 200 and persisted
+  effects, then drops the reply before headers. The real proxy produces 502.
+  The exact answer reaches the broker once; a lost grant reply persists the
+  preference without sending a permission response or automatic retry.
+
+The fixture uses an explicit offline CLI for synthetic version/auth probes and
+streamed questions/permissions, while the server, store, device registry, proxy,
+SSE observer, Claude driver and per-turn Unix broker are actual. No real Claude
+account, model request or tool execution is exercised. The command recipes are
+never executed. Environments/data and loopback/socket guards belong only to the
+fixture; this does not establish general security or cloud-account isolation.
+
+Preserved setup failures: command-prefix reuse correctly hit the real persistent
+grant and auto-approved a later fixture ask; unique nonexecuted prefixes fixed
+that setup. Signal-terminated fixture providers left dead PID marker receipts;
+cleanup now confirms ownership and ESRCH before removing those markers. The first
+loss-proof assertion expected literal text in card.answered, but the real server
+stores the behavior answer; exact text is checked at the broker. Original failed
+receipts remain. The final Node proof, first native fixture and response-loss
+proof each passed **8/8** independent cleanup checks.
+
+Actual native acceptance recorded **58 accepted checks** across three source
+phases: **3** initial pairing/seed checks, **49** chronology-corrected live-card
+checks, and **6** final targeted roster/error-copy rechecks. Raw evidence retains
+**58 passing attempts and 1 failed selector attempt**, corrected against the
+same captured native XML. There are no unresolved acceptance failures. The
+observation window was **1,850.869 seconds**, from 03:07:50 to 03:38:41 UTC;
+this includes manual inspection and setup waits, not a runtime performance test.
+
+Actual API 34 arm64 debug execution covers exact Allow/Deny question text,
+custom whitespace with the real keyboard, permission allow/deny, three rapid
+taps producing one request, pre-forward failure, explicit retry, genuine HTTP
+200 unavailable, failed and saved grants, grant-before-decision order, accepted
+server response loss, exact room attribution/route, server restart persistence,
+Android cold restart and restored pairing. The final same-process roster check
+shows one live question then zero after settlement despite notification history.
+The final lost-grant check verifies one persisted preference, zero permission
+requests until an explicit Allow once, and one broker answer afterward. Checking
+status never sends a decision. Client behavior does not establish general server
+idempotency across arbitrary network/process failures.
+
+Preserved native setup observations: the busy accessibility label includes a
+suffix, so the initial exact-label assertion failed despite disabled controls in
+that same XML. Inspection crossed the real 20-second proxy deadline. A later
+held-action predicate treated an array as a number and also crossed that deadline;
+explicit recovery and a fresh correctly bounded hold/release were then verified.
+The unavailable setup initially expected a persisted unavailable enum; actual
+interrupt writes deny plus dismissed, while the response correctly reports
+unavailable. An early composer capture was transient; a stable screenshot and
+actual typing confirmed the composer remains usable. Original evidence is kept.
+
+The owned Expo prebuild passed in **4.261 seconds**, debug assembly in
+**119.331 seconds / 644 tasks executed**, and install in **0.917 seconds**.
+APK: **148,313,221 bytes**, SHA256
+`2b37bf7381be2593122c51708e9e52502be017b4446e8463d3d8751db25ffdbc`.
+This is debug signing. Only arm64 was executed; other bundled ABI libraries are
+not execution proof. Later JavaScript ran from freshly restarted owned Metro;
+the original APK hash alone does not identify that loaded application source.
+All eleven native/config/asset inputs remained unchanged. Root independently
+compared **45/47 tracked/new package files** after the final refinement; only
+README and Expo-generated tsconfig differ. All runtime/tests/config/assets match;
+the native agent independently checked **37/37** app/native input hashes.
+
+Root visually reviewed the 320dp question, keyboard, error, pending, settled and
+final roster/lost-grant screenshots. Long text wraps, the task composer remains
+usable, and recovery controls fit. This is owned debug/emulator acceptance, not a
+physical device, bundled release, packaged sidecar, real Google/provider or store
+release. Native default roster avatars still use initials; full mascot/evidence
+parity remains future work.
+
+All owned Loop40 services are stopped. Native cleanup passed **11/11** with four
+ports closed; final actual fixture cleanup passed **17/17** with five ports
+closed, all twenty observed provider PIDs absent, zero pending/busy turns, zero
+held actions/reads and zero outbound-guard attempts. The final fixture recorded
+fourteen cases, thirteen broker answers and twenty-two HTTP action attempts,
+including the declared failures and expiration. No demo or real session changed.
+
+Evidence: `.omb-scratch/verification/loop40-*.log`, `loop40-native-cards/`, and
+`android-cards-loop40-057563d553/`. Runtime source has no verification injection.
+
+Next bounded slice: establish the durable no-request onboarding answer contract,
+then enable its clients. Read-only audit found web seed answers issue independent
+optimistic generic card PATCH and text POST requests. The PATCH can also mutate
+live-card transcript state without resolving its broker; do not expose it to
+companions. Use a narrowly authenticated seed-answer endpoint with exact owner,
+current thread, active branch, recognized seed purpose and bounded answer checks.
+A seed message ID is the durable idempotency key; it is never a fabricated live
+request ID. New purpose metadata needs a narrow tested legacy-seed rule, while
+unknown historical cards remain inert.
+
+Record settlement, linked user message and branch head in one SQLite transaction
+before memory/SSE publication. Existing Store.patchMessage mutates memory before
+its DB write, and appendMessage catches DB errors; chaining them is not atomic.
+Reuse the committed user message for dispatch, distinguish answer recorded from
+task started, and test duplicate/lost-response/conflicting retries, DB failure and
+restart without silent redispatch. Existing in-memory steer queuing loses run
+intent across restart; durable answer recording cannot promise exactly-once
+provider execution. Replace the web's split writes and add only the exact new
+companion route, preserving live-request pending semantics on Android/iOS/Watch.
+Source paths, exact checks and the optional wire-field changes are documented in
+`loop40-native-cards/next-seed-card-contract-audit.md`; no tests were run for that
+read-only next-slice audit.
+
+Native why/history/rehearsal evidence parity remains separate. Then inspect the
+actual merged release HTTP policy and execute a bundled release variant; debug's
+HTTP allowance is not release proof. Any intentional app-wide HTTP support must
+preserve HTTPS and is not LAN-only. Keep the existing release transport audit.
+
+Desktop candidate 8966619 and the public release/CI billing/VPS identity/signing/
+mirror gates remain open, as do iOS/Watch, real Google, VM, portable backup/sync
+and full Mimosa acceptance. No dependency or real-provider configuration changed.
+The demo at 8845, real accounts and existing release-handoff stash are untouched.
+The full goal remains active. Latest allowance: **56% used / 44% remaining**;
+no reset consumed.
+
+Pre-commit pull/rebase is up to date; the existing release-handoff stash is
+preserved. Post-push GET-only reachability and published download metadata are
+recorded separately in `.omb-scratch/verification/loop40-production-get.json`.
+HTTP 200 does not identify the deployed source SHA or a newly released binary.

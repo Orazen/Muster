@@ -2,9 +2,11 @@
 import { APIError } from "../core/client";
 import type { Connection, MusterClient } from "../core/client";
 import type { PairResponse } from "../core/types";
+import { isCardPending, type Message } from "../core/types";
+import { cardActionKey, cardDecision, cardReference, outcomeMessage, type CardAction, type CardActionState, type CardReference } from "../core/card-actions";
 import type { Frame } from "../core/frames";
 import {
-  acknowledgeViewed, applyFrame, hydrate, initialState, markViewed, prependPage, setCursor,
+  acknowledgeViewed, applyFrame, hydrate, initialState, markViewed, prependPage, setCursor, visibleTranscript,
 } from "../core/store";
 import type { CompanionState, ViewedConversation } from "../core/store";
 
@@ -77,10 +79,11 @@ export interface CompanionSnapshot {
   pairing: boolean;
   pairError: string | null;
   readError: { target: ChatTarget; message: string } | null;
+  cardActions: Record<string, CardActionState>;
 }
 
 function emptySnapshot(): CompanionSnapshot {
-  return { client: null, state: initialState(), connected: false, connecting: false, pairing: false, pairError: null, readError: null };
+  return { client: null, state: initialState(), connected: false, connecting: false, pairing: false, pairError: null, readError: null, cardActions: {} };
 }
 
 interface FleetRecovery {
@@ -112,6 +115,14 @@ const READ_TIMEOUT_MS = 10_000;
 const READ_ATTEMPTS = 3;
 const readKey = (target: ChatTarget): string => JSON.stringify([target.kind, target.id, target.threadId]);
 
+interface CardOperation {
+  client: CompanionClient;
+  reference: CardReference;
+  generation: number;
+  grantSaved: boolean;
+}
+const requestKey = (reference: CardReference): string => JSON.stringify([reference.target.threadId, reference.requestId]);
+
 export class CompanionSession {
   private snapshot = emptySnapshot();
   private listeners = new Set<() => void>();
@@ -125,6 +136,7 @@ export class CompanionSession {
   private foreground = false;
   private view: ConversationView | null = null;
   private readAttempts = new Map<string, ReadAttempt>();
+  private cardRequests = new Map<string, CardOperation>();
 
   constructor(private readonly dependencies: CompanionDependencies) {}
 
@@ -152,6 +164,7 @@ export class CompanionSession {
     stop?.();
     this.cancelRecovery();
     this.clearViews();
+    this.cardRequests.clear();
     this.dataRevision++;
     this.pageRequests.clear();
     this.update({ ...emptySnapshot(), pairing, pairError });
@@ -180,6 +193,7 @@ export class CompanionSession {
     this.stopStream = null;
     this.cancelRecovery();
     this.clearViews();
+    this.cardRequests.clear();
     // Queue immediately on the shared writer, before a new mount can write.
     // An established connection remains available for normal app restarts.
     if (pendingPair) void this.dependencies.persistence.write(null, () => true).catch(() => undefined);
@@ -302,6 +316,15 @@ export class CompanionSession {
     if (this.active && client) await this.refreshWith(client, this.generation);
   };
 
+  async refreshCards(client: CompanionClient | null): Promise<void> {
+    if (!this.owns(client)) return;
+    const generation = this.generation;
+    const result = await this.refreshWith(client, generation);
+    if (!this.current(generation) || !this.owns(client)) return;
+    if (result === "failed") throw new Error("Could not load the latest request status. Check your connection and try again.");
+    if (result === "stale") throw new Error("The conversation changed while checking its status. Check again for the latest request.");
+  }
+
   pair = async (input: PairInput): Promise<{ response: PairResponse } | null> => {
     if (!this.active) return null;
     const generation = this.reset(true);
@@ -357,12 +380,117 @@ export class CompanionSession {
       && currentChatTarget({ client, target }, client, this.snapshot.state) !== null;
   }
 
-  async respond(client: CompanionClient | null, threadId: string, requestId: string, behavior: string, message?: string): Promise<void> {
-    if (this.owns(client) && this.activeThread(threadId)) await client.respond(threadId, requestId, behavior, message);
+  private cardMessage(client: CompanionClient | null, reference: CardReference): Message | null {
+    if (!this.owns(client) || !currentChatTarget({ client, target: reference.target }, client, this.snapshot.state)) return null;
+    const message = visibleTranscript(this.snapshot.state, reference.target.threadId).find((entry) => entry.id === reference.messageId);
+    const current = message ? cardReference(reference.target, message) : null;
+    return message && current && cardActionKey(current) === cardActionKey(reference)
+      && current.signature === reference.signature ? message : null;
   }
 
-  async alwaysAllow(client: CompanionClient | null, botId: string, allowKey: string): Promise<void> {
-    if (this.owns(client)) await client.alwaysAllow(botId, allowKey);
+  private viewingCard(client: CompanionClient, reference: CardReference): boolean {
+    const view = this.view;
+    return this.foreground && view !== null && this.currentView(view) && view.client === client
+      && readKey(view.target) === readKey(reference.target);
+  }
+
+  private currentCardOperation(operation: CardOperation): boolean {
+    return this.current(operation.generation) && this.owns(operation.client)
+      && this.cardRequests.get(requestKey(operation.reference)) === operation;
+  }
+
+  private publishCard(operation: CardOperation, state: Omit<CardActionState, "reference" | "grantSaved">): void {
+    if (!this.currentCardOperation(operation) || !this.cardMessage(operation.client, operation.reference)) return;
+    this.update({ cardActions: {
+      ...this.snapshot.cardActions,
+      [cardActionKey(operation.reference)]: { ...state, reference: operation.reference, grantSaved: operation.grantSaved },
+    } });
+  }
+
+  private roomCardOwner(reference: CardReference, message: Message): boolean {
+    if (reference.target.kind !== "room") return true;
+    const speaker = this.snapshot.state.rooms[reference.target.id]?.busyBotId;
+    return !!speaker && message.from?.botId === speaker;
+  }
+
+  async actOnCard(client: CompanionClient | null, input: CardReference, action: CardAction): Promise<void> {
+    if (!this.owns(client) || !this.viewingCard(client, input)) return;
+    const message = this.cardMessage(client, input);
+    const card = message?.card;
+    if (!message || !card || !isCardPending(card) || this.cardRequests.has(requestKey(input))) return;
+    const previous = this.snapshot.cardActions[cardActionKey(input)];
+    if (previous?.phase === "settled" && previous.reference.signature === input.signature) return;
+    const reference = { ...input, target: { ...input.target } };
+    const operation: CardOperation = { client, reference, generation: this.generation, grantSaved: false };
+    this.cardRequests.set(requestKey(reference), operation);
+    const decision = cardDecision(card, action);
+    try {
+      if (!decision || !this.roomCardOwner(reference, message)
+        || (action.kind === "always" && (reference.target.kind !== "bot" || !card.allowKey?.trim()))) {
+        this.publishCard(operation, {
+          phase: "failed", outcome: null,
+          message: action.kind === "answer" && !action.text.trim()
+            ? "Enter an answer before sending."
+            : "This response does not match the current request. Check its status before responding.",
+        });
+        return;
+      }
+      this.publishCard(operation, { phase: "pending", message: null, outcome: null });
+      const live = this.cardMessage(client, reference);
+      if (!this.currentCardOperation(operation) || !this.viewingCard(client, reference)
+        || !live?.card || !isCardPending(live.card) || !this.roomCardOwner(reference, live)) return;
+      // A persistent grant is a separate mutation. Never claim it was saved or
+      // release the pending permission before the computer accepts that write.
+      if (action.kind === "always" && card.allowKey) {
+        await client.alwaysAllow(reference.target.id, card.allowKey);
+        if (!this.currentCardOperation(operation)) return;
+        operation.grantSaved = true;
+        this.publishCard(operation, { phase: "pending", outcome: null, message: null });
+        const current = this.cardMessage(client, reference);
+        if (!current?.card || !isCardPending(current.card) || !this.viewingCard(client, reference)) {
+          this.publishCard(operation, {
+            phase: "failed", outcome: null,
+            message: "The preference was saved, but this request was not approved here. Check its status before responding.",
+          });
+          return;
+        }
+      }
+      const outcome = await client.respond(reference.target.threadId, reference.requestId, decision.behavior, decision.message);
+      this.publishCard(operation, { phase: "settled", outcome, message: outcomeMessage(outcome) });
+    } catch (failure) {
+      if (!this.currentCardOperation(operation)) return;
+      const error = failure instanceof Error ? failure : new Error("Could not confirm the response.");
+      if (error instanceof APIError && (error.status === 401 || error.status === 403)) {
+        this.requestFailed(error, operation.generation);
+        return;
+      }
+      const definiteFailure = error instanceof APIError && error.status >= 400 && error.status < 500 && error.status !== 408;
+      const prefix = operation.grantSaved ? "The preference was saved. " : "";
+      const grantFailed = action.kind === "always" && !operation.grantSaved;
+      const detail = grantFailed
+        ? `${definiteFailure ? "The computer rejected the preference change." : "Could not confirm whether the preference was saved."} No approval response was sent. Check the request before approving it.`
+        : `${prefix}${definiteFailure ? "The response was not accepted." : "Could not confirm whether the response was delivered. Check its status before trying again."}`;
+      this.publishCard(operation, {
+        phase: "failed", outcome: null,
+        // A proxy failure can arrive after the computer accepted the write.
+        // Its generic diagnosis cannot establish why delivery is uncertain.
+        message: definiteFailure ? `${detail} ${error.message}` : detail,
+      });
+    } finally {
+      if (this.cardRequests.get(requestKey(reference)) === operation) {
+        this.cardRequests.delete(requestKey(reference));
+        const key = cardActionKey(reference);
+        const state = this.snapshot.cardActions[key];
+        // If the ask changed while awaiting transport, discard only its old
+        // pending indicator. A new card/result is never overwritten.
+        if (this.current(operation.generation) && state?.phase === "pending"
+          && state.reference.signature === reference.signature) {
+          const cardActions = { ...this.snapshot.cardActions };
+          delete cardActions[key];
+          this.update({ cardActions });
+        }
+      }
+    }
   }
 
   private viewedState(target: ChatTarget | null): void {

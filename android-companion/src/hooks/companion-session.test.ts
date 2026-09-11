@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, jest } from "@jest/globals";
 import { APIError, type Connection } from "../core/client";
-import type { Fleet, PairResponse, ThreadPage } from "../core/types";
+import type { Fleet, Message, PairResponse, RequestBehavior, RequestOutcome, ThreadPage } from "../core/types";
+import { cardActionKey, cardReference, type CardAction, type CardReference } from "../core/card-actions";
 import {
   CompanionSession, ConnectionPersistence, currentChatTarget,
   type CompanionClient, type CompanionDependencies, type PairInput,
@@ -41,6 +42,9 @@ class FixtureClient implements CompanionClient {
   pageResponses: Array<Promise<ThreadPage>> = [];
   sendResponses: Array<Promise<void>> = [];
   readResponses: Array<Promise<void>> = [];
+  responseResults: Array<Promise<RequestOutcome>> = [];
+  grantResults: Array<Promise<void>> = [];
+  decisions: Array<{ thread: string; request: string; behavior: RequestBehavior; message?: string }> = [];
   reads: Array<{ kind: "bot" | "room"; id: string; signal?: AbortSignal }> = [];
   streams: Stream[] = [];
   actions: string[] = [];
@@ -65,8 +69,12 @@ class FixtureClient implements CompanionClient {
   }
   async sendToBot(id: string, text: string): Promise<void> { this.actions.push(`bot:${id}:${text}`); await this.sendResponses.shift(); }
   async sendToGroup(id: string, text: string): Promise<void> { this.actions.push(`group:${id}:${text}`); await this.sendResponses.shift(); }
-  async respond(thread: string, request: string, behavior: string): Promise<void> { this.actions.push(`respond:${thread}:${request}:${behavior}`); }
-  async alwaysAllow(bot: string, key: string): Promise<void> { this.actions.push(`always:${bot}:${key}`); }
+  async respond(thread: string, request: string, behavior: RequestBehavior, message?: string): Promise<RequestOutcome> {
+    this.actions.push(`respond:${thread}:${request}:${behavior}`);
+    this.decisions.push({ thread, request, behavior, message });
+    return await (this.responseResults.shift() ?? Promise.resolve(behavior === "answer" ? "answered" : behavior === "deny" ? "rejected" : "allowed-once"));
+  }
+  async alwaysAllow(bot: string, key: string): Promise<void> { this.actions.push(`always:${bot}:${key}`); await this.grantResults.shift(); }
   async markBotRead(id: string, signal?: AbortSignal): Promise<void> {
     this.reads.push({ kind: "bot", id, signal });
     await this.readResponses.shift();
@@ -158,6 +166,257 @@ async function readingFixture(foreground = true) {
   f.a.streams[0].status("connected");
   return f;
 }
+
+function referenceFor(target: CardReference["target"], message: Message): CardReference {
+  const reference = cardReference(target, message);
+  if (!reference) throw new Error("Fixture requires a live request identity");
+  return reference;
+}
+
+async function cardFixture(permission = false, inRoom = false) {
+  const f = await readingFixture();
+  const target = inRoom ? readRoom : readBot;
+  if (inRoom) f.a.streams[0].frame({ kind: "group", group: { ...room, busyBotId: "a" } }, null);
+  const card = permission
+    ? { title: "Run this tool?", options: ["Allow", "Deny"], requestId: "ask", tool: "Read", allowKey: "read:workspace" }
+    : { title: "What should I do?", options: ["Allow", "Deny", "Another choice"], requestId: "ask" };
+  const message: Message = { id: "card-message", at: 3, role: "bot", kind: "options", card, from: { botId: "a" } };
+  const emit = (next: Message) => f.a.streams[0].frame({ kind: "message.patch", threadId: target.threadId, message: next }, null);
+  f.a.streams[0].frame({ kind: "message", threadId: target.threadId, message }, null);
+  const leave = f.session.viewConversation(f.a, target); await settleMicrotasks();
+  const reference = referenceFor(target, message);
+  const state = () => f.session.getSnapshot().cardActions[cardActionKey(reference)];
+  const act = (action: CardAction) => f.session.actOnCard(f.a, reference, action);
+  return { ...f, target, message, reference, leave, emit, state, act };
+}
+
+describe("native question and permission decisions", () => {
+  it.each(["Allow", "Deny", "  custom\nanswer  "])("sends %s as exact question text, never a permission", async (text) => {
+    const f = await cardFixture(); await f.act({ kind: "answer", text });
+    expect(f.a.decisions).toEqual([{ thread: "thread", request: "ask", behavior: "answer", message: text }]);
+    expect(f.state()).toMatchObject({ phase: "settled", outcome: "answered", grantSaved: false });
+    expect(f.session.getSnapshot().state.messages.thread.find((message) => message.id === f.message.id)?.card?.answered).toBeUndefined();
+  });
+
+  it.each(["allow", "deny"] as const)("sends the exact permission %s with no question text", async (kind) => {
+    const f = await cardFixture(true); await f.act({ kind });
+    expect(f.a.decisions).toEqual([{ thread: "thread", request: "ask", behavior: kind, message: undefined }]);
+    expect(f.state()?.outcome).toBe(kind === "allow" ? "allowed-once" : "rejected");
+  });
+
+  it("routes a room question through its thread and current speaker", async () => {
+    const f = await cardFixture(false, true); await f.act({ kind: "answer", text: "Room answer" });
+    expect(f.a.decisions).toEqual([{ thread: "room-thread", request: "ask", behavior: "answer", message: "Room answer" }]);
+  });
+
+  it("rejects a card left behind by a different room speaker", async () => {
+    const f = await cardFixture(false, true);
+    f.a.streams[0].frame({ kind: "group", group: { ...room, busyBotId: "other" } }, null);
+    await f.act({ kind: "answer", text: "Former speaker" });
+    expect(f.a.decisions).toHaveLength(0); expect(f.state()?.phase).toBe("failed");
+  });
+
+  it.each(["allow", "deny", "always"] as const)("rejects permission %s on a question", async (kind) => {
+    const f = await cardFixture(); await f.act({ kind });
+    expect(f.a.actions).toEqual([]); expect(f.state()?.phase).toBe("failed");
+  });
+
+  it("rejects a text answer on a permission and rejects blank question answers", async () => {
+    const permission = await cardFixture(true); await permission.act({ kind: "answer", text: "Allow" });
+    expect(permission.a.actions).toEqual([]);
+    const question = await cardFixture(); await question.act({ kind: "answer", text: " \n " });
+    expect(question.a.actions).toEqual([]); expect(question.state()?.message).toContain("Enter an answer");
+  });
+
+  it("locks immediate repeated taps and remains settled before the server frame arrives", async () => {
+    const f = await cardFixture(true); const response = deferred<RequestOutcome>(); f.a.responseResults.push(response.promise);
+    const first = f.act({ kind: "allow" }); const second = f.act({ kind: "deny" });
+    expect(f.a.decisions).toHaveLength(1); expect(f.state()?.phase).toBe("pending");
+    response.resolve("allowed-once"); await Promise.all([first, second]);
+    await f.act({ kind: "deny" }); expect(f.a.decisions).toHaveLength(1);
+    expect(f.state()?.outcome).toBe("allowed-once");
+  });
+
+  it("keeps unavailable distinct from a successful answer and does not retry it", async () => {
+    const f = await cardFixture(); f.a.responseResults.push(Promise.resolve("unavailable"));
+    await f.act({ kind: "answer", text: "Too late" }); await f.act({ kind: "answer", text: "Again" });
+    expect(f.state()).toMatchObject({ phase: "settled", outcome: "unavailable", message: expect.stringContaining("not delivered") });
+    expect(f.a.decisions).toHaveLength(1);
+  });
+
+  it.each(["network", "http"])("preserves failed %s decisions and only retries after a new explicit action", async (failure) => {
+    jest.useFakeTimers(); const f = await cardFixture(); const pending = deferred<RequestOutcome>(); f.a.responseResults.push(pending.promise);
+    const sending = f.act({ kind: "answer", text: "Keep my answer" });
+    pending.reject(failure === "http" ? new APIError(409, "Request changed") : new Error("Network unavailable"));
+    await sending; await jest.advanceTimersByTimeAsync(60_000);
+    expect(f.state()?.phase).toBe("failed");
+    expect(f.state()?.message).toContain(failure === "http" ? "not accepted" : "Could not confirm");
+    if (failure === "http") expect(f.state()?.message).toContain("Request changed");
+    expect(f.a.decisions).toHaveLength(1);
+    await f.act({ kind: "answer", text: "Keep my answer" });
+    expect(f.a.decisions).toHaveLength(2); expect(f.state()?.outcome).toBe("answered");
+  });
+
+  it("saves Always before releasing the exact permission", async () => {
+    const f = await cardFixture(true); const grant = deferred<void>(); const response = deferred<RequestOutcome>();
+    f.a.grantResults.push(grant.promise); f.a.responseResults.push(response.promise);
+    const saving = f.act({ kind: "always" });
+    await f.act({ kind: "always" });
+    expect(f.a.actions).toEqual(["always:a:read:workspace"]);
+    expect(f.state()).toMatchObject({ phase: "pending", grantSaved: false });
+    grant.resolve(); await settleMicrotasks();
+    expect(f.a.actions).toEqual(["always:a:read:workspace", "respond:thread:ask:allow"]);
+    expect(f.state()).toMatchObject({ phase: "pending", grantSaved: true });
+    response.resolve("allowed-once"); await saving;
+    expect(f.state()).toMatchObject({ phase: "settled", grantSaved: true, outcome: "allowed-once" });
+  });
+
+  it.each(["conflict", "network"])("does not approve after a %s grant failure", async (failure) => {
+    const f = await cardFixture(true); const grant = deferred<void>(); f.a.grantResults.push(grant.promise);
+    const saving = f.act({ kind: "always" });
+    grant.reject(failure === "conflict" ? new APIError(409, "No matching pending grant") : new Error("Connection lost"));
+    await saving;
+    expect(f.a.decisions).toHaveLength(0);
+    expect(f.state()).toMatchObject({ phase: "failed", grantSaved: false });
+    expect(f.state()?.message).toContain("No approval response was sent");
+    if (failure === "conflict") expect(f.state()?.message).toContain("No matching pending grant");
+  });
+
+  it.each(["answer", "grant"])("reports an ambiguous %s 502 without claiming the computer is offline", async (kind) => {
+    jest.useFakeTimers();
+    const f = await cardFixture(kind === "grant");
+    const error = new APIError(502, "Muster is not running on this computer");
+    if (kind === "grant") {
+      f.a.grantResults.push(Promise.reject(error));
+      await f.act({ kind: "always" });
+    } else {
+      f.a.responseResults.push(Promise.reject(error));
+      await f.act({ kind: "answer", text: "Preserve this answer" });
+    }
+    await jest.advanceTimersByTimeAsync(60_000);
+    expect(f.state()?.message).toContain("Could not confirm whether");
+    expect(f.state()?.message).not.toContain("not running");
+    expect(f.a.actions).toHaveLength(1);
+    if (kind === "grant") {
+      expect(f.a.decisions).toHaveLength(0);
+      expect(f.state()?.message).toContain("No approval response was sent");
+    }
+  });
+
+  it("keeps an accepted grant visible when the following decision is unconfirmed", async () => {
+    const f = await cardFixture(true); const response = deferred<RequestOutcome>(); f.a.responseResults.push(response.promise);
+    const saving = f.act({ kind: "always" }); await settleMicrotasks();
+    response.reject(new Error("Response lost")); await saving;
+    expect(f.state()).toMatchObject({ phase: "failed", grantSaved: true, message: expect.stringContaining("preference was saved") });
+    expect(f.a.actions).toHaveLength(2);
+  });
+
+  it.each(["room", "missing-key"])("does not save an ineligible Always grant: %s", async (invalid) => {
+    const f = await cardFixture(true, invalid === "room");
+    const message = invalid === "missing-key" ? { ...f.message, card: { ...f.message.card!, allowKey: undefined } } : f.message;
+    f.emit(message);
+    await f.session.actOnCard(f.a, referenceFor(f.target, message), { kind: "always" });
+    expect(f.a.actions).toEqual([]);
+  });
+
+  it.each(["leave", "background", "settle", "change-ask", "change-thread", "unpair"])("does not release a permission when %s happens while saving its grant", async (change) => {
+    const f = await cardFixture(true); const grant = deferred<void>(); f.a.grantResults.push(grant.promise);
+    const saving = f.act({ kind: "always" });
+    if (change === "leave") f.leave();
+    if (change === "background") f.session.setForeground(false);
+    if (change === "settle") f.emit({ ...f.message, card: { ...f.message.card!, answered: "Deny" } });
+    if (change === "change-ask") f.emit({ ...f.message, card: { ...f.message.card!, subtitle: "A different action", allowKey: "other:key" } });
+    if (change === "change-thread") f.a.streams[0].frame({ kind: "bot", bot: { ...fleet("a").bots[0], threadId: "next" } }, null);
+    if (change === "unpair") await f.session.unpair();
+    grant.resolve(); await saving;
+    expect(f.a.decisions).toHaveLength(0);
+    if (change === "leave" || change === "background") expect(f.state()).toMatchObject({ phase: "failed", grantSaved: true });
+  });
+
+  it.each(["leave", "background", "stale-client", "signature", "settled", "hidden-branch"])("rejects a new action from %s context", async (invalid) => {
+    const f = await cardFixture(true);
+    if (invalid === "leave") f.leave();
+    if (invalid === "background") f.session.setForeground(false);
+    if (invalid === "signature") f.emit({ ...f.message, card: { ...f.message.card!, tool: "Bash" } });
+    if (invalid === "settled") f.emit({ ...f.message, card: { ...f.message.card!, answered: "Allow" } });
+    if (invalid === "hidden-branch") f.a.streams[0].frame({ kind: "message", threadId: "thread", message: { ...newest, id: "separate-branch" } }, null);
+    await f.session.actOnCard(invalid === "stale-client" ? f.b : f.a, f.reference, { kind: "allow" });
+    expect(f.a.actions).toEqual([]); expect(f.b.actions).toEqual([]);
+  });
+
+  it("does not let a late old response settle a different question reusing its request ID", async () => {
+    const f = await cardFixture(); const pending = deferred<RequestOutcome>(); f.a.responseResults.push(pending.promise);
+    const sending = f.act({ kind: "answer", text: "Original" });
+    const replacement = { ...f.message, id: "new-card", card: { ...f.message.card!, title: "Replacement ask" } };
+    f.a.streams[0].frame({ kind: "message", threadId: "thread", message: replacement }, null);
+    const reference = referenceFor(f.target, replacement);
+    await f.session.actOnCard(f.a, reference, { kind: "answer", text: "Must wait" });
+    expect(f.a.decisions).toHaveLength(1);
+    pending.resolve("answered"); await sending;
+    expect(f.session.getSnapshot().cardActions[cardActionKey(reference)]).toBeUndefined();
+    expect(f.state()).toBeUndefined();
+    await f.session.actOnCard(f.a, reference, { kind: "answer", text: "New answer" });
+    expect(f.a.decisions).toHaveLength(2);
+  });
+
+  it("preserves a server settlement when the HTTP response is lost", async () => {
+    const f = await cardFixture(true); const pending = deferred<RequestOutcome>(); f.a.responseResults.push(pending.promise);
+    const sending = f.act({ kind: "allow" });
+    f.emit({ ...f.message, card: { ...f.message.card!, answered: "Allow" } });
+    pending.reject(new Error("Response lost")); await sending;
+    await f.act({ kind: "allow" }); expect(f.a.decisions).toHaveLength(1);
+    expect(f.session.getSnapshot().state.messages.thread.find((message) => message.id === f.message.id)?.card?.answered).toBe("Allow");
+  });
+
+  it("fences a previous account's pending decision after pairing to a new client", async () => {
+    const f = await cardFixture(); const pending = deferred<RequestOutcome>(); f.a.responseResults.push(pending.promise);
+    const sending = f.act({ kind: "answer", text: "Old account" }); await pairWith(f);
+    pending.reject(new APIError(401, "Old account revoked")); await sending;
+    expect(f.session.getSnapshot().client).toBe(f.b); expect(f.session.getSnapshot().cardActions).toEqual({});
+  });
+
+  it.each([401, 403])("clears the current connection for authorization failure %s", async (status) => {
+    const f = await cardFixture(); const pending = deferred<RequestOutcome>(); f.a.responseResults.push(pending.promise);
+    const sending = f.act({ kind: "answer", text: "Answer" }); pending.reject(new APIError(status, "Revoked")); await sending; await settleMicrotasks();
+    expect(f.session.getSnapshot().client).toBeNull(); expect(f.stored()).toBeNull();
+    expect(f.session.getSnapshot().cardActions).toEqual({});
+  });
+
+  it("revalidates ownership before a write if a synchronous subscriber unpairs on pending", async () => {
+    const f = await cardFixture(true);
+    const unsubscribe = f.session.subscribe(() => {
+      if (f.state()?.phase === "pending") void f.session.unpair();
+    });
+    await f.act({ kind: "allow" }); unsubscribe(); await settleMicrotasks();
+    expect(f.a.actions).toEqual([]); expect(f.session.getSnapshot().client).toBeNull();
+  });
+
+  it("reports a failed explicit status check without sending a decision", async () => {
+    const f = await cardFixture(); f.a.fleetResponses.push(Promise.reject(new APIError(503, "Offline")));
+    await expect(f.session.refreshCards(f.a)).rejects.toThrow("Could not load the latest request status");
+    expect(f.a.decisions).toHaveLength(0);
+    expect(f.session.getSnapshot().state.messages.thread).toContainEqual(f.message);
+  });
+
+  it("reports a stale status check while preserving a newer ask", async () => {
+    const f = await cardFixture(); const pending = deferred<Fleet>(); f.a.fleetResponses.push(pending.promise);
+    const checking = f.session.refreshCards(f.a);
+    const replacement = { ...f.message, card: { ...f.message.card!, subtitle: "Updated request" } };
+    f.emit(replacement); pending.resolve(fleet("a"));
+    await expect(checking).rejects.toThrow("conversation changed");
+    expect(f.session.getSnapshot().state.messages.thread).toContainEqual(replacement);
+    expect(f.a.decisions).toHaveLength(0);
+  });
+
+  it("ignores an old account status check before and after transport", async () => {
+    const f = await cardFixture(); const pending = deferred<Fleet>(); f.a.fleetResponses.push(pending.promise);
+    const checking = f.session.refreshCards(f.a); await pairWith(f);
+    pending.reject(new APIError(401, "Former credentials")); await checking;
+    const calls = f.a.fleetCalls; await f.session.refreshCards(f.a);
+    expect(f.a.fleetCalls).toBe(calls); expect(f.session.getSnapshot().client).toBe(f.b);
+    expect(f.session.getSnapshot().cardActions).toEqual({});
+  });
+});
 
 describe("shared conversation read state", () => {
   it.each([readBot, readRoom])("acknowledges the $kind owner after acceptance without clearing its neighbors", async (target) => {
@@ -740,7 +999,7 @@ describe("companion session lifecycle", () => {
     } }, null);
     expect(currentChatTarget({ client: f.a, target }, f.a, f.session.getSnapshot().state)).toBeNull();
     await expect(f.session.send(f.a, target, "stale draft")).resolves.toBe(false);
-    await f.session.respond(f.a, "thread", "request", "allow");
+    await f.session.actOnCard(f.a, { target, messageId: "former-card", requestId: "request", signature: "former-ask" }, { kind: "allow" });
     expect(f.a.actions).toEqual([]);
     page.resolve({ messages: [older], hasMore: false }); await paging;
     expect(f.session.getSnapshot().state.messages.thread).toEqual([newest]);
@@ -780,8 +1039,9 @@ describe("companion session lifecycle", () => {
     expect(currentChatTarget(selection, f.b, f.session.getSnapshot().state)).toBeNull();
     expect(currentChatTarget(selection, null, f.session.getSnapshot().state)).toBeNull();
     await expect(f.session.send(f.a, target, "old screen")).resolves.toBe(false);
-    await f.session.respond(f.a, "thread", "request", "allow");
-    await f.session.alwaysAllow(f.a, "a", "tool");
+    const formerCard = { target, messageId: "former-card", requestId: "request", signature: "former-ask" };
+    await f.session.actOnCard(f.a, formerCard, { kind: "allow" });
+    await f.session.actOnCard(f.a, formerCard, { kind: "always" });
     f.session.viewConversation(f.a, target);
     expect(f.a.actions).toEqual([]); expect(f.b.actions).toEqual([]);
     expect(f.a.reads).toEqual([]); expect(f.b.reads).toEqual([]);
