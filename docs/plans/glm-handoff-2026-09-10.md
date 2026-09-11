@@ -2073,3 +2073,58 @@ completion. Refresh allowance and post-push metadata at this boundary.
 
 At this boundary allowance is77% used /23% remaining; no reset consumed. The
 existing heartbeat remains active; preserve a user pause and the2%/1% handoff rules.
+
+## Astra Loop45 — Native pairing accepted; continue composer/approvals (2026-09-11)
+
+Product scope: `ios/App/PairingView.swift` only, accepted SHA256
+`d937753e8804beac71ee38992c14d58265aebf43aed562dbb50921b9782dd2cb`.
+Manual controls precede discovery; delayed help is replaced by explicit
+troubleshooting. Errors dismiss the keyboard and show their full text in native
+alerts. Addresses remain; failed codes clear. Submission captures context and
+locks before scheduling, including the successful-to-navigation interval.
+Late discovery/scanner selections are fenced. Competing links during a request
+are consumed with a reopen-later notice and never queued or redeemed.
+
+Actual gates: **235 root files /3241 passed /8 skipped**,277.25s; **189 Swift
+passed**,0.743s; ad hoc iPhoneSE3/iOS26.5 build, servertsc and rootlint exit0.
+All69 non-Markdown iOS inputs match. **Six distinct native scenarios passed
+across reruns**, not a single green six-test batch: stable form29.876s,
+invalid-address retention/full error35.301s, expired certificate/full error31.455s,
+server503/explicit retry/cold Keychain restore43.481s, pending double-tap/competing
+link32.660s, and invitation-confirmation15.901s. Final pending proof includes one
+request, still-open original connection, release1live/0abandoned, one redemption.
+
+Preserve `failed-runs.json` and every result bundle. Earlier native runs were
+0/1,1/6,2/6,0/1, then correctedB1/1 and CDE2/3, bridgeE0/1 and correctedE1/1
+(passed/total); these are test executions, not distinct feature counts. Failures
+exposed an OS keyboard tutorial, floating keyboard toolbar hit testing, an
+inapplicable navigation geometry bound, fault-mode carryover, app relaunch through
+`XCUIApplication.open`, and SpringBoard's required Open confirmation. Use the
+owned `simctl openurl` bridge plus that explicit confirmation for incoming links;
+it retains the pending app. The real app/source was unchanged during these harness
+fixes. Hold and503 occur before redemption; response-loss acceptance is unverified.
+
+Initial cleanup retained25passed/1failed with fixture `kill EPERM`/exit1; exact
+cause is unknown. Independent recovery **37/37passed**,3.347s, proves all7 owned
+PIDs/groups/11 ports absent, the fresh simulator and its testCA deleted, and all26
+original devices unchanged. Separate URL bridge cleanup **6/6passed**. No further
+signals/restart were needed; no services remain. Runtime `/tmp/muster45-KvXnrn`
+and ignored evidence in `loop45-ios-pairing/` and `loop45-native-pairing/` remain.
+Never recreate or reuse this deleted simulator or stopped fixture. Demo8845 and
+the original release-handoff stash were preserved.
+
+Next bounded slices: ordinary `ChatView.submit` draft retention until acceptance
+and immutable account/thread/send context; then one guarded Always allow operation
+that stops on grant failure, retains its client, decodes unavailable outcomes and
+maps permissions explicitly. Test newer edits, duplicate callbacks, lost responses
+and context changes with actual request counts. Native `AgentAvatar.swift` still
+uses the old cursor SVG, visible in the roster screenshot; follow with canonical
+flower/reaction parity rather than treating regenerated icons as complete branding.
+
+Physical/minimum-iOS17 devices, Watch/Bonjour/QR camera, Google and real models
+remain unverified. Preserve all desktop1.10.4/local1.10.5 release, CI billing,
+VPS-host-key, signing/Intel/mirror, Android release-policy, backup ownership/
+portability, VM and Mimosa gates. Allowance80%used/20%remaining; no reset consumed.
+Single existing heartbeat stays active subject to user pause and2%/1% handoff rules.
+Goal remains active. Post-push GET metadata and scheduler readback are recorded
+separately; a source push is not a native release.

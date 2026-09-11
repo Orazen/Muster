@@ -394,3 +394,53 @@ The companion fixture is in `loop44-native-tls/`. All39 cleanup checks passed:
 deleted, all26 pre-existing simulators preserved. No shared Mac trust change was
 made. Physical devices, minimum iOS17 runtime, Watch runtime, Google and native
 release signing remain separate gates.
+
+
+## iPhone pairing form and operation contract — Loop45
+
+Manual address entry precedes the changing discovery results. Troubleshooting is
+an explicit disclosure; no timer inserts help above the form while someone types.
+Address/code fields expose a keyboard Done action. Validation and request errors
+clear focus and use a native alert so the entire message can be read without the
+number keyboard covering its final lines. Failed addresses remain editable;
+failed one-time codes are cleared and require an explicit fresh attempt.
+
+Submission captures the computer and credential and locks synchronously before
+scheduling its Task. A successful attempt remains locked until navigation removes
+the pairing view; only a matching failure unlocks it. The manual, discovery and
+scanner paths invalidate older selections. A link arriving during a pending
+attempt is consumed with an explanatory notice, never queued or redeemed later.
+The scanner callback also belongs to its specific opening. These UI checks do not
+replace Session's existing connection fencing or the server's one-time registry.
+
+Owned native acceptance must assert complete control/message bounds, not merely
+XCTest `isHittable` or accessibility existence. On iOS26.5 the floating keyboard
+toolbar can intercept a gesture whose coordinate appears above the keyboard keys.
+Scroll from a clear part of the form before tapping. Preserve failed runs; a test
+that stopped before submission cannot establish transport or retry behavior.
+
+Loop45 verified on2026-09-11: root **235files /3241passed /8skipped** (277.25s),
+Swift **189passed /0failed** (0.743s), ad hoc iPhoneSE3/iOS26.5 build,
+servertsc/rootlint exit0, and69 matching non-Markdown source inputs. **Six distinct
+native scenarios passed across reruns**: stable manual controls, invalid-address
+retention, certificate error visibility, explicit server-error retry with cold
+Keychain restoration, repeated tap/competing live invitation, and invitation
+confirmation. Earlier failed batches and individual runs remain in `failed-runs.json`;
+there was no single all-green six-case native batch. See the Loop45 CEO ledger for
+individual times and initial failures.
+
+For a link arriving during an existing request, `XCUIApplication.open` relaunches
+the app. The accepted case instead uses an owned-host `simctl openurl` bridge and
+taps only iOS's exact MusterMobile Open confirmation. Keep the original pairing
+window: opening another invalidates its credential. Assert one original request,
+its open connection, release1live/0abandoned, and one redemption. A pre-redemption
+hold or503 does not establish accepted-response-loss behavior. Real camera capture,
+Bonjour arrival, physical/iOS17/Watch devices and Google remain separate gates.
+
+Cleanup retained an initial25passed/1failed shutdown-status gate (`kill EPERM`,
+launcherexit1), then independently passed37/37 recovery checks plus6/6 URL-bridge
+cleanup checks. All owned processes/ports are gone, the disposable simulator/testCA
+is deleted, all26 pre-existing devices are unchanged, and evidence is preserved.
+Artifacts: `.omb-scratch/verification/loop45-ios-pairing/` and
+`loop45-native-pairing/`. These simulator checks do not establish distribution or
+cross-platform release readiness.

@@ -3155,3 +3155,88 @@ unavailable. The full OS/ecosystem/release goal stays active.
 
 At this boundary allowance is77% used /23% remaining; no reset consumed. The
 existing heartbeat remains active; preserve a user pause and the2%/1% handoff rules.
+
+## Loop 45 — Stable native pairing and explicit recovery (2026-09-11)
+
+The iPhone pairing form keeps manual entry ahead of changing discovery results.
+Troubleshooting opens deliberately; the eight-second help insertion is removed.
+Continue/Connect dismiss the keyboard, and invalid-address, certificate and server
+errors use a native alert with the complete message. Entered addresses survive
+recovery. Failed one-time codes clear and require an explicit fresh attempt.
+Keyboard Done/return controls and stable accessibility identifiers are included.
+
+A synchronous operation lock captures the computer and credential before a Task
+starts. Repeated taps cannot redeem twice; changing computers is disabled while
+pending. Successful pairing remains locked until navigation removes the view.
+New manual/scanned selections invalidate older discovery resolutions, and each
+scanner callback belongs to its own opening. A competing invitation is consumed
+with a separate notice to reopen it after the active attempt; it is not queued.
+The only product edit is `ios/App/PairingView.swift`; its reviewed and accepted
+SHA256 is `d937753e8804beac71ee38992c14d58265aebf43aed562dbb50921b9782dd2cb`.
+All69 non-Markdown iOS inputs match the native source input snapshot.
+
+Verified results:
+
+- Root Vitest: **235 files /3241 passed /8 skipped /0 failed**,277.25s, exit0.
+- Swift core: **189 passed /0 failed /0 skipped**,0.743s (0.764s aggregate).
+- Native: **six distinct scenarios accepted across reruns**, not one all-green
+  six-case batch. Stable form across the discovery interval29.876s and explicit
+  invitation confirmation15.901s passed in `native-recovery`; invalid-address
+  retention/readable error35.301s passed in `native-b-final`; certificate rejection
+  with full error31.455s and server failure/explicit retry/cold Keychain restore
+  43.481s passed in `native-cde-final`; double tap plus competing live invitation
+  32.660s passed in `native-e-system-final`.
+- The final pending-request test sends one POST, confirms the original held
+  request is still open, releases exactly1live/0abandoned requests, and observes
+  one accepted device. The incoming URL uses `simctl openurl` on only the owned
+  simulator followed by iOS's explicit Open confirmation. Opening a new
+  invitation on its own still makes no request until the app's confirmation.
+- iPhoneSE3(375x667pt)/iOS26.5 local ad hoc build, server typecheck and root lint
+  passed. Visual inspection confirms complete invalid-address, certificate and
+  exact503 messages within their alerts, with no keyboard. Native transport uses
+  the real isolated app/Keychain/proxy/DeviceRegistry/server plus an offline
+  provider and a testCA trusted only in the disposable simulator.
+
+Failures remain part of the evidence. The baseline attempt failed1/1 before
+submission at an OS keyboard tutorial. Initial native batch passed1/6; the next
+passed2/6. Their remaining cases stopped at keyboard/toolbar-covered controls;
+an uncleared injected fault also affected the first batch's final case. A targeted
+reset failed1/1 because its form-only geometry excluded the roster's navigation
+button. Corrected invalid-address test passed1/1. C/D/E passed2/3 because
+`XCUIApplication.open` relaunched the app and lost the pending view. The first
+system-delivery attempt failed1/1 at iOS's unhandled Open confirmation; its
+corrected rerun passed1/1. A separate xctestrun schema preflight launched0tests.
+All these harness corrections leave the product source unchanged. The two failed
+held requests timed out without redemption. Do not describe pre-redemption hold
+or503 injection as accepted-response-loss verification.
+
+Cleanup initially passed25checks and failed1shutdown-status gate: the fixture
+reported `kill EPERM` and launcherexit1. Its identity matched, but the precise
+failed signal/existence check is unknown. Independent recovery passed **37/37**
+checks in3.347s: all7 captured PIDs/groups and11 ports absent, no owned work or
+outbound denials, only the owned simulator deleted with its testCA, all26 original
+devices unchanged. No further signals or fixture restart were used. Separate URL
+bridge cleanup passed **6/6**; its PID/port are gone. The failed receipt is retained.
+No Loop45 service remains, and demo8845 was not touched.
+
+Evidence: `.omb-scratch/verification/loop45-ios-pairing/` (`verification.json`,
+`failed-runs.json`, all xcresults/screenshots, accepted source hashes and separate
+cleanup receipts), `loop45-native-pairing/`, runtime `/tmp/muster45-KvXnrn`.
+Physical/minimum-iOS17 devices, Watch runtime, actual Bonjour arrival/QR camera,
+Google sign-in, real models and distribution are not verified by these fixtures.
+
+Next: fix ordinary iOS draft loss before acceptance, preserving raw/newer edits
+and captured account/thread context. Then fix Always allow's swallowed grant
+failure, client reacquisition between grant/answer, missing unavailable outcome,
+and permission-choice mapping. These are source-audited follow-ups, not native
+reproductions yet. The native roster also visibly retains the old cursor mascot
+in `ios/App/AgentAvatar.swift`; regenerate visible avatars from the canonical
+flower and add appropriate reactions after these correctness slices. Updated
+app-icon catalogs alone did not establish native avatar parity.
+
+Published desktop1.10.4 and the local1.10.5 candidate remain distinct; release,
+signing/Intel/mirror, CI billing, VPS trust, Google, portable backup and VM gates
+remain open. Full Mimosa is unavailable. Allowance at this boundary is80% used /
+20% remaining; no reset consumed. Keep the single existing heartbeat, original
+release-handoff stash and active ecosystem goal. This loop is progress toward a
+release; post-push GET verification and heartbeat readback are separate receipts.
