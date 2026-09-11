@@ -2,7 +2,7 @@
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFileSync, existsSync, statSync, unlinkSync } from "node:fs";
+import { readFileSync, statSync, unlinkSync } from "node:fs";
 import { writeFileAtomic } from "./atomic.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
