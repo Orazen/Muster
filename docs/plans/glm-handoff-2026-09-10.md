@@ -2260,3 +2260,15 @@ restore, and separately specified live sync. Keep the original release gates and
 active goal; continue with one verified slice at a time. Allowance last observed
 85%used/15%remaining, no reset used;2%/1% handoff rules remain. The existing
 heartbeat must be updated with the final documentation commit, not duplicated.
+
+
+Loop47 post-push observation,09:25UTC: GET health now returns
+`messageSendVersion:1` and PID8; app and downloads also return200. The web entry
+remains `index-DtqgTb0F.js`, which is compatible with this server/native-only
+change and does not identify a backend commit. Desktop metadata still names
+1.10.4/cb5db9c. This supersedes the earlier missing-capability observation, without
+establishing an exact backend SHA, authenticated production send or new native
+release. GitHub Actions' billing refusal and public backend availability are
+separate observations; the deployment path responsible was not proved. Receipt:
+`loop47-main-only/production-get.json`. Latest allowance87%used/13%remaining,
+no reset consumed. Application source and Loop46 test results remain unchanged.
