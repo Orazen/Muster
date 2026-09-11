@@ -40,6 +40,7 @@ import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-s
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
 import { installObscuraLocal, resolveObscuraMount, OBSCURA_TOOLS } from "./obscura.ts";
+import { legalPageFor, withVerificationMeta } from "./legal-pages.ts";
 import { exportSoulMd, parseSoulMd } from "./soul-md.ts";
 import {
   CUSTOM_MODELS_MIN,
@@ -7606,6 +7607,15 @@ let requestUserEmail = "";
       );
     }
 
+    // legal pages: server-rendered privacy policy + terms. Google's OAuth
+    // consent-screen review needs crawlable content — the bare SPA shell
+    // reads as a blank page — and the consent form links /Terms-of-Service
+    // with capital letters, so matching is case-insensitive.
+    if (method === "GET") {
+      const legal = legalPageFor(path);
+      if (legal) return html(res, 200, withVerificationMeta(legal));
+    }
+
     // public marketing pages at "/" — the landing itself plus any real
     // file that exists in the marketing dir (teams.html, images, css).
     // Never intercepts /api or the app's deep links; SPA fallback below.
@@ -7619,8 +7629,11 @@ let requestUserEmail = "";
         const rel = (path === "/" ? "index.html" : path.slice(1)).replace(/\.\./g, "");
         const file = join(MARKETING_DIR, rel);
         const data = readFileSync(file);
-        res.writeHead(200, { "content-type": MIME.get(extname(file).toLowerCase()) ?? "text/html" });
-        return res.end(data);
+        const type = MIME.get(extname(file).toLowerCase()) ?? "text/html";
+        res.writeHead(200, { "content-type": type });
+        // Search Console HTML-tag verification rides every served HTML page,
+        // homepage included.
+        return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
       } catch {
         /* fall through to the app SPA below */
       }
@@ -7633,14 +7646,15 @@ let requestUserEmail = "";
       const file = join(STATIC_DIR, safe);
       try {
         const data = readFileSync(file);
-        res.writeHead(200, { "content-type": MIME.get(extname(file)) ?? "application/octet-stream" });
-        return res.end(data);
+        const type = MIME.get(extname(file)) ?? "application/octet-stream";
+        res.writeHead(200, { "content-type": type });
+        return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
       } catch {
         // SPA fallback
         try {
           const data = readFileSync(join(STATIC_DIR, "index.html"));
           res.writeHead(200, { "content-type": "text/html" });
-          return res.end(data);
+          return res.end(withVerificationMeta(data.toString()));
         } catch {
           /* fall through to 404 */
         }
