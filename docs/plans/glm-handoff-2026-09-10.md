@@ -3052,7 +3052,7 @@ receipts prove **6 servers + 4 providers exited, 12 ports closed, 3 roots remove
 
 Retained failures/corrections: first real HTTP boot rejected a TypeScript
 parameter property unsupported by Node strip-only execution (1 failed /18 skipped);
-explicit fields corrected it. Initial lint had12 errors, all corrected. First
+explicit fields corrected it. Initial lint had 12 errors, all corrected. First
 browser run1/2 passed because the second tab selected the helper bot; exact bot
 route/request/credential identity fixed the fixture. First sign-out probe0/1
 failed on an assumed CDP abort event; the final test asserts the real account/UI
@@ -3086,7 +3086,7 @@ high `image-size` alerts in Android's Metro chain, with no fixed published upgra
 retain existing mitigations and do not dismiss the alerts. See the primary
 [ICNS advisory](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr) and
 [JXL/HEIF advisory](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq). The audit ran
-0tests/0installs; it is not a security conclusion. Native signing/runtime, actual
+0 tests / 0 installs; it is not a security conclusion. Native signing/runtime, actual
 Google consent, full portable sync, VM and Mimosa remain open.
 
 Evidence: `.omb-scratch/verification/loop80-stop-recovery/` —
@@ -3096,3 +3096,33 @@ Evidence: `.omb-scratch/verification/loop80-stop-recovery/` —
 is attributed to this reliability slice.
 
 Allowance at Loop80 acceptance: **4% remaining**; reset **19 September2026, 16:43 Europe/Rome**. No reset consumed. Owner’s2%handoff threshold has not yet been reached.
+
+
+**Loop80 publication receipt — 2026-09-12T19:58:36.684227+00:00:** Product **b3786bb** is pushed.
+Final production GET checks passed **10/10** for public route/asset availability,
+missing-asset404 behavior and anonymous401 boundaries. The app's served JavaScript
+changed from index-DCAkTz04.js to **index-CSwfumo9.js**, containing the new Stop
+recovery UI strings. CSS remains index-C6Cegjsm.css. The new frontend code is
+observed live about three minutes after push; earlier probes correctly saw the
+old bundle. **Authenticated production recovery and exact backend/source identity
+remain unverified.** Served artifacts differ from this Mac's build, so this is
+feature-presence evidence, not a complete artifact attestation. Desktop metadata
+remains1.12.0/e241968; no native release.
+
+CI34715571217 and autodeploy34715571179 completed with 4 billing-rejected jobs,
+1 skipped and0 executed steps. GitHub annotations explicitly cite failed account
+payments or spending limit. The registered hook again returned404 at19:55:33 UTC,
+yet another path delivered new frontend code. Do not describe all deployments as
+blocked. No hook, billing or hosted settings changed. Authenticated Dokploy access
+is still required to inspect and repair that configuration.
+
+Full acceptance remains **254 files /3862 passed /8 skipped /0 failed**, plus
+broker 2/2, updater 14/14, packaged server 9/9, browser 3/3. The final browser receipt
+run took 23.755s; all 970 source hashes remain unchanged. This documentation receipt
+adds0 runtime tests. The [next build-identity slice](web-release-identity-next-slice.md)
+is ready, preserving the current UI and avoiding forced reloads. Restore all 12
+inherited paths exactly using the Loop80 receipt; retain the original stash.
+Allowance remains **4%**; no reset consumed; the owner's 2% handoff threshold has not
+been reached. Automation stays untouched/PAUSED. The wider release goal remains
+incomplete: native/runtime, actual Google consent, durable Stop/restart, peer race
+acceptance, full sync/backup, VM, Mimosa and two high dependency gates remain open.
