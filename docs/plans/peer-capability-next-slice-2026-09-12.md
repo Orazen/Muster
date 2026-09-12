@@ -51,6 +51,25 @@ verified; a nontechnical user's persistent retry action is not implemented or
 browser-tested. Add that recovery surface before treating failed-stop handling as
 an end-to-end release capability.
 
+### Next UI slice: retry the original cleanup only (proposed)
+
+Do not replay the generic interrupt endpoint: it stops whichever dispatch is now
+current and cancels queues across all the bot's tasks. A local busy/thread check
+cannot protect against another tab starting a newer turn on the same thread.
+Issue an owner-bound failed-stop receipt for the original dispatch generation.
+Invalidate it at every later start, and retry only the original queue cleanup;
+the retry must never invoke the provider interruption method. Missing or stale
+receipts must direct the user to inspect current work rather than offer a stale
+Stop action. This server receipt and endpoint are not implemented in Loop78.
+
+Keep recovery separately from the six-second shared error message, scoped by
+account and bot. ChatView must show an accessible alert and named retry action
+after idle. Both initial Stop controls share a synchronous pending lock. Fence
+late responses on sign-out/unmount, and test task changes, duplicate clicks,
+failed retry, successful cleanup and stale receipt refusal in owned HTTP/browser
+fixtures. Do not claim refresh restoration until its chosen persistence behavior
+is implemented and tested.
+
 ### Remaining runtime acceptance recipe (proposed, not executed)
 
 Reuse the owned HTTP fixture with blocked outbound access and private credential

@@ -4105,3 +4105,21 @@ The newly identified recovery UI gap remains queued: after a failed Stop, the
 server accepts a retry but busy-only controls disappear. A persistent retry action
 and browser acceptance are required. Latest allowance: **20% remaining**, reset
 19 September 2026 at 16:43 Europe/Rome; no reset consumed.
+
+
+**Loop78 publication receipt — 12 September 2026, 19:03 UTC:** Product
+**fb956a8** is pushed to private `Orazen/Muster`, default `main`. Final GET checks
+returned health/app/download metadata **200** and anonymous scan/Google workspace
+status **401**. The app still serves `/assets/index-DCAkTz04.js`; these checks do
+not establish the exact backend revision or authenticated production behavior.
+Desktop metadata remains **1.12.0 / e241968**, with no new native release.
+
+Fresh CI/autodeploy runs **34712918029 / 34712917913** recorded **4 billing-rejected
+jobs / 1 skipped / 0 steps**. Local verification remains **248 files / 3748 passed /
+8 skipped / 0 failed**, plus packaged server **9/9**, broker **2/2**, updater **14/14**.
+This documentation receipt adds **0 runtime tests**; all 959 code inputs remain
+unchanged. Account billing and release prerequisites remain board gates. Preserve
+PAUSED automation and the twelve inherited files; final byte restoration is recorded
+in this loop's local `inherited-restoration.json`. The original stash must remain.
+The reviewed next UI slice uses an owner-bound, original-generation cleanup retry
+so an old Stop failure cannot cancel newer work.
