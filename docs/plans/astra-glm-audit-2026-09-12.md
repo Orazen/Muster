@@ -256,3 +256,40 @@ publication-only preservation. This documentation update changes no tested produ
 Continue with the ranked repairs above, one verified commit at a time. Preserve the
 inherited native work, report actual failures, and distinguish browser fixture acceptance,
 real provider consent, production deployment and native release.
+
+
+## Loop 71 — hosted Vault and briefing containment (12 September 2026)
+
+Authenticated hosted accounts could reach the installation Vault routes. A second
+owned reproduction found daily briefings exposing the other account's bot names and
+the installation's Vault-empty status. Hosted requests now receive403 for the exact
+Vault route family before body parsing/file operations; briefings filter bots through
+existing ownership rules and return without reading Vault state. Local Vault status,
+validation and installation Drive behavior remain supported. Only the server router
+and its owned HTTP harness changed.
+
+Final focused acceptance: **1 file / 87 passed / 0 failed / 0 skipped**,4.58s. Full
+Vitest: **244 files / 3520 passed / 8 skipped / 0 failed**,355.21s (357.626s command).
+Server typecheck passed12.197s; repository lint passed2.627s; rebuilt packaged server
+passed **9 checks**,17.413s. The unchanged renderer's production build passed92.931s
+before the server-only briefing amendment. All653 observed source inputs still match
+the freeze. Each final owned HTTP fixture stopped both servers, closed four ports,
+made zero outbound attempts and removed its temporary root.
+
+Keep the failed evidence: four expected pre-fix Vault GET failures; the configured
+Vault baseline could not open the absent native SQLite binding. Therefore the Vault
+baseline proves route accessibility, not configured-data exfiltration or transfers.
+The briefing reproduction separately proves actual synthetic other-account names and
+Vault metadata disclosure (2 expected failures,2 local/auth passes). A mistaken test
+name precondition was corrected using returned bot names, with that first failure
+retained. The initial83-test and3516-pass full-suite results precede the amendment;
+the87/3520 results above supersede them. No full security assessment is implied.
+
+Evidence: `.omb-scratch/verification/loop71-vault-containment/` and
+`.omb-scratch/verification/astra-onboarding-refresh-2026-09-12/loop71-final-*-result.json`.
+Next: verify the prepared Flower onboarding frame; retain the12 shelved inherited
+files unchanged. Account-linked Drive containment and portable v2 restore remain
+required before any all-chats/files/session backup or automatic sync promise. The
+current v1 bundle is partial and needs the original installation secret as well as
+its passphrase. This removes a data-boundary defect; no revenue uplift was measured.
+Push and production revision still require their own receipts.

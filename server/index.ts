@@ -4333,11 +4333,13 @@ let requestUserEmail = "";
       requestUserEmail = sessAcct?.user?.email ?? "";
     }
 
-    // Version-one bundles contain the whole install, not one account. Keep
-    // every workspace backup route local until export and restore both have
-    // an account-scoped format; even the primary account must not upload
-    // other users' data to its personal storage.
-    if (SELF_HOSTED && (path === "/api/workspace" || path.startsWith("/api/workspace/"))) {
+    // Workspace bundles and the Vault belong to the whole installation,
+    // not one account. Deny both families before handlers parse bodies or
+    // open local files; even the primary hosted account must not export
+    // other users' data through the installation's storage connection.
+    const installationBackup = path === "/api/workspace" || path.startsWith("/api/workspace/")
+      || path === "/api/vault" || path.startsWith("/api/vault/");
+    if (SELF_HOSTED && installationBackup) {
       return json(res, 403, {
         code: "WORKSPACE_BACKUP_UNAVAILABLE",
         error: "Workspace backups are available on local desktop installs only for now.",
@@ -5249,6 +5251,10 @@ let requestUserEmail = "";
     }
 
     if (path === "/api/briefing" && method === "GET") {
+      const bots = store.bots.filter(ownsRecord)
+        .map((b) => ({ name: b.name, activity: String(b.activity), unread: Boolean(b.unread) }));
+      // A hosted account can see its roster, but not the installation Vault.
+      if (SELF_HOSTED) return json(res, 200, { briefing: buildBriefing({ bots }) });
       const vaultStatus = vault.status();
       const lastSnapshot = vaultStatus.lastSnapshot;
       const daysStale = lastSnapshot
@@ -5256,8 +5262,7 @@ let requestUserEmail = "";
         : null;
       return json(res, 200, {
         briefing: buildBriefing({
-          // SAFETY: store.bots is the live roster array on Store (server/store.ts).
-          bots: store.bots.map((b) => ({ name: b.name, activity: String(b.activity), unread: Boolean(b.unread) })),
+          bots,
           vault: { fileCount: vaultStatus.fileCount, lastSnapshot, daysStale },
         }),
       });

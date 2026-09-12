@@ -3889,3 +3889,24 @@ so CI failure must not be equated with production remaining stale. Desktop metad
 stays1.12.0. No product changes or new tests in this receipt-only update; Loop70's
 **3468 passed / 8 skipped**,30 browser checks and successful build/lint still apply.
 Pending12 files are restored byte-for-byte, original stash preserved, heartbeat ACTIVE.
+
+
+**Loop 71 (2026-09-12, contain hosted Vault and briefing data):** the exact
+installation Vault route family now denies authenticated hosted accounts before
+body parsing or file operations. Daily briefings use each account's visible bots and
+omit Vault lookup entirely on hosted installs. Owned baseline requests demonstrated
+other-account bot names and Vault metadata in the briefing; configured Vault data
+transfer remains unverified because the native index binding was unavailable.
+
+Changed the router and owned HTTP harness. Final focused **87 passed**; full Vitest
+**244 files / 3520 passed / 8 skipped / 0 failed**,355.21s; server types passed12.197s,
+lint2.627s, rebuilt packaged server **9/9**,17.413s. Unchanged frontend build passed
+92.931s before the server-only amendment. All653 observed inputs stable. Final fixture
+cleanup:2 servers exited,4 ports closed,0 outbound attempts,root removed. Earlier
+83/3516-pass runs and all expected/preparation failures are retained in the audit.
+
+Protecting account boundaries is a prerequisite to adoption, not evidence of revenue
+uplift or a comprehensive security conclusion. Next: the prepared Flower onboarding
+frame and narrow-screen recovery acceptance; then checked Drive ownership and portable
+backup recovery. Twelve inherited files remain preserved outside this commit. See the
+current audit/handoff for exact receipts and remaining native release gates.
