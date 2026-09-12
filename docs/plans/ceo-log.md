@@ -3910,3 +3910,27 @@ uplift or a comprehensive security conclusion. Next: the prepared Flower onboard
 frame and narrow-screen recovery acceptance; then checked Drive ownership and portable
 backup recovery. Twelve inherited files remain preserved outside this commit. See the
 current audit/handoff for exact receipts and remaining native release gates.
+
+
+**Loop 72 (2026-09-12, guided onboarding and visible recovery):** shipped design
+candidate uses a stable seven-step frame, canonical expressive Flower, semantic
+progress and focused headings. Failed sends reveal a reachable recovery message;
+provider Settings Escape preserves the draft. All seven steps exercised at320px and
+1440px, with keyboard navigation, reload, long inputs and explicit retry acceptance.
+
+Full Vitest **244 files / 3520 passed / 8 skipped / 0 failed**,407.76s; build/types
+passed125.821s; lint2.679s; owned browser **15 passed / 0 failed / 0 skipped / 0 flaky**,
+177.727s, zero retries. All932 inputs frozen;172 owned processes exited,57 ports closed,
+15 fixture roots removed. Earlier14/15 browser result retained: test-only CSS identity
+expectation corrected, product unchanged. Independent17-image review found no shell
+blocker; existing teal-avatar clipping is a separate follow-up. Real provider consent,
+production acceptance and native release are distinct outstanding gates.
+
+Parallel research reviewed the installed OpenMausBot0.1.74 onboarding, public landing
+and30 selected source files at0.1.75;259 docs-area files were inventoried, not all read.
+An updater download was deferred without installation. The resulting strategy and
+free-account iPhone/Watch guide are being made durable next. Current manual backup is
+partial and installation-secret dependent: do not promise all-chat/file/session sync.
+No conversion or revenue improvement has been measured. Latest allowance readback
+42%used/58%remaining; reported reset19September2026,16:43Europe/Rome. Existing hourly
+heartbeat remains ACTIVE with the2%handoff/1%pause rules; no reset credit consumed.

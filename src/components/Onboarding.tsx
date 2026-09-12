@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Check,
   AlertTriangle,
@@ -16,7 +16,7 @@ import {
   BellRing,
   Lock,
 } from "lucide-react";
-import { MusterBloom } from "./MusterBloom";
+import { FlowerBot } from "@/lib/musterbot";
 import { AgentAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -309,6 +309,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   // Draft hydration runs once per account; saving starts only after it.
   const restoredRef = useRef(false);
   const [draftReady, setDraftReady] = useState(false);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const stageTitleRef = useRef<HTMLHeadingElement>(null);
+  const stageScrollRef = useRef<HTMLDivElement>(null);
+  const setupErrorRef = useRef<HTMLDivElement>(null);
+  const revealedSetupErrorRef = useRef("");
 
   useEffect(() => {
     finishSession.activate();
@@ -421,7 +426,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   // sane escape hatch (it previously had none at all).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || finishingRef.current || !finishSession.active) return;
+      if (e.key !== "Escape" || e.defaultPrevented || state.appSettingsOpen || finishingRef.current || !finishSession.active) return;
       track("email_skipped");
       setEmailGateDone(user?.id, "skipped");
       // Deliberate abandonment discards the draft — it exists to protect
@@ -432,7 +437,30 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [user?.id, onDone, finishSession]);
+  }, [user?.id, onDone, finishSession, state.appSettingsOpen]);
+
+  // Only semantic navigation/restoration moves focus. Edits, engine polls,
+  // tour panels and Settings opening/closing leave the current control alone.
+  useLayoutEffect(() => {
+    if (!decided || !draftReady) return;
+    stageScrollRef.current?.scrollTo({ top: 0 });
+    stageTitleRef.current?.focus({ preventScroll: true });
+  }, [decided, draftReady, step, user?.id]);
+
+  // Reveal each new failure once, without moving focus during edits or
+  // tour animation. Settings keeps its own focus while it is open.
+  useLayoutEffect(() => {
+    if (!setupError) {
+      revealedSetupErrorRef.current = "";
+      return;
+    }
+    if (state.appSettingsOpen || revealedSetupErrorRef.current === setupError) return;
+    const alert = setupErrorRef.current;
+    if (!alert) return;
+    revealedSetupErrorRef.current = setupError;
+    alert.scrollIntoView({ block: "nearest", inline: "nearest" });
+    alert.focus({ preventScroll: true });
+  }, [setupError, state.appSettingsOpen]);
 
   // Tour auto-advance — only while the tour step is showing, and never
   // under prefers-reduced-motion (the panel then stays put; Next/dots work).
@@ -612,7 +640,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const stepContent = [
     (
       <div className="flex flex-col items-center">
-        <MusterBloom size={96} wordmark />
         <h1 className="mt-4 text-[20px] font-semibold text-ink">Welcome to Muster</h1>
         <p className="mt-1.5 text-center text-[14px] leading-relaxed text-ink-secondary">
           A roster of AI agents that do real work on their own computer. Let&rsquo;s set yours up —
@@ -629,7 +656,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             : "Your keys stay yours, and every bot asks before acting on anything risky."}
         </p>
         <input
-          autoFocus
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -930,7 +956,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
           {/* Identity */}
           <input
-            autoFocus
             type="text"
             value={botName}
             onChange={(e) => setBotName(e.target.value)}
@@ -1145,60 +1170,103 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-app p-4">
-      <div aria-hidden="true" className="onboarding-scene">
-        <div className="onboarding-petal onboarding-petal-a"><MusterBloom size={480} interactive={false} /></div>
-        <div className="onboarding-petal onboarding-petal-b"><MusterBloom size={360} interactive={false} /></div>
-        <div className="onboarding-petal onboarding-petal-c"><MusterBloom size={120} interactive={false} /></div>
-      </div>
-      <div
-        className={`onboarding-card flex max-h-full min-h-0 w-full flex-col rounded-2xl border border-hairline/40 bg-panel/95 p-6 shadow-xl backdrop-blur-xl sm:p-8 ${
-          step === 1 ? "max-w-[680px]" : "max-w-[460px]"
-        }`}
-      >
-        {/* progress: step label carries the intent ("What are we doing"),
-            the dots just keep count — Mercury's label-first grammar */}
-        <div className="mb-2 text-center text-[11px] font-semibold uppercase tracking-[0.32em] text-ink-secondary">
-          {STEP_LABELS[step]}
-        </div>
-        <div
-          className="mb-6 flex items-center justify-center gap-1.5"
-          aria-label={`Step ${step + 1} of ${STEP_LABELS.length}: ${STEP_LABELS[step]}`}
-        >
-          {STEP_LABELS.map((label, i) => (
-            <span
-              key={label}
-              className={`h-1.5 rounded-full transition-all ${i === step ? "w-5 bg-accent" : i < step ? "w-1.5 bg-accent/50" : "w-1.5 bg-hairline"}`}
-            />
-          ))}
-        </div>
-        {/* No AnimatePresence here: its mode="wait" exit handshake hung on
-            framer-motion v13, leaving the previous step mounted with the
-            new step's label — the wizard became un-navigable mid-funnel.
-            A hard swap is boring and always correct. */}
-        <fieldset key={step} disabled={creating} className="wizard-step m-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain border-0 px-1 pb-1 pt-0">
-          {stepContent[step]}
-        </fieldset>
-        {/* Recovery: a failed finish keeps the wizard open with every input
-            intact and says what went wrong, instead of closing on a failure
-            like it used to. */}
-        {setupError && (
-          <div
-            role="alert"
-            className="mx-1 mt-3 flex items-start gap-2 rounded-xl border border-[#ff5c5c40] bg-[#ff5c5c14] px-3.5 py-2.5 text-[13px] leading-relaxed text-ink"
-          >
-            <AlertTriangle size={15} className="mt-0.5 shrink-0 text-[#ff7a7a]" />
-            <span>{setupError}</span>
+    <div
+      ref={shellRef}
+      role="region"
+      aria-labelledby="onboarding-title"
+      className="onboarding-shell"
+      onKeyDown={(event) => {
+        // Settings is a sibling dialog with its own keyboard boundary and
+        // focus restoration. This handler receives events inside setup only.
+        if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey || state.appSettingsOpen) return;
+        const shell = shellRef.current;
+        if (!shell) return;
+        const controls = Array.from(shell.querySelectorAll<HTMLElement>(
+          'button, a[href], input, textarea, select, summary, [tabindex]',
+        )).filter((element) => !element.matches(":disabled") && element.tabIndex >= 0 && element.getClientRects().length > 0);
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (!first || !last) {
+          event.preventDefault();
+          stageTitleRef.current?.focus();
+        } else if (event.shiftKey && (document.activeElement === first || document.activeElement === stageTitleRef.current || document.activeElement === setupErrorRef.current)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }}
+    >
+      <div className="onboarding-frame">
+        <aside className="onboarding-guide" aria-label="Your setup guide">
+          <div className="onboarding-guide-intro">
+            <div className="onboarding-guide-flower" aria-hidden="true">
+              <FlowerBot size={148} state={setupError ? "thinking" : creating ? "working" : step === 6 ? "happy" : "idle"} spin={false} />
+            </div>
+            <div className="onboarding-guide-copy">
+              <p className="onboarding-wordmark">Muster</p>
+              <h2 id="onboarding-title" className="onboarding-guide-title">Set up Muster</h2>
+              <p className="onboarding-guide-note">Meet your teammate. Choose how you work.</p>
+            </div>
           </div>
-        )}
-        {step === 2 && (
-          <button
-            onClick={() => setStep(step - 1)}
-            className="mt-4 flex items-center gap-1 self-center text-[12px] text-ink-secondary hover:text-ink"
-          >
-            <ArrowLeft size={12} /> Back to {STEP_LABELS[step - 1]}
-          </button>
-        )}
+          <ol className="onboarding-progress" aria-label="Setup progress">
+            {ONBOARDING_STEPS.map((entry, index) => (
+              <li
+                key={entry.id}
+                aria-current={index === step ? "step" : undefined}
+                data-complete={index < step || undefined}
+                className="onboarding-progress-step"
+              >
+                <span className="onboarding-progress-number" aria-hidden="true">
+                  {index < step ? <Check size={13} /> : index + 1}
+                </span>
+                <span className="onboarding-progress-label">{entry.label}</span>
+              </li>
+            ))}
+          </ol>
+        </aside>
+        <div className="onboarding-stage">
+          <header className="onboarding-stage-head">
+            <p className="onboarding-stage-count">Step {step + 1} of {ONBOARDING_STEPS.length}</p>
+            <h2
+              ref={stageTitleRef}
+              tabIndex={-1}
+              data-testid="onboarding-stage-title"
+              className="onboarding-stage-title"
+            >
+              {STEP_LABELS[step]}
+            </h2>
+          </header>
+          <div ref={stageScrollRef} data-testid="onboarding-stage-scroll" className="onboarding-stage-scroll">
+            {/* A new failure is revealed above the form. It shares the
+                scroll area, so long recovery text and retry stay reachable. */}
+            {setupError && (
+              <div
+                ref={setupErrorRef}
+                role="alert"
+                tabIndex={-1}
+                className="onboarding-error mb-4 flex items-start gap-2 rounded-xl border border-[#ff5c5c40] bg-[#ff5c5c14] px-3.5 py-2.5 text-[13px] leading-relaxed text-ink"
+              >
+                <AlertTriangle size={15} className="mt-0.5 shrink-0 text-[#ff7a7a]" />
+                <span className="min-w-0 break-words">{setupError}</span>
+              </div>
+            )}
+            {/* Preserve the hard swap: the old exit-animation handshake could
+                leave stale content mounted beneath the next step's label. */}
+            <fieldset key={step} disabled={creating} className="wizard-step m-0 min-w-0 border-0 p-0">
+              {stepContent[step]}
+            </fieldset>
+            {step === 2 && (
+              <button
+                onClick={() => setStep(step - 1)}
+                className="mx-auto mt-4 flex items-center gap-1 text-[12px] text-ink-secondary hover:text-ink"
+              >
+                <ArrowLeft size={12} /> Back to {STEP_LABELS[step - 1]}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

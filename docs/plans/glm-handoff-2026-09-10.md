@@ -2553,3 +2553,39 @@ required before any all-chats/files/session backup or automatic sync promise. Th
 current v1 bundle is partial and needs the original installation secret as well as
 its passphrase. This removes a data-boundary defect; no revenue uplift was measured.
 Push and production revision still require their own receipts.
+
+
+## Loop 72 — guided onboarding and visible recovery (12 September 2026)
+
+The seven-step setup now has a stable desktop frame and compact mobile guide using
+Muster's canonical Flower mascot. Ordered, named progress and focused stage headings
+make navigation/restoration explicit. Long failures reveal themselves above the form;
+editing does not repeatedly steal focus. Escape in provider Settings closes Settings
+without abandoning onboarding or discarding the account's draft. Existing semantic
+steps, v2 draft ownership, checked finish/retry and explicit sending are preserved.
+
+Verification: production build including frontend/server types passed **125.821s**;
+final repository lint passed **2.679s**. Full Vitest **244 files / 3520 passed / 8 skipped /
+0 failed**,407.76s (410.444s command). Final owned Playwright **15 passed / 0 failed /
+0 skipped / 0 flaky**,177.727s, one worker and zero retries; test types/scoped lint also
+passed. All932 observed source/build inputs stayed unchanged;172 observed owned
+processes exited,57 ports closed and15 fixture roots were removed. The first browser
+attempt retained14 passes/1 helper-precondition failure: normal CSS settled to an
+identity matrix rather than the literal `none`. Only that expectation was corrected;
+reduced-motion assertions remained. Product inputs were unchanged between attempts.
+
+Browser acceptance covers all seven steps at320x568 and1440x900, long/expanded inputs,
+keyboard progress/back/restore, provider Settings Escape, reduced motion, account
+isolation, template prefill and failed-send recovery followed by an explicit successful
+retry. Seventeen final screenshots were independently reviewed. A nonblocking existing
+teal teammate-avatar edge is clipped in the desktop preview; cause remains unverified
+and is queued separately. The tour's existing autoplay remains a subsequent slice.
+Owned offline engine acceptance is not real Google consent, a production task, native
+installation, full accessibility certification or measured conversion/revenue uplift.
+
+Evidence: `.omb-scratch/verification/astra-onboarding-refresh-2026-09-12/`, especially
+`shell-tests/attempt-2/summary.json`, `shell/visual-review.json`, and `loop72-*-result.json`.
+The12 inherited native/research/template files remain separately preserved until the
+verified commits finish. No native release is claimed; physical Watch/editor acceptance,
+Intel runtime and Apple distribution signing remain open. The handoff will retain the
+portable-backup and account-linked Drive acceptance gates.
