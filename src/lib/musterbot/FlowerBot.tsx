@@ -21,7 +21,7 @@ function eyeTransform(pose: FlowerPose, index: 0 | 1, gazeX: number, gazeY: numb
   const tilt = (pose.tilt ?? 0) * wrap + (pose.tilt2 ?? 0) * sel;
   const sx = (pose.esx ?? 1) * (1 + (pose.esx2 ?? 0) * sel);
   const sy = (pose.esy ?? 1) * (1 + (pose.esy2 ?? 0) * sel);
-  return `translate(${round(dx)} ${round(dy)}) rotate(${round(tilt)}) scale(${round(sx)} ${round(sy)})`;
+  return `translate(${round(dx)}px, ${round(dy)}px) rotate(${round(tilt)}deg) scale(${round(sx)}, ${round(sy)})`;
 }
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
@@ -66,7 +66,7 @@ function FlowerBotComponent({
       data-spin={spin || undefined}
       data-pose={poseFor(state)}
     >
-      <g className="flower-bot__body" style={{ transform: `translate(0 ${(pose.bdy ?? 0).toFixed(1)})` }}>
+      <g className="flower-bot__body" style={{ transform: `translate(0px, ${(pose.bdy ?? 0).toFixed(1)}px)` }}>
         <path d={MUSTER_BODY} fill={color} />
         {EYES.map((eye) => (
           <g key={eye.x} transform={`translate(${eye.x} ${eye.y}) rotate(-4)`}>

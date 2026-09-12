@@ -3844,3 +3844,37 @@ all existing containers/images were preserved. Viewer, internet, auto-setup and 
 bot job remain unverified. Native release and Drive/storage repair gates remain in
 `docs/plans/astra-glm-audit-2026-09-12.md`. Inherited Watch work remains preserved outside
 this commit. Next bounded UI repair is the Flower CSS transform syntax.
+
+
+**Loop 70 (2026-09-12, make Flower expressions visible):** corrected only the two
+CSS transform strings in the mascot component. Chromium now applies the existing
+body/eye poses and gaze. Geometry, expression values, eye anchors and motion policy
+are unchanged. Actual component/CSS browser acceptance passed **30/30 grouped checks**,
+including all15 poses, both eyes, five gaze samples, four animation/spin combinations
+and reduced motion; desktop/mobile screenshots were inspected, browser closed, no
+page errors or external requests. Full Vitest **244 files / 3468 passed / 8 skipped /
+0 failed**, 301.67s; lint passed2.081s; production build/types passed53.144s.
+
+Native audit advanced without shipping the inherited Watch migration: actual watchOS
+and iOS simulator builds passed27.674s/27.414s with signing disabled. The owned snapshot
+included all five inherited edits; all86 checkout iOS hashes and all26 original
+simulator states remained unchanged, and all command groups exited. Watch runtime/
+editor acceptance remains required before committing those five files. All14 inherited
+files were restored and hash-verified before updating the two old ledgers; pending
+native/research/template work is preserved separately from this verified slice.
+
+Loop69 `f40e9d7` is pushed, with full-app browser **13/13 passed**. Its four CI/deploy
+jobs again never started due to account billing/spending; build skipped. Production
+GET200 still serves the old literal v1 onboarding draft key; desktop remains1.12.0.
+Both image-size high alerts stay open: GLM's dismissal recommendation is unsupported;
+preserve existing Metro mitigation and the separate CVE mappings in the audit. No
+complete Mimosa assessment, real OAuth, native distribution or revenue uplift is
+claimed. Next correctness work: preserve installation Drive while containing its
+unchecked new account-linked flow; repair Store ancestry/write failures; complete
+owned Watch editor acceptance. Current evidence and actionable acceptance plans are
+linked from the refreshed ownership handoff.
+
+The board's renewed authorization also resumes the existing hourly CEO heartbeat:
+app update and local readback both confirm ACTIVE, original target/cadence preserved,
+no duplicate. Latest allowance check24%used/76%remaining; reported reset19 September
+2026,16:43Europe/Rome; no credit consumed. Preserve the2%handoff/1%pause thresholds.

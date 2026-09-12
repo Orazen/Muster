@@ -2326,3 +2326,174 @@ Production GETs at **11:12:10 UTC** returned **200/200/200** for health, app and
 For the exact product SHA, automatic CI run **34592857323** and autodeploy run **34592857324** both failed: **4 jobs blocked by account payments/spending limits, 1 skipped job, 0 executed steps**. Board billing action is required. No retry, billing change, tag, release publication or reset was performed. Evidence: `loop49-watch/actions-current.json`, `production-get.json`, `precommit-source-check.json`, `current-source-match.json` and `cleanup-final-result.json`.
 
 Allowance is **98% used / 2% remaining**, with no reset credits available. This is the requested ready-to-resume handoff. Next verified slice: Watch reply drafts and checked delivery using the existing ComposerCoordinator/ComposerTransport; the observed draft-loss failure remains open. Then improve native task identity and canonical flower avatars, followed by the ranked release/auth/recovery work in `docs/plans/ecosystem-reference-and-release-plan-2026-09-11.md`. Preserve Loop 46 composer and Loop 48 approval protections. Actual Google login across platforms, portable Drive backups, conflict-aware sync, Android release policy, minimum/physical devices, real engine execution, VM operation and the full Mimosa assessment remain unverified. Desktop release still needs billing, trusted deployment identity/mirror acceptance, signing and current-SHA platform artifacts. The current heartbeat is retained and must be paused at 1% or less after updating this handoff; do not resume any retired fixture or spend/reset automatically. Old September 16 dates are not a verified current reset deadline.
+
+
+## Loop 50 — Watch composer prepared; 1% allowance pause (2026-09-11)
+
+The next slice started from pushed `aac8fd3e3d156e188d5332b3ddd8ee7f55969584` after a clean checkout and up-to-date pull. Allowance moved from 98% to **99% used / 1% remaining** during implementation, so the user's standing pause rule now applies. The existing `muster-ceo-loop` heartbeat is **PAUSED**. Do not resume autonomous work or consume a reset without renewed authorization or an applicable allowance reset. The full ecosystem goal is incomplete; no goal-completion claim is made.
+
+**Uncommitted product changes to preserve:** `ios/Watch/WatchSession.swift` and `ios/Watch/WatchViews.swift` now wire the existing ComposerCoordinator/ComposerTransport to session-owned in-memory drafts and captured account/task/view identities. Send is synchronous and requires a live foreground connection; failures retain text and show inline recovery with explicit Retry send. System editor Done only commits text. Non-live status, disconnect, foreground exit and view changes retire requests, while an outstanding transport keeps its duplicate-prevention slot. A matching checked acknowledgment clears only the submitted draft revision. Re-pair clears this session's drafts; no durable/relaunch draft preservation or automatic replay is claimed. `ios/Sources/CompanionCore/ComposerCoordinator.swift` adds connectionChanged and separates local edit eligibility from foreground sending: this shared change also lets iPhone system-editor callbacks preserve an otherwise-valid draft during inactivity. Its tests add four regressions; `Client.swift` changes only the outdated composer comment.
+
+Current verification: **274 Swift tests passed / 0 failed** (0.859 seconds XCTest tests, 31.827 seconds command), **24 focused composer tests passed / 0 failed** (0.021 seconds), Watch syntax parsing exit 0 (0.091 seconds), server typecheck exit 0 (9.437 seconds) and root lint exit 0 (2.069 seconds). The first focused run's 23/23 result is retained; final 24/24 supersedes it. **Root full suite: 238 files / 3,352 passed / 8 skipped / 0 failed**, 291.09 seconds Vitest / 293.104 seconds command. Bootstrap-only cleanup completed **40/40 checks / 0 failed**, with all postconditions satisfied. The Watch changes have **0 native acceptance tests and no actual Watch build** in this loop; syntax is not runtime acceptance. Independent source review found no concrete blocker, but the Watch system editor may cause ChatView.onDisappear, retiring its captured lease before committing text. That behavior needs actual native evidence and is not fixed or disproved by portable tests.
+
+Resume with the current diff and `.omb-scratch/verification/loop50-watch-composer/source-handoff.json`: all five product hashes are frozen. Core focused evidence lives in `loop50-composer-core/`; syntax evidence in `loop50-watch/`. Fresh runtime preparation passed **22/22** before the allowance threshold. The first cleanup attempt stopped with **19 passed / 1 failure before any mutation** because the redactor expected string dictionary keys but received an integer-keyed PID map. That attempt is retained. The corrected capture serialization then passed **40/40** cleanup checks: all three owned PIDs/groups and 11 ports are absent, Watch `B1CEF59B-94A4-4201-9339-451B896012BC` and its data are deleted, and all 26 original devices remain unchanged. No simulator CA was installed; the actual owned trust store was empty. Demo 8845 was untouched. Fixture handle 76515 and boot handle 13213 are closed with exit 0; successful cleanup handle 90187 closed with exit 0. There are no live Loop 50 resources. No pairing, simulator CA installation, native snapshot, build or native test had started when paused. Evidence: `loop50-watch-composer/cleanup-bootstrap-result2.json` (SHA256 `fa201df612b6e10f4de937d6860522a840c3e8cf54e96e280f4be5c0afa8de32`) and `bootstrap-pause-handoff.json`; do not resume the retired fixture or device. Do not commit these product changes as a verified slice until the actual Watch editor, success/acknowledgment, failed/lost response, explicit retry, duplicate/held send, newer edit, leave/return, legacy capability and lifecycle cases are exercised. Refresh only necessary checks if source changes; retain existing results.
+
+Next after acceptance: canonical native mascot and readable task identity, then the ranked ecosystem/release plan. Google login across clients, portable Drive backup/restore and conflict-aware sync, physical/minimum-platform acceptance, Android release policy, real engines, VM execution and the full Mimosa assessment remain open. Product last pushed is Loop 49 `fddb197`; public desktop metadata last observed 1.10.4/cb5db9c. GitHub billing blocked four jobs before execution; billing, trusted deployment identity/mirror acceptance, signing and current-SHA platform artifacts remain release prerequisites. Revenue hypothesis: retaining a dictated reply prevents avoidable lost work; no conversion or retention uplift was measured.
+
+Loop 50 closing state: all five product files plus these two ledgers and the ecosystem plan remain **uncommitted**. HEAD/origin remain `aac8fd3`; no new tag, release or deployment is claimed. Full root/Swift checks finished with the counts above; source hashes and exact remaining acceptance steps are in `source-handoff.json`. The 1% pause is active, and no reset was consumed.
+
+Allowance recheck after the Loop 50 handoff: **100% used / 0% remaining**, no reset credits. The account now reports its next reset as **2026-09-17 20:29:34 Europe/Rome** (18:29:34 UTC), superseding the old September 16 expectation. Pending product hashes are unchanged and the heartbeat remains PAUSED. No additional implementation or tests ran during this recheck.
+
+### GLM Loop 51 ledger entry — 2026-09-11 (user-authorized, Astra PAUSED)
+
+GLM ran one authorized slice in Astra's loop (pull → smallest verifiable version → full suite → pathless commit → push → prod GET → ceo-log block + verification dir) without touching Astra's paused state or in-flight files. Landed: `6db8677` (per-role benchmark grading: `server/role-eval.ts` + 15 tests + `muster bench` CLI + bundle entry, mirroring fleet-eval end to end) and `25d112f` (package-win.yml runs the real packaged-Electron native smoke gate instead of host Node; publisherName check aligned). Full suite green before each commit — **239 files / 3,367 passed / 8 skipped**. `muster bench` E2E-verified on a simulated 6-scenario capture (overall passed, exit 0). Prod GET 200. Evidence: `.omb-scratch/verification/loop51-role-benchmark/` (source hashes, evidence capture + scorecard).
+
+GitHub Actions/release audit outcome: billing block confirmed owner-side (zero CI attestation since 2026-09-06, last release v1.10.3 vs package.json 1.10.5); the 2 HIGH Dependabot alerts (`image-size` 1.2.1, android-companion Metro chain, CVE-2025-71329) are **unfixable upstream today** (no fixed release exists; override breaks npm install and Metro needs the v1 API; dev-only exposure) — recommend dismissal as dev_tooling or waiting for upstream; the release.yml `published`-output finding was a false positive against Astra's post-`5a98daa` workflow. Astra's Loop 50 Watch composer diff remains preserved and uncommitted; next GLM slices: storage write-failure consistency, native mascot + task identity, memory history + rollback.
+
+
+## Ownership handoff to GPT-6 Astra — resumed audit, 12 September 2026
+
+The board explicitly confirmed **GLM stopped; Astra owns the checkout** and renewed
+the standing mandate after upgrading the allowance. Earlier pause, HEAD, release and
+reset dates above are historical. Read `AGENTS.md`, the CEO mandate, this checkpoint,
+and `docs/plans/astra-glm-audit-2026-09-12.md`; then execute one verified slice on main.
+The audit reviewed GLM's **66 committed files** from `aac8fd3` through `97c2b56`, plus
+the **14 inherited pending files**. This is not a claim that every repository file,
+real provider, native platform or product feature passed end-to-end acceptance.
+
+### Verified repairs and current test baseline
+
+| Loop | Result | Verification |
+| --- | --- | --- |
+| 67, `efcf629` | Memory save/rollback retain exact previous bytes before replacement; reject linked history paths and failed snapshots; preserve displaced baseline/live history through clock rollback and pruning. | Focused41; full **243 files / 3426 passed / 8 skipped / 0 failed**; build/types passed; packaged server9; original browser8/8. Initial inherited lint44 errors retained. |
+| 68, `c8d33ad` | All44 inherited lint errors cleared; malformed organization IDs reject and mascot lookups ignore inherited object keys. | Full **243 files / 3431 passed / 8 skipped / 0 failed**; lint/types passed; independent review. |
+| 69, `f40e9d7` | All seven onboarding stages persist using semantic v2 IDs; safe legacy migration; one shared character contract fixes default Flower/Blob rejection before first task. | Draft54; character/store53; full **244 files / 3468 passed / 8 skipped / 0 failed**; lint/build/types passed; packaged server9; full-app browser **13/13**, zero retries,69.557s. |
+| 70, this checkpoint | Two CSS transform strings now render the existing Flower poses, gaze and motion correctly. | **30/30** component browser checks, all15 poses and reduced motion; full **244 files / 3468 passed / 8 skipped / 0 failed**,301.67s; lint/build/types passed. |
+
+Retained onboarding browser failures: attempt1 **11/12 passed** exposed the actual
+Flower PATCH400 that prevented any message request; attempt2 **12/13 passed** exposed
+an ambiguous reply locator after real fixture-server acceptance. Only the locator
+changed before final13/13. Final evidence includes an intercepted pre-forward503,
+manual retry202, exactly one persisted user/reply after reload, A→B→A drafts in one
+tab, template prefill without auto-send, mobile/desktop layouts and character readback.
+All932 observed inputs stayed fixed, all108 owned process identities exited,48 ports
+closed and13 fixture roots were removed. Synthetic providers are not real Google
+consent or live model execution.
+
+Additional fresh gates: **Swift274 passed** with the pending composer changes;
+Android **11 suites / 555 passed**, types/lint passed, toolchain15/15, assets29/29,
+autolinking19/19; updater14 passed; broker2 passed; Electron syntax8 files checked.
+Existing CUA0.20.0 image passed actual guest MCP smoke with60 tools discovered,
+screenshot/app-list/pointer operations, runtime10/10, cleanup7/7 and owned workspaces
+removed4/4. Original9 containers/17 image records stayed unchanged. Viewer, internet,
+auto-provisioning and a real bot job are still unverified.
+
+### Preserve the inherited native work
+
+All14 inherited files were restored byte-for-byte and verified against
+`.omb-scratch/verification/astra-glm-audit-2026-09-12/inherited-state.json` before
+updating these two old ledgers. The original stash
+`4d13860fa6cb858efc48713dba9fb4637c7101e7` remains preserved. Temporary owned stashes
+must be applied and hash-checked before ending this checkpoint; restoration receipts
+in that audit directory record their final disposition. Never blindly pop the original
+stash or include pending files with an unreviewed `git add -A`.
+
+The five Loop50 product files remain **uncommitted**: `Client.swift`,
+`ComposerCoordinator.swift`, its tests, `WatchSession.swift`, and `WatchViews.swift`
+at their paths listed in `inherited-state.json`. Six files under `docs/research/glm/`
+and `www/templates.html` also remain pending. The template page falsely reports copy
+success and describes prompt copies as installed packs; its research includes
+unsupported code-complete/native-release claims. Correct those in separate slices.
+
+Native compilation has advanced: an owned snapshot with all five exact inherited
+overlays passed **watchOS and iOS simulator builds**,27.674s/27.414s, signing disabled,
+no developer identity. XcodeGen passed. All86 checkout iOS hashes, all26 original
+simulator records/states and all source overlays stayed unchanged; command groups
+exited. No device was created, booted or installed. **Watch interaction acceptance for
+this migration is still zero**, so compilation does not authorize its commit.
+
+Next Watch acceptance must exercise the actual system text editor→Done through
+inactive/onDisappear, send/acknowledgment, failed/lost response, explicit retry,
+held duplicate, newer edit, leave/return, legacy capability and lifecycle retirement.
+Reuse only fixture code from earlier loops with fresh owned identities. The old
+append-only Watch XcodeGen test specification does not fit today's project: merge
+targets/schemes structurally inside the owned snapshot. Exact commands and limits:
+`native-unsigned/README.md` within the audit directory. Do not revive retired devices
+or fixtures, or touch demo8845.
+
+### Remaining build order and acceptance gates
+
+1. **Drive capability containment:** preserve explicitly configured local installation
+   Drive (`cfg.driveSync.refreshToken`, `/api/workspace/drive/push|pull`), file and
+   Telegram operations. The newly advertised account-linked flow is unreachable on
+   hosted deployments and lacks coherent identity/scope/token ownership on desktop.
+   Expose only an exact authenticated sanitized capability GET on hosted deployments;
+   retain every installation-wide backup denial. Route supported local UI to the
+   existing installation transport and contain only unchecked account-linked routes.
+   Test actual routes and SQLite with fake upstream responses, unchanged login rows,
+   no outbound calls and no false connection fallback. Detailed implementation and
+   acceptance checklist: `auth/next-slice.md`. Re-enable account-linked Drive only after
+   a separate legitimate callback/session-intent/subject/scope design and actual consent.
+2. **Storage consistency:** repair failed best-effort insert ancestry across restart,
+   bot-plus-greeting partial creation/retry duplication, and zero-row strict patches.
+   Assert active transcript/history as well as database row counts. Repair premature
+   Drive restore success stamps and double Telegram stamps separately. Source-level
+   reproductions and exact scopes are in `storage/audit.md` and `auth/report.md`.
+3. **UI correctness:** memory restore versus newer editor input, stale usage captions,
+   historical-card resend locking/thread ownership, keyboard dialog focus/Escape,
+   real companion pairing producer/consumer, and actual tier-cap402 onboarding recovery
+   in the browser. Then improve native task identity
+   and visible canonical Flower avatars; regenerated icon catalogs alone are not
+   native mascot rendering or mobile/Watch layout acceptance.
+4. **Release:** fix the advertised CLI version, diagnose Intel packaged runtime,
+   produce current-source platform artifacts and test real installation/update.
+   Verify Google login and backup recovery independently on each client, actual
+   Android/minimum/physical platforms, Watch packaging and TestFlight distribution.
+   The board must resolve billing and supply a proper signing/notarization path.
+5. **VM and ecosystem:** verify product auto-setup, viewer/takeover, durable workspace,
+   browser isolation, idle/restart behavior and bounded real-engine work. Define
+   conflict-aware, account-owned portable backup/restore before claiming cross-device
+   sync. Reconcile the harness brief with shipped code and run its real benchmark;
+   simulated scorecards do not prove AGI/ASI or model-independent capability.
+6. **Claims and monetization:** correct backup/privacy/restore and beta availability
+   claims in visible pages and machine-readable copy. Measure first-task activation,
+   retained use and paid conversion before asserting growth. Paid activation, live
+   price changes, payment credentials, spending and a public launch still go to the
+   board. No revenue uplift or category leadership was demonstrated by this audit.
+
+### Release, security and allowance facts
+
+GLM published **v1.12.0 / `e241968`**. All8 uploaded assets match local size/SHA256;
+both Mac ZIPs match882 entries each. Apple Silicon packaged runtime passes9 checks;
+Intel's actual packaged runtime probe times out with no passing result. Both Mac
+Gatekeeper assessments reject, neither has a stapled ticket, and there is no available
+Developer ID Application identity. The advertised CLI reports **1.11.0**. Astra has
+not produced or claimed a new distributable desktop release.
+
+For `f40e9d7`, CI/autodeploy again show **4 billing-blocked jobs,1 skipped build,
+0 executed steps**. GET health/app/downloads return200; the served bundle still has
+the old v1 draft key and desktop metadata remains1.12.0. Push, deployment and an
+installed native update are separate receipts. Do not bypass identity, signing,
+spending or release gates.
+
+Keep both image-size high alerts open. GLM's dev-only dismissal recommendation is
+unsupported: they are distinct JXL/HEIF and ICNS advisories, and a forced2.0.2 upgrade
+remains affected while breaking Metro. Preserve the existing parent/worker mitigation;
+a reviewed compatible parser backport or fixed toolchain needs malformed-input and
+actual-export gates. See `security/dependency-review.md`. No complete Mimosa rerun
+was available; no whole-codebase security conclusion follows.
+
+Latest account-wide allowance check: **24% used / 76% remaining**, weekly window;
+next reported reset **19 September 2026,16:43 Europe/Rome** (14:43UTC). Zero reset
+credits; none consumed. Older2%/1% exhaustion and September16/17 reset statements
+are stale. Keep the user's standing rule: refresh this ledger at2% remaining and
+pause autonomous work at1% or less; never buy or consume a reset automatically.
+The existing hourly `muster-ceo-loop` heartbeat is now **ACTIVE**, updated through
+the app under the renewed mandate. Its original target and hourly cadence were
+preserved; no duplicate was created. Readback receipt: `automation-resumed.json`.
+The new prompt preserves the 2% handoff / 1% pause rules and the original stash,
+demo and release boundaries. Old pause paragraphs above are historical.
+
+Evidence root for every relative receipt above:
+`.omb-scratch/verification/astra-glm-audit-2026-09-12/`. The current audit and CEO log
+are the checked-in summary; preserve local failed-run evidence and ownership receipts.

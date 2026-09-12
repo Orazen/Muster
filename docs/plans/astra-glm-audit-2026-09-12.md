@@ -46,7 +46,7 @@ not fix the separate mascot CSS-transform or Drive-flow defects below.
 | P2 | Strict message patch accepts a zero-row database update. | Separate Store slice: require durable target or explicitly repair it; test restart behavior. |
 | P1, repaired in Loop 69 | Default Flower and picker Blob were accepted by the client but rejected by the server, blocking first-task submission before any message request. | Found by the new real-browser recovery test. One browser-safe character contract now drives both picker and API membership, preserving legacy Lottie storage without exposing it in the picker or PATCH. Browser acceptance retains the default Flower. |
 | P2, repaired in Loop 69 | New onboarding indexes 5/6 are rejected by the draft validator. Legacy index 4 has changed meaning. | Version-2 semantic step IDs are shared by persistence and the seven-step UI. Valid legacy drafts retain every field and reopen Welcome because old numeric layouts are ambiguous. Failed migration writes preserve the legacy copy; a v2 value suppresses stale legacy resurrection. Browser and full-suite receipts follow below. |
-| P2 | Flower poses use SVG syntax in CSS transforms; Chromium discards them. | Correct applied transforms; browser assertions must check computed matrices and visual states, including reduced motion. |
+| P2, repaired in Loop 70 | Flower poses use SVG syntax in CSS transforms; Chromium discards them. | CSS length/angle units and comma separators now apply the intended body and eye transforms. All 15 poses and reduced motion pass computed-matrix and visual browser checks. |
 | P2 | Shortcuts dialog sits inside `aria-hidden` and lacks focus ownership. | Use the existing dialog primitive; test keyboard focus/return and Escape interaction with onboarding. |
 | P2 | Phone onboarding opens desktop account pairing instead of companion pairing. | Test the actual invitation producer/consumer; show supported companion setup prerequisites. |
 | P2 | Pending memory restore can erase newly typed text; load-budget captions remain stale after mutations. | Serialize save/restore or preserve editor revisions; update usage from accepted content. Test delayed responses. |
@@ -150,6 +150,17 @@ Additional platform gates, run separately from the root suite:
   are incorrect. Basic sign-in plus separate backup consent remains a valid UX choice.
 - No complete Mimosa rerun was available in this session. No security conclusion follows
   from this review, the portable tests, or the runtime smoke.
+- GLM's recommendation to dismiss the two image-size alerts as dev-only is unsupported.
+  Fresh review confirms two separate high advisories: JXL/HEIF
+  [CVE-2025-71329](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq) and ICNS
+  [CVE-2025-71330](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr). Both reach
+  image-size 1.2.1 through Android Metro; no patched release was available. A forced
+  2.0.2 upgrade remains affected and breaks Metro's callable CommonJS interface.
+  Preserve the existing parent/worker parser mitigation and both open alerts. Its
+  three runtime files match the retained Loop 37 actual-export evidence; that older
+  export evidence was not rerun by this read-only review. A reviewed compatible
+  parser backport or coordinated fixed toolchain is a future repair, with malformed
+  input and actual worker-export gates. See `security/dependency-review.md`.
 
 ## Loop 69: recoverable onboarding and one mascot character contract
 
@@ -191,6 +202,38 @@ roots were removed. Settled wizard screenshots were visually inspected. No live 
 consent, real provider task, native installation or production revision is implied.
 Evidence: `onboarding-e2e/attempt-3/`; the final locator-only adjustment did not change
 any product input used by the successful full Vitest/build/package checks.
+
+Loop 69 is pushed as `f40e9d7`. Its CI and autodeploy runs again contain **4 jobs blocked
+by billing, 1 skipped build and 0 executed steps**. Production GETs returned 200,
+but the served `index-CT_q0_0R.js` still contains the old literal v1 onboarding draft
+key. Desktop metadata remains 1.12.0 / `e241968`. No exact backend revision or new
+installed release is established. Receipts: `release/loop69-*.json`.
+
+## Loop 70: Flower expressions render in Chromium
+
+Only the two applied CSS transform strings changed: lengths now use px, angles deg,
+and multi-argument functions use commas. Canonical paths, poses, gaze math, eye
+anchors and motion policy are unchanged. Actual component/CSS rendering in owned
+Chromium passed **30/30 grouped checks**, zero failures, on the first run: all 15
+poses, both eyes, five gaze samples, four animation/spin combinations, fixed-time
+animation matrices and reduced motion. Screenshots at 1280px and 320px were inspected;
+there were no external resource requests or page errors, and the browser closed.
+This is component browser acceptance, distinct from the full-app tests in Loop 69.
+
+Full Vitest: **244 files / 3468 passed / 8 skipped / 0 failed**, 301.67s (303.221s
+command). Repository lint passed in 2.081s and production build including frontend/
+server TypeScript passed in 53.144s. Source hashes remained frozen. Evidence:
+`flower-repair/completion.json`, `flower-full-vitest-result.json`, build/lint receipts.
+
+The five inherited Loop 50 edits also now pass actual **watchOS and iOS simulator
+builds**, 27.674s and 27.414s, with signing disabled and no developer identity. A frozen
+snapshot overlaid exactly those five preserved files; XcodeGen passed. All 86 checkout
+iOS source hashes and 26 original simulator identities/states stayed unchanged; all
+three command groups exited. No device was created, booted or installed. This closes
+the missing compile gate, but **Watch interaction acceptance is still zero for this
+pending migration**; do not commit its five product files yet. Evidence:
+`native-unsigned/summary.json`. The simulator linker may emit its normal ad hoc
+Mach-O signature; this is not distribution signing or notarization.
 
 Continue with the ranked repairs above, one verified commit at a time. Preserve the
 inherited native work, report actual failures, and distinguish browser fixture acceptance,
