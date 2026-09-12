@@ -29,6 +29,7 @@ import type { InstanceInfo } from "@/state/store";
 import { createOnboardingFinishSession } from "@/state/onboarding-finish";
 import {
   clearOnboardingDraft,
+  ONBOARDING_STEPS,
   readOnboardingDraft,
   resolveInitialTaskDraft,
   saveOnboardingDraft,
@@ -43,7 +44,7 @@ import {
 
 type InstanceRow = InstanceInfo;
 
-const STEP_LABELS = ["Welcome", "Tour", "Engines", "Phone", "Teammate", "Permissions", "First task"] as const;
+const STEP_LABELS = ONBOARDING_STEPS.map((step) => step.label);
 
 function StatusRow({
   ok,
@@ -372,7 +373,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     if (stored) {
       if (stored.name !== undefined) setName(stored.name);
       if (stored.email !== undefined) setEmail(stored.email);
-      setStep(stored.step);
+      setStep(ONBOARDING_STEPS.findIndex((entry) => entry.id === stored.step));
       setBotName((current) => current || stored.botName);
       setBotRole((current) => current || stored.botRole);
       const savedColor = AGENT_COLOR_NAMES.find((color) => color === stored.botColor);
@@ -393,12 +394,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   // state. Cleared on success and deliberate abandonment (Escape / Maybe
   // later); a failed finish keeps it, so nothing typed is lost.
   useEffect(() => {
-    if (!draftReady || !user) return;
+    const currentStep = ONBOARDING_STEPS[step];
+    if (!draftReady || !user || !currentStep) return;
     saveOnboardingDraft(user.id, {
-      version: 1,
+      version: 2,
       name,
       email,
-      step,
+      step: currentStep.id,
       botName,
       botRole,
       botColor,

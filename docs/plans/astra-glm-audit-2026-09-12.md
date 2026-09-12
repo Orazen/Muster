@@ -37,14 +37,15 @@ not fix the separate mascot CSS-transform or Drive-flow defects below.
 
 | Priority | Finding | Required acceptance / disposition |
 | --- | --- | --- |
-| P1 | History follows planted links and lets failed snapshots precede live overwrite. | First repair slice: reject linked paths/entries, retain exact old bytes before writes, propagate retention failure, bound reads and rollback. Filesystem tests include real permission failures. No claim of isolation against a hostile process continuously replacing path ancestors. |
-| P1 | Memory history can lose a baseline edited before the next prompt, or prune a new snapshot after clock rollback. | Preserve both the displaced baseline and current live version; protect this operation's retained IDs during pruning. Include save and restore regressions. |
+| P1, repaired in `efcf629` | History follows planted links and lets failed snapshots precede live overwrite. | Reject linked paths/entries, retain exact old bytes before writes, propagate retention failure, bound reads and rollback. Filesystem tests include real permission failures. No claim of isolation against a hostile process continuously replacing path ancestors. |
+| P1, repaired in `efcf629` | Memory history can lose a baseline edited before the next prompt, or prune a new snapshot after clock rollback. | Preserve both the displaced baseline and current live version; protect this operation's retained IDs during pruning. Save and restore regressions pass. |
 | P1 | Newly advertised Drive consent is unreachable: hosted routes hit the existing global workspace denial; desktop Host values with ports fail. | Preserve hosted installation-wide export/restore denial. Establish an honest deployment capability before advertising consent. A bridged desktop has neither a Google account token row nor the hosted OAuth secret. A Host-regex patch alone cannot fix it. |
 | P1 | Drive token exchange does not verify Google subject or granted scope and can combine one account's access token with another refresh token. | Before enabling: verified identity/scope, coherent separate grant, one-use session-bound consent intent, actual route and SQLite tests. No hosted secret in desktop packages. |
 | P1 | Best-effort message insert failure can leave a missing predecessor in a later durable branch. | Separate Store slice: restart tests must assert active transcript ancestry, not only SQLite row count. This predates GLM's change. |
 | P2 | Strict seed writes can fail after bot creation was persisted/emitted. | Separate Store slice: one coherent bot-and-greeting creation boundary; failed creation/retry must not duplicate bots. |
 | P2 | Strict message patch accepts a zero-row database update. | Separate Store slice: require durable target or explicitly repair it; test restart behavior. |
-| P2 | New onboarding indexes 5/6 are rejected by the draft validator. Legacy index 4 has changed meaning. | Version/migrate drafts, retain final-step input through reload/sign-in, test all seven current steps. |
+| P1, repaired in Loop 69 | Default Flower and picker Blob were accepted by the client but rejected by the server, blocking first-task submission before any message request. | Found by the new real-browser recovery test. One browser-safe character contract now drives both picker and API membership, preserving legacy Lottie storage without exposing it in the picker or PATCH. Browser acceptance retains the default Flower. |
+| P2, repaired in Loop 69 | New onboarding indexes 5/6 are rejected by the draft validator. Legacy index 4 has changed meaning. | Version-2 semantic step IDs are shared by persistence and the seven-step UI. Valid legacy drafts retain every field and reopen Welcome because old numeric layouts are ambiguous. Failed migration writes preserve the legacy copy; a v2 value suppresses stale legacy resurrection. Browser and full-suite receipts follow below. |
 | P2 | Flower poses use SVG syntax in CSS transforms; Chromium discards them. | Correct applied transforms; browser assertions must check computed matrices and visual states, including reduced motion. |
 | P2 | Shortcuts dialog sits inside `aria-hidden` and lacks focus ownership. | Use the existing dialog primitive; test keyboard focus/return and Escape interaction with onboarding. |
 | P2 | Phone onboarding opens desktop account pairing instead of companion pairing. | Test the actual invitation producer/consumer; show supported companion setup prerequisites. |
@@ -120,6 +121,22 @@ First repair source is frozen and independently reviewed:
 Initial harness/path/browser availability failures are retained in the local evidence;
 they are not silently replaced by successful reruns.
 
+Additional platform gates, run separately from the root suite:
+
+- Android companion: **11 Jest suites / 555 passed / 0 skipped**, package TypeScript
+  and lint passed, toolchain **15/15**, Metro assets **29/29**, autolinking **19/19**.
+  All six commands passed once. The 53 source/config/asset inputs and 14 selected
+  installed dependency inputs stayed unchanged; owned process groups exited. These
+  are portable gates, not emulator/device installation or Android distribution.
+- Local VM: the already-present, source-matching CUA 0.20.0 image passed the actual
+  repository MCP smoke: **60 tools discovered**, PNG capture, app listing and pointer
+  movement inside a disposable guest. Runtime/ownership checks **10/10**, cleanup
+  **7/7** and four owned workspaces removed **4/4**. The nine pre-existing containers
+  and 17 image records remained unchanged. Three earlier setup assertion failures
+  were retained, each with **7/7** cleanup. No image pull/build or real bot/provider
+  job ran. This used an internal network and guest Unix socket; live viewer, internet
+  browsing and automatic product setup remain unverified. Evidence: `vm/README.md`.
+
 ## Corrections to earlier ledger claims
 
 - Loop 63's health and unauthenticated 401 checks did not verify signed-in Drive consent.
@@ -133,6 +150,47 @@ they are not silently replaced by successful reruns.
   are incorrect. Basic sign-in plus separate backup consent remains a valid UX choice.
 - No complete Mimosa rerun was available in this session. No security conclusion follows
   from this review, the portable tests, or the runtime smoke.
+
+## Loop 69: recoverable onboarding and one mascot character contract
+
+Onboarding now saves all seven stages using semantic version-2 step IDs. Legacy drafts
+retain their exact profile, teammate, personality and task values and reopen Welcome;
+the old numeric stage cannot be mapped safely across two wizard layouts. Current drafts
+take precedence even when malformed, and failed migration writes retain the old copy.
+Clearing a draft cannot expose an older version when storage removal fails. Storage
+remains best effort; fields that the old validator never saved cannot be recovered.
+
+The new browser recovery case found a second real defect: the default Flower and picker
+Blob were absent from the server's accepted character list. The resulting PATCH 400
+prevented any first-task message request. A browser-safe shared module now supplies the
+client and server with the same ordered picker list. Existing Lottie values remain
+persistable but hidden and rejected by character PATCH, as before.
+
+Focused tests: draft **1 file / 54 passed**; character/store **2 files / 53 passed**,
+all with zero failures/skips. Final full Vitest: **244 files / 3468 passed / 8 skipped /
+0 failed**, 285.75s (287.886s command). Repository lint passed in 2.667s; production
+build including frontend/server TypeScript passed in 50.781s; packaged-server smoke
+passed **9 checks** in 13.971s including its server build. Independent review found no
+material blocker in migration, the shared contract, or the narrowly scoped fixture 503.
+
+Browser attempt 1 retained **11 passed / 1 failed**: the genuine default-Flower rejection
+above. Attempt 2, after the product fix, retained **12 passed / 1 failed**: the final
+reply-text locator also matched the sidebar and completion notification. The trace
+confirmed actual 503 recovery followed by a 202 send and persisted user/reply rows.
+Only the test locator was narrowed to the transcript row for the final browser run.
+All owned resources from both failed runs were removed and observed inputs unchanged.
+
+Final repository Playwright: **13 passed / 0 failed / 0 skipped / 0 flaky**, 69.557s
+(70.557s command), one worker and zero retries. It covers the original approval/pairing
+cases plus seven-step draft reload at 320px/1280px, legacy migration, A→B→A account
+isolation in one tab, explicit template submission, pre-forward 503 recovery followed
+by a real fixture-server 202 and one persisted user/reply, and accepted/rejected mascot
+PATCH readback. All 932 observed source/build/harness hashes stayed unchanged; all 108
+observed owned process identities exited, 48 ports refused connections, and 13 fixture
+roots were removed. Settled wizard screenshots were visually inspected. No live Google
+consent, real provider task, native installation or production revision is implied.
+Evidence: `onboarding-e2e/attempt-3/`; the final locator-only adjustment did not change
+any product input used by the successful full Vitest/build/package checks.
 
 Continue with the ranked repairs above, one verified commit at a time. Preserve the
 inherited native work, report actual failures, and distinguish browser fixture acceptance,

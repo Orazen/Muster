@@ -11,6 +11,7 @@ import { DATA_DIR } from "./config.ts";
 import * as mdb from "./message-db.ts";
 import { workspaceDir } from "./workspace.ts";
 import { newId, type ModelSelection, type ThreadId } from "./contracts.ts";
+import type { AgentCharacter } from "./agent-character.ts";
 import { pickBotName } from "./names.ts";
 import { redactApprovalWhy, type ApprovalWhy } from "./approval-why.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -39,14 +40,7 @@ export type AgentColor =
  */
 export type AgentExpression = string;
 
-/** Which mascot body a bot uses: the procedural cursor, the .lottie
- * character, the star teammate, or one of the shape-pack bodies (rendered
- * through the same cursor engine client-side). */
-export type AgentCharacter = "cursor" | "lottie" | "star" | "hexagon" | "triangle" | "egg" | "drop" | "heart" | "pebble" | "squircle" | "capsule" | "cloud" | "ball" | "sparkle" | "circle";
-export const AGENT_CHARACTERS: readonly AgentCharacter[] = [
-  "star", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
-  "pebble", "squircle", "capsule", "cloud", "ball", "sparkle", "circle",
-];
+export { AGENT_CHARACTERS, type AgentCharacter } from "./agent-character.ts";
 
 export interface OptionCardData {
   /** Server-created onboarding action, distinct from a live provider request. */

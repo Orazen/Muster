@@ -20,9 +20,21 @@ export interface SetupAxes {
   honesty: number;
 }
 
+export const ONBOARDING_STEPS = [
+  { id: "welcome", label: "Welcome" },
+  { id: "tour", label: "Tour" },
+  { id: "engines", label: "Engines" },
+  { id: "phone", label: "Phone" },
+  { id: "teammate", label: "Teammate" },
+  { id: "permissions", label: "Permissions" },
+  { id: "first-task", label: "First task" },
+] as const;
+
+export type OnboardingStep = (typeof ONBOARDING_STEPS)[number]["id"];
+
 export interface OnboardingDraft {
-  version: 1;
-  step: number;
+  version: 2;
+  step: OnboardingStep;
   /** Optional so drafts saved before welcome-field persistence still restore. */
   name?: string;
   email?: string;
@@ -78,8 +90,8 @@ export function resolveInitialTaskDraft(
 // Caps mirror the server's PATCH limits (name 100, title 200, description
 // 4000) so a poisoned draft can't overflow the API on restore.
 const draftSchema = z.object({
-  version: z.literal(1),
-  step: z.number().int().min(0).max(4),
+  version: z.literal(2),
+  step: z.enum(ONBOARDING_STEPS.map((step) => step.id)),
   name: z.string().max(100).optional(),
   // Preserve unfinished email input; format validation belongs to submission.
   email: z.string().max(320).optional(),
@@ -99,6 +111,13 @@ const draftSchema = z.object({
   }),
 });
 
+// Version 1 used these same indexes for two different wizard layouts.
+// Preserve its fields, but restart at Welcome rather than guess a step.
+const legacyDraftSchema = draftSchema.extend({
+  version: z.literal(1),
+  step: z.number().int().min(0).max(4),
+});
+
 function draftStorage(): OnboardingStorage | null {
   try {
     return window.sessionStorage;
@@ -108,8 +127,8 @@ function draftStorage(): OnboardingStorage | null {
   }
 }
 
-function draftKey(accountId: string): string {
-  return `muster:onboarding-draft:v1:${encodeURIComponent(accountId)}`;
+function draftKey(accountId: string, version: 1 | 2): string {
+  return `muster:onboarding-draft:v${version}:${encodeURIComponent(accountId)}`;
 }
 
 export function readOnboardingDraft(
@@ -118,10 +137,19 @@ export function readOnboardingDraft(
 ): OnboardingDraft | null {
   if (!accountId || !storage) return null;
   try {
-    const saved = storage.getItem(draftKey(accountId));
-    if (!saved) return null;
-    const parsed = draftSchema.safeParse(JSON.parse(saved));
-    return parsed.success ? parsed.data : null;
+    const saved = storage.getItem(draftKey(accountId, 2));
+    if (saved !== null) {
+      // A malformed current draft or a clear tombstone must never revive v1.
+      const parsed = draftSchema.safeParse(JSON.parse(saved));
+      return parsed.success ? parsed.data : null;
+    }
+    const legacy = storage.getItem(draftKey(accountId, 1));
+    if (legacy === null) return null;
+    const parsed = legacyDraftSchema.safeParse(JSON.parse(legacy));
+    if (!parsed.success) return null;
+    const migrated: OnboardingDraft = { ...parsed.data, version: 2, step: "welcome" };
+    saveOnboardingDraft(accountId, migrated, storage);
+    return migrated;
   } catch {
     return null;
   }
@@ -136,7 +164,9 @@ export function saveOnboardingDraft(
   try {
     const parsed = draftSchema.safeParse(draft);
     if (!parsed.success) return;
-    storage.setItem(draftKey(accountId), JSON.stringify(parsed.data));
+    storage.setItem(draftKey(accountId, 2), JSON.stringify(parsed.data));
+    // Keep the only recoverable copy until the current version is stored.
+    storage.removeItem(draftKey(accountId, 1));
   } catch {
     // The draft is an optimization; the wizard still works without storage.
   }
@@ -148,8 +178,16 @@ export function clearOnboardingDraft(
 ): void {
   if (!accountId || !storage) return;
   try {
-    storage.removeItem(draftKey(accountId));
+    storage.removeItem(draftKey(accountId, 1));
   } catch {
-    // Blocked storage must not interrupt completion; an old draft may remain.
+    // Removing v2 while v1 survives would expose an older draft. A current
+    // tombstone clears both logically; if writes also fail, retain v2.
+    try { storage.setItem(draftKey(accountId, 2), "null"); } catch { /* Storage remains unavailable. */ }
+    return;
+  }
+  try {
+    storage.removeItem(draftKey(accountId, 2));
+  } catch {
+    // Blocked storage must not interrupt completion; the current draft may remain.
   }
 }

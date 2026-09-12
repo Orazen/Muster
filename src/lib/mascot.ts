@@ -5,17 +5,7 @@ import { CURSOR_STATES, type CursorState } from "@/components/CursorAvatar";
 export type AgentState = CursorState;
 export const AGENT_STATES = CURSOR_STATES;
 
-/** Which mascot body a bot uses. `flower` is the app-icon mark (the
- * default teammate); `cursor` is the procedural mascot; `lottie` is the
- * bundled .lottie bot character. `star` is the musterbot star. */
-export type AgentCharacter =
-  | "flower" | "cursor" | "lottie" | "star" | "blob"
-  | "hexagon" | "triangle" | "egg" | "drop" | "heart"
-  | "pebble" | "squircle" | "capsule" | "cloud" | "ball" | "sparkle" | "circle";
-export const AGENT_CHARACTERS: AgentCharacter[] = [
-  "flower", "star", "blob", "cursor", "hexagon", "triangle", "egg", "drop", "heart",
-  "pebble", "squircle", "capsule", "cloud", "ball", "sparkle", "circle",
-];
+export { AGENT_CHARACTERS, type AgentCharacter } from "../../server/agent-character";
 
 /** CursorAvatar ships French group labels; the app shows these instead. The
  * memberships mirror its STATE_GROUPS exactly. */

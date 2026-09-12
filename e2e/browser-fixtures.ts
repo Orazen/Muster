@@ -4,10 +4,12 @@ import { expect, test as baseTest, type BrowserContext, type Page } from "@playw
 import { startPairingHarness, type FixtureEngineMode } from "./pairing-harness.ts";
 
 type Harness = Awaited<ReturnType<typeof startPairingHarness>>;
+type PageFailure = boolean | { messageSend503: true };
+interface MessageSendFailure { url: string | null; consoleErrors: number }
 type Fixtures = {
   engineMode: FixtureEngineMode;
   harness: Harness;
-  newPage: (expectedPairFailure?: boolean) => Promise<Page>;
+  newPage: (expectedFailure?: PageFailure) => Promise<Page>;
   pairCodeFromCloud: string;
 };
 
@@ -20,19 +22,34 @@ const test = baseTest.extend<Fixtures>({
   newPage: async ({ browser, harness }, use, testInfo) => {
     const contexts: BrowserContext[] = [];
     const errors: string[] = [];
+    const sendFailures: MessageSendFailure[] = [];
     const allowedOrigins = new Set([harness.cloudUrl, harness.desktopUrl]);
-    const open = async (expectedPairFailure = false) => {
+    const open = async (expectedFailure: PageFailure = false) => {
       const context = await browser.newContext();
       contexts.push(context);
+      const expectedPairFailure = expectedFailure === true;
+      const failedSend: MessageSendFailure | null = expectedFailure && expectedFailure !== true
+        ? { url: null, consoleErrors: 0 } : null;
+      if (failedSend) sendFailures.push(failedSend);
       // A server fetch guard cannot stop the browser following OAuth or
       // third-party page resources. Only these two owned origins are allowed.
       await context.route("**/*", async (route) => {
         const url = new URL(route.request().url());
-        if (allowedOrigins.has(url.origin)) await route.continue();
-        else {
+        if (!allowedOrigins.has(url.origin)) {
           errors.push(`Unexpected browser request: ${url.origin}${url.pathname}`);
           await route.abort("blockedbyclient");
+          return;
         }
+        if (failedSend && failedSend.url === null && url.origin === harness.desktopUrl
+          && route.request().method() === "POST" && /^\/api\/bots\/[^/]+\/messages$/.test(url.pathname) && !url.search) {
+          // Pin the exact request before responding. This is explicitly a
+          // failure BEFORE forwarding, never fabricated server acceptance.
+          failedSend.url = url.href;
+          await route.fulfill({ status: 503, contentType: "application/json",
+            body: JSON.stringify({ error: "Owned fixture: first task was not sent. Please retry." }) });
+          return;
+        }
+        await route.continue();
       });
       const page = await context.newPage();
       page.on("pageerror", (error) => errors.push(error.message));
@@ -42,12 +59,21 @@ const test = baseTest.extend<Fixtures>({
         // that endpoint's expected HTTP 400 resource message is exempted.
         if (expectedPairFailure && message.location().url === `${harness.desktopUrl}/api/pair/redeem`
           && /^Failed to load resource:.*\b400\b/.test(message.text())) return;
+        if (failedSend && message.location().url === failedSend.url
+          && /^Failed to load resource:.*\b503\b/.test(message.text()) && failedSend.consoleErrors === 0) {
+          failedSend.consoleErrors += 1;
+          return;
+        }
         errors.push(`${message.location().url}: ${message.text()}`);
       });
       return page;
     };
     try {
       await use(open);
+      for (const failure of sendFailures) {
+        expect(failure.url, "The expected pre-forward message failure was exercised").not.toBeNull();
+        expect(failure.consoleErrors, "Exactly the intercepted message's single HTTP 503 error was consumed").toBe(1);
+      }
       if (errors.length) await testInfo.attach("browser-errors", { body: errors.join("\n"), contentType: "text/plain" });
       expect(errors, "Unexpected browser errors or external requests").toEqual([]);
     } finally {

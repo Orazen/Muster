@@ -3807,3 +3807,40 @@ reporting billing/spending limits; build skipped. Thus neither source push nor p
 health establishes exact backend deployment. Full details and remaining repairs stay
 in `docs/plans/astra-glm-audit-2026-09-12.md`. Next product repair is onboarding draft
 persistence and migration; no conversion/revenue uplift has been measured in this loop.
+
+
+**Loop 69 (2026-09-12, recoverable first-task onboarding):** version-2 drafts use
+semantic stage IDs shared by all seven wizard steps, so Permissions and First task
+survive reload and sign-in. Ambiguous legacy indexes reopen Welcome while preserving
+every valid field. Failed migration writes preserve the old copy; current drafts and
+clear tombstones prevent stale legacy resurrection. Storage remains best effort.
+
+The new browser recovery case discovered a separate first-task blocker: the server
+rejected the UI's default Flower mascot before sending any message. One browser-safe
+character contract now supplies both client and server; Flower/Blob persist correctly,
+while legacy Lottie storage stays compatible without adding it to the picker or PATCH.
+
+Verification: draft **1 file / 54 passed**, character/store **2 files / 53 passed**;
+full Vitest **244 files / 3468 passed / 8 skipped / 0 failed**, 285.75s; lint passed
+in 2.667s; production build including frontend/server TypeScript passed in 50.781s;
+packaged-server **9 checks passed**, 13.971s. Final repository Playwright **13 passed /
+0 failed / 0 skipped / 0 flaky**, 69.557s, zero retries. Includes actual fixture-server
+acceptance after a single pre-forward 503, one user/reply after reload, per-account
+draft isolation, template submission, mobile/desktop layouts and mascot validation.
+All 932 observed inputs unchanged; 108 owned process identities exited, 48 ports
+closed, and 13 fixture roots removed. Independent review found no material blocker.
+
+Two earlier browser attempts remain recorded: **11/12 passed** exposed the real
+Flower rejection; **12/13 passed** then exposed an ambiguous test locator after the
+successful send. Only that locator changed before the final green browser run; full
+suite/build product inputs stayed unchanged. This proves owned browser acceptance,
+not real Google consent, production deployment, native distribution, or revenue uplift.
+
+Additional platform audit: Android **11 suites / 555 passed**, types/lint passed,
+toolchain **15/15**, assets **29/29**, autolinking **19/19**. Existing local CUA image
+passed actual MCP smoke with **60 tools discovered**, screenshot/app-list/pointer
+operations, runtime checks **10/10**, cleanup **7/7**, owned workspaces removed **4/4**;
+all existing containers/images were preserved. Viewer, internet, auto-setup and a real
+bot job remain unverified. Native release and Drive/storage repair gates remain in
+`docs/plans/astra-glm-audit-2026-09-12.md`. Inherited Watch work remains preserved outside
+this commit. Next bounded UI repair is the Flower CSS transform syntax.

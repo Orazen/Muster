@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearOnboardingDraft,
   FIRST_TASK_TEMPLATES,
+  ONBOARDING_STEPS,
   readOnboardingDraft,
   resolveFirstTaskTemplate,
   resolveInitialTaskDraft,
@@ -18,8 +19,8 @@ class MemoryDraftStorage implements OnboardingStorage {
 }
 
 const draft: OnboardingDraft = {
-  version: 1,
-  step: 4,
+  version: 2,
+  step: "first-task",
   botName: "Scout",
   botRole: "Research",
   botColor: "orange",
@@ -33,6 +34,16 @@ const draft: OnboardingDraft = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("onboarding draft persistence", () => {
+  it.each(ONBOARDING_STEPS)("round-trips the $id step with exact late-step input", ({ id }) => {
+    const storage = new MemoryDraftStorage();
+    const current: OnboardingDraft = {
+      ...draft, step: id, name: "  Sam  ", email: "sam@", suggestion: "  Option\n", customTask: "  e\u0301 brief\n\t",
+    };
+    saveOnboardingDraft("account-a", current, storage);
+    expect(readOnboardingDraft("account-a", storage)).toEqual(current);
+    expect(JSON.parse(storage.getItem("muster:onboarding-draft:v2:account-a") ?? "null")).toEqual(current);
+  });
+
   it("round-trips a draft through storage per account", () => {
     const storage = new MemoryDraftStorage();
     saveOnboardingDraft("account-a", draft, storage);
@@ -43,15 +54,15 @@ describe("onboarding draft persistence", () => {
 
   it("treats corrupt, wrong-version, and oversized payloads as no draft", () => {
     const storage = new MemoryDraftStorage();
-    storage.setItem("muster:onboarding-draft:v1:account-a", "{not json");
+    storage.setItem("muster:onboarding-draft:v2:account-a", "{not json");
     expect(readOnboardingDraft("account-a", storage)).toBeNull();
     storage.setItem(
-      "muster:onboarding-draft:v1:account-a",
-      JSON.stringify({ ...draft, version: 2 }),
+      "muster:onboarding-draft:v2:account-a",
+      JSON.stringify({ ...draft, version: 3 }),
     );
     expect(readOnboardingDraft("account-a", storage)).toBeNull();
     storage.setItem(
-      "muster:onboarding-draft:v1:account-a",
+      "muster:onboarding-draft:v2:account-a",
       JSON.stringify({ ...draft, botName: "x".repeat(101) }),
     );
     expect(readOnboardingDraft("account-a", storage)).toBeNull();
@@ -69,7 +80,7 @@ describe("onboarding draft persistence", () => {
 
   it("refuses to save a draft that violates the schema", () => {
     const storage = new MemoryDraftStorage();
-    saveOnboardingDraft("account-a", { ...draft, step: 9 }, storage);
+    saveOnboardingDraft("account-a", { ...draft, customTask: "x".repeat(4001) }, storage);
     expect(storage.values.size).toBe(0);
   });
 
@@ -90,7 +101,7 @@ describe("onboarding draft persistence", () => {
     saveOnboardingDraft("account-a", draft, storage);
     saveOnboardingDraft("account-a", { ...draft, ...welcome }, storage);
     expect(readOnboardingDraft("account-a", storage)).toEqual(draft);
-    storage.setItem("muster:onboarding-draft:v1:account-a", JSON.stringify({ ...draft, ...welcome }));
+    storage.setItem("muster:onboarding-draft:v2:account-a", JSON.stringify({ ...draft, ...welcome }));
     expect(readOnboardingDraft("account-a", storage)).toBeNull();
   });
 
@@ -105,7 +116,7 @@ describe("onboarding draft persistence", () => {
     expect(() => clearOnboardingDraft("account-a")).not.toThrow();
   });
 
-  it("tolerates denied reads, writes and removals without claiming the old draft was cleared", () => {
+  it("tolerates denied reads, writes and removals and uses a tombstone when removal is blocked", () => {
     const blocked: OnboardingStorage = {
       getItem() { throw new Error("read denied"); },
       setItem() { throw new Error("quota exceeded"); },
@@ -118,7 +129,168 @@ describe("onboarding draft persistence", () => {
     saveOnboardingDraft("account-a", draft, storage);
     const deniedRemoval = { getItem: storage.getItem.bind(storage), setItem: storage.setItem.bind(storage), removeItem: blocked.removeItem };
     clearOnboardingDraft("account-a", deniedRemoval);
+    expect(readOnboardingDraft("account-a", storage)).toBeNull();
+    expect(storage.getItem("muster:onboarding-draft:v2:account-a")).toBe("null");
+  });
+});
+
+describe("onboarding draft migration", () => {
+  const legacyKey = "muster:onboarding-draft:v1:account-a";
+  const currentKey = "muster:onboarding-draft:v2:account-a";
+  const legacy = { ...draft, version: 1, step: 4, customTask: "  Preserve my\nexact answer\t" };
+
+  it.each([0, 1, 2, 3, 4])("preserves v1 fields at ambiguous index %i but reopens Welcome", (step) => {
+    const storage = new MemoryDraftStorage();
+    storage.setItem(legacyKey, JSON.stringify({ ...legacy, step }));
+    const expected = { ...legacy, version: 2, step: "welcome" };
+    expect(readOnboardingDraft("account-a", storage)).toEqual(expected);
+    expect(JSON.parse(storage.getItem(currentKey) ?? "null")).toEqual(expected);
+    expect(storage.getItem(legacyKey)).toBeNull();
+    expect(readOnboardingDraft("account-a", storage)).toEqual(expected);
+  });
+
+  it("keeps cleared fields and optional omissions during migration instead of applying a URL template", () => {
+    const storage = new MemoryDraftStorage();
+    storage.setItem(legacyKey, JSON.stringify({ ...legacy, suggestion: "", customTask: "" }));
+    const restored = readOnboardingDraft("account-a", storage);
+    expect(restored).not.toHaveProperty("name");
+    expect(restored).not.toHaveProperty("email");
+    expect(resolveInitialTaskDraft(restored, "weekly-priorities")).toEqual({ suggestion: "", customTask: "" });
+  });
+
+  it.each(["", "{invalid", "null", JSON.stringify({ ...draft, step: "future-step" }), JSON.stringify({ ...draft, version: 3 })])(
+    "does not revive v1 beneath malformed or cleared v2: %s", (saved) => {
+      const storage = new MemoryDraftStorage();
+      storage.setItem(legacyKey, JSON.stringify(legacy));
+      storage.setItem(currentKey, saved);
+      expect(readOnboardingDraft("account-a", storage)).toBeNull();
+      expect(storage.getItem(currentKey)).toBe(saved);
+      expect(storage.getItem(legacyKey)).toBe(JSON.stringify(legacy));
+    },
+  );
+
+  it("prefers current exact fields over legacy fields", () => {
+    const storage = new MemoryDraftStorage();
+    storage.setItem(legacyKey, JSON.stringify(legacy));
+    storage.setItem(currentKey, JSON.stringify(draft));
     expect(readOnboardingDraft("account-a", storage)).toEqual(draft);
+  });
+
+  it.each([-1, 1.5, 5, 6])("rejects invalid v1 step %i instead of inventing a legacy layout", (step) => {
+    const storage = new MemoryDraftStorage();
+    const raw = JSON.stringify({ ...legacy, step });
+    storage.setItem(legacyKey, raw);
+    expect(readOnboardingDraft("account-a", storage)).toBeNull();
+    expect(storage.getItem(currentKey)).toBeNull();
+    expect(storage.getItem(legacyKey)).toBe(raw);
+  });
+
+  it("keeps the only legacy copy when migration storage fails and retries on the next read", () => {
+    const storage = new MemoryDraftStorage();
+    storage.setItem(legacyKey, JSON.stringify(legacy));
+    const removeItem = vi.fn(storage.removeItem.bind(storage));
+    const blocked: OnboardingStorage = {
+      getItem: storage.getItem.bind(storage),
+      setItem() { throw new Error("quota exceeded"); },
+      removeItem,
+    };
+    expect(readOnboardingDraft("account-a", blocked)).toEqual({ ...legacy, version: 2, step: "welcome" });
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(storage.getItem(legacyKey)).toBe(JSON.stringify(legacy));
+    expect(storage.getItem(currentKey)).toBeNull();
+    expect(readOnboardingDraft("account-a", storage)?.step).toBe("welcome");
+    expect(storage.getItem(legacyKey)).toBeNull();
+  });
+
+  it("keeps v2 authoritative when old-key removal fails after a successful migration or save", () => {
+    const storage = new MemoryDraftStorage();
+    storage.setItem(legacyKey, JSON.stringify(legacy));
+    const blocked: OnboardingStorage = {
+      getItem: storage.getItem.bind(storage), setItem: storage.setItem.bind(storage),
+      removeItem() { throw new Error("removal denied"); },
+    };
+    expect(readOnboardingDraft("account-a", blocked)?.step).toBe("welcome");
+    expect(storage.getItem(legacyKey)).toBe(JSON.stringify(legacy));
+    saveOnboardingDraft("account-a", draft, blocked);
+    expect(readOnboardingDraft("account-a", storage)).toEqual(draft);
+  });
+
+  it("migrates and clears only the selected account, with encoded account keys", () => {
+    const storage = new MemoryDraftStorage();
+    for (const accountId of ["account-a", "account/a", "account%2Fa"]) {
+      storage.setItem(`muster:onboarding-draft:v1:${encodeURIComponent(accountId)}`, JSON.stringify({ ...legacy, botName: accountId }));
+    }
+    expect(readOnboardingDraft("account/a", storage)?.botName).toBe("account/a");
+    expect(readOnboardingDraft("account%2Fa", storage)?.botName).toBe("account%2Fa");
+    clearOnboardingDraft("account/a", storage);
+    expect(readOnboardingDraft("account/a", storage)).toBeNull();
+    expect(readOnboardingDraft("account%2Fa", storage)?.botName).toBe("account%2Fa");
+    expect(storage.getItem(legacyKey)).not.toBeNull();
+    expect(storage.getItem(currentKey)).toBeNull();
+  });
+
+  it("clears both versions when both exist", () => {
+    const storage = new MemoryDraftStorage();
+    storage.setItem(legacyKey, JSON.stringify(legacy));
+    storage.setItem(currentKey, JSON.stringify(draft));
+    clearOnboardingDraft("account-a", storage);
+    expect(storage.values.size).toBe(0);
+    expect(readOnboardingDraft("account-a", storage)).toBeNull();
+  });
+
+  it("tombstones v2 when legacy removal fails so clearing cannot expose the old task", () => {
+    const storage = new MemoryDraftStorage();
+    storage.setItem(legacyKey, JSON.stringify(legacy));
+    storage.setItem(currentKey, JSON.stringify(draft));
+    const blocked: OnboardingStorage = {
+      getItem: storage.getItem.bind(storage), setItem: storage.setItem.bind(storage),
+      removeItem(key) { if (key === legacyKey) throw new Error("legacy denied"); storage.removeItem(key); },
+    };
+    clearOnboardingDraft("account-a", blocked);
+    expect(storage.getItem(legacyKey)).not.toBeNull();
+    expect(storage.getItem(currentKey)).toBe("null");
+    expect(readOnboardingDraft("account-a", storage)).toBeNull();
+    saveOnboardingDraft("account-a", draft, storage);
+    expect(readOnboardingDraft("account-a", storage)).toEqual(draft);
+    expect(storage.getItem(legacyKey)).toBeNull();
+  });
+
+  it("keeps current v2 if legacy removal and tombstone writing both fail", () => {
+    const storage = new MemoryDraftStorage();
+    storage.setItem(legacyKey, JSON.stringify(legacy));
+    storage.setItem(currentKey, JSON.stringify(draft));
+    const blocked: OnboardingStorage = {
+      getItem: storage.getItem.bind(storage),
+      setItem() { throw new Error("write denied"); },
+      removeItem() { throw new Error("removal denied"); },
+    };
+    clearOnboardingDraft("account-a", blocked);
+    expect(readOnboardingDraft("account-a", storage)).toEqual(draft);
+  });
+
+  it("removes legacy even if current removal fails", () => {
+    const storage = new MemoryDraftStorage();
+    storage.setItem(legacyKey, JSON.stringify(legacy));
+    storage.setItem(currentKey, JSON.stringify(draft));
+    const blocked: OnboardingStorage = {
+      getItem: storage.getItem.bind(storage), setItem: storage.setItem.bind(storage),
+      removeItem(key) { if (key === currentKey) throw new Error("current denied"); storage.removeItem(key); },
+    };
+    clearOnboardingDraft("account-a", blocked);
+    expect(storage.getItem(legacyKey)).toBeNull();
+    expect(readOnboardingDraft("account-a", storage)).toEqual(draft);
+  });
+
+  it("preserves the existing 4000-unit task cap in both formats", () => {
+    const storage = new MemoryDraftStorage();
+    const maximum = "\ud83c\udf38".repeat(2000);
+    saveOnboardingDraft("account-a", { ...draft, customTask: maximum }, storage);
+    expect(readOnboardingDraft("account-a", storage)?.customTask).toBe(maximum);
+    saveOnboardingDraft("account-a", { ...draft, customTask: `${maximum}x` }, storage);
+    expect(readOnboardingDraft("account-a", storage)?.customTask).toBe(maximum);
+    storage.removeItem(currentKey);
+    storage.setItem(legacyKey, JSON.stringify({ ...legacy, customTask: `${maximum}x` }));
+    expect(readOnboardingDraft("account-a", storage)).toBeNull();
   });
 });
 
@@ -167,7 +339,7 @@ describe("first-task restoration precedence", () => {
 
   it("falls back to the template when stored draft validation fails", () => {
     const storage = new MemoryDraftStorage();
-    storage.setItem("muster:onboarding-draft:v1:account-a", JSON.stringify({ ...draft, axes: { companion: -1 } }));
+    storage.setItem("muster:onboarding-draft:v2:account-a", JSON.stringify({ ...draft, axes: { companion: -1 } }));
     const stored = readOnboardingDraft("account-a", storage);
     expect(stored).toBeNull();
     expect(resolveInitialTaskDraft(stored, "notes-to-draft")).toEqual({ suggestion: "", customTask: FIRST_TASK_TEMPLATES["notes-to-draft"] });

@@ -8,7 +8,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
-import { Store, type BotRecord, type OptionCardData, type StoreChange } from "./store.ts";
+import { AGENT_CHARACTERS, Store, type BotRecord, type OptionCardData, type StoreChange } from "./store.ts";
+import { AGENT_CHARACTERS as SHARED_CHARACTERS, type AgentCharacter } from "./agent-character.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
@@ -69,6 +70,28 @@ describe("Store", () => {
     expect(second.color).toBe("orange");
     expect(first.character).toBe("star");
     expect(second.character).toBe("star");
+  });
+
+  it("exposes the shared picker vocabulary to the HTTP character validator", () => {
+    expect(AGENT_CHARACTERS).toBe(SHARED_CHARACTERS);
+    expect(AGENT_CHARACTERS).toContain("flower");
+    expect(AGENT_CHARACTERS).toContain("blob");
+    expect(AGENT_CHARACTERS).not.toContain("lottie");
+    expect(AGENT_CHARACTERS).not.toContain("unknown-character");
+  });
+
+  const persistedCharacters = ["flower", "blob", "lottie"] as const satisfies readonly AgentCharacter[];
+  it.each(persistedCharacters)("preserves %s on creation and patch across Store reloads", (character) => {
+    const store = new Store(selection);
+    const created = store.createBot({ character });
+    const patched = store.createBot();
+    expect(store.patchBot(patched.id, { character })?.character).toBe(character);
+
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(created.id)?.character).toBe(character);
+    expect(reloaded.bot(patched.id)?.character).toBe(character);
+    expect(reloaded.messagesFor(created.threadId)).toEqual(store.messagesFor(created.threadId));
+    expect(reloaded.messagesFor(patched.threadId)).toEqual(store.messagesFor(patched.threadId));
   });
 
   it("defaults a room to its first member and repairs the lead when membership changes", () => {
