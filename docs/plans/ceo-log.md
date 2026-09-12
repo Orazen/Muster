@@ -3720,6 +3720,19 @@ Drive connect, seed-card recovery, shortcuts, flower-star, auth-domain fixes). C
 Loops 55–64. Next design loop: sidebar sections + density; then usage ledger, approval
 levels, tour v2. TestFlight/Watch: Apple account gate unchanged.
 
+**Loop 66 (2026-09-12, ecosystem proof pass — all four surfaces live at once):** web+desktop
+app UI captured logged-in via a scratch harness (Atlas purple Chief-of-Staff + Sage teal
+flower avatars, connection cards, model chips, sync-era UI); iOS simulator PAIRED to a fresh
+sidecar rig (3 devices registered) and shows the paired roster — Sage teal flower with the
+"Ops intern" chip + Atlas purple flower; the MusterWatch app was built for the watchOS
+simulator (WatchKit error fix: never pin -sdk iphonesimulator on a watch destination) and
+RUNS — its own Pair screen discovers the rig's computer with the 6-digit code field. Signed
+builds are required for pairing (CODE_SIGNING_ALLOWED=NO strips entitlements → "required
+entitlement isn't present"; the ad-hoc identity fixes it). Proof PNGs:
+.omb-scratch/verification/loop66-ecosystem-proof/ (desktop roster, web roster, web chat,
+iOS paired roster, watch pair screen). All rigs shut down after capture; the user's real
+apps were only ever read.
+
 **Loop 65 (2026-09-12, UNCOMMITTED — Mimosa git-gate, user remedy):** account-and-sync
 visibility slice — successful Drive/Telegram backups+restores stamp a per-account record
 (0600 json under DATA_DIR/sync-state/; Telegram stamps under the "local" machine key since
