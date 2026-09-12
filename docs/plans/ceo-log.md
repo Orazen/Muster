@@ -3708,3 +3708,14 @@ dispatches the saved answer as an ordinary message (bot-busy hides it); the stor
 send is a split child so the plain card still server-renders without a provider.
 Suite 243/3,410/8. This covers the stranded state wherever it came from; current-flow
 failures already surface action.error + retry.
+
+**Release v1.12.0 (2026-09-12, tag pushed + published, mirror synced, live-verified):** mac
+arm64 DMG/zip + Intel DMG/x64 zip built locally (both arch blockmaps), 8 assets on the GitHub
+release (published, not draft), latest-mac.yml hand-merged to the 3-arch shape (arm64 first —
+the intel rebuild had overwritten it), latest.json rebuilt at 1.12.0 (sha e241968) with stable
+aliases, mirror rsynced from release/ cwd. Live-verified: mirror Muster.dmg + latest-mac.yml +
+latest.json all 200 serving 1.12.0; download.html badge v1.12.0 live. THE USER'S INSTALLED
+DESKTOP APP NOW AUTO-UPDATES INTO THIS WEEK'S ENTIRE WEBAPP WORK (run pills, memory gauge,
+Drive connect, seed-card recovery, shortcuts, flower-star, auth-domain fixes). Carried in:
+Loops 55–64. Next design loop: sidebar sections + density; then usage ledger, approval
+levels, tour v2. TestFlight/Watch: Apple account gate unchanged.
