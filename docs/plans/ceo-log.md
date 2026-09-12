@@ -3934,3 +3934,28 @@ partial and installation-secret dependent: do not promise all-chat/file/session 
 No conversion or revenue improvement has been measured. Latest allowance readback
 42%used/58%remaining; reported reset19September2026,16:43Europe/Rome. Existing hourly
 heartbeat remains ACTIVE with the2%handoff/1%pause rules; no reset credit consumed.
+
+
+**Loop 73 (2026-09-12, installation and recovery handoff):** promoted the reviewed
+OpenMaus study, free-account iPhone/Watch guide and portable-backup contract into
+versioned docs. Personal Team test copy passes Watch/iOS generic simulator builds
+**56.211s/57.394s**, with signing disabled;90 copy inputs,86 checkout inputs,5 overlays
+and26 existing simulator states unchanged. These are **2 compile gates / 0 runtime
+tests / 0 physical installations**, not a native release. Documentation local links
+**5/5** resolve; raw research evidence is labelled local-only. Product unchanged: latest full suite **244 files / 3520 passed /
+8 skipped / 0 failed**, browser **15/15**, build/types/lint green.
+
+Loop72 is pushed as `e6bbf16`. GitHub records4 billing-blocked jobs,1 skipped build,
+0 executed steps; the account payment/spending issue requires the board, not a code
+change. Production is checked independently with GET. Next: preserve installation
+Drive while containing unchecked account-linked ownership, then restore portability
+and the remaining native runtime/signing gates. Twelve inherited files stay preserved
+for restoration after this documentation commit. Existing hourly heartbeat is ACTIVE;
+no additional automation or reset purchase was created.
+
+
+Loop72 rollout receipt,16:42–16:43UTC: production GET positively serves the new frame/
+recovery JavaScript and CSS. Health/app/assets/download metadata200; anonymous Vault/
+briefing401. Exact backend SHA and authenticated real-provider flow remain unverified.
+Desktop1.12.0 is unchanged. GitHub's4 billing-blocked jobs/1 skipped build/0 steps did
+not attest the observed deployment. No additional runtime tests or product changes.

@@ -1,0 +1,44 @@
+# Portable backup contract and remaining acceptance gates
+
+Read-only review, 2026-09-12; checkout HEAD `3c6400c3780da64c065c5326f76caaf0477237a8`. Source inspection and public provider documentation only. No provider API calls, credentials read, tests, scans, installs or tracked edits.
+
+## What exists today
+
+The Settings workspace backup is **manual, installation-wide, partial, and tied to the original installation's secret**. It is not “all chats/sessions/files backed up to the signed-in user's account.” Current UI already says conversation history and provider connections are excluded and another installation is unsupported (`src/components/WorkspaceSyncCard.tsx:147–151,259–263`), although its Drive controls still use the unchecked account-linked routes.
+
+| Data | Current v1 bundle |
+|---|---|
+| Visible teammate records | Included wholesale, including IDs, profile/settings, permission preferences, task titles/IDs and resume-cursor strings. Hidden bots excluded. |
+| Groups | All group records, including membership, IDs, bulletin and paths; no per-user filter. |
+| Memory | Top-level `DATA_DIR/memory/*.md`, each visible bot's top-level `workspaces/<id>/memory/*.md`, and qualifying bot `MEMORY.md`. Unreadable files are silently skipped. |
+| Chats and task history | **Not included:** no message rows, attachments, branch heads or deleted/hidden conversation export. Task IDs/cursors are metadata, not transcripts or resumable provider state. |
+| Files and live sessions | **Not included:** arbitrary workspace files, nested memory/history, SOUL files, browser cookies/storage, provider CLI session files, native drafts or active processes. No opt-in transcript implementation despite the module's opening comment. |
+| Connections and secrets | Configuration/OAuth/Keychain/auth databases are not exported. Sensitive text already placed in a bot record or memory is not automatically removed. |
+
+Evidence: `server/workspace-bundle.ts:24–30,45–115`; `server/store.ts:145–200,272–357`. Actual transcripts and active heads live separately in `server/message-db.ts:22–54`. The independent Vault feature backs up explicitly selected files through Vaultgram (`server/vault-manager.ts:46–78`); it is not invoked by workspace export and does not make the bundle complete.
+
+Restore merges missing bot/group IDs, skips existing records, and lets existing local memory win. It writes/persists incrementally, without a transaction spanning fleet and files; it does not restore transcript rows or prove all original data is present (`workspace-bundle.ts:201–275`). Existing owned route tests establish a same-install export/missing-memory restore, not disaster recovery on a fresh machine (`server/workspace-auth-harness.test.ts:198–218`).
+
+## Encryption and recovery ownership
+
+Workspace v1 uses AES-256-GCM, a random 16-byte salt and 12-byte IV, and scrypt of **passphrase plus deployment signing secret** (`workspace-bundle.ts:39–40,119–167`). Salt/IV/tag/ciphertext are carried in the envelope. The browser sends the passphrase to the local server; this does not protect plaintext or the key from that server/process. Provider transports receive the encrypted payload, but metadata, availability and endpoint compromise remain separate concerns.
+
+The signing secret is `BETTER_AUTH_SECRET` or the installation's generated `DATA_DIR/auth.secret`, also used for login signing (`server/auth.ts:59–100`). **Losing that original secret makes v1 unreadable even with the correct passphrase.** Copying a Google login, Telegram file or bot token does not recover it. Do not solve portability by distributing the auth signing secret. Installation Drive/Telegram credentials are stored in owner-mode config JSON, not a backup-specific encrypted keystore (`server/config.ts:253–307`). Vaultgram separately needs its passphrase, salt/config and file index; its wrapper is not evidence of portable workspace recovery.
+
+## Destination/account boundaries
+
+- **Preserve configured installation Drive.** `/api/workspace/drive/push|pull` captures `cfg.driveSync.refreshToken` and uses the installation OAuth client, independent of sign-in tokens (`index.ts:7100–7135`; `drive-sync.ts:71–87`). That deliberately chosen Google account may differ from login. Sequential uploads update the newest `muster-workspace.enc`; this is neither retained snapshot history nor conflict-aware sync (`drive-sync.ts:102–176`). Google's appData folder is app-specific, hidden from normal Drive browsing, and user-deletable; it is not an immutable backup service. [Google appData documentation](https://developers.google.com/workspace/drive/api/guides/appdata).
+- **New account-linked Drive is not ready to promise ownership.** It chooses a login account row but does not verify returned Google subject/scope; an omitted refresh token keeps the previous token while replacing the access token (`account-drive.ts:143–171`). Signed state expires but is not consumed once. Hosted workspace routes correctly deny global backup even for the primary account (`index.ts:4336–4344`). Preserve that denial. Google pull currently stamps success before decryption/restore (`index.ts:7248–7255`), so that timestamp is not restore proof. Detailed containment plan remains `.omb-scratch/verification/astra-glm-audit-2026-09-12/auth/next-slice.md`.
+- **Telegram is an encrypted-file transport, not a verified personal destination.** Connect selects the latest incoming chat, without proving ownership; unbound restore can select a document from any recent chat (`telegram-sync.ts:142–180`). Existing exact token/chat rechecks prevent a changed local connection adopting a transfer result. Bot API traffic is not a Secret Chat: Muster's file encryption provides content protection here. Telegram still sees recipient, filename, size and timing. Recent updates expire within 24 hours; Bot API downloads currently cap at 20 MB, so a larger future “everything” bundle needs a tested chunk protocol. [Telegram bots](https://core.telegram.org/bots), [Bot API](https://core.telegram.org/bots/api).
+
+## Smallest testable protection slice
+
+**Contain installation-wide capabilities before expanding backup contents.** Keep local configured Drive and file backup working. Implement the previously planned honest capability response and disable only unchecked account-linked Drive connection/write routes until its identity/scope/one-use architecture is ready.
+
+**Superseded by Loop71 (`33fda89`):** source inspection found that the separate `/api/vault/*` endpoints use one global VaultManager and accept filesystem paths (`index.ts:5362–5410`); the current hosted workspace denial and bot/group/thread ownership checks do not cover them (`4336–4380`). Loop71 now gates the exact Vault route family for every authenticated hosted account before body parsing/file operations and filters daily briefing ownership. Its final real-route harness passed87 tests, full suite3520/8 skipped. Baseline requests proved route accessibility and synthetic other-account briefing names/metadata; configured Vault transfers could not be exercised because the native SQLite binding was unavailable. No configured-data exfiltration or complete Vault restore verification is claimed. See [the current audit](astra-glm-audit-2026-09-12.md). Preserve local configured Vault behavior.
+
+Acceptance: actual hosted primary/secondary/anonymous routes, local configuration with different synthetic login/installation identities in SQLite, zero credential mutation/provider calls for denied routes, explicit local push/pull through fake transport, and no successful-restore stamp on download/decrypt/import failure. Preserve original data and source/cleanup receipts.
+
+Then build **portable v2 file export/restore first**, before automatic Drive/Telegram sync: user-held recovery material independent of auth signing; strict authenticated version/KDF/manifest; consistent SQLite messages/branch snapshot plus explicit file manifest; owner filtering; portable IDs with re-consent for permissions/connections; confined paths/no symlinks and size/count limits; staged restore with failure rollback. Existing v1 restore accepts loosely validated record/path keys and has no all-or-nothing import, so it must not be reused blindly (`workspace-bundle.ts:147–171,183–275`). Test export from installation A, destroy its fixture, restore under unrelated auth secret B using only the intended recovery kit, and compare exact messages/branches/file hashes. Tampering, wrong keys, unknown versions, traversal/symlinks, truncated files, interrupted imports and other-account records must leave live data unchanged. A successful upload alone cannot close this gate.
+
+Onboarding can promise only the current manual partial backup until those gates pass. No mechanism here supports claims of being unattackable, immune to reverse engineering, loss-proof, or automatically synchronized.

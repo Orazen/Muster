@@ -329,3 +329,60 @@ The12 inherited native/research/template files remain separately preserved until
 verified commits finish. No native release is claimed; physical Watch/editor acceptance,
 Intel runtime and Apple distribution signing remain open. The handoff will retain the
 portable-backup and account-linked Drive acceptance gates.
+
+
+## Loop 73 — durable installation and recovery handoff (12 September 2026)
+
+Loop72 product is committed and pushed as **`e6bbf16`**. The native personal-testing
+copy and research are now documented in three durable files:
+
+- [Personal iPhone/Watch installation](../guides/personal-iphone-watch-install.md):
+  prepared Xcode project, free Personal Team steps, separate phone/Watch schemes,
+  seven-day renewal and physical acceptance limits.
+- [OpenMaus onboarding decisions](openmaus-onboarding-study-2026-09-12.md): installed
+  0.1.74 versus pinned source0.1.75,259 documentation-area files inventoried/30 selected
+  files inspected, adopted frame and measurable next-slice acceptance.
+- [Portable backup contract](portable-backup-contract-2026-09-12.md): exact v1 scope,
+  original-secret dependency, account-linked Drive containment, and fresh-install v2
+  recovery gates before automatic Drive/Telegram sync.
+
+Personal-testing copy verification: XcodeGen passed0.204s; generic simulator Watch
+build **passed56.211s**, iOS **passed57.394s**, signing disabled. All90 copy inputs,
+86 checkout inputs,5 exact inherited overlays and26 existing simulator identities/
+states unchanged; owned command groups exited. **Zero physical installations, signing
+operations or runtime tests** in these compile gates. No Apple account or phone/Watch was
+modified. The copied iPhone capability/entitlement omit Time Sensitive Notifications
+for Personal Team compatibility; main application source is unchanged. The normal
+linker ad-hoc signatures are not development/distribution signing.
+
+This documentation-only slice adds **0 new runtime tests**; it preserves Loop72's
+**244 files / 3520 passed / 8 skipped / 0 failed**,15/15 browser acceptance, successful
+build/types/lint and source freeze. All5 intended local links in the three documents resolve; raw scratch evidence is explicitly local-only.
+Evidence remains under `.omb-scratch/verification/astra-onboarding-refresh-2026-09-12/`.
+
+Next product slice: contain the unchecked account-linked Drive flow while preserving
+configured installation Drive; then user-paced Tour/readiness recovery and portable
+file restore. The inherited five-file Watch composer migration still requires real
+system-editor/lifecycle acceptance before committing. Real Google consent across
+platforms, complete encrypted backup/restore, signed/notarized native distribution,
+Intel runtime, the advertised CLI version and the full Mimosa rerun remain open.
+Two distinct image-size high dependency alerts remain open. No comprehensive security,
+all-data sync, new native release, revenue uplift or public-launch completion is claimed.
+
+
+### Loop72 production observation — 12 September,16:42–16:43 UTC
+
+GET now serves **`index-Wta1ET2F.js`** with all four new onboarding markers and
+**`index-DSXB0S8I.css`** with the frame, Flower guide, progress and scroll rules.
+Health/app/assets/download metadata return200; anonymous Vault status and briefing
+return401. This supersedes the earlier old-bundle observations. The exact backend SHA
+and authenticated production onboarding/provider flow remain unverified. Desktop
+metadata stays **1.12.0 / `e241968`**.
+
+GitHub records **4 billing-blocked jobs / 1 skipped build / 0 executed steps** for
+`e6bbf16`; every failed job has the payment/spending-limit annotation. Those jobs did
+not attest the observed rollout, whose successful path remains unestablished. Board
+billing action is still needed for hosted CI; do not equate this with a stale web build.
+Receipts: `loop72-public-get-initial.json`, `loop72-public-get-post-roll.json`,
+`loop72-public-get-final.json`, `loop72-served-css.json`, `loop72-ci-annotations.json`
+under the current local evidence root. No further product changes or test reruns.
