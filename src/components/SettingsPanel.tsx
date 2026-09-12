@@ -16,6 +16,7 @@ import { requestNotificationPermission } from "@/lib/notify";
 import { botUsage, costCaption, formatTokens, formatUsd } from "@/lib/usage";
 import { shortPath } from "@/lib/short-path";
 import { MemoryTab } from "./bot-profile/MemoryTab";
+import { MemoryHistory, type MemoryVersion } from "./bot-profile/MemoryHistory";
 
 function Field({
   label,
@@ -176,11 +177,15 @@ function MemoryCard({ bot }: { bot: Bot }) {
   const [topics, setTopics] = useState<MemoryTopic[]>([]);
   const [saving, setSaving] = useState(false);
   const [topic, setTopic] = useState<{ name: string; text: string } | null>(null);
+  const [history, setHistory] = useState<MemoryVersion[]>([]);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [version, setVersion] = useState<(MemoryVersion & { text: string }) | null>(null);
 
   const load = async () => {
     setLoading(true);
     setError(null);
     setTopic(null);
+    setVersion(null);
     try {
       const result: { text: string; truncated: boolean; topics: MemoryTopic[] } = await api(
         `/api/bots/${bot.id}/memory`,
@@ -196,6 +201,16 @@ function MemoryCard({ bot }: { bot: Bot }) {
     }
   };
 
+  const loadHistory = async () => {
+    try {
+      const result: { versions: MemoryVersion[] } = await api(`/api/bots/${bot.id}/memory/history`);
+      setHistory(result.versions);
+    } catch {
+      // history is a safety net — a failed listing must not block editing
+      setHistory([]);
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     setError(null);
@@ -206,6 +221,7 @@ function MemoryCard({ bot }: { bot: Bot }) {
       });
       setTruncated(result.truncated);
       setDirty(false);
+      void loadHistory(); // this save just displaced the previous content
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -215,10 +231,41 @@ function MemoryCard({ bot }: { bot: Bot }) {
 
   const openTopic = async (name: string) => {
     setError(null);
+    setVersion(null);
     try {
       setTopic(await api(`/api/bots/${bot.id}/memory/topics/${encodeURIComponent(name)}`));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const openVersion = async (v: MemoryVersion) => {
+    setError(null);
+    setTopic(null);
+    try {
+      setVersion(await api(`/api/bots/${bot.id}/memory/history/${encodeURIComponent(v.id)}`));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const restoreVersion = async (v: MemoryVersion) => {
+    setRestoringId(v.id);
+    setError(null);
+    try {
+      const result: { ok: boolean; text: string; truncated: boolean } = await api(
+        `/api/bots/${bot.id}/memory/rollback`,
+        { method: "POST", body: JSON.stringify({ id: v.id }) },
+      );
+      setText(result.text);
+      setTruncated(result.truncated);
+      setDirty(false);
+      setVersion(null);
+      await loadHistory(); // the displaced live content became a version
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRestoringId(null);
     }
   };
 
@@ -230,7 +277,10 @@ function MemoryCard({ bot }: { bot: Bot }) {
         onClick={() => {
           const next = !open;
           setOpen(next);
-          if (next) void load();
+          if (next) {
+            void load();
+            void loadHistory();
+          }
         }}
       >
         <div>
@@ -261,7 +311,39 @@ function MemoryCard({ bot }: { bot: Bot }) {
         </div>
       )}
 
-      {open && !loading && !topic && (
+      {open && !loading && version && (
+        <div className="mt-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-[12.5px] text-ink-secondary">
+              Version from{" "}
+              {new Date(version.at).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </span>
+            <button
+              onClick={() => setVersion(null)}
+              className="shrink-0 rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+            >
+              Back
+            </button>
+          </div>
+          <pre className="mt-2 max-h-[240px] overflow-auto whitespace-pre-wrap rounded-lg border border-hairline/40 bg-inset p-3 font-mono text-[12.5px] leading-relaxed text-ink">
+            {version.text}
+          </pre>
+          <button
+            onClick={() => void restoreVersion(version)}
+            disabled={restoringId !== null}
+            className="mt-2 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+          >
+            {restoringId === version.id ? "Restoring…" : "Restore this version"}
+          </button>
+        </div>
+      )}
+
+      {open && !loading && !topic && !version && (
         <div className="mt-3">
           <textarea
             className={cn(inputCls, "min-h-[160px] resize-y font-mono text-[12.5px] leading-relaxed")}
@@ -288,6 +370,12 @@ function MemoryCard({ bot }: { bot: Bot }) {
             )}
           </div>
           {topics.length > 0 && <MemoryTab topics={topics} onOpen={(name) => void openTopic(name)} />}
+          <MemoryHistory
+            versions={history}
+            restoringId={restoringId}
+            onPreview={(v) => void openVersion(v)}
+            onRestore={(v) => void restoreVersion(v)}
+          />
         </div>
       )}
 

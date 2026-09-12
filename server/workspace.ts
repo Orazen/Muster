@@ -8,9 +8,19 @@
 // memory/ holds topic files the bot reads on demand with its ordinary
 // file tools. Plain markdown on purpose — the user can open, edit, or
 // delete anything the bot believes.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
+import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 
 export const WORKSPACES_DIR = join(DATA_DIR, "workspaces");
@@ -97,10 +107,23 @@ export function readMemoryFile(botId: string) {
 }
 
 /** ensureWorkspace first: the user may edit memory before the bot has ever
- * run a turn, and the write must not depend on that ordering. */
+ * run a turn, and the write must not depend on that ordering. The content
+ * this overwrite replaces is snapshotted first (see memory history below),
+ * and the replace itself is atomic — a crash mid-save leaves the old memory
+ * intact instead of a half-written file. The baseline update afterwards is
+ * what keeps the next prompt build from misattributing this edit to the bot. */
 export function writeMemoryFile(botId: string, text: string): void {
   ensureWorkspace(botId);
-  writeFileSync(join(workspaceDir(botId), "MEMORY.md"), text, { mode: 0o600 });
+  const file = join(workspaceDir(botId), "MEMORY.md");
+  let current: string | null = null;
+  try {
+    current = readFileSync(file, "utf8");
+  } catch {
+    /* missing live file — nothing to snapshot, the write recreates it */
+  }
+  if (current !== text) snapshotMemory(botId, "user-edit");
+  writeFileAtomic(file, text, { mode: 0o600 });
+  writeMemoryBaseline(botId, text);
 }
 
 // One path segment, starts with a word character, plain characters only,
@@ -147,12 +170,254 @@ export function readMemoryTopic(botId: string, name: string): string | null {
   }
 }
 
+// ── memory history ───────────────────────────────────────────────────────
+// MEMORY.md is the one file a bot can rewrite about itself, and the bot
+// writes it with its own file tools — those writes never pass through this
+// server, so a bad self-edit (or a prompt-injection one) is otherwise
+// invisible and irreversible. Every distinct past version is therefore kept
+// in <workspace>/.memory-history/ as plain markdown, one file per version,
+// so the user can see what changed and put an earlier version back.
+//
+// A version's `origin` names the event that SUPERSEDED it (it is recorded
+// at the moment it stopped being the live file): "user-edit" — replaced by
+// an editor save; "agent" — replaced by bot (or manual on-disk) file-tool
+// activity, noticed at the next turn's prompt build; "rollback" — replaced
+// by a restore, so a rollback can itself be rolled back.
+
+const HISTORY_DIR_NAME = ".memory-history";
+const MEMORY_HISTORY_LIMIT = 20;
+
+export type MemoryHistoryOrigin = "user-edit" | "agent" | "rollback";
+
+/** Version ids are filenames: <YYYYMMDDTHHMMSSmmm>-<origin>-<4 hex>.md — an
+ * 18-character local wall-clock stamp with the T separator. The strict shape
+ * is the traversal gate — no slash, no dot run, no leading dot can match, so
+ * a gated id can only resolve inside the history dir. */
+const HISTORY_ID = /^\d{8}T\d{9}-(user-edit|agent|rollback)-[0-9a-f]{4}\.md$/;
+
+export function isMemoryHistoryId(id: string): boolean {
+  return HISTORY_ID.test(id);
+}
+
+function historyDirFor(botId: string): string {
+  return join(workspaceDir(botId), HISTORY_DIR_NAME);
+}
+
+/** A filename timestamp is a local wall clock, so parsing it back goes
+ * through the local-time constructor — treating the digits as UTC would
+ * shift every listed version by the zone offset. */
+function parseHistoryStamp(stamp: string): string {
+  const year = Number(stamp.slice(0, 4));
+  const month = Number(stamp.slice(4, 6));
+  const day = Number(stamp.slice(6, 8));
+  const hour = Number(stamp.slice(9, 11));
+  const minute = Number(stamp.slice(11, 13));
+  const second = Number(stamp.slice(13, 15));
+  const ms = Number(stamp.slice(15, 18));
+  return new Date(year, month - 1, day, hour, minute, second, ms).toISOString();
+}
+
+function formatHistoryStamp(date: Date): string {
+  const pad = (n: number, width: number) => String(n).padStart(width, "0");
+  return (
+    `${date.getFullYear()}${pad(date.getMonth() + 1, 2)}${pad(date.getDate(), 2)}` +
+    `T${pad(date.getHours(), 2)}${pad(date.getMinutes(), 2)}${pad(date.getSeconds(), 2)}${pad(date.getMilliseconds(), 3)}`
+  );
+}
+
+/** Write one snapshot file and enforce the cap. Callers have already decided
+ * this content is worth keeping. Failure is swallowed: history is a safety
+ * net and must never block the write it guards. */
+function recordHistoryEntry(botId: string, text: string, origin: MemoryHistoryOrigin): void {
+  const dir = historyDirFor(botId);
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(dir, `${formatHistoryStamp(new Date())}-${origin}-${randomBytes(2).toString("hex")}.md`), text, {
+      mode: 0o600,
+    });
+  } catch {
+    return;
+  }
+  // keep the newest MEMORY_HISTORY_LIMIT versions, drop the rest
+  const entries = historyEntries(botId);
+  for (const stale of entries.slice(MEMORY_HISTORY_LIMIT)) {
+    try {
+      unlinkSync(join(dir, stale.id));
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+/** True when some recorded version already holds exactly this content, so
+ * displacing it again loses nothing recoverable. */
+function historyHasContent(botId: string, text: string): boolean {
+  for (const entry of historyEntries(botId)) {
+    try {
+      if (readFileSync(join(historyDirFor(botId), entry.id), "utf8") === text) return true;
+    } catch {
+      /* a pruned or unreadable entry just fails the match */
+    }
+  }
+  return false;
+}
+
+/** Snapshot the live MEMORY.md because a server-mediated write is about to
+ * replace it. Skips the untouched seed (boilerplate, re-derivable — history
+ * starts at the first real content) and anything history already holds. */
+function snapshotMemory(botId: string, origin: MemoryHistoryOrigin): void {
+  let raw: string;
+  try {
+    raw = readFileSync(join(workspaceDir(botId), "MEMORY.md"), "utf8");
+  } catch {
+    return; // nothing on disk to preserve
+  }
+  if (raw === MEMORY_SEED || historyHasContent(botId, raw)) return;
+  recordHistoryEntry(botId, raw, origin);
+}
+
+// The last MEMORY.md content the server itself wrote or verified, kept beside
+// the versions. A bot edits MEMORY.md with its own file tools, which never
+// pass through the server — comparing the live file against this baseline at
+// the next prompt build is what separates a behind-the-back edit (worth an
+// "agent" snapshot of the displaced state) from a server-mediated write,
+// which records its own baseline. A stale or missing baseline is harmless:
+// the displaced content is then already in history, so at worst one snapshot
+// is skipped or the seed is compared once.
+const MEMORY_BASELINE_FILE = ".known";
+
+function readMemoryBaseline(botId: string): string {
+  try {
+    return readFileSync(join(historyDirFor(botId), MEMORY_BASELINE_FILE), "utf8");
+  } catch {
+    return MEMORY_SEED; // no server write on record: the seed is the baseline
+  }
+}
+
+function writeMemoryBaseline(botId: string, text: string): void {
+  try {
+    mkdirSync(historyDirFor(botId), { recursive: true, mode: 0o700 });
+    writeFileSync(join(historyDirFor(botId), MEMORY_BASELINE_FILE), text, { mode: 0o600 });
+  } catch {
+    /* see readMemoryBaseline — a missed update self-heals on the next capture */
+  }
+}
+
+/** Prompt-build capture: if the live file differs from the baseline, someone
+ * edited it behind the server's back (the bot's file tools, or a manual on-
+ * disk edit — indistinguishable, so the label is best-effort). Record the
+ * displaced last-known state before it is gone. */
+function captureAgentMemory(botId: string): void {
+  let raw: string;
+  try {
+    raw = readFileSync(join(workspaceDir(botId), "MEMORY.md"), "utf8");
+  } catch {
+    return;
+  }
+  const baseline = readMemoryBaseline(botId);
+  if (raw === baseline) return;
+  if (baseline !== MEMORY_SEED && !historyHasContent(botId, baseline)) {
+    recordHistoryEntry(botId, baseline, "agent");
+  }
+  writeMemoryBaseline(botId, raw);
+}
+
+/** Id → full record (without text) for every snapshot, newest first. The
+ * filename sort IS the time sort: the stamp is the leading field. */
+function historyEntries(botId: string): Array<{ id: string; origin: MemoryHistoryOrigin; at: string }> {
+  let entries: string[];
+  try {
+    entries = readdirSync(historyDirFor(botId));
+  } catch {
+    return [];
+  }
+  return entries
+    .filter(isMemoryHistoryId)
+    .sort((a, b) => b.localeCompare(a))
+    .flatMap((id) => {
+      const withoutExt = id.slice(0, -3);
+      const stamp = withoutExt.slice(0, 18);
+      const origin = withoutExt.slice(19).replace(/-[0-9a-f]{4}$/, "") as MemoryHistoryOrigin;
+      return HISTORY_ID.test(id) && stamp.length === 18
+        ? [{ id, origin, at: parseHistoryStamp(stamp) }]
+        : [];
+    });
+}
+
+export interface MemoryHistoryEntry {
+  id: string;
+  at: string;
+  origin: MemoryHistoryOrigin;
+  bytes: number;
+}
+
+/** The bot's memory versions, newest first, size only — contents are fetched
+ * one at a time, mirroring listMemoryTopics. */
+export function listMemoryHistory(botId: string): MemoryHistoryEntry[] {
+  return historyEntries(botId).flatMap((entry) => {
+    try {
+      const stat = statSync(join(historyDirFor(botId), entry.id));
+      return stat.isFile() ? [{ ...entry, bytes: stat.size }] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** One recorded version's text. The id gate runs here too, not only in the
+ * HTTP route — same contract as readMemoryTopic. Null for anything invalid
+ * or unreadable. */
+export function readMemoryHistoryEntry(botId: string, id: string): (Omit<MemoryHistoryEntry, "bytes"> & { text: string }) | null {
+  if (!isMemoryHistoryId(id)) return null;
+  let raw: string;
+  try {
+    raw = readFileSync(join(historyDirFor(botId), id), "utf8");
+  } catch {
+    return null;
+  }
+  const withoutExt = id.slice(0, -3);
+  return {
+    id,
+    at: parseHistoryStamp(withoutExt.slice(0, 18)),
+    origin: withoutExt.slice(19).replace(/-[0-9a-f]{4}$/, "") as MemoryHistoryOrigin,
+    text: raw,
+  };
+}
+
+/** Put a recorded version back as the live MEMORY.md. The state this restore
+ * replaces is snapshotted first with origin "rollback", so undoing a restore
+ * is another restore. False for an unknown or invalid id. */
+export function restoreMemoryHistory(botId: string, id: string): boolean {
+  const entry = readMemoryHistoryEntry(botId, id);
+  if (entry === null) return false;
+  ensureWorkspace(botId);
+  const file = join(workspaceDir(botId), "MEMORY.md");
+  let current: string | null = null;
+  try {
+    current = readFileSync(file, "utf8");
+  } catch {
+    /* missing live file — restore recreates it */
+  }
+  if (current === entry.text) return true; // already that version — nothing to do
+  snapshotMemory(botId, "rollback");
+  writeFileAtomic(file, entry.text, { mode: 0o600 });
+  writeMemoryBaseline(botId, entry.text);
+  return true;
+}
+
 /** The memory block appended to a bot's system prompt. Always present for
  * bots with a workspace, so the bot knows the mechanism exists even before
  * it has written anything. Content from other bots or imported files must
  * never be recorded as fact — memory is a prompt-injection persistence
  * vector the moment a bot copies untrusted text into it. */
 export function memorySystemPrompt(botId: string): string {
+  // Capture behind-the-server edits before reading them into the prompt: the
+  // bot writes MEMORY.md with its own file tools, which never pass through
+  // the server, so the next turn's prompt build is where a change becomes
+  // visible — and where the displaced state gets one last chance to be
+  // recorded. Server-mediated writes keep the baseline current themselves and
+  // record nothing here.
+  captureAgentMemory(botId);
   const memory = loadMemory(botId);
   const memoryFile = join(workspaceDir(botId), "MEMORY.md");
   const topicDir = join(workspaceDir(botId), "memory");

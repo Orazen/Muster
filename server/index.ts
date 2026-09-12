@@ -202,9 +202,13 @@ import {
   ensureWorkspace,
   listMemoryTopics,
   isMemoryTopicName,
+  isMemoryHistoryId,
+  listMemoryHistory,
   memorySystemPrompt,
   readMemoryFile,
+  readMemoryHistoryEntry,
   readMemoryTopic,
+  restoreMemoryHistory,
   writeMemoryFile,
   workspaceDir,
   MEMORY_FILE_MAX_BYTES,
@@ -6208,6 +6212,44 @@ let requestUserEmail = "";
       const text = readMemoryTopic(m[1], name);
       if (text === null) return json(res, 404, { error: "no such topic file" });
       return json(res, 200, { name, text });
+    }
+
+    // ── bot memory history: past versions of MEMORY.md + rollback ───────
+    // The bot rewrites its own memory with file tools the server never
+    // sees; these routes expose the versions workspace.ts records so the
+    // user can inspect what changed and put an earlier version back.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/history$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { versions: listMemoryHistory(m[1]) });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/history\/([^/]+)$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      // Decode before validating (a UI may percent-encode the id), then gate
+      // on the strict id shape — same order as the topic-name route above.
+      let id: string;
+      try {
+        id = decodeURIComponent(m[2]);
+      } catch {
+        return json(res, 400, { error: "invalid version id" });
+      }
+      if (!isMemoryHistoryId(id)) return json(res, 400, { error: "invalid version id" });
+      const entry = readMemoryHistoryEntry(m[1], id);
+      if (entry === null) return json(res, 404, { error: "no such memory version" });
+      return json(res, 200, entry);
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/rollback$/);
+    if (m && method === "POST") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const parsed = z.object({ id: z.string() }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "id must be a string" });
+      // restoreMemoryHistory rejects invalid and unknown ids alike — a
+      // guess at a version id is a 404, never a read of another path
+      if (!restoreMemoryHistory(m[1], parsed.data.id)) {
+        return json(res, 404, { error: "no such memory version" });
+      }
+      return json(res, 200, { ok: true, ...readMemoryFile(m[1]) });
     }
 
     // A welcome answer and its user message are one durable operation. Reads

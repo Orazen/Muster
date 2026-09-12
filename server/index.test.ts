@@ -951,6 +951,44 @@ describe("bot memory API", () => {
     }
   });
 
+  it("versions MEMORY.md writes and restores a chosen version", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      // the first save replaces the seed boilerplate, which is not history;
+      // the second replaces real content, which is
+      await api("PUT", `/api/bots/${bot.id}/memory`, { text: "version one\n" });
+      await api("PUT", `/api/bots/${bot.id}/memory`, { text: "version two\n" });
+      const history = await api("GET", `/api/bots/${bot.id}/memory/history`);
+      expect(history.status).toBe(200);
+      expect(history.body.versions).toHaveLength(1);
+      expect(history.body.versions[0].origin).toBe("user-edit");
+      const id = history.body.versions[0].id;
+      expect((await api("GET", `/api/bots/${bot.id}/memory/history/${id}`)).body.text).toBe("version one\n");
+      expect((await api("GET", `/api/bots/${bot.id}/memory/history/nope.md`)).status).toBe(400);
+      expect((await api("GET", `/api/bots/does-not-exist/memory/history`)).status).toBe(404);
+
+      const rollback = await api("POST", `/api/bots/${bot.id}/memory/rollback`, { id });
+      expect(rollback.status).toBe(200);
+      expect(rollback.body.text).toBe("version one\n");
+      expect((await api("GET", `/api/bots/${bot.id}/memory`)).body.text).toBe("version one\n");
+      // the displaced "version two" became history, so the restore is itself reversible
+      const after = await api("GET", `/api/bots/${bot.id}/memory/history`);
+      expect(after.body.versions).toHaveLength(2);
+      expect(after.body.versions[0].origin).toBe("rollback");
+      const undo = await api("POST", `/api/bots/${bot.id}/memory/rollback`, { id: after.body.versions[0].id });
+      expect(undo.status).toBe(200);
+      expect((await api("GET", `/api/bots/${bot.id}/memory`)).body.text).toBe("version two\n");
+
+      expect(
+        (await api("POST", `/api/bots/${bot.id}/memory/rollback`, { id: "20260101T000000000-agent-ab12.md" })).status,
+      ).toBe(404);
+      expect((await api("POST", `/api/bots/${bot.id}/memory/rollback`, { id: "../MEMORY.md" })).status).toBe(404);
+      expect((await api("POST", `/api/bots/does-not-exist/memory/rollback`, { id })).status).toBe(404);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("refuses every coat of path traversal without reading the target", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     try {
