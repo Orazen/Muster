@@ -3126,3 +3126,52 @@ Allowance remains **4%**; no reset consumed; the owner's 2% handoff threshold ha
 been reached. Automation stays untouched/PAUSED. The wider release goal remains
 incomplete: native/runtime, actual Google consent, durable Stop/restart, peer race
 acceptance, full sync/backup, VM, Mimosa and two high dependency gates remain open.
+
+
+## Loop81 — stable web release identity audit and reserve handoff (12 September 2026)
+
+**Status: documentation and read-only audit only; no new product release.** The
+owner's latest instruction is to keep the existing web layout stable. The handbook,
+current state and stability contract already make that the next agent's first read.
+No redesign, automatic reload, session reset, provider call, hosted setting change,
+service restart or deployment trigger was made in this continuation.
+
+A parallel packaging audit and local runtime review expanded the
+[next build-identity slice](web-release-identity-next-slice.md). The implementation
+is still pending. The plan now locates final bundle rewriting, module-relative
+packaged resources, absent runtime package.json/Git metadata, afterPack native
+changes, loaded-backend versus mutable-web identity and transformed HTML. It
+requires bounded diagnostics, explicit provenance uncertainty, real relocated
+GET tests and unchanged draft/navigation behavior. Cloud Docker defects remain a
+separate gate. A manifest or supplied commit SHA must not be called attestation.
+
+**Verification in this loop: 0 new runtime tests.** All **970/970** source input
+hashes match the prior final test freeze. The unchanged accepted baseline is
+**254 files / 3862 passed / 8 skipped / 0 failed**, broker2/2, updater14/14,
+Node packaged server9/9 and browser3/3. These are Loop80 results, not reruns or
+native/production acceptance. Evidence for this audit and inherited preservation:
+`.omb-scratch/verification/loop81-identity-handoff/`. All12 inherited paths must be
+restored byte-for-byte before stopping; the original stash must remain. Never
+sweep them into a different slice. Automation remains untouched/PAUSED.
+
+**Release state carried forward:** product b3786bb is pushed; Loop80's19:58UTC
+GET10/10 observed index-CSwfumo9.js with new recovery UI. No fresh rollout is
+claimed here. Exact backend identity and authenticated production Stop recovery
+remain unverified. Downloads remain1.12.0/e241968; no native release. GitHub Actions
+billing rejection and registered-hook404 still require separate remediation;
+another deployment path delivered frontend code. Keep using isolated local
+verification while Actions is unavailable; do not claim its checks are green.
+
+**Next agent:** implement only the audited identity slice, then its complete
+acceptance and a scoped main commit/push. Follow the current-state release gates:
+durable Stop/restart and peer race acceptance, real Google consent, complete
+sync/backup, native signing and physical-device tests, VM, Mimosa and two Android
+image-size high alerts. None is completed by this handoff. No revenue result or
+all-features/security/AGI claim is supported.
+
+**Allowance:** the initial check reported3%; the final live check reached **2%
+remaining**, the owner's handoff reserve. Reset is19 September2026 at16:43
+Europe/Rome. No reset consumed. The handoff is ready, and no further implementation
+was started after this threshold. The wider goal remains open for the next agent.
+Read this latest ledger entry, current-state.md and the stability contract before
+historical plans, preserving the approved app.

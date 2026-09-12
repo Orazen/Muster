@@ -20,8 +20,8 @@ All 970 input hashes match. Types/lint/web build pass. Cleanup: 6 servers + 4 pr
 exited, 12 ports closed, 3 temporary roots removed. The latest ledger retains initial
 failures, test details and limits. Production acceptance is recorded below.
 
-**Production baseline:** https://muster.orazen.online/app serves
-DCAkTz04/C6Cegjsm; missing scripts/styles return genuine404. Downloads remain
+**Latest observed production, Loop80 19:58 UTC:** https://muster.orazen.online/app serves
+CSwfumo9/C6Cegjsm, with the new recovery UI; missing scripts/styles return genuine404. Downloads remain
 1.12.0/e241968. This slice does not claim a native release, exact backend source
 identity, actual Google consent or authenticated production recovery acceptance.
 
@@ -33,8 +33,9 @@ failed path with proof of no rollout. One verified trigger accompanies Loop80.
 
 **Preserved local work:** five iOS/Watch source/test files, six docs/research/glm
 files and www/templates.html stay outside this slice. Check the 12 exact hashes
-and stash ownership in `.omb-scratch/verification/loop80-stop-recovery/`
-`inherited-preservation.json` / `inherited-restoration.json`. Restore exactly;
+and stash ownership in `.omb-scratch/verification/loop81-identity-handoff/`
+`inherited-preservation.json` / `inherited-restoration.json`; Loop80 is the original
+hash baseline. All12 must be restored before stopping. Restore exactly;
 never sweep them into cleanup commits. Retain the original preexisting stash.
 
 **Next:** [exact web/server build identity](web-release-identity-next-slice.md), then verified deployment wiring when
@@ -49,7 +50,13 @@ found no fixed published upgrade. Keep existing mitigations and automation PAUSE
 Never relabel fixture tests as native/production acceptance or resume broad
 redesigns. Read live account usage before applying the owner's 2% handoff threshold.
 
-**Allowance snapshot:** 4% remaining at the Loop80 acceptance check; reset19 September2026 at16:43 Europe/Rome. No reset consumed. Re-read usage before the owner’s2%handoff threshold.
+**Loop81 handoff:** the parallel read-only packaging/runtime audit expanded the
+[next slice](web-release-identity-next-slice.md) into concrete integration points
+and real-fixture acceptance. It is **not implemented**. All970 tested source input
+hashes still match Loop80; this documentation-only continuation ran0 new runtime
+tests. Current layout and user services were not changed.
+
+**Allowance snapshot:** final live check reached **2% remaining**, the owner’s handoff reserve; reset19 September2026 at16:43 Europe/Rome. No reset consumed. The handoff is ready; no further implementation was started after this threshold. The wider goal remains open for the next agent.
 
 **Final publication check, 19:58 UTC:** product b3786bb is pushed. Production
 GET10/10 availability/auth-boundary checks pass. Served JavaScript changed to
