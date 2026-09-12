@@ -1,11 +1,14 @@
-// Async peer handoff (`delegate_bot`) — pure logic. Each test stands up a
+// Async peer handoff (`delegate_bot`) — real Store/SQLite, with a fake bus and
+// target dispatcher. Each test stands up a
 // real Store with throwaway bots, a fake comms-bus (records broadcasts),
 // and a runTarget stub that captures the would-be turn so the test can
 // assert what would have been dispatched to the harness. The harness itself
 // stays out of these — the integration happens in comms.test.ts (the full
 // e2e through the agents proxy + fake ACP CLI).
 import { rmSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { closeMessageDb, readThread } from "./message-db.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CommsBus } from "./comms-visibility.ts";
 import { DATA_DIR } from "./config.ts";
@@ -14,9 +17,19 @@ import {
   drainDelegations,
   queueDelegation,
   _pendingCount,
+  type PeerProvenance,
 } from "./delegations.ts";
 import { peerAllowKey, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
-import { Store, type BotRecord, type Message } from "./store.ts";
+import { Store, type BotRecord, type GroupRecord, type Message } from "./store.ts";
+
+function provenanceFor(store: Store, from: BotRecord, depth = 0, sourceThreadId = from.threadId, ownerId = "local"): PeerProvenance {
+  const task = store.taskByThread(from.id, sourceThreadId);
+  if (!task) throw new Error("Test source task missing");
+  return { ownerId, fromBotId: from.id, sourceThreadId, taskId: task.threadId, depth, operation: "delegate_bot" };
+}
+
+beforeEach(() => { closeMessageDb(); _resetPending(); });
+afterEach(() => { closeMessageDb(); _resetPending(); vi.restoreAllMocks(); });
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
 
@@ -99,7 +112,7 @@ describe("queueDelegation", () => {
       toBotId: from.id,
       message: "self-talk",
       depth: 0,
-    }, 1);
+    }, 1, provenanceFor(commsBus.store, from, 0));
     expect(result).toBe("self");
     expect(_pendingCount(from.threadId)).toBe(0);
   });
@@ -109,7 +122,7 @@ describe("queueDelegation", () => {
       toBotId: target.id,
       message: "next task",
       depth: 1,
-    }, 1);
+    }, 1, provenanceFor(commsBus.store, from, 1));
     expect(result).toBe("too_deep");
     expect(_pendingCount(from.threadId)).toBe(0);
   });
@@ -119,7 +132,7 @@ describe("queueDelegation", () => {
       toBotId: "ghost",
       message: "where?",
       depth: 0,
-    }, 1);
+    }, 1, provenanceFor(commsBus.store, from, 0));
     expect(result).toBe("no_target");
     expect(_pendingCount(from.threadId)).toBe(0);
   });
@@ -130,7 +143,7 @@ describe("queueDelegation", () => {
       message: "do this",
       reason: "followup",
       depth: 0,
-    }, 1);
+    }, 1, provenanceFor(commsBus.store, from, 0));
     expect(result).toBe("ok");
     expect(_pendingCount(from.threadId)).toBe(1);
 
@@ -149,13 +162,7 @@ describe("queueDelegation", () => {
 
   it("keys detached routine delegations to their real source thread", async () => {
     const routineTask = store.createTask(from.id, "Routine run", false)!;
-    const result = queueDelegation(
-      commsBus,
-      from,
-      { toBotId: target.id, message: "routine follow-up", depth: 0 },
-      1,
-      routineTask.threadId,
-    );
+    const result = queueDelegation(commsBus, from, { toBotId: target.id, message: "routine follow-up", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0, routineTask.threadId));
 
     expect(result).toBe("ok");
     expect(_pendingCount(routineTask.threadId)).toBe(1);
@@ -199,7 +206,7 @@ describe("drainDelegations", () => {
   });
 
   it("runs the target's turn via runTarget and mirrors the exchange", async () => {
-    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0));
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
     });
@@ -225,12 +232,7 @@ describe("drainDelegations", () => {
   });
 
   it("includes the reason line in the prefixed message when one is given", async () => {
-    queueDelegation(
-      commsBus,
-      from,
-      { toBotId: target.id, message: "do this", reason: "next step", depth: 0 },
-      1,
-    );
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", reason: "next step", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0));
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
     });
@@ -241,13 +243,7 @@ describe("drainDelegations", () => {
   it("drains and mirrors a detached routine delegation on its source thread", async () => {
     const activeThreadId = from.threadId;
     const routineTask = store.createTask(from.id, "Routine run", false)!;
-    queueDelegation(
-      commsBus,
-      from,
-      { toBotId: target.id, message: "routine follow-up", depth: 0 },
-      1,
-      routineTask.threadId,
-    );
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "routine follow-up", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0, routineTask.threadId));
 
     drainDelegations(
       commsBus,
@@ -270,7 +266,7 @@ describe("drainDelegations", () => {
   });
 
   it("contains a rejected delegation worker and reports it on the source thread", async () => {
-    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0));
     drainDelegations(commsBus, approvalBus, from.threadId, () => {
       throw new Error("target runner exploded");
     });
@@ -286,13 +282,7 @@ describe("drainDelegations", () => {
   it("reports an asynchronous target-start rejection on a detached source thread", async () => {
     const activeThreadId = from.threadId;
     const routineTask = store.createTask(from.id, "Routine run", false)!;
-    queueDelegation(
-      commsBus,
-      from,
-      { toBotId: target.id, message: "do this", depth: 0 },
-      1,
-      routineTask.threadId,
-    );
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0, routineTask.threadId));
     drainDelegations(commsBus, approvalBus, routineTask.threadId, () =>
       Promise.reject(new Error("provider disappeared")),
     );
@@ -309,7 +299,7 @@ describe("drainDelegations", () => {
   });
 
   it("skips runTarget and emits a 'no such bot' chip when the target was deleted", async () => {
-    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0));
     store.deleteBot(target.id);
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
@@ -325,7 +315,7 @@ describe("drainDelegations", () => {
 
   it("skips runTarget and emits a 'is busy' chip when the target is currently busy", async () => {
     store.patchBot(target.id, { busy: true });
-    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0));
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
     });
@@ -341,7 +331,7 @@ describe("drainDelegations", () => {
 
   it("asks for approval when approvePeerComms is on, then runs only on allow", async () => {
     store.patchBot(from.id, { approvePeerComms: true });
-    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0));
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
     });
@@ -364,7 +354,7 @@ describe("drainDelegations", () => {
 
   it("emits a denial chip and skips runTarget when the user denies", async () => {
     store.patchBot(from.id, { approvePeerComms: true });
-    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0));
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
     });
@@ -388,7 +378,7 @@ describe("drainDelegations", () => {
       approvePeerComms: true,
       alwaysAllow: [peerAllowKey("delegate_bot", target.id)],
     });
-    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0));
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
     });
@@ -409,7 +399,7 @@ describe("drainDelegations", () => {
   });
 
   it("no-ops when the source thread no longer resolves to a bot", () => {
-    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, provenanceFor(commsBus.store, from, 0));
     store.deleteBot(from.id);
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
@@ -441,7 +431,7 @@ describe("delegations survive a restart", () => {
   afterEach(() => _resetPending());
 
   it("writes the queue to disk on queue, and clears it on drain and discard", async () => {
-    expect(queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1)).toBe("ok");
+    expect(queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, provenanceFor(buses.commsBus.store, from, 0))).toBe("ok");
     expect(existsSync(file())).toBe(true);
     // SAFETY: delegations.json is queueDelegation's own on-disk map of
     // threadId → queued delegation list; the expects below pin its entries.
@@ -452,7 +442,7 @@ describe("delegations survive a restart", () => {
     discardDelegations(buses.commsBus, from.threadId);
     expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId]).toBeUndefined();
 
-    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "again", depth: 0 }, 1);
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "again", depth: 0 }, 1, provenanceFor(buses.commsBus.store, from, 0));
     const ran: string[] = [];
     drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, async (_to, message) => {
       ran.push(message);
@@ -463,9 +453,9 @@ describe("delegations survive a restart", () => {
 
   it("acknowledges a handoff at dispatch time, not after the target turn settles", async () => {
     // At-most-once: the queue entry is removed (and persisted) when the
-    // target turn STARTS, so a crash mid-turn re-asks the delegation on
-    // restart instead of silently running it a second time.
-    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "wait for dispatch", depth: 0 }, 1);
+    // target turn STARTS, so a crash mid-turn does not automatically run
+    // it a second time. Completion is not guaranteed after removal.
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "wait for dispatch", depth: 0 }, 1, provenanceFor(buses.commsBus.store, from, 0));
     let release!: () => void;
     const dispatchSettled = new Promise<void>((resolve) => {
       release = resolve;
@@ -488,7 +478,7 @@ describe("delegations survive a restart", () => {
 
   it("never runs a handoff whose queue was discarded while approval was pending", async () => {
     store.patchBot(from.id, { approvePeerComms: true });
-    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "dropped mid-approval", depth: 0 }, 1);
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "dropped mid-approval", depth: 0 }, 1, provenanceFor(buses.commsBus.store, from, 0));
     let fired = false;
     drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, () => {
       fired = true;
@@ -508,7 +498,7 @@ describe("delegations survive a restart", () => {
   });
 
   it("drains work queued by a later settled turn while an earlier handoff is waiting", async () => {
-    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "first", depth: 0 }, 1);
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "first", depth: 0 }, 1, provenanceFor(buses.commsBus.store, from, 0));
     let release!: () => void;
     const firstSettled = new Promise<void>((resolve) => {
       release = resolve;
@@ -521,7 +511,7 @@ describe("delegations survive a restart", () => {
     drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, runTarget);
     await waitFor(() => ran.length === 1);
 
-    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "second", depth: 0 }, 1);
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "second", depth: 0 }, 1, provenanceFor(buses.commsBus.store, from, 0));
     drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, runTarget);
     expect(ran).toHaveLength(1);
 
@@ -530,8 +520,8 @@ describe("delegations survive a restart", () => {
     expect(ran[1]).toContain("second");
   });
 
-  it("a fresh process loads what the last one queued, and can drain it", async () => {
-    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "left over", depth: 0 }, 1);
+  it("reloads the disk queue after forgetting in-memory state, and can drain it", async () => {
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "left over", depth: 0 }, 1, provenanceFor(buses.commsBus.store, from, 0));
     // "restart": forget memory, reload from disk
     _resetPending();
     expect(pendingThreads()).toEqual([]);
@@ -558,4 +548,406 @@ describe("delegations survive a restart", () => {
     _loadPending();
     expect(pendingThreads()).toEqual([]);
   });
+});
+
+import * as atomic from "./atomic.ts";
+import { mkdirSync, writeFileSync } from "node:fs";
+
+describe("delegation provenance and durable transitions", () => {
+  let store: Store;
+  let from: BotRecord;
+  let target: BotRecord;
+  let buses: BusPair;
+  const file = () => join(DATA_DIR, "delegations.json");
+  const ownerOf = (bot: Pick<BotRecord, "ownerId">) => bot.ownerId || "primary";
+  const queue = () => queueDelegation(buses.commsBus, from,
+    { toBotId: target.id, message: "owned follow-up", depth: 0 }, 1,
+    provenanceFor(store, from, 0, from.threadId, "primary"), ownerOf);
+  const injectWriteFailure = () => {
+    const write = atomic.writeFileAtomic;
+    return vi.spyOn(atomic, "writeFileAtomic").mockImplementation((path, data, options) => {
+      if (path === file()) throw new Error("Injected delegation storage failure");
+      write(path, data, options);
+    });
+  };
+
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    store = new Store(selection);
+    from = store.createBot();
+    target = store.createBot();
+    buses = setupBuses(store);
+  });
+
+  it("persists a copied explicit provenance and uses the hosted primary-owner fallback", async () => {
+    const provenance = provenanceFor(store, from, 0, from.threadId, "primary");
+    expect(queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "owned", depth: 0 }, 1, provenance, ownerOf)).toBe("ok");
+    expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId][0].provenance).toEqual(provenance);
+    provenance.ownerId = "mutated-caller-record";
+    _resetPending();
+    _loadPending();
+    const run = vi.fn();
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    await waitFor(() => run.mock.calls.length === 1);
+    expect(readFileSync(file(), "utf8")).not.toContain("mutated-caller-record");
+  });
+
+  it.each(["ownerId", "fromBotId", "sourceThreadId", "taskId"] as const)("rejects queue provenance mismatch in %s before any disclosure or persistence", (field) => {
+    const provenance = { ...provenanceFor(store, from, 0, from.threadId, "primary"), [field]: "wrong" };
+    const before = store.messagesFor(from.threadId).length;
+    expect(queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "no", depth: 0 }, 1, provenance, ownerOf)).toBe("invalid_provenance");
+    expect(store.messagesFor(from.threadId)).toHaveLength(before);
+    expect(_pendingCount(from.threadId)).toBe(0);
+    expect(existsSync(file())).toBe(false);
+  });
+
+  it("rejects mismatched depth and foreign target without a named queue chip", () => {
+    const provenance = provenanceFor(store, from, 1, from.threadId, "primary");
+    expect(queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "no", depth: 0 }, 1, provenance, ownerOf)).toBe("invalid_provenance");
+    store.patchBot(target.id, { ownerId: "foreign", name: "PRIVATE-NAME", busy: true });
+    expect(queue()).toBe("invalid_provenance");
+    expect(JSON.stringify(store.messagesFor(from.threadId))).not.toContain("PRIVATE-NAME");
+    expect(existsSync(file())).toBe(false);
+  });
+
+  it.each(["sender", "target"] as const)("revalidates %s owner before busy/name/approval disclosure during drain", async (participant) => {
+    expect(queue()).toBe("ok");
+    const before = store.messagesFor(from.threadId).length;
+    store.patchBot(from.id, { approvePeerComms: true });
+    store.patchBot(participant === "sender" ? from.id : target.id, { ownerId: "foreign", name: "PRIVATE-NAME", busy: true });
+    const run = vi.fn();
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    await waitFor(() => _pendingCount(from.threadId) === 0);
+    expect(run).not.toHaveBeenCalled();
+    expect(store.messagesFor(from.threadId)).toHaveLength(before);
+  });
+
+  it.each(["sender", "target", "task"] as const)("revalidates %s after a held approval without mirroring or dispatch", async (participant) => {
+    store.patchBot(from.id, { approvePeerComms: true });
+    expect(queue()).toBe("ok");
+    const run = vi.fn();
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    const card = await waitFor(() => store.messagesFor(from.threadId).find((message) => message.card?.requestId));
+    if (participant === "task") store.taskByThread(from.id, from.threadId)!.threadId = "replacement-task";
+    else store.patchBot(participant === "sender" ? from.id : target.id, { ownerId: "foreign", name: "PRIVATE-NAME" });
+    resolvePeerComms(buses.approvalBus, card.card!.requestId!, "allow");
+    await waitFor(() => _pendingCount(from.threadId) === 0);
+    expect(run).not.toHaveBeenCalled();
+    expect(store.messagesFor(target.threadId).some((message) => message.comm)).toBe(false);
+    expect(JSON.stringify(store.messagesFor(from.threadId))).not.toContain("PRIVATE-NAME");
+  });
+
+  it.each(["sender", "target", "task"] as const)("passes a live %s validation callback across target setup", async (participant) => {
+    expect(queue()).toBe("ok");
+    let release = () => {};
+    const setup = new Promise<void>((resolve) => { release = resolve; });
+    let entered = false;
+    let validAfterSetup: boolean | undefined;
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, async (_to, _message, _depth, _thread, _channel, validate) => {
+      expect(validate()).toBe(true);
+      entered = true;
+      await setup;
+      validAfterSetup = validate();
+    }, ownerOf);
+    await waitFor(() => entered);
+    if (participant === "task") store.taskByThread(from.id, from.threadId)!.threadId = "replacement-task";
+    else store.patchBot(participant === "sender" ? from.id : target.id, { ownerId: "foreign" });
+    release();
+    await waitFor(() => validAfterSetup === false);
+    expect(validAfterSetup).toBe(false);
+  });
+
+  it("rejects legacy and malformed loaded provenance and deduplicates stable queue IDs", async () => {
+    expect(queue()).toBe("ok");
+    const [row] = JSON.parse(readFileSync(file(), "utf8"))[from.threadId];
+    const { provenance, ...legacy } = row;
+    const invalid = [
+      legacy,
+      { ...row, id: "wrong-operation", provenance: { ...provenance, operation: "ask_bot" } },
+      { ...row, id: "wrong-thread", provenance: { ...provenance, sourceThreadId: "different" } },
+      { ...row, id: "wrong-depth", provenance: { ...provenance, depth: 1 } },
+      { ...row, id: "blank-owner", provenance: { ...provenance, ownerId: " " } },
+      { ...row, id: "with-token", provenance: { ...provenance, token: "not-authority" } },
+      { ...row, id: "recursive-depth", depth: 1, provenance: { ...provenance, depth: 1 } },
+      { ...row, id: "fraction-depth", depth: 0.5, provenance: { ...provenance, depth: 0.5 } },
+    ];
+    writeFileSync(file(), JSON.stringify({ [from.threadId]: [...invalid, row, row] }));
+    _resetPending();
+    _loadPending();
+    expect(_pendingCount(from.threadId)).toBe(1);
+    const run = vi.fn();
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    await waitFor(() => run.mock.calls.length === 1 && _pendingCount(from.threadId) === 0);
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({});
+  });
+
+  it("does not acknowledge acceptance or publish a chip on an actual atomic rename failure", () => {
+    mkdirSync(file());
+    const before = store.messagesFor(from.threadId).length;
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(queue()).toBe("persistence_failed");
+    expect(_pendingCount(from.threadId)).toBe(0);
+    expect(store.messagesFor(from.threadId)).toHaveLength(before);
+    expect(log).toHaveBeenCalled();
+  });
+
+  it("preserves existing queue bytes and memory on failed enqueue, then permits explicit retry", () => {
+    expect(queue()).toBe("ok");
+    const bytes = readFileSync(file());
+    const before = store.messagesFor(from.threadId).length;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failure = injectWriteFailure();
+    expect(queue()).toBe("persistence_failed");
+    expect(readFileSync(file())).toEqual(bytes);
+    expect(_pendingCount(from.threadId)).toBe(1);
+    expect(store.messagesFor(from.threadId)).toHaveLength(before);
+    failure.mockRestore();
+    expect(queue()).toBe("ok");
+    expect(_pendingCount(from.threadId)).toBe(2);
+  });
+
+  it("failed durable dequeue cannot mirror/dispatch or retry itself, and remains reloadable", async () => {
+    expect(queue()).toBe("ok");
+    const bytes = readFileSync(file());
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failure = injectWriteFailure();
+    const run = vi.fn();
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    await waitFor(() => store.messagesFor(from.threadId).some((message) => message.tool?.name.includes("Could not durably remove")));
+    // The report happens before drain.finally; let that microtask complete.
+    await Promise.resolve();
+    expect(failure.mock.calls.filter(([path]) => path === file())).toHaveLength(1); // no automatic retry
+    expect(run).not.toHaveBeenCalled();
+    expect(store.messagesFor(target.threadId).some((message) => message.comm)).toBe(false);
+    expect(_pendingCount(from.threadId)).toBe(1);
+    expect(readFileSync(file())).toEqual(bytes);
+    failure.mockRestore();
+    _resetPending();
+    _loadPending();
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    await waitFor(() => run.mock.calls.length === 1 && _pendingCount(from.threadId) === 0);
+  });
+
+  it("failed discard preserves queue and emits no dropped chip; retry removes it durably", () => {
+    expect(queue()).toBe("ok");
+    const bytes = readFileSync(file());
+    const before = store.messagesFor(from.threadId).length;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failure = injectWriteFailure();
+    expect(discardDelegations(buses.commsBus, from.threadId)).toBe(false);
+    expect(_pendingCount(from.threadId)).toBe(1);
+    expect(readFileSync(file())).toEqual(bytes);
+    expect(store.messagesFor(from.threadId)).toHaveLength(before);
+    failure.mockRestore();
+    expect(discardDelegations(buses.commsBus, from.threadId)).toBe(true);
+    expect(_pendingCount(from.threadId)).toBe(0);
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({});
+  });
+  it("refuses an existing foreign-owned direct channel before mirroring or dispatch", async () => {
+    const room = store.createGroup("PRIVATE-ROOM", [from.id, target.id], true, "foreign");
+    expect(queue()).toBe("ok");
+    const fromCount = store.messagesFor(from.threadId).length;
+    const targetCount = store.messagesFor(target.threadId).length;
+    const roomCount = store.messagesFor(room.threadId).length;
+    const run = vi.fn();
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    await waitFor(() => _pendingCount(from.threadId) === 0);
+    expect(run).not.toHaveBeenCalled();
+    expect(store.messagesFor(from.threadId)).toHaveLength(fromCount);
+    expect(store.messagesFor(target.threadId)).toHaveLength(targetCount);
+    expect(store.messagesFor(room.threadId)).toHaveLength(roomCount);
+  });
+
+  it.each(["owner", "member"] as const)("rechecks channel %s after provider setup", async (change) => {
+    expect(queue()).toBe("ok");
+    let release = () => {};
+    const setup = new Promise<void>((resolve) => { release = resolve; });
+    let entered = false;
+    let validAfterSetup: boolean | undefined;
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, async (_to, _message, _depth, _thread, channel, validate) => {
+      expect(validate()).toBe(true);
+      if (!channel) throw new Error("Expected owned direct channel");
+      entered = true;
+      await setup;
+      validAfterSetup = validate();
+    }, ownerOf);
+    await waitFor(() => entered);
+    const room = store.dmGroup(from.id, target.id)!;
+    if (change === "owner") room.ownerId = "foreign";
+    else {
+      const foreign = store.createBot({ ownerId: "foreign" });
+      store.patchGroup(room.id, { memberIds: [from.id, target.id, foreign.id] });
+    }
+    release();
+    await waitFor(() => validAfterSetup === false);
+    expect(validAfterSetup).toBe(false);
+  });
+
+  it("acknowledges identical queued messages by ID without removing a second handoff", async () => {
+    expect(queue()).toBe("ok");
+    expect(queue()).toBe("ok");
+    const run = vi.fn();
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    await waitFor(() => run.mock.calls.length === 2 && _pendingCount(from.threadId) === 0);
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({});
+  });
+
+  it("preserves the four-item cap and queue bytes when another handoff is refused", () => {
+    for (let index = 0; index < 4; index++) expect(queue()).toBe("ok");
+    const bytes = readFileSync(file());
+    const count = store.messagesFor(from.threadId).length;
+    expect(queue()).toBe("too_many");
+    expect(_pendingCount(from.threadId)).toBe(4);
+    expect(readFileSync(file())).toEqual(bytes);
+    expect(store.messagesFor(from.threadId)).toHaveLength(count);
+  });
+
+  it.each([false, true])("rechecks setup-time consent with prior item approval=%s", async (approvedInitially) => {
+    store.patchBot(from.id, { approvePeerComms: approvedInitially });
+    expect(queue()).toBe("ok");
+    let release = () => {};
+    const setup = new Promise<void>((resolve) => { release = resolve; });
+    let entered = false;
+    let validAfterSetup: boolean | undefined;
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, async (_to, _message, _depth, _thread, _channel, validate) => {
+      expect(validate()).toBe(true);
+      entered = true;
+      await setup;
+      validAfterSetup = validate();
+    }, ownerOf);
+    if (approvedInitially) {
+      const card = await waitFor(() => store.messagesFor(from.threadId).find((message) => message.card?.requestId));
+      resolvePeerComms(buses.approvalBus, card.card!.requestId!, "allow");
+    }
+    await waitFor(() => entered);
+    store.patchBot(from.id, { approvePeerComms: true });
+    release();
+    await waitFor(() => validAfterSetup !== undefined);
+    expect(validAfterSetup).toBe(approvedInitially);
+  });
+
+  it("does not admit recursive handoffs even if a caller supplies a larger depth limit", () => {
+    expect(queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "recursive", depth: 1 }, 2,
+      provenanceFor(store, from, 1, from.threadId, "primary"), ownerOf)).toBe("too_deep");
+    expect(_pendingCount(from.threadId)).toBe(0);
+    expect(existsSync(file())).toBe(false);
+  });
+
+  it("returns durable acceptance once even when the acknowledgement hits a real SQLite insert failure", async () => {
+    const connection = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    const before = readThread(from.threadId, join(DATA_DIR, `messages-${from.threadId}.json`));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      connection.exec("CREATE TRIGGER delegation_ack_failure BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT, 'owned acknowledgement failure'); END");
+      expect(queue()).toBe("ok");
+      expect(_pendingCount(from.threadId)).toBe(1);
+      expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId]).toHaveLength(1);
+      expect(readThread(from.threadId, join(DATA_DIR, `messages-${from.threadId}.json`))).toEqual(before);
+      connection.exec("DROP TRIGGER delegation_ack_failure");
+      const run = vi.fn();
+      drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+      await waitFor(() => run.mock.calls.length === 1 && _pendingCount(from.threadId) === 0);
+      expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({});
+      const repaired = readThread(from.threadId, join(DATA_DIR, `messages-${from.threadId}.json`));
+      expect(repaired.messages.filter((message) => message.tool?.name.startsWith("Delegated to @"))).toHaveLength(1);
+    } finally {
+      connection.exec("DROP TRIGGER IF EXISTS delegation_ack_failure");
+      connection.close();
+    }
+  });
+
+  it("failed discard retires a held approval in process; later drain removes it without dispatch", async () => {
+    store.patchBot(from.id, { approvePeerComms: true });
+    expect(queue()).toBe("ok");
+    const bytes = readFileSync(file());
+    const run = vi.fn();
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    const card = await waitFor(() => store.messagesFor(from.threadId).find((message) => message.card?.requestId));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const failure = injectWriteFailure();
+    expect(discardDelegations(buses.commsBus, from.threadId)).toBe(false);
+    resolvePeerComms(buses.approvalBus, card.card!.requestId!, "allow");
+    await waitFor(() => store.messagesFor(from.threadId).some((message) => message.tool?.name.includes("Could not durably remove")));
+    await Promise.resolve();
+    expect(run).not.toHaveBeenCalled();
+    expect(readFileSync(file())).toEqual(bytes);
+    failure.mockRestore();
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    await waitFor(() => _pendingCount(from.threadId) === 0);
+    expect(run).not.toHaveBeenCalled();
+    // A new accepted item on the same thread is independent of the stop.
+    store.patchBot(from.id, { approvePeerComms: false });
+    expect(queue()).toBe("ok");
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    await waitFor(() => run.mock.calls.length === 1);
+  });
+
+  it("discard retires a dequeued handoff while target setup is still awaiting", async () => {
+    expect(queue()).toBe("ok");
+    let release = () => {};
+    const setup = new Promise<void>((resolve) => { release = resolve; });
+    let entered = false;
+    let validAfterSetup: boolean | undefined;
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, async (_to, _message, _depth, _thread, _channel, validate) => {
+      entered = true;
+      await setup;
+      validAfterSetup = validate();
+    }, ownerOf);
+    await waitFor(() => entered);
+    expect(_pendingCount(from.threadId)).toBe(0);
+    expect(discardDelegations(buses.commsBus, from.threadId)).toBe(true);
+    release();
+    await waitFor(() => validAfterSetup === false);
+    expect(validAfterSetup).toBe(false);
+  });
+
+  it("successful durable discard survives an actual dropped-chip SQLite failure", () => {
+    expect(queue()).toBe("ok");
+    const connection = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      connection.exec("CREATE TRIGGER delegation_drop_failure BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT, 'owned drop acknowledgement failure'); END");
+      expect(discardDelegations(buses.commsBus, from.threadId)).toBe(true);
+      expect(_pendingCount(from.threadId)).toBe(0);
+      expect(JSON.parse(readFileSync(file(), "utf8"))).toEqual({});
+    } finally {
+      connection.exec("DROP TRIGGER delegation_drop_failure");
+      connection.close();
+    }
+  });
+
+  it("allows a hidden source to queue and dispatch to its visible same-owner peer", async () => {
+    store.patchBot(from.id, { hidden: true });
+    expect(queue()).toBe("ok");
+    let validateCurrent = () => false;
+    const run = vi.fn((_to: string, _message: string, _depth: number, _thread: string, _channel: GroupRecord | undefined, validate: () => boolean) => {
+      validateCurrent = validate;
+      expect(validate()).toBe(true);
+    });
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    await waitFor(() => run.mock.calls.length === 1 && _pendingCount(from.threadId) === 0);
+    expect(store.messagesFor(target.threadId).some((message) => message.comm?.withBotId === from.id)).toBe(true);
+    expect(validateCurrent()).toBe(true);
+    // Visibility never substitutes for the accepted owner's authority.
+    store.patchBot(from.id, { ownerId: "foreign" });
+    expect(validateCurrent()).toBe(false);
+    expect(queue()).toBe("invalid_provenance");
+  });
+
+  it("still refuses a hidden target at queue and drain for a hidden same-owner source", async () => {
+    store.patchBot(from.id, { hidden: true });
+    store.patchBot(target.id, { hidden: true });
+    expect(queue()).toBe("invalid_provenance");
+    expect(_pendingCount(from.threadId)).toBe(0);
+    store.patchBot(target.id, { hidden: false });
+    expect(queue()).toBe("ok");
+    store.patchBot(target.id, { hidden: true });
+    const run = vi.fn();
+    const count = store.messagesFor(target.threadId).length;
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, run, ownerOf);
+    await waitFor(() => _pendingCount(from.threadId) === 0);
+    expect(run).not.toHaveBeenCalled();
+    expect(store.messagesFor(target.threadId)).toHaveLength(count);
+  });
+
 });

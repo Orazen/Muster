@@ -1,4 +1,84 @@
-# Next slice: scoped internal peer capabilities
+# Scoped internal peer capabilities
+
+## Loop78 implementation and acceptance — 12 September 2026
+
+The dispatch registry, internal-route checks and durable delegation provenance are
+implemented. Credentials bind the effective owner, bot, durable task/thread, depth
+and one dispatch generation. They rotate on provider resume, expire after 24 hours,
+and retire on exact completion, interruption, deletion, owner reassignment and
+provider reload. Connector credentials cannot authorize any of the three peer
+operations. The connector endpoints themselves retain their prior authority model.
+
+Peer requests revalidate after request-body reads, human approval and target setup;
+reply mirroring checks current participants and channel ownership. Setup refusal
+settles the waiting ask promptly. Stop finds detached task queues even after the
+live credential is gone. Queues persist validated provenance, never bearer tokens,
+and refuse legacy or recursive records. Failed durable removal prevents dispatch;
+failed Stop retires in-process work and returns 503 with a retry instruction.
+
+Focused acceptance: **18/18 real hosted HTTP cases**, **40/40 credential tests**,
+**56/56 delegation tests**, and **22/22 comms/unattended tests**. HTTP acceptance used
+genuine credentials injected through offline ACP, real sign-up sessions, a connector
+descriptor, provider session/load, interruption and a fresh server process. Its
+cleanup proved both servers and 23 provider processes exited, both ports closed and
+zero outbound attempts. Final acceptance: **248 files / 3748 passed / 8 skipped /
+0 failed**, 320.21s Vitest (321.349s command). All **959 source hashes match**
+`source-freeze-repaired.json`; the result is in
+`.omb-scratch/verification/loop78-peer-capabilities/full-repaired-result.json`.
+Server types pass; lint passes with one intentional watch-snapshot warning. The
+rebuilt packaged server passes **9/9** under Node 22.22.3, not a native Electron launch.
+The first full run had **3744 passed / 2 failed / 8 skipped**. It exposed hidden
+webhook-source refusal and a lost provider-reload failure receipt. Hidden senders
+now retain authorized dispatch; terminal reporting is separate from launch
+permission and still checks the original owner/task/channel audience. The corrected
+22-case comms/unattended and 56-case delegation gates passed before the full rerun.
+
+**Evidence limits:** HTTP covers held target deletion and source Stop; ownership
+mutation during held approval and post-setup validation are covered by delegation
+module tests and source review, not those exact real-server races. Queue reload
+acceptance is same-process disk reload; the real server restart case rejects old
+credentials. A failed nondurable Stop may reload accepted work after restart if the
+user ignores the 503 retry instruction. Durable dequeue is at-most-once dispatch,
+not guaranteed task completion after a crash. This is neither a process sandbox
+nor a comprehensive security review. Mimosa and two high dependency alerts remain
+release gates. Complete the remaining real-server race/restart acceptance before
+claiming the original acceptance list below in full.
+
+**Recovery UI still required:** source review of `ChatView.tsx` and `Composer.tsx`
+shows Stop is rendered only while the bot is busy. The 503 reaches the shared error
+handler, but after the turn settles those controls disappear. The HTTP retry is
+verified; a nontechnical user's persistent retry action is not implemented or
+browser-tested. Add that recovery surface before treating failed-stop handling as
+an end-to-end release capability.
+
+### Remaining runtime acceptance recipe (proposed, not executed)
+
+Reuse the owned HTTP fixture with blocked outbound access and private credential
+receipts. Keep all accounts, processes, data and ports disposable.
+
+1. **Owner merge:** as the last case, register a second synthetic account and use
+   its real `/api/account/merge/start` token. With the original cookie, hold an ask
+   behind approval and complete the merge. Assert source/old-token refusal,
+   dismissed card, persisted new ownership and no target prompt or exchange mirror.
+   Read back with the surviving account. This transfers every source-owned bot;
+   it does not isolate a recipient-only owner change.
+2. **Queued restart:** queue through an actually injected credential while the
+   source provider is held. Capture the accepted row without changing its bytes.
+   Crash only the positively identified fixture server, stop its exact owned CLI
+   children and verify ports closed before restarting the same disposable data.
+   Graceful shutdown is insufficient because it may complete the source first.
+   Require a fresh approval card, explicitly allow it, then prove one target prompt,
+   no recursive peer integration, durable acknowledgement and old-token refusal.
+   This proves that crash schedule, not exactly-once delivery across all failures.
+3. **Target setup:** use a fixture-only Claude wrapper that holds only the
+   summarization text command and otherwise delegates to the existing fake CLI.
+   Seed a valid oversized active transcript so real context construction awaits
+   that summary. While the ask is waiting, enable source peer approval, then release
+   the summary. Assert refusal, settled busy state and no target `sendTurn`/stream
+   receipt. Request mirrors and user text may already exist before setup; do not
+   claim their absence. The current Grok ACP fixture has no `generateText` seam.
+
+The original proposal follows for requirement traceability.
 
 Read-only source map, 12 September 2026; proposed implementation, no tests run.
 

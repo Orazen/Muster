@@ -16,8 +16,8 @@
 // the harness when it builds the integration:
 //   OMB_HARNESS_URL  base URL of the harness (http://127.0.0.1:8799)
 //   OMB_BOT_ID       the calling bot's id (excluded from list_bots; sender)
-//   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
-//   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
+//   OMB_COMMS_TOKEN  opaque credential for this dispatch only
+//   OMB_TURN_DEPTH   consistency assertion (the server derives authority)
 import readline from "node:readline";
 
 import { z } from "zod";

@@ -4075,3 +4075,33 @@ remaining; automation remains PAUSED. The twelve inherited files are separately
 preserved; consult this loop's `inherited-restoration.json` for final byte-for-byte
 restoration, and retain the original preexisting stash. Next work is the scoped
 internal-peer P1, then owned bot creation recovery and user-paced onboarding.
+
+**Loop78 (12 September 2026, dispatch-scoped peer credentials):** Replaced the
+installation-wide peer bearer with owner/bot/task/dispatch authority. List, ask and
+delegate no longer accept the connector bearer or caller-selected identity/depth.
+Resumed turns rotate credentials; exact terminal events cannot retire a replacement
+dispatch. Queued handoffs persist provenance and recheck current owner, task,
+channel and consent. Stop cancels detached-task handoffs and reports 503 if durable
+cancellation fails; a retry can clear the queue after the live lease is revoked.
+
+Focused checks passed **18 HTTP / 40 registry / 56 delegation / 22 comms/unattended**.
+Server types 6.872s, lint 1.151s and the earlier build 52.172s passed. The first
+full run returned **3744 passed / 2 failed / 8 skipped**. Corrected hidden webhook
+source dispatch and provider-reload failure reporting. The final full suite passed
+**248 files / 3748 passed / 8 skipped / 0 failed**, 320.21s Vitest (321.349s command).
+All **959 frozen source inputs match** `source-freeze-repaired.json`. The rebuilt
+packaged server passed **9/9** in 10.952s under Node 22.22.3, with Electron absent;
+broker **2/2**, updater **14/14**, and Electron syntax also pass. These checks do
+not establish a native desktop launch. Lint retains one nonblocking
+spread warning for the intentional fixed watch snapshot. Retained task-ID assumption failures, an HTTP teardown-only
+failure and lint corrections. The original task identity is threadId, not a new
+Store field. Build keeps the known chunk-size warning. This prerequisite for a
+private bot network has no measured revenue effect. Remaining real-server owner
+race/restart acceptance and release prerequisites are explicitly recorded in the
+peer-capability specification. Twelve inherited files remain separately preserved
+for restoration after this slice; no native release or automation change is claimed.
+
+The newly identified recovery UI gap remains queued: after a failed Stop, the
+server accepts a retry but busy-only controls disappear. A persistent retry action
+and browser acceptance are required. Latest allowance: **20% remaining**, reset
+19 September 2026 at 16:43 Europe/Rome; no reset consumed.

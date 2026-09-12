@@ -25,6 +25,10 @@
 //                     file exists — a deterministic busy window for the
 //                     steer-queue e2e, with the echo pinning exactly what a
 //                     drained turn was sent)
+//                   | peer-capability (hold a real prompt until the owned
+//                     <pid>.release file exists in FAKE_ACP_PEER_DIRECTORY)
+//   FAKE_ACP_PEER_DIRECTORY  explicit owned directory for private per-process
+//                     MCP credential receipts and prompt/terminal markers
 //   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
 //                   argv shape (agent/stdio flags) and env hygiene
 //   FAKE_ACP_MODELS      comma-separated model ids. Enables the opencode-shaped
@@ -49,6 +53,7 @@
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
 // opencode-shaped surface: the session carries its own model catalog and the
@@ -119,8 +124,14 @@ let pendingPermissionId: number | null = null;
 let onPermissionAnswered: ((allowOnce: boolean) => void) | null = null;
 
 // ask-peer mode: the "agents" MCP server entry from session/new's mcpServers
-type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
+type McpEntry = { name?: string; command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
 let agentsMcp: McpEntry | null = null;
+const peerDirectory = process.env.FAKE_ACP_PEER_DIRECTORY;
+type PeerReceipt = { pid: number; method: "session/new" | "session/load"; servers: McpEntry[] } |
+  { pid: number; received: true } | { pid: number; completed: true };
+const peerReceipt = (suffix: string, value: PeerReceipt) => {
+  if (peerDirectory) writeFileSync(join(peerDirectory, `${process.pid}.${suffix}`), JSON.stringify(value), { mode: 0o600 });
+};
 
 /** Minimal one-shot MCP stdio client: initialize, call each tool in
  * sequence, return the text of the last result. Dependency-free. */
@@ -238,7 +249,8 @@ function handle(msg: any) {
         break;
       }
       const servers: McpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
-      agentsMcp = servers.find((s: any) => s?.name === "agents") ?? null;
+      agentsMcp = servers.find((s) => s.name === "agents") ?? null;
+      peerReceipt("session.json", { pid: process.pid, method: "session/new", servers });
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(servers, null, 2));
       }
@@ -247,6 +259,9 @@ function handle(msg: any) {
       break;
     }
     case "session/load": {
+      const servers: McpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
+      if (peerDirectory) agentsMcp = servers.find((s) => s.name === "agents") ?? null;
+      peerReceipt("session.json", { pid: process.pid, method: "session/load", servers });
       const opts = configOptions();
       result(msg.id, opts ? { configOptions: opts } : {});
       break;
@@ -302,6 +317,7 @@ function handle(msg: any) {
       break;
     }
     case "session/prompt": {
+      peerReceipt("prompt.json", { pid: process.pid, received: true });
       if (mode === "hang") {
         // never resolve the prompt — lets tests exercise interrupt
         setInterval(() => {}, 1_000);
@@ -323,6 +339,7 @@ function handle(msg: any) {
         process.exit(9);
       }
       const complete = () => {
+        peerReceipt("completed.json", { pid: process.pid, completed: true });
         recordMethod("session/prompt.result");
         result(
           msg.id,
@@ -333,6 +350,22 @@ function handle(msg: any) {
             : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
         );
       };
+      if (mode === "peer-capability") {
+        if (!peerDirectory) throw new Error("peer-capability mode requires an owned receipt directory");
+        const deadline = Date.now() + 60_000;
+        const held = setInterval(() => {
+          if (!existsSync(join(peerDirectory, `${process.pid}.release`))) {
+            if (Date.now() < deadline) return;
+            clearInterval(held);
+            process.stderr.write("fake-acp: owned peer capability hold expired\n");
+            process.exit(8);
+          }
+          clearInterval(held);
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "Owned held turn completed" } } } });
+          complete();
+        }, 20);
+        return;
+      }
       if (mode === "ask-peer" && agentsMcp) {
         // the comms e2e: reach a peer bot through the injected agents proxy
         // and reply with whatever it said (the peer's fake runs plain happy

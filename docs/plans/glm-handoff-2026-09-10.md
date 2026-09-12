@@ -2870,3 +2870,49 @@ The loop76 evidence directory contains the preservation manifest and final
 `inherited-restoration.json`; confirm all 12 original hashes before resuming native
 or template work. Do not include them in a generic cleanup commit. Read the scoped
 peer-capability specification before further social-network or UI work.
+
+## Loop78 — scoped peer authority (12 September 2026)
+
+Implemented a per-dispatch peer credential registry and owner-filtered list/ask/
+delegate routes. Caller-supplied identity/depth is only a consistency assertion;
+the server derives authority. Connector bearer access to peer operations is gone.
+Credentials rotate on resumed turns, expire, and revoke on exact terminal events
+or explicit lifecycle changes. Target setup and reply mirroring revalidate current
+source/task/target/channel/consent. Queues persist provenance without credentials,
+refuse legacy/recursive records, and cannot dispatch after a failed durable dequeue.
+Stop cancels all source tasks in-process and returns 503 when cancellation cannot be
+saved; retry before restart. Failed nondurable cancellation is not a durable promise.
+
+Focused tests passed **18 real HTTP, 40 registry, 56 delegation, 22 comms/unattended**.
+Types 6.872s and lint 1.151s pass; earlier build52.172s passed. The first full gate
+had **3744 passed / 2 failed / 8 skipped**, exposing hidden-source dispatch and
+provider-reload receipt regressions. Both are corrected and their 22-case focused
+gate passes; delegation 56/56 includes hidden-source compatibility and hidden-target
+refusal. Final full acceptance: **248 files / 3748 passed / 8 skipped / 0 failed**,
+320.21s Vitest (321.349s command), with **959/959 source hashes unchanged** against
+`source-freeze-repaired.json`. Rebuilt packaged server **9/9** in 10.952s uses
+Node 22.22.3 without Electron; broker **2/2**, updater **14/14** and Electron syntax
+pass. The earlier complete build predates the two backend-only regression repairs;
+final server types and packaged checks cover those repairs. Lint passes with one
+intentional fixed-snapshot warning. No native launch is established. Earlier
+freeze/results are retained, not final acceptance. All evidence is under
+`.omb-scratch/verification/loop78-peer-capabilities/`.
+Initial failures are retained, including 15 passing HTTP cases whose teardown failed
+on invalid Vitest hook usage; the corrected 18-case gate also proves cleanup.
+
+Read the [updated capability specification](peer-capability-next-slice-2026-09-12.md)
+for exact evidence limits. Still required: real-server ownership changes across held
+approval/setup and accepted delegation recovery across an actual restart. Existing
+queue unit tests reload the disk in the same process; do not relabel them as fresh
+server acceptance. Then resume recoverable bot creation and user-paced onboarding.
+Full native release/signing, Google consent, portable backup/sync, VM execution,
+Mimosa and dependency alerts remain separate. Preserve paused automation. Restore
+all 12 inherited files from this loop's manifest and verify their exact hashes;
+retain the preexisting stash. Last allowance read **20% remaining**, reset
+19 September 2026 at 16:43 Europe/Rome; no reset consumed.
+
+**Next user-facing gap:** Stop 503 recovery works through HTTP, but ChatView and
+Composer show Stop only while busy; after settling, the user cannot retry through
+those controls. Add a persistent retry action for the failed cancellation and
+browser-test it before claiming end-to-end recovery. This source-review finding is
+new; no UI change or browser acceptance is included in Loop78.

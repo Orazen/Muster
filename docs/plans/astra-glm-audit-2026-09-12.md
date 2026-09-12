@@ -600,3 +600,29 @@ README has 28/28 valid local links/assets; zero runtime tests added for document
 No new native release, billing change, runner installation or automation resumption.
 Restoration of the 12 inherited files is recorded separately in Loop76's ignored
 `inherited-restoration.json`; original preexisting stash must remain retained.
+
+
+## Loop78 — scoped peer dispatch acceptance
+
+Per-dispatch credentials now replace shared connector authority for internal peer
+list/ask/delegate. Current owner/task/target/channel/consent checks guard launch and
+reply visibility; durable queues retain provenance without credentials. Exact turn
+correlation avoids retiring a replacement dispatch. Failed queue removal prevents
+dispatch; failed durable Stop returns 503 with a retry instruction. A persistent
+UI retry control remains a separate gap after the bot becomes idle.
+
+Final full gate: **248 files / 3748 passed / 8 skipped / 0 failed**, 320.21s Vitest,
+321.349s command, **959/959** frozen source hashes unchanged. Focused HTTP **18/18**,
+registry **40/40**, delegation **56/56**, comms/unattended **22/22**. Rebuilt packaged
+server **9/9**, broker **2/2**, updater **14/14**, server types, lint and Electron
+syntax pass. Lint retains one intentional fixed-snapshot warning. Packaged checks
+run under Node 22.22.3 without Electron, not a native launch. The earlier complete
+build passed before the final backend-only regression fixes.
+
+The first full run exposed two real regressions (3744 passed, 2 failed, 8 skipped):
+hidden webhook senders were rejected and provider reload could lose the failure
+receipt. Corrected both before the final full gate. Earlier test-fixture and lint
+failures remain in local evidence; final acceptance uses only the repaired freeze.
+See [the capability specification](peer-capability-next-slice-2026-09-12.md) for
+remaining actual owner-change, setup and queued-restart races. No native release,
+complete sync, comprehensive security audit or revenue outcome is claimed.
