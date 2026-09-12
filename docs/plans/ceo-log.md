@@ -3684,3 +3684,17 @@ Suite 243/3,410/8. Landing redesign (b1a6ef2) verified live. Remaining roadmap s
 for their own loops: sidebar sections+density, run-summary pill, usage ledger+spend limits,
 approval levels per bot, spotlight-tour v2, opt-in Drive connect. TestFlight/Watch release
 gate unchanged: Apple developer account (owner-side).
+
+**Loop 63 wrap (2026-09-12, commit f488b65, live):** two roadmap slices shipped. (1) Run-summary
+pill: grouped tool runs now carry the wall-clock span — "Worked for 2m 13s · Used N tools · M
+running" (formatRunDuration; single-tool runs skip the duration). (2) Opt-in Drive connect:
+sign-in is basic-scope, so Drive is granted separately — GET /api/workspace/google/connect
+302s to Google consent (state = userId.issued.HMAC(deploymentSigningSecret), 10-min window),
+GET /callback verifies state AND the live session (same account), exchanges the code at
+oauth2.googleapis.com (constant https hosts only), and upserts tokens onto the existing google
+account row (refreshToken COALESCE-preserved); GET /status reports {drive}; the sync card shows
+"Connect Google Drive…" only while ungranted. Google client gained the callback URI in the
+console (owner account, persisted + re-verified on a fresh page load). Live: health 200, route
+401-gated unauth as designed. Remaining roadmap: sidebar sections+density, usage ledger,
+approval levels, tour v2 — each its own loop. TestFlight/Watch still blocked on the Apple
+developer account.
