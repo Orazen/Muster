@@ -3959,3 +3959,26 @@ recovery JavaScript and CSS. Health/app/assets/download metadata200; anonymous V
 briefing401. Exact backend SHA and authenticated real-provider flow remain unverified.
 Desktop1.12.0 is unchanged. GitHub's4 billing-blocked jobs/1 skipped build/0 steps did
 not attest the observed deployment. No additional runtime tests or product changes.
+
+
+**Loop 74 (2026-09-12, checked Drive backup availability):** Settings now confirms
+capability before enabling backup, names the configured computer's Drive and preserves
+explicit retry/error recovery. Hosted accounts receive a local-only explanation.
+Unchecked account-linked connect/callback/push/pull are contained before state/token/
+bundle operations; existing configured installation Drive remains available. This
+addresses account-boundary correctness before expanding backup or promoting adoption.
+
+Full Vitest **245 files / 3609 passed / 8 skipped / 0 failed**,296.13s; build/types
+passed53.078s; lint passed1.488s; packaged server **9/9**,11.295s. Focused HTTP139/139,
+UI helpers37/37, existing transport73/73; browser **4/4**,19.467s, zero retries/flakes.
+All957 source inputs unchanged. Browser cleanup:23 processes absent,8 ports closed,
+4 roots removed. Eleven screenshots reviewed; mobile success visibility is a P2 follow-up.
+
+Retained failures: initial134/135 HTTP run used Node fetch which ignored the Host header;
+actual node:http fixed the test. Initial build had12 test-fixture inference diagnostics;
+explicit types fixed them before the final build/full suite. Real Google consent,
+portable backup, native release and comprehensive security remain separate gates.
+No revenue uplift is measured. Next: Store ancestry recovery after failed writes,
+with exact conversation-path assertions across restart. Twelve inherited files remain
+preserved until publication; no unverified native migration is included. Evidence and
+remaining acceptance are linked from the audit and ownership handoff.

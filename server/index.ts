@@ -120,7 +120,7 @@ import { LivenessReaper } from "./liveness.ts";
 import type { WatchedTurn } from "./turn-watchdog.ts";
 import { buildModelContext } from "./model-context.ts";
 import { buildNotification, type Notification } from "./notify.ts";
-import { isEffortLevel, type RequestOutcome, type RuntimeEvent } from "./contracts.ts";
+import { isEffortLevel, type RequestOutcome, type RuntimeEvent, type WorkspaceBackupCapability } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
@@ -219,7 +219,6 @@ import * as browserPanel from "./browser-panel.ts";
 import * as workspaceBundle from "./workspace-bundle.ts";
 import * as driveSync from "./drive-sync.ts";
 import * as telegramSync from "./telegram-sync.ts";
-import * as accountDrive from "./account-drive.ts";
 import * as syncState from "./sync-state.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimerPool } from "./local-vm-idle.ts";
@@ -4333,6 +4332,23 @@ let requestUserEmail = "";
       requestUserEmail = sessAcct?.user?.email ?? "";
     }
 
+    // This exact read-only response is the sole hosted workspace exception.
+    // Hosted status does not read installation connections, account tokens or
+    // backup stamps. Local readiness uses only the existing operator transport.
+    if (path === "/api/workspace/google/status" && method === "GET") {
+      const installationDriveReady = !SELF_HOSTED
+        && Boolean(cfg.driveSync?.refreshToken?.trim()) && driveSync.driveOAuthConfigured();
+      const capability: WorkspaceBackupCapability = {
+        capabilityVersion: 1,
+        workspaceBackupAvailable: !SELF_HOSTED,
+        unavailableReason: SELF_HOSTED ? "Workspace backups are available on local desktop installs only for now." : null,
+        drive: false,
+        installationDrive: { configured: installationDriveReady, operationsAvailable: installationDriveReady },
+        accountDrive: { available: false, code: "ACCOUNT_DRIVE_UNAVAILABLE" },
+      };
+      return json(res, 200, capability);
+    }
+
     // Workspace bundles and the Vault belong to the whole installation,
     // not one account. Deny both families before handlers parse bodies or
     // open local files; even the primary hosted account must not export
@@ -4343,6 +4359,18 @@ let requestUserEmail = "";
       return json(res, 403, {
         code: "WORKSPACE_BACKUP_UNAVAILABLE",
         error: "Workspace backups are available on local desktop installs only for now.",
+      });
+    }
+
+    // Account-linked backup has no verified subject/scope/token continuity
+    // or single-use callback intent yet. Retire these routes before reading
+    // bodies, creating state, exchanging tokens or touching backup contents.
+    // The separately configured installation Drive routes remain supported.
+    if ((method === "GET" && (path === "/api/workspace/google/connect" || path === "/api/workspace/google/callback"))
+      || (method === "POST" && (path === "/api/workspace/google/push" || path === "/api/workspace/google/pull"))) {
+      return json(res, 501, {
+        code: "ACCOUNT_DRIVE_UNAVAILABLE",
+        error: "Account-linked Google Drive backup is unavailable. Use a Drive connection configured on this computer.",
       });
     }
 
@@ -7131,130 +7159,6 @@ let requestUserEmail = "";
           return json(res, 409, { error: "Google Drive connection changed during download — check the connection and try again." });
         }
         if (!payload) return json(res, 404, { error: "no workspace bundle exists in Drive yet — push from the other device first" });
-        const { workspace } = workspaceBundle.decryptBundle(payload, passphrase, deploymentSigningSecret());
-        const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
-        await reloadProviders();
-        broadcast({ kind: "hello" });
-        return json(res, 200, { restored: result });
-      } catch (e) {
-        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-
-    // ── Google-login token source for legacy local Drive transport ──────
-    // Tokens belong to the signed-in account; the bundle itself is still
-    // global local workspace state. Login does not trigger a backup.
-    if (path === "/api/workspace/google/push" && method === "POST") {
-      // Session truth on every deployment: cloud/self-host resolve it above;
-      // on the desktop (SELF_HOSTED=false, loopback-only) there is exactly
-      // one local user, so resolve the session here the same way.
-      const session = requestUserId ? { userId: requestUserId } : await getSession(req);
-      if (!session) return json(res, 401, { error: "sign in with Google first" });
-      const googleUserId = session.userId;
-      const body = await readBody(req);
-      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
-      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      const db = getDb();
-      try {
-        const accessToken = await accountDrive.accessTokenFor(db, googleUserId);
-        if (!accessToken) {
-          return json(res, 400, {
-            error: "no Google login on this account — sign in with Google (or reconnect) to grant Drive access",
-          });
-        }
-        const bundle = workspaceBundle.buildBundle(store, DATA_DIR);
-        const { payload, counts } = workspaceBundle.encryptBundle(bundle, passphrase, deploymentSigningSecret());
-        const id = await accountDrive.drivePushFor(accessToken, payload);
-        syncState.stampSync(googleUserId, "push", "google-drive");
-        return json(res, 200, { uploaded: id, counts });
-      } catch (e) {
-        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    // Opt-in Drive connect: sign-in is basic-scope (drive.appdata is a
-    // restricted scope and would show Google's unverified-app interstitial
-    // to every new user), so backup access is granted here, separately.
-    // The callback binds to the requesting account twice — the signed state
-    // AND the live session — and lands back in the app with a flag.
-    if (path === "/api/workspace/google/status" && method === "GET") {
-      const session = requestUserId ? { userId: requestUserId } : await getSession(req);
-      if (!session) return json(res, 401, { error: "sign in with Google first" });
-      const tokens = accountDrive.googleTokensFor(getDb(), session.userId);
-      const stamps = syncState.readSyncState(session.userId);
-      // Telegram is an install-wide transport, so its stamps land under the
-      // machine key — surface whichever backup is the most recent truth.
-      const machine = syncState.readSyncState("local");
-      const newer = (a: typeof stamps.lastPush, b: typeof stamps.lastPush) =>
-        (a?.at ?? 0) >= (b?.at ?? 0) ? a : b;
-      return json(res, 200, {
-        drive: Boolean(tokens?.refreshToken),
-        telegram: Boolean(cfg.telegramSync?.botToken),
-        lastPush: newer(stamps.lastPush, machine.lastPush?.channel === "telegram" ? machine.lastPush : null),
-        lastPull: newer(stamps.lastPull, machine.lastPull?.channel === "telegram" ? machine.lastPull : null),
-      });
-    }
-    if (path === "/api/workspace/google/connect" && method === "GET") {
-      const session = requestUserId ? { userId: requestUserId } : await getSession(req);
-      if (!session) return json(res, 401, { error: "sign in with Google first" });
-      const proto = String(req.headers["x-forwarded-proto"] ?? "https").split(",")[0].trim() || "https";
-      const host = String(req.headers.host ?? "");
-      if (!/^[\w.-]+$/.test(host)) return json(res, 400, { error: "bad host" });
-      try {
-        const target = accountDrive.googleDriveAuthUrl(
-          `${proto}://${host}`,
-          accountDrive.signDriveState(session.userId),
-        );
-        res.writeHead(302, { location: target });
-        return res.end();
-      } catch (e) {
-        return json(res, 503, { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    if (path === "/api/workspace/google/callback" && method === "GET") {
-      const url = new URL(req.url ?? "/", "https://muster.today");
-      const state = url.searchParams.get("state") ?? "";
-      const code = url.searchParams.get("code") ?? "";
-      const stateUser = accountDrive.verifyDriveState(state);
-      const session = !code || !stateUser ? null : requestUserId ? { userId: requestUserId } : await getSession(req);
-      const ok = Boolean(session && session.userId === stateUser);
-      if (ok) {
-        const proto = String(req.headers["x-forwarded-proto"] ?? "https").split(",")[0].trim() || "https";
-        const host = String(req.headers.host ?? "");
-        try {
-          const connected = await accountDrive.connectDriveFor(
-            getDb(), session!.userId, code, `${proto}://${host}`,
-          );
-          res.writeHead(302, { location: connected ? "/app?drive=connected" : "/app?drive=no-account" });
-          return res.end();
-        } catch {
-          res.writeHead(302, { location: "/app?drive=error" });
-          return res.end();
-        }
-      }
-      res.writeHead(302, { location: "/app?drive=error" });
-      return res.end();
-    }
-
-    if (path === "/api/workspace/google/pull" && method === "POST") {
-      const session = requestUserId ? { userId: requestUserId } : await getSession(req);
-      if (!session) return json(res, 401, { error: "sign in with Google first" });
-      const googleUserId = session.userId;
-      const body = await readBody(req);
-      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
-      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      const db = getDb();
-      try {
-        const accessToken = await accountDrive.accessTokenFor(db, googleUserId);
-        if (!accessToken) {
-          return json(res, 400, {
-            error: "no Google login on this account — sign in with Google (or reconnect) to grant Drive access",
-          });
-        }
-        const payload = await accountDrive.drivePullFor(accessToken);
-        if (payload) syncState.stampSync(googleUserId, "pull", "google-drive");
-        if (!payload) {
-          return json(res, 404, { error: "no workspace bundle in Drive yet — push from the other device first" });
-        }
         const { workspace } = workspaceBundle.decryptBundle(payload, passphrase, deploymentSigningSecret());
         const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
         await reloadProviders();

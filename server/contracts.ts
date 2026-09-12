@@ -390,6 +390,18 @@ export interface ProviderDriver<Config = unknown> {
 
 export type AnyProviderDriver = ProviderDriver<any>;
 
+/** Configuration readiness for manual installation backups, not proof of
+ * Google account ownership, successful transport, or portable recovery. */
+export interface WorkspaceBackupCapability {
+  capabilityVersion: 1;
+  workspaceBackupAvailable: boolean;
+  unavailableReason: string | null;
+  /** Legacy account-linked flag stays false while that flow is contained. */
+  drive: false;
+  installationDrive: { configured: boolean; operationsAvailable: boolean };
+  accountDrive: { available: false; code: "ACCOUNT_DRIVE_UNAVAILABLE" };
+}
+
 let eventCounter = 0;
 export const newEventId = () => `ev-${Date.now().toString(36)}-${(eventCounter++).toString(36)}`;
 export const newId = () => crypto.randomUUID();

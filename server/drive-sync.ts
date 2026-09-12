@@ -17,6 +17,11 @@ const CLIENT_ID = process.env.GOOGLE_CLIENT_ID?.trim() ?? "";
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
 
+/** Uses the same captured client configuration as token exchange/refresh. */
+export function driveOAuthConfigured(): boolean {
+  return Boolean(CLIENT_ID && CLIENT_SECRET);
+}
+
 /** The URL a user opens in a browser to grant Drive access. Muster shows
  * this in Settings; the resulting code is pasted back (OAuth device-lite
  * flow — no loopback listener needed). */

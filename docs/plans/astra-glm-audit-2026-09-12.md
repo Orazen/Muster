@@ -386,3 +386,66 @@ billing action is still needed for hosted CI; do not equate this with a stale we
 Receipts: `loop72-public-get-initial.json`, `loop72-public-get-post-roll.json`,
 `loop72-public-get-final.json`, `loop72-served-css.json`, `loop72-ci-annotations.json`
 under the current local evidence root. No further product changes or test reruns.
+
+
+## Loop 74 — checked Drive capability and contained account backup (12 September 2026)
+
+Settings now reports backup availability from a strict versioned capability. Hosted
+accounts see the local-only explanation without installation credentials, account-token
+state or backup timestamps. Local Drive controls use the separately configured
+installation transport; Google sign-in is explicitly not a backup connection. Loading,
+failed and malformed status keep writes disabled with an explicit retry. Four unchecked
+account-linked connect/callback/push/pull routes return501 locally before reading bodies
+or changing state; authenticated hosted family denial remains403 and anonymous status401.
+Existing installation Drive/file/Telegram behavior is preserved.
+
+The card retires requests when its session or mounted instance changes, validates
+success bodies and guards after asynchronous reads before writes/downloads/reloads.
+Pure helper tests cover retirement and duplicate-operation prevention; the browser
+covers Settings close/reopen retirement, not a mounted account-switch flow. No stale
+backup timestamp or unchecked Connect link remains. Eleven screenshots were reviewed
+at320px and1440px with no blocking layout finding. A nonblocking follow-up is to make
+mobile success confirmation easier to notice below the scroll boundary.
+
+Verification on the final source: full Vitest **245 files / 3609 passed / 8 skipped /
+0 failed**,296.13s (297.28s command); build including frontend/server types **passed
+53.078s**; repository lint passed1.488s and final test annotation types/scoped lint
+passed6.825s/0.298s. Packaged server **9/9 passed**,11.295s, Node22.22.3 arm64.
+Focused owned HTTP **139/139**,8.97s; UI helpers **37/37**; existing transport **73/73**.
+Browser **4 passed / 0 failed / 0 skipped / 0 flaky**,19.467s, one worker and zero retries.
+The browser observed957 source inputs,334 build inputs and3 ignored metadata files
+unchanged; all23 observed processes exited,8 ports closed and4 fixture roots removed.
+The final HTTP fixtures exited all10 servers, closed20 ports and removed their roots.
+Root final verification found all957 frozen source inputs unchanged.
+
+The route harness uses real owned auth SQLite rows, HTTP, encryption/decryption and
+same-install memory restoration with synthetic Google responses inside the child only.
+Distinct synthetic Google login and installation credentials prove transport separation.
+It exercises configured/unconfigured/blank readiness, all contained routes, failed
+refresh/list/upload/download/decrypt/restore and held connection replacement. All sync
+stamp files are compared, not only the local stamp. No real Google account, token,
+provider traffic, demo8845, existing simulator or native app was used.
+
+Failure history is retained: first HTTP run134/135 because Node fetch ignored the
+supplied Host header; a wire probe confirmed the cause and the test now uses node:http
+for the actual invalid Host. Later135/135 runs preceded four extra configured-route
+checks. The initial integrated build failed with12 TypeScript diagnostics from recursive
+inferred fixture types; explicit test-only annotations fixed it. Final build and full
+suite above verify that source. No failure was hidden or expectation weakened.
+
+Evidence is local-only under `.omb-scratch/verification/loop74-drive-capability/`:
+`final-verification.json`, build/full-vitest/packaged-server result files, server-tests,
+UI and browser receipts. The refreshed [backup contract](portable-backup-contract-2026-09-12.md)
+keeps v1 partial scope and original-secret dependency explicit. This slice does not
+establish portable recovery, real OAuth, transactional restore, native distribution,
+whole-codebase security or revenue improvement. Two image-size high alerts remain open.
+
+Next bounded correctness slice: recover Store conversation ancestry after a best-effort
+SQLite insert fails. The reproduced A→B, failed C, durable D chain loses A/B from the
+active path on restart. Persist missing ancestors and the new leaf atomically; verify
+exact paths and parents across restart, rollback, repeated recovery and explicit branch
+selection. Do not mask missing ancestry by concatenating unrelated rows. Separate
+remaining work includes Watch editor/lifecycle acceptance, user-paced onboarding Tour,
+portable v2 file restore and native signing/runtime gates. Twelve inherited native,
+research and template files remain preserved outside this commit; restore from this
+loop's owned receipt after publication, retaining the original stash.

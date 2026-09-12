@@ -1,10 +1,10 @@
 # Portable backup contract and remaining acceptance gates
 
-Read-only review, 2026-09-12; checkout HEAD `3c6400c3780da64c065c5326f76caaf0477237a8`. Source inspection and public provider documentation only. No provider API calls, credentials read, tests, scans, installs or tracked edits.
+Initial read-only review, 2026-09-12, at `3c6400c3780da64c065c5326f76caaf0477237a8`; source references below describe that snapshot unless superseded. Loop74 implementation and owned-fixture acceptance are recorded below. No real Google or Telegram provider calls were made.
 
 ## What exists today
 
-The Settings workspace backup is **manual, installation-wide, partial, and tied to the original installation's secret**. It is not “all chats/sessions/files backed up to the signed-in user's account.” Current UI already says conversation history and provider connections are excluded and another installation is unsupported (`src/components/WorkspaceSyncCard.tsx:147–151,259–263`), although its Drive controls still use the unchecked account-linked routes.
+The Settings workspace backup is **manual, installation-wide, partial, and tied to the original installation's secret**. It is not “all chats/sessions/files backed up to the signed-in user's account.” The UI says conversation history and provider connections are excluded and another installation is unsupported. Loop74 changes its Drive controls to the configured installation transport and disables writes until a checked capability response confirms availability.
 
 | Data | Current v1 bundle |
 |---|---|
@@ -33,7 +33,11 @@ The signing secret is `BETTER_AUTH_SECRET` or the installation's generated `DATA
 
 ## Smallest testable protection slice
 
-**Contain installation-wide capabilities before expanding backup contents.** Keep local configured Drive and file backup working. Implement the previously planned honest capability response and disable only unchecked account-linked Drive connection/write routes until its identity/scope/one-use architecture is ready.
+**Loop74 implements capability and account-route containment.** The exact status GET reports a versioned capability without reading hosted installation credentials, account tokens or backup stamps. Authenticated hosted accounts receive the local-only explanation; anonymous hosted requests remain401. Local unchecked account connect/callback/push/pull return501 before state, token or bundle operations; hosted family denial stays403. Configured installation Drive and local file/Telegram routes are preserved. The unresolved account-token findings above are historical reasons for containment, not a presently enabled backup path.
+
+Settings names the configured computer's Drive, removes the unchecked connect link and stale timestamp, and fails closed on loading/error/malformed status. Explicit retry and checked response schemas preserve errors. Request cancellation/generation guards prevent retired card requests from changing the current card or sending after an asynchronous file read. Pure helper tests cover request retirement; browser acceptance covers closing/reopening Settings, not an actual account switch.
+
+Verification: owned HTTP139/139, UI helpers37/37, browser4/4 at320px/1440px, full suite245 files/3609 passed/8 skipped/0 failed, build/types/lint and packaged server9/9. Actual encryption, fake Google transport, decryption and same-install memory restore passed; held connection replacement and transport/decrypt/restore failures were exercised. This does not establish real consent, transactional restore, portable recovery or complete sync. Evidence and failed preparation attempts are recorded in [the audit](astra-glm-audit-2026-09-12.md).
 
 **Superseded by Loop71 (`33fda89`):** source inspection found that the separate `/api/vault/*` endpoints use one global VaultManager and accept filesystem paths (`index.ts:5362–5410`); the current hosted workspace denial and bot/group/thread ownership checks do not cover them (`4336–4380`). Loop71 now gates the exact Vault route family for every authenticated hosted account before body parsing/file operations and filters daily briefing ownership. Its final real-route harness passed87 tests, full suite3520/8 skipped. Baseline requests proved route accessibility and synthetic other-account briefing names/metadata; configured Vault transfers could not be exercised because the native SQLite binding was unavailable. No configured-data exfiltration or complete Vault restore verification is claimed. See [the current audit](astra-glm-audit-2026-09-12.md). Preserve local configured Vault behavior.
 
