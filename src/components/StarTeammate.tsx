@@ -1,32 +1,20 @@
-// Star teammates use the same flat flower mark as Muster's brand surfaces.
+// Star teammates wear the brand flower with the full pose vocabulary — the
+// flower IS the star now: every agent state maps onto a real expression
+// (flower.ts's poseFor chain, 16 poses), and `spin` restores the old star's
+// slow idle rotation. The flat three-eye-state mascot remains available
+// directly via MusterMascot.
 import { memo } from "react";
-import { AGENT_COLORS, type AgentColor, type AgentState } from "@/lib/mascot";
-import { MusterMascot, MUSTER_ORANGE, type MusterEyeState } from "./MusterMascot";
-
-function eyeVariant(state: AgentState): MusterEyeState {
-  switch (state) {
-    case "sleeping":
-    case "powering-down":
-    case "drowsy":
-      return "closed";
-    case "happy":
-    case "excited":
-    case "celebrate":
-    case "playful":
-    case "laughing":
-    case "proud":
-      return "happy";
-    default:
-      return "open";
-  }
-}
+import { AGENT_COLORS, type AgentColor } from "@/lib/mascot";
+import { FlowerBot, MUSTERBOT_ORANGE } from "@/lib/musterbot";
 
 interface StarTeammateProps {
   color: AgentColor;
-  state?: AgentState;
+  state?: string;
   size?: number;
   label?: string;
   animated?: boolean;
+  /** Slow idle rotation. Off by default; motion rules apply. */
+  spin?: boolean;
 }
 
 export const StarTeammate = memo(function StarTeammate({
@@ -35,15 +23,17 @@ export const StarTeammate = memo(function StarTeammate({
   size = 44,
   label,
   animated = false,
+  spin = false,
 }: StarTeammateProps) {
   return (
     <span className="inline-flex shrink-0">
-      <MusterMascot
+      <FlowerBot
         size={size}
-        color={color === "orange" ? MUSTER_ORANGE : AGENT_COLORS[color] ?? MUSTER_ORANGE}
-        eyes={eyeVariant(state)}
+        state={state}
+        color={color === "orange" ? MUSTERBOT_ORANGE : AGENT_COLORS[color] ?? MUSTERBOT_ORANGE}
         label={label}
         animated={animated}
+        spin={spin}
       />
     </span>
   );

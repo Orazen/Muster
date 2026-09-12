@@ -242,6 +242,8 @@ function AgentAvatarComponent(
   }
 
   if (character === "star") {
+    // the flower IS the star now: full pose expressions, and the old star's
+    // slow idle spin whenever the avatar is animated
     return (
       <StarTeammate
         color={color}
@@ -249,6 +251,7 @@ function AgentAvatarComponent(
         size={size}
         label={label}
         animated={animated}
+        spin={animated}
       />
     );
   }

@@ -60,3 +60,14 @@
     transition: none !important;
   }
 }
+
+/* Star rotation: the brand flower wears the old star's idle spin — slow,
+ * eased at the seam, and off under reduced motion (blanket rule above). */
+.flower-bot[data-spin="true"] {
+  animation: flower-bot-spin 22s linear infinite;
+}
+
+@keyframes flower-bot-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

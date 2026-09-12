@@ -33,6 +33,8 @@ export interface FlowerBotProps {
   label?: string;
   /** Blinking + gentle float. Off renders the state's resting pose. */
   animated?: boolean;
+  /** Slow continuous rotation — the old star's idle spin, now the flower's. */
+  spin?: boolean;
   /** Eye offset in [-1, 1] per axis. */
   gaze?: { x?: number; y?: number };
 }
@@ -43,6 +45,7 @@ function FlowerBotComponent({
   color = MUSTER_ORANGE,
   label,
   animated = true,
+  spin = false,
   gaze,
 }: FlowerBotProps) {
   const pose: FlowerPose = FLOWER_POSES[poseFor(state)];
@@ -60,6 +63,7 @@ function FlowerBotComponent({
       aria-hidden={label ? undefined : true}
       focusable="false"
       data-animated={animated}
+      data-spin={spin || undefined}
       data-pose={poseFor(state)}
     >
       <g className="flower-bot__body" style={{ transform: `translate(0 ${(pose.bdy ?? 0).toFixed(1)})` }}>

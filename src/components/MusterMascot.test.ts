@@ -69,19 +69,26 @@ describe("the shared Muster mascot", () => {
   });
 
   it.each([
-    { expected: "closed", states: ["sleeping", "powering-down", "drowsy"] },
+    { expected: "sleepy", states: ["sleeping", "powering-down", "drowsy"] },
     { expected: "happy", states: ["happy", "excited", "celebrate", "playful", "laughing", "proud"] },
-    { expected: "open", states: ["idle", "working", "thinking", "alerting"] },
-  ] satisfies Array<{ expected: string; states: AgentState[] }>)("preserves the $expected expression family", ({ expected, states }) => {
+    { expected: "idle", states: ["idle"] },
+    { expected: "focused", states: ["working"] },
+    { expected: "thinking", states: ["thinking"] },
+    { expected: "mad", states: ["alerting"] },
+  ] satisfies Array<{ expected: string; states: string[] }>)("maps $states onto the $expected flower pose", ({ expected, states }) => {
     for (const state of states) {
       const markup = render(createElement(StarTeammate, { color: "orange", state }));
-      expect(markup).toContain(`data-eyes="${expected}"`);
-      if (expected === "open") expect(markup.match(/<rect /g)).toHaveLength(2);
-      else {
-        expect(markup).not.toContain("<rect");
-        expect(markup.match(/stroke="#f9f9f9"/g)).toHaveLength(2);
-      }
+      // the star teammate now wears the full pose vocabulary: the pose lands
+      // in data-pose and both capsules stay capsules (expressions morph eye
+      // geometry, they never swap to arcs)
+      expect(markup).toContain(`data-pose="${expected}"`);
+      expect(markup.match(/<rect /g)).toHaveLength(2);
     }
+  });
+
+  it("spins the star teammate only when asked, never for reduced motion", () => {
+    expect(render(createElement(StarTeammate, { color: "orange" }))).not.toContain('data-spin');
+    expect(render(createElement(StarTeammate, { color: "orange", spin: true }))).toContain('data-spin="true"');
   });
 
   it("keeps the mark's expressions in the flower's eye slots", () => {
