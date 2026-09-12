@@ -3248,8 +3248,9 @@ let providerConfigBusy = false;
 // ── HTTP plumbing ─────────────────────────────────────────────────────
 function html(res: ServerResponse, status: number, body: string) {
   // tiny sibling of json() for the handful of handoff/error pages the
-  // desktop OAuth flow renders directly.
-  res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
+  // desktop OAuth flow renders directly. no-store keeps crawlers and
+  // intermediaries from serving a stale copy of legal/verification pages.
+  res.writeHead(status, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
   res.end(body);
 }
 
@@ -7586,7 +7587,10 @@ let requestUserEmail = "";
       for (const file of candidates) {
         try {
           const data = readFileSync(file);
-          res.writeHead(200, { "content-type": MIME.get(extname(file).toLowerCase()) ?? "text/html" });
+          const type = MIME.get(extname(file).toLowerCase()) ?? "text/html";
+          // no-cache on HTML: pages change between deploys and crawlers
+          // (Google's OAuth review) must never see a stale shell.
+          res.writeHead(200, { "content-type": type, ...(type === "text/html" ? { "cache-control": "no-cache" } : {}) });
           return res.end(data);
         } catch {
           /* try the next candidate */
@@ -7630,7 +7634,7 @@ let requestUserEmail = "";
         const file = join(MARKETING_DIR, rel);
         const data = readFileSync(file);
         const type = MIME.get(extname(file).toLowerCase()) ?? "text/html";
-        res.writeHead(200, { "content-type": type });
+        res.writeHead(200, { "content-type": type, ...(type === "text/html" ? { "cache-control": "no-cache" } : {}) });
         // Search Console HTML-tag verification rides every served HTML page,
         // homepage included.
         return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
@@ -7647,13 +7651,13 @@ let requestUserEmail = "";
       try {
         const data = readFileSync(file);
         const type = MIME.get(extname(file)) ?? "application/octet-stream";
-        res.writeHead(200, { "content-type": type });
+        res.writeHead(200, { "content-type": type, ...(type === "text/html" ? { "cache-control": "no-cache" } : {}) });
         return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
       } catch {
         // SPA fallback
         try {
           const data = readFileSync(join(STATIC_DIR, "index.html"));
-          res.writeHead(200, { "content-type": "text/html" });
+          res.writeHead(200, { "content-type": "text/html", "cache-control": "no-cache" });
           return res.end(withVerificationMeta(data.toString()));
         } catch {
           /* fall through to 404 */

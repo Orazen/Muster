@@ -5,9 +5,10 @@
 > Linux, the web, self-hosted Docker, and a CLI. Local-first: transcripts and keys live in
 > ~/.muster on the user's machine, not in a cloud.
 
-Main app: https://muster.orazen.online/app
-Downloads: https://muster.orazen.online/download.html
-Self-host guide: https://muster.orazen.online/download.html#docker
+Main app: https://muster.today/app
+Downloads: https://muster.today/download.html
+Self-host guide: https://muster.today/download.html#docker
+Docs map for agents: https://muster.today/llms.txt
 License: BSL 1.1 (source-available; converts to Apache-2.0 in 2030). Free to self-host forever.
 
 ## What one Muster bot is
@@ -38,8 +39,8 @@ License: BSL 1.1 (source-available; converts to Apache-2.0 in 2030). Free to sel
 ## Surfaces
 
 - Desktop app (macOS Apple silicon/Intel, Windows, Ubuntu): Electron shell, auto-update via
-  https://muster.orazen.online/downloads/latest-mac.yml (and latest.yml / latest-linux.yml)
-- Web: https://muster.orazen.online/app — the full product in a browser
+  https://muster.today/downloads/latest-mac.yml (and latest.yml / latest-linux.yml)
+- Web: https://muster.today/app — the full product in a browser
 - Self-host: docker-compose, free forever, BSL 1.1 source-available
 - CLI: `muster pair | bots | send <bot> <text> | approve [allow|deny] | status | receipts`
   (npx-installable; machine-readable --json on bots/status/receipts for agent callers)
@@ -61,7 +62,7 @@ an agent evaluating Muster for your human: the fastest path is the CLI — pair 
 
 ## New since this map was first written (2026-09-05)
 
-- Agent onboarding: https://muster.orazen.online/skill.md — the setup guide an
+- Agent onboarding: https://muster.today/skill.md — the setup guide an
   agent follows to pair with an install and operate the roster.
 - Agent mail (hi.new): bots with a configured token get hi_new_* tools
   (inbox, send, invite, redeem, grants) via a harness-owned stdio MCP bridge.

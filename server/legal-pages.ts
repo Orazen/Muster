@@ -24,6 +24,10 @@ function legalShell(title: string, body: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="index, follow">
+<link rel="canonical" href="${title === "Privacy policy" ? "https://muster.today/privacy-policy" : "https://muster.today/terms-of-service"}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Muster">
+<meta property="og:title" content="${title} — Muster">
 <title>${title} — Muster</title>
 <style>${PAGE_STYLE}</style></head>
 <body>
@@ -203,8 +207,11 @@ about the Service, these Terms or account requests: ${CONTACT}.</p>
 }
 
 // The consent form uses /Terms-of-Service; both spellings must resolve.
+// Trailing slashes must resolve too: without this, /privacy-policy/ falls
+// through to the bare SPA shell (an empty <div id="root">), which Google's
+// OAuth review reads as a privacy policy with no content.
 export function legalPageFor(path: string): string | undefined {
-  switch (path.toLowerCase()) {
+  switch (path.replace(/\/+$/, "").toLowerCase()) {
     case "/privacy-policy":
       return privacyPolicy();
     case "/terms-of-service":

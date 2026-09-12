@@ -1,0 +1,49 @@
+# Muster
+
+> Muster is an AI-agent workforce platform: a roster of persistent AI agents (personas, memory,
+> approvals, real computers) that anyone can hire, manage and audit — on macOS, Windows, Linux,
+> the web, self-hosted Docker, and a CLI. Local-first: transcripts and keys live in ~/.muster on
+> the user's machine, not in a cloud. Free to self-host forever (BSL 1.1, converts to Apache-2.0
+> in 2030); hosted plans from $20/month.
+
+Muster agents are model-agnostic (Claude Code, Codex, Grok, Gemini, Kimi, Qwen, any
+OpenAI/Anthropic-compatible endpoint, or local Ollama/LM Studio on 127.0.0.1) and can be given a
+real computer: a cloud Linux desktop or the local machine — files, shell, and a stealth browser
+engine. Guardrails are built in: approval cards for shell/file actions, per-agent token budgets
+and spend caps, an on-device Privacy Shield that deterministically masks emails/phones/secrets
+before prompts reach a cloud model, and verifiable signed job receipts for every settled task.
+
+## Site map
+
+- [Home](https://muster.today/): product overview, pricing philosophy, FAQ
+- [Download](https://muster.today/download.html): macOS (Apple silicon/Intel), Windows, Ubuntu builds + Docker self-host guide
+- [Docs](https://muster.today/docs): documentation overview
+- [Quick start](https://muster.today/docs/quick-start): install, pair, first bot
+- [Install](https://muster.today/docs/install): platform-specific install instructions
+- [Self-host](https://muster.today/docs/self-host): Docker Compose deployment
+- [Engines](https://muster.today/docs/engines): connecting AI models and CLIs as agent engines
+- [Agents](https://muster.today/docs/agents): personas, memory, computer access
+- [Approvals](https://muster.today/docs/approvals): the guardrail system
+- [Automation](https://muster.today/docs/automation): routines, schedules, webhooks
+- [Goals](https://muster.today/docs/goals): bounded-autonomy goal mode
+- [Security](https://muster.today/docs/security): security posture, Privacy Shield, receipts
+- [Teams](https://muster.today/teams.html): pre-built agent teams
+- [Bot directory](https://muster.today/bots): public team-library catalog
+- [Privacy policy](https://muster.today/privacy-policy): data handling incl. Google API Limited Use
+- [Terms of service](https://muster.today/terms-of-service)
+- [Agent skill map (llm.txt)](https://muster.today/llm.txt): machine-oriented product map
+- [Agent setup guide](https://muster.today/skill.md): how an agent pairs with an install and operates the roster
+
+## For agents reading this
+
+Muster is agent-operable end to end. The CLI (`muster pair | bots | send <bot> <text> | approve
+[allow|deny] | status | receipts`) exposes machine-readable `--json` output on bots/status/receipts.
+The HTTP API under /api/* (same auth as the app: session cookie or pairing-derived session)
+exposes bots, groups/rooms, routines, job receipts and the security scan (/api/security-scan).
+The fastest integration path: pair once, then `muster status --json` and
+`muster send <bot> <task>`.
+
+## Contact
+
+Operator: Tharun Ramagiri (Orazen) — ramagiritharun@gmail.com. Security reports: see
+[security.txt](https://muster.today/.well-known/security.txt).

@@ -45,6 +45,30 @@ describe("legalPageFor", () => {
     expect(legalPageFor("/PRIVACY-POLICY")).toBeTruthy();
   });
 
+  it("serves trailing-slash variants instead of the bare SPA shell", () => {
+    // Google's crawler normalizes URLs; a trailing slash used to fall through
+    // to the empty SPA shell and read as a contentless privacy policy.
+    expect(legalPageFor("/privacy-policy/")).toBe(legalPageFor("/privacy-policy"));
+    expect(legalPageFor("/Terms-of-Service/")).toBe(legalPageFor("/terms-of-service"));
+  });
+
+  it("declares muster.today canonicals in the shell", () => {
+    expect(legalPageFor("/privacy-policy")).toContain('<link rel="canonical" href="https://muster.today/privacy-policy">');
+    expect(legalPageFor("/terms-of-service")).toContain('<link rel="canonical" href="https://muster.today/terms-of-service">');
+  });
+
+  it("ships crawler discovery files for the muster.today property", () => {
+    const www = (name: string) => readFileSync(new URL(`../www/${name}`, import.meta.url), "utf8");
+    const robots = www("robots.txt");
+    expect(robots).toContain("Sitemap: https://muster.today/sitemap.xml");
+    expect(robots).toContain("Disallow: /api/");
+    const sitemap = www("sitemap.xml");
+    for (const url of ["https://muster.today/", "https://muster.today/privacy-policy", "https://muster.today/docs"]) {
+      expect(sitemap).toContain(`<loc>${url}</loc>`);
+    }
+    expect(www("llms.txt")).toContain("# Muster");
+  });
+
   it("leaves unrelated paths to other handlers", () => {
     expect(legalPageFor("/")).toBeUndefined();
     expect(legalPageFor("/privacy")).toBeUndefined();

@@ -7,16 +7,87 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Muster — Muster your agents</title>
 <meta name="description" content="AI agents with real computers. Privacy Shield scrubs emails and secrets before any cloud model sees them. Self-host free — or hosted from $20/mo."/>
-<link rel="canonical" href="https://muster.orazen.online/" />
+<link rel="canonical" href="https://muster.today/" />
+<meta property="og:site_name" content="Muster" />
+<meta property="og:locale" content="en_US" />
 <meta property="og:title" content="Muster — Muster your agents" />
 <meta property="og:description" content="Give each agent a name, a memory, and a Linux desktop it drives. On-device Privacy Shield. Self-host free, or hosted from $20/mo." />
 <meta property="og:type" content="website" />
-<meta property="og:url" content="https://muster.orazen.online/" />
-<meta property="og:image" content="https://muster.orazen.online/hero.png" />
+<meta property="og:url" content="https://muster.today/" />
+<meta property="og:image" content="https://muster.today/hero.png" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Muster — Muster your agents" />
 <meta name="twitter:description" content="AI agents that do real work on real computers. Privacy Shield included. Self-host free, or hosted from $20/mo." />
-<meta name="twitter:image" content="https://muster.orazen.online/hero.png" />
+<meta name="twitter:image" content="https://muster.today/hero.png" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://muster.today/#org",
+      "name": "Muster",
+      "url": "https://muster.today/",
+      "logo": "https://muster.today/app-icon.svg",
+      "email": "ramagiritharun@gmail.com",
+      "description": "Muster is an AI-agent workforce platform built by Tharun Ramagiri at Orazen."
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://muster.today/#site",
+      "url": "https://muster.today/",
+      "name": "Muster",
+      "publisher": { "@id": "https://muster.today/#org" },
+      "inLanguage": "en"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "Muster",
+      "url": "https://muster.today/",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "macOS, Windows, Linux, Web",
+      "description": "A roster of persistent AI agents with personas, memory, approval guardrails, real computer access and verifiable job receipts. Free to self-host; hosted from $20/month.",
+      "offers": { "@type": "AggregateOffer", "lowPrice": "0", "highPrice": "20", "priceCurrency": "USD" },
+      "publisher": { "@id": "https://muster.today/#org" }
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What exactly is a “cloud computer”?",
+          "acceptedAnswer": { "@type": "Answer", "text": "A small Linux desktop in our cloud that your bot drives like a person would — real browser, real files, real apps. It's the metered unit because it's the only part of Muster that costs us compute. Bots themselves are free and unlimited on every plan." }
+        },
+        {
+          "@type": "Question",
+          "name": "Does the Privacy Shield slow my bots down or break their context?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. Masking is deterministic — the same email always becomes the same [EMAIL_n] token — so models keep thread context across turns. You get a counts-only receipt each turn showing exactly how many items were masked, never the content itself." }
+        },
+        {
+          "@type": "Question",
+          "name": "If I self-host, do I lose any features?",
+          "acceptedAnswer": { "@type": "Answer", "text": "None. The software ships complete under BSL 1.1 — every feature, unlimited bots, no license keys, no phone-home. What we sell is hosting and convenience, not unlocks." }
+        },
+        {
+          "@type": "Question",
+          "name": "What happens to my bots if I cancel?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Your bots, transcripts, and connected apps stay intact. Cloud computer provisioning pauses until billing resumes, and you can export everything and self-host the same harness at any time." }
+        },
+        {
+          "@type": "Question",
+          "name": "Which AI models can my bots use?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Whatever you already pay for. Bots run on Claude Code, Codex, Grok, Gemini, and any OpenAI-compatible API — including local models via Ollama. There's also a built-in free tier through OpenRouter, so you can start without a single paid subscription. Vision-capable models can read screenshots you attach." }
+        },
+        {
+          "@type": "Question",
+          "name": "Where does my data actually live?",
+          "acceptedAnswer": { "@type": "Answer", "text": "On your machine, by default — transcripts, keys, and memories in ~/.muster. If you want sync across devices, Muster pushes one AES-256-encrypted bundle to storage you own: your Google Drive or a private Telegram chat. Both hold ciphertext only — your passphrase never leaves you, and neither service can read a byte." }
+        }
+      ]
+    }
+  ]
+}
+</script>
 <link rel="icon" type="image/svg+xml" href="/app-icon.svg" />
 <style>
   :root {
