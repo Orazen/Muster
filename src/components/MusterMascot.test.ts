@@ -10,7 +10,7 @@ import { StarTeammate } from "./StarTeammate";
 
 const render = (element: ReactElement) => renderToStaticMarkup(element);
 const body = (markup: string) => {
-  const match = /<path d="([^"]+)" fill="([^"]+)"/.exec(markup);
+  const match = markup.match(/<path d="([^"]+)" fill="([^"]+)"/);
   expect(match).not.toBeNull();
   return { path: match![1], fill: match![2] };
 };
@@ -29,15 +29,20 @@ describe("the shared Muster mascot", () => {
     }
   });
 
-  it("renders brand surfaces as the musterbot blob mark in brand orange", () => {
+  it("renders brand surfaces as the canonical flower mark in brand orange", () => {
     for (const surface of [
       createElement(MusterBloom, { interactive: false }),
       createElement(MusterbotMark),
     ]) {
       const markup = render(surface);
       expect(markup).toContain('stop-color="#f08a24"');
-      expect(markup).not.toMatch(/^M92\.79 0\.33C91\.27/);
-      expect(markup).toContain("<ellipse");
+      // the authored five-lobed flower — the same body the app icon serves,
+      // drawn flat in brand orange with no smile
+      const match = markup.match(/<path d="([^"]+)" fill="([^"]+)"/);
+      expect(match).not.toBeNull();
+      expect(match![1]).toMatch(/^M92\.79 0\.33C91\.27/);
+      expect(match![2]).toBe("#f08a24");
+      expect(markup).not.toContain("<ellipse");
     }
   });
 
@@ -79,15 +84,15 @@ describe("the shared Muster mascot", () => {
     }
   });
 
-  it("keeps happy eyes on the blob mark for the happy mood", () => {
-    // Happy eyes are stroked arcs; open eyes are ellipses.
-    // Happy eyes are stroked arcs; open eyes are ellipses. The body keeps
-    // one white highlight ellipse either way, so count them.
+  it("keeps the mark's expressions in the flower's eye slots", () => {
+    // happy and waving: two stroked arcs, no capsules, no smile — the brand
+    // mark carries no mouth; idle: the canonical capsule pair
     const happy = render(createElement(MusterBloom, { mood: "happy", interactive: false }));
-    expect(happy).not.toContain("<ellipse");
-    expect(happy.match(/stroke="#f9f9f9"/g)).toHaveLength(3);
+    expect(happy).not.toContain("<rect");
+    expect(happy.match(/stroke="#f9f9f9"/g)).toHaveLength(2);
     const idle = render(createElement(MusterBloom, { mood: "idle", interactive: false }));
-    expect(idle).toContain("<ellipse");
+    expect(idle.match(/<rect /g)).toHaveLength(2);
+    expect(idle).not.toContain('stroke="#f9f9f9"');
   });
 
   it("keeps blob avatars deterministic per seed and state-mapped", () => {
