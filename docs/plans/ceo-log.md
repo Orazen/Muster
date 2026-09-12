@@ -4023,3 +4023,26 @@ The existing heartbeat is verified ACTIVE with its original cadence and next cre
 slice;42% allowance remains, reported reset19September2026,16:43Europe/Rome, no reset
 consumed. Consult this loop's preservation/restoration JSON before touching pending
 files or stashes; all12 inherited paths must be restored byte-for-byte before stopping.
+
+
+**Loop76 (2026-09-12, hosted team ownership):** Fixed cross-owner room membership
+edits, team exports, replace-import archiving and advisory scan results. Existing
+mixed-owner rooms refuse new work before message persistence; member dispatch
+checks the whole current roster again after connector setup. Changed server/index.ts
+and added the real HTTP team-ownership harness. This is a prerequisite to private
+team/network features, not a whole-codebase security conclusion or measured revenue.
+
+Final full suite **246 files / 3657 passed / 8 skipped / 0 failed**,406.35s. Final
+owner harness24/24; earlier combined focused56/56. Server types17.319s, lint4.672s,
+build77.174s, packaged server9/9, broker2/2, updater14/14 and Electron syntax passed.
+All956 frozen source inputs match. Retained baseline5passed/17failed; fixed malformed
+test table inputs, public-owner-ID expectations and four lint issues. Distinct private
+profiles are now saved through actual PATCH before export assertions.
+
+Inspected the installed OpenMausBot shell, six settings pages, first five tour steps
+and live landing demo; reviewed six social-network sources. Research, private-product
+direction, CI alternatives and next peer-capability acceptance are now documented.
+Next P1: replace shared internal peer authority with scoped capabilities; historical
+mixed-room content needs separate review. Native release, full backup/sync, Mimosa
+and two high dependency alerts remain gates. Automation was observed PAUSED; preserve
+that state. Twelve inherited files remain separately preserved pending restoration.

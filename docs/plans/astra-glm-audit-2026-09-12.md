@@ -544,3 +544,49 @@ The existing heartbeat is verified ACTIVE with its original cadence and next cre
 slice;42% allowance remains, reported reset19September2026,16:43Europe/Rome, no reset
 consumed. Consult this loop's preservation/restoration JSON before touching pending
 files or stashes; all12 inherited paths must be restored byte-for-byte before stopping.
+
+
+## Loop76 — authenticated team owner boundaries (12 September 2026)
+
+**Fixed P1 paths:** `PATCH /api/groups/:id` accepted another owner's bot;
+`POST /api/teams/export` exposed foreign profiles; replace import archived foreign
+bots and returned them; `GET /api/security-scan` disclosed foreign identifiers and
+findings. The session gate alone did not protect member IDs or whole-roster handlers.
+All four now apply owner scoping, including primary-versus-other-owner behavior and
+legacy unowned records. Invalid room membership aborts accompanying field changes
+with a generic400. Valid lists deduplicate while preserving order. Secondary default
+export names use their own account profile.
+
+Old mixed-owner rooms remain on disk, but new messages return409 before user echo/
+SQLite head changes. Dispatch validates the whole current roster before claiming a
+bot and after connector setup, including cached member membership. Tests use actual
+hosted sign-up sessions for primary/Alice/Bob, a legacy foreign-owner fixture and a
+local server; distinct names/descriptions are persisted through the real edit route.
+They verify private export content, foreign records unchanged on import, exact
+SQLite/roster/file stability on refusal, and valid local/owned behavior. No real
+provider or account is used; owned child cleanup/no-outbound assertions pass.
+
+Final full **246 files / 3657 passed / 8 skipped / 0 failed**,406.35s
+(407.610s command); new ownership harness24/24 in6.84s; prior combined56/56 in17.64s.
+Server types17.319s, lint4.672s, build77.174s, packaged server9/9 in17.325s,
+broker2/2 in0.416s, updater14/14, Electron syntax pass. Runtime Node22.22.3/arm64/macOS
+and pnpm10.33.0: this is local verification, not Ubuntu/Node24 Actions or native
+Electron launch acceptance. Build retains large-chunk and ignored-override warnings.
+All956 final source inputs match; hash-pinned review found no blocker.
+
+Retained failures: baseline5passed/17failed included real route regressions and
+test-authoring defects; malformed table cases were corrected. First fixed run54/56
+failed only on public ownerId assertions; wire omission is intentional, so assertions
+now check persisted rows. Four lint errors were corrected. A passing earlier full
+run began before corrections and is superseded by the frozen final run. Evidence:
+`.omb-scratch/verification/loop76-network-direction/`, especially `verified-source.json`,
+`owner-boundaries-review-final.json`, command logs and team-ownership-tests receipts.
+
+**Open P1:** internal peer tools still share an installation bearer; see the
+[scoped-capability next slice](peer-capability-next-slice-2026-09-12.md). Historical
+foreign data in already-mirrored rooms is not retroactively removed. Post-await and
+queued-dispatch branches are source-reviewed, not held-transport runtime acceptance.
+These limits prevent a comprehensive isolation/security or public-launch claim.
+Native signing/runtime, full portable backup, real Google consent, VM execution,
+Mimosa and two high dependency alerts remain separate gates. The current scheduler
+was observed PAUSED; old ACTIVE/hourly entries are historical.

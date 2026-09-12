@@ -2798,3 +2798,40 @@ The existing heartbeat is verified ACTIVE with its original cadence and next cre
 slice;42% allowance remains, reported reset19September2026,16:43Europe/Rome, no reset
 consumed. Consult this loop's preservation/restoration JSON before touching pending
 files or stashes; all12 inherited paths must be restored byte-for-byte before stopping.
+
+
+## Loop76 — private-team owner boundaries (12 September 2026)
+
+Four authenticated routes were owner-blind despite the normal roster being filtered:
+room PATCH member IDs, team export, replace-import archive snapshots and advisory
+scan input. These now use the existing ownership rule. Unknown/foreign/malformed room
+members return the same400 and cancel the entire patch. Legacy mixed-owner rooms
+return409 before saving a user message; member dispatch revalidates the whole roster
+before setup and after its await. This prevents an owned responder receiving foreign
+roster metadata in a new prompt. Existing historical content is not deleted.
+
+Final **246 files / 3657 passed / 8 skipped / 0 failed**,406.35s; final new HTTP
+harness24/24, prior combined focused56/56, packaged server9/9, broker2/2, updater14/14.
+Server types, lint, build and Electron syntax pass. All956 source inputs frozen and
+unchanged. Test failures and lint corrections are retained under local evidence
+`.omb-scratch/verification/loop76-network-direction/`. The first full run passed too,
+but final-source acceptance is `full-final-result.json`, not the earlier moving-source
+run. Reviewer GO is hash-pinned. Queued/connector race branches were source-reviewed;
+the HTTP tests prove legacy refusal and persisted owner separation, not real providers.
+
+**Next P1:** [scoped peer capabilities](peer-capability-next-slice-2026-09-12.md).
+Internal list/ask/delegate still trust a shared installation bearer. Never substitute
+a caller-supplied self/from ID for authenticated authority. Recipient consent and
+previously mirrored private data remain separate work. The prior P2 recoverable bot
+creation slice stays queued behind this P1.
+
+The owner explicitly wants a private product, superseding the old open-core marketing
+thesis. Read the [direction](private-product-network-direction-2026-09-12.md),
+[social research](bot-network-research-2026-09-12.md), installed-app observations in
+[design study](openmausbot-design-study.md), and [CI alternatives](../guides/verification-without-actions.md).
+No external social account/post, new native release, full automatic sync, VM job or
+complete security rerun was verified. README/landing alignment and user-paced tour
+remain separate slices. Current scheduler was read as PAUSED with its daily cadence;
+do not restore the older hourly/ACTIVE state from previous entries. Read current
+state before updates. Inherited12 files must be restored byte-for-byte using this
+loop's preservation receipt; original stash stays retained.

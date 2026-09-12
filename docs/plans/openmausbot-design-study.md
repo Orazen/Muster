@@ -146,3 +146,48 @@ Browser evidence for Muster must distinguish local fixtures, real server
 behavior, authenticated flows, and production deployment. Native iOS/Android
 and packaged Electron checks need their own evidence. No runtime superiority
 or security conclusion follows from this source study.
+
+
+## Installed desktop observation — 12 September 2026
+
+Navigated the installed macOS app through native UI controls. Its update label
+said **0.1.75 ready — restart**; no restart/update was performed, so this does
+not establish that the running binary was 0.1.75. This was an existing workspace,
+not a fresh-account installation. Private conversations and screenshots are not
+reproduced here. No messages, connections, approvals, backups or VM jobs were sent.
+Opening Browser and VM settings initiated the app's own status checks.
+
+At 1238×768, the app used an approximately 220px navigation column, a quiet chat
+canvas, compact model/task controls, a bottom composer and a separate Computer/
+Browser panel. Collapsible sidebar sections and Tools/profile menus keep secondary
+controls out of the conversation. General, Appearance, Engines, Local VM, Remote
+access and Backups were inspected. The searchable settings dialog has stable left
+navigation and a separately scrolling content column with grouped form cards.
+
+The first five app-tour steps pointed to actual interface controls using a dimmed
+background, bright target outline, mascot coachmark, progress and explicit Next.
+Escape dismissed the tour; steps six through nine were not inspected. Muster's
+existing onboarding examples instead advance every3.6 seconds, and Back returns
+to Welcome rather than the previous example. Queue a user-paced tour with larger
+selectors and clear example labels, then test focus, reduced motion and320px layout.
+
+Engines separated five displayed Ready rows from seven Needs setup rows. Those
+labels are UI observations, not new provider execution tests. Local VM settled on
+“Create the Local VM”; nothing was created. Remote access showed a conflicting
+companion port and actionable recovery; no existing companion was stopped.
+Backups explained included workspace data, excluded credentials/remote disks,
+password requirements and validation before import. Export/restore was not run.
+
+Apply the hierarchy and explicit recovery patterns using Muster's own mascot,
+copy and components. Preserve task identity, approvals and truthful capability
+labels. This inspection does not establish native parity, successful remote
+pairing, backup portability, VM execution or comparative product superiority.
+
+The live [landing page](https://www.openmausbot.com/) was also opened in a browser.
+It uses a dark, spacious hero, a row of expressive mascots, one dominant platform
+download action and a product-shaped interactive preview. Selecting its Release
+bot updated the pressed state and displayed a scripted working state. The page
+explicitly labels the preview as a simulation. No installer, external account,
+real release or native task was exercised by that interaction. For Muster, pair
+the orange Flower with similarly clear product hierarchy and honestly labelled
+examples; use verified availability for each platform CTA.

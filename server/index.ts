@@ -140,6 +140,7 @@ import {
   roomResponders,
   Store,
   type AgentCharacter,
+  type GroupRecord,
   type GroupDefaultResponder,
   type Message,
   type TaskRecord,
@@ -2743,6 +2744,19 @@ _loadPending();
   for (const threadId of leftover) drainDelegations(commsBus, approvalBus, threadId, runDelegatedTurn);
 }
 
+// Legacy rooms may already contain members inserted before the hosted PATCH
+// owner check. Refuse the whole roster: even an owned responder would receive
+// foreign names/titles in its prompt. Unowned records belong to the primary.
+function roomMembersAvailable(group: GroupRecord): boolean {
+  if (!SELF_HOSTED) return true;
+  const primary = primaryUserId();
+  const owner = group.ownerId || primary;
+  return Boolean(owner) && group.memberIds.every((id) => {
+    const member = store.bot(id);
+    return Boolean(member) && (member!.ownerId || primary) === owner;
+  });
+}
+
 async function runGroupMemberTurn(
   groupId: string,
   botId: string,
@@ -2752,9 +2766,10 @@ async function runGroupMemberTurn(
   spoken: Set<string> = new Set(),
   connectorContinuation?: string,
 ): Promise<boolean> {
-  const group = store.group(groupId);
+  let group = store.group(groupId);
   const bot = store.bot(botId);
   if (!group || !bot) return false;
+  if (SELF_HOSTED && (!group.memberIds.includes(botId) || !roomMembersAvailable(group))) return false;
   spoken.add(botId);
   const instance = registry.get(bot.modelSelection.instanceId);
   const userName = cfg.profile?.name?.trim() || "User";
@@ -2820,6 +2835,14 @@ async function runGroupMemberTurn(
     return true;
   }
 
+  // Connector setup yields. Re-read before using the roster or dispatching a
+  // cached responder; an edit/deletion must not bypass the initial check.
+  const currentGroup = store.group(groupId);
+  if (!currentGroup || (SELF_HOSTED && (!currentGroup.memberIds.includes(botId) || !roomMembersAvailable(currentGroup)))) {
+    store.setActivity(bot.id, "idle");
+    return false;
+  }
+  group = currentGroup;
   store.patchGroup(group.id, { busyBotId: bot.id }); // the store's change stream carries the frame
   groupSpeakers.set(group.threadId, { botId: bot.id, name: bot.name, color: bot.color });
 
@@ -2947,6 +2970,7 @@ async function runGroupMemberTurn(
 function startGroupTurn(groupId: string, text: string) {
   const group = store.group(groupId);
   if (!group) throw Object.assign(new Error("no such group"), { status: 404 });
+  if (!roomMembersAvailable(group)) throw Object.assign(new Error("room members are unavailable"), { status: 409 });
   store.appendMessage(group.threadId, { role: "user", kind: "text", text });
 
   const members = group.memberIds
@@ -4434,7 +4458,7 @@ let requestUserEmail = "";
     // the operator owns the autonomy-vs-blast-radius trade-off.
     if (path === "/api/security-scan" && method === "GET") {
       const findings = scanBotSecurity(
-        store.bots.map((bot) => ({
+        store.bots.filter(ownsRecord).map((bot) => ({
           id: bot.id,
           name: bot.name,
           autoApprove: bot.autoApprove,
@@ -5766,14 +5790,14 @@ let requestUserEmail = "";
     }
     if (method === "POST" && path === "/api/teams/export") {
       const body = await readBody(req);
-      const profileName = cfg.profile?.name?.trim();
+      const profileName = isPrimary ? cfg.profile?.name?.trim() : requestUserName.trim();
       const name =
         isText(body.name) && body.name.trim()
           ? body.name.trim()
           : profileName
             ? `${profileName}'s Team`
             : "My Muster Team";
-      const memberIds = store.bots.filter((bot) => !bot.hidden).map((bot) => bot.id);
+      const memberIds = store.bots.filter((bot) => !bot.hidden && ownsRecord(bot)).map((bot) => bot.id);
       if (memberIds.length === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
       try {
         return json(
@@ -5841,7 +5865,7 @@ let requestUserEmail = "";
       // failed import therefore leaves the current workspace untouched.
       const archived = importMode === "replace"
         ? store.bots
-            .filter((bot) => !bot.hidden)
+            .filter((bot) => !bot.hidden && ownsRecord(bot))
             .map((bot) => ({ id: bot.id, chiefOfStaff: Boolean(bot.chiefOfStaff) }))
         : [];
       const importedBots: ReturnType<typeof store.createBot>[] = [];
@@ -5887,9 +5911,15 @@ let requestUserEmail = "";
       for (const key of ["name", "bulletin", "unread"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
-      if (Array.isArray(body.memberIds)) {
-        const ids = body.memberIds.filter(<T>(id: T): boolean => isText(id) && Boolean(store.bot(id)));
-        if (ids.length) patch.memberIds = ids;
+      if (body.memberIds !== undefined) {
+        // Reject the entire edit, including accompanying fields. Unknown and
+        // foreign IDs have the same response and cannot become responders.
+        if (!Array.isArray(body.memberIds) || body.memberIds.length === 0 || !body.memberIds.every((id: JsonValue) => {
+          if (!isText(id) || !id) return false;
+          const bot = store.bot(id);
+          return Boolean(bot) && ownsRecord(bot!);
+        })) return json(res, 400, { error: "invalid room members" });
+        patch.memberIds = [...new Set<string>(body.memberIds)];
       }
       if (body.defaultResponder !== undefined) {
         const value: { kind?: unknown; botId?: unknown } | null = body.defaultResponder;
