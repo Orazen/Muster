@@ -2941,3 +2941,43 @@ PAUSED automation and the twelve inherited files; final byte restoration is reco
 in this loop's local `inherited-restoration.json`. The original stash must remain.
 The reviewed next UI slice uses an owner-bound, original-generation cleanup retry
 so an old Stop failure cannot cancel newer work.
+
+
+## Loop79 — web app stability is the current owner priority
+
+Read [current state](current-state.md) and [the stability contract](../guides/web-app-stability.md)
+first. Do not resume broad redesigns from old mandate entries. Current layout,
+mascot, /app and /os shells, choices and sessions are preserved.
+
+Implemented: explicit Vite backend selection, bounded credential-free identity
+probes before proxy forwarding, PID pinning, fixed UI ports, scratch/report watch
+exclusions, and genuine non-HTML404 responses for missing assets. Intentional HMR
+and valid document/file serving still work. The backend probe is diagnostic and
+not an atomic lease against hostile local processes.
+
+Final full **250 files / 3808 passed / 8 skipped / 0 failed** (310.25s); whole npm
+test324.033s includes broker2/2, updater14/14 and packaged server9/9 (Node22.22.3,
+not Electron). Focused66/66, minimal browser stability2/2 at320/1280, actual Muster
+onboarding7/7 with isolated Chrome profiles. Types, lint and web build pass;962
+source hashes match the final freeze. Retained test declaration/lint fixes, two
+intentional old-config failures, a corrected browser cleanup expectation, and
+seven initial missing-browser launch failures. Final browser wrapper and Chrome
+onboarding reruns pass. No actual Google consent/native acceptance was performed.
+
+One .deploy-trigger update is included in the fully verified product candidate;
+Actions billing still blocks its normal trigger. Do not claim deployment until
+the final GET receipt appears below. Baseline production served old entry assets
+and HTML200 for missing scripts/styles. The12 inherited files remain separately
+preserved; restore exact hashes from the Loop79 manifest and retain original stash.
+
+Evidence: `.omb-scratch/verification/loop79-web-stability/`. Source freeze is
+`source-freeze-final.json`; overall gate `all-tests-result.json`; browser and
+first-attempt failures are retained separately. Latest allowance **11% remaining**;
+reset19 September2026 at16:43 Europe/Rome, no reset consumed. Automation PAUSED.
+
+Next: live rollout acceptance, then generation-bound Stop cleanup retry. Pending
+deployment work: one verified-revision promotion path, exact build identity and
+old-asset retention, unsafe manual deploy script, cloud Dockerfile and Compose
+defects. These are mapped in the stability guide and are not fixed by this slice.
+Native release/signing, portable sync, VM execution, Mimosa and two high dependency
+alerts remain open. Preserve scope and report actual gates instead of optimism.

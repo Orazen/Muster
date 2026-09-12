@@ -2,9 +2,16 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { devBackendPreview } from "./scripts/dev-backend-guard";
+
+const backend = devBackendPreview({
+  OMB_PORT: process.env.OMB_PORT,
+  OGB_PORT: process.env.OGB_PORT,
+  MUSTER_DEV_SERVER_PID: process.env.MUSTER_DEV_SERVER_PID,
+});
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [backend.plugin, react(), tailwindcss()],
   test: {
     environment: "node",
     include: [
@@ -34,17 +41,15 @@ export default defineConfig({
     // clients that resolve IPv4 first
     host: "127.0.0.1",
     port: Number(process.env.OMB_UI_PORT) || 5199,
+    strictPort: true,
     // packager output lands inside the repo — its HTML files must never
     // trigger dev full-page reloads
     watch: {
-      ignored: ["**/release/**", "**/build/**", "**/dist/**", "**/electron/resources/**"],
+      ignored: ["**/release/**", "**/build/**", "**/dist/**", "**/electron/resources/**", "**/.omb-scratch/**", "**/test-results/**", "**/playwright-report/**"],
     },
     // the harness server owns every provider process; the app only ever
     // talks to /api — clients hold no transports
-    proxy: {
-      "/api": {
-        target: `http://127.0.0.1:${process.env.OMB_PORT || process.env.OGB_PORT || 8799}`,
-      },
-    },
+    proxy: backend.proxy,
   },
+  preview: { host: "127.0.0.1", strictPort: true, proxy: backend.proxy },
 });

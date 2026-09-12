@@ -1,6 +1,19 @@
 # AGENTS.md — Muster
 
-You are working on **Muster** v1.10.4 — an AI-agent workforce platform (Electron desktop + server + web + CLI + iOS/Watch companions). Humans own a fleet of persistent AI workers ("bots"); approvals stay human via OptionCard/Apple Watch. Private repo (BSL 1.1), prod at muster.orazen.online.
+## Current owner priority: keep the web app stable
+
+Read [current state](docs/plans/current-state.md),
+[the web app stability contract](docs/guides/web-app-stability.md), and the
+**latest entry at the end** of the handoff ledger before historical roadmaps.
+Preserve the current layout, mascot, route shells, saved choices and user sessions.
+Audits should fix reproduced defects; do not use them to redesign the app again.
+Use isolated data, explicit ports and owned browser contexts. Never point a
+preview at an unidentified backend or restart an existing user service. Treat
+local preview, production and installed apps as distinct versions. A push is not
+proof of deployment. Keep existing automation paused.
+
+
+You are working on **Muster** (source version: `package.json`; installed/live versions require verification) — an AI-agent workforce platform (Electron desktop + server + web + CLI + iOS/Watch companions). Humans own a fleet of persistent AI workers ("bots"); approvals stay human via OptionCard/Apple Watch. Private repo (BSL 1.1), prod at muster.orazen.online.
 
 ## Read first (in this order — then stop exploring, go build)
 
@@ -39,7 +52,9 @@ npm run dev:server                         # local server
 npm run lint                               # oxlint
 ```
 
-Suite baseline: **172 files / 1689 passed / 8 skipped**. If you land below that, say so explicitly.
+Use the **latest verified full-suite baseline at the end of the handoff ledger**.
+The historical 172 files / 1689 passed / 8 skipped count is not the current gate.
+Report any decrease from the latest accepted baseline explicitly.
 
 ## Non-negotiable rules
 
@@ -50,7 +65,7 @@ Suite baseline: **172 files / 1689 passed / 8 skipped**. If you land below that,
 - **No security claims.** The project's security scanner hasn't completed a full re-run; never assert the codebase is secure.
 - Never stop or revoke sessions on the demo server already running on `127.0.0.1:8845`.
 - Credentials come from env/secrets only — never commit literals.
-- Prod auto-deploys on push (~2–3 min, Dokploy). Verify prod with **GET only** (HEAD returns 404 on static routes).
+- Production uses Dokploy, but pushes are **not deployment receipts**. Actions billing can block the automatic trigger. Follow the stability contract, verify the actual served files with **GET only**, and keep an unverified rollout explicit (HEAD returns 404 on static routes).
 
 ## Token discipline
 

@@ -58,17 +58,20 @@ The server owns the fleet, provider processes, persistence and dispatch. Clients
 
 ## Authorized development
 
-Read [AGENTS.md](AGENTS.md) first. Keep work on `main`, scope each change, preserve unrelated work, and record actual verification before committing.
+Read [AGENTS.md](AGENTS.md) and the [web app stability contract](docs/guides/web-app-stability.md) first. Keep work on `main`, scope each change, preserve the approved interface and unrelated work, and record actual verification before committing.
 Use Node 24 and the pinned pnpm 10.33.0 toolchain for the current development/CI baseline; `package.json` declares a Node 22 minimum.
 
-From an authorized checkout:
+From an authorized checkout, install with `pnpm install --frozen-lockfile`. Choose
+and check an owned backend port and data directory, then set `OMB_PORT` and
+`OMB_DATA_DIR` before running `pnpm dev:server`. In another terminal, set the same
+`OMB_PORT`, choose an explicit `OMB_UI_PORT`, and run `pnpm dev`. The preview
+refuses missing/wrong backend identity and an occupied UI port. Port 8799 may
+belong to another installed application.
 
-```sh
-pnpm install --frozen-lockfile
-pnpm dev:server     # server; run in a separate terminal
-pnpm dev            # Vite web UI
-pnpm dev:desktop    # Electron; keep the server and Vite running
-```
+For Electron development, set `ELECTRON_START_URL` to that exact owned frontend
+origin before running `pnpm dev:desktop`. For a review that should stay unchanged
+while source edits continue, build once and use `pnpm preview` with the explicit
+backend port and a free `--port`; do not rebuild that review snapshot mid-test.
 
 Use isolated data directories and synthetic credentials for tests. Never stop or alter the existing demo service on port 8845.
 Keep credentials out of commits and logs; use the supported settings or environment configuration for each integration.

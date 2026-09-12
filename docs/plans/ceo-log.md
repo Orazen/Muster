@@ -4123,3 +4123,36 @@ PAUSED automation and the twelve inherited files; final byte restoration is reco
 in this loop's local `inherited-restoration.json`. The original stash must remain.
 The reviewed next UI slice uses an owner-bound, original-generation cleanup retry
 so an old Stop failure cannot cancel newer work.
+
+
+**Loop79 (12 September 2026, web app stability):** Preserved the existing UI
+while fixing three reproduced defects. Vite now requires an explicit loopback
+backend, verifies Muster identity before API forwarding, pins its PID, and refuses
+occupied preview ports. Scratch snapshots and reports cannot trigger page reloads;
+intentional source HMR remains. Packaged missing assets now return text 404 with
+no-store/nosniff instead of HTML200; real files and document routes retain their
+correct behavior. Added the stability contract and short current-state snapshot
+as first reads in AGENTS.md and the CEO mandate; corrected development guidance.
+
+Final full suite **250 files / 3808 passed / 8 skipped / 0 failed**, 310.25s; full
+`npm test` passed in 324.033s including broker **2/2**, updater **14/14**, packaged
+server **9/9** under Node22.22.3 (Electron absent). Focused **66/66**, minimal
+browser stability **2/2** at320/1280, actual Muster onboarding browser **7/7**
+in66.631s with installed Chrome. All **962 source hashes unchanged**. Frontend
+types passed; final server types6.837s, lint1.266s and Vite build35.571s passed.
+Known lint snapshot and large-chunk warnings remain. Documentation links **36/36**.
+
+Retained failures: old-config baseline **0/2** (two scratch reloads and silent
+alternate port); test-only type declarations and lint corrections; first browser
+wrapper misclassified owned Vite SIGTERM143 (corrected end-to-end2/2); first seven
+onboarding launches failed because bundled Chromium was missing, then Chrome7/7
+passed. No actual Google consent or native runtime acceptance is implied.
+
+One deployment trigger ships with this verified product candidate because Actions
+billing blocked the usual trigger. Production GET baseline showed the missing
+asset bug; final rollout acceptance remains to be recorded after publication.
+Twelve inherited files remain separately preserved for exact restoration. No
+layout rewrite, user-service restart or automation change. Revenue is unmeasured;
+this slice prevents disruptive previews and misleading asset responses. Next:
+verify live rollout, then original-generation Stop cleanup recovery. Deployment
+hardening, native/signing, full sync and scanner/dependency gates remain explicit.

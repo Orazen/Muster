@@ -7916,24 +7916,54 @@ let requestUserEmail = "";
     // packaged app: the server serves the built UI too (window → :8799 for
     // everything, no dev proxy to die). OMB_STATIC_DIR is set by Electron.
     if (method === "GET" && !path.startsWith("/api/") && STATIC_DIR) {
-      const safe = path === "/" ? "/index.html" : path.replace(/\.\./g, "");
-      const file = join(STATIC_DIR, safe);
+      const notFound = () => {
+        res.writeHead(404, {
+          "content-type": "text/plain; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+        });
+        return res.end("Not found");
+      };
+      let decodedPath: string;
       try {
-        const data = readFileSync(file);
-        const type = MIME.get(extname(file)) ?? "application/octet-stream";
-        const headers: OutgoingHttpHeaders = { "content-type": type };
-        if (type === "text/html") headers["cache-control"] = "no-cache";
-        res.writeHead(200, headers);
-        return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
+        decodedPath = decodeURIComponent(path);
       } catch {
-        // SPA fallback
-        try {
-          const data = readFileSync(join(STATIC_DIR, "index.html"));
-          res.writeHead(200, { "content-type": "text/html", "cache-control": "no-cache" });
-          return res.end(withVerificationMeta(data.toString()));
-        } catch {
-          /* fall through to 404 */
+        return notFound();
+      }
+      const segments = decodedPath.split("/");
+      const hasControl = decodedPath.split("").some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
+      if (decodedPath.includes("\\") || hasControl || segments.some((segment) => segment === "." || segment === "..")) {
+        return notFound();
+      }
+      const file = join(STATIC_DIR, decodedPath === "/" ? "index.html" : decodedPath);
+      try {
+        const stat = statSync(file, { throwIfNoEntry: false });
+        if (stat) {
+          if (!stat.isFile()) return notFound();
+          const data = readFileSync(file);
+          const type = MIME.get(extname(file).toLowerCase()) ?? "application/octet-stream";
+          const headers: OutgoingHttpHeaders = { "content-type": type, "x-content-type-options": "nosniff" };
+          if (type === "text/html") headers["cache-control"] = "no-cache";
+          res.writeHead(200, headers);
+          return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
         }
+
+        // Only document navigation gets the SPA shell. A missing asset must
+        // remain a real 404 even when a browser accepts HTML or */*.
+        const destination = req.headers["sec-fetch-dest"];
+        const documentDestination = destination === undefined || destination === "document" || destination === "iframe" || destination === "frame";
+        const acceptsDocument = req.headers.accept === undefined || req.headers.accept.split(",").some((entry) => {
+          const [type, ...parameters] = entry.trim().toLowerCase().split(";");
+          return (type === "text/html" || type === "application/xhtml+xml" || type === "*/*") &&
+            !parameters.some((parameter) => /^\s*q\s*=\s*0(?:\.0*)?\s*$/.test(parameter));
+        });
+        if (!documentDestination || !acceptsDocument || segments.some((segment) => segment.includes(".")) ||
+            decodedPath === "/assets" || decodedPath.startsWith("/assets/")) return notFound();
+        const data = readFileSync(join(STATIC_DIR, "index.html"));
+        res.writeHead(200, { "content-type": "text/html", "cache-control": "no-cache", "x-content-type-options": "nosniff" });
+        return res.end(withVerificationMeta(data.toString()));
+      } catch {
+        return notFound();
       }
     }
 

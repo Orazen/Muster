@@ -7,7 +7,7 @@
 //
 // POSIX-gated like the other boot-a-real-server suites.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,9 +19,15 @@ const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
 
-async function get(path: string): Promise<{ status: number; type: string; text: string }> {
-  const res = await fetch(`${BASE}${path}`);
-  return { status: res.status, type: res.headers.get("content-type") ?? "", text: await res.text() };
+async function get(path: string, headers?: Record<string, string> | Headers) {
+  const res = await fetch(`${BASE}${path}`, { headers });
+  return {
+    status: res.status,
+    type: res.headers.get("content-type") ?? "",
+    cache: res.headers.get("cache-control"),
+    nosniff: res.headers.get("x-content-type-options"),
+    text: await res.text(),
+  };
 }
 
 posixOnly("docs pretty-URL serving", () => {
@@ -43,13 +49,26 @@ posixOnly("docs pretty-URL serving", () => {
     writeFileSync(join(www, "docs", "quick-start.html"), "<!doctype html><html><body>quick start</body></html>");
     writeFileSync(join(www, "docs", "docs.css"), "body{color:#fff}");
 
+    const dist = join(home, "dist");
+    mkdirSync(join(dist, "assets"), { recursive: true });
+    mkdirSync(join(dist, "empty-directory"));
+    writeFileSync(join(dist, "index.html"), '<!doctype html><html><body><div id="root">owned app shell</div></body></html>');
+    writeFileSync(join(dist, "local.html"), "<!doctype html><html><body>local document</body></html>");
+    writeFileSync(join(dist, "assets", "entry.js"), 'console.log("owned entry");');
+    writeFileSync(join(dist, "assets", "entry.css"), ".owned{color:green}");
+    writeFileSync(join(dist, "assets", "flower.svg"), '<svg xmlns="http://www.w3.org/2000/svg"></svg>');
+    writeFileSync(join(dist, "assets", "two..dots.js"), 'console.log("exact filename");');
+    const bin = join(home, "empty-bin");
+    mkdirSync(bin);
+
     const env: NodeJS.ProcessEnv = {
       HOME: home,
       USERPROFILE: home,
+      PATH: bin,
       OMB_PORT: String(PORT),
       OMB_MARKETING_DIR: www,
+      OMB_STATIC_DIR: dist,
     };
-    if (process.env.PATH) env.PATH = process.env.PATH;
     child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env,
@@ -74,6 +93,8 @@ posixOnly("docs pretty-URL serving", () => {
   afterAll(async () => {
     await waitForExit(child, { signal: "SIGTERM" });
     await removeTempDir(home);
+    expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+    expect(existsSync(home)).toBe(false);
   });
 
   it("serves the hub at /docs and /docs/", async () => {
@@ -122,5 +143,76 @@ posixOnly("docs pretty-URL serving", () => {
     // rather than serve anything outside the marketing dir.
     const res = await get("/docs/..%2f..%2fconfig.json");
     expect(res.status).toBe(404);
+  });
+
+  it.each(["/app", "/os", "/sign-in", "/app/bots/owned-bot/thread", "/os/workspace/owned-task"])(
+    "serves the app document at %s with revalidation",
+    async (path) => {
+      const res = await get(path, {
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,*/*;q=0.8",
+        "sec-fetch-dest": "document",
+      });
+      expect(res.status).toBe(200);
+      expect(res.type).toBe("text/html");
+      expect(res.text).toContain("owned app shell");
+      expect(res.cache).toBe("no-cache");
+      expect(res.nosniff).toBe("nosniff");
+    },
+  );
+
+  it("keeps generic document clients and explicit HTML files working", async () => {
+    expect((await get("/app/reloaded")).text).toContain("owned app shell");
+    const res = await get("/local.html");
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("local document");
+    expect(res.cache).toBe("no-cache");
+    expect(res.nosniff).toBe("nosniff");
+  });
+
+  it.each([
+    ["/assets/entry.js", "script", "*/*", "text/javascript", 'console.log("owned entry");'],
+    ["/assets/%65ntry.js", "script", "*/*", "text/javascript", 'console.log("owned entry");'],
+    ["/assets/entry.css", "style", "text/css,*/*;q=0.1", "text/css", ".owned{color:green}"],
+    ["/assets/flower.svg", "image", "image/avif,image/webp,image/*,*/*;q=0.8", "image/svg+xml", '<svg xmlns="http://www.w3.org/2000/svg"></svg>'],
+    ["/assets/two..dots.js", "script", "*/*", "text/javascript", 'console.log("exact filename");'],
+  ])("serves exact asset bytes at %s", async (path, destination, accept, type, body) => {
+    const res = await get(path, { accept, "sec-fetch-dest": destination });
+    expect(res.status).toBe(200);
+    expect(res.type).toBe(type);
+    expect(res.text).toBe(body);
+    expect(res.nosniff).toBe("nosniff");
+  });
+
+  it.each([
+    ["/assets/missing.js", "script", "*/*"],
+    ["/assets/missing.css", "style", "text/css,*/*;q=0.1"],
+    ["/missing.png", "image", "image/avif,image/webp,image/*,*/*;q=0.8"],
+    ["/missing.woff2", "font", "*/*"],
+    ["/missing.js", "document", "text/html"],
+    ["/assets/missing", "document", "text/html"],
+    ["/assets", "document", "text/html"],
+    ["/assets/missing/", "document", "text/html"],
+    ["/missing.js/child", "document", "text/html"],
+    ["/empty-directory", "document", "text/html"],
+    ["/empty-directory/", "document", "text/html"],
+    ["/extensionless-script", "script", "*/*"],
+    ["/extensionless-fetch", "empty", "*/*"],
+    ["/extensionless-json", "", "application/json"],
+    ["/extensionless-html-refused", "document", "text/html;q=0"],
+    ["/missing%2ejs", "document", "text/html"],
+    ["/assets%2fmissing", "document", "text/html"],
+    ["/assets/..%2flocal.html", "document", "text/html"],
+    ["/assets/%5centry.js", "script", "*/*"],
+    ["/assets/%00entry.js", "script", "*/*"],
+    ["/assets/%zz", "document", "text/html"],
+  ])("returns non-HTML 404 for %s", async (path, destination, accept) => {
+    const headers = new Headers({ accept });
+    if (destination) headers.set("sec-fetch-dest", destination);
+    const res = await get(path, headers);
+    expect(res.status).toBe(404);
+    expect(res.type).toBe("text/plain; charset=utf-8");
+    expect(res.text).toBe("Not found");
+    expect(res.cache).toBe("no-store");
+    expect(res.nosniff).toBe("nosniff");
   });
 });
