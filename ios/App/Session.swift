@@ -799,6 +799,26 @@ enum Chat: Identifiable, Hashable {
         case .room: return "blue"
         }
     }
+
+    /// The bot's face state — the same derivation the web's stateForBot
+    /// makes from what the roster record carries (pinned expression, busy,
+    /// unread). Rooms have no face of their own and rest at idle.
+    var mascotState: String {
+        switch self {
+        case let .bot(bot): return flowerState(for: bot)
+        case .room: return "idle"
+        }
+    }
+
+    /// The open task's title, for the chat header's task label. Nil when the
+    /// thread has no titled task — the label stays out of the way entirely
+    /// rather than showing a placeholder.
+    var taskTitle: String? {
+        guard case let .bot(bot) = self else { return nil }
+        guard let title = bot.tasks?.first(where: { $0.threadId == bot.threadId })?.title,
+              !title.isEmpty else { return nil }
+        return title
+    }
 }
 
 /// A chat plus the two things a roster row shows that the record itself does

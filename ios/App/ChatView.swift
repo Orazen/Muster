@@ -44,6 +44,20 @@ struct ChatView: View {
         }
     }
 
+    private var isBotChat: Bool {
+        if case .bot = current { return true }
+        return false
+    }
+
+    /// The header reads as one element to VoiceOver: who this is, and the
+    /// task it is on — the identity the truncated label visually hides.
+    private var accessibilitySummary: String {
+        if let task = current.taskTitle {
+            return "\(current.name), current task: \(task)"
+        }
+        return current.name
+    }
+
     var body: some View {
         // Read the transcript once for this render. Pagination changes the
         // array as a unit; repeatedly reaching through ObservableObject for
@@ -168,16 +182,41 @@ struct ChatView: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 8) {
-                    AgentAvatar(color: current.color, size: 26)
-                    Text(current.name)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Color.primary)
+                // Identity + task label: the bot's flower and name, and under
+                // them the open task's title — the thing a transcript is
+                // *about*, which the old header dropped entirely. The label
+                // truncates (a toolbar is narrow) but is never the only copy:
+                // tapping the capsule opens the task list, where every title
+                // renders in full. Bots only; rooms have no tasks.
+                Button {
+                    if case .bot = current { showingTasks = true }
+                } label: {
+                    VStack(spacing: 1) {
+                        HStack(spacing: 8) {
+                            FlowerAvatar(color: current.color, size: 24, state: current.mascotState)
+                            Text(current.name)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Color.primary)
+                                .lineLimit(1)
+                        }
+                        if let task = current.taskTitle {
+                            Text(task)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
+                    .padding(.leading, 10)
+                    .padding(.trailing, 14)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.secondary.opacity(0.16)))
                 }
-                .padding(.leading, 6)
-                .padding(.trailing, 14)
-                .padding(.vertical, 5)
-                .background(Capsule().fill(Color.secondary.opacity(0.16)))
+                .buttonStyle(.plain)
+                .disabled(!isBotChat)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(accessibilitySummary)
+                .accessibilityHint(isBotChat ? "Opens the task list" : "")
             }
             if case let .bot(bot) = current {
                 // Rooms have no computer of their own — whichever member is

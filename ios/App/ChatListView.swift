@@ -222,7 +222,7 @@ struct ChatRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            AgentAvatar(color: chat.color, size: 52)
+            FlowerAvatar(color: chat.color, size: 52, state: chat.mascotState)
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
@@ -283,7 +283,7 @@ struct WaitingRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AgentAvatar(color: chat.color, size: 38)
+            FlowerAvatar(color: chat.color, size: 38, state: "notifying")
 
             VStack(alignment: .leading, spacing: 3) {
                 Label("\(chat.name) is waiting on you", systemImage: "hand.raised.fill")
