@@ -547,14 +547,18 @@ async function attemptProviderFallback(threadId: string, errorMessage: string): 
     store.patchBot(threadBot.id, {
       modelSelection: { ...threadBot.modelSelection, instanceId: alt, model: "" },
     });
-    store.appendMessage(threadId, {
-      role: "bot",
-      kind: "activity",
-      tool: {
-        name: `${current.split(":")[0]} hit its limit — switching this bot to ${alt.split(":")[0]} and re-asking`,
-        ok: true,
+    store.appendMessage(
+      threadId,
+      {
+        role: "bot",
+        kind: "activity",
+        tool: {
+          name: `${current.split(":")[0]} hit its limit — switching this bot to ${alt.split(":")[0]} and re-asking`,
+          ok: true,
+        },
       },
-    });
+      { bestEffort: true },
+    );
     await startTurn(threadBot.id, lastUser.text, { threadId, connectorContinuation: true }).catch(() => {});
   } catch {
     // fallback must never become a second failure surface
@@ -870,14 +874,25 @@ async function answerRequest(
     const messageId = askMessageByRequest.get(`${threadId}:${requestId}`);
     const existing = messageId ? store.messagesFor(threadId).find((m) => m.id === messageId) : undefined;
     if (existing?.card && !existing.card.answered) {
-      store.patchMessage(threadId, existing.id, { card: { ...existing.card, answered: "unavailable", dismissed: true } });
+      // failure-path bookkeeping: the record must not throw past the
+      // graceful "unavailable" outcome this function exists to deliver
+      store.patchMessage(
+        threadId,
+        existing.id,
+        { card: { ...existing.card, answered: "unavailable", dismissed: true } },
+        { bestEffort: true },
+      );
     }
     if (messageId) askMessageByRequest.delete(`${threadId}:${requestId}`);
-    store.appendMessage(threadId, {
-      role: "bot",
-      kind: "activity",
-      tool: { name: "Couldn't deliver that answer — the request is no longer open, so the action was not run", ok: false },
-    });
+    store.appendMessage(
+      threadId,
+      {
+        role: "bot",
+        kind: "activity",
+        tool: { name: "Couldn't deliver that answer — the request is no longer open, so the action was not run", ok: false },
+      },
+      { bestEffort: true },
+    );
   }
   return outcome;
 }
@@ -942,11 +957,17 @@ function settleLostTurn(turn: WatchedTurn, note: string): void {
   // turn.completed seconds later. Arm the watchdog so that wind-down can't
   // settle a replacement turn dispatched on this thread.
   watchdog.suppressStaleSettles(turn.threadId, STALE_SETTLE_GRACE_MS);
-  store.appendMessage(turn.threadId, {
-    role: "bot",
-    kind: "activity",
-    tool: { name: `error: ${note}`, ok: false },
-  });
+  // Watchdog housekeeping below must always run — the loss chip is
+  // best-effort so a degraded disk cannot skip ownership return and idle.
+  store.appendMessage(
+    turn.threadId,
+    {
+      role: "bot",
+      kind: "activity",
+      tool: { name: `error: ${note}`, ok: false },
+    },
+    { bestEffort: true },
+  );
   finalizeDelegationWatch(turn.threadId, false, "", "Delegated turn was lost");
   turnUsage.delete(turn.threadId);
   // ACP interruption settles within five seconds; other adapters settle
@@ -1157,8 +1178,15 @@ bus.subscribe((event: RuntimeEvent) => {
   const speaker = group ? groupSpeakers.get(event.threadId) : undefined;
 
   const pushMessage = (m: Omit<Message, "id" | "at">) => {
-    const message = store.appendMessage(event.threadId, group && m.role === "bot" ? { ...m, from: speaker } : m);
-    return message;
+    // The fold runs inside the turn — a persistence failure here must keep
+    // folding (a throw would strand the bot busy past turn.completed's
+    // housekeeping until the watchdog), so it degrades to memory-only and
+    // logs loudly. Everywhere else a failed transcript write propagates.
+    return store.appendMessage(
+      event.threadId,
+      group && m.role === "bot" ? { ...m, from: speaker } : m,
+      { bestEffort: true },
+    );
   };
 
   switch (event.type) {
@@ -1201,9 +1229,12 @@ bus.subscribe((event: RuntimeEvent) => {
           // dropping it here would silently un-narrate every completed tool
           const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId)?.tool;
           toolName = existing?.name ?? "tool";
-          store.patchMessage(event.threadId, messageId, {
-            tool: { name: toolName, ok: event.ok, spoken: existing?.spoken },
-          });
+          store.patchMessage(
+            event.threadId,
+            messageId,
+            { tool: { name: toolName, ok: event.ok, spoken: existing?.spoken } },
+            { bestEffort: true },
+          );
           toolMessageByItem.delete(itemKey);
         }
         // the bot just acted ON ITS SCREEN — refresh the preview now. Only
@@ -1346,9 +1377,12 @@ bus.subscribe((event: RuntimeEvent) => {
       if (messageId) {
         const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
         if (existing?.card && !existing.card.answered) {
-          store.patchMessage(event.threadId, messageId, {
-            card: { ...existing.card, answered: event.behavior, dismissed: event.source !== "user" },
-          });
+          store.patchMessage(
+            event.threadId,
+            messageId,
+            { card: { ...existing.card, answered: event.behavior, dismissed: event.source !== "user" } },
+            { bestEffort: true },
+          );
         }
         if (event.requestId) askMessageByRequest.delete(`${event.threadId}:${event.requestId}`);
       }
@@ -1528,11 +1562,16 @@ bus.subscribe((event: RuntimeEvent) => {
   if (!threshold) return;
   const [tool, ...rest] = key.split(":");
   const args = rest.join(":");
-  store.appendMessage(event.threadId, {
-    role: "bot",
-    kind: "activity",
-    tool: { name: `Same call repeated ${threshold}× — ${tool}: ${args.slice(0, 80)}${args.length > 80 ? "…" : ""} — it may be stuck`, ok: false },
-  });
+  // fold subscriber: an observability chip must never break the fold
+  store.appendMessage(
+    event.threadId,
+    {
+      role: "bot",
+      kind: "activity",
+      tool: { name: `Same call repeated ${threshold}× — ${tool}: ${args.slice(0, 80)}${args.length > 80 ? "…" : ""} — it may be stuck`, ok: false },
+    },
+    { bestEffort: true },
+  );
 });
 
 // Drain queued delegations for a source thread after its turn settles.
@@ -1565,11 +1604,17 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
       }
       const source = store.botByThread(sourceThreadId);
       if (!source) return;
-      store.appendMessage(sourceThreadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `error: delegation to @${bot?.name ?? toBotId} could not start — ${why.slice(0, 120)}`, ok: false },
-      });
+      // .catch/onDispatchError path — a throw here would be unhandled and
+      // fatal to the harness, so the chip degrades to memory-only
+      store.appendMessage(
+        sourceThreadId,
+        {
+          role: "bot",
+          kind: "activity",
+          tool: { name: `error: delegation to @${bot?.name ?? toBotId} could not start — ${why.slice(0, 120)}`, ok: false },
+        },
+        { bestEffort: true },
+      );
     };
     return startTurn(toBotId, text, {
       commsDepth,
@@ -1615,14 +1660,18 @@ function drainQueuedSends() {
     // The messages are already in the transcript; userMessage keeps
     // startTurn from appending the joined prompt as a duplicate.
     startTurn(botId, prompt, { threadId, userMessage }).catch((err) => {
-      store.appendMessage(threadId, {
-        role: "bot",
-        kind: "activity",
-        tool: {
-          name: `error: queued message could not start — ${(err instanceof Error ? err.message : String(err)).slice(0, 120)}`,
-          ok: false,
+      store.appendMessage(
+        threadId,
+        {
+          role: "bot",
+          kind: "activity",
+          tool: {
+            name: `error: queued message could not start — ${(err instanceof Error ? err.message : String(err)).slice(0, 120)}`,
+            ok: false,
+          },
         },
-      });
+        { bestEffort: true },
+      );
     }),
   );
 }
@@ -1845,19 +1894,36 @@ async function startTurn(
   // the reason right under it.
   let userMessage = opts?.userMessage;
   if (!userMessage) {
-    userMessage = opts?.connectorContinuation
-      ? { id: `connector-${randomUUID()}`, at: Date.now(), role: "user", kind: "text", text }
-      : store.appendMessage(threadId, { role: "user", kind: "text", text });
+    if (opts?.connectorContinuation) {
+      userMessage = { id: `connector-${randomUUID()}`, at: Date.now(), role: "user", kind: "text", text };
+    } else {
+      // The claim is already held, so a failed transcript write must go
+      // through fail() — a bare throw here would strand the bot busy.
+      // Nothing was persisted (the DB write gates memory), so the thread is
+      // pristine and the caller sees the error to retry.
+      try {
+        userMessage = store.appendMessage(threadId, { role: "user", kind: "text", text });
+      } catch (cause) {
+        fail(cause instanceof Error ? cause : new Error(String(cause)));
+      }
+    }
   }
   /** Same release-the-claim contract as fail(), but the refusal is also
    * written into the thread as an activity entry — visible next to the
    * user's message instead of only in a toast. */
   const failVisible: (err: Error) => never = (err) => {
-    store.appendMessage(threadId, {
-      role: "bot",
-      kind: "activity",
-      tool: { name: `error: ${err.message}`, ok: false },
-    });
+    // best-effort: the chip explains the refusal, but if the disk is too
+    // degraded to record it the ORIGINAL error must still propagate and
+    // fail() must still release the claim.
+    store.appendMessage(
+      threadId,
+      {
+        role: "bot",
+        kind: "activity",
+        tool: { name: `error: ${err.message}`, ok: false },
+      },
+      { bestEffort: true },
+    );
     return fail(err);
   };
 
@@ -1910,7 +1976,13 @@ async function startTurn(
     // Persist the summary as a tree node: nothing behind it is removed, the
     // next rebuild hits the cache instead of re-summarizing, and the UI gets
     // its divider for free because the record is just a message.
-    store.appendMessage(threadId, { role: "bot", kind: "compaction", compaction: built.pending });
+    // Pre-dispatch with the claim held — a failed write routes through
+    // fail() so the turn aborts cleanly instead of stranding the bot busy.
+    try {
+      store.appendMessage(threadId, { role: "bot", kind: "compaction", compaction: built.pending });
+    } catch (cause) {
+      fail(cause instanceof Error ? cause : new Error(String(cause)));
+    }
   }
   const transcript: Array<{ role: "user" | "assistant"; text: string }> = [];
   if (built.summary) {
@@ -2390,11 +2462,17 @@ async function startTurn(
       turnUsage.delete(threadId);
       turnProvenance.delete(threadId);
       const message = e instanceof Error ? e.message : String(e);
-      store.appendMessage(threadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `error: ${message.slice(0, 160)}`, ok: false },
-      });
+      // The chip must never mask the unwind below: a throw here would skip
+      // setActivity/onDispatchError/drainQueuedSends and strand the bot busy.
+      store.appendMessage(
+        threadId,
+        {
+          role: "bot",
+          kind: "activity",
+          tool: { name: `error: ${message.slice(0, 160)}`, ok: false },
+        },
+        { bestEffort: true },
+      );
       store.setActivity(bot.id, "idle");
       opts?.onDispatchError?.(message, driverInvoked);
       // a dispatch failure never emits turn.completed, so the settle-driven
@@ -2454,7 +2532,10 @@ goals = new GoalManager({
     // stays the human's record (the detached userMessage mirrors how
     // connector continuations avoid appending a visible bubble).
     const userMessage = first
-      ? store.appendMessage(threadId, { role: "user", kind: "text", text: userText })
+      ? // goal rounds run detached — a rejected append would surface as an
+        // unhandled rejection in the goal loop, so the bubble degrades to
+        // memory-only and logs loudly instead
+        store.appendMessage(threadId, { role: "user", kind: "text", text: userText }, { bestEffort: true })
       : { id: `goal-${randomUUID()}`, at: Date.now(), role: "user" as const, kind: "text" as const, text: engineText };
     await startTurn(botId, engineText, { threadId, userMessage, unattended: true, onDispatchError });
   },
@@ -2672,12 +2753,18 @@ async function runGroupMemberTurn(
   const instance = registry.get(bot.modelSelection.instanceId);
   const userName = cfg.profile?.name?.trim() || "User";
   if (!instance) {
-    store.appendMessage(group.threadId, {
-      role: "bot",
-      kind: "activity",
-      from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: `error: ${bot.name}'s model is unavailable`, ok: false },
-    });
+    // refusal chips degrade to memory-only on a degraded disk — the queue
+    // chain swallows rejections, so a throw would buy silence, not safety
+    store.appendMessage(
+      group.threadId,
+      {
+        role: "bot",
+        kind: "activity",
+        from: { botId: bot.id, name: bot.name, color: bot.color },
+        tool: { name: `error: ${bot.name}'s model is unavailable`, ok: false },
+      },
+      { bestEffort: true },
+    );
     return true;
   }
   // One turn per bot at a time, across BOTH engines. Without this a bot
@@ -2685,12 +2772,16 @@ async function runGroupMemberTurn(
   // processes, interleaved token spend, and an interrupt that only ever
   // reached one of them.
   if (bot.busy) {
-    store.appendMessage(group.threadId, {
-      role: "bot",
-      kind: "activity",
-      from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: `${bot.name} is busy in another conversation — skipped this round`, ok: false },
-    });
+    store.appendMessage(
+      group.threadId,
+      {
+        role: "bot",
+        kind: "activity",
+        from: { botId: bot.id, name: bot.name, color: bot.color },
+        tool: { name: `${bot.name} is busy in another conversation — skipped this round`, ok: false },
+      },
+      { bestEffort: true },
+    );
     return true;
   }
   // Claim the busy flag SYNCHRONOUSLY, before the first await below: this
@@ -2708,12 +2799,18 @@ async function runGroupMemberTurn(
     }
   } catch (error) {
     store.setActivity(bot.id, "idle");
-    store.appendMessage(group.threadId, {
-      role: "bot",
-      kind: "activity",
-      from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: `error: connected apps are unavailable — ${error instanceof Error ? error.message : String(error)}`, ok: false },
-    });
+    // inside a catch with the claim just released — the chip must not throw
+    // past the release, or the bot is stranded working
+    store.appendMessage(
+      group.threadId,
+      {
+        role: "bot",
+        kind: "activity",
+        from: { botId: bot.id, name: bot.name, color: bot.color },
+        tool: { name: `error: connected apps are unavailable — ${error instanceof Error ? error.message : String(error)}`, ok: false },
+      },
+      { bestEffort: true },
+    );
     return true;
   }
 
@@ -2775,12 +2872,17 @@ async function runGroupMemberTurn(
       // Graceful stop: interrupt first (the driver unwinds its process),
       // then record why — the channel must show the turn ended on purpose.
       void instance.adapter.interruptTurn(group.threadId).catch(() => {});
-      store.appendMessage(group.threadId, {
-        role: "bot",
-        kind: "activity",
-        from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: `Turn stopped: exceeded ${capMinutes}-minute limit.`, ok: false },
-      });
+      // timer callbacks must not throw — best-effort chip on a degraded disk
+      store.appendMessage(
+        group.threadId,
+        {
+          role: "bot",
+          kind: "activity",
+          from: { botId: bot.id, name: bot.name, color: bot.color },
+          tool: { name: `Turn stopped: exceeded ${capMinutes}-minute limit.`, ok: false },
+        },
+        { bestEffort: true },
+      );
       finish("timed_out");
     }, capMinutes * 60_000);
     watchdog.watch(group.threadId, bot.id);
@@ -2794,12 +2896,18 @@ async function runGroupMemberTurn(
         ...memberTurnSelection(bot.modelSelection),
       })
       .catch((err) => {
-        store.appendMessage(group.threadId, {
-          role: "bot",
-          kind: "activity",
-          from: { botId: bot.id, name: bot.name, color: bot.color },
-          tool: { name: `error: ${err instanceof Error ? err.message.slice(0, 140) : "turn failed"}`, ok: false },
-        });
+        store.appendMessage(
+          group.threadId,
+          {
+            role: "bot",
+            kind: "activity",
+            from: { botId: bot.id, name: bot.name, color: bot.color },
+            tool: { name: `error: ${err instanceof Error ? err.message.slice(0, 140) : "turn failed"}`, ok: false },
+          },
+          // a .catch callback must not throw — a degraded transcript disk
+          // degrades to memory-only here instead of an unhandled rejection
+          { bestEffort: true },
+        );
         watchdog.settle(group.threadId);
         finish("dispatch_failed");
       });
@@ -2864,11 +2972,15 @@ function startGroupTurn(groupId: string, text: string) {
     const current = store.group(groupId);
     if (current?.busyBotId) {
       const owner = store.bot(current.busyBotId);
-      store.appendMessage(current.threadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `${owner?.name ?? "A room member"} is still stopping — this message was not dispatched`, ok: false },
-      });
+      store.appendMessage(
+        current.threadId,
+        {
+          role: "bot",
+          kind: "activity",
+          tool: { name: `${owner?.name ?? "A room member"} is still stopping — this message was not dispatched`, ok: false },
+        },
+        { bestEffort: true },
+      );
       return;
     }
     const spoken = new Set<string>();
@@ -2910,9 +3022,16 @@ function connectorCards(threadId: string, resumeKey: string) {
 function markConnectorResumeFailed(threadId: string, resumeKey: string, error: string) {
   for (const message of connectorCards(threadId, resumeKey)) {
     if (!message.connector) continue;
-    store.patchMessage(threadId, message.id, {
-      connector: { ...message.connector, resumed: false, error: error.slice(0, 180) },
-    });
+    // Only reachable from catch handlers — a throw here would be an unhandled
+    // rejection, so the failure marker itself degrades to memory-only.
+    store.patchMessage(
+      threadId,
+      message.id,
+      {
+        connector: { ...message.connector, resumed: false, error: error.slice(0, 180) },
+      },
+      { bestEffort: true },
+    );
   }
 }
 
@@ -3223,11 +3342,15 @@ async function reloadProviders() {
         "",
         "Delegated turn did not finish — provider settings changed",
       );
-      store.appendMessage(b.threadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: "error: turn interrupted — provider settings changed", ok: false },
-      });
+      store.appendMessage(
+        b.threadId,
+        {
+          role: "bot",
+          kind: "activity",
+          tool: { name: "error: turn interrupted — provider settings changed", ok: false },
+        },
+        { bestEffort: true },
+      );
       store.setActivity(b.id, "idle");
     }
   } finally {
@@ -5092,13 +5215,23 @@ let requestUserEmail = "";
         .prepare('SELECT 1 FROM "referralRedemption" WHERE "codeUsed" = ? AND "refereeUserId" = ?')
         .get(code, referee);
       if (double) return json(res, 409, { error: "you already redeemed this code" });
-      db.prepare(
-        'INSERT INTO "referralRedemption" ("id", "codeUsed", "ownerUserId", "refereeUserId", "createdAt") VALUES (?, ?, ?, ?, ?)',
-      ).run(`ref_${randomBytes(12).toString("base64url")}`, code, ownerRow.userId, referee, new Date().toISOString());
-      db.prepare('UPDATE "referral" SET "bankedDays" = "bankedDays" + ? WHERE "userId" = ?').run(
-        REFERRAL_INVITER_DAYS,
-        ownerRow.userId,
-      );
+      // Redemption record + owner's banked days are one mutation: a
+      // redemption whose banked-days update died would silently short the
+      // inviter every time the ledger was read.
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.prepare(
+          'INSERT INTO "referralRedemption" ("id", "codeUsed", "ownerUserId", "refereeUserId", "createdAt") VALUES (?, ?, ?, ?, ?)',
+        ).run(`ref_${randomBytes(12).toString("base64url")}`, code, ownerRow.userId, referee, new Date().toISOString());
+        db.prepare('UPDATE "referral" SET "bankedDays" = "bankedDays" + ? WHERE "userId" = ?').run(
+          REFERRAL_INVITER_DAYS,
+          ownerRow.userId,
+        );
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
       const state = grantBonusProDays(DATA_DIR, REFERRAL_INVITEE_DAYS);
       return json(res, 200, {
         ok: true,
@@ -5998,7 +6131,9 @@ let requestUserEmail = "";
       // now, and its caller would otherwise wait out the 15-minute timeout
       cancelPeerApprovalsFor(bot.id);
       discardDelegations(commsBus, bot.threadId);
-      store.deleteBot(bot.id);
+      // a concurrent delete between the lookup above and here (the await
+      // points leave a window) must surface as 404, not a fake success
+      if (!store.deleteBot(bot.id)) return json(res, 404, { error: "no such bot" });
       for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
         try {
           unlinkSync(join(dir, `${bot.threadId}.ndjson`));
@@ -7419,9 +7554,14 @@ let requestUserEmail = "";
           return json(res, 200, await composio.authorizeService(cfg, connector.slug));
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
-          store.patchMessage(threadId, message.id, {
-            connector: { ...connector, status: "failed", error: detail.slice(0, 180) },
-          });
+          // inside a catch that rethrows the original error — the failure
+          // marker must not replace it with a DB error
+          store.patchMessage(
+            threadId,
+            message.id,
+            { connector: { ...connector, status: "failed", error: detail.slice(0, 180) } },
+            { bestEffort: true },
+          );
           throw error;
         }
       }

@@ -229,8 +229,19 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
 }
 
 export function deleteThread(threadId: string): void {
-  db().prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
-  db().prepare("DELETE FROM thread_state WHERE thread_id = ?").run(threadId);
+  // Both deletes are one mutation: a thread whose rows died but whose
+  // branch head survived would resurrect an empty transcript on the next
+  // read instead of disappearing cleanly.
+  const database = db();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
+    database.prepare("DELETE FROM thread_state WHERE thread_id = ?").run(threadId);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export interface SearchHit {

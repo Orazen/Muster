@@ -720,22 +720,37 @@ export class Store {
     return path.reverse();
   }
 
-  appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }): Message {
+  appendMessage(
+    threadId: string,
+    message: Omit<Message, "id" | "at"> & { at?: number },
+    opts: { bestEffort?: boolean } = {},
+  ): Message {
     const t = this.thread(threadId);
     const full: Message = { id: newId(), at: Date.now(), parentId: t.activeLeafId, ...redactBotAuthored(message) };
-    t.messages.push(full);
-    t.activeLeafId = full.id;
-    // Memory is authoritative; a failed SQLite write (disk full, WAL
-    // failure) must not abort the caller mid-fold — that would leave the
-    // bot stuck busy past turn.completed's housekeeping until the watchdog.
+    // Durability gates the transcript: the SQLite row is written BEFORE the
+    // in-memory thread mutates, so a failed write (disk full, WAL failure)
+    // propagates and the caller's state never diverges from the durable
+    // record. Only the runtime event fold passes bestEffort — mid-turn a
+    // throw would leave the bot stuck busy past turn.completed's
+    // housekeeping until the watchdog, so there a failed write degrades to
+    // memory-only, loudly.
     try {
       mdb.appendMessage(threadId, full);
     } catch (error) {
-      console.error(`message-db write failed for thread ${threadId} (transcript kept in memory):`, error);
+      if (!opts.bestEffort) throw error;
+      console.error(`message-db write failed for thread ${threadId} (message kept in memory only):`, error);
     }
+    t.messages.push(full);
+    t.activeLeafId = full.id;
     if (full.kind === "screen") {
       for (const pruned of this.pruneScreenFrames(t)) {
-        mdb.updateMessage(threadId, pruned);
+        // Frame pruning shrinks an already-durable record; a failed prune
+        // write only costs disk, never the message.
+        try {
+          mdb.updateMessage(threadId, pruned);
+        } catch (error) {
+          console.error(`message-db prune write failed for thread ${threadId} (frame kept full-size):`, error);
+        }
         this.emit({ type: "message.patch", threadId, message: pruned });
       }
     }
@@ -778,9 +793,12 @@ export class Store {
       text,
       parentId: source.parentId ?? null,
     };
+    // Same durability gate as appendMessage: the branch row lands before
+    // memory forks, so a failed write propagates instead of forking a
+    // conversation a restart would forget.
+    mdb.appendMessage(threadId, full);
     t.messages.push(full);
     t.activeLeafId = full.id;
-    mdb.appendMessage(threadId, full);
     this.emit({ type: "message", threadId, message: full });
     return full;
   }
@@ -796,20 +814,33 @@ export class Store {
       if (!children.length) break;
       cur = children.reduce((a, b) => (b.at >= a.at ? b : a)).id;
     }
-    t.activeLeafId = cur;
+    // Durability first, like appendMessage: a failed leaf write propagates
+    // instead of silently pointing memory at a branch the DB never recorded.
     mdb.setActiveLeaf(threadId, cur);
+    t.activeLeafId = cur;
     this.emit({ type: "thread", threadId, activeLeafId: cur });
     return cur;
   }
 
-  patchMessage(threadId: string, messageId: string, patch: Partial<Message>): Message | null {
+  patchMessage(
+    threadId: string,
+    messageId: string,
+    patch: Partial<Message>,
+    opts: { bestEffort?: boolean } = {},
+  ): Message | null {
     const t = this.thread(threadId);
     const idx = t.messages.findIndex((m) => m.id === messageId);
     if (idx === -1) return null;
-    t.messages[idx] = { ...t.messages[idx], ...patch, card: patch.card ?? t.messages[idx].card };
-    mdb.updateMessage(threadId, t.messages[idx]);
-    this.emit({ type: "message.patch", threadId, message: t.messages[idx] });
-    return t.messages[idx];
+    const merged: Message = { ...t.messages[idx], ...patch, card: patch.card ?? t.messages[idx].card };
+    try {
+      mdb.updateMessage(threadId, merged);
+    } catch (error) {
+      if (!opts.bestEffort) throw error;
+      console.error(`message-db patch write failed for thread ${threadId} (patch kept in memory only):`, error);
+    }
+    t.messages[idx] = merged;
+    this.emit({ type: "message.patch", threadId, message: merged });
+    return merged;
   }
 
   /** A read never accepts or dispatches a seed answer. */

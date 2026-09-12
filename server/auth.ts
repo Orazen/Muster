@@ -459,19 +459,43 @@ function provisionOrganizationFor(userId: string, displayName: string): string {
   const now = new Date().toISOString();
   const orgId = `org_${randomBytes(12).toString("base64url")}`;
   const slug = `org-${userId}`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
-  db.prepare('INSERT INTO "organization" ("id", "name", "slug", "createdAt") VALUES (?, ?, ?, ?)').run(
-    orgId,
-    `${displayName}'s workspace`,
-    slug,
-    now,
-  );
-  db.prepare('INSERT INTO "member" ("id", "organizationId", "userId", "role", "createdAt") VALUES (?, ?, ?, ?, ?)').run(
-    `mem_${randomBytes(12).toString("base64url")}`,
-    orgId,
-    userId,
-    "owner",
-    now,
-  );
+  // better-auth can run user.create.after more than once per user; the slug
+  // is deterministic per user, so treat an existing row as already
+  // provisioned instead of riding the UNIQUE constraint into the catch below.
+  const existing = db.prepare('SELECT id FROM "organization" WHERE slug = ?').get(slug) as
+    | { id: string }
+    | undefined;
+  if (existing) return existing.id;
+  // The org and its owner membership are one mutation: an org row whose
+  // membership insert failed would leave the user org-less with no owner.
+  // A SAVEPOINT, not BEGIN: this hook fires inside better-auth's own
+  // transaction around sign-up, where a nested BEGIN would throw and
+  // silently kill the provisioning. And when this savepoint IS outermost,
+  // ROLLBACK TO alone would leave its transaction open — every later write
+  // on this connection would silently join a transaction nobody commits —
+  // so the catch RELEASES the savepoint too (a no-op pop when nested in an
+  // outer transaction, a commit-to-nothing when it was the outermost).
+  db.exec("SAVEPOINT provision_org");
+  try {
+    db.prepare('INSERT INTO "organization" ("id", "name", "slug", "createdAt") VALUES (?, ?, ?, ?)').run(
+      orgId,
+      `${displayName}'s workspace`,
+      slug,
+      now,
+    );
+    db.prepare('INSERT INTO "member" ("id", "organizationId", "userId", "role", "createdAt") VALUES (?, ?, ?, ?, ?)').run(
+      `mem_${randomBytes(12).toString("base64url")}`,
+      orgId,
+      userId,
+      "owner",
+      now,
+    );
+    db.exec("RELEASE SAVEPOINT provision_org");
+  } catch (error) {
+    db.exec("ROLLBACK TO SAVEPOINT provision_org");
+    db.exec("RELEASE SAVEPOINT provision_org");
+    throw error;
+  }
   return orgId;
 }
 
