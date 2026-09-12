@@ -400,13 +400,15 @@ function socialProviders() {
     providers.google = {
       clientId: googleId,
       clientSecret: googleSecret,
-      // Workspace sync (docs/plans/account-sync-portable-profile.md): the
-      // login grant includes the app-private Drive scope, so the tokens
-      // better-auth stores in the account table can push/pull the
-      // encrypted workspace bundle — one consent at login, no second flow.
-      scope: ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.appdata"],
-      accessType: "offline",
-      prompt: "consent",
+      // Sign-in stays basic-scope on purpose: drive.appdata is a RESTRICTED
+      // scope, and requesting it at login makes Google show every new user
+      // the "Google hasn't verified this app" interstitial (scope
+      // verification is separate from branding — restricted scopes need a
+      // security assessment). Accounts that granted Drive earlier keep
+      // their stored refresh token, so workspace Drive backup still works
+      // for them; a separate opt-in Drive connect is the follow-up for
+      // everyone else.
+      scope: ["openid", "email", "profile"],
     };
   }
 
