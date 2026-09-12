@@ -2956,9 +2956,9 @@ and valid document/file serving still work. The backend probe is diagnostic and
 not an atomic lease against hostile local processes.
 
 Final full **250 files / 3808 passed / 8 skipped / 0 failed** (310.25s); whole npm
-test324.033s includes broker2/2, updater14/14 and packaged server9/9 (Node22.22.3,
-not Electron). Focused66/66, minimal browser stability2/2 at320/1280, actual Muster
-onboarding7/7 with isolated Chrome profiles. Types, lint and web build pass;962
+test324.033s includes broker 2/2, updater 14/14 and packaged server 9/9 (Node22.22.3,
+not Electron). Focused 66/66, minimal browser stability2/2 at320/1280, actual Muster
+onboarding 7/7 with isolated Chrome profiles. Types, lint and web build pass; 962
 source hashes match the final freeze. Retained test declaration/lint fixes, two
 intentional old-config failures, a corrected browser cleanup expectation, and
 seven initial missing-browser launch failures. Final browser wrapper and Chrome
@@ -2966,8 +2966,8 @@ onboarding reruns pass. No actual Google consent/native acceptance was performed
 
 One .deploy-trigger update is included in the fully verified product candidate;
 Actions billing still blocks its normal trigger. Do not claim deployment until
-the final GET receipt appears below. Baseline production served old entry assets
-and HTML200 for missing scripts/styles. The12 inherited files remain separately
+the final GET receipt appears below. Baseline production served its existing entry assets
+and HTML 200 for missing scripts/styles. The 12 inherited files remain separately
 preserved; restore exact hashes from the Loop79 manifest and retain original stash.
 
 Evidence: `.omb-scratch/verification/loop79-web-stability/`. Source freeze is
@@ -2981,3 +2981,29 @@ old-asset retention, unsafe manual deploy script, cloud Dockerfile and Compose
 defects. These are mapped in the stability guide and are not fixed by this slice.
 Native release/signing, portable sync, VM execution, Mimosa and two high dependency
 alerts remain open. Preserve scope and report actual gates instead of optimism.
+
+
+**Loop79 publication receipt — 12 September 2026, 19:32 UTC:** Product
+**e1cfcb9** is pushed. Final GET observed missing scripts/styles return text 404
+with no-store/nosniff; five subsequent samples passed **15/15** checks while the
+app shell remained byte-for-byte unchanged. The served JS/CSS also matched their
+pre-rollout bytes. No src/ layout/theme code changed in this slice.
+
+Served entries remain index-DCAkTz04.js / index-C6Cegjsm.css and differ from this
+Mac's build. This does not by itself establish an old revision. The static repair
+is observed live; exact artifact/backend source identity and authenticated
+production behavior are not attested. Desktop metadata remains 1.12.0/e241968.
+
+Repository hook 669688357 returned 404 for this exact product commit and four prior
+pushes. CI/autodeploy runs 34714191322/34714191273 recorded 4 billing-rejected jobs,
+1 skipped and 0 steps. Despite those failures, another delivery path evidently
+reached production. Do not claim all deployments are blocked from the hook alone.
+Dokploy is reachable but signed out; no configured API credential was found. The
+owner was asked to sign in to repair the failed hook and inspect the actual path.
+No hook settings, sessions, billing or hosted configuration were changed.
+
+Final source acceptance remains **250 files / 3808 passed / 8 skipped / 0 failed**,
+plus broker 2/2, updater 14/14, packaged server 9/9, focused 66/66, browser 2/2 and
+onboarding 7/7. This documentation receipt adds 0 runtime tests. All 962 code hashes
+remain unchanged. Restore all 12 inherited files using the local Loop79 receipt,
+retain the original stash and preserve PAUSED automation.

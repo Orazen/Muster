@@ -7,18 +7,26 @@ roadmap status; the latest owner request always takes precedence over this file.
 keep the existing layout, Flower mascot, /app and /os shells, saved choices and
 sessions intact. Read [the stability contract](../guides/web-app-stability.md).
 
-**Locally verified slice:** Loop79 stabilizes Vite backend selection, ports and
-scratch watching, and fixes missing JS/CSS responses. Full suite **250 files /
-3808 passed / 8 skipped / 0 failed**; broker2/2, updater14/14, packaged server9/9.
-Focused66/66, minimal browser2/2, actual Muster onboarding7/7. Types/lint/web build
-pass;962 source inputs match. Publication and live GET acceptance are still to be
-recorded below; local success is not deployment evidence.
+**Published product:** Loop79, commit **e1cfcb9**. Explicit Vite backend identity,
+fixed ports and scratch exclusions prevent accidental preview changes. Missing
+assets now return real 404s; layout/theme source was not changed. Full suite
+**250 files / 3808 passed / 8 skipped / 0 failed**; broker 2/2, updater 14/14, packaged
+server 9/9. Focused 66/66, minimal browser 2/2, actual Muster onboarding 7/7. Types,
+lint and web build pass; 962 source inputs match.
 
-**Production:** canonical workspace is https://muster.orazen.online/app. Last
-baseline GET still served index-DCAkTz04.js and returned HTML200 for missing assets.
-One repository deployment trigger is included in the verified candidate. GitHub
-Actions billing remains blocked; a successful push alone is not a rollout receipt.
-Desktop download metadata remains 1.12.0/e241968. No new native release is claimed.
+**Production, 19:32 UTC:** missing JS/CSS repair observed live; five repeated
+samples passed **15/15** GET checks. App shell and served JS/CSS stayed byte-for-byte
+unchanged from baseline. Canonical workspace: https://muster.orazen.online/app.
+Served entries DCAkTz04/C6Cegjsm differ from this Mac's build; exact source/artifact
+identity is unverified, not automatically an old deployment. Desktop downloads
+remain 1.12.0/e241968; no new native release or authenticated production test.
+
+**Deployment wiring:** registered push hook 669688357 returned 404 for e1cfcb9;
+Actions had 4 billing-rejected jobs, 1 skipped, 0 steps. Another path nevertheless
+delivered the static fix. The owner has been asked to sign in to the opened
+Dokploy panel; authenticated access is needed to repair the failed hook and inspect
+the actual promotion path. Do not guess URLs or resend triggers repeatedly.
+
 
 **Preserved local work:** five iOS/Watch source/test files, six docs/research/glm
 files, and www/templates.html remain outside this slice. All 12 exact hashes and
@@ -27,7 +35,8 @@ under `inherited-preservation.json` / `inherited-restoration.json`. Check actual
 status and the receipt before touching them; never sweep them into a cleanup
 commit. Retain the original preexisting stash.
 
-**Next work:** first verify the live rollout. Then implement the original-generation
+**Next work:** repair deployment wiring when Dokploy login is available. The next
+code slice is the original-generation
 Stop cleanup retry described in the [peer capability plan](peer-capability-next-slice-2026-09-12.md).
 Do not replay generic interrupt for an old failure: it can stop newer work.
 Deployment hardening debt is listed in the stability guide. Native signing/runtime,

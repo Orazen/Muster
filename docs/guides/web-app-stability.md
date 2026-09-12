@@ -67,7 +67,36 @@ the running web revision. Record the verified source commit, actual asset URLs a
 bytes, and the final GET results. Never report an unreleased native version as
 installed or describe an unverified deployment as successful.
 
-Known deployment debt from Loop79, not repaired by preview/static-serving fixes:
+### Deployment wiring discrepancy — verified 12 September 2026
+
+Repository push hook **669688357** delivered product commit **e1cfcb9** at
+19:26:43 UTC and received **HTTP404**. Four preceding push deliveries also
+returned 404. Actions CI/autodeploy meanwhile recorded four billing-rejected jobs,
+one skipped job and zero executed steps. The registered repository hook's origin
+is `https://dokploy.ramagiritharun.in`; its full destination is intentionally not
+published here. The control panel is reachable but signed out in the available
+browser; no Dokploy environment credential or project `.env` is available.
+
+At 19:30 UTC, the missing-asset fix was observed live despite that failed hook:
+missing scripts/styles returned text 404/no-store, while the served app shell and
+JavaScript/CSS bytes remained unchanged from the baseline. Another delivery path
+therefore appears to work; its configuration is not established by the hook data.
+The live asset entries differ from this Mac's build, so exact artifact/source
+identity remains unverified. Do not call an unchanged filename an old deployment
+without an attestation or equivalent evidence.
+
+The owner has been asked to sign in to the opened panel to repair the failed
+registered hook and inspect the actual deployment path. Do not ask for a password
+in chat or invent a replacement webhook URL. With authenticated access, identify
+the current Muster application, confirm its repository/branch and read its actual
+deployment endpoint. Repair the existing hook only from that verified setting;
+preserve unrelated events, TLS and secret configuration. Promote one verified
+revision and check delivery acknowledgement plus actual GET asset/error behavior.
+Do not delete/recreate workspace data or repeatedly resend a failed webhook.
+A private GitHub App delivery path has not been independently inspected here;
+the observed live fix must not be described as blocked merely because this hook failed.
+
+Known deployment debt, not repaired by preview/static-serving fixes:
 
 - `autodeploy.yml` currently runs independently of CI, checks out floating main,
   pushes a trigger commit and also calls a webhook. Live Dokploy trigger settings

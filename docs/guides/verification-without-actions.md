@@ -20,3 +20,12 @@ Manual release acceptance can reuse `release-native-smoke.mjs`, package validato
 Dokploy's GitHub integration/webhooks can deploy independently of Actions, and watch paths can restrict triggers. This is an architectural alternative, not verification of the live deployment configuration. After separately authorized release/deploy work, check production using **GET only**. Do not run `deploy-prod.sh` as CI: it pulls, installs and stops/restarts containers. Preserve current deployment policy until a separate reviewed change binds deployment to the verified source. [Dokploy GitHub integration](https://docs.dokploy.com/docs/core/github), [auto-deploy methods](https://docs.dokploy.com/docs/core/auto-deploy), [watch paths](https://docs.dokploy.com/docs/core/watch-paths).
 
 No runner, daemon, billing, secret, repository-visibility, release or production mutation was performed in this audit.
+
+
+Loop79 follow-up (12 September, 19:32 UTC): CI/autodeploy again had 4 billing-rejected
+jobs, 1 skip and 0 steps. The conventional repository webhook also returned 404 for
+product e1cfcb9, yet a single verified trigger was followed by the live static-file
+repair (15/15 repeated GET checks). Another deployment path evidently works; its
+configuration still needs authenticated Dokploy inspection. See the
+[stability guide](web-app-stability.md) for the exact handoff. Do not equate failed
+Actions or one failed hook with proof that no deployment occurred.

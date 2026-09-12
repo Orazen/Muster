@@ -4130,7 +4130,7 @@ while fixing three reproduced defects. Vite now requires an explicit loopback
 backend, verifies Muster identity before API forwarding, pins its PID, and refuses
 occupied preview ports. Scratch snapshots and reports cannot trigger page reloads;
 intentional source HMR remains. Packaged missing assets now return text 404 with
-no-store/nosniff instead of HTML200; real files and document routes retain their
+no-store/nosniff instead of HTML 200; real files and document routes retain their
 correct behavior. Added the stability contract and short current-state snapshot
 as first reads in AGENTS.md and the CEO mandate; corrected development guidance.
 
@@ -4156,3 +4156,29 @@ layout rewrite, user-service restart or automation change. Revenue is unmeasured
 this slice prevents disruptive previews and misleading asset responses. Next:
 verify live rollout, then original-generation Stop cleanup recovery. Deployment
 hardening, native/signing, full sync and scanner/dependency gates remain explicit.
+
+
+**Loop79 publication receipt — 12 September 2026, 19:32 UTC:** Product
+**e1cfcb9** is pushed. Final GET observed missing scripts/styles return text 404
+with no-store/nosniff; five subsequent samples passed **15/15** checks while the
+app shell remained byte-for-byte unchanged. The served JS/CSS also matched their
+pre-rollout bytes. No src/ layout/theme code changed in this slice.
+
+Served entries remain index-DCAkTz04.js / index-C6Cegjsm.css and differ from this
+Mac's build. This does not by itself establish an old revision. The static repair
+is observed live; exact artifact/backend source identity and authenticated
+production behavior are not attested. Desktop metadata remains 1.12.0/e241968.
+
+Repository hook 669688357 returned 404 for this exact product commit and four prior
+pushes. CI/autodeploy runs 34714191322/34714191273 recorded 4 billing-rejected jobs,
+1 skipped and 0 steps. Despite those failures, another delivery path evidently
+reached production. Do not claim all deployments are blocked from the hook alone.
+Dokploy is reachable but signed out; no configured API credential was found. The
+owner was asked to sign in to repair the failed hook and inspect the actual path.
+No hook settings, sessions, billing or hosted configuration were changed.
+
+Final source acceptance remains **250 files / 3808 passed / 8 skipped / 0 failed**,
+plus broker 2/2, updater 14/14, packaged server 9/9, focused 66/66, browser 2/2 and
+onboarding 7/7. This documentation receipt adds 0 runtime tests. All 962 code hashes
+remain unchanged. Restore all 12 inherited files using the local Loop79 receipt,
+retain the original stash and preserve PAUSED automation.
