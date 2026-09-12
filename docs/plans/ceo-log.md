@@ -3662,3 +3662,15 @@ APPROVED branding). Sign-in scope reduced to openid/email/profile (no forced re-
 existing accounts keep their Drive refresh tokens so workspace backup still works; separate
 opt-in Drive connect queued. Live-verified: OAuth start requests only basic scopes. Console:
 branding VERIFIED and shown to users; data-access verification not required.
+
+**Loop 61 wrap (2026-09-12, commit b1a6ef2):** landing restructured to the download-first
+messaging layout benchmarked from the rival app (rival unnamed): hero now opens with the
+six-flower teammate fleet (one authored MUSTER_BODY + <use>, six palette colors, one happy
+arcs variant), single-line value promise "Your own team of AI agents, in a chat app.",
+split download CTA + honest microcopy (self-host/BSL/own keys/iOS+Watch); nav re-anchored
+(Download/Features/Use cases/How it works/Pricing/FAQ); new #use-cases gallery of 8 concrete
+scheduled jobs; download rows gained CLI + iOS-beta + Apple Watch rows; download.html gained
+the iPhone & Watch section with the honest TestFlight gate note (build done + sim-accepted;
+Apple developer account is the owner-side gate) and the add-to-home-screen browser fallback.
+Verified live post-roll (hero faces + headline + iOS section all serving). iOS TestFlight and
+Watch distribution remain blocked on the Apple account — owner-side.
