@@ -17,6 +17,7 @@ import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
+import { ShortcutsSheet } from "@/components/ShortcutsSheet";
 import { NotificationStack } from "@/components/NotificationStack";
 import { MusterBloom } from "@/components/MusterBloom";
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -51,6 +52,7 @@ function Shell() {
     navigate({ pathname: location.pathname, search: resolved.search, hash: location.hash }, { replace: true });
   }, [location.key, location.search, location.pathname, location.hash, user?.id, state.rosterHydrated, state.bots, dispatch, navigate]);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [scoutOpen, setScoutOpen] = useState(false);
   const [firstRun, setFirstRun] = useState(true);
   // Web audit 2026-08-23: the wizard must not render until the identity is
@@ -89,6 +91,24 @@ function Shell() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
+      // "?" outside any text field opens the shortcut cheat sheet — and ⌘/
+      // works everywhere, inputs included, mirroring the palette's ⌘K.
+      if (mod && e.key === "/") {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+        return;
+      }
+      if (
+        !mod &&
+        e.key === "?" &&
+        e.target instanceof HTMLElement &&
+        !["INPUT", "TEXTAREA"].includes(e.target.tagName) &&
+        !e.target.isContentEditable
+      ) {
+        e.preventDefault();
+        setShortcutsOpen((v) => !v);
+        return;
+      }
       if (!mod) return;
       const bots = state.bots.filter((b) => !b.hidden);
       if (e.key === "n" && !e.shiftKey) {
@@ -215,6 +235,7 @@ function Shell() {
       {state.appSettingsOpen && <SettingsModal />}
       {state.pluginsOpen && <PluginsPanel />}
       <CommandPalette />
+      <ShortcutsSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <NotificationStack />
       {gateDecision === "show" && firstRun && (
         <Onboarding

@@ -894,7 +894,21 @@ describe("bot memory API", () => {
     try {
       const fresh = await api("GET", `/api/bots/${bot.id}/memory`);
       expect(fresh.status).toBe(200);
-      expect(fresh.body).toEqual({ text: "", truncated: false, topics: [] });
+      expect(fresh.body).toEqual({
+        text: "",
+        truncated: false,
+        usage: null,
+        budget: { lines: 200, bytes: 24000 },
+        topics: [],
+      });
+      // a bot with real memory reports its measured size against the budget
+      const saved = await api("PUT", `/api/bots/${bot.id}/memory`, { text: "# Memory\n- prefers pnpm\n" });
+      expect(saved.status).toBe(200);
+      const sized = await api("GET", `/api/bots/${bot.id}/memory`);
+      expect(sized.body.usage).toEqual({
+        lines: 3, // split("\n") counts the trailing newline
+        bytes: Buffer.byteLength("# Memory\n- prefers pnpm\n", "utf8"),
+      });
       expect((await api("GET", "/api/bots/does-not-exist/memory")).status).toBe(404);
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);

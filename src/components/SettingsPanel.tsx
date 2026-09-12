@@ -174,6 +174,8 @@ function MemoryCard({ bot }: { bot: Bot }) {
   const [text, setText] = useState("");
   const [dirty, setDirty] = useState(false);
   const [truncated, setTruncated] = useState(false);
+  const [budget, setBudget] = useState<{ lines: number; bytes: number } | null>(null);
+  const [usage, setUsage] = useState<{ lines: number; bytes: number } | null>(null);
   const [topics, setTopics] = useState<MemoryTopic[]>([]);
   const [saving, setSaving] = useState(false);
   const [topic, setTopic] = useState<{ name: string; text: string } | null>(null);
@@ -187,11 +189,17 @@ function MemoryCard({ bot }: { bot: Bot }) {
     setTopic(null);
     setVersion(null);
     try {
-      const result: { text: string; truncated: boolean; topics: MemoryTopic[] } = await api(
-        `/api/bots/${bot.id}/memory`,
-      );
+      const result: {
+        text: string;
+        truncated: boolean;
+        usage: { lines: number; bytes: number } | null;
+        budget: { lines: number; bytes: number };
+        topics: MemoryTopic[];
+      } = await api(`/api/bots/${bot.id}/memory`);
       setText(result.text);
       setTruncated(result.truncated);
+      setBudget(result.budget);
+      setUsage(result.usage);
       setTopics(result.topics);
       setDirty(false);
     } catch (e) {
@@ -363,11 +371,25 @@ function MemoryCard({ bot }: { bot: Bot }) {
             >
               {saving ? "Saving…" : "Save"}
             </button>
-            {truncated && (
-              <span className="text-[11.5px] text-ink-secondary">
-                Over the budget — only the top of this file loads each turn.
-              </span>
-            )}
+            {budget && usage && (() => {
+              // the stored file's measured size against what actually loads
+              // each turn — the plain sentence, not a silent truncation. Live
+              // counts track the draft while it diverges from what's saved.
+              const saved = !dirty;
+              const lines = saved ? usage.lines : text.split("\n").length;
+              const bytes = saved ? usage.bytes : new TextEncoder().encode(text).length;
+              const kb = Math.round(bytes / 102.4) / 10;
+              const overLines = lines - budget.lines;
+              const overKb = Math.ceil((bytes - budget.bytes) / 102.4) / 10;
+              const over = truncated || lines > budget.lines || bytes > budget.bytes;
+              return (
+                <span className={cn("text-[11.5px]", over ? "text-warning" : "text-ink-secondary")}>
+                  {over
+                    ? `${lines} lines saved, ${budget.lines} load into every conversation${overLines > 0 ? ` — ${overLines} are not being loaded` : ""}${overKb > 0 ? ` · ${overKb} KB over the byte budget` : ""}.`
+                    : `${lines} of ${budget.lines} lines · ${kb} of ${Math.round(budget.bytes / 102.4) / 10} KB — all of it loads each turn.`}
+                </span>
+              );
+            })()}
           </div>
           {topics.length > 0 && <MemoryTab topics={topics} onOpen={(name) => void openTopic(name)} />}
           <MemoryHistory

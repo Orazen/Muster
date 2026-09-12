@@ -30,6 +30,9 @@ export const WORKSPACES_DIR = join(DATA_DIR, "workspaces");
  * budget (first N lines / bytes) so the bot learns to keep it curated. */
 export const MEMORY_MAX_LINES = 200;
 export const MEMORY_MAX_BYTES = 24_000;
+/** What actually loads into each turn — the honest denominator the editor
+ * shows against the file's real size. */
+export const MEMORY_BUDGET = { lines: MEMORY_MAX_LINES, bytes: MEMORY_MAX_BYTES } as const;
 
 const MEMORY_SEED = `# Memory
 
@@ -104,6 +107,19 @@ export function readMemoryFile(botId: string) {
   const truncated =
     raw.split("\n").length > MEMORY_MAX_LINES || Buffer.byteLength(raw, "utf8") > MEMORY_MAX_BYTES;
   return { text: raw, truncated };
+}
+
+/** The live file's measured size, for the editor's load-budget gauge. Null
+ * when there is nothing stored — absence is not zero lines of memory. */
+export function memoryUsage(botId: string): { lines: number; bytes: number } | null {
+  let raw: string;
+  try {
+    raw = readFileSync(join(workspaceDir(botId), "MEMORY.md"), "utf8");
+  } catch {
+    return null;
+  }
+  if (!raw.trim() || raw === MEMORY_SEED) return null;
+  return { lines: raw.split("\n").length, bytes: Buffer.byteLength(raw, "utf8") };
 }
 
 /** ensureWorkspace first: the user may edit memory before the bot has ever

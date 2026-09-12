@@ -206,12 +206,14 @@ import {
   listMemoryHistory,
   memorySystemPrompt,
   readMemoryFile,
+  memoryUsage,
   readMemoryHistoryEntry,
   readMemoryTopic,
   restoreMemoryHistory,
   writeMemoryFile,
   workspaceDir,
   MEMORY_FILE_MAX_BYTES,
+  MEMORY_BUDGET,
 } from "./workspace.ts";
 import * as browserPanel from "./browser-panel.ts";
 import * as workspaceBundle from "./workspace-bundle.ts";
@@ -6154,7 +6156,12 @@ let requestUserEmail = "";
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory$/);
     if (m && method === "GET") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
-      return json(res, 200, { ...readMemoryFile(m[1]), topics: listMemoryTopics(m[1]) });
+      return json(res, 200, {
+        ...readMemoryFile(m[1]),
+        usage: memoryUsage(m[1]),
+        budget: MEMORY_BUDGET,
+        topics: listMemoryTopics(m[1]),
+      });
     }
     if (m && method === "PUT") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
