@@ -20,14 +20,20 @@ export function WorkspaceSyncCard() {
   const [showTelegram, setShowTelegram] = useState(false);
   const [botToken, setBotToken] = useState("");
   // null = unknown yet; false shows the connect button (sign-in is
-  // basic-scope by design, so Drive is granted here, not at login)
+  // basic-scope by design, so Drive is granted here, not at login).
+  // lastPush feeds the "Last backed up" line the card renders.
   const [drive, setDrive] = useState<boolean | null>(null);
+  const [lastPush, setLastPush] = useState<{ at: number; channel: string } | null>(null);
   const busy = step.kind === "busy";
 
   useEffect(() => {
     let alive = true;
     api("/api/workspace/google/status")
-      .then((r: { drive: boolean }) => alive && setDrive(r.drive))
+      .then((r: { drive: boolean; lastPush: { at: number; channel: string } | null }) => {
+        if (!alive) return;
+        setDrive(r.drive);
+        setLastPush(r.lastPush);
+      })
       .catch(() => alive && setDrive(null));
     return () => { alive = false; };
   }, []);
@@ -157,6 +163,13 @@ export function WorkspaceSyncCard() {
         autoComplete="off"
         className={cn(input, "mt-2.5")}
       />
+
+      {lastPush && (
+        <p className="mt-2 text-[12.5px] text-ink-secondary">
+          Last backed up to {lastPush.channel === "google-drive" ? "Google Drive" : "Telegram"} ·{" "}
+          {new Date(lastPush.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+        </p>
+      )}
 
       <div className="mt-2 flex flex-wrap gap-2">
         <button type="button" disabled={busy} onClick={() => void exportLocal()} className={button}>

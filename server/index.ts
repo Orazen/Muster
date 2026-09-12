@@ -220,6 +220,7 @@ import * as workspaceBundle from "./workspace-bundle.ts";
 import * as driveSync from "./drive-sync.ts";
 import * as telegramSync from "./telegram-sync.ts";
 import * as accountDrive from "./account-drive.ts";
+import * as syncState from "./sync-state.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimerPool } from "./local-vm-idle.ts";
 import { LocalVmLeasePool } from "./local-vm-lease.ts";
@@ -7159,6 +7160,7 @@ let requestUserEmail = "";
         const bundle = workspaceBundle.buildBundle(store, DATA_DIR);
         const { payload, counts } = workspaceBundle.encryptBundle(bundle, passphrase, deploymentSigningSecret());
         const id = await accountDrive.drivePushFor(accessToken, payload);
+        syncState.stampSync(googleUserId, "push", "google-drive");
         return json(res, 200, { uploaded: id, counts });
       } catch (e) {
         return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
@@ -7173,7 +7175,18 @@ let requestUserEmail = "";
       const session = requestUserId ? { userId: requestUserId } : await getSession(req);
       if (!session) return json(res, 401, { error: "sign in with Google first" });
       const tokens = accountDrive.googleTokensFor(getDb(), session.userId);
-      return json(res, 200, { drive: Boolean(tokens?.refreshToken) });
+      const stamps = syncState.readSyncState(session.userId);
+      // Telegram is an install-wide transport, so its stamps land under the
+      // machine key — surface whichever backup is the most recent truth.
+      const machine = syncState.readSyncState("local");
+      const newer = (a: typeof stamps.lastPush, b: typeof stamps.lastPush) =>
+        (a?.at ?? 0) >= (b?.at ?? 0) ? a : b;
+      return json(res, 200, {
+        drive: Boolean(tokens?.refreshToken),
+        telegram: Boolean(cfg.telegramSync?.botToken),
+        lastPush: newer(stamps.lastPush, machine.lastPush?.channel === "telegram" ? machine.lastPush : null),
+        lastPull: newer(stamps.lastPull, machine.lastPull?.channel === "telegram" ? machine.lastPull : null),
+      });
     }
     if (path === "/api/workspace/google/connect" && method === "GET") {
       const session = requestUserId ? { userId: requestUserId } : await getSession(req);
@@ -7233,6 +7246,7 @@ let requestUserEmail = "";
           });
         }
         const payload = await accountDrive.drivePullFor(accessToken);
+        if (payload) syncState.stampSync(googleUserId, "pull", "google-drive");
         if (!payload) {
           return json(res, 404, { error: "no workspace bundle in Drive yet — push from the other device first" });
         }
@@ -7290,6 +7304,8 @@ let requestUserEmail = "";
         }
         saveConfig({ telegramSync: { lastFileId: fileId } });
         Object.assign(cfg, loadConfig());
+        syncState.stampSync("local", "push", "telegram");
+        syncState.stampSync("local", "push", "telegram");
         return json(res, 200, { uploaded: fileId, counts });
       } catch (e) {
         return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
@@ -7322,6 +7338,7 @@ let requestUserEmail = "";
         const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
         await reloadProviders();
         broadcast({ kind: "hello" });
+        syncState.stampSync("local", "pull", "telegram");
         return json(res, 200, { restored: result });
       } catch (e) {
         return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
