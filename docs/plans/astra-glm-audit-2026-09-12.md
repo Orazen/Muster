@@ -39,9 +39,9 @@ not fix the separate mascot CSS-transform or Drive-flow defects below.
 | --- | --- | --- |
 | P1, repaired in `efcf629` | History follows planted links and lets failed snapshots precede live overwrite. | Reject linked paths/entries, retain exact old bytes before writes, propagate retention failure, bound reads and rollback. Filesystem tests include real permission failures. No claim of isolation against a hostile process continuously replacing path ancestors. |
 | P1, repaired in `efcf629` | Memory history can lose a baseline edited before the next prompt, or prune a new snapshot after clock rollback. | Preserve both the displaced baseline and current live version; protect this operation's retained IDs during pruning. Save and restore regressions pass. |
-| P1 | Newly advertised Drive consent is unreachable: hosted routes hit the existing global workspace denial; desktop Host values with ports fail. | Preserve hosted installation-wide export/restore denial. Establish an honest deployment capability before advertising consent. A bridged desktop has neither a Google account token row nor the hosted OAuth secret. A Host-regex patch alone cannot fix it. |
-| P1 | Drive token exchange does not verify Google subject or granted scope and can combine one account's access token with another refresh token. | Before enabling: verified identity/scope, coherent separate grant, one-use session-bound consent intent, actual route and SQLite tests. No hosted secret in desktop packages. |
-| P1 | Best-effort message insert failure can leave a missing predecessor in a later durable branch. | Separate Store slice: restart tests must assert active transcript ancestry, not only SQLite row count. This predates GLM's change. |
+| P1, contained in Loop74 (`175a88d`) | Newly advertised Drive consent is unreachable: hosted routes hit the existing global workspace denial; desktop Host values with ports fail. | Checked capability now replaces the misleading Connect control; configured installation Drive is preserved. Hosted global backup denial remains. Account consent is unavailable until its full ownership contract is ready. |
+| P1, contained in Loop74 (`175a88d`) | Drive token exchange does not verify Google subject or granted scope and can combine one account's access token with another refresh token. | Account connect/callback/push/pull are disabled before token/state operations. Before re-enabling: verified identity/scope, coherent separate grant, one-use session-bound consent intent, actual route and SQLite tests. No hosted secret in desktop packages. |
+| P1, repaired in Loop75 | Best-effort message insert failure can leave a missing predecessor in a later durable branch. | Required missing ancestors and the selected leaf now commit atomically. Exact paths/parents, real SQLite rollback and fresh-process restart pass. Already-lost memory is not recoverable. |
 | P2 | Strict seed writes can fail after bot creation was persisted/emitted. | Separate Store slice: one coherent bot-and-greeting creation boundary; failed creation/retry must not duplicate bots. |
 | P2 | Strict message patch accepts a zero-row database update. | Separate Store slice: require durable target or explicitly repair it; test restart behavior. |
 | P1, repaired in Loop 69 | Default Flower and picker Blob were accepted by the client but rejected by the server, blocking first-task submission before any message request. | Found by the new real-browser recovery test. One browser-safe character contract now drives both picker and API membership, preserving legacy Lottie storage without exposing it in the picker or PATCH. Browser acceptance retains the default Flower. |
@@ -487,3 +487,46 @@ ancestry. Publish strict updates only after commit and preserve seed-answer sema
 Extend persist-failure-store, store and message-db tests with real SQLite rejection,
 exact parent/path/leaf assertions and a bounded fresh-child restart. Detailed anchors
 remain in the local `next-Store-slice.md`; this map was read-only, with0 new tests.
+
+
+## Loop75 — durable conversation ancestry (12 September 2026)
+
+Store now tracks rows missing after best-effort inserts. Before a durable descendant,
+branch replacement or selection of an unsaved leaf, it persists only the required
+parent chain and new head in one SQLite transaction. Failure rolls back every row and
+retains pending markers for retry; strict changes emit no success event. Recovery uses
+the latest in-memory message, including subsequent patches, and never replaces a
+conflicting durable row. Existing seed-answer compare-and-swap behavior is unchanged.
+The normal append path avoids a history scan even if another branch is still pending.
+
+Verification: **245 files / 3633 passed / 8 skipped / 0 failed**,284.33s (285.442s
+command). Focused **149/149 across4 files**,3.45s; final server types passed7.75s,
+lint1.823s; rebuilt packaged server **9/9**,10.637s, Node22.22.3 arm64. All957 source
+inputs remained frozen. Added24 cases:18 database cases and6 Store cases; the original
+recovery test now compares exact messages/parents/leaf rather than only row counts.
+A fresh process with an8s bound reopens actual owned SQLite, asserts exact transcript/
+active path/leaf, zero network attempts and exit0. Owned DB closure/data-removal
+assertions pass. Console receipts were not emitted by this runner even with silent
+output disabled; no independent process inventory is claimed.
+
+Baseline regression was **4 passed / 1 failed**: durable D referenced the omitted
+memory-only C. Initial typechecking found one nullable-variable annotation error;
+that type-only correction preceded the final typecheck/full suite. The final review
+found no further blocker. Evidence: local `.omb-scratch/verification/loop75-store-ancestry/`,
+including baseline, suite-verification, source-freeze-final and review-final receipts.
+No real provider, demo8845, existing native app or simulator was used.
+
+This repairs missing inserts while their data remains in memory. It does not recover
+RAM already lost in an earlier process crash, replay failed patches of existing rows,
+or provide portable backup. Delayed insertion of an older branch can change global
+row order; equal-timestamp sibling reselection is a separate P2 acceptance follow-up.
+No browser/layout or physical-device acceptance is claimed for this server-only slice.
+
+Next P2: make first-bot creation recoverable across bots.json and SQLite so a seed-write
+failure cannot leave an error response and a duplicate on retry. Prepare both seed IDs
+and a creation intent, use the owner-file replacement as an explicit commit point, and
+reconcile interrupted preparation on startup. Test real insert/file failures, forced
+process exits before/after commit, HTTP retry/readback and owner-before-message events.
+A memory rollback alone is insufficient across both stores. See local next-create-slice.md;
+no implementation or new creation tests are claimed yet. Drive P1 findings are contained
+by Loop74; provider consent, portable recovery, native release and full scanner gates remain.

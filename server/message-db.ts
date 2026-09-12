@@ -160,6 +160,72 @@ export function appendMessage(threadId: string, message: Message): void {
   }
 }
 
+/** Recover missing ancestors and their selected leaf as one mutation.
+ * Callers supply the required segment in parent-first order. The durable
+ * attachment is checked in this thread; unrelated durable history is not
+ * walked or rewritten. Existing append/seed transactions remain separate.
+ */
+export function persistMessagePath(threadId: string, ancestors: Message[], leafId: string, message?: Message): void {
+  const database = db();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const select = database.prepare("SELECT rowid, json FROM messages WHERE thread_id = ? AND id = ?");
+    const previous = database.prepare("SELECT id FROM messages WHERE thread_id = ? AND rowid < ? ORDER BY rowid DESC LIMIT 1");
+    const last = database.prepare("SELECT id FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1");
+    const insert = database.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    const candidates = message ? [...ancestors, message] : ancestors;
+    const supplied = new Set(candidates.map((candidate) => candidate.id));
+    const processed = new Set<string>();
+    const storedRow = (id: string) => {
+      // SAFETY: this query selects SQLite's integer rowid and the serialized Message JSON cell.
+      return select.get(threadId, id) as { rowid: number; json: string } | undefined;
+    };
+    const inferredParent = (rowid?: number): string | null => {
+      // SAFETY: both queries select the id TEXT column, restricted to this thread.
+      const row = (rowid === undefined ? last.get(threadId) : previous.get(threadId, rowid)) as { id: string } | undefined;
+      return row?.id ?? null;
+    };
+    const checkParent = (id: string, parentId: string | null | undefined) => {
+      if (parentId === undefined) throw new Error("Message recovery requires a resolved parent");
+      if (parentId === null) return;
+      if (parentId === id) throw new Error("Message recovery cannot reference itself");
+      if (supplied.has(parentId) && !processed.has(parentId)) throw new Error("Message recovery requires parent-first ancestors");
+      if (!storedRow(parentId)) throw new Error("Message recovery parent is missing from this thread");
+    };
+    for (const candidate of candidates) {
+      const json = JSON.stringify(candidate);
+      const incoming = rowToMessage({ json });
+      const row = storedRow(candidate.id);
+      if (row) {
+        const current = rowToMessage(row);
+        if (current.parentId === undefined) {
+          // Store infers old flat transcripts from row order. Accept that
+          // equivalent explicit parent without rewriting/reordering the row.
+          current.parentId = inferredParent(row.rowid);
+          if (incoming.parentId === undefined) incoming.parentId = current.parentId;
+        }
+        if (!isDeepStrictEqual(current, incoming)) throw new Error("Message recovery conflicts with an existing durable row");
+      } else if (incoming.parentId === undefined) {
+        // A newly supplied legacy-shaped row follows the prior stored row,
+        // exactly as Store will infer it after reopening the thread.
+        incoming.parentId = inferredParent();
+      }
+      checkParent(candidate.id, incoming.parentId);
+      if (!row) insert.run(threadId, candidate.id, candidate.at, candidate.role, candidate.kind, candidate.text ?? null, json);
+      processed.add(candidate.id);
+    }
+    const leafRow = storedRow(leafId);
+    if (!leafRow) throw new Error("Message recovery leaf is missing from this thread");
+    const leaf = rowToMessage(leafRow);
+    checkParent(leafId, leaf.parentId === undefined ? inferredParent(leafRow.rowid) : leaf.parentId);
+    setActiveLeaf(threadId, leafId);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function updateMessage(threadId: string, message: Message): void {
   db()
     .prepare("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ? WHERE thread_id = ? AND id = ?")

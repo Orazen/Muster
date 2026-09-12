@@ -2,14 +2,17 @@
 // import, deletion, and the LIKE search used by /api/search.
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import {
   closeMessageDb,
+  appendMessage,
   deleteThread,
   insertMessage,
   readThread,
+  persistMessagePath,
   searchMessages,
   setActiveLeaf,
   updateMessage,
@@ -34,6 +37,7 @@ describe("message-db", () => {
     rmSync(DATA_DIR, { recursive: true, force: true });
     mkdirSync(DATA_DIR, { recursive: true });
   });
+  afterEach(() => closeMessageDb());
 
   it("persists inserts, updates, and the active leaf across a reopen", () => {
     insertMessage("t1", msg("m1", "hello"));
@@ -152,5 +156,179 @@ describe("message-db", () => {
     expect(path.at(-1)?.text).toBe("edited");
     // both branches survive in the tree
     expect(reloaded.messagesFor(bot.threadId).filter((m) => m.parentId === first.parentId)).toHaveLength(2);
+  });
+
+  const pathFixture = () => {
+    const threadId = "owned-recovery";
+    const a = msg("a", "durable root", { parentId: null });
+    const b = msg("b", "first recovered message", { parentId: a.id });
+    const c = msg("c", "second recovered message", { parentId: b.id });
+    const d = msg("d", "new descendant", { parentId: c.id });
+    appendMessage(threadId, a);
+    return { threadId, a, b, c, d };
+  };
+  const rawRows = (threadId: string) => {
+    const connection = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    try { return connection.prepare("SELECT rowid, id, json FROM messages WHERE thread_id = ? ORDER BY rowid").all(threadId); }
+    finally { connection.close(); }
+  };
+
+  it("atomically recovers parent-first messages and their descendant, then replays without replacing rows", () => {
+    const f = pathFixture();
+    persistMessagePath(f.threadId, [f.b, f.c], f.d.id, f.d);
+    const before = rawRows(f.threadId);
+    expect(readThread(f.threadId, legacy(f.threadId))).toEqual({ messages: [f.a, f.b, f.c, f.d], activeLeafId: f.d.id });
+    closeMessageDb();
+    persistMessagePath(f.threadId, [f.b, f.c], f.d.id, f.d);
+    expect(rawRows(f.threadId)).toEqual(before);
+    const restored = new Store(selection);
+    expect(restored.activePath(f.threadId)).toEqual([f.a, f.b, f.c, f.d]);
+    expect(restored.activeLeaf(f.threadId)).toBe(f.d.id);
+  });
+
+  it("recovers a selected pending leaf without appending a new message or adopting another branch", () => {
+    const f = pathFixture();
+    const sibling = msg("sibling", "unrelated durable branch", { parentId: f.a.id });
+    appendMessage(f.threadId, sibling);
+    persistMessagePath(f.threadId, [f.b, f.c], f.c.id);
+    closeMessageDb();
+    const restored = new Store(selection);
+    expect(restored.activePath(f.threadId)).toEqual([f.a, f.b, f.c]);
+    expect(restored.messagesFor(f.threadId)).toEqual([f.a, sibling, f.b, f.c]);
+  });
+
+  it("selects an existing durable leaf without rewriting its messages", () => {
+    const f = pathFixture();
+    appendMessage(f.threadId, f.b);
+    const before = rawRows(f.threadId);
+    persistMessagePath(f.threadId, [], f.a.id);
+    expect(rawRows(f.threadId)).toEqual(before);
+    expect(readThread(f.threadId, legacy(f.threadId)).activeLeafId).toBe(f.a.id);
+  });
+
+  it.each([
+    { name: "second ancestor insert", trigger: "CREATE TRIGGER recovery_fail BEFORE INSERT ON messages WHEN NEW.id = 'c' BEGIN SELECT RAISE(ABORT, 'owned recovery failure'); END" },
+    { name: "new descendant insert", trigger: "CREATE TRIGGER recovery_fail BEFORE INSERT ON messages WHEN NEW.id = 'd' BEGIN SELECT RAISE(ABORT, 'owned recovery failure'); END" },
+    { name: "existing branch head update", trigger: "CREATE TRIGGER recovery_fail BEFORE UPDATE ON thread_state BEGIN SELECT RAISE(ABORT, 'owned recovery failure'); END" },
+  ])("rolls back every inserted ancestor when $name fails, and retries after recovery", ({ trigger }) => {
+    const f = pathFixture();
+    const before = rawRows(f.threadId);
+    const connection = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    try {
+      connection.exec(trigger);
+      expect(() => persistMessagePath(f.threadId, [f.b, f.c], f.d.id, f.d)).toThrow("owned recovery failure");
+      expect(rawRows(f.threadId)).toEqual(before);
+      expect(readThread(f.threadId, legacy(f.threadId))).toEqual({ messages: [f.a], activeLeafId: f.a.id });
+      connection.exec("DROP TRIGGER recovery_fail");
+      persistMessagePath(f.threadId, [f.b, f.c], f.d.id, f.d);
+    } finally { connection.close(); }
+    closeMessageDb();
+    expect(readThread(f.threadId, legacy(f.threadId))).toEqual({ messages: [f.a, f.b, f.c, f.d], activeLeafId: f.d.id });
+  });
+
+  it("rolls back a new thread's rows when inserting its first branch head fails", () => {
+    const f = pathFixture();
+    const newThread = "new-owned-recovery";
+    const connection = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    try {
+      connection.exec("CREATE TRIGGER recovery_fail BEFORE INSERT ON thread_state BEGIN SELECT RAISE(ABORT, 'owned leaf insert failure'); END");
+      expect(() => persistMessagePath(newThread, [f.a, f.b], f.c.id, f.c)).toThrow("owned leaf insert failure");
+      expect(readThread(newThread, legacy(newThread))).toEqual({ messages: [], activeLeafId: null });
+      expect(readThread(f.threadId, legacy(f.threadId))).toEqual({ messages: [f.a], activeLeafId: f.a.id });
+      connection.exec("DROP TRIGGER recovery_fail");
+      persistMessagePath(newThread, [f.a, f.b], f.c.id, f.c);
+    } finally { connection.close(); }
+    closeMessageDb();
+    expect(readThread(newThread, legacy(newThread))).toEqual({ messages: [f.a, f.b, f.c], activeLeafId: f.c.id });
+  });
+
+  it.each(["ancestor", "new-message"])("rejects a conflicting durable %s without replacing or partially inserting rows", (conflict) => {
+    const f = pathFixture();
+    const durable = msg("existing", "durable version", { parentId: f.a.id });
+    appendMessage(f.threadId, durable);
+    const before = rawRows(f.threadId);
+    const changed = { ...durable, text: "conflicting version", parentId: f.b.id };
+    expect(() => conflict === "ancestor"
+      ? persistMessagePath(f.threadId, [f.b, changed], f.d.id, { ...f.d, parentId: changed.id })
+      : persistMessagePath(f.threadId, [f.b], changed.id, changed)).toThrow("conflicts with an existing durable row");
+    expect(rawRows(f.threadId)).toEqual(before);
+    expect(readThread(f.threadId, legacy(f.threadId)).activeLeafId).toBe(durable.id);
+  });
+
+  it("rejects a missing same-thread parent even when its ID exists in another thread", () => {
+    const f = pathFixture();
+    const foreign = msg("foreign-parent", "different thread", { parentId: null });
+    appendMessage("other-thread", foreign);
+    const before = rawRows(f.threadId);
+    expect(() => persistMessagePath(f.threadId, [], f.b.id, { ...f.b, parentId: foreign.id })).toThrow("parent is missing from this thread");
+    expect(rawRows(f.threadId)).toEqual(before);
+    expect(readThread("other-thread", legacy("other-thread"))).toEqual({ messages: [foreign], activeLeafId: foreign.id });
+  });
+
+  it("rolls back recovered rows when the selected leaf belongs only to another thread", () => {
+    const f = pathFixture();
+    appendMessage("other-thread", msg("foreign-leaf", "different leaf", { parentId: null }));
+    const before = rawRows(f.threadId);
+    expect(() => persistMessagePath(f.threadId, [f.b, f.c], "foreign-leaf")).toThrow("leaf is missing from this thread");
+    expect(rawRows(f.threadId)).toEqual(before);
+    expect(readThread(f.threadId, legacy(f.threadId)).activeLeafId).toBe(f.a.id);
+  });
+
+  it("rejects a selected durable row whose immediate parent is absent", () => {
+    const f = pathFixture();
+    const orphan = msg("orphan", "owned malformed row", { parentId: "missing" });
+    insertMessage(f.threadId, orphan);
+    const before = rawRows(f.threadId);
+    expect(() => persistMessagePath(f.threadId, [f.b], orphan.id)).toThrow("parent is missing from this thread");
+    expect(rawRows(f.threadId)).toEqual(before);
+    expect(readThread(f.threadId, legacy(f.threadId)).activeLeafId).toBe(f.a.id);
+  });
+
+  it.each(["out-of-order", "self-parent", "cycle"])("rejects %s recovery input without any durable change", (invalid) => {
+    const f = pathFixture();
+    const before = rawRows(f.threadId);
+    const ancestors = invalid === "out-of-order" ? [f.c, f.b]
+      : invalid === "self-parent" ? [{ ...f.b, parentId: f.b.id }]
+        : [{ ...f.b, parentId: f.c.id }, f.c];
+    expect(() => persistMessagePath(f.threadId, ancestors, f.d.id, f.d)).toThrow(/parent-first|reference itself/);
+    expect(rawRows(f.threadId)).toEqual(before);
+    expect(readThread(f.threadId, legacy(f.threadId)).activeLeafId).toBe(f.a.id);
+  });
+
+  it("accepts Store's inferred legacy parents without changing legacy JSON or row order", () => {
+    const threadId = "legacy-recovery";
+    const a = msg("a", "legacy root");
+    const b = msg("b", "legacy child");
+    insertMessage(threadId, a);
+    insertMessage("other-thread", msg("unrelated", "interleaved row"));
+    insertMessage(threadId, b);
+    const before = rawRows(threadId);
+    const c = msg("c", "new descendant", { parentId: b.id });
+    persistMessagePath(threadId, [{ ...a, parentId: null }, { ...b, parentId: a.id }], c.id, c);
+    expect(rawRows(threadId).slice(0, 2)).toEqual(before);
+    closeMessageDb();
+    expect(new Store(selection).activePath(threadId)).toEqual([{ ...a, parentId: null }, { ...b, parentId: a.id }, c]);
+  });
+
+  it("does not accept an invented parent for an existing legacy row", () => {
+    const threadId = "legacy-conflict";
+    const a = msg("a", "legacy root");
+    const b = msg("b", "legacy child");
+    insertMessage(threadId, a);
+    insertMessage(threadId, b);
+    setActiveLeaf(threadId, b.id);
+    const before = rawRows(threadId);
+    expect(() => persistMessagePath(threadId, [{ ...b, parentId: null }], b.id)).toThrow("conflicts with an existing durable row");
+    expect(rawRows(threadId)).toEqual(before);
+    expect(readThread(threadId, legacy(threadId)).activeLeafId).toBe(b.id);
+  });
+
+  it("preserves flat legacy-shaped input inference within a newly recovered thread", () => {
+    const threadId = "new-legacy-recovery";
+    const a = msg("a", "legacy root");
+    const b = msg("b", "legacy child");
+    persistMessagePath(threadId, [a], b.id, b);
+    closeMessageDb();
+    expect(new Store(selection).activePath(threadId)).toEqual([{ ...a, parentId: null }, { ...b, parentId: a.id }]);
   });
 });

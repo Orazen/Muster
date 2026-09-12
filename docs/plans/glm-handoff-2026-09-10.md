@@ -2758,3 +2758,29 @@ ancestry. Publish strict updates only after commit and preserve seed-answer sema
 Extend persist-failure-store, store and message-db tests with real SQLite rejection,
 exact parent/path/leaf assertions and a bounded fresh-child restart. Detailed anchors
 remain in the local `next-Store-slice.md`; this map was read-only, with0 new tests.
+
+
+## Loop75 — conversation ancestry recovery (12 September 2026)
+
+Store and MessageDB now atomically recover required missing ancestor rows before a
+new durable descendant/branch/selected leaf. Latest pending contents survive retry;
+strict failure publishes nothing, unrelated volatile branches remain pending, existing
+durable rows are never replaced, and seed-answer CAS is preserved. The ordinary append
+path does not scan history when its own parent is durable.
+
+Full **245 files / 3633 passed / 8 skipped / 0 failed**,284.33s; focused149/149,
+server types7.75s, lint1.823s, packaged server9/9 in10.637s. All957 frozen inputs match.
+A bounded fresh process verifies exact SQLite messages/parents/leaf/active path and no
+network attempts. Cleanup assertions pass; independent console/PID receipts were not
+emitted. Baseline4/5 failure and initial nullable-annotation type error are preserved.
+See [the audit](astra-glm-audit-2026-09-12.md#loop75--durable-conversation-ancestry-12-september-2026)
+for scope, evidence and limitations. This is not recovery of already-lost RAM, full
+cross-device backup, new browser acceptance or a native release.
+
+Next bounded item is P2 recoverable bot-and-greeting creation across bots.json/SQLite:
+creation intent, explicit owner-file commit point, startup reconciliation, actual
+failed-write/retry/forced-exit/HTTP/SSE acceptance. Avoid claiming in-memory rollback
+is a transaction. The executable local map is under loop75-store-ancestry/next-create-slice.md.
+Pending12 inherited files stay outside the slice until restored from this loop's
+hash-verified preservation receipt. Preserve the original stash; read restoration
+receipts before acting. Existing hourly work and2%handoff/1%pause thresholds remain.

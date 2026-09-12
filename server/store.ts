@@ -438,6 +438,9 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
 interface ThreadState {
   messages: Message[];
   activeLeafId: string | null;
+  /** Rows missing after a best-effort insert. Updates/prunes do not make
+   * them durable; recover their latest in-memory contents before a child. */
+  pendingInserts: Set<string>;
 }
 
 export class Store {
@@ -688,7 +691,7 @@ export class Store {
       prev = m.id;
     }
     if (!activeLeafId) activeLeafId = messages.at(-1)?.id ?? null;
-    t = { messages, activeLeafId };
+    t = { messages, activeLeafId, pendingInserts: new Set() };
     this.threads.set(threadId, t);
     return t;
   }
@@ -714,6 +717,35 @@ export class Store {
     return path.reverse();
   }
 
+  /** Only recover the selected missing segment, leaving unrelated volatile
+   * branches alone. A durable attachment ends the walk, so ordinary writes
+   * do not rescan the conversation's full history. */
+  private pendingPath(t: ThreadState, leafId: string | null): Message[] {
+    if (leafId === null || !t.pendingInserts.has(leafId)) return [];
+    const byId = new Map(t.messages.map((message) => [message.id, message]));
+    const seen = new Set<string>();
+    const path: Message[] = [];
+    let current: string | null = leafId;
+    while (current !== null) {
+      if (seen.has(current)) throw new Error("Cannot persist a cyclic conversation path");
+      seen.add(current);
+      const message = byId.get(current);
+      if (!message) throw new Error("Cannot persist a conversation with a missing parent");
+      if (!t.pendingInserts.has(current)) break;
+      path.push(message);
+      current = message.parentId ?? null;
+    }
+    return path.reverse();
+  }
+
+  private persistNewMessage(threadId: string, t: ThreadState, message: Message): void {
+    const ancestors = this.pendingPath(t, message.parentId ?? null);
+    if (ancestors.length) mdb.persistMessagePath(threadId, ancestors, message.id, message);
+    else mdb.appendMessage(threadId, message);
+    // A failed transaction retains every pending marker for a later retry.
+    for (const ancestor of ancestors) t.pendingInserts.delete(ancestor.id);
+  }
+
   appendMessage(
     threadId: string,
     message: Omit<Message, "id" | "at"> & { at?: number },
@@ -729,9 +761,10 @@ export class Store {
     // housekeeping until the watchdog, so there a failed write degrades to
     // memory-only, loudly.
     try {
-      mdb.appendMessage(threadId, full);
+      this.persistNewMessage(threadId, t, full);
     } catch (error) {
       if (!opts.bestEffort) throw error;
+      t.pendingInserts.add(full.id);
       console.error(`message-db write failed for thread ${threadId} (message kept in memory only):`, error);
     }
     t.messages.push(full);
@@ -790,7 +823,7 @@ export class Store {
     // Same durability gate as appendMessage: the branch row lands before
     // memory forks, so a failed write propagates instead of forking a
     // conversation a restart would forget.
-    mdb.appendMessage(threadId, full);
+    this.persistNewMessage(threadId, t, full);
     t.messages.push(full);
     t.activeLeafId = full.id;
     this.emit({ type: "message", threadId, message: full });
@@ -803,14 +836,20 @@ export class Store {
     const t = this.thread(threadId);
     if (!t.messages.some((m) => m.id === messageId)) return null;
     let cur = messageId;
+    const seen = new Set<string>();
     for (;;) {
+      if (seen.has(cur)) throw new Error("Cannot select a cyclic conversation path");
+      seen.add(cur);
       const children = t.messages.filter((m) => m.parentId === cur);
       if (!children.length) break;
       cur = children.reduce((a, b) => (b.at >= a.at ? b : a)).id;
     }
     // Durability first, like appendMessage: a failed leaf write propagates
     // instead of silently pointing memory at a branch the DB never recorded.
-    mdb.setActiveLeaf(threadId, cur);
+    const ancestors = this.pendingPath(t, cur);
+    if (ancestors.length) mdb.persistMessagePath(threadId, ancestors, cur);
+    else mdb.setActiveLeaf(threadId, cur);
+    for (const ancestor of ancestors) t.pendingInserts.delete(ancestor.id);
     t.activeLeafId = cur;
     this.emit({ type: "thread", threadId, activeLeafId: cur });
     return cur;

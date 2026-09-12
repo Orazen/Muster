@@ -3994,3 +3994,18 @@ No product edits or new runtime tests in this receipt:245 files/3609 passed/8 sk
 browser4/4, packaged server9/9 remain the measured gates. Current allowance47%remaining;
 existing hourly heartbeat retains2%handoff/1%pause rules and Store ancestry recovery
 next. Twelve inherited files are to be restored and hash-verified after publication.
+
+
+**Loop75 (2026-09-12, conversation recovery after failed writes):** Store and MessageDB
+now save required missing ancestors and the branch head atomically before accepting a
+new durable message. Rollback preserves retry state; unrelated branches and seed CAS
+remain intact. This closes the reproduced P1 that hid earlier conversation context on
+restart, a prerequisite for trusting ongoing work; no revenue uplift is measured.
+
+Full **245 files / 3633 passed / 8 skipped / 0 failed**,284.33s; focused149/149,
+server types7.75s, lint1.823s, rebuilt packaged server9/9 in10.637s. All957 source inputs
+unchanged. Baseline4/5 failed as intended; one nullable type annotation was corrected
+before final gates. Real SQLite trigger rollback and bounded fresh-process exact-path
+acceptance pass. Existing pending12 native/research/template files remain preserved.
+Next: P2 recoverable bot-and-greeting creation with a real cross-store commit boundary.
+No new native release, provider consent, portable backup or complete security claim.
