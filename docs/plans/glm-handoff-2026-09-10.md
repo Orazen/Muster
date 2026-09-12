@@ -2497,3 +2497,22 @@ demo and release boundaries. Old pause paragraphs above are historical.
 Evidence root for every relative receipt above:
 `.omb-scratch/verification/astra-glm-audit-2026-09-12/`. The current audit and CEO log
 are the checked-in summary; preserve local failed-run evidence and ownership receipts.
+
+### Latest publication correction — 12 September, 15:49–15:50 UTC
+
+Loop70 product **`2acc705` is pushed**. The production web bundle changed during the
+rollout window: GET health/app/download metadata returned200 after204 seconds, and
+served `index-DvR35QXt.js` positively contains v2-first draft reads with legacy fallback,
+semantic seven-stage onboarding and the corrected Flower px transform. **Do not carry
+forward the earlier claim that production still serves the old onboarding bundle.**
+The exact backend SHA, authenticated production first-task acceptance and actual
+successful deployment path remain unestablished; GitHub's4 billing-blocked jobs,
+1 skipped build and0 executed steps did not attest this rollout. Desktop metadata is
+still1.12.0 / `e241968`, and native signing/runtime/release gates remain unchanged.
+
+All12 pending non-ledger files were restored and hash-verified, both old temporary
+stash references were cleaned after restoration, and the original stash remains.
+The final publication-receipt preservation step has its own restoration receipt;
+never reapply an already-restored stash. The hourly heartbeat is ACTIVE. This
+documentation-only correction leaves all verified product inputs and test counts
+unchanged. Receipts are under `release/loop70-*.json` and the final restoration files.

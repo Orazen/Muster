@@ -3878,3 +3878,14 @@ The board's renewed authorization also resumes the existing hourly CEO heartbeat
 app update and local readback both confirm ACTIVE, original target/cadence preserved,
 no duplicate. Latest allowance check24%used/76%remaining; reported reset19 September
 2026,16:43Europe/Rome; no credit consumed. Preserve the2%handoff/1%pause thresholds.
+
+**Loop70 publication receipt (15:49–15:50 UTC):** product `2acc705` is pushed. After
+204seconds, GET health/app/downloads passed200 and the new served bundle positively
+contains v2-first onboarding persistence, semantic stages and the corrected Flower
+transform. Earlier old-bundle observations are superseded. The exact backend SHA and
+authenticated production send remain unverified. GitHub still records4 billing-blocked
+jobs,1 skipped build,0 steps; the successful web rollout used an unestablished path,
+so CI failure must not be equated with production remaining stale. Desktop metadata
+stays1.12.0. No product changes or new tests in this receipt-only update; Loop70's
+**3468 passed / 8 skipped**,30 browser checks and successful build/lint still apply.
+Pending12 files are restored byte-for-byte, original stash preserved, heartbeat ACTIVE.

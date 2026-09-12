@@ -235,6 +235,24 @@ pending migration**; do not commit its five product files yet. Evidence:
 `native-unsigned/summary.json`. The simulator linker may emit its normal ad hoc
 Mach-O signature; this is not distribution signing or notarization.
 
+### Post-roll observation — 12 September, 15:49–15:50 UTC
+
+Loop70 is pushed as `2acc705`. **204 seconds after its push workflow started**, GET
+health/app/downloads returned200 and the app served a new `index-DvR35QXt.js` bundle.
+GET inspection positively confirms the semantic seven-step list, v2-first draft read
+with legacy fallback, and corrected Flower px transform. This supersedes the earlier
+old-bundle observation. Health now reports process7, but provides no backend commit;
+an authenticated production first-task flow and exact server SHA remain unverified.
+
+Its GitHub jobs still show **4 billing-blocked jobs,1 skipped build,0 executed steps**.
+The observed web rollout therefore must not be attributed to those jobs or described
+as blocked solely by them. The actual successful deployment path was not established.
+Desktop download metadata remains1.12.0 / `e241968`; native release limitations stand.
+Receipts: `release/loop70-post-roll.json`, `loop70-served-markers.json`, `loop70-ci.json`.
+All12 pending native/research/template files were restored and matched their original
+hashes; the original stash remains. Final restoration receipts document temporary
+publication-only preservation. This documentation update changes no tested product.
+
 Continue with the ranked repairs above, one verified commit at a time. Preserve the
 inherited native work, report actual failures, and distinguish browser fixture acceptance,
 real provider consent, production deployment and native release.
