@@ -4009,3 +4009,17 @@ before final gates. Real SQLite trigger rollback and bounded fresh-process exact
 acceptance pass. Existing pending12 native/research/template files remain preserved.
 Next: P2 recoverable bot-and-greeting creation with a real cross-store commit boundary.
 No new native release, provider consent, portable backup or complete security claim.
+
+
+**Loop75 publication receipt (2026-09-12T17:39:18.595002+00:00):** product **c51c577** is pushed.
+GET health/app/assets/download metadata200; anonymous workspace status401. Served
+frontend remains `/assets/index-DCAkTz04.js` with Loop74 backup markers, as expected for a
+server-only slice. These checks establish availability, **not the exact deployed
+backend revision or authenticated recovery behavior**. Desktop metadata remains1.12.0.
+GitHub records4 billing-blocked jobs,1 skipped build and0 steps for this SHA; board
+billing action is still required. No additional runtime tests in this receipt: full
+245 files/3633 passed/8 skipped, focused149/149 and packaged server9/9 remain the gates.
+The existing heartbeat is verified ACTIVE with its original cadence and next creation
+slice;42% allowance remains, reported reset19September2026,16:43Europe/Rome, no reset
+consumed. Consult this loop's preservation/restoration JSON before touching pending
+files or stashes; all12 inherited paths must be restored byte-for-byte before stopping.
