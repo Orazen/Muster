@@ -3749,3 +3749,37 @@ Google sign-in done (branded + verified); desktop loopback Google handoff done; 
 pairing-code done; iOS pairing links done; Drive/Telegram transports done + now visible.
 Next design decision (flagged, not built): the auto-sync engine — background pushes need a
 trusted-device passphrase store, a product decision before code.
+
+
+**Loop 67 (2026-09-12, Astra resumes ownership — GLM audit and memory retention repair):**
+The board confirmed GLM stopped. Reviewed the 66-file `aac8fd3..97c2b56` delta in
+parallel across storage, auth and UI, plus native/release evidence. Preserved and hashed
+14 inherited pending files and the original stash; pending native edits remain outside
+this commit. Full findings and corrections: `docs/plans/astra-glm-audit-2026-09-12.md`.
+
+Memory edits and rollback now retain exact prior bytes before replacing live content,
+reject linked/nonregular history paths and oversized restores, and propagate snapshot
+failure. Agent baseline A and directly edited live B both survive a subsequent server
+write C. Pruning protects the operation's retained versions even when existing history
+has future timestamps. Atomic writes support byte arrays; live memory and baseline are
+still separate atomic updates, not a cross-file transaction or a filesystem sandbox.
+
+Verification: focused **3 files / 41 passed / 0 failed / 0 skipped**; full Vitest
+**243 files / 3426 passed / 8 skipped / 0 failed**, 291.93s; production build including
+TypeScript passed; packaged-server **9 checks passed**; repository Playwright **8/8
+passed**, 0 failures/skips/retries, 44.696s, owned fixtures cleaned. Ancillary audit:
+broker **2 passed**, updater **14 passed**, Electron syntax **8 files checked**.
+Swift **274 passed** was run with inherited pending composer edits before shelving;
+it is not committed-native or Watch UI acceptance. Scoped repair lint passed; whole
+repository lint failed with **44 existing errors across 13 unchanged files**, queued
+for a separate verified slice.
+
+Release audit corrects earlier confidence: uploaded v1.12.0 assets match local hashes;
+Apple Silicon runtime **9 checks passed**, Intel runtime timed out; both Mac Gatekeeper
+assessments rejected and neither bundle has a stapled ticket; advertised CLI reports
+**1.11.0**. No available Developer ID identity. GitHub CI/deploy jobs never started due
+to billing/spending annotations. No real Google consent or complete Mimosa rerun was
+performed. Existing configured local Drive credentials use a separate installation
+contract and must be preserved while repairing the broken account-linked flow.
+Push and production GET verification are separate post-commit receipts; this entry
+makes no claim that the new memory code is deployed or that a desktop update installed.

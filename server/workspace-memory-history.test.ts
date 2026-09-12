@@ -4,7 +4,7 @@
 // workspace module directly against a throwaway DATA_DIR, including the
 // "agent" capture path where the file is written behind the server's back
 // exactly as a bot's file tools would.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -168,5 +168,211 @@ describe("memory history", () => {
     ws.memorySystemPrompt("bot-isolation");
     expect(ws.listMemoryTopics("bot-isolation")).toEqual([{ name: "notes.md", bytes: 11 }]);
     expect(ws.readMemoryTopic("bot-isolation", "notes.md")).toBe("topic body\n");
+  });
+
+  it("retains and restores exact old bytes, including invalid UTF-8", async () => {
+    const ws = await load();
+    const bot = "bot-bytes";
+    ws.ensureWorkspace(bot);
+    const file = join(ws.workspaceDir(bot), "MEMORY.md");
+    const original = Buffer.from([0xef, 0xbb, 0xbf, 0xff, 0x00, 0xc3, 0x28, 0x0d, 0x0a]);
+    writeFileSync(file, original);
+    ws.writeMemoryFile(bot, "replacement");
+    const version = ws.listMemoryHistory(bot)[0];
+    expect(readFileSync(join(ws.workspaceDir(bot), ".memory-history", version.id))).toEqual(original);
+    expect(ws.restoreMemoryHistory(bot, version.id)).toBe(true);
+    expect(readFileSync(file)).toEqual(original);
+    expect(readFileSync(join(ws.workspaceDir(bot), ".memory-history", ".known"))).toEqual(original);
+  });
+
+  it("rejects linked history entries without reading or restoring another file", async () => {
+    const ws = await load();
+    const bot = "bot-linked-entry";
+    ws.writeMemoryFile(bot, "keep current");
+    const outside = join(home, "other-owner.txt");
+    writeFileSync(outside, "synthetic private memory");
+    const id = "20260912T010203004-agent-ab12.md";
+    symlinkSync(outside, join(ws.workspaceDir(bot), ".memory-history", id));
+    expect(ws.listMemoryHistory(bot)).toEqual([]);
+    expect(ws.readMemoryHistoryEntry(bot, id)).toBeNull();
+    expect(() => ws.restoreMemoryHistory(bot, id)).toThrow(/regular/);
+    expect(ws.readMemoryFile(bot).text).toBe("keep current");
+    expect(readFileSync(outside, "utf8")).toBe("synthetic private memory");
+  });
+
+  it("rejects linked history directories before read, write, restore or pruning", async () => {
+    const ws = await load();
+    const bot = "bot-linked-directory";
+    ws.writeMemoryFile(bot, "keep current");
+    const history = join(ws.workspaceDir(bot), ".memory-history");
+    rmSync(history, { recursive: true });
+    const outside = join(home, "other-history"); mkdirSync(outside);
+    const id = "20260912T010203004-agent-ab12.md";
+    writeFileSync(join(outside, id), "other version");
+    symlinkSync(outside, history, "dir");
+    expect(ws.listMemoryHistory(bot)).toEqual([]);
+    expect(ws.readMemoryHistoryEntry(bot, id)).toBeNull();
+    expect(() => ws.writeMemoryFile(bot, "unsafe write")).toThrow(/directories/);
+    expect(() => ws.restoreMemoryHistory(bot, id)).toThrow(/directories/);
+    expect(ws.readMemoryFile(bot).text).toBe("keep current");
+    expect(readdirSync(outside)).toEqual([id]);
+  });
+
+  it("rejects linked workspace roots, live memory and baseline before writes", async () => {
+    const ws = await load();
+    const outside = join(home, "outside"); mkdirSync(outside);
+    const sentinel = join(outside, "sentinel"); writeFileSync(sentinel, "unchanged");
+    ws.writeMemoryFile("bot-root", "root current");
+    symlinkSync(outside, ws.workspaceDir("bot-link"), "dir");
+    expect(() => ws.writeMemoryFile("bot-link", "new")).toThrow(/directories/);
+    expect(existsSync(join(outside, "MEMORY.md"))).toBe(false);
+    for (const leaf of ["MEMORY.md", ".memory-history/.known"]) {
+      const bot = leaf === "MEMORY.md" ? "bot-live-link" : "bot-baseline-link";
+      ws.writeMemoryFile(bot, "keep current");
+      const file = join(ws.workspaceDir(bot), leaf);
+      rmSync(file); symlinkSync(sentinel, file);
+      expect(() => ws.writeMemoryFile(bot, "new")).toThrow(/regular/);
+      expect(readFileSync(sentinel, "utf8")).toBe("unchanged");
+      expect(ws.listMemoryHistory(bot)).toEqual([]);
+    }
+    rmSync(ws.WORKSPACES_DIR, { recursive: true });
+    symlinkSync(outside, ws.WORKSPACES_DIR, "dir");
+    expect(() => ws.writeMemoryFile("bot-root-link", "new")).toThrow(/directories/);
+    expect(ws.listMemoryHistory("bot-root-link")).toEqual([]);
+    expect(readdirSync(outside)).toEqual(["sentinel"]);
+  });
+
+  it("does not overwrite live memory when its history location is unusable", async () => {
+    const ws = await load();
+    const bot = "bot-retention-failure";
+    ws.writeMemoryFile(bot, "sole old version");
+    const history = join(ws.workspaceDir(bot), ".memory-history");
+    rmSync(history, { recursive: true }); writeFileSync(history, "not a directory");
+    expect(() => ws.writeMemoryFile(bot, "replacement")).toThrow();
+    expect(ws.readMemoryFile(bot).text).toBe("sole old version");
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("failed snapshot permissions leave rollback and editor bytes unchanged", async () => {
+    const ws = await load();
+    const bot = "bot-read-only-history";
+    ws.writeMemoryFile(bot, "saved earlier"); ws.writeMemoryFile(bot, "keep current");
+    const history = join(ws.workspaceDir(bot), ".memory-history");
+    const id = ws.listMemoryHistory(bot)[0].id;
+    const before = readdirSync(history).sort();
+    chmodSync(history, 0o500);
+    try {
+      expect(() => ws.restoreMemoryHistory(bot, id)).toThrow();
+      expect(() => ws.writeMemoryFile(bot, "replacement")).toThrow();
+      expect(ws.readMemoryFile(bot).text).toBe("keep current");
+      expect(readdirSync(history).sort()).toEqual(before);
+    } finally { chmodSync(history, 0o700); }
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("failed live replacement keeps old memory after a successful snapshot", async () => {
+    const ws = await load();
+    const bot = "bot-live-write-failure";
+    ws.writeMemoryFile(bot, "keep current");
+    const dir = ws.workspaceDir(bot); chmodSync(dir, 0o500);
+    try {
+      expect(() => ws.writeMemoryFile(bot, "replacement")).toThrow();
+      expect(ws.readMemoryFile(bot).text).toBe("keep current");
+      const history = ws.listMemoryHistory(bot);
+      expect(history).toHaveLength(1);
+      expect(ws.readMemoryHistoryEntry(bot, history[0].id)?.text).toBe("keep current");
+      expect(readdirSync(join(dir, ".memory-history")).some(name => name.startsWith(".pending-") || name.endsWith(".tmp"))).toBe(false);
+    } finally { chmodSync(dir, 0o700); }
+  });
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("failed agent capture retains its baseline for a later successful retry", async () => {
+    const ws = await load();
+    const bot = "bot-agent-retry"; ws.writeMemoryFile(bot, "last known memory");
+    const dir = ws.workspaceDir(bot); const history = join(dir, ".memory-history");
+    writeFileSync(join(dir, "MEMORY.md"), "agent changed memory");
+    chmodSync(history, 0o500);
+    try {
+      expect(ws.memorySystemPrompt(bot)).toContain("agent changed memory");
+      expect(readFileSync(join(history, ".known"), "utf8")).toBe("last known memory");
+      expect(ws.listMemoryHistory(bot)).toEqual([]);
+    } finally { chmodSync(history, 0o700); }
+    ws.memorySystemPrompt(bot);
+    const entries = ws.listMemoryHistory(bot);
+    expect(entries).toHaveLength(1); expect(entries[0].origin).toBe("agent");
+    expect(ws.readMemoryHistoryEntry(bot, entries[0].id)?.text).toBe("last known memory");
+    expect(readFileSync(join(history, ".known"), "utf8")).toBe("agent changed memory");
+  });
+
+  it("rejects oversized history and direct saves before replacing current memory", async () => {
+    const ws = await load();
+    const bot = "bot-byte-cap"; ws.writeMemoryFile(bot, "keep current");
+    const history = join(ws.workspaceDir(bot), ".memory-history");
+    const id = "20260912T010203004-agent-ab12.md";
+    const tooLarge = "x".repeat(ws.MEMORY_FILE_MAX_BYTES + 1);
+    writeFileSync(join(history, id), tooLarge);
+    expect(ws.listMemoryHistory(bot)).toEqual([]);
+    expect(ws.readMemoryHistoryEntry(bot, id)).toBeNull();
+    expect(() => ws.restoreMemoryHistory(bot, id)).toThrow(/256KB/);
+    expect(() => ws.writeMemoryFile(bot, tooLarge)).toThrow(/256KB/);
+    expect(ws.readMemoryFile(bot).text).toBe("keep current");
+    writeFileSync(join(history, id), "x".repeat(ws.MEMORY_FILE_MAX_BYTES));
+    expect(ws.restoreMemoryHistory(bot, id)).toBe(true);
+    expect(readFileSync(join(ws.workspaceDir(bot), "MEMORY.md")).length).toBe(ws.MEMORY_FILE_MAX_BYTES);
+  });
+
+  it("rejects non-file history entries and preserves the legacy missing-id result", async () => {
+    const ws = await load();
+    const bot = "bot-history-directory"; ws.writeMemoryFile(bot, "keep current");
+    const id = "20260912T010203004-agent-ab12.md";
+    mkdirSync(join(ws.workspaceDir(bot), ".memory-history", id));
+    expect(ws.listMemoryHistory(bot)).toEqual([]);
+    expect(ws.readMemoryHistoryEntry(bot, id)).toBeNull();
+    expect(() => ws.restoreMemoryHistory(bot, id)).toThrow(/regular/);
+    expect(ws.restoreMemoryHistory(bot, "20260912T010203004-agent-ffff.md")).toBe(false);
+    expect(ws.readMemoryFile(bot).text).toBe("keep current");
+  });
+
+  it.each(["save", "rollback"])("%s preserves the displaced version when existing timestamps are all in the future", async (operation) => {
+    const ws = await load();
+    const bot = `bot-future-${operation}`;
+    ws.writeMemoryFile(bot, "unique current bytes");
+    const history = join(ws.workspaceDir(bot), ".memory-history");
+    const ids = Array.from({ length: 20 }, (_, i) => `20991231T235959${String(i).padStart(3, "0")}-user-edit-ab12.md`);
+    ids.forEach((id, i) => writeFileSync(join(history, id), `future version ${i}`));
+    if (operation === "save") ws.writeMemoryFile(bot, "replacement");
+    else expect(ws.restoreMemoryHistory(bot, ids[0])).toBe(true);
+    const entries = ws.listMemoryHistory(bot);
+    expect(entries).toHaveLength(20);
+    const displaced = entries.find(entry => ws.readMemoryHistoryEntry(bot, entry.id)?.text === "unique current bytes");
+    expect(displaced).toBeDefined();
+    expect(ws.restoreMemoryHistory(bot, displaced!.id)).toBe(true);
+    expect(ws.readMemoryFile(bot).text).toBe("unique current bytes");
+  });
+
+  it.each(["save", "rollback"])("%s retains both an uncaptured agent baseline and live bytes under the cap", async (operation) => {
+    const ws = await load();
+    const bot = `bot-uncaptured-${operation}`;
+    ws.writeMemoryFile(bot, "baseline A");
+    const dir = ws.workspaceDir(bot); const history = join(dir, ".memory-history");
+    const ids = Array.from({ length: 20 }, (_, i) => `20991231T235959${String(i).padStart(3, "0")}-user-edit-ab12.md`);
+    ids.forEach((id, i) => writeFileSync(join(history, id), `future version ${i}`));
+    writeFileSync(join(dir, "MEMORY.md"), "agent B");
+    if (operation === "save") ws.writeMemoryFile(bot, "editor C");
+    else expect(ws.restoreMemoryHistory(bot, ids[0])).toBe(true);
+    const entries = ws.listMemoryHistory(bot);
+    expect(entries).toHaveLength(20);
+    const records = entries.map(entry => ws.readMemoryHistoryEntry(bot, entry.id));
+    expect(records.find(entry => entry?.text === "baseline A")?.origin).toBe("agent");
+    expect(records.find(entry => entry?.text === "agent B")?.origin).toBe(operation === "save" ? "user-edit" : "rollback");
+  });
+
+  it("a no-op editor save still retains an uncaptured prior agent baseline", async () => {
+    const ws = await load(); const bot = "bot-noop-agent";
+    ws.writeMemoryFile(bot, "baseline A");
+    writeFileSync(join(ws.workspaceDir(bot), "MEMORY.md"), "agent B");
+    ws.writeMemoryFile(bot, "agent B");
+    const entries = ws.listMemoryHistory(bot);
+    expect(entries).toHaveLength(1);
+    expect(ws.readMemoryHistoryEntry(bot, entries[0].id)?.text).toBe("baseline A");
+    expect(entries[0].origin).toBe("agent");
+    expect(ws.readMemoryFile(bot).text).toBe("agent B");
   });
 });

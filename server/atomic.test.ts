@@ -43,6 +43,13 @@ describe("writeFileAtomic", () => {
     expect(existsSync(p)).toBe(true);
   });
 
+  it("preserves arbitrary bytes without UTF-8 decoding", () => {
+    const p = join(dir, "memory.md");
+    const bytes = new Uint8Array([0xef, 0xbb, 0xbf, 0xff, 0x00, 0xc3, 0x28, 0x0a]);
+    writeFileAtomic(p, bytes, { mode: 0o600 });
+    expect(readFileSync(p)).toEqual(Buffer.from(bytes));
+  });
+
   it.skipIf(process.platform === "win32")("applies the requested mode when replacing a file", () => {
     const p = join(dir, "secret.json");
     writeFileAtomic(p, "old");

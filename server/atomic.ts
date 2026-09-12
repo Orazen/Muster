@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, openSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
-export function writeFileAtomic(path: string, data: string, options: { mode?: number } = {}): void {
+export function writeFileAtomic(path: string, data: string | Uint8Array, options: { mode?: number } = {}): void {
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
   let fd: number | null = null;
   try {

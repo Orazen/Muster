@@ -10,13 +10,21 @@
 // delete anything the bot believes.
 import { randomBytes } from "node:crypto";
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   statSync,
   unlinkSync,
   writeFileSync,
+  type Stats,
 } from "node:fs";
 import { join } from "node:path";
 
@@ -129,17 +137,20 @@ export function memoryUsage(botId: string): { lines: number; bytes: number } | n
  * intact instead of a half-written file. The baseline update afterwards is
  * what keeps the next prompt build from misattributing this edit to the bot. */
 export function writeMemoryFile(botId: string, text: string): void {
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.length > MEMORY_FILE_MAX_BYTES) throw new Error("Memory exceeds the 256KB limit.");
+  memoryDirectory(botId, false, true);
+  // Validate before ensureWorkspace can create files through a linked path.
+  readMemoryBytes(botId, "MEMORY.md", false);
+  memoryDirectory(botId, true, true);
+  readMemoryBytes(botId, MEMORY_BASELINE_FILE, true);
   ensureWorkspace(botId);
   const file = join(workspaceDir(botId), "MEMORY.md");
-  let current: string | null = null;
-  try {
-    current = readFileSync(file, "utf8");
-  } catch {
-    /* missing live file — nothing to snapshot, the write recreates it */
-  }
-  if (current !== text) snapshotMemory(botId, "user-edit");
+  const current = readMemoryBytes(botId, "MEMORY.md", false);
+  snapshotMemory(botId, "user-edit", current, !current?.equals(bytes));
+  memoryDirectory(botId, false, false);
   writeFileAtomic(file, text, { mode: 0o600 });
-  writeMemoryBaseline(botId, text);
+  writeMemoryBaseline(botId, bytes);
 }
 
 // One path segment, starts with a word character, plain characters only,
@@ -219,6 +230,64 @@ function historyDirFor(botId: string): string {
   return join(workspaceDir(botId), HISTORY_DIR_NAME);
 }
 
+function missingFile(error: Error): boolean {
+  return "code" in error && error.code === "ENOENT";
+}
+
+/** DATA_DIR is configured by the operator. Below it, every workspace/history
+ * directory must be an actual directory, never a link to another workspace. */
+function memoryDirectory(botId: string, history: boolean, create: boolean): boolean {
+  if (!/^[\w-]+$/.test(botId)) throw new Error("Invalid memory workspace.");
+  if (create) mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+  const dirs = [WORKSPACES_DIR, workspaceDir(botId)];
+  if (history) dirs.push(historyDirFor(botId));
+  for (const dir of dirs) {
+    try {
+      const stat = lstatSync(dir);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Memory paths must be regular directories.");
+    } catch (error) {
+      if (!(error instanceof Error) || !missingFile(error)) throw error;
+      if (!create) return false;
+      mkdirSync(dir, { mode: 0o700 });
+      const stat = lstatSync(dir);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Memory directory changed.");
+    }
+  }
+  return true;
+}
+
+/** Bounded, no-follow reads preserve bytes and reject special files before
+ * opening. Recheck the opened inode and path so replacements fail closed. */
+function readMemoryBytes(botId: string, name: string, history: boolean): Buffer | null {
+  if (!memoryDirectory(botId, history, false)) return null;
+  const file = join(history ? historyDirFor(botId) : workspaceDir(botId), name);
+  let before: Stats;
+  try { before = lstatSync(file); }
+  catch (error) { if (error instanceof Error && missingFile(error)) return null; throw error; }
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) throw new Error("Memory must be a regular unlinked file.");
+  if (before.size > MEMORY_FILE_MAX_BYTES) throw new Error("Memory exceeds the 256KB limit.");
+  const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev || opened.ino !== before.ino
+        || opened.size > MEMORY_FILE_MAX_BYTES) throw new Error("Memory file changed while opening.");
+    const bytes = Buffer.alloc(opened.size + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const count = readSync(fd, bytes, length, bytes.length - length, null);
+      if (!count) break;
+      length += count;
+    }
+    memoryDirectory(botId, history, false);
+    const after = fstatSync(fd);
+    const current = lstatSync(file);
+    if (length !== opened.size || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs
+        || after.ctimeMs !== opened.ctimeMs || current.isSymbolicLink()
+        || current.dev !== opened.dev || current.ino !== opened.ino) throw new Error("Memory file changed while reading.");
+    return bytes.subarray(0, length);
+  } finally { closeSync(fd); }
+}
+
 /** A filename timestamp is a local wall clock, so parsing it back goes
  * through the local-time constructor — treating the digits as UTC would
  * shift every listed version by the zone offset. */
@@ -241,55 +310,75 @@ function formatHistoryStamp(date: Date): string {
   );
 }
 
-/** Write one snapshot file and enforce the cap. Callers have already decided
- * this content is worth keeping. Failure is swallowed: history is a safety
- * net and must never block the write it guards. */
-function recordHistoryEntry(botId: string, text: string, origin: MemoryHistoryOrigin): void {
+/** A complete snapshot must exist before the live file may be replaced.
+ * Publish exclusively: a timestamp collision cannot replace another version. */
+function recordHistoryEntry(botId: string, text: Buffer, origin: MemoryHistoryOrigin): string {
   const dir = historyDirFor(botId);
+  memoryDirectory(botId, true, true);
+  const staged = join(dir, `.pending-${process.pid}-${randomBytes(8).toString("hex")}`);
+  let publishedId: string | undefined;
   try {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    writeFileSync(join(dir, `${formatHistoryStamp(new Date())}-${origin}-${randomBytes(2).toString("hex")}.md`), text, {
-      mode: 0o600,
-    });
-  } catch {
-    return;
+    writeFileAtomic(staged, text, { mode: 0o600 });
+    for (let attempt = 0; attempt < 8; attempt++) {
+      memoryDirectory(botId, true, false);
+      const id = `${formatHistoryStamp(new Date())}-${origin}-${randomBytes(2).toString("hex")}.md`;
+      try { linkSync(staged, join(dir, id)); publishedId = id; break; }
+      catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+      }
+    }
+    if (!publishedId) throw new Error("Could not allocate a new memory version.");
+  } catch (error) {
+    try { unlinkSync(staged); } catch { /* preserve the publication failure */ }
+    throw error;
   }
-  // keep the newest MEMORY_HISTORY_LIMIT versions, drop the rest
-  const entries = historyEntries(botId);
-  for (const stale of entries.slice(MEMORY_HISTORY_LIMIT)) {
+  unlinkSync(staged);
+  return publishedId;
+}
+
+function pruneMemoryHistory(botId: string, retained: ReadonlySet<string>): void {
+  // Retain the displaced live bytes even if the clock moved backwards or
+  // legacy files have future timestamps. The other newest versions fill the cap.
+  const entries = listMemoryHistory(botId).filter(entry => !retained.has(entry.id));
+  for (const stale of entries.slice(Math.max(0, MEMORY_HISTORY_LIMIT - retained.size))) {
     try {
-      unlinkSync(join(dir, stale.id));
+      unlinkSync(join(historyDirFor(botId), stale.id));
     } catch {
       /* already gone */
     }
   }
 }
 
-/** True when some recorded version already holds exactly this content, so
- * displacing it again loses nothing recoverable. */
-function historyHasContent(botId: string, text: string): boolean {
+/** Locate identical retained bytes so deduplication can also protect that ID
+ * from pruning while the live and baseline versions are retained together. */
+function historyContentId(botId: string, text: Buffer): string | null {
   for (const entry of historyEntries(botId)) {
     try {
-      if (readFileSync(join(historyDirFor(botId), entry.id), "utf8") === text) return true;
+      if (readMemoryBytes(botId, entry.id, true)?.equals(text)) return entry.id;
     } catch {
       /* a pruned or unreadable entry just fails the match */
     }
   }
-  return false;
+  return null;
+}
+
+function retainMemoryVersion(botId: string, bytes: Buffer | null, origin: MemoryHistoryOrigin, retained: Set<string>): void {
+  if (bytes === null || bytes.equals(Buffer.from(MEMORY_SEED))) return;
+  retained.add(historyContentId(botId, bytes) ?? recordHistoryEntry(botId, bytes, origin));
 }
 
 /** Snapshot the live MEMORY.md because a server-mediated write is about to
  * replace it. Skips the untouched seed (boilerplate, re-derivable — history
  * starts at the first real content) and anything history already holds. */
-function snapshotMemory(botId: string, origin: MemoryHistoryOrigin): void {
-  let raw: string;
-  try {
-    raw = readFileSync(join(workspaceDir(botId), "MEMORY.md"), "utf8");
-  } catch {
-    return; // nothing on disk to preserve
-  }
-  if (raw === MEMORY_SEED || historyHasContent(botId, raw)) return;
-  recordHistoryEntry(botId, raw, origin);
+function snapshotMemory(botId: string, origin: MemoryHistoryOrigin, raw: Buffer | null, replacing = true): void {
+  memoryDirectory(botId, true, true);
+  const retained = new Set<string>();
+  const baseline = readMemoryBaseline(botId);
+  // An agent may have changed memory since the last prompt. Save the prior
+  // baseline before the editor/rollback advances it, as well as the live bytes.
+  if (!raw?.equals(baseline)) retainMemoryVersion(botId, baseline, "agent", retained);
+  if (replacing) retainMemoryVersion(botId, raw, origin, retained);
+  if (retained.size) pruneMemoryHistory(botId, retained);
 }
 
 // The last MEMORY.md content the server itself wrote or verified, kept beside
@@ -297,26 +386,18 @@ function snapshotMemory(botId: string, origin: MemoryHistoryOrigin): void {
 // pass through the server — comparing the live file against this baseline at
 // the next prompt build is what separates a behind-the-back edit (worth an
 // "agent" snapshot of the displaced state) from a server-mediated write,
-// which records its own baseline. A stale or missing baseline is harmless:
-// the displaced content is then already in history, so at worst one snapshot
-// is skipped or the seed is compared once.
+// which records its own baseline. Snapshot retention must succeed before
+// replacing the live file; the baseline is a separate atomic file update.
 const MEMORY_BASELINE_FILE = ".known";
 
-function readMemoryBaseline(botId: string): string {
-  try {
-    return readFileSync(join(historyDirFor(botId), MEMORY_BASELINE_FILE), "utf8");
-  } catch {
-    return MEMORY_SEED; // no server write on record: the seed is the baseline
-  }
+function readMemoryBaseline(botId: string): Buffer {
+  return readMemoryBytes(botId, MEMORY_BASELINE_FILE, true) ?? Buffer.from(MEMORY_SEED);
 }
 
-function writeMemoryBaseline(botId: string, text: string): void {
-  try {
-    mkdirSync(historyDirFor(botId), { recursive: true, mode: 0o700 });
-    writeFileSync(join(historyDirFor(botId), MEMORY_BASELINE_FILE), text, { mode: 0o600 });
-  } catch {
-    /* see readMemoryBaseline — a missed update self-heals on the next capture */
-  }
+function writeMemoryBaseline(botId: string, text: Buffer): void {
+  memoryDirectory(botId, true, true);
+  readMemoryBytes(botId, MEMORY_BASELINE_FILE, true);
+  writeFileAtomic(join(historyDirFor(botId), MEMORY_BASELINE_FILE), text, { mode: 0o600 });
 }
 
 /** Prompt-build capture: if the live file differs from the baseline, someone
@@ -324,23 +405,26 @@ function writeMemoryBaseline(botId: string, text: string): void {
  * disk edit — indistinguishable, so the label is best-effort). Record the
  * displaced last-known state before it is gone. */
 function captureAgentMemory(botId: string): void {
-  let raw: string;
   try {
-    raw = readFileSync(join(workspaceDir(botId), "MEMORY.md"), "utf8");
+    const raw = readMemoryBytes(botId, "MEMORY.md", false);
+    if (raw === null) return;
+    const baseline = readMemoryBaseline(botId);
+    if (raw.equals(baseline)) return;
+    const retained = new Set<string>();
+    retainMemoryVersion(botId, baseline, "agent", retained);
+    if (retained.size) pruneMemoryHistory(botId, retained);
+    writeMemoryBaseline(botId, raw);
   } catch {
+    // Keep the prior baseline if retention failed. A future capture can retry;
+    // bookkeeping must not interrupt a turn that has already claimed a bot.
     return;
   }
-  const baseline = readMemoryBaseline(botId);
-  if (raw === baseline) return;
-  if (baseline !== MEMORY_SEED && !historyHasContent(botId, baseline)) {
-    recordHistoryEntry(botId, baseline, "agent");
-  }
-  writeMemoryBaseline(botId, raw);
 }
 
 /** Id → full record (without text) for every snapshot, newest first. The
  * filename sort IS the time sort: the stamp is the leading field. */
 function historyEntries(botId: string): Array<{ id: string; origin: MemoryHistoryOrigin; at: string }> {
+  if (!memoryDirectory(botId, true, false)) return [];
   let entries: string[];
   try {
     entries = readdirSync(historyDirFor(botId));
@@ -353,11 +437,18 @@ function historyEntries(botId: string): Array<{ id: string; origin: MemoryHistor
     .flatMap((id) => {
       const withoutExt = id.slice(0, -3);
       const stamp = withoutExt.slice(0, 18);
-      const origin = withoutExt.slice(19).replace(/-[0-9a-f]{4}$/, "") as MemoryHistoryOrigin;
+      const origin = historyOrigin(id);
       return HISTORY_ID.test(id) && stamp.length === 18
         ? [{ id, origin, at: parseHistoryStamp(stamp) }]
         : [];
     });
+}
+
+/** Called only after HISTORY_ID has admitted one of the three origins. */
+function historyOrigin(id: string): MemoryHistoryOrigin {
+  if (id.includes("-user-edit-")) return "user-edit";
+  if (id.includes("-agent-")) return "agent";
+  return "rollback";
 }
 
 export interface MemoryHistoryEntry {
@@ -370,10 +461,14 @@ export interface MemoryHistoryEntry {
 /** The bot's memory versions, newest first, size only — contents are fetched
  * one at a time, mirroring listMemoryTopics. */
 export function listMemoryHistory(botId: string): MemoryHistoryEntry[] {
-  return historyEntries(botId).flatMap((entry) => {
+  let entries: ReturnType<typeof historyEntries>;
+  try { entries = historyEntries(botId); } catch { return []; }
+  return entries.flatMap((entry) => {
     try {
-      const stat = statSync(join(historyDirFor(botId), entry.id));
-      return stat.isFile() ? [{ ...entry, bytes: stat.size }] : [];
+      memoryDirectory(botId, true, false);
+      const stat = lstatSync(join(historyDirFor(botId), entry.id));
+      return stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1 && stat.size <= MEMORY_FILE_MAX_BYTES
+        ? [{ ...entry, bytes: stat.size }] : [];
     } catch {
       return [];
     }
@@ -387,7 +482,9 @@ export function readMemoryHistoryEntry(botId: string, id: string): (Omit<MemoryH
   if (!isMemoryHistoryId(id)) return null;
   let raw: string;
   try {
-    raw = readFileSync(join(historyDirFor(botId), id), "utf8");
+    const bytes = readMemoryBytes(botId, id, true);
+    if (bytes === null) return null;
+    raw = bytes.toString("utf8");
   } catch {
     return null;
   }
@@ -395,7 +492,7 @@ export function readMemoryHistoryEntry(botId: string, id: string): (Omit<MemoryH
   return {
     id,
     at: parseHistoryStamp(withoutExt.slice(0, 18)),
-    origin: withoutExt.slice(19).replace(/-[0-9a-f]{4}$/, "") as MemoryHistoryOrigin,
+    origin: historyOrigin(id),
     text: raw,
   };
 }
@@ -404,20 +501,19 @@ export function readMemoryHistoryEntry(botId: string, id: string): (Omit<MemoryH
  * replaces is snapshotted first with origin "rollback", so undoing a restore
  * is another restore. False for an unknown or invalid id. */
 export function restoreMemoryHistory(botId: string, id: string): boolean {
-  const entry = readMemoryHistoryEntry(botId, id);
-  if (entry === null) return false;
+  if (!isMemoryHistoryId(id)) return false;
+  const bytes = readMemoryBytes(botId, id, true);
+  if (bytes === null) return false;
+  memoryDirectory(botId, false, true);
+  const current = readMemoryBytes(botId, "MEMORY.md", false);
+  readMemoryBytes(botId, MEMORY_BASELINE_FILE, true);
   ensureWorkspace(botId);
   const file = join(workspaceDir(botId), "MEMORY.md");
-  let current: string | null = null;
-  try {
-    current = readFileSync(file, "utf8");
-  } catch {
-    /* missing live file — restore recreates it */
-  }
-  if (current === entry.text) return true; // already that version — nothing to do
-  snapshotMemory(botId, "rollback");
-  writeFileAtomic(file, entry.text, { mode: 0o600 });
-  writeMemoryBaseline(botId, entry.text);
+  snapshotMemory(botId, "rollback", current, !current?.equals(bytes));
+  if (current?.equals(bytes)) { writeMemoryBaseline(botId, bytes); return true; }
+  memoryDirectory(botId, false, false);
+  writeFileAtomic(file, bytes, { mode: 0o600 });
+  writeMemoryBaseline(botId, bytes);
   return true;
 }
 
