@@ -3982,3 +3982,15 @@ No revenue uplift is measured. Next: Store ancestry recovery after failed writes
 with exact conversation-path assertions across restart. Twelve inherited files remain
 preserved until publication; no unverified native migration is included. Evidence and
 remaining acceptance are linked from the audit and ownership handoff.
+
+
+Loop74 publication receipt: **175a88d** pushed; GET at17:19:55UTC positively serves
+new `index-DCAkTz04.js` with all four backup markers, superseding earlier old-bundle
+checks. Health/app/assets/downloads200, anonymous status401; desktop1.12.0 unchanged.
+Exact backend SHA and authenticated production behavior remain unverified. GitHub4
+billing-blocked jobs/1 skipped build/0 steps require board billing action; they did not
+attest the observed rollout, whose successful path remains unestablished.
+No product edits or new runtime tests in this receipt:245 files/3609 passed/8 skipped,
+browser4/4, packaged server9/9 remain the measured gates. Current allowance47%remaining;
+existing hourly heartbeat retains2%handoff/1%pause rules and Store ancestry recovery
+next. Twelve inherited files are to be restored and hash-verified after publication.

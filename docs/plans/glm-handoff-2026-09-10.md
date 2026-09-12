@@ -2720,3 +2720,41 @@ remaining work includes Watch editor/lifecycle acceptance, user-paced onboarding
 portable v2 file restore and native signing/runtime gates. Twelve inherited native,
 research and template files remain preserved outside this commit; restore from this
 loop's owned receipt after publication, retaining the original stash.
+
+
+### Loop74 publication receipt — 12 September 2026
+
+Verified product commit **175a88d** is pushed. At17:19:55UTC, GET positively serves
+`index-DCAkTz04.js` with all four new backup markers: configured-computer Drive,
+explicit status retry, account-Drive-unavailable code and installation push route.
+This supersedes the old-bundle observations through17:18:33UTC. Health/app/assets/
+download metadata return200 and anonymous workspace status401. That401 does not
+establish the backend revision or authenticated production acceptance. Desktop metadata
+remains1.12.0 / `e241968`; no native release. GitHub records4 billing-blocked jobs,
+1 skipped build and0 executed steps for this SHA; all four failures carry the payment/
+spending-limit annotation. Board billing action remains required. Those jobs did not
+attest the observed web rollout, whose successful path remains unestablished.
+
+This receipt adds0 runtime tests; the verified product suite remains245 files/3609
+passed/8 skipped, browser4/4 and packaged server9/9. The two local links in the updated
+backup contract resolve2/2. Current allowance is53%used/47%remaining; reported reset
+19September2026,16:43Europe/Rome;0 available reset credits and none consumed. The
+existing hourly CEO heartbeat retains its cadence, quiet reporting and2%handoff/1%pause
+rules, with Store ancestry recovery next. Do not create another automation.
+
+Local receipts: `.omb-scratch/verification/loop74-drive-capability/public-get-*.json`,
+`ci-annotations.json`, `allowance.json` and `contract-links.json`. After this receipt's
+commit, restore only the12 inherited paths from this loop's preservation receipt and
+verify all12 SHA256 values. Keep original stash4d13860fa6cb858efc48713dba9fb4637c7101e7;
+consult the restoration receipt before any later stash action.
+
+Store implementation map for the next owner: `ThreadState` tracks unpersisted IDs;
+collect only the selected parent chain. Extend MessageDB's existing append transaction
+with a narrow batch-and-leaf operation, inserting required ancestors before the new
+row and active leaf. Avoid nested transactions and blind INSERT OR REPLACE of existing
+rows. Append uses its resolved parent; `branchMessage` uses the source's parent,
+not an unrelated volatile tail; `setActiveLeaf` repairs the selected newest descendant's
+ancestry. Publish strict updates only after commit and preserve seed-answer semantics.
+Extend persist-failure-store, store and message-db tests with real SQLite rejection,
+exact parent/path/leaf assertions and a bounded fresh-child restart. Detailed anchors
+remain in the local `next-Store-slice.md`; this map was read-only, with0 new tests.
