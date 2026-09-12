@@ -93,7 +93,8 @@ export function SeedOptionCardView({ card, action, hotkeys = false, writeBlocked
   </section>;
 }
 
-export function UnavailableSeedCard({ card }: { card: OptionCardData }) {
+export function UnavailableSeedCard({ card, botId }: { card: OptionCardData; botId?: string }) {
+  const sendable = Boolean(botId && card.answered);
   if (card.dismissed) return null;
   return <section aria-label="Saved question" className="w-full min-w-0 max-w-[840px] rounded-2xl border border-hairline/50 bg-card p-4 [overflow-wrap:anywhere]">
     <h3 className="font-semibold text-ink">{card.title}</h3>
@@ -101,5 +102,26 @@ export function UnavailableSeedCard({ card }: { card: OptionCardData }) {
     <ul className="mt-3 space-y-2 text-sm text-ink">{card.options.map((option, index) => <li key={`${index}:${option}`}>{option}</li>)}</ul>
     {card.answered !== undefined && <p className="mt-3 whitespace-pre-wrap text-sm text-ink">Saved answer: {card.answered}</p>}
     <p className="mt-3 text-sm text-ink-secondary">This saved question cannot be answered here. Continue in the conversation.</p>
+    {/* The answer may have been recorded without its task ever starting (an
+        older client's split write). A dead-end card strands that intent —
+        offer to send it as an ordinary message instead. */}
+    {sendable && <UnavailableSeedSend botId={botId!} answer={card.answered!} />}
   </section>;
+}
+
+/** Store-bound tail of the recovery affordance — split out so the plain
+ * card still server-renders without a store provider. */
+function UnavailableSeedSend({ botId, answer }: { botId: string; answer: string }) {
+  const { state, dispatch } = useStore();
+  const bot = state.bots.find((candidate) => candidate.id === botId);
+  if (!bot || bot.busy) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => dispatch({ type: "send", botId, text: answer })}
+      className="mt-3 min-h-10 rounded-lg border border-hairline/50 px-3 py-2 text-sm text-ink hover:bg-raised"
+    >
+      Send “{answer}” to {bot.name}
+    </button>
+  );
 }

@@ -20,7 +20,7 @@ export function OptionCard(props: OptionCardProps) {
   if (props.message.card.requestId) return <LiveOptionCard {...props} />;
   const reference = seedCardReference(state, props.botId, props.message.id);
   return reference ? <SeedOptionCard key={seedCardKey(reference)} reference={reference} card={props.message.card} hotkeys={props.hotkeys ?? false} />
-    : <UnavailableSeedCard card={props.message.card} />;
+    : <UnavailableSeedCard card={props.message.card} botId={props.botId} />;
 }
 
 function LiveOptionCard({
