@@ -545,13 +545,16 @@ function ToolStatusMark({ tool }: { tool: NonNullable<Message["tool"]> }) {
   return failed ? <X size={13} /> : <Check size={13} className="text-success" />;
 }
 
-/** gaia-ui-style collapsed run: consecutive tool calls become one
- * "Used N tools" section — stacked status marks, expandable to the
- * individual chips. A long agent turn reads as one calm line instead of a
- * wall of chips. */
+/** gaia-ui-style collapsed run: consecutive tool calls become one calm line
+ * — how long the run took, how many tools it used, stacked status marks,
+ * expandable to the individual chips. */
 function ToolRunGroup({ items }: { items: Message[] }) {
   const [open, setOpen] = useState(false);
   const running = items.filter((m) => m.tool?.ok === undefined).length;
+  // wall-clock span of the run: first tool started → last tool reported.
+  // Zero-length runs just skip the duration — "Worked for 0s" is noise.
+  const span = items.length > 1 ? Math.max(0, (items[items.length - 1].at ?? 0) - (items[0].at ?? 0)) : 0;
+  const duration = span > 999 ? `Worked for ${formatRunDuration(span)} · ` : "";
   return (
     <div className="flex justify-start">
       <div className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-hairline/40 bg-panel">
@@ -568,7 +571,7 @@ function ToolRunGroup({ items }: { items: Message[] }) {
             ))}
           </span>
           <span>
-            Used {items.length} tools{running > 0 ? ` · ${running} running` : ""}
+            {duration}Used {items.length} tools{running > 0 ? ` · ${running} running` : ""}
           </span>
           <ChevronDown size={14} className={cn("ml-auto transition-transform", open && "rotate-180")} />
         </button>
@@ -585,6 +588,16 @@ function ToolRunGroup({ items }: { items: Message[] }) {
 }
 
 type RenderItem = { msg: Message } | { group: Message[] };
+
+/** "Worked for 2m 13s" — compact wall-clock span for a run summary. */
+function formatRunDuration(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  if (seconds === 0) return `${minutes}m`;
+  return `${minutes}m ${seconds}s`;
+}
 
 /** Collapse consecutive plain tool-run messages into single groups. Bot⇄bot
  * comm chips, errors, and everything else pass through untouched. */

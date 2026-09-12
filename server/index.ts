@@ -7164,6 +7164,59 @@ let requestUserEmail = "";
         return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
       }
     }
+    // Opt-in Drive connect: sign-in is basic-scope (drive.appdata is a
+    // restricted scope and would show Google's unverified-app interstitial
+    // to every new user), so backup access is granted here, separately.
+    // The callback binds to the requesting account twice — the signed state
+    // AND the live session — and lands back in the app with a flag.
+    if (path === "/api/workspace/google/status" && method === "GET") {
+      const session = requestUserId ? { userId: requestUserId } : await getSession(req);
+      if (!session) return json(res, 401, { error: "sign in with Google first" });
+      const tokens = accountDrive.googleTokensFor(getDb(), session.userId);
+      return json(res, 200, { drive: Boolean(tokens?.refreshToken) });
+    }
+    if (path === "/api/workspace/google/connect" && method === "GET") {
+      const session = requestUserId ? { userId: requestUserId } : await getSession(req);
+      if (!session) return json(res, 401, { error: "sign in with Google first" });
+      const proto = String(req.headers["x-forwarded-proto"] ?? "https").split(",")[0].trim() || "https";
+      const host = String(req.headers.host ?? "");
+      if (!/^[\w.-]+$/.test(host)) return json(res, 400, { error: "bad host" });
+      try {
+        const target = accountDrive.googleDriveAuthUrl(
+          `${proto}://${host}`,
+          accountDrive.signDriveState(session.userId),
+        );
+        res.writeHead(302, { location: target });
+        return res.end();
+      } catch (e) {
+        return json(res, 503, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/google/callback" && method === "GET") {
+      const url = new URL(req.url ?? "/", "https://muster.today");
+      const state = url.searchParams.get("state") ?? "";
+      const code = url.searchParams.get("code") ?? "";
+      const stateUser = accountDrive.verifyDriveState(state);
+      const session = !code || !stateUser ? null : requestUserId ? { userId: requestUserId } : await getSession(req);
+      const ok = Boolean(session && session.userId === stateUser);
+      if (ok) {
+        const proto = String(req.headers["x-forwarded-proto"] ?? "https").split(",")[0].trim() || "https";
+        const host = String(req.headers.host ?? "");
+        try {
+          const connected = await accountDrive.connectDriveFor(
+            getDb(), session!.userId, code, `${proto}://${host}`,
+          );
+          res.writeHead(302, { location: connected ? "/app?drive=connected" : "/app?drive=no-account" });
+          return res.end();
+        } catch {
+          res.writeHead(302, { location: "/app?drive=error" });
+          return res.end();
+        }
+      }
+      res.writeHead(302, { location: "/app?drive=error" });
+      return res.end();
+    }
+
     if (path === "/api/workspace/google/pull" && method === "POST") {
       const session = requestUserId ? { userId: requestUserId } : await getSession(req);
       if (!session) return json(res, 401, { error: "sign in with Google first" });

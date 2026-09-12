@@ -1,7 +1,7 @@
 import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AGENT_COLORS, type AgentState } from "@/lib/mascot";
+import { AGENT_COLORS } from "@/lib/mascot";
 import { AgentAvatar } from "./Avatar";
 import { MusterBloom } from "./MusterBloom";
 import { MusterMascot } from "./MusterMascot";

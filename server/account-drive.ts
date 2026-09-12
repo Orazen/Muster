@@ -3,9 +3,11 @@
 // Hosted v1 workspace routes remain disabled until account-scoped portable
 // recovery is implemented and verified. Payload encryption lives elsewhere.
 import type { DatabaseSync } from "node:sqlite";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { z } from "zod";
 import { uploadBundle, downloadBundle } from "./drive-sync.ts";
+import { deploymentSigningSecret } from "./auth.ts";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID?.trim() ?? "";
@@ -78,4 +80,91 @@ export async function drivePushFor(accessToken: string, payload: string): Promis
 
 export async function drivePullFor(accessToken: string): Promise<string | null> {
   return downloadBundle(accessToken);
+}
+
+// ── opt-in Drive connect ─────────────────────────────────────────────────
+// Sign-in is deliberately basic-scope (see auth.ts): drive.appdata is a
+// restricted scope and requesting it at login shows every new user Google's
+// unverified-app interstitial. Backup therefore asks for Drive as its own
+// explicit grant — same client, same account row, one click in settings.
+
+const DRIVE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+export const DRIVE_CALLBACK_PATH = "/api/workspace/google/callback";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.appdata";
+
+/** The consent URL for the separate Drive grant. `origin` is this
+ * deployment's own https origin — it decides the redirect_uri, so Google's
+ * client must list `${origin}${DRIVE_CALLBACK_PATH}`. */
+export function googleDriveAuthUrl(origin: string, state: string): string {
+  if (!CLIENT_ID || !CLIENT_SECRET) throw new Error("Google OAuth is not configured on this deployment");
+  const url = new URL(DRIVE_AUTH_URL);
+  url.search = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: `${origin}${DRIVE_CALLBACK_PATH}`,
+    response_type: "code",
+    scope: DRIVE_SCOPE,
+    access_type: "offline",
+    prompt: "consent",
+    state,
+  }).toString();
+  return url.toString();
+}
+
+/** State = userId.issued.mac — binds the callback to the requesting account
+ * and expires in ten minutes. */
+export function signDriveState(userId: string, now = Date.now()): string {
+  const issued = now.toString();
+  const mac = createHmac("sha256", deploymentSigningSecret()).update(`${userId}.${issued}`).digest("base64url");
+  return `${userId}.${issued}.${mac}`;
+}
+
+export function verifyDriveState(state: string): string | null {
+  const parts = state.split(".");
+  if (parts.length !== 3) return null;
+  const [userId, issued, mac] = parts;
+  const age = Date.now() - Number(issued);
+  if (!userId || !Number.isFinite(age) || age < 0 || age > 10 * 60_000) return null;
+  const expected = createHmac("sha256", deploymentSigningSecret()).update(`${userId}.${issued}`).digest("base64url");
+  const a = Buffer.from(mac);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b) ? userId : null;
+}
+
+const driveCodeResponseSchema = z.object({
+  access_token: z.string().min(1),
+  refresh_token: z.string().min(1).optional(),
+  expires_in: z.number().optional(),
+});
+
+/** Trade the consent code for tokens and store them on the user's existing
+ * google account row. False when no such row exists — Drive connects to an
+ * account, it does not create one. */
+export async function connectDriveFor(db: DatabaseSync, userId: string, code: string, origin: string): Promise<boolean> {
+  if (!CLIENT_ID || !CLIENT_SECRET) throw new Error("Google OAuth is not configured on this deployment");
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      redirect_uri: `${origin}${DRIVE_CALLBACK_PATH}`,
+      grant_type: "authorization_code",
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const parsed = driveCodeResponseSchema.safeParse(await res.json().catch(() => null));
+  if (!res.ok || !parsed.success) throw new Error("Google refused the Drive connection — try connecting again");
+  const row = db.prepare(
+    `SELECT id FROM "account" WHERE "userId" = ? AND "providerId" = 'google' ORDER BY "createdAt" DESC LIMIT 1`,
+  ).get(userId);
+  if (!row || typeof row.id !== "string") return false;
+  const expiresAt = parsed.data.expires_in
+    ? new Date(Date.now() + parsed.data.expires_in * 1000).toISOString()
+    : null;
+  db.prepare(
+    `UPDATE "account" SET "accessToken" = ?, "refreshToken" = COALESCE(?, "refreshToken"),
+     "accessTokenExpiresAt" = ?, "updatedAt" = ? WHERE "id" = ?`,
+  ).run(parsed.data.access_token, parsed.data.refresh_token ?? null, expiresAt, new Date().toISOString(), row.id);
+  return true;
 }

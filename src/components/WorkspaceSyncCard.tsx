@@ -3,7 +3,7 @@
 // The current format does not include conversation history or support moving
 // a workspace to another installation. Hosted deployments reject these routes.
 import { Download, HardDriveDownload, Loader2, Send, Upload } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -19,7 +19,18 @@ export function WorkspaceSyncCard() {
   const [step, setStep] = useState<SyncStep>({ kind: "idle" });
   const [showTelegram, setShowTelegram] = useState(false);
   const [botToken, setBotToken] = useState("");
+  // null = unknown yet; false shows the connect button (sign-in is
+  // basic-scope by design, so Drive is granted here, not at login)
+  const [drive, setDrive] = useState<boolean | null>(null);
   const busy = step.kind === "busy";
+
+  useEffect(() => {
+    let alive = true;
+    api("/api/workspace/google/status")
+      .then((r: { drive: boolean }) => alive && setDrive(r.drive))
+      .catch(() => alive && setDrive(null));
+    return () => { alive = false; };
+  }, []);
 
   const run = async (label: string, fn: () => Promise<string>) => {
     setStep({ kind: "busy", label });
@@ -167,6 +178,14 @@ export function WorkspaceSyncCard() {
           />
         </label>
         <span className="mx-1 w-px self-stretch bg-hairline/40" aria-hidden="true" />
+        {/* Drive needs its own grant: sign-in is basic-scope on purpose, so
+            first-time users connect here — one consent, then the buttons
+            below work. */}
+        {drive === false && (
+          <a href="/api/workspace/google/connect" className={cn(button, "text-accent font-medium")}>
+            <HardDriveDownload size={13} /> Connect Google Drive…
+          </a>
+        )}
         {/* Requires a Google Drive grant on this installation. Desktop pairing
             alone does not transfer the web account's Drive grant. */}
         <button type="button" disabled={busy} onClick={() => void googlePush()} className={cn(button, "text-accent font-medium")}>
