@@ -1,7 +1,7 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Clock, Mic, Square, Target, Users, X } from "lucide-react";
-import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
+import { useStore, useStopCleanup, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useComposerDraft } from "@/lib/drafts";
 import { AgentAvatar } from "./Avatar";
@@ -49,6 +49,7 @@ export function Composer({
   onEditLast?: () => void;
 }) {
   const { state, dispatch } = useStore();
+  const { action: stopAction } = useStopCleanup(group ? undefined : bot?.id);
   const { capabilities } = useDesktopCapabilities();
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers members plus @everyone; explicit mentions override the room's
@@ -368,6 +369,7 @@ export function Composer({
                 if (group) dispatch({ type: "interruptGroup", groupId: group.id });
                 else if (bot) dispatch({ type: "interrupt", botId: bot.id });
               }}
+              cancelPending={Boolean(stopAction.pending)}
             />
           </div>
         )}
@@ -475,7 +477,9 @@ export function Composer({
               else if (bot) dispatch({ type: "interrupt", botId: bot.id });
             }}
             aria-label="Stop this turn"
-            className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
+            disabled={Boolean(stopAction.pending)}
+            aria-busy={Boolean(stopAction.pending)}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
             title="Stop"
           >
             <Square size={14} className="fill-current" />

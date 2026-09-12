@@ -1,50 +1,52 @@
 # Current Muster state — read before editing
 
-Updated 12 September 2026. This short snapshot takes precedence over historical
-roadmap status; the latest owner request always takes precedence over this file.
+Updated 12 September 2026. This snapshot takes precedence over historical roadmap
+status; the latest owner request takes precedence over this file.
 
-**Owner priority:** preserve the working web app. Repair reproduced defects and
-keep the existing layout, Flower mascot, /app and /os shells, saved choices and
-sessions intact. Read [the stability contract](../guides/web-app-stability.md).
+**Owner priority:** keep the existing web layout, Flower mascot, /app and /os
+shells, choices and sessions stable. Read [the stability contract](../guides/web-app-stability.md).
 
-**Published product:** Loop79, commit **e1cfcb9**. Explicit Vite backend identity,
-fixed ports and scratch exclusions prevent accidental preview changes. Missing
-assets now return real 404s; layout/theme source was not changed. Full suite
-**250 files / 3808 passed / 8 skipped / 0 failed**; broker 2/2, updater 14/14, packaged
-server 9/9. Focused 66/66, minimal browser 2/2, actual Muster onboarding 7/7. Types,
-lint and web build pass; 962 source inputs match.
+**Verified candidate:** Loop80 adds cleanup-only Stop recovery, separate from the
+six-second error banner. Receipts bind the original owner/bot/dispatch generation;
+retry never interrupts providers. Later starts invalidate old receipts. Normal
+layout is unchanged; the notice appears only after an uncertain/failed Stop.
+In-memory recovery does not survive reload/restart; durable failure/restart
+recovery remains open.
 
-**Production, 19:32 UTC:** missing JS/CSS repair observed live; five repeated
-samples passed **15/15** GET checks. App shell and served JS/CSS stayed byte-for-byte
-unchanged from baseline. Canonical workspace: https://muster.orazen.online/app.
-Served entries DCAkTz04/C6Cegjsm differ from this Mac's build; exact source/artifact
-identity is unverified, not automatically an old deployment. Desktop downloads
-remain 1.12.0/e241968; no new native release or authenticated production test.
+Full **254 files / 3862 passed / 8 skipped / 0 failed**; broker 2/2, updater 14/14,
+packaged server 9/9 under Node, not Electron. Focused42 server + 30 UI; browser 3/3
+covers actual503/retry, same-bot two-tab stale409, sign-out, draft and 320px notice.
+All 970 input hashes match. Types/lint/web build pass. Cleanup: 6 servers + 4 providers
+exited, 12 ports closed, 3 temporary roots removed. The latest ledger retains initial
+failures, test details and limits. Publication/GET acceptance follows below.
 
-**Deployment wiring:** registered push hook 669688357 returned 404 for e1cfcb9;
-Actions had 4 billing-rejected jobs, 1 skipped, 0 steps. Another path nevertheless
-delivered the static fix. The owner has been asked to sign in to the opened
-Dokploy panel; authenticated access is needed to repair the failed hook and inspect
-the actual promotion path. Do not guess URLs or resend triggers repeatedly.
+**Production baseline:** https://muster.orazen.online/app serves
+DCAkTz04/C6Cegjsm; missing scripts/styles return genuine404. Downloads remain
+1.12.0/e241968. This slice does not claim a native release, exact backend source
+identity, actual Google consent or authenticated production recovery acceptance.
 
+**Deployment wiring:** registered push hook 669688357 returned 404 in Loop79 and
+Actions were billing-rejected, yet the prior static repair reached production.
+Authenticated Dokploy configuration remains unavailable; the formerly opened
+in-app tab is gone. Do not invent URLs, resend triggers repeatedly or equate one
+failed path with proof of no rollout. One verified trigger accompanies Loop80.
 
 **Preserved local work:** five iOS/Watch source/test files, six docs/research/glm
-files, and www/templates.html remain outside this slice. All 12 exact hashes and
-stash ownership are recorded in `.omb-scratch/verification/loop79-web-stability/`
-under `inherited-preservation.json` / `inherited-restoration.json`. Check actual
-status and the receipt before touching them; never sweep them into a cleanup
-commit. Retain the original preexisting stash.
+files and www/templates.html stay outside this slice. Check the 12 exact hashes
+and stash ownership in `.omb-scratch/verification/loop80-stop-recovery/`
+`inherited-preservation.json` / `inherited-restoration.json`. Restore exactly;
+never sweep them into cleanup commits. Retain the original preexisting stash.
 
-**Next work:** repair deployment wiring when Dokploy login is available. The next
-code slice is the original-generation
-Stop cleanup retry described in the [peer capability plan](peer-capability-next-slice-2026-09-12.md).
-Do not replay generic interrupt for an old failure: it can stop newer work.
-Deployment hardening debt is listed in the stability guide. Native signing/runtime,
-real Google consent, complete portable sync, VM execution, Mimosa and two high
-dependency alerts remain open. Existing automation stays PAUSED.
+**Next:** exact web/server build identity, then verified deployment wiring when
+Dokploy access is available. Finish the remaining peer/crash acceptance in the
+[peer plan](peer-capability-next-slice-2026-09-12.md), durable Stop recovery across
+reload, native signing/runtime, actual Google consent, full sync/backup, VM and
+Mimosa. Two Android Metro/image-size high alerts remain open; the read-only audit
+found no fixed published upgrade. Keep existing mitigations and automation PAUSED.
 
-**Handoff rule:** update this snapshot, the [ledger](glm-handoff-2026-09-10.md) and
-[CEO log](ceo-log.md) with real test counts, observed deployment evidence and next
-scope. Report failures and limitations. Do not resume broad redesigns or relabel
-local fixture acceptance as production/native acceptance. Latest account allowance
-was 11% remaining; read current usage rather than treating that snapshot as live.
+**Handoff:** update this snapshot, the [ledger](glm-handoff-2026-09-10.md) and
+[CEO log](ceo-log.md) with real counts, deployed evidence and remaining scope.
+Never relabel fixture tests as native/production acceptance or resume broad
+redesigns. Read live account usage before applying the owner's 2% handoff threshold.
+
+**Allowance snapshot:** 4% remaining at the Loop80 acceptance check; reset19 September2026 at16:43 Europe/Rome. No reset consumed. Re-read usage before the owner’s2%handoff threshold.

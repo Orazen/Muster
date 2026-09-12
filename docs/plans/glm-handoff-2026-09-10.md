@@ -3007,3 +3007,92 @@ plus broker 2/2, updater 14/14, packaged server 9/9, focused 66/66, browser 2/2 
 onboarding 7/7. This documentation receipt adds 0 runtime tests. All 962 code hashes
 remain unchanged. Restore all 12 inherited files using the local Loop79 receipt,
 retain the original stash and preserve PAUSED automation.
+
+
+## Loop80 — Stop cleanup recovery, 12 September 2026
+
+Owner priority remains the stable existing web workspace. Reproduced the missing
+recovery path in source: both Stop controls disappeared at idle and the shared
+error expired after six seconds. Added one failure-only notice; navigation,
+mascot, theme and normal conversation layout are preserved.
+
+Implemented owner/bot/dispatch-generation receipts for failed durable queue
+cancellation. Retry removes only captured original queue IDs and never invokes a
+provider interrupt. Every later direct or room start invalidates the receipt
+before setup awaits; delete, owner merge, task deletion and provider reload also
+retire it. The route rechecks ownership after reading its body. Same-generation
+retries are idempotent. Initial Stop freezes one actual provider destination,
+avoiding a delayed second interruption after an await.
+
+The account-scoped frontend controller shares a synchronous lock across bot Stop
+entrypoints. The accessible ChatView notice survives idle and task changes, keeps
+unsent drafts intact, and offers cleanup-only retry. Stale/missing receipts direct
+the user to review current work. Account change, unmount, 401 and ten-second
+request/body timeout fence late responses. Cleanup wording does not assert that
+provider interruption succeeded when that outcome is uncertain.
+
+**Final gates:** full **254 files / 3862 passed / 8 skipped / 0 failed**, 309.03s
+Vitest; complete `npm test` 322.048s. Broker **2/2**, updater **14/14**, rebuilt
+packaged server **9/9** under Node22.22.3/arm64 macOS/ABI127, **not Electron**.
+Focused server **42/42** (18 registry, 6 real durable-storage, 18 real HTTP),
+existing delegation **56/56**, UI **30/30**. Frontend/server/E2E types, lint and web
+build pass; the one existing intentional snapshot-spread lint warning and large
+bundle warning remain. All **970 source inputs** match the final freeze.
+
+Final browser **3/3**, 23.755s command, installed Chrome with owned email/pairing
+accounts and offline ACP. Real injected peer credentials and a reversible
+filesystem obstruction produce the actual 503. Acceptance covers synchronous
+duplicate Stop/retry, failed retry, idle >6 seconds, same-bot task change, exact
+draft, 320x568 and 1280x900 notice/control visibility, successful durable cleanup,
+and a newer same-bot turn in another tab refusing old cleanup409 without a
+provider cancellation. A held real Stop503 delivered after sign-out leaves the
+account signed out with no recovery surface. Chrome may omit requestfailed after
+document destruction; no transport-abort event guarantee is claimed. Cleanup
+receipts prove **6 servers + 4 providers exited, 12 ports closed, 3 roots removed**.
+
+Retained failures/corrections: first real HTTP boot rejected a TypeScript
+parameter property unsupported by Node strip-only execution (1 failed /18 skipped);
+explicit fields corrected it. Initial lint had12 errors, all corrected. First
+browser run1/2 passed because the second tab selected the helper bot; exact bot
+route/request/credential identity fixed the fixture. First sign-out probe0/1
+failed on an assumed CDP abort event; the final test asserts the real account/UI
+boundary instead and records transport observation. Independent review fixed
+cleanup diagnostics that could have skipped teardown; final3-case rerun and
+persisted cleanup receipts pass. Initial full suite also passed3862/8; final full
+rerun includes neutral copy and the one verified deployment trigger.
+
+**Limits:** in-memory recovery intentionally does not survive page reload or
+server restart. A failed nondurable cancellation can still reload accepted queue
+work after a restart; durable failure/restart recovery remains a release gate.
+Browser tests are not actual Google consent, authenticated production, installed
+Electron, native iOS/Watch/Android, VM or complete sync acceptance. Automation
+remains untouched and must stay PAUSED. All12 inherited files remain outside this
+slice; restore exact hashes from the Loop80 preservation receipt and retain the
+original stash before stopping.
+
+**Publication:** one .deploy-trigger update accompanies this verified candidate.
+Push and post-publication GET evidence are recorded separately below. The latest
+baseline still serves DCAkTz04/C6Cegjsm; missing scripts/styles remain proper404.
+No new native release is claimed (downloads1.12.0/e241968). The failed registered
+webhook still needs authenticated Dokploy inspection; the formerly opened tab is
+no longer available (current in-app browser inventory0tabs). No hosted settings,
+credentials, sessions, billing, dependency versions or user processes changed.
+
+**Next:** expose exact web/server build identity for release diagnosis without
+changing the user layout; repair actual deployment wiring when credentials are
+available. Finish peer owner-merge/held-setup/crash-restart acceptance and durable
+Stop recovery before a full release. The read-only dependency audit found2open
+high `image-size` alerts in Android's Metro chain, with no fixed published upgrade;
+retain existing mitigations and do not dismiss the alerts. See the primary
+[ICNS advisory](https://github.com/advisories/GHSA-w3rx-r6r6-pgpr) and
+[JXL/HEIF advisory](https://github.com/advisories/GHSA-5p2g-fcmc-qvqq). The audit ran
+0tests/0installs; it is not a security conclusion. Native signing/runtime, actual
+Google consent, full portable sync, VM and Mimosa remain open.
+
+Evidence: `.omb-scratch/verification/loop80-stop-recovery/` —
+`all-tests-final-result.json`, `source-freeze-final.json`, `browser-receipts-result.json`,
+`browser-cleanup-summary.json`, per-test receipt files, `independent-review.json`,
+`dependency-next-slice.json`, and retained failures. No measured revenue outcome
+is attributed to this reliability slice.
+
+Allowance at Loop80 acceptance: **4% remaining**; reset **19 September2026, 16:43 Europe/Rome**. No reset consumed. Owner’s2%handoff threshold has not yet been reached.

@@ -277,25 +277,61 @@ describe.skipIf(process.platform === "win32")("peer capabilities from actual off
     }
   });
 
-  it("reports a failed durable queue cancellation on Stop and clears it on explicit retry", async () => {
+  it("returns an owner-bound cleanup receipt, rejects malformed and foreign retries, and cleans original queues idempotently", async () => {
     const before = promptCount();
     const queued = await api("/api/internal/delegate-bot", "POST", { toBotId: helper.id, message: "Never dispatch after failed Stop" }, lease().token);
     expect(queued.status).toBe(200); expect(await queued.json()).toMatchObject({ queued: true });
     const file = join(data, "delegations.json"); const backup = join(directory, "saved-delegations.json");
     const saved = readFileSync(file, "utf8");
     expect(z.record(z.string(), z.array(z.object({ toBotId: z.string() }))).parse(JSON.parse(saved))[lease().threadId]).toEqual([{ toBotId: helper.id }]);
+    let cleanupReceipt = "";
     renameSync(file, backup); mkdirSync(file);
     try {
       const stopped = await api(`/api/bots/${caller.id}/interrupt`, "POST", {});
       expect(stopped.status).toBe(503);
-      expect(await stopped.json()).toEqual({ error: "The turn was stopped, but queued handoffs could not be durably canceled. Retry Stop before restarting Muster." });
+      const body = z.object({ code: z.literal("STOP_CLEANUP_PENDING"), error: z.string(), cleanupReceipt: z.string().regex(/^[a-f0-9]{64}$/) }).parse(await stopped.json());
+      cleanupReceipt = body.cleanupReceipt;
+      expect(body.error).toContain("Retry cleanup");
       expect(promptCount()).toBe(before);
       expect((await api("/api/internal/agents", "GET", undefined, lease().token)).status).toBe(401);
+      const pending = await api(`/api/bots/${caller.id}/stop-cleanup`, "POST", { receipt: cleanupReceipt });
+      expect(pending.status).toBe(503);
+      expect(await pending.json()).toMatchObject({ code: "STOP_CLEANUP_PENDING", cleanupReceipt });
+      expect((await api(`/api/bots/${caller.id}/stop-cleanup`, "POST", {})).status).toBe(400);
+      expect((await api(`/api/bots/${caller.id}/stop-cleanup`, "POST", { receipt: "invalid" })).status).toBe(400);
+      expect((await api(`/api/bots/${helper.id}/stop-cleanup`, "POST", { receipt: cleanupReceipt })).status).toBe(409);
+      const signed = await api("/api/auth/sign-up/email", "POST", { name: "Owned foreign retry", email: `retry-${randomBytes(10).toString("hex")}@example.test`, password: randomBytes(32).toString("base64url") });
+      expect(signed.status).toBe(200);
+      const foreignCookie = signed.headers.getSetCookie().find((value) => value.startsWith("better-auth.session_token="))?.split(";")[0];
+      if (!foreignCookie) throw new Error("No synthetic foreign session");
+      const foreignRetry = await fetch(`${url}/api/bots/${caller.id}/stop-cleanup`, {
+        method: "POST", headers: { origin: url, "content-type": "application/json", cookie: foreignCookie },
+        body: JSON.stringify({ receipt: cleanupReceipt }), signal: AbortSignal.timeout(15_000),
+      });
+      expect(foreignRetry.status).toBe(404);
+      expect(promptCount()).toBe(before);
     } finally { rmdirSync(file); renameSync(backup, file); }
-    const retry = await api(`/api/bots/${caller.id}/interrupt`, "POST", {});
-    expect(retry.status).toBe(200); await idle();
-    expect(z.record(z.string(), z.array(z.object({ toBotId: z.string() }))).parse(JSON.parse(readFileSync(file, "utf8")))[lease().threadId] ?? []).toEqual([]);
-    expect(promptCount()).toBe(before);
+    // Selecting another task does not authorize a different cleanup or discard
+    // the original detached task's recovery receipt.
+    const originalThread = lease().threadId;
+    expect((await api(`/api/bots/${caller.id}/tasks/${alternateThread}`, "POST", {})).status).toBe(200);
+    try {
+      const retry = await api(`/api/bots/${caller.id}/stop-cleanup`, "POST", { receipt: cleanupReceipt });
+      expect(retry.status).toBe(200); await idle();
+      expect(await retry.json()).toEqual({ ok: true });
+      const disk = readFileSync(file, "utf8");
+      expect(z.record(z.string(), z.array(z.object({ toBotId: z.string() }))).parse(JSON.parse(disk))[originalThread] ?? []).toEqual([]);
+      expect((await api(`/api/bots/${caller.id}/stop-cleanup`, "POST", { receipt: cleanupReceipt })).status).toBe(200);
+      expect(readFileSync(file, "utf8")).toBe(disk);
+      expect(promptCount()).toBe(before);
+    } finally { expect((await api(`/api/bots/${caller.id}/tasks/${originalThread}`, "POST", {})).status).toBe(200); }
+    // Even an acknowledged receipt cannot later become Stop for a new turn.
+    current = await begin();
+    const stale = await api(`/api/bots/${caller.id}/stop-cleanup`, "POST", { receipt: cleanupReceipt });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ code: "STOP_CLEANUP_STALE" });
+    expect((await roster()).find((bot) => bot.id === caller.id)?.busy).toBe(true);
+    expect((await api("/api/internal/agents", "GET", undefined, lease().token)).status).toBe(200);
   });
 
   it("keeps the captured source task valid while the UI selects another task", async () => {

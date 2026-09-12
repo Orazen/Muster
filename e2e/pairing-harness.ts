@@ -195,12 +195,13 @@ export interface PairingHarness {
   stop(): Promise<void>;
 }
 
-export type FixtureEngineMode = "happy" | "permission-gated" | "rehearsal-gated";
+export type FixtureEngineMode = "happy" | "permission-gated" | "rehearsal-gated" | "peer-capability";
 
 interface FakeEngineEnvironment {
   FAKE_ACP_MODE: FixtureEngineMode;
   FAKE_ACP_DUMP: string;
   FAKE_ACP_PERMISSION_DUMP?: string;
+  FAKE_ACP_PEER_DIRECTORY?: string;
 }
 
 export async function startPairingHarness(
@@ -267,10 +268,14 @@ setInterval(() => { if (process.ppid !== owner) process.exit(0); }, 100).unref()
         FAKE_ACP_DUMP: join(directory, "fake-acp.json"),
       };
       if (permissionOutcomePath) engineEnvironment.FAKE_ACP_PERMISSION_DUMP = permissionOutcomePath;
+      if (engineMode === "peer-capability") {
+        engineEnvironment.FAKE_ACP_PEER_DIRECTORY = join(directory, "peer-receipts");
+        await mkdir(engineEnvironment.FAKE_ACP_PEER_DIRECTORY, { mode: 0o700 });
+      }
       await writeFile(join(dataDirectory, "config.json"), JSON.stringify({
         instances: kind === "cloud"
           ? { ghost: { driver: "not-a-real-driver", displayName: "Offline fixture" } }
-          : { gemini: { driver: "geminiAgent", displayName: "Pairing test engine", environment: engineEnvironment,
+          : { gemini: { driver: engineMode === "peer-capability" ? "grokAgent" : "geminiAgent", displayName: "Pairing test engine", environment: engineEnvironment,
             config: { cli: fakeCli, fullAuto: false, workspace: home } } },
       }), { mode: 0o600 });
       const guard = join(directory, "block-outbound.mjs");

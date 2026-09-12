@@ -33,6 +33,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { costCaption, formatTokens, formatUsd, usageChip } from "@/lib/usage";
 import {
   useStore,
+  useStopCleanup,
   useStreaming,
   formatTime,
   messageVersions,
@@ -53,6 +54,7 @@ import { PrivacyNotice } from "./PrivacyNotice";
 import { OptionCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { Composer } from "./Composer";
+import { StopCleanupNotice } from "./StopCleanupNotice";
 import { TimelineStrip } from "./TimelineStrip";
 import { ConnectorCard } from "./ConnectorCard";
 import { ModelPicker } from "./ModelPicker";
@@ -807,6 +809,7 @@ const iconToggleClasses =
 
 export function ChatView({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
+  const { stopCleanup, action: stopAction } = useStopCleanup(bot.id);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [findOpen, setFindOpen] = useState(false);
 
@@ -1054,7 +1057,9 @@ export function ChatView({ bot }: { bot: Bot }) {
         interrupt={bot.busy && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
-              className="flex min-h-9 items-center gap-1.5 rounded-lg border border-danger/30 bg-danger/10 px-3 text-[13px] font-medium text-danger hover:bg-danger/20"
+              disabled={Boolean(stopAction.pending)}
+              aria-busy={Boolean(stopAction.pending)}
+              className="flex min-h-9 items-center gap-1.5 rounded-lg border border-danger/30 bg-danger/10 px-3 text-[13px] font-medium text-danger hover:bg-danger/20 disabled:opacity-50"
               title="Stop this turn"
             >
               <Square size={12} className="fill-current" />
@@ -1121,6 +1126,10 @@ export function ChatView({ bot }: { bot: Bot }) {
       {receiptOpen && <JobReceiptModal key={`${bot.id}:${bot.threadId}`} bot={bot} onClose={() => setReceiptOpen(false)} onReturnFocus={() => receiptButtonRef.current?.focus()} />}
 
       {/* Error banner */}
+      <StopCleanupNotice action={stopAction} threadId={bot.threadId}
+        onRetry={() => { void stopCleanup.retry(bot.id); }}
+        onReview={() => { jumpToLatest(); scrollRef.current?.focus(); }}
+        onDismiss={() => stopCleanup.dismiss(bot.id)} />
       {state.error && (
         <div className="mx-auto w-full max-w-[900px] px-5">
           <div className="mb-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[13px] text-danger">
@@ -1132,6 +1141,7 @@ export function ChatView({ bot }: { bot: Bot }) {
       {/* Messages */}
       <div
         ref={scrollRef}
+        tabIndex={-1}
         className="flex-1 overflow-y-auto px-5 [overflow-anchor:none]"
         onWheel={(e) => {
           if (e.deltaY < 0) setBottomFollow(false);

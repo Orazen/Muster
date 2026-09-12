@@ -11,6 +11,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import type { EffortLevel } from "../../server/contracts.ts";
@@ -22,6 +23,7 @@ import { showNotification } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { readChatSelection, resolveChatSelection, saveChatSelection } from "./chat-selection";
 import { mergeSeedCardResult, SeedCardSession, seedCardReference, type SeedAnswer, type SeedCardReference, type SeedCardResult } from "./seed-card-session";
+import { EMPTY_STOP_ACTION, StopCleanupSession } from "./stop-cleanup-session";
 
 export type { AgentColor } from "@/lib/mascot";
 
@@ -1100,6 +1102,7 @@ const StoreContext = createContext<{
   /** Re-fetch engine availability — after an install, without a restart. */
   refreshInstances: () => Promise<void>;
   seedCards: SeedCardSession;
+  stopCleanup: StopCleanupSession;
 } | null>(null);
 
 export function StoreProvider({ accountId, readSelectedMessages = true, children }: {
@@ -1119,6 +1122,18 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
   }, [accountId, state.selectedId]);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const accountRef = useRef(accountId);
+  accountRef.current = accountId;
+  const stopCleanup = useMemo(() => new StopCleanupSession({
+    accountId,
+    getAccountId: () => accountRef.current,
+    getBot: (botId) => stateRef.current.rosterHydrated ? stateRef.current.bots.find((bot) => bot.id === botId) : undefined,
+    request: (url, init) => fetch(url, init),
+    onUnauthorized: () => {
+      window.location.href = `/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+    },
+  }), [accountId]);
+  useEffect(() => stopCleanup.attach(), [stopCleanup]);
   const [seedCards] = useState(() => new SeedCardSession({
     getState: () => stateRef.current,
     request: (url, init) => fetch(url, init),
@@ -1402,7 +1417,7 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
           }).catch(showError);
           break;
         case "interrupt":
-          api(`/api/bots/${action.botId}/interrupt`, { method: "POST" }).catch(showError);
+          void stopCleanup.interrupt(action.botId);
           break;
         // tasks: the server answers with the bot AND the live transcript,
         // because switching changes which conversation is on screen
@@ -1449,7 +1464,7 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
       }
     };
     return wrapped;
-  }, []);
+  }, [stopCleanup]);
 
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
@@ -1772,7 +1787,7 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshInstances]);
 
-  const value = useMemo(() => ({ state, dispatch, refreshInstances, seedCards }), [state, dispatch, refreshInstances, seedCards]);
+  const value = useMemo(() => ({ state, dispatch, refreshInstances, seedCards, stopCleanup }), [state, dispatch, refreshInstances, seedCards, stopCleanup]);
   return (
     <StoreContext.Provider value={value}>
       <StreamContext.Provider value={stream}>{children}</StreamContext.Provider>
@@ -1784,6 +1799,12 @@ export function useStore() {
   const ctx = useContext(StoreContext);
   if (!ctx) throw new Error("useStore outside provider");
   return ctx;
+}
+
+export function useStopCleanup(botId?: string) {
+  const { stopCleanup } = useStore();
+  const actions = useSyncExternalStore(stopCleanup.subscribe, stopCleanup.getSnapshot, stopCleanup.getSnapshot);
+  return { stopCleanup, action: botId ? actions[botId] ?? EMPTY_STOP_ACTION : EMPTY_STOP_ACTION };
 }
 
 export function formatTime(at: number) {

@@ -128,7 +128,8 @@ type McpEntry = { name?: string; command: string; args?: string[]; env?: Array<{
 let agentsMcp: McpEntry | null = null;
 const peerDirectory = process.env.FAKE_ACP_PEER_DIRECTORY;
 type PeerReceipt = { pid: number; method: "session/new" | "session/load"; servers: McpEntry[] } |
-  { pid: number; received: true } | { pid: number; completed: true };
+  { pid: number; received: true } | { pid: number; completed: true } | { pid: number; canceled: number };
+let peerCancelCount = 0;
 const peerReceipt = (suffix: string, value: PeerReceipt) => {
   if (peerDirectory) writeFileSync(join(peerDirectory, `${process.pid}.${suffix}`), JSON.stringify(value), { mode: 0o600 });
 };
@@ -509,6 +510,7 @@ function handle(msg: any) {
     }
     case "session/cancel":
       // the interrupted prompt resolves as cancelled
+      peerReceipt("cancel.json", { pid: process.pid, canceled: ++peerCancelCount });
       break;
     default:
       if (msg.id !== undefined) out({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });

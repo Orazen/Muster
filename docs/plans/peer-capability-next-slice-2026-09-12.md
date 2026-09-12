@@ -1,5 +1,21 @@
 # Scoped internal peer capabilities
 
+## Loop80 update — cleanup-only recovery implemented
+
+The formerly proposed UI slice below is now implemented. Failed Stop503 returns
+an owner/bot/generation-bound receipt; `/api/bots/:id/stop-cleanup` clears only its
+captured queue IDs and cannot interrupt a provider. Later direct/room starts,
+owner/deletion/reload changes invalidate it. The persistent-in-session ChatView
+notice and synchronous lock survive idle/task navigation and fence late auth
+responses. Browser3/3 verifies real503/retry, two-tab stale409 and sign-out; full
+254files/3862passed/8skipped. See the latest ledger for exact gates and limitations.
+
+Refresh/server-restart recovery is not implemented. The remaining runtime
+acceptance recipe below (owner merge, queued crash restart, held target setup)
+is still outstanding; do not interpret the historical proposal as new work to
+reimplement the already shipped receipt/UI boundary.
+
+
 ## Loop78 implementation and acceptance — 12 September 2026
 
 The dispatch registry, internal-route checks and durable delegation provenance are

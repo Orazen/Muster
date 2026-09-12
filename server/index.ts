@@ -40,6 +40,7 @@ import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-s
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
 import { PeerCapabilities, type PeerLease } from "./peer-capabilities.ts";
+import { StopCleanupRegistry, STOP_CLEANUP_PENDING, STOP_CLEANUP_STALE, STOP_CLEANUP_PENDING_MESSAGE, STOP_CLEANUP_STALE_MESSAGE } from "./stop-cleanup.ts";
 import { installObscuraLocal, resolveObscuraMount, OBSCURA_TOOLS } from "./obscura.ts";
 import { legalPageFor, withVerificationMeta } from "./legal-pages.ts";
 import { exportSoulMd, parseSoulMd } from "./soul-md.ts";
@@ -126,7 +127,7 @@ import { isEffortLevel, type RequestOutcome, type RuntimeEvent, type WorkspaceBa
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages } from "./message-db.ts";
-import { _loadPending, discardDelegations, drainDelegations, pendingThreads, queueDelegation } from "./delegations.ts";
+import { _loadPending, discardDelegations, discardDelegationSnapshot, snapshotDelegations, drainDelegations, pendingThreads, queueDelegation, type DelegationSnapshot } from "./delegations.ts";
 import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
 import { DecisionLog, queryAudit } from "./decision-log.ts";
 import { approvalWhy } from "./approval-why.ts";
@@ -320,6 +321,7 @@ const CONNECTOR_TOKEN = randomBytes(24).toString("hex");
 const peerCapabilities = new PeerCapabilities(Date.now, 24 * 60 * 60_000, (lease) => {
   discardDelegations(commsBus, lease.threadId);
 });
+const stopCleanups = new StopCleanupRegistry();
 const settledPeerEvents = new WeakSet<RuntimeEvent>();
 bus.subscribe((event) => {
   if (peerCapabilities.onEvent(event)) settledPeerEvents.add(event);
@@ -455,12 +457,17 @@ function stopPeerDispatch(botId: string) {
   peerCapabilities.revokeBot(botId);
   cancelPeerApprovalsFor(botId);
   let queuedCanceled = true;
-  // Stop applies to the bot, including detached or previously selected tasks.
-  // Retrying Stop must still find a queue after its live lease was revoked.
+  const failedQueues: DelegationSnapshot[] = [];
+  // Initial Stop applies to all original tasks. Cleanup retries retain exact
+  // IDs from the failed queues and never sweep newly arrived work.
   for (const task of store.tasks(botId)) {
-    if (!discardDelegations(commsBus, task.threadId)) queuedCanceled = false;
+    const snapshot = snapshotDelegations(task.threadId);
+    if (!discardDelegations(commsBus, task.threadId)) {
+      queuedCanceled = false;
+      failedQueues.push(snapshot);
+    }
   }
-  return { threadId: lease?.threadId, queuedCanceled };
+  return { threadId: lease?.threadId, queuedCanceled, failedQueues };
 }
 const seedAnswers = new SeedAnswerDispatcher(store, startTurn);
 bootSelection = await defaultSelection();
@@ -1917,6 +1924,7 @@ async function startTurn(
   // The catch below resets to idle if dispatch fails; the watchdog, reaper,
   // and turn.completed fold all settle from "working" as usual. setActivity
   // is idempotent, so the later call stays as documentation, not state.
+  stopCleanups.begin(bot.id, peerOwnerOf(bot));
   store.setActivity(bot.id, "working");
   let dispatchLease: PeerLease | undefined;
   /** Pre-dispatch failure: this turn never reached a driver, so release
@@ -2892,6 +2900,7 @@ async function runGroupMemberTurn(
   // let both chains pass the busy check and dispatch two provider
   // processes for one bot. (startTurn claims the same way.) Early returns
   // after this point must release the claim.
+  stopCleanups.begin(bot.id, peerOwnerOf(bot));
   store.setActivity(bot.id, "working");
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
   try {
@@ -3381,7 +3390,10 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
 async function reloadUserInstances(userId: string): Promise<void> {
   const userConfigs = userInstanceConfigs(DATA_DIR, userId, PROVIDER_DRIVER_ENV);
   for (const bot of store.bots) {
-    if (bot.modelSelection.instanceId.endsWith(`:${userId}`)) stopPeerDispatch(bot.id);
+    if (bot.modelSelection.instanceId.endsWith(`:${userId}`)) {
+      stopCleanups.invalidate(bot.id);
+      stopPeerDispatch(bot.id);
+    }
   }
   await registry.load(userConfigs);
 }
@@ -3420,7 +3432,10 @@ async function reloadProviders() {
   for (const threadId of [...delegationWatch.keys()]) {
     finalizeDelegationWatch(threadId, false, "", "Delegated turn did not finish — provider settings changed");
   }
-  for (const bot of store.bots) stopPeerDispatch(bot.id);
+  for (const bot of store.bots) {
+    stopCleanups.invalidate(bot.id);
+    stopPeerDispatch(bot.id);
+  }
   peerCapabilities.clear();
   bus.detachAll();
   // Disposal below kills healthy engines on purpose. The reaper must not
@@ -6251,6 +6266,7 @@ let requestUserEmail = "";
     if (m && method === "DELETE") {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      stopCleanups.invalidate(bot.id);
       // a running turn dies with its bot
       const runningThread = stopPeerDispatch(bot.id).threadId ?? bot.threadId;
       await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(runningThread).catch(() => {});
@@ -6547,25 +6563,60 @@ let requestUserEmail = "";
       const outcome = await answerRequest(threadId, owner.modelSelection.instanceId, String(body.requestId), behavior, body.message);
       return json(res, 200, { ok: true, outcome });
     }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/stop-cleanup$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      if (!isText(body?.receipt) || !/^[a-f0-9]{64}$/.test(body.receipt)) {
+        return json(res, 400, { error: "a valid cleanup receipt is required" });
+      }
+      // The central ownership gate preceded readBody; owner merge/deletion can
+      // happen during that await. Re-read before the synchronous cleanup commit.
+      const bot = store.bot(m[1]);
+      if (!bot || !ownsRecord(bot)) return json(res, 404, { error: "no such bot" });
+      const outcome = stopCleanups.retry(bot.id, peerOwnerOf(bot), body.receipt,
+        (threadId) => !!store.taskByThread(bot.id, threadId), discardDelegationSnapshot);
+      if (outcome === "stale") return json(res, 409, { code: STOP_CLEANUP_STALE, error: STOP_CLEANUP_STALE_MESSAGE });
+      if (outcome === "pending") return json(res, 503, {
+        code: STOP_CLEANUP_PENDING, error: STOP_CLEANUP_PENDING_MESSAGE, cleanupReceipt: body.receipt,
+      });
+      return json(res, 200, { ok: true });
+    }
+
     m = path.match(/^\/api\/bots\/([\w-]+)\/interrupt$/);
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const routineRun = routines!.activeRunForBot(bot.id);
       const stoppedPeers = stopPeerDispatch(bot.id);
+      const ownerId = peerOwnerOf(bot);
+      // Anchor the receipt before provider interruption yields. A queued steer,
+      // another tab or room can admit a new generation while Stop settles.
+      const cleanupReceipt = !stoppedPeers.queuedCanceled
+        ? stopCleanups.issue(bot.id, ownerId, stoppedPeers.failedQueues) : undefined;
       const runningThread = stoppedPeers.threadId ?? bot.threadId;
-      if (routineRun) {
-        await routines!.cancelRun(routineRun.id);
-        if (!stoppedPeers.queuedCanceled) return json(res, 503, { error: "The turn was stopped, but queued handoffs could not be durably canceled. Retry Stop before restarting Muster." });
-        return json(res, 200, { ok: true });
-      }
       const instance = registry.get(bot.modelSelection.instanceId);
-      // a bot busy in a ROOM is running on the room's thread — stopping it
-      // from its own chat must reach that turn, not just the 1:1 thread
       const busyGroup = store.groups.find((g) => g.busyBotId === bot.id);
-      if (busyGroup) await instance?.adapter.interruptTurn(busyGroup.threadId).catch(() => {});
-      await instance?.adapter.interruptTurn(runningThread);
-      if (!stoppedPeers.queuedCanceled) return json(res, 503, { error: "The turn was stopped, but queued handoffs could not be durably canceled. Retry Stop before restarting Muster." });
+      let interruptError: unknown;
+      try {
+        if (routineRun) await routines!.cancelRun(routineRun.id);
+        // There is one provider turn per bot. Freeze its actual destination and
+        // invoke once before awaiting; never interrupt a second thread later.
+        else await instance?.adapter.interruptTurn(busyGroup?.threadId ?? runningThread);
+      } catch (error) { interruptError = error; }
+      if (cleanupReceipt) {
+        const currentBot = store.bot(bot.id);
+        if (!currentBot || !ownsRecord(currentBot) || !stopCleanups.current(bot.id, peerOwnerOf(currentBot), cleanupReceipt)) {
+          return json(res, 409, { code: STOP_CLEANUP_STALE, error: STOP_CLEANUP_STALE_MESSAGE });
+        }
+        return json(res, 503, {
+          code: STOP_CLEANUP_PENDING,
+          error: interruptError
+            ? "Stop could not finish, and queued handoffs could not be durably canceled. Retry cleanup, then check the bot's current work."
+            : STOP_CLEANUP_PENDING_MESSAGE,
+          cleanupReceipt,
+        });
+      }
+      if (interruptError) throw interruptError;
       return json(res, 200, { ok: true });
     }
 
@@ -6615,6 +6666,7 @@ let requestUserEmail = "";
       }
       const updated = store.deleteTask(m[1], m[2]);
       if (!updated) return json(res, 400, { error: "a bot keeps at least one task" });
+      stopCleanups.invalidate(m[1]);
       peerCapabilities.revokeThread(m[2]);
       discardDelegations(commsBus, m[2]);
       const fresh = botWithThread(updated);
@@ -6720,6 +6772,7 @@ let requestUserEmail = "";
       let botsReassigned = 0;
       for (const b of store.bots) {
         if (b.ownerId === sourceUserId) {
+          stopCleanups.invalidate(b.id);
           stopPeerDispatch(b.id);
           store.patchBot(b.id, { ownerId: targetUserId });
           botsReassigned++;

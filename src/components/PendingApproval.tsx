@@ -109,12 +109,14 @@ export function PendingApprovalActions({
   threadId,
   bot,
   onCancelTurn,
+  cancelPending = false,
 }: {
   pending: Pending;
   threadId: string;
   /** who asked — "always allow" is remembered against them */
   bot?: Bot;
   onCancelTurn: () => void;
+  cancelPending?: boolean;
 }) {
   const { dispatch } = useStore();
   const decide = (behavior: "allow" | "deny", always = false) =>
@@ -130,7 +132,7 @@ export function PendingApprovalActions({
   const base = "rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors";
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 px-2 py-2">
-      <button onClick={onCancelTurn} className={cn(base, "text-ink-secondary hover:bg-raised hover:text-ink")}>
+      <button onClick={onCancelTurn} disabled={cancelPending} aria-busy={cancelPending} className={cn(base, "text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50")}>
         Cancel turn
       </button>
       <button

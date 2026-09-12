@@ -270,6 +270,31 @@ function acknowledgeDelegation(threadId: string, itemId: string): void {
   }
 }
 
+/** Original queue IDs captured synchronously by Stop, before any cancellation.
+ * Never reconstruct a cleanup retry by looking up all current thread work. */
+export interface DelegationSnapshot { threadId: string; itemIds: string[] }
+export function snapshotDelegations(threadId: string): DelegationSnapshot {
+  return { threadId, itemIds: (pendingDelegations.get(threadId) ?? []).map((item) => item.id) };
+}
+
+/** Retry only the original failed durable removal. Do not advance the thread's
+ * discard generation: that would revoke unrelated handoffs already in setup. */
+export function discardDelegationSnapshot(snapshot: DelegationSnapshot): boolean {
+  const ids = new Set(snapshot.itemIds);
+  const current = pendingDelegations.get(snapshot.threadId) ?? [];
+  const selected = current.filter((item) => ids.has(item.id));
+  if (!selected.length) return true;
+  for (const item of selected) canceledItems.add(item.id);
+  try {
+    replacePending(snapshot.threadId, current.filter((item) => !ids.has(item.id)));
+    for (const item of selected) canceledItems.delete(item.id);
+    return true;
+  } catch (error) {
+    console.error("delegations: could not persist original cleanup", error);
+    return false;
+  }
+}
+
 /** Drop a thread's queued handoffs without running them, telling the user
  * they were dropped. Used when the queueing turn failed or was interrupted. */
 export function discardDelegations(bus: CommsBus, threadId: string): boolean {
