@@ -3674,3 +3674,13 @@ the iPhone & Watch section with the honest TestFlight gate note (build done + si
 Apple developer account is the owner-side gate) and the add-to-home-screen browser fallback.
 Verified live post-roll (hero faces + headline + iOS section all serving). iOS TestFlight and
 Watch distribution remain blocked on the Apple account — owner-side.
+
+**Loop 62 wrap (2026-09-12, commit 370dd3a):** the flower wears the star's crown — StarTeammate
+switched from the flat 3-eye-state mascot to the full flower pose vocabulary (16 poses via the
+shared poseFor chain: working→focused, alerting→mad, thinking→thinking, sleeping→sleepy…), plus
+the old star's slow idle rotation as opt-in `spin` (flower-bot-spin keyframes, reduced-motion
+honored by the existing blanket rule); Avatar.tsx star character passes spin when animated.
+Suite 243/3,410/8. Landing redesign (b1a6ef2) verified live. Remaining roadmap slices queued
+for their own loops: sidebar sections+density, run-summary pill, usage ledger+spend limits,
+approval levels per bot, spotlight-tour v2, opt-in Drive connect. TestFlight/Watch release
+gate unchanged: Apple developer account (owner-side).
