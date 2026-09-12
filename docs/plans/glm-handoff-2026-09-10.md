@@ -2835,3 +2835,18 @@ remain separate slices. Current scheduler was read as PAUSED with its daily cade
 do not restore the older hourly/ACTIVE state from previous entries. Read current
 state before updates. Inherited12 files must be restored byte-for-byte using this
 loop's preservation receipt; original stash stays retained.
+
+
+## Loop77 — private README and testing entrypoints (12 September 2026)
+
+Loop76 product/research commit **2f2ca40** is pushed. The separate README slice now
+uses the canonical Flower, describes a private product, removes self-hosting/source
+acquisition and unsupported claims, and links personal-device installation and local
+CI alternatives. License terms remain authoritative. Landing-page copy is still a
+separate unimplemented follow-up; no native/UI/sync release is implied by README.
+
+Static checks **28/28 local links/assets**, prior public-entrypoint GET3/3. No code
+inputs changed (956 hashes), so Loop76 full246files/3657passed/8skipped remains the
+runtime gate;0 new runtime tests. Current internal-peer P1 and inherited Watch
+acceptance remain first in the handoff. Preserve paused automation and restore all
+12 inherited paths from this loop's receipt after publication.

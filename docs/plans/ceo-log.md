@@ -4046,3 +4046,18 @@ Next P1: replace shared internal peer authority with scoped capabilities; histor
 mixed-room content needs separate review. Native release, full backup/sync, Mimosa
 and two high dependency alerts remain gates. Automation was observed PAUSED; preserve
 that state. Twelve inherited files remain separately preserved pending restoration.
+
+
+**Loop77 (2026-09-12, private product overview):** Rewrote README around Muster's
+actual workspace, canonical Flower logo, private repository, supported source
+surfaces, development checks and separate release gates. Removed the self-hosting/
+open-source acquisition pitch, stale prices/counts and unsupported exclusivity,
+privacy and distribution claims. BSL terms and code functionality are unchanged.
+Added personal iPhone/Watch and billing-blocked verification guides.
+
+Verification: **28/28 relative links/assets exist**,3/3 public entrypoints returned
+200 in the candidate GET check. All956 code inputs unchanged from Loop76, whose
+full suite passed246files/3657tests with8skips; **0 new runtime tests** for this
+documentation-only slice. Loop76 code is pushed as2f2ca40. No revenue or adoption
+uplift measured. Landing-page copy and user-paced onboarding remain queued after
+the scoped internal-peer P1; this README does not change the deployed UI.
