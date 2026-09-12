@@ -3698,3 +3698,13 @@ console (owner account, persisted + re-verified on a fresh page load). Live: hea
 401-gated unauth as designed. Remaining roadmap: sidebar sections+density, usage ledger,
 approval levels, tour v2 — each its own loop. TestFlight/Watch still blocked on the Apple
 developer account.
+
+**Loop 64 fix (2026-09-12, commit 125354f):** webapp seed-card dead-end — a getting-started
+card whose answer was recorded WITHOUT its task starting (answered set, no seedAnswer
+receipt → seedCardReference nulls it by the legacy split-write rule) rendered as pure
+history: "Saved answer … This saved question cannot be answered here" with no way forward,
+stranding the user's intent. UnavailableSeedCard now offers "Send '<answer>' to <bot>" —
+dispatches the saved answer as an ordinary message (bot-busy hides it); the store-bound
+send is a split child so the plain card still server-renders without a provider.
+Suite 243/3,410/8. This covers the stranded state wherever it came from; current-flow
+failures already surface action.error + retry.
