@@ -4061,3 +4061,17 @@ full suite passed246files/3657tests with8skips; **0 new runtime tests** for this
 documentation-only slice. Loop76 code is pushed as2f2ca40. No revenue or adoption
 uplift measured. Landing-page copy and user-paced onboarding remain queued after
 the scoped internal-peer P1; this README does not change the deployed UI.
+
+**Loops76–77 publication receipt (12 September 2026, 18:17 UTC):** Product
+**2f2ca40** and README **86604d2** are pushed to private `Orazen/Muster`, default
+branch `main`. Production GET health/app/download metadata returned 200; anonymous
+scan and Google workspace status returned 401. These five checks establish
+availability and anonymous refusal, not the exact backend revision or authenticated
+production acceptance. Desktop metadata remains **1.12.0 / e241968**; no new native
+release was produced. Four GitHub jobs were rejected for billing, one skipped and
+zero steps ran. Local final gates remain **246 files / 3657 passed / 8 skipped**;
+this receipt adds zero runtime tests. Current allowance was last observed 31%
+remaining; automation remains PAUSED. The twelve inherited files are separately
+preserved; consult this loop's `inherited-restoration.json` for final byte-for-byte
+restoration, and retain the original preexisting stash. Next work is the scoped
+internal-peer P1, then owned bot creation recovery and user-paced onboarding.

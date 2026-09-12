@@ -2850,3 +2850,23 @@ inputs changed (956 hashes), so Loop76 full246files/3657passed/8skipped remains 
 runtime gate;0 new runtime tests. Current internal-peer P1 and inherited Watch
 acceptance remain first in the handoff. Preserve paused automation and restore all
 12 inherited paths from this loop's receipt after publication.
+
+### Publication receipt — 12 September 2026, 18:17 UTC
+
+Pushed product **2f2ca40**, private README **86604d2**; repository remains private
+with main as default. Final production GET checks: health 200, app 200, downloads 200,
+anonymous advisory scan 401 and Google workspace status 401. Served app script is
+`/assets/index-DCAkTz04.js`; **neither exact deployed backend revision nor an
+authenticated production flow is established**. Desktop download metadata is still
+**1.12.0 / e241968**, with no new native release. Latest README CI/autodeploy runs
+34710527787/34710527784 record **4 billing-rejected jobs / 1 skipped / 0 steps**.
+Use the local verification guide; a self-hosted runner is not a verified bypass of
+the account-level dispatch block. No billing, runner or scheduler changes were made.
+
+Final runtime gate remains **246 files / 3657 passed / 8 skipped / 0 failed**;
+this receipt adds **0 runtime tests**. Allowance last read 31% remaining, reset
+19 September 2026 at 16:43 Europe/Rome; no reset consumed. Preserve PAUSED automation.
+The loop76 evidence directory contains the preservation manifest and final
+`inherited-restoration.json`; confirm all 12 original hashes before resuming native
+or template work. Do not include them in a generic cleanup commit. Read the scoped
+peer-capability specification before further social-network or UI work.

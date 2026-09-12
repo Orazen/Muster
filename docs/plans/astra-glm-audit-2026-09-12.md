@@ -590,3 +590,13 @@ These limits prevent a comprehensive isolation/security or public-launch claim.
 Native signing/runtime, full portable backup, real Google consent, VM execution,
 Mimosa and two high dependency alerts remain separate gates. The current scheduler
 was observed PAUSED; old ACTIVE/hourly entries are historical.
+
+**Publication receipt, 18:17 UTC:** Product 2f2ca40 and README 86604d2 pushed.
+Production GET: 3/3 public paths returned 200 and 2/2 anonymous protected paths 401; exact backend
+deployment/authenticated acceptance remain unverified. Download metadata remains
+1.12.0/e241968. Latest CI and deploy runs recorded 4 billing-rejected jobs, 1 skip,
+0 steps; local frozen-source gate remains 246 files / 3657 passed / 8 skipped / 0 failed.
+README has 28/28 valid local links/assets; zero runtime tests added for documentation.
+No new native release, billing change, runner installation or automation resumption.
+Restoration of the 12 inherited files is recorded separately in Loop76's ignored
+`inherited-restoration.json`; original preexisting stash must remain retained.
