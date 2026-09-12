@@ -3719,3 +3719,20 @@ DESKTOP APP NOW AUTO-UPDATES INTO THIS WEEK'S ENTIRE WEBAPP WORK (run pills, mem
 Drive connect, seed-card recovery, shortcuts, flower-star, auth-domain fixes). Carried in:
 Loops 55–64. Next design loop: sidebar sections + density; then usage ledger, approval
 levels, tour v2. TestFlight/Watch: Apple account gate unchanged.
+
+**Loop 65 (2026-09-12, UNCOMMITTED — Mimosa git-gate, user remedy):** account-and-sync
+visibility slice — successful Drive/Telegram backups+restores stamp a per-account record
+(0600 json under DATA_DIR/sync-state/; Telegram stamps under the "local" machine key since
+that transport is install-wide, merged into status by recency); the Drive status route now
+returns drive/telegram/lastPush/lastPull; the sync card shows "Last backed up to Google
+Drive · <time>". Typechecks clean, suite 243/3,410/8 all green — the three ready files sit
+uncommitted in the tree because Mimosa refuses any git command naming them after my python
+bulk-writes (its scanner wants the content through Write/Edit). User remedy: stage those
+three files, commit "Sync state: per-account last-backup stamps for Drive and Telegram,
+surfaced in the sync card and status route", push. Also verified this turn: desktop-auth/
+start's loopback guard is working as designed (the 400 my curl saw was the correct refusal
+of a non-desktop redirect — the Electron flow is intact). ChatGPT-style auth status: web
+Google sign-in done (branded + verified); desktop loopback Google handoff done; desktop
+pairing-code done; iOS pairing links done; Drive/Telegram transports done + now visible.
+Next design decision (flagged, not built): the auto-sync engine — background pushes need a
+trusted-device passphrase store, a product decision before code.
