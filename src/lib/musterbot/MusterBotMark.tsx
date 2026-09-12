@@ -24,7 +24,7 @@ const EYES = [
 export function MusterBotMark({
   size = 44,
   color = MUSTERBOT_ORANGE,
-  eyes = "open" as "open" | "closed" | "happy",
+  eyes = "open",
   label,
   /** 0..1 animates a gentle idle wobble via CSS. */
   animated = false,

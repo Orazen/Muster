@@ -5,7 +5,7 @@
  * geometry all derive from the seed, while color, state and size come from
  * the caller. Pure SVG + CSS animation, no dependencies, no timers.
  */
-import { useMemo, type CSSProperties } from "react";
+import { useMemo } from "react";
 import { gradientFor, hashSeed, layoutBlob } from "./blob";
 import { faceFor, type Face } from "./face";
 
@@ -78,7 +78,7 @@ export function BlobBot({
 }
 
 function renderEyes(face: Face, lx: number, rx: number, cy: number, r: number, animated: boolean) {
-  const blinkStyle = animated ? ({ animation: "musterbot-blink 4.4s infinite" } as CSSProperties) : undefined;
+  const blinkStyle = animated ? { animation: "musterbot-blink 4.4s infinite" } : undefined;
   switch (face.eyes) {
     case "closed":
       return (

@@ -478,6 +478,8 @@ function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
     setInstalling(true);
     setInstallError(null);
     try {
+      // SAFETY: this server's browser-install handler returns a boolean ok
+      // and optional error on every 200 branch; api rejects non-2xx replies.
       const data = await api("/api/browser-install", { method: "POST" }) as { ok: boolean; error?: string };
       if (!data.ok) setInstallError(data.error ?? "Install failed.");
     } catch {

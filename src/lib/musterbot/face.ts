@@ -6,11 +6,11 @@
  * vocabularies onto these.
  */
 
-export type EyeShape = "open" | "half" | "closed" | "happy" | "wide" | "wary";
+export type EyeExpression = "open" | "half" | "closed" | "happy" | "wide" | "wary";
 export type Mouth = "none" | "smile" | "flat" | "oh" | "grit";
 
 export interface Face {
-  eyes: EyeShape;
+  eyes: EyeExpression;
   mouth: Mouth;
 }
 
@@ -19,7 +19,7 @@ export type BlobState =
   | "idle" | "happy" | "sad" | "thinking" | "working" | "sleeping"
   | "surprised" | "suspicious" | "excited" | "listening";
 
-export const STATE_FACES: Record<BlobState, Face> = {
+export const STATE_FACES = {
   idle: { eyes: "open", mouth: "none" },
   happy: { eyes: "happy", mouth: "smile" },
   sad: { eyes: "half", mouth: "flat" },
@@ -30,12 +30,13 @@ export const STATE_FACES: Record<BlobState, Face> = {
   suspicious: { eyes: "wary", mouth: "flat" },
   excited: { eyes: "happy", mouth: "oh" },
   listening: { eyes: "wide", mouth: "none" },
-};
+} satisfies Record<BlobState, Face>;
 
 /** Maps any string state onto a Face, defaulting to idle. */
 export function faceFor(state: string | null | undefined): Face {
   const key = (state ?? "idle").toLowerCase();
-  if (key in STATE_FACES) return STATE_FACES[key as BlobState];
+  const namedFace = Object.entries(STATE_FACES).find(([name]) => name === key);
+  if (namedFace) return namedFace[1];
   if (/(happy|excit|proud|playful|celebrat|love)/.test(key)) return STATE_FACES.happy;
   if (/(sleep|drows|rest|night)/.test(key)) return STATE_FACES.sleeping;
   if (/(think|load|plan|search|read)/.test(key)) return STATE_FACES.thinking;

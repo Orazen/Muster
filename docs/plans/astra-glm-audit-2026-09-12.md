@@ -23,6 +23,18 @@ session handoff. Pending native code is not approved for release by this audit.
 
 ## Ranked findings and repair boundaries
 
+The memory-retention repair is committed and pushed as `efcf629`. Subsequent
+production GETs returned 200, but its CI/deploy jobs again failed before starting
+because of billing/spending limits. The exact running backend revision remains
+unestablished.
+
+Loop 68 also clears all **44 inherited lint errors** without suppressing rules.
+The **243-file suite passes 3431 tests, with 8 skipped and 0 failures** (297.50s),
+and repository lint and TypeScript both pass. Valid-input behavior is preserved;
+malformed organization IDs now fail validation, and mascot lookup ignores inherited
+object properties. Five new face-lookup regression tests cover the latter. This does
+not fix the separate mascot CSS-transform or Drive-flow defects below.
+
 | Priority | Finding | Required acceptance / disposition |
 | --- | --- | --- |
 | P1 | History follows planted links and lets failed snapshots precede live overwrite. | First repair slice: reject linked paths/entries, retain exact old bytes before writes, propagate retention failure, bound reads and rollback. Filesystem tests include real permission failures. No claim of isolation against a hostile process continuously replacing path ancestors. |

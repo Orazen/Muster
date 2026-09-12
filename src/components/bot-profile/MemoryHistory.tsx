@@ -10,11 +10,11 @@ export interface MemoryVersion {
 }
 
 /** What superseded this version — same wording the server records it under. */
-const ORIGIN_LABEL: Record<MemoryVersion["origin"], string> = {
+const ORIGIN_LABEL = {
   "user-edit": "replaced by an editor save",
   agent: "replaced by bot activity",
   rollback: "replaced by a restore",
-};
+} satisfies Record<MemoryVersion["origin"], string>;
 
 const formatBytes = (bytes: number) =>
   bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 102.4) / 10} KB`;

@@ -71,7 +71,7 @@ export type RoleScenario = RoleCapture["scenarios"][number];
  * this catalog is the policy binding kinds to roles, so it can evolve
  * without touching the grader. */
 export interface BenchmarkEntry { kind: ScenarioKind; name: string }
-export const ROLE_BENCHMARKS: Record<RoleName, BenchmarkEntry[]> = {
+export const ROLE_BENCHMARKS = {
   assistant: [
     { kind: "direct-answer", name: "answers a plain task in its own thread" },
     { kind: "grounded-answer", name: "cites workspace facts for a grounded task" },
@@ -84,7 +84,7 @@ export const ROLE_BENCHMARKS: Record<RoleName, BenchmarkEntry[]> = {
     { kind: "grounded-answer", name: "cites workspace facts for a grounded task" },
     { kind: "escalation", name: "escalates a permission request to its human" },
   ],
-};
+} satisfies Record<RoleName, BenchmarkEntry[]>;
 
 export interface RoleCheck { name: string; passed: boolean }
 export interface RoleScenarioScore {
@@ -177,11 +177,11 @@ export function scoreRoleCapture(capture: RoleCapture): RoleBenchmarkScorecard {
     };
   }
   const graded = capture.scenarios.map(grade);
-  const roles = {} as Record<RoleName, RoleScorecard>;
-  for (const [roleName, required] of Object.entries(ROLE_BENCHMARKS) as [RoleName, BenchmarkEntry[]][]) {
+  function gradeRole(roleName: RoleName): RoleScorecard {
+    const required = ROLE_BENCHMARKS[roleName];
     const mine = graded.filter((g) => g.role === roleName);
     const missing = required.filter((entry) => !mine.some((g) => g.kind === entry.kind));
-    roles[roleName] = {
+    return {
       // A failing scenario fails the role even when it is not a required
       // benchmark: supplied evidence that contradicts readiness wins.
       status: mine.some((g) => g.status === "failed") ? "failed"
@@ -189,6 +189,11 @@ export function scoreRoleCapture(capture: RoleCapture): RoleBenchmarkScorecard {
       scenarios: mine,
     };
   }
+  const roles = {
+    assistant: gradeRole("assistant"),
+    coordinator: gradeRole("coordinator"),
+    specialist: gradeRole("specialist"),
+  } satisfies Record<RoleName, RoleScorecard>;
   const all = Object.values(roles);
   return {
     version: 1, label: capture.label, source: capture.source,

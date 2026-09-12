@@ -10,6 +10,6 @@ export { BlobBot, type BlobBotProps } from "./BlobBot";
 export { FlowerBot, type FlowerBotProps } from "./FlowerBot";
 export { FLOWER_POSES, poseFor, type FlowerPose, type FlowerPoseName } from "./flower";
 export { MusterBotMark, MUSTERBOT_ORANGE } from "./MusterBotMark";
-export { layoutBlob, gradientFor, hashSeed, rng, type BlobShape, type BlobLayout } from "./blob";
-export { faceFor, STATE_FACES, type BlobState, type Face, type EyeShape, type Mouth } from "./face";
+export { layoutBlob, gradientFor, hashSeed, rng, type BlobSilhouette, type BlobLayout } from "./blob";
+export { faceFor, STATE_FACES, type BlobState, type Face, type EyeExpression, type Mouth } from "./face";
 import "./motion.css";

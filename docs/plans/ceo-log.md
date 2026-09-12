@@ -3783,3 +3783,27 @@ performed. Existing configured local Drive credentials use a separate installati
 contract and must be preserved while repairing the broken account-linked flow.
 Push and production GET verification are separate post-commit receipts; this entry
 makes no claim that the new memory code is deployed or that a desktop update installed.
+
+
+**Loop 68 (2026-09-12, restore the repository lint gate):** all **44 inherited lint
+errors across 13 files** are cleared without blanket suppression. Closed lookup tables
+retain inference; role grading constructs the complete role record; HTTP headers omit
+cache-control explicitly; database row IDs are parsed at the read boundary. Mascot
+silhouette/expression types use domain names while preserving the serialized layout key,
+geometry, RNG ordering and supported eye-transform strings. Two input-boundary corrections
+are explicit: malformed organization IDs now reject instead of escaping an assertion,
+and mascot lookup ignores inherited object properties. Five new face tests cover unknown
+keys and supported-state identity. The actual flower CSS motion defect remains open.
+
+Verification: server focused **4 files / 108 passed**, mascot focused **2 files / 27
+passed**, both with 0 failures/skips. Full suite **243 files / 3431 passed / 8 skipped /
+0 failed**, 297.50s (299.817s command); repository lint **passed**, 2.906s; frontend and
+server TypeScript **passed**, 17.721s. Independent read-only review covered all14 changed
+files and found no material blocker. No new blanket security or OAuth acceptance claim.
+
+Loop 67 product `efcf629` is pushed. Post-push GET health/download metadata returned
+200, with desktop metadata still1.12.0. Its four CI/deploy jobs never started, again
+reporting billing/spending limits; build skipped. Thus neither source push nor public
+health establishes exact backend deployment. Full details and remaining repairs stay
+in `docs/plans/astra-glm-audit-2026-09-12.md`. Next product repair is onboarding draft
+persistence and migration; no conversion/revenue uplift has been measured in this loop.

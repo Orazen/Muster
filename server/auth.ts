@@ -446,6 +446,8 @@ export function authCapabilities() {
   };
 }
 
+const organizationIdRowSchema = z.object({ id: z.string() }).optional();
+
 /** Create this user's own organization + owner membership, directly
  * against the same tables server/auth.ts's own migration SQL defines
  * above — not through the organization plugin's HTTP-route-style API
@@ -464,9 +466,7 @@ function provisionOrganizationFor(userId: string, displayName: string): string {
   // better-auth can run user.create.after more than once per user; the slug
   // is deterministic per user, so treat an existing row as already
   // provisioned instead of riding the UNIQUE constraint into the catch below.
-  const existing = db.prepare('SELECT id FROM "organization" WHERE slug = ?').get(slug) as
-    | { id: string }
-    | undefined;
+  const existing = organizationIdRowSchema.parse(db.prepare('SELECT id FROM "organization" WHERE slug = ?').get(slug));
   if (existing) return existing.id;
   // The org and its owner membership are one mutation: an org row whose
   // membership insert failed would leave the user org-less with no owner.

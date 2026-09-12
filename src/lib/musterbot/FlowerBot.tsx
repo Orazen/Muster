@@ -9,8 +9,8 @@ import { FLOWER_POSES, poseFor, type FlowerPose } from "./flower";
 import "./flower-bot.css";
 
 const EYES = [
-  { x: -15, y: -2 },
-  { x: 38, y: -6 },
+  { index: 0, x: -15, y: -2 },
+  { index: 1, x: 38, y: -6 },
 ] as const;
 
 function eyeTransform(pose: FlowerPose, index: 0 | 1, gazeX: number, gazeY: number): string {
@@ -68,9 +68,9 @@ function FlowerBotComponent({
     >
       <g className="flower-bot__body" style={{ transform: `translate(0 ${(pose.bdy ?? 0).toFixed(1)})` }}>
         <path d={MUSTER_BODY} fill={color} />
-        {EYES.map((eye, index) => (
+        {EYES.map((eye) => (
           <g key={eye.x} transform={`translate(${eye.x} ${eye.y}) rotate(-4)`}>
-            <g className="flower-bot__eye" style={{ transform: eyeTransform(pose, index as 0 | 1, gazeX, gazeY) }}>
+            <g className="flower-bot__eye" style={{ transform: eyeTransform(pose, eye.index, gazeX, gazeY) }}>
               <rect
                 className="flower-bot__eyelid"
                 x={-10.5}

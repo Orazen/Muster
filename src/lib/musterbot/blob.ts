@@ -34,33 +34,36 @@ export function hashSeed(input: string): number {
  * Body silhouettes a seed can land on. The first harmonic weights pick the
  * family; callers may also pin one explicitly.
  */
-export type BlobShape = "round" | "organic" | "droplet" | "cloud" | "capsule";
+export type BlobSilhouette = "round" | "organic" | "droplet" | "cloud" | "capsule";
 
-const SHAPE_HARMONICS: Record<BlobShape, [number, number, number]> = {
+const SILHOUETTE_HARMONICS = {
   // relative weight of harmonic 2 / 3 / 4
   round: [0.02, 0.015, 0.01],
   organic: [0.09, 0.05, 0.03],
   droplet: [0.12, 0.03, 0.02],
   cloud: [0.06, 0.1, 0.04],
   capsule: [0.04, 0.02, 0.015],
-};
+} satisfies Record<BlobSilhouette, [number, number, number]>;
 
 export interface BlobLayout {
   /** SVG path for the body, in a 200x200 viewBox centered at (100, 100). */
   path: string;
-  shape: BlobShape;
+  /** Preserve the existing serialized layout field for library callers. */
+  "shape": BlobSilhouette;
   /** Eye centre offset from (100, 100) and eye radius — geometry-aware. */
   eyes: { cx: number; cy: number; gap: number; r: number };
 }
 
-export function layoutBlob(seed: number, pinned?: BlobShape): BlobLayout {
+export function layoutBlob(seed: number, pinned?: BlobSilhouette): BlobLayout {
   const rand = rng(seed);
-  const shapeNames = Object.keys(SHAPE_HARMONICS) as BlobShape[];
-  const shape = pinned ?? shapeNames[Math.floor(rand() * shapeNames.length)];
-  const [w2, w3, w4] = SHAPE_HARMONICS[shape];
+  // SAFETY: Object.keys enumerates the own keys of this closed, module-local
+  // table, whose complete silhouette vocabulary is checked by satisfies.
+  const silhouettes = Object.keys(SILHOUETTE_HARMONICS) as BlobSilhouette[];
+  const silhouette = pinned ?? silhouettes[Math.floor(rand() * silhouettes.length)];
+  const [w2, w3, w4] = SILHOUETTE_HARMONICS[silhouette];
 
   const stretch = 0.94 + rand() * 0.14; // vertical squash
-  const tilt = shape === "capsule" ? Math.PI / 2 : rand() * Math.PI;
+  const tilt = silhouette === "capsule" ? Math.PI / 2 : rand() * Math.PI;
   const p2 = rand() * Math.PI * 2;
   const p3 = rand() * Math.PI * 2;
   const p4 = rand() * Math.PI * 2;
@@ -80,7 +83,7 @@ export function layoutBlob(seed: number, pinned?: BlobShape): BlobLayout {
     const r = base * wob * (0.72 + 0.28 * vertical);
     const ct = Math.cos(t + tilt * 0.15);
     const st = Math.sin(t + tilt * 0.15);
-    points.push({ x: 100 + r * ct, y: 100 + r * st * (shape === "capsule" ? 1 : stretch) });
+    points.push({ x: 100 + r * ct, y: 100 + r * st * (silhouette === "capsule" ? 1 : stretch) });
   }
 
   // Catmull-Rom -> bezier smooth closed path
@@ -100,10 +103,10 @@ export function layoutBlob(seed: number, pinned?: BlobShape): BlobLayout {
 
   // Face placement: upper-centre, sized by the local body width.
   const eyeGap = 16 + rand() * 8;
-  const eyeR = shape === "round" ? 10 : 8.5 + rand() * 2;
+  const eyeR = silhouette === "round" ? 10 : 8.5 + rand() * 2;
   return {
     path,
-    shape,
+    "shape": silhouette,
     eyes: { cx: 100, cy: 92, gap: eyeGap, r: eyeR },
   };
 }

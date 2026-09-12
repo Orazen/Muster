@@ -135,6 +135,7 @@ const driveCodeResponseSchema = z.object({
   refresh_token: z.string().min(1).optional(),
   expires_in: z.number().optional(),
 });
+const googleAccountIdSchema = z.object({ id: z.string() });
 
 /** Trade the consent code for tokens and store them on the user's existing
  * google account row. False when no such row exists — Drive connects to an
@@ -158,13 +159,14 @@ export async function connectDriveFor(db: DatabaseSync, userId: string, code: st
   const row = db.prepare(
     `SELECT id FROM "account" WHERE "userId" = ? AND "providerId" = 'google' ORDER BY "createdAt" DESC LIMIT 1`,
   ).get(userId);
-  if (!row || typeof row.id !== "string") return false;
+  const account = googleAccountIdSchema.safeParse(row);
+  if (!account.success) return false;
   const expiresAt = parsed.data.expires_in
     ? new Date(Date.now() + parsed.data.expires_in * 1000).toISOString()
     : null;
   db.prepare(
     `UPDATE "account" SET "accessToken" = ?, "refreshToken" = COALESCE(?, "refreshToken"),
      "accessTokenExpiresAt" = ?, "updatedAt" = ? WHERE "id" = ?`,
-  ).run(parsed.data.access_token, parsed.data.refresh_token ?? null, expiresAt, new Date().toISOString(), row.id);
+  ).run(parsed.data.access_token, parsed.data.refresh_token ?? null, expiresAt, new Date().toISOString(), account.data.id);
   return true;
 }

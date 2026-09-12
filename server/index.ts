@@ -4,7 +4,7 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readFileSync, statSync, unlinkSync } from "node:fs";
 import { writeFileAtomic } from "./atomic.ts";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import { extname, isAbsolute, join } from "node:path";
 
@@ -7849,7 +7849,9 @@ let requestUserEmail = "";
           const type = MIME.get(extname(file).toLowerCase()) ?? "text/html";
           // no-cache on HTML: pages change between deploys and crawlers
           // (Google's OAuth review) must never see a stale shell.
-          res.writeHead(200, { "content-type": type, ...(type === "text/html" ? { "cache-control": "no-cache" } : {}) });
+          const headers: OutgoingHttpHeaders = { "content-type": type };
+          if (type === "text/html") headers["cache-control"] = "no-cache";
+          res.writeHead(200, headers);
           return res.end(data);
         } catch {
           /* try the next candidate */
@@ -7893,7 +7895,9 @@ let requestUserEmail = "";
         const file = join(MARKETING_DIR, rel);
         const data = readFileSync(file);
         const type = MIME.get(extname(file).toLowerCase()) ?? "text/html";
-        res.writeHead(200, { "content-type": type, ...(type === "text/html" ? { "cache-control": "no-cache" } : {}) });
+        const headers: OutgoingHttpHeaders = { "content-type": type };
+        if (type === "text/html") headers["cache-control"] = "no-cache";
+        res.writeHead(200, headers);
         // Search Console HTML-tag verification rides every served HTML page,
         // homepage included.
         return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
@@ -7910,7 +7914,9 @@ let requestUserEmail = "";
       try {
         const data = readFileSync(file);
         const type = MIME.get(extname(file)) ?? "application/octet-stream";
-        res.writeHead(200, { "content-type": type, ...(type === "text/html" ? { "cache-control": "no-cache" } : {}) });
+        const headers: OutgoingHttpHeaders = { "content-type": type };
+        if (type === "text/html") headers["cache-control"] = "no-cache";
+        res.writeHead(200, headers);
         return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
       } catch {
         // SPA fallback

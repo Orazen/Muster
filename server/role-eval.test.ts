@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { parseRoleCapture, scoreRoleCapture, ROLE_BENCHMARKS, type RoleCapture, type RoleScenario } from './role-eval.ts';
+import { parseRoleCapture, scoreRoleCapture, roleNames, type RoleCapture, type RoleScenario } from './role-eval.ts';
 
 const BASE = '2026-09-11T10:00:00Z';
 const LATER = '2026-09-11T10:01:00Z';
@@ -72,8 +72,8 @@ describe('role benchmark scorecards', () => {
   it('grades all six required benchmarks and rolls roles up to passed', () => {
     const result = scoreRoleCapture(fixture());
     expect(result.status).toBe('passed');
-    for (const roleName of Object.keys(ROLE_BENCHMARKS)) {
-      expect(result.roles[roleName as keyof typeof result.roles].status).toBe('passed');
+    for (const roleName of roleNames) {
+      expect(result.roles[roleName].status).toBe('passed');
     }
     expect(result.roles.assistant.scenarios).toHaveLength(2);
     expect(result.roles.assistant.scenarios[0].tokens).toBe(20);
@@ -172,7 +172,8 @@ describe('role benchmark scorecards', () => {
     const capture = fixture(); capture.scenarios[0].receipt!.receipt.tokensIn = -1;
     expect(() => parseRoleCapture(JSON.stringify(capture))).toThrow();
     expect(() => parseRoleCapture('{broken')).toThrow();
-    const badRole = fixture(); badRole.scenarios[0].role = 'chief' as never;
+    const validRoles = fixture();
+    const badRole = { ...validRoles, scenarios: [{ ...validRoles.scenarios[0], role: 'chief' }, ...validRoles.scenarios.slice(1)] };
     expect(() => parseRoleCapture(JSON.stringify(badRole))).toThrow();
   });
 

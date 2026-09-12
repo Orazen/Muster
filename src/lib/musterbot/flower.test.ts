@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FLOWER_POSES, poseFor, type FlowerPose } from "./flower.js";
+import { faceFor, STATE_FACES } from "./face.js";
 
 /** Counts the pose channels a pose actually differs from idle on — the
  * blobatar legibility rule: every expression must move at least 3 channels
@@ -40,5 +41,18 @@ describe("poseFor", () => {
     expect(poseFor("reviewing changes")).toBe("smug");
     expect(poseFor("shy")).toBe("shy");
     expect(poseFor("sick")).toBe("sick");
+  });
+});
+
+describe("blob face lookup", () => {
+  it.each(["constructor", "toString", "__proto__", "opaque signal"])("keeps %s outside the named face vocabulary", (state) => {
+    expect(faceFor(state)).toEqual({ eyes: "open", mouth: "none" });
+  });
+
+  it("preserves every supported face, including case-insensitive lookup", () => {
+    for (const [state, face] of Object.entries(STATE_FACES)) {
+      expect(faceFor(state)).toBe(face);
+      expect(faceFor(state.toUpperCase())).toBe(face);
+    }
   });
 });
