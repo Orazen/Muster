@@ -45,9 +45,10 @@ never sweep them into cleanup commits. Retain the original preexisting stash.
 implemented and locally tested (observer plus producer contracts, 27 tests), but it
 is not deployed and its production identity is unverified. The
 [portable backup v2 prototype](audit-2026-09-13-backup-v2-and-release-identity.md)
-also landed as an inert module with its own tests: passphrase-only export and a
-dry-run restore plan, with **no restore writer, no route wiring and no
-cross-installation acceptance**. Finish the remaining peer/crash acceptance in
+also landed as an inert module with its own tests: passphrase-only export, a dry-run
+plan and a staged, all-or-nothing restore whose rollback is asserted byte-for-byte.
+That is a module with tests, not a shipped feature — **no route wiring, no UI and no
+production acceptance** — and no security claim. Finish the remaining peer/crash acceptance in
 the [peer plan](peer-capability-next-slice-2026-09-12.md),
 durable Stop recovery across reload, native signing/runtime, actual Google consent,
 full sync/backup, VM and Mimosa. Two Android Metro/image-size high alerts remain

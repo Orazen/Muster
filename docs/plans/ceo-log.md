@@ -4515,3 +4515,137 @@ three are weaker than a green suite implies. An audit is not an acceptance.
 **Next:** the staged restore writer behind an explicit user action, then the
 cross-installation fixture the contract requires (export from A, destroy A, restore under an
 unrelated secret B, compare message, branch and file hashes).
+
+## Loop89 — staged, all-or-nothing restore for the portable bundle (13 September 2026)
+
+**Status:** the destructive half of the v2 contract exists as code, in the same inert module as
+the export half. `server/workspace-bundle-v2.ts` gains `stageRestoreV2`, `commitRestoreV2` and
+`restoreBundleV2`, and `server/workspace-bundle-restore-v2.test.ts` is the suite that puts them
+through their own failure paths. **There is still no route wiring, no UI, no automatic sync and
+no production acceptance** — the module is inert, and no git state was mutated, so the tree is
+left for the owner's review. Documentation: this entry, the audit note, the contract note and two
+lines in current-state.md.
+
+**Verification (all on the frozen tree at `22a7011` plus the uncommitted slices):**
+- `npx oxlint .` → **exit 0**, one pre-existing warning (`server/index.ts:3440`,
+  `unicorn/no-useless-spread`).
+- `npx tsc --noEmit -p tsconfig.server.json` → **exit 0**.
+- `npx vitest run server/workspace-bundle-v2.test.ts server/workspace-bundle-restore-v2.test.ts`
+  → **2 files / 37 passed / 0 failed** (the export suite's 15 unchanged, the restore suite's 22
+  new).
+- `node_modules/.bin/vitest run` → **260 files / 3936 passed / 8 skipped / 0 failed**
+  (362.93s, re-run on the frozen tree). Loop88's stamped baseline was 259 files / 3914 passed /
+  8 skipped, so this is **+1 file / +22 tests** and no regression.
+
+**What a stage does.** `stageRestoreV2` validates the whole payload first — schema, every path
+through `isSafeRelativePath` and `confinedTarget`, every declared count against the rows and the
+manifest, every manifest hash against its body, every declared limit — and a payload that fails
+any of it returns `refused` with a `blocked[]` entry per property and writes nothing at all: not
+one file and not even the staging directory. Otherwise it writes inside a caller-named staging
+directory that must be absent or empty, every file temp-then-rename (`writeFileAtomic`), and
+rebuilds the transcript into a **new** SQLite database using the declaration from
+`server/message-db.ts:39-55`, inserting in the bundle's recorded row order and writing
+`thread_state.active_leaf_id` from the payload's own head rather than inferring it from the last
+row. The staged `messages.db` is created `0o600`, and the commit carries that mode through to
+the live file, so a restore neither widens nor narrows the transcript's permissions.
+
+**What a commit does.** `commitRestoreV2` is the module's only writer of live paths, so its
+guards are the deliverable. It refuses unless `confirm === true`; if `dataDir` is the filesystem
+root, is the home directory itself, does not exist, is not a directory, or is a symlink; if
+`stagingDir` is missing, empty, not a directory, holds no readable staging manifest, or already
+has one; if `stagingDir` is `dataDir` or sits inside it; if `backupDir` already exists, is a
+parent of `dataDir`, or sits inside it; and at pre-flight, if a staged file no longer matches the
+hash and size its manifest records, if a covered path is unsafe, if a live covered path is not a
+regular file, or if a covered path has a `-wal`/`-shm`/`-journal` sidecar (moving the database
+alone would drop transactions that were never checkpointed). Those comparisons are made on the
+paths the filesystem actually holds, not on the strings the caller passed: a backup directory
+spelled through a symlink into the live tree is refused, and so is a covered path whose parent
+directory is a link out of it — a guard that `resolve` alone cannot make, and one that an
+adversarial review pass on this slice proved was missing before it was fixed. Reads that cannot
+be performed (an unreadable staging tree) come back as a refusal rather than an exception. A
+refusal writes nothing.
+
+The commit then **overlays, it does not swap directories**: it moves the current version of
+exactly the paths the staging manifest covers into `backupDir`, preserving their relative
+structure, and writes the staged files into `dataDir`. `config.json`, `auth.secret`, attachments
+and every other path the bundle does not cover are left exactly as they were — asserted byte for
+byte, including that the installation's own secret is never copied into the backup. On success
+the staging manifest is marked consumed, so the same tree cannot be applied twice.
+
+**The rollback guarantee.** Every step after the guards sits inside one try. If any of them
+throws — the injected faults cover the move phase, the gap between the move and the writes, and
+the step after every file was written — the moved paths are **copied** back from `backupDir`
+(never moved back: the backup is the owner's pre-restore copy and stays), the files the commit
+created where nothing existed are removed, and the directories it created are removed deepest
+first (the first run of this suite caught a real bug here: an insertion-order removal left a
+parent directory behind because its child had not been removed yet). The tests assert the live
+directory is byte-identical to its pre-call fingerprint — content, size and mode, directories
+included — and that `rollbackFailures` is empty, which is the field that would say so if a
+rollback step itself failed.
+
+**Ids and grants.** By default a restore issues fresh bot and thread ids (`randomUUID`, the same
+shape as `newId` in `server/contracts.ts:407`) and returns a `mapping` of `{kind, from, to}` for
+each; bot ids are also rewritten inside the serialized messages that name one (`from.botId`,
+`comm.withBotId`, `reactions[].by`) and in the room's `defaultResponder`, and rows that name no
+bot are written back as the exact bytes the bundle held. `remapIds: false` keeps the bundle's
+ids, which is also what makes an overlay land on the same paths. Either way **no grant travels**:
+a bot record loses `alwaysAllow`, `autoApprove`, `approvePeerComms`, `resumeCursors`, `computer`,
+`cwd`, `ownerId` and `chiefOfStaff` — the last because a workspace holds one coordinator and the
+boot migration keeps whichever record it meets first (`server/store.ts:487-498`); `composio` and
+`browser` are written explicitly `false` rather than dropped (their absence means "allowed"); task
+cursors, `lastInstanceId` and `cwd` go; group records lose `busyBotId`, `ownerId`, `cwd` and
+`pinnedCwd` while membership, the room's thread and the member a plain message reaches
+(`defaultResponder.botId`, `server/store.ts:426-433` — a dangling id there is a room that
+dispatches to nobody) all follow the remap. Every bot in the bundle is returned in
+`reconsentRequired[]` with the reason, so the owner grants it again deliberately.
+
+**A review pass, and what it changed.** This slice was put through an adversarial read before it
+was accepted, and four of its findings were real enough to fix rather than file:
+
+- **Path guards compared strings, not files.** `containsPath` used `resolve`, which cannot tell
+  that `/tmp` and `/private/tmp` are one directory. A backup directory spelled through a symlink
+  into the live tree therefore passed the "not inside the data directory" guard, and a failed
+  commit then left that directory behind — a `rolled-back` result that was not byte-identical to
+  what it replaced. Guards now compare real paths, with the deepest existing ancestor resolved
+  for a directory that does not exist yet, and the home-directory guard is judged the same way.
+- **A covered path could be a link out of the tree.** `confinedTarget` is string arithmetic; a
+  live `memory/` that is a symlink would have had its file replaced *outside* the installation.
+  Pre-flight now resolves the parent of every covered path on both the staging and the live side
+  and refuses when it leaves the tree.
+- **A room's default responder kept a dead id.** `portGroupRecords` remapped `memberIds` and
+  `threadId` but carried `defaultResponder` verbatim, and `roomResponders` returns `[]` for a
+  member id it cannot find (`server/store.ts:426-433`): a restored room would have dispatched to
+  nobody. The responder now follows the remap. The fixture had hidden this by using a responder
+  shape the real type cannot hold; it now uses `{kind: "member", botId}`, the shape the store
+  actually writes.
+- **`chiefOfStaff` travelled.** A restored bot carrying the flag could take the workspace's
+  single coordinator role from the installation's own, and was never listed for re-consent.
+
+Two smaller ones were taken as well: a payload could claim `messages.db-shm` and have the commit
+plant it beside the fresh database, so the transcript's whole sidecar namespace is now a reserved
+name; and an unreadable staging tree threw out of `commitRestoreV2` instead of refusing, so those
+reads now report a refusal. The suite grew from 14 cases to 22, including the two path-alias
+cases that would have caught the first finding.
+
+**The cross-installation contract test now exists.** Export from fixture A (two bots, two
+threads, a branch whose newest row is not its recorded head, a group message that names a bot,
+five memory files), delete A entirely, restore into a fresh empty B using only the bundle bytes
+and the passphrase: B's `messages.db` holds the exact message ids, roles and text, the exact
+recorded heads, and every memory file at its remapped path with the exact hash it had in A — and
+B has no `auth.secret`.
+
+**Not done, and not claimed:** no route wiring, no UI, no automatic Drive/Telegram sync, no
+merge-into-live semantics (a covered path is replaced, not merged), no re-consent screen, no
+acceptance on real user data and no production observation of anything here. The rollback
+guarantee is proven for the failure points this suite injects by hand — the move phase, the gap
+between the move and the writes, the step after every file was written, and a rollback that
+itself cannot put a path back — and not for every conceivable one: a crash or power loss
+mid-commit is not simulated, and the `EXDEV` branch of `moveFile` (cross-filesystem backup) has
+no test, because no second filesystem exists in the fixture. A restore still takes a whole payload
+into memory (bounded by the declared limits) and the pre-flight reads the staged files back to
+check them. No security claim is made about the format or the installation.
+
+**Next:** the user-facing slice — a route behind an explicit owner action, with the re-consent
+list surfaced, plus the merge-into-live question the contract leaves open, and an acceptance run
+against a real installation's own data.
+
