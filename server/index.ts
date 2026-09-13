@@ -41,7 +41,7 @@ import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-s
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
 import { PeerCapabilities, type PeerLease } from "./peer-capabilities.ts";
-import { StopCleanupRegistry, STOP_CLEANUP_PENDING, STOP_CLEANUP_STALE, STOP_CLEANUP_PENDING_MESSAGE, STOP_CLEANUP_STALE_MESSAGE } from "./stop-cleanup.ts";
+import { StopCleanupRegistry, STOP_CLEANUP_PENDING, STOP_CLEANUP_STALE, STOP_CLEANUP_PENDING_MESSAGE, STOP_CLEANUP_STALE_MESSAGE, STOP_CLEANUP_RESTART_SETTLED_MESSAGE, STOP_CLEANUP_RESTART_UNRESOLVED_MESSAGE, settleInterruptedStopCleanups } from "./stop-cleanup.ts";
 import { installObscuraLocal, resolveObscuraMount, OBSCURA_TOOLS } from "./obscura.ts";
 import { legalPageFor, withVerificationMeta } from "./legal-pages.ts";
 import { exportSoulMd, parseSoulMd } from "./soul-md.ts";
@@ -127,7 +127,7 @@ import { isEffortLevel, type RequestOutcome, type RuntimeEvent, type WorkspaceBa
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
-import { searchMessages } from "./message-db.ts";
+import { searchMessages, stopCleanupJournal } from "./message-db.ts";
 import { _loadPending, discardDelegations, discardDelegationSnapshot, snapshotDelegations, drainDelegations, pendingThreads, queueDelegation, type DelegationSnapshot } from "./delegations.ts";
 import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
 import { DecisionLog, queryAudit } from "./decision-log.ts";
@@ -329,7 +329,8 @@ const CONNECTOR_TOKEN = randomBytes(24).toString("hex");
 const peerCapabilities = new PeerCapabilities(Date.now, 24 * 60 * 60_000, (lease) => {
   discardDelegations(commsBus, lease.threadId);
 });
-const stopCleanups = new StopCleanupRegistry();
+const stopCleanupDurability = stopCleanupJournal();
+const stopCleanups = new StopCleanupRegistry(Date.now, 24 * 60 * 60_000, stopCleanupDurability);
 const settledPeerEvents = new WeakSet<RuntimeEvent>();
 bus.subscribe((event) => {
   if (peerCapabilities.onEvent(event)) settledPeerEvents.add(event);
@@ -2834,9 +2835,35 @@ const approvalBus: ApprovalBus = {
 // dead (no turn survives a restart) so they would otherwise wait forever.
 // Run them now, through the same drain — target and approvePeerComms are
 // re-checked there as always; a source bot that no longer exists is skipped.
-_loadPending();
+const queueLoaded = _loadPending();
+// A Stop whose queue removal failed left a durable receipt. That process could
+// not finish canceling those exact handoffs, so without this the drain below
+// would run the very work the user stopped. Settle each receipt once, against
+// its captured IDs only, then say the Stop outcome is uncertain. Whatever a
+// receipt still covers is kept out of this boot's drain instead of resumed.
+const interruptedStops = settleInterruptedStopCleanups({
+  journal: stopCleanupDurability,
+  queueLoaded,
+  botOwner: (botId) => {
+    const bot = store.bot(botId);
+    return bot ? peerOwnerOf(bot) : undefined;
+  },
+  botThread: (botId) => store.bot(botId)?.threadId,
+  isLiveTask: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),
+  cancelQueue: discardDelegationSnapshot,
+});
+const unresolvedStops = new Set(interruptedStops.flatMap((result) => result.state === "unresolved" ? result.capturedThreads : []));
+for (const result of interruptedStops) {
+  if (!result.threadId || !result.note) continue;
+  try {
+    store.appendMessage(result.threadId, { role: "bot", kind: "activity", tool: { name: result.note, ok: false } });
+  } catch (error) {
+    // The receipt is already settled; a bot that cannot speak must not stop boot.
+    console.error("stop-cleanup: could not report an interrupted Stop", error);
+  }
+}
 {
-  const leftover = pendingThreads();
+  const leftover = pendingThreads().filter((threadId) => !unresolvedStops.has(threadId));
   if (leftover.length) console.log(`delegations: ${leftover.length} thread(s) with queued handoffs from a previous run — draining`);
   for (const threadId of leftover) drainDelegations(commsBus, approvalBus, threadId, runDelegatedTurn, peerOwnerOf);
 }
@@ -6588,7 +6615,17 @@ let requestUserEmail = "";
       if (!bot || !ownsRecord(bot)) return json(res, 404, { error: "no such bot" });
       const outcome = stopCleanups.retry(bot.id, peerOwnerOf(bot), body.receipt,
         (threadId) => !!store.taskByThread(bot.id, threadId), discardDelegationSnapshot);
-      if (outcome === "stale") return json(res, 409, { code: STOP_CLEANUP_STALE, error: STOP_CLEANUP_STALE_MESSAGE });
+      if (outcome === "stale") {
+        // A receipt this process never issued can still be a failed Stop from an
+        // earlier one. Report what the durable record says instead of silence.
+        const durable = stopCleanups.durableState(bot.id, body.receipt);
+        if (!durable) return json(res, 409, { code: STOP_CLEANUP_STALE, error: STOP_CLEANUP_STALE_MESSAGE });
+        return json(res, 409, {
+          code: STOP_CLEANUP_STALE,
+          error: durable.status === "settled" ? STOP_CLEANUP_RESTART_SETTLED_MESSAGE : STOP_CLEANUP_RESTART_UNRESOLVED_MESSAGE,
+          durableCleanup: { state: durable.status, failedAt: durable.failedAt },
+        });
+      }
       if (outcome === "pending") return json(res, 503, {
         code: STOP_CLEANUP_PENDING, error: STOP_CLEANUP_PENDING_MESSAGE, cleanupReceipt: body.receipt,
       });

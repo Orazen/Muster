@@ -11,7 +11,7 @@
 // time, never at queue time, because the user might have just turned
 // approvePeerComms on between queueing and draining.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import { join } from "node:path";
 
@@ -106,12 +106,17 @@ function replacePending(threadId: string, items: PendingDelegationItem[]): void 
   for (const [id, list] of next) pendingDelegations.set(id, list);
 }
 
-/** Legacy rows without provenance are refused, not upgraded into authority. */
-export function _loadPending(): void {
+/** Legacy rows without provenance are refused, not upgraded into authority.
+ * Returns false when a queue file that exists could not be read or parsed:
+ * nothing was loaded, so a caller holding a durable Stop receipt cannot tell an
+ * already-removed handoff from one this process never saw. A fresh install has
+ * nothing to account for and returns true. */
+export function _loadPending(): boolean {
   pendingDelegations.clear();
+  if (!existsSync(DELEGATIONS_FILE)) return true;
   try {
     const result = queueSchema.safeParse(parseJson(readFileSync(DELEGATIONS_FILE, "utf8")));
-    if (!result.success) return;
+    if (!result.success) return false;
     const ids = new Set<string>();
     for (const [threadId, list] of Object.entries(result.data)) {
       if (!Array.isArray(list)) continue;
@@ -124,8 +129,10 @@ export function _loadPending(): void {
       }
       if (items.length) pendingDelegations.set(threadId, items);
     }
+    return true;
   } catch {
-    /* fresh install, corrupt or unreadable — no accepted queue loaded */
+    /* unreadable — no accepted queue loaded, and none can be accounted for */
+    return false;
   }
 }
 

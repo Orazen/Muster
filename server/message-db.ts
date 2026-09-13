@@ -17,6 +17,9 @@ import { isDeepStrictEqual } from "node:util";
 
 import { DATA_DIR } from "./config.ts";
 import { SeedAnswerError } from "./seed-card.ts";
+import type { DelegationSnapshot } from "./delegations.ts";
+import type { StopCleanupDurableState, StopCleanupJournal, StopCleanupReceiptRecord } from "./stop-cleanup.ts";
+import { stopCleanupSnapshotsSchema } from "./stop-cleanup.ts";
 import type { Message } from "./store.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
@@ -51,6 +54,17 @@ function open(): DatabaseSync {
     CREATE TABLE IF NOT EXISTS thread_state (
       thread_id TEXT PRIMARY KEY,
       active_leaf_id TEXT
+    );
+    CREATE TABLE IF NOT EXISTS stop_cleanup_receipts (
+      bot_id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL,
+      generation_id TEXT NOT NULL,
+      token TEXT NOT NULL,
+      snapshots TEXT NOT NULL,
+      failed_at INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL,
+      settled_at INTEGER
     );
   `);
   return db;
@@ -283,6 +297,92 @@ export function startingSeedCards(threadId: string): Message[] {
   const rows = db().prepare("SELECT json FROM messages WHERE thread_id = ? AND json_extract(json, '$.card.purpose') = 'onboarding-v1' AND json_extract(json, '$.card.seedAnswer.status') = 'starting'")
     .all(threadId) as Array<{ json: string }>;
   return rows.map(rowToMessage);
+}
+
+// ── failed-Stop receipts ──────────────────────────────────────────────
+// A Stop that could not write the handoff queue has to outlive the process
+// that failed it: otherwise a reload lets the next boot's queue drain run the
+// very work the user stopped. These rows are the durable half of that receipt
+// and share this database (and its transaction/file discipline) with the
+// seed-answer receipt rather than adding a second store. One row per bot,
+// replaced by that bot's next failed Stop, never swept by another bot's work.
+
+/** Decode captured snapshots defensively: a corrupt row must not break boot. */
+function decodeStopCleanupSnapshots(raw: string): DelegationSnapshot[] | undefined {
+  try {
+    const parsed = stopCleanupSnapshotsSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Record the failed Stop, replacing any earlier row for this bot. */
+export function recordStopCleanupReceipt(record: StopCleanupReceiptRecord): void {
+  db()
+    .prepare(
+      "INSERT OR REPLACE INTO stop_cleanup_receipts (bot_id, owner_id, generation_id, token, snapshots, failed_at, reason, status, settled_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL)",
+    )
+    .run(record.botId, record.ownerId, record.generationId, record.token, JSON.stringify(record.snapshots), record.failedAt, record.reason);
+}
+
+/** Receipts a previous process could not finish; a settled row is never reapplied. */
+export function pendingStopCleanupReceipts(): StopCleanupReceiptRecord[] {
+  // SAFETY: the select lists this table's own columns, and snapshots is decoded below.
+  const rows = db()
+    .prepare("SELECT bot_id, owner_id, generation_id, token, snapshots, failed_at, reason FROM stop_cleanup_receipts WHERE status = 'pending' ORDER BY failed_at")
+    .all() as Array<{ bot_id: string; owner_id: string; generation_id: string; token: string; snapshots: string; failed_at: number; reason: string }>;
+  const records: StopCleanupReceiptRecord[] = [];
+  for (const row of rows) {
+    const snapshots = decodeStopCleanupSnapshots(row.snapshots);
+    if (!snapshots) {
+      console.error("stop-cleanup: a durable receipt held no readable queue capture and was skipped");
+      continue;
+    }
+    records.push({
+      botId: row.bot_id, ownerId: row.owner_id, generationId: row.generation_id,
+      token: row.token, snapshots, failedAt: row.failed_at, reason: row.reason,
+    });
+  }
+  return records;
+}
+
+/** Consume one receipt exactly once. The boot that finds the row pending wins;
+ * every later boot or process sees zero changed rows and applies nothing. */
+export function settleStopCleanupReceipt(botId: string, token: string, settledAt: number): boolean {
+  const updated = db()
+    .prepare("UPDATE stop_cleanup_receipts SET status = 'settled', settled_at = ? WHERE bot_id = ? AND token = ? AND status = 'pending'")
+    .run(settledAt, botId, token);
+  return updated.changes === 1;
+}
+
+/** What a reload can still be told about a receipt it holds but this process
+ * never issued — the same failure, after the restart that ended its memory. */
+export function stopCleanupReceiptState(botId: string, token: string): StopCleanupDurableState | undefined {
+  // SAFETY: the select lists this table's own columns.
+  const row = db()
+    .prepare("SELECT status, failed_at, reason FROM stop_cleanup_receipts WHERE bot_id = ? AND token = ?")
+    .get(botId, token) as { status: string; failed_at: number; reason: string } | undefined;
+  if (!row) return undefined;
+  return { status: row.status === "settled" ? "settled" : "pending", failedAt: row.failed_at, reason: row.reason };
+}
+
+/** Retire a bot's receipt once nothing is left to resume (a completed retry,
+ * a new turn, an expiry or a deletion). */
+export function clearStopCleanupReceipt(botId: string): void {
+  db().prepare("DELETE FROM stop_cleanup_receipts WHERE bot_id = ?").run(botId);
+}
+
+/** The registry's durable half, wired by the server at boot. */
+export function stopCleanupJournal(): StopCleanupJournal {
+  return {
+    record: recordStopCleanupReceipt,
+    clear: clearStopCleanupReceipt,
+    pending: pendingStopCleanupReceipts,
+    settle: settleStopCleanupReceipt,
+    state: stopCleanupReceiptState,
+  };
 }
 
 export function setActiveLeaf(threadId: string, leafId: string | null): void {
