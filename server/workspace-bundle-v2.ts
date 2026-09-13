@@ -34,23 +34,51 @@
 // instead of a torn one. A `messages.db` outside the given data directory is
 // never opened.
 //
-// THERE IS DELIBERATELY NO RESTORE WRITER HERE. `planRestoreV2` is a dry run
-// that reports what a restore would do and writes nothing — not one byte, and
-// it will not even open the target database, because opening a WAL database
-// can create `-shm`/`-wal` sidecars. The staged, all-or-nothing transactional
-// restore (write to a staging tree, verify, swap, roll back on any failure) is
-// the next slice of the contract in
-// docs/plans/portable-backup-contract-2026-09-12.md. Nothing in this module
-// is wired into a route: it is inert until that slice lands.
+// The restore half is split in two so that only one of them can touch a live
+// installation. `stageRestoreV2` validates the whole payload and then writes a
+// complete, hashed copy of it into a staging directory the caller names; it
+// never reads or writes the installation. `commitRestoreV2` is the only
+// function here that may write into a live tree, and it overlays: the current
+// version of exactly the paths the staging manifest covers is moved into a
+// backup directory, the staged files are written in their place, and anything
+// the bundle does not cover — `config.json`, `auth.secret`, attachments — is
+// left exactly as it was. Any failure rolls the covered paths back and the
+// directory is byte-identical to what it was before the call.
+//
+// `planRestoreV2` is still the dry run, and still writes nothing: it will not
+// even open the target database, because opening a WAL database can create
+// `-shm`/`-wal` sidecars. Nothing in this module is wired into a route — there
+// is no endpoint, no UI and no automatic sync, so a restore only happens when
+// a caller explicitly asks for one. See
+// docs/plans/portable-backup-contract-2026-09-12.md.
 
-import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
-import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
+import {
+  chmodSync,
+  closeSync,
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { gunzipSync, gzipSync } from "node:zlib";
 
 import { z } from "zod";
+
+import { writeFileAtomic } from "./atomic.ts";
 
 /** Bounded everything. A bundle that declares more than this is refused
  * before a buffer is allocated for it. */
@@ -1064,6 +1092,1233 @@ export function planRestoreV2(payload: BundlePayloadV2, options: PlanRestoreV2Op
     plan.creates.push({ kind: "thread", path: thread.threadId, detail: `${thread.messages.length} messages, head ${thread.activeLeafId ?? "none"}` });
   }
   return plan;
+}
+
+// ---------------------------------------------------------------------------
+// Restore — stage
+// ---------------------------------------------------------------------------
+
+/** A step a restore is about to take. The seams (`onStage`, `onCommit`) fire
+ * immediately before the step runs, so a throw lands with that step's effects
+ * not yet applied. `path` names the entry the step concerns, when it concerns
+ * one. */
+export interface RestoreEvent {
+  step: "validate" | "staging-dir" | "file" | "transcript" | "manifest" | "move" | "write" | "consume";
+  path?: string;
+}
+
+/** One property that stopped a restore, and why. A refusal reports every
+ * property it can check rather than the first: "refused" with no reason is a
+ * report the operator cannot act on. */
+export interface RestoreBlocked {
+  path: string;
+  detail: string;
+}
+
+/** One id this restore issued, against the id the bundle carried. `kind` keeps
+ * a bot named `thread-1` apart from a thread named `thread-1`. An empty
+ * `mapping` means no id changed. */
+export interface RestoreIdMapping {
+  kind: "bot" | "thread";
+  from: string;
+  to: string;
+}
+
+/** A bot whose grants did not travel. A bot record holds standing permissions
+ * (`alwaysAllow`, `autoApprove`), a connection switch (`composio`), a browser
+ * capability and provider session handles. A bundle carries the record, but a
+ * file may not re-establish a grant, so every restored bot is listed here for
+ * the owner to decide again on this installation. */
+export interface ReconsentEntry {
+  botId: string;
+  restoredId: string;
+  reason: string;
+}
+
+export interface StagedCounts {
+  files: number;
+  messages: number;
+  threads: number;
+  bots: number;
+  bytes: number;
+}
+
+const RESTORE_MANIFEST = ".muster-restore-staging.json";
+const RESTORE_FORMAT = "muster-restore-staging";
+/** The transcript is rebuilt from the payload's rows, never copied: the rows
+ * are the data, the file is a rendering of them. */
+const STAGED_TRANSCRIPT = "messages.db";
+const BOTS_FILE_NAME = "bots.json";
+const GROUPS_FILE_NAME = "groups.json";
+const WORKSPACES_PREFIX = "workspaces/";
+
+/** Bot-record fields that are a granted capability, an approval the owner gave
+ * on a different installation, a provider session handle, or a pointer at a
+ * machine or folder belonging to the installation the bundle came from. They
+ * are dropped rather than restored. */
+export const RESTORE_DROPPED_BOT_FIELDS = [
+  "alwaysAllow",
+  "autoApprove",
+  "approvePeerComms",
+  "resumeCursors",
+  "computer",
+  "cwd",
+  "ownerId",
+  // a workspace holds at most one coordinator, and the boot migration keeps
+  // whichever record it meets first (server/store.ts:487-498): a restored bot
+  // carrying the flag could take the role from the installation's own
+  "chiefOfStaff",
+] as const;
+
+/** Capability switches whose *absence* means "allowed" (`composio` defaults to
+ * on, `browser` to off). Dropping `composio` would silently re-grant a
+ * connection, so these are written explicitly off instead. */
+export const RESTORE_DISABLED_BOT_FIELDS = ["composio", "browser"] as const;
+
+/** The same rule per task record: a cursor resumes a provider session this
+ * installation never opened, and a folder was pinned on the other machine. */
+export const RESTORE_DROPPED_TASK_FIELDS = ["resumeCursors", "lastInstanceId", "cwd"] as const;
+
+/** Group records carry the same non-portable pointers, plus the transient
+ * `busyBotId` the store itself never persists. */
+export const RESTORE_DROPPED_GROUP_FIELDS = ["busyBotId", "ownerId", "cwd", "pinnedCwd"] as const;
+
+const stagedFileSchema = z.object({
+  path: z.string().min(1).max(512),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  size: z.number().int().min(0).max(LIMITS.maxFileBytes),
+});
+
+const stagedCountsSchema = z.object({
+  files: z.number().int().min(0).max(LIMITS.maxFiles + 1),
+  messages: z.number().int().min(0).max(LIMITS.maxMessages),
+  threads: z.number().int().min(0).max(LIMITS.maxManifestEntries),
+  bots: z.number().int().min(0).max(LIMITS.maxManifestEntries),
+  /** bytes counts the staging tree the stage just wrote, transcript included,
+   * so it is deliberately unbounded here: a bound below the size of a large
+   * transcript's database would make the stage write a manifest its own reader
+   * rejects. The payload's own bounds were enforced before any of this. */
+  bytes: z.number().int().min(0),
+});
+
+/** What a staging tree is, and what it holds. `commitRestoreV2` reads this
+ * before it moves anything and refuses a tree without it: a directory of files
+ * is not a restore, and a half-written one must never be mistaken for one. */
+const stagingManifestSchema = z.object({
+  format: z.literal(RESTORE_FORMAT),
+  schema: z.literal(BUNDLE_SCHEMA),
+  stagedAt: z.number().int(),
+  appVersion: z.string().min(1).max(128),
+  transcriptMethod: z.string().min(1).max(128),
+  remappedIds: z.boolean(),
+  counts: stagedCountsSchema,
+  files: z.array(stagedFileSchema).min(1).max(LIMITS.maxFiles + 1),
+  /** set by a completed commit, so the same tree cannot be applied twice */
+  consumedAt: z.number().int().optional(),
+});
+
+type StagingManifest = z.infer<typeof stagingManifestSchema>;
+
+/** Lenient on purpose: a bundle from another build carries fields this one
+ * does not know, and the whole point of restoring is to keep them. */
+const botRecordSchema = z.looseObject({
+  id: z.string().min(1).max(512),
+  threadId: z.string().min(1).max(512).optional(),
+  tasks: z
+    .array(z.looseObject({ threadId: z.string().min(1).max(512).optional() }))
+    .max(LIMITS.maxManifestEntries)
+    .optional(),
+});
+
+const groupRecordSchema = z.looseObject({
+  id: z.string().min(1).max(512),
+  threadId: z.string().min(1).max(512).optional(),
+  memberIds: z.array(z.string().min(1).max(512)).max(LIMITS.maxManifestEntries).optional(),
+  /** `{kind: "member", botId}` names the member a plain message reaches
+   * (server/store.ts:426-433). Left untyped on purpose: the field has several
+   * shapes, and one that names no member is left exactly as the bundle held
+   * it rather than failing the whole restore. */
+  defaultResponder: z.unknown().optional(),
+});
+
+/** The responder shape that carries a bot id. */
+const groupResponderSchema = z.looseObject({ botId: z.string().min(1).max(512) });
+
+const botReferenceSchema = z.looseObject({ botId: z.string().min(1).max(512) });
+const commReferenceSchema = z.looseObject({ withBotId: z.string().min(1).max(512) });
+const reactionSchema = z.looseObject({ by: z.string().min(1).max(512) });
+/** The bot ids a serialized Message carries inside itself. */
+const messageReferencesSchema = z.looseObject({
+  from: botReferenceSchema.optional(),
+  comm: commReferenceSchema.optional(),
+  reactions: z.array(reactionSchema).max(LIMITS.maxMessages).optional(),
+});
+
+const botRecordsSchema = z.array(botRecordSchema).max(LIMITS.maxManifestEntries);
+const groupRecordsSchema = z.array(groupRecordSchema).max(LIMITS.maxManifestEntries);
+
+type BotRecords = z.infer<typeof botRecordsSchema>;
+type GroupRecords = z.infer<typeof groupRecordsSchema>;
+type MessageReferences = z.infer<typeof messageReferencesSchema>;
+
+/** Everything a staged restore would write, decided before a byte is. */
+interface StagedPlan {
+  files: Array<{ path: string; body: Buffer }>;
+  transcript: BundleTranscript;
+  mapping: RestoreIdMapping[];
+  reconsent: ReconsentEntry[];
+  counts: StagedCounts;
+  transcriptMethod: string;
+  remappedIds: boolean;
+}
+
+type PlanOutcome = { ok: true; plan: StagedPlan } | { ok: false; blocked: RestoreBlocked[] };
+
+/** Rewrite the bot ids a serialized Message carries inside itself: group
+ * sender attribution (`from.botId`), comm chips (`comm.withBotId`) and
+ * reactions (`reactions[].by`). A row that names no bot is returned as the
+ * exact string the bundle held rather than a re-serialization, so a remap
+ * only touches the rows that actually reference one. */
+function remapMessageJson(json: string, botIds: ReadonlyMap<string, string>): string {
+  if (botIds.size === 0) return json;
+  let row: MessageReferences;
+  try {
+    const decoded = messageReferencesSchema.safeParse(JSON.parse(json));
+    if (!decoded.success) return json;
+    row = decoded.data;
+  } catch {
+    return json;
+  }
+  let changed = false;
+  const from = row.from;
+  if (from !== undefined) {
+    const to = botIds.get(from.botId);
+    if (to !== undefined) {
+      from.botId = to;
+      changed = true;
+    }
+  }
+  const comm = row.comm;
+  if (comm !== undefined) {
+    const to = botIds.get(comm.withBotId);
+    if (to !== undefined) {
+      comm.withBotId = to;
+      changed = true;
+    }
+  }
+  for (const reaction of row.reactions ?? []) {
+    const to = botIds.get(reaction.by);
+    if (to !== undefined) {
+      reaction.by = to;
+      changed = true;
+    }
+  }
+  return changed ? JSON.stringify(row) : json;
+}
+
+/** Bot records as this installation will hold them: a fresh id, a fresh thread
+ * binding, and no grant or pointer that belonged to the other machine. Written
+ * back with the store's own formatting (`JSON.stringify(bots, null, 2)`,
+ * server/store.ts:566) so a restored file is the file the app would have
+ * written. Returns null when the document is not a JSON array of records. */
+function portBotRecords(
+  text: string,
+  botIds: ReadonlyMap<string, string>,
+  threadIds: ReadonlyMap<string, string>,
+): BotRecords | null {
+  try {
+    const decoded = botRecordsSchema.safeParse(JSON.parse(text));
+    if (!decoded.success) return null;
+    return decoded.data.map((record) => {
+      const next = { ...record };
+      for (const field of RESTORE_DROPPED_BOT_FIELDS) delete next[field];
+      for (const field of RESTORE_DISABLED_BOT_FIELDS) next[field] = false;
+      const id = botIds.get(record.id);
+      if (id !== undefined) next.id = id;
+      const threadId = record.threadId === undefined ? undefined : threadIds.get(record.threadId);
+      if (threadId !== undefined) next.threadId = threadId;
+      next.tasks = record.tasks?.map((task) => {
+        const remapped = { ...task };
+        for (const field of RESTORE_DROPPED_TASK_FIELDS) delete remapped[field];
+        const mapped = task.threadId === undefined ? undefined : threadIds.get(task.threadId);
+        if (mapped !== undefined) remapped.threadId = mapped;
+        return remapped;
+      });
+      return next;
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Group records as this installation will hold them. Group ids are not bot
+ * ids and are left alone; membership, the room's thread and the member a plain
+ * message reaches all follow the remap, because a member list or a responder
+ * pointing at ids that no longer exist is a room that cannot dispatch. */
+function portGroupRecords(
+  text: string,
+  botIds: ReadonlyMap<string, string>,
+  threadIds: ReadonlyMap<string, string>,
+): GroupRecords | null {
+  try {
+    const decoded = groupRecordsSchema.safeParse(JSON.parse(text));
+    if (!decoded.success) return null;
+    return decoded.data.map((record) => {
+      const next = { ...record };
+      for (const field of RESTORE_DROPPED_GROUP_FIELDS) delete next[field];
+      if (record.memberIds !== undefined) {
+        next.memberIds = record.memberIds.map((member) => botIds.get(member) ?? member);
+      }
+      const threadId = record.threadId === undefined ? undefined : threadIds.get(record.threadId);
+      if (threadId !== undefined) next.threadId = threadId;
+      const responder = groupResponderSchema.safeParse(record.defaultResponder);
+      if (responder.success) {
+        const mapped = botIds.get(responder.data.botId);
+        if (mapped !== undefined) next.defaultResponder = { ...responder.data, botId: mapped };
+      }
+      return next;
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Every way a payload can contradict itself, collected rather than
+ * short-circuited. This runs before the staging directory exists, so a
+ * refusal here has written nothing at all. */
+function restorePayloadProblems(payload: BundlePayloadV2, stagingDir: string): RestoreBlocked[] {
+  const blocked: RestoreBlocked[] = [];
+  const decoded = bundlePayloadSchema.safeParse(payload);
+  if (!decoded.success) {
+    blocked.push({ path: "-", detail: "the payload does not match the v2 schema" });
+    return blocked;
+  }
+  const data = decoded.data;
+  if (data.files.length !== data.counts.files) {
+    blocked.push({
+      path: "-",
+      detail: `the manifest holds ${data.files.length} files but declares ${data.counts.files}`,
+    });
+  }
+  if (data.files.length > LIMITS.maxFiles || data.files.length > LIMITS.maxManifestEntries) {
+    blocked.push({ path: "-", detail: `the manifest holds more than ${LIMITS.maxFiles} files` });
+  }
+  const seenPaths = new Set<string>();
+  let totalBytes = 0;
+  for (const file of data.files) {
+    if (!isSafeRelativePath(file.path) || confinedTarget(stagingDir, file.path) === null) {
+      blocked.push({ path: file.path, detail: "unsafe-path" });
+      continue;
+    }
+    if (file.path === STAGED_TRANSCRIPT || file.path.startsWith(`${STAGED_TRANSCRIPT}-`)) {
+      blocked.push({ path: file.path, detail: "the manifest claims a name that belongs to the transcript database" });
+      continue;
+    }
+    if (file.path === RESTORE_MANIFEST) {
+      blocked.push({ path: file.path, detail: "the manifest claims the path the restore writes its own manifest to" });
+      continue;
+    }
+    if (seenPaths.has(file.path)) {
+      blocked.push({ path: file.path, detail: "duplicate manifest path" });
+      continue;
+    }
+    seenPaths.add(file.path);
+    totalBytes += file.size;
+    if (file.size > LIMITS.maxFileBytes) {
+      blocked.push({ path: file.path, detail: `above the ${LIMITS.maxFileBytes}-byte per-file limit` });
+      continue;
+    }
+    const body = decodeBase64(file.bodyB64);
+    if (body === null || body.byteLength !== file.size) {
+      blocked.push({
+        path: file.path,
+        detail: body === null ? "the body cannot be decoded" : "the body is not the length it declares",
+      });
+      continue;
+    }
+    if (sha256Hex(body) !== file.sha256) {
+      blocked.push({ path: file.path, detail: "the body does not match the hash recorded for it" });
+    }
+  }
+  if (data.counts.totalBytes > LIMITS.maxTotalBytes) {
+    blocked.push({ path: "-", detail: `the files declare more than ${LIMITS.maxTotalBytes} bytes` });
+  } else if (totalBytes !== data.counts.totalBytes) {
+    blocked.push({
+      path: "-",
+      detail: `the files total ${totalBytes} bytes but the payload declares ${data.counts.totalBytes}`,
+    });
+  }
+  if (manifestDigest(data.files) !== data.manifestSha256) {
+    blocked.push({ path: "-", detail: "the manifest does not match its recorded digest" });
+  }
+  const threads = data.transcripts.threads;
+  const messages = threads.reduce((total, thread) => total + thread.messages.length, 0);
+  if (threads.length !== data.transcripts.counts.threads) {
+    blocked.push({
+      path: "-",
+      detail: `the transcript holds ${threads.length} threads but declares ${data.transcripts.counts.threads}`,
+    });
+  }
+  if (messages !== data.transcripts.counts.messages) {
+    blocked.push({
+      path: "-",
+      detail: `the transcript holds ${messages} messages but declares ${data.transcripts.counts.messages}`,
+    });
+  }
+  if (data.counts.threads !== threads.length || data.counts.messages !== messages) {
+    blocked.push({ path: "-", detail: "the payload counts do not match the transcript's rows" });
+  }
+  if (threads.length > LIMITS.maxManifestEntries) {
+    blocked.push({ path: "-", detail: `the transcript holds more than ${LIMITS.maxManifestEntries} threads` });
+  }
+  if (messages > LIMITS.maxMessages) {
+    blocked.push({ path: "-", detail: `the transcript holds more than ${LIMITS.maxMessages} messages` });
+  }
+  const seenThreads = new Set<string>();
+  for (const thread of threads) {
+    if (seenThreads.has(thread.threadId)) {
+      blocked.push({ path: thread.threadId, detail: "duplicate thread id" });
+      continue;
+    }
+    seenThreads.add(thread.threadId);
+    const ids = new Set<string>();
+    for (const message of thread.messages) {
+      if (ids.has(message.id)) {
+        blocked.push({ path: `${thread.threadId}/${message.id}`, detail: "duplicate message id in its thread" });
+        continue;
+      }
+      ids.add(message.id);
+    }
+    if (thread.activeLeafId !== null && !ids.has(thread.activeLeafId)) {
+      blocked.push({
+        path: thread.threadId,
+        detail: `the recorded branch head ${thread.activeLeafId} is not among the messages`,
+      });
+    }
+  }
+  return blocked;
+}
+
+/** Decide every byte a stage would write, and every id it would issue, without
+ * touching the filesystem. Refusals here leave nothing behind because nothing
+ * has been created yet. */
+function buildStagedPlan(payload: BundlePayloadV2, stagingDir: string, remapIds: boolean): PlanOutcome {
+  const blocked = restorePayloadProblems(payload, stagingDir);
+  if (blocked.length > 0) return { ok: false, blocked };
+  const botsFile = payload.files.find((file) => file.path === BOTS_FILE_NAME);
+  const groupsFile = payload.files.find((file) => file.path === GROUPS_FILE_NAME);
+  const botIds = new Set<string>();
+  for (const file of payload.files) {
+    if (!file.path.startsWith(WORKSPACES_PREFIX)) continue;
+    const botId = file.path.split("/")[1];
+    if (botId !== undefined && botId.length > 0) botIds.add(botId);
+  }
+  let botRecords: BotRecords | null = null;
+  if (botsFile !== undefined) {
+    const body = decodeBase64(botsFile.bodyB64);
+    if (body === null) return { ok: false, blocked: [{ path: BOTS_FILE_NAME, detail: "the body cannot be decoded" }] };
+    botRecords = portBotRecords(body.toString("utf8"), new Map<string, string>(), new Map<string, string>());
+    if (botRecords === null) {
+      return {
+        ok: false,
+        blocked: [{ path: BOTS_FILE_NAME, detail: "the bot store is not a JSON array of bot records" }],
+      };
+    }
+    for (const record of botRecords) botIds.add(record.id);
+  }
+  let groupsText: string | null = null;
+  if (groupsFile !== undefined) {
+    const body = decodeBase64(groupsFile.bodyB64);
+    if (body === null) return { ok: false, blocked: [{ path: GROUPS_FILE_NAME, detail: "the body cannot be decoded" }] };
+    groupsText = body.toString("utf8");
+    if (portGroupRecords(groupsText, new Map<string, string>(), new Map<string, string>()) === null) {
+      return {
+        ok: false,
+        blocked: [{ path: GROUPS_FILE_NAME, detail: "the group store is not a JSON array of group records" }],
+      };
+    }
+  }
+  const botIdMap = new Map<string, string>();
+  const mapping: RestoreIdMapping[] = [];
+  for (const from of [...botIds].sort()) {
+    const to = remapIds ? randomUUID() : from;
+    botIdMap.set(from, to);
+    if (remapIds) mapping.push({ kind: "bot", from, to });
+  }
+  const threadIdMap = new Map<string, string>();
+  for (const thread of payload.transcripts.threads) {
+    const to = remapIds ? randomUUID() : thread.threadId;
+    threadIdMap.set(thread.threadId, to);
+    if (remapIds) mapping.push({ kind: "thread", from: thread.threadId, to });
+  }
+  const reconsent: ReconsentEntry[] = [...botIds].sort().map((botId) => ({
+    botId,
+    restoredId: botIdMap.get(botId) ?? botId,
+    reason: remapIds
+      ? "permissions and connection grants do not travel in a bundle, and this bot was restored under a fresh id"
+      : "permissions and connection grants do not travel in a bundle",
+  }));
+  const files: Array<{ path: string; body: Buffer }> = [];
+  for (const file of payload.files) {
+    const body = decodeBase64(file.bodyB64);
+    if (body === null) return { ok: false, blocked: [{ path: file.path, detail: "the body cannot be decoded" }] };
+    const segments = file.path.split("/");
+    const botDir = segments[1];
+    const mapped = botDir === undefined ? undefined : botIdMap.get(botDir);
+    const stagedPath =
+      segments[0] === "workspaces" && mapped !== undefined
+        ? [segments[0], mapped, ...segments.slice(2)].join("/")
+        : file.path;
+    let staged = body;
+    if (file.path === BOTS_FILE_NAME && botRecords !== null) {
+      const ported = portBotRecords(body.toString("utf8"), botIdMap, threadIdMap) ?? botRecords;
+      staged = Buffer.from(JSON.stringify(ported, null, 2), "utf8");
+    } else if (file.path === GROUPS_FILE_NAME && groupsText !== null) {
+      const ported = portGroupRecords(groupsText, botIdMap, threadIdMap);
+      if (ported !== null) staged = Buffer.from(JSON.stringify(ported, null, 2), "utf8");
+    }
+    files.push({ path: stagedPath, body: staged });
+  }
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const transcript: BundleTranscript = {
+    method: payload.transcripts.method,
+    threads: payload.transcripts.threads.map((thread) => ({
+      threadId: threadIdMap.get(thread.threadId) ?? thread.threadId,
+      activeLeafId: thread.activeLeafId,
+      messages: thread.messages.map((message) =>
+        remapIds ? { ...message, json: remapMessageJson(message.json, botIdMap) } : message,
+      ),
+    })),
+    counts: { ...payload.transcripts.counts },
+  };
+  const messages = transcript.threads.reduce((total, thread) => total + thread.messages.length, 0);
+  return {
+    ok: true,
+    plan: {
+      files,
+      transcript,
+      mapping,
+      reconsent,
+      counts: {
+        files: files.length + 1,
+        messages,
+        threads: transcript.threads.length,
+        bots: botIds.size,
+        bytes: files.reduce((total, file) => total + file.body.byteLength, 0),
+      },
+      transcriptMethod: payload.transcripts.method,
+      remappedIds: remapIds,
+    },
+  };
+}
+
+/** Rebuild the transcript as a new database.
+ *
+ * The three statements below are the declaration from
+ * server/message-db.ts:39-55, character for character — a staged database with
+ * its own idea of the schema is one the app has to repair on first open. WAL
+ * is deliberately not set here: the app turns it on when it opens the file
+ * (message-db.ts:37), and a staged database with a `-wal` beside it would be a
+ * second file to carry for no gain.
+ *
+ * Rows are inserted in the order the bundle recorded (`seq`, the source
+ * rowid), and every value is bound, never interpolated. `thread_state` is
+ * written from the payload's own head rather than inferred from the last row
+ * inserted: a branch whose newest row is not its head must come back with the
+ * head it had. */
+function writeStagedTranscript(dbPath: string, transcript: BundleTranscript): void {
+  // owner-only, on creation and on a file that predates it — transcripts are
+  // private conversations (server/message-db.ts:30-35)
+  closeSync(openSync(dbPath, "a", 0o600));
+  try {
+    chmodSync(dbPath, 0o600);
+  } catch {
+    /* best effort, as in the live store */
+  }
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.exec(
+      "CREATE TABLE IF NOT EXISTS messages (thread_id TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, text TEXT, json TEXT NOT NULL, PRIMARY KEY (thread_id, id))",
+    );
+    db.exec("CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id)");
+    db.exec("CREATE TABLE IF NOT EXISTS thread_state (thread_id TEXT PRIMARY KEY, active_leaf_id TEXT)");
+    const insert = db.prepare(
+      "INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    const state = db.prepare("INSERT INTO thread_state (thread_id, active_leaf_id) VALUES (?, ?)");
+    db.exec("BEGIN");
+    try {
+      for (const thread of transcript.threads) {
+        const rows = [...thread.messages].sort((a, b) => a.seq - b.seq);
+        for (const message of rows) {
+          insert.run(thread.threadId, message.id, message.at, message.role, message.kind, message.text, message.json);
+        }
+        state.run(thread.threadId, thread.activeLeafId);
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  } finally {
+    db.close();
+  }
+}
+
+export interface StageRestoreV2Options {
+  stagingDir: string;
+  /** Issue fresh bot and thread ids (default), or keep the bundle's. Grants
+   * and connection switches are dropped either way. */
+  remapIds?: boolean;
+  /** Test seam, called before each step. A throw cleans the staging tree up
+   * and returns `failed`; nothing outside `stagingDir` is touched. */
+  onStage?: (event: RestoreEvent) => void;
+}
+
+export interface StagedRestoreResult {
+  status: "staged" | "refused" | "failed";
+  stagingDir: string;
+  blocked: RestoreBlocked[];
+  mapping: RestoreIdMapping[];
+  reconsentRequired: ReconsentEntry[];
+  /** the staged relative paths, the transcript included */
+  files: string[];
+  counts?: StagedCounts;
+  error?: string;
+}
+
+/** Write a complete, hashed copy of a payload into `stagingDir`.
+ *
+ * This never reads or writes a live installation. The caller names a directory
+ * that must be absent or empty and everything lands inside it: the payload is
+ * validated in full first — schema, every path, the declared counts, every
+ * manifest hash, every limit — and a payload that fails any of that returns
+ * `refused` with nothing written, not even the directory. Each file is written
+ * temp-then-rename, so a reader never sees a half-written one. */
+export function stageRestoreV2(payload: BundlePayloadV2, options: StageRestoreV2Options): StagedRestoreResult {
+  const stagingDir = resolve(options.stagingDir);
+  const remapIds = options.remapIds ?? true;
+  const report = options.onStage ?? (() => {});
+  const refuse = (blocked: RestoreBlocked[]): StagedRestoreResult => ({
+    status: "refused",
+    stagingDir,
+    blocked,
+    mapping: [],
+    reconsentRequired: [],
+    files: [],
+  });
+  const existing = lstatOrNull(stagingDir);
+  if (existing !== null) {
+    if (!existing.isDirectory()) {
+      return refuse([{ path: stagingDir, detail: "the staging path exists and is not a directory" }]);
+    }
+    let occupied: string[];
+    try {
+      occupied = readdirSync(stagingDir);
+    } catch (error) {
+      return refuse([
+        {
+          path: stagingDir,
+          detail: `the staging directory could not be read (${error instanceof Error ? error.message : String(error)})`,
+        },
+      ]);
+    }
+    if (occupied.length > 0) {
+      return refuse([{ path: stagingDir, detail: "the staging directory exists and is not empty" }]);
+    }
+  }
+  const outcome = buildStagedPlan(payload, stagingDir, remapIds);
+  if (!outcome.ok) return refuse(outcome.blocked);
+  const plan = outcome.plan;
+  const files: string[] = [];
+  let stagedCounts: StagedCounts = plan.counts;
+  try {
+    report({ step: "validate" });
+    mkdirSync(stagingDir, { recursive: true });
+    report({ step: "staging-dir", path: stagingDir });
+    for (const file of plan.files) {
+      report({ step: "file", path: file.path });
+      const target = confinedTarget(stagingDir, file.path);
+      if (target === null) throw new Error(`${file.path} is not a safe relative path`);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileAtomic(target, file.body);
+      files.push(file.path);
+    }
+    report({ step: "transcript", path: STAGED_TRANSCRIPT });
+    const transcriptPath = join(stagingDir, STAGED_TRANSCRIPT);
+    writeStagedTranscript(transcriptPath, plan.transcript);
+    const transcriptBody = readFileSync(transcriptPath);
+    const entries: Array<{ path: string; sha256: string; size: number }> = plan.files.map((file) => ({
+      path: file.path,
+      sha256: sha256Hex(file.body),
+      size: file.body.byteLength,
+    }));
+    entries.push({
+      path: STAGED_TRANSCRIPT,
+      sha256: sha256Hex(transcriptBody),
+      size: transcriptBody.byteLength,
+    });
+    entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    files.push(STAGED_TRANSCRIPT);
+    files.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    // the counts describe the staging tree that now exists, transcript
+    // included: a `files` that counted it beside a `bytes` that did not would
+    // be two different claims about one directory
+    const counts: StagedCounts = {
+      files: entries.length,
+      messages: plan.counts.messages,
+      threads: plan.counts.threads,
+      bots: plan.counts.bots,
+      bytes: entries.reduce((total, entry) => total + entry.size, 0),
+    };
+    stagedCounts = counts;
+    const manifest: StagingManifest = {
+      format: RESTORE_FORMAT,
+      schema: BUNDLE_SCHEMA,
+      stagedAt: Date.now(),
+      appVersion: payload.appVersion,
+      transcriptMethod: plan.transcriptMethod,
+      remappedIds: plan.remappedIds,
+      counts,
+      files: entries,
+    };
+    report({ step: "manifest", path: RESTORE_MANIFEST });
+    writeFileAtomic(join(stagingDir, RESTORE_MANIFEST), JSON.stringify(manifest));
+  } catch (error) {
+    // whatever went wrong, the staging tree is this call's own work: it did
+    // not exist, or was empty, when the call started
+    const reason = error instanceof Error ? error.message : String(error);
+    let cleanupFailure: string | null = null;
+    try {
+      rmSync(stagingDir, { recursive: true, force: true });
+    } catch (cleanupError) {
+      // say so rather than reporting a clean failure over a tree that is still
+      // on disk
+      cleanupFailure = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+    }
+    const failed: StagedRestoreResult = {
+      status: "failed",
+      stagingDir,
+      blocked: [],
+      mapping: plan.mapping,
+      reconsentRequired: plan.reconsent,
+      files: [],
+      error:
+        cleanupFailure === null
+          ? reason
+          : `${reason}; the staging directory could not be removed (${cleanupFailure})`,
+    };
+    return failed;
+  }
+  return {
+    status: "staged",
+    stagingDir,
+    blocked: [],
+    mapping: plan.mapping,
+    reconsentRequired: plan.reconsent,
+    files,
+    counts: stagedCounts,
+  };
+}
+// ---------------------------------------------------------------------------
+// Restore — commit
+// ---------------------------------------------------------------------------
+
+export interface CommitRestoreV2Options {
+  stagingDir: string;
+  dataDir: string;
+  backupDir: string;
+  /** explicit and literal: a restore into a live installation is never
+   * something a caller does by accident */
+  confirm: boolean;
+  /** Test seam, called before each step. A throw rolls the commit back. */
+  onCommit?: (event: RestoreEvent) => void;
+}
+
+export interface CommitRestoreResult {
+  status: "committed" | "rolled-back" | "refused";
+  /** the covered relative paths that existed and were moved into `backupDir` */
+  moved: string[];
+  /** the covered relative paths written into the data directory */
+  written: string[];
+  backupDir: string;
+  blocked: RestoreBlocked[];
+  error?: string;
+  /** populated only when a rollback step itself failed; a `rolled-back` result
+   * with entries here did not fully restore the tree */
+  rollbackFailures?: string[];
+}
+
+/** Whether `child` is `parent` or sits inside it, judged on the paths the
+ * filesystem actually holds rather than on the strings the caller passed.
+ * `resolve` alone cannot tell that `/tmp` and `/private/tmp` are one directory,
+ * so a guard built on it can be walked around by spelling one of the two the
+ * long way — and the guard that stops a backup directory being created inside
+ * the live tree is exactly that kind of guard. */
+function containsPath(parent: string, child: string): boolean {
+  return containedIn(realPath(child), realPath(parent));
+}
+
+/** Whether an already-resolved `target` is `root` or sits inside it. */
+function containedIn(target: string, root: string): boolean {
+  return target === root || target.startsWith(root + sep);
+}
+
+/** The real path of `path`, with every component that exists resolved through
+ * its links. For a path that does not exist yet, the deepest existing ancestor
+ * is resolved and the missing segments are re-appended, so a directory that is
+ * about to be created is still compared against where it will really land. */
+function realPath(path: string): string {
+  const missing: string[] = [];
+  let current = resolve(path);
+  for (;;) {
+    try {
+      const real = realpathSync(current);
+      return missing.length === 0 ? real : join(real, ...[...missing].reverse());
+    } catch {
+      const parent = dirname(current);
+      // nothing on this path exists, or the walk reached a broken link at the
+      // root: fall back to the string form rather than looping forever
+      if (parent === current) return resolve(path);
+      missing.push(basename(current));
+      current = parent;
+    }
+  }
+}
+
+/** The home directory, or null when the process has no usable HOME. */
+function homeDir(): string | null {
+  try {
+    return resolve(homedir());
+  } catch {
+    return null;
+  }
+}
+
+/** Create `dir` and its missing parents, recording only the directories this
+ * call brought into being — a rollback removes those and nothing else. */
+function ensureDirectory(dir: string, created: string[]): void {
+  const missing: string[] = [];
+  let current = resolve(dir);
+  for (;;) {
+    if (existsSync(current)) break;
+    missing.push(current);
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  if (missing.length === 0) return;
+  mkdirSync(dir, { recursive: true });
+  created.push(...missing);
+}
+
+/** Move a file, falling back to copy-then-unlink when the two paths are on
+ * different filesystems (rename cannot cross one). The copy is verified
+ * against the source before the original is unlinked, so a failed move leaves
+ * the original where it was. */
+function moveFile(from: string, to: string): void {
+  try {
+    renameSync(from, to);
+  } catch (error) {
+    const crossDevice = error instanceof Error && "code" in error && error.code === "EXDEV";
+    if (!crossDevice) throw error;
+    copyFileSync(from, to);
+    if (sha256Hex(readFileSync(to)) !== sha256Hex(readFileSync(from))) {
+      try {
+        unlinkSync(to);
+      } catch {
+        /* the original is still in place, which is what matters */
+      }
+      throw new Error(`moving ${from} across filesystems produced a different file`);
+    }
+    unlinkSync(from);
+  }
+}
+
+function parseStagingManifest(text: string): StagingManifest | null {
+  try {
+    const decoded = stagingManifestSchema.safeParse(JSON.parse(text));
+    return decoded.success ? decoded.data : null;
+  } catch {
+    return null;
+  }
+}
+
+interface StagedEntry {
+  path: string;
+  body: Buffer;
+  mode: number;
+}
+
+type PreflightOutcome = { ok: true; entries: StagedEntry[] } | { ok: false; blocked: RestoreBlocked[] };
+
+/** Everything that must be true before a single live path is touched: the
+ * staging manifest is readable and unconsumed, every staged file matches the
+ * hash and size recorded for it, every covered path is safe, and no covered
+ * path is something this overlay could not put back. */
+function preflightCommit(stagingDir: string, dataDir: string): PreflightOutcome {
+  const manifestPath = join(stagingDir, RESTORE_MANIFEST);
+  const blocked: RestoreBlocked[] = [];
+  const raw = lstatOrNull(manifestPath);
+  if (raw === null || !raw.isFile()) {
+    return { ok: false, blocked: [{ path: RESTORE_MANIFEST, detail: "the staging tree carries no staging manifest" }] };
+  }
+  let manifestText: string;
+  try {
+    manifestText = readFileSync(manifestPath, "utf8");
+  } catch (error) {
+    return {
+      ok: false,
+      blocked: [
+        {
+          path: RESTORE_MANIFEST,
+          detail: `the staging manifest could not be read (${error instanceof Error ? error.message : String(error)})`,
+        },
+      ],
+    };
+  }
+  const decoded = parseStagingManifest(manifestText);
+  if (decoded === null) {
+    return { ok: false, blocked: [{ path: RESTORE_MANIFEST, detail: "the staging manifest is not readable" }] };
+  }
+  if (decoded.consumedAt !== undefined) {
+    return {
+      ok: false,
+      blocked: [{ path: RESTORE_MANIFEST, detail: "the staging manifest was already consumed by an earlier commit" }],
+    };
+  }
+  const entries: StagedEntry[] = [];
+  const seen = new Set<string>();
+  const rootReal = realPath(dataDir);
+  const stagingReal = realPath(stagingDir);
+  for (const entry of decoded.files) {
+    const stagedPath = isSafeRelativePath(entry.path) ? confinedTarget(stagingDir, entry.path) : null;
+    const live = isSafeRelativePath(entry.path) ? confinedTarget(dataDir, entry.path) : null;
+    if (stagedPath === null || live === null) {
+      blocked.push({ path: entry.path, detail: "unsafe-path" });
+      continue;
+    }
+    if (seen.has(entry.path)) {
+      blocked.push({ path: entry.path, detail: "duplicate staging manifest path" });
+      continue;
+    }
+    seen.add(entry.path);
+    // the path string is confined, but a link on it is not: a directory that
+    // sits under the root by name can still point out of the tree, and the
+    // move and the write would both follow it
+    if (!containedIn(realPath(dirname(stagedPath)), stagingReal)) {
+      blocked.push({ path: entry.path, detail: "a directory on this path is a link out of the staging tree" });
+      continue;
+    }
+    if (!containedIn(realPath(dirname(live)), rootReal)) {
+      blocked.push({ path: entry.path, detail: "a directory on this path is a link out of the data directory" });
+      continue;
+    }
+    const info = lstatOrNull(stagedPath);
+    if (info === null || !info.isFile()) {
+      blocked.push({ path: entry.path, detail: "the staging tree does not hold this file" });
+      continue;
+    }
+    const body = readFileSync(stagedPath);
+    if (body.byteLength !== entry.size || sha256Hex(body) !== entry.sha256) {
+      blocked.push({ path: entry.path, detail: "the staged file does not match the staging manifest" });
+      continue;
+    }
+    for (const sidecar of ["-wal", "-shm", "-journal"]) {
+      if (existsSync(`${live}${sidecar}`)) {
+        blocked.push({
+          path: entry.path,
+          detail: `a ${sidecar} sidecar sits beside this path, so the live database is not checkpointed`,
+        });
+      }
+    }
+    const liveInfo = lstatOrNull(live);
+    if (liveInfo !== null && !liveInfo.isFile()) {
+      blocked.push({ path: entry.path, detail: "the live path exists and is not a regular file" });
+    }
+    entries.push({ path: entry.path, body, mode: info.mode & 0o777 });
+  }
+  if (entries.length === 0 && blocked.length === 0) {
+    blocked.push({ path: "-", detail: "the staging manifest lists no files" });
+  }
+  if (blocked.length > 0) return { ok: false, blocked };
+  return { ok: true, entries };
+}
+
+interface RollbackInput {
+  dataDir: string;
+  backupDir: string;
+  moved: string[];
+  written: string[];
+  createdDirs: string[];
+}
+
+/** Put a rolled-back tree back the way it was.
+ *
+ * Files moved into `backupDir` are *copied* back, not moved back: the backup
+ * is the owner's pre-restore copy and stays where it is. Files this commit
+ * created where nothing existed are removed, and the directories it created go
+ * too if they are empty. Returns one line per step that itself failed; an
+ * empty list is the claim that the tree is byte-identical to what it was. */
+function rollbackCommit(input: RollbackInput): string[] {
+  const failures: string[] = [];
+  for (const path of input.written) {
+    if (input.moved.includes(path)) continue;
+    const target = confinedTarget(input.dataDir, path);
+    if (target === null) {
+      failures.push(`${path}: not a safe relative path`);
+      continue;
+    }
+    try {
+      if (existsSync(target)) unlinkSync(target);
+    } catch (error) {
+      failures.push(`${path}: could not be removed again (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+  for (const path of input.moved) {
+    const backup = confinedTarget(input.backupDir, path);
+    const target = confinedTarget(input.dataDir, path);
+    if (backup === null || target === null) {
+      failures.push(`${path}: not a safe relative path`);
+      continue;
+    }
+    try {
+      const expected = sha256Hex(readFileSync(backup));
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(backup, target);
+      chmodSync(target, statSync(backup).mode & 0o777);
+      if (sha256Hex(readFileSync(target)) !== expected) {
+        failures.push(`${path}: the restored file does not match the backup`);
+      }
+    } catch (error) {
+      failures.push(`${path}: could not be restored (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+  // deepest first, not most-recent first: `ensureDirectory` records a whole
+  // missing chain, and removing a parent before its child leaves the parent
+  // behind because the child still makes it non-empty
+  const deepestFirst = [...input.createdDirs].sort(
+    (a, b) => b.split(sep).length - a.split(sep).length,
+  );
+  for (const dir of deepestFirst) {
+    try {
+      rmdirSync(dir);
+    } catch {
+      /* not empty, or not ours to remove: both are fine */
+    }
+  }
+  return failures;
+}
+
+/** Overlay a staged restore onto a live installation.
+ *
+ * This is the only function in this module that may write into a live tree, so
+ * its guards are as much the deliverable as its happy path. It moves the
+ * current version of exactly the paths the staging manifest covers into
+ * `backupDir`, preserving their relative structure, then writes the staged
+ * files into `dataDir` through `writeFileAtomic`. Anything the bundle does not
+ * cover — `config.json`, `auth.secret`, attachments, everything else — is left
+ * exactly as it was: this replaces the paths it covers and preserves the rest.
+ *
+ * Every step is inside one try: if any of them throws, the moved paths are
+ * restored, the files this commit newly created are removed, and the result is
+ * `rolled-back` with the reason. After a rollback the live directory is
+ * byte-identical to what it was. `backupDir` is never deleted — it is the
+ * owner's pre-restore copy and it stays.
+ *
+ * The covered paths are expected to be at rest. A `messages.db` with a
+ * `-wal`/`-shm`/`-journal` sidecar is refused rather than moved, because
+ * moving the database alone would drop transactions that have not been
+ * checkpointed. */
+export function commitRestoreV2(options: CommitRestoreV2Options): CommitRestoreResult {
+  const stagingDir = resolve(options.stagingDir);
+  const dataDir = resolve(options.dataDir);
+  const backupDir = resolve(options.backupDir);
+  const report = options.onCommit ?? (() => {});
+  const refuse = (blocked: RestoreBlocked[]): CommitRestoreResult => ({
+    status: "refused",
+    moved: [],
+    written: [],
+    backupDir,
+    blocked,
+  });
+  if (options.confirm !== true) {
+    return refuse([{ path: "-", detail: "a restore into a live installation requires confirm: true" }]);
+  }
+  if (containsPath(dataDir, stagingDir)) {
+    return refuse([{ path: stagingDir, detail: "the staging directory is the data directory or sits inside it" }]);
+  }
+  if (containsPath(dataDir, backupDir)) {
+    return refuse([{ path: backupDir, detail: "the backup directory is the data directory or sits inside it" }]);
+  }
+  if (containsPath(backupDir, dataDir)) {
+    return refuse([{ path: dataDir, detail: "the data directory sits inside the backup directory" }]);
+  }
+  if (existsSync(backupDir)) {
+    return refuse([{ path: backupDir, detail: "the backup directory already exists" }]);
+  }
+  const dataInfo = lstatOrNull(dataDir);
+  if (dataInfo === null) {
+    return refuse([{ path: dataDir, detail: "the data directory does not exist" }]);
+  }
+  if (!dataInfo.isDirectory()) {
+    return refuse([{ path: dataDir, detail: "the data directory is not a directory" }]);
+  }
+  if (dataDir === parse(dataDir).root) {
+    return refuse([{ path: dataDir, detail: "the data directory is the filesystem root" }]);
+  }
+  const home = homeDir();
+  if (home !== null && realPath(dataDir) === realPath(home)) {
+    return refuse([{ path: dataDir, detail: "the data directory is the home directory itself" }]);
+  }
+  const stagingInfo = lstatOrNull(stagingDir);
+  if (stagingInfo === null) {
+    return refuse([{ path: stagingDir, detail: "the staging directory does not exist" }]);
+  }
+  if (!stagingInfo.isDirectory()) {
+    return refuse([{ path: stagingDir, detail: "the staging path is not a directory" }]);
+  }
+  let stagedNames: string[];
+  try {
+    stagedNames = readdirSync(stagingDir);
+  } catch (error) {
+    return refuse([
+      {
+        path: stagingDir,
+        detail: `the staging directory could not be read (${error instanceof Error ? error.message : String(error)})`,
+      },
+    ]);
+  }
+  if (stagedNames.length === 0) {
+    return refuse([{ path: stagingDir, detail: "the staging directory is empty" }]);
+  }
+  const preflight = preflightCommit(stagingDir, dataDir);
+  if (!preflight.ok) return refuse(preflight.blocked);
+  const moved: string[] = [];
+  const written: string[] = [];
+  const createdDirs: string[] = [];
+  try {
+    for (const entry of preflight.entries) {
+      const live = confinedTarget(dataDir, entry.path);
+      if (live === null || !existsSync(live)) continue;
+      report({ step: "move", path: entry.path });
+      ensureDirectory(dirname(join(backupDir, ...entry.path.split("/"))), []);
+      moveFile(live, join(backupDir, ...entry.path.split("/")));
+      moved.push(entry.path);
+    }
+    for (const entry of preflight.entries) {
+      const target = confinedTarget(dataDir, entry.path);
+      if (target === null) throw new Error(`${entry.path} is not a safe relative path`);
+      report({ step: "write", path: entry.path });
+      ensureDirectory(dirname(target), createdDirs);
+      writeFileAtomic(target, entry.body, { mode: entry.mode });
+      written.push(entry.path);
+    }
+    report({ step: "consume", path: RESTORE_MANIFEST });
+    const manifest = parseStagingManifest(readFileSync(join(stagingDir, RESTORE_MANIFEST), "utf8"));
+    if (manifest === null) throw new Error("the staging manifest disappeared during the commit");
+    writeFileAtomic(join(stagingDir, RESTORE_MANIFEST), JSON.stringify({ ...manifest, consumedAt: Date.now() }));
+  } catch (error) {
+    const rollbackFailures = rollbackCommit({ dataDir, backupDir, moved, written, createdDirs });
+    const result: CommitRestoreResult = {
+      status: "rolled-back",
+      moved,
+      written,
+      backupDir,
+      blocked: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+    if (rollbackFailures.length > 0) result.rollbackFailures = rollbackFailures;
+    return result;
+  }
+  return { status: "committed", moved, written, backupDir, blocked: [] };
+}
+
+// ---------------------------------------------------------------------------
+// Restore — decrypt, verify, stage, commit
+// ---------------------------------------------------------------------------
+
+export interface RestoreBundleV2Options {
+  passphrase: string;
+  stagingDir: string;
+  dataDir: string;
+  backupDir: string;
+  confirm: boolean;
+  remapIds?: boolean;
+  onStage?: (event: RestoreEvent) => void;
+  onCommit?: (event: RestoreEvent) => void;
+}
+
+export interface RestoreBundleV2Result {
+  status: "committed" | "rolled-back" | "refused" | "failed";
+  /** the stage this run stopped at; `done` means the commit ran and succeeded,
+   * `commit` means it ran and rolled back or refused */
+  stoppedAt: "decrypt" | "verify" | "stage" | "commit" | "done";
+  decrypt: DecryptBundleV2Result;
+  verify?: VerifyBundleV2Result;
+  staged?: StagedRestoreResult;
+  commit?: CommitRestoreResult;
+  error?: string;
+}
+
+/** The whole restore as one call: decrypt, verify, stage, commit.
+ *
+ * It exists so that a caller cannot wire the four in the wrong order or forget
+ * one. Every stage's own result is returned, so a caller can see where the run
+ * stopped. A run that stops before the commit has not entered a write path:
+ * `dataDir` is untouched, not "restored". */
+export function restoreBundleV2(bytes: Buffer, options: RestoreBundleV2Options): RestoreBundleV2Result {
+  const decrypt = decryptBundleV2(bytes, { passphrase: options.passphrase });
+  if (decrypt.status !== "ok" || decrypt.payload === undefined) {
+    const result: RestoreBundleV2Result = { status: "refused", stoppedAt: "decrypt", decrypt };
+    if (decrypt.error !== undefined) result.error = decrypt.error;
+    return result;
+  }
+  const verify = verifyBundleV2(bytes, { passphrase: options.passphrase });
+  if (verify.status !== "ok") {
+    return {
+      status: "refused",
+      stoppedAt: "verify",
+      decrypt,
+      verify,
+      error: `the bundle did not verify: ${verify.status}`,
+    };
+  }
+  const stageOptions: StageRestoreV2Options = { stagingDir: options.stagingDir };
+  if (options.remapIds !== undefined) stageOptions.remapIds = options.remapIds;
+  if (options.onStage !== undefined) stageOptions.onStage = options.onStage;
+  const staged = stageRestoreV2(decrypt.payload, stageOptions);
+  if (staged.status !== "staged") {
+    const result: RestoreBundleV2Result = {
+      // a stage that was refused and a stage that broke are different facts
+      status: staged.status === "failed" ? "failed" : "refused",
+      stoppedAt: "stage",
+      decrypt,
+      verify,
+      staged,
+    };
+    if (staged.error !== undefined) result.error = staged.error;
+    return result;
+  }
+  const commitOptions: CommitRestoreV2Options = {
+    stagingDir: options.stagingDir,
+    dataDir: options.dataDir,
+    backupDir: options.backupDir,
+    confirm: options.confirm,
+  };
+  if (options.onCommit !== undefined) commitOptions.onCommit = options.onCommit;
+  const commit = commitRestoreV2(commitOptions);
+  const result: RestoreBundleV2Result = {
+    status: commit.status === "committed" ? "committed" : "refused",
+    stoppedAt: commit.status === "committed" ? "done" : "commit",
+    decrypt,
+    verify,
+    staged,
+    commit,
+  };
+  if (commit.status === "rolled-back") result.status = "rolled-back";
+  if (commit.error !== undefined) result.error = commit.error;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
