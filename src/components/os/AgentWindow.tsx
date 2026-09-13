@@ -26,6 +26,7 @@ export function activityLabel(bot: Bot, connected = true): string {
 interface AgentWindowProps {
   bot: Bot;
   engineName: string | null;
+  onSelectBot: (botId: string) => void;
   focused: boolean;
   minimized: boolean;
   zIndex: number;
@@ -38,6 +39,7 @@ interface AgentWindowProps {
 export function AgentWindow({
   bot,
   engineName,
+  onSelectBot,
   focused,
   minimized,
   zIndex,
@@ -50,6 +52,7 @@ export function AgentWindow({
   const navigate = useNavigate();
   const location = useLocation();
   const openChat = () => {
+    onSelectBot(bot.id);
     navigate(botChatRoute(bot.id, location.search));
   };
 
@@ -85,6 +88,6 @@ export function AgentWindow({
           <ArrowLeft size={14} style={{ transform: "rotate(180deg)" }} />
         </button>
       </div>
-    </WindowFrame>
+        </WindowFrame>
   );
 }

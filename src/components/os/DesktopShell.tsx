@@ -128,7 +128,10 @@ export function DesktopShell() {
             connected={state.connected}
             hydrated={state.rosterHydrated}
             onOpenBot={(botId) => openWindow({ kind: "agent", botId })}
-            onOpenChat={(botId) => navigate(botChatRoute(botId, location.search))}
+            onOpenChat={(botId) => {
+            dispatch({ type: "select", id: botId });
+            navigate(botChatRoute(botId, location.search));
+          }}
             onAsk={() => setConsoleOpen(true)}
             onRooms={() => openWindow({ kind: "app", appId: "rooms" })}
             onApp={() => navigate("/app")}
@@ -155,7 +158,7 @@ export function DesktopShell() {
             const botId = win.target.botId;
             const bot = bots.find((b) => b.id === botId);
             if (!bot) return null;
-            return <AgentWindow key={win.id} bot={bot} engineName={engineFor(bot)} {...windowProps} />;
+            return <AgentWindow key={win.id} bot={bot} engineName={engineFor(bot)} onSelectBot={(botId) => dispatch({ type: "select", id: botId })} {...windowProps} />;
           })}
         </div>
       </main>

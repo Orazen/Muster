@@ -18,6 +18,39 @@ interface ParsedCommand {
   text: string;
   /** true when a name prefix was recognized ("jarvis:" / "@jarvis") */
   targeted: boolean;
+  /** validation text when a user specifically targeted a bot by name */
+  targetError?: string;
+}
+
+const COMMAND_HELP = "Ask anything — or: botname: task · @bot task · open rooms";
+
+export function parseCommand(raw: string, bots: Array<{ id: string; name: string; chiefOfStaff?: boolean }>): ParsedCommand {
+  const text = raw.trim();
+  if (!text) return { botId: null, openApp: null, text, targeted: false };
+
+  // "open rooms" / "show rooms" — window management, no model call
+  if (/^(open|show)\s+rooms$/i.test(text)) return { botId: null, openApp: "rooms", text, targeted: false };
+
+  // "botname: rest" or "@botname rest" — targeted turn
+  const colon = text.match(/^([\w][\w\s-]{0,30}?)\s*[:：]\s*(.+)$/s);
+  const at = text.match(/^@([\w-]{1,30})\s+(.+)$/s);
+  const named = colon ?? at;
+  if (named) {
+    const wanted = named[1].trim().toLowerCase();
+    const bot = bots.find((b) => b.name.toLowerCase() === wanted);
+    if (bot) return { botId: bot.id, openApp: null, text: named[2].trim(), targeted: true };
+    return {
+      botId: null,
+      openApp: null,
+      text: named[2].trim(),
+      targeted: true,
+      targetError: `Could not find teammate "${named[1].trim()}". Pick one to send it to.`,
+    };
+  }
+
+  // plain request → the chief of staff, else the first bot
+  const preferred = bots.find((b) => b.chiefOfStaff) ?? bots[0];
+  return { botId: preferred?.id ?? null, openApp: null, text, targeted: false };
 }
 
 export function CommandBar({ open, onClose, onOpenRooms }: { open: boolean; onClose: () => void; onOpenRooms: () => void }) {
@@ -37,25 +70,7 @@ export function CommandBar({ open, onClose, onOpenRooms }: { open: boolean; onCl
     }
   }, [open]);
 
-  const parse = (raw: string): ParsedCommand => {
-    const text = raw.trim();
-    // "open rooms" / "show rooms" — window management, no model call
-    if (/^(open|show)\s+rooms$/i.test(text)) return { botId: null, openApp: "rooms", text, targeted: false };
-    // "botname: rest" or "@botname rest" — targeted turn
-    const colon = text.match(/^([\w][\w\s-]{0,30}?)\s*[:：]\s*(.+)$/s);
-    const at = text.match(/^@([\w-]{1,30})\s+(.+)$/s);
-    const named = colon ?? at;
-    if (named) {
-      const wanted = named[1].trim().toLowerCase();
-      const bot = bots.find((b) => b.name.toLowerCase() === wanted);
-      if (bot) return { botId: bot.id, openApp: null, text: named[2].trim(), targeted: true };
-    }
-    // plain request → the chief of staff, else the first bot
-    const preferred = bots.find((b) => b.chiefOfStaff) ?? bots[0];
-    return { botId: preferred?.id ?? null, openApp: null, text, targeted: false };
-  };
-
-  const parsed = useMemo(() => parse(draft), [draft, bots]);
+  const parsed = useMemo(() => parseCommand(draft, bots), [draft, bots]);
 
   const suggestions = useMemo(() => {
     const q = draft.trim().toLowerCase();
@@ -66,11 +81,15 @@ export function CommandBar({ open, onClose, onOpenRooms }: { open: boolean; onCl
   if (!open) return null;
 
   const run = () => {
-    const command = parse(draft);
+    const command = parseCommand(draft, bots);
     if (!command.text) return;
     if (command.openApp === "rooms") {
       onOpenRooms();
       onClose();
+      return;
+    }
+    if (command.targeted && command.targetError) {
+      setError(command.targetError);
       return;
     }
     if (!command.botId) {
@@ -102,7 +121,7 @@ export function CommandBar({ open, onClose, onOpenRooms }: { open: boolean; onCl
               if (e.key === "Enter") run();
               if (e.key === "Escape") onClose();
             }}
-            placeholder="Ask anything — or: botname: task · @bot task · open rooms"
+            placeholder={COMMAND_HELP}
             aria-label="Command"
             autoComplete="off"
             spellCheck={false}
