@@ -53,12 +53,38 @@ permission and still checks the original owner/task/channel audience. The correc
 mutation during held approval and post-setup validation are covered by delegation
 module tests and source review, not those exact real-server races. Queue reload
 acceptance is same-process disk reload; the real server restart case rejects old
-credentials. A failed nondurable Stop may reload accepted work after restart if the
-user ignores the 503 retry instruction. Durable dequeue is at-most-once dispatch,
+credentials. Durable dequeue is at-most-once dispatch,
 not guaranteed task completion after a crash. This is neither a process sandbox
 nor a comprehensive security review. Mimosa and two high dependency alerts remain
 release gates. Complete the remaining real-server race/restart acceptance before
 claiming the original acceptance list below in full.
+
+**Durable failed-Stop recovery (implemented in Loop90, not yet accepted on a real
+installation).** The former limit here — that a failed nondurable Stop may reload
+accepted work after restart if the user ignores the 503 retry instruction — is closed as code.
+A Stop whose queued-handoff removal fails now writes a pending receipt to the
+installation's transcript database (`messages.db`, the same file and transaction
+discipline the seeded welcome-answer receipt uses) inside `issue()`, before the
+provider interruption is awaited. The next boot settles it before the handoff
+drain: it removes only the captured `{threadId, itemIds}` of threads that are still
+live tasks, consumes the row once with a conditional `UPDATE … WHERE status =
+'pending'` that requires one changed row, and appends an uncertainty line to the
+bot's thread — `error: the app restarted while a Stop was canceling queued
+handoffs — cleanup finished at startup; that work was not resumed`. If the queue
+file itself cannot be read at boot, no receipt is consumed (the process cannot tell
+an already-removed handoff from one it never saw), the thread says the cleanup
+could not be confirmed, and the captured threads are held out of that boot's drain
+until a later boot can apply it. A retry that arrives with a token the new process
+never issued still gets 409 `STOP_CLEANUP_STALE`, now with
+`durableCleanup: {state, failedAt}` and an `error` line naming the durable state,
+instead of silence. What remains unproven: no crash-during-write or power-loss
+acceptance on a real installation (the restart evidence is a Vitest re-initialisation
+of real module state: a fresh `Store`, a reopened SQLite handle and a reloaded queue
+file inside one process); no browser acceptance of the new wording, and the web
+client's own receipt ledger is still in-memory, so a real page reload leaves the
+thread note as the only signal; a crash between consuming a receipt and writing the
+note loses the note, not the guarantee; and if `record()` itself cannot be written,
+the previous in-memory-only behaviour returns with a loud log.
 
 **Recovery UI still required:** source review of `ChatView.tsx` and `Composer.tsx`
 shows Stop is rendered only while the bot is busy. The 503 reaches the shared error

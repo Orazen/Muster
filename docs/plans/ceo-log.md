@@ -4649,3 +4649,119 @@ check them. No security claim is made about the format or the installation.
 list surfaced, plus the merge-into-live question the contract leaves open, and an acceptance run
 against a real installation's own data.
 
+## Loop90 — durable failed-Stop recovery across reload and restart (13 September 2026)
+
+**Status:** the limit this ledger has carried since Loop80 — "a failed nondurable Stop may
+reload accepted work after restart if the user ignores the 503 retry instruction" — is closed
+for the paths below. A Stop whose queued-handoff removal fails now leaves a receipt in the
+installation's own transcript database, and the next boot settles it **before** the handoff
+drain: it removes only the captured IDs, consumes the receipt once, never resumes the stopped
+work, and says in the bot's thread that the Stop outcome is uncertain. No UI change, no new
+route, no new dependency, no restructuring of the server; the six-second banner, the 503 retry
+path and the ordinary Stop are untouched. This is **local fixture evidence, not production
+acceptance** — and the restart it exercises is a re-initialisation of real module state (a fresh
+`Store`, a closed-and-reopened SQLite handle, a reloaded queue file) inside Vitest, not a
+spawned server and not a crash-during-write on a real installation.
+
+**Verification (working tree at `4335326` plus this uncommitted slice):**
+- `npx oxlint .` → **exit 0**; the one pre-existing `unicorn/no-useless-spread` warning remains
+  (now `server/index.ts:3467`; it was `:3440` before this slice's insertions).
+- `npx tsc --noEmit -p tsconfig.server.json` → **exit 0**.
+- `npx vitest run server/stop-cleanup.test.ts server/stop-cleanup-delegations.test.ts
+  server/stop-cleanup-durable.test.ts server/message-db.test.ts` → **4 files / 59 passed /
+  0 failed** (the 18 original receipt cases unchanged, 8 new durable cases).
+- `server/peer-capabilities-harness.test.ts` (spawned real server, real HTTP) → **18 passed**,
+  including the failed-Stop case that asserts the 503 body, the 200 `{ok: true}` retry, the 409
+  stale body and that no target prompt was issued.
+- `node_modules/.bin/vitest run` → **261 files / 3944 passed / 8 skipped / 0 failed** (exit 0;
+  counts reproduced across three runs, the last at 395.71s). The committed baseline was
+  260 / 3936 / 8 / 0: **+1 file / +8 tests, no decrease**.
+
+**What was stored before this slice.** `server/stop-cleanup.ts` held the failed Stop in process
+memory and nowhere else — `private receipts = new Map<string, Receipt>()`, where
+
+```ts
+interface Receipt {
+  token: string;
+  generation: Generation;
+  snapshots: DelegationSnapshot[];
+  expiresAt: number;
+  complete: boolean;
+}
+```
+
+with the class documented as "Process-local cleanup authority, never a provider Stop command. A
+new process, later admitted turn, changed owner, deletion or reload retires old receipts." The
+captured queue IDs, the owner and the generation all died with the process; `delegations.json`
+did not, so the next boot's `_loadPending()` + drain would dispatch exactly the handoffs the user
+had stopped.
+
+**What is stored now.** One row per bot in the same `messages.db` the welcome-answer receipt
+uses — the same file, the same `node:sqlite` handle discipline, `BEGIN IMMEDIATE` for the
+settle, no second store and no new dependency:
+
+| column | meaning |
+| --- | --- |
+| `bot_id` | primary key; a bot's next failed Stop replaces its row |
+| `owner_id` | the owner the Stop was issued under, re-checked at boot |
+| `generation_id` | the dispatch/turn generation the receipt was anchored to |
+| `token` | the same opaque 64-hex token the 503 hands the client |
+| `snapshots` | the exact captured `{threadId, itemIds}` — never a fresh sweep |
+| `failed_at`, `reason` | when the cleanup failed and why it was recorded |
+| `status`, `settled_at` | `pending` until a boot consumes it, then `settled` forever |
+
+The write happens inside `issue()`, before the provider-interruption `await`, because a process
+that dies mid-Stop is exactly what the record has to survive. The registry's existing retirement
+points now retire the durable row with the in-memory one: a completed retry, an expiry, a later
+admitted generation, a deletion. A row that could not be deleted is applied at the next boot
+instead, which errs toward the Stop the user asked for, never toward resuming it.
+
+**Why this store, and how a restart consumes it exactly once.** The welcome-answer receipt
+already answers the same question — a user action that must not be lost to a process death — in
+the transcript database, so this slice mirrors its shape rather than inventing a file or a second
+SQLite database. At boot, `settleInterruptedStopCleanups` reads the pending rows and, for each
+one whose bot still exists under the same owner, cancels the captured IDs of threads that are
+still live tasks, then consumes the row with
+`UPDATE … SET status = 'settled' WHERE bot_id = ? AND token = ? AND status = 'pending'` and
+requires `changes === 1`. That single conditional write is the exactly-once gate: a second boot,
+or a second process, finds no changed row and applies nothing — the same all-or-nothing rule the
+in-memory path already enforced within one process. A row whose bot is gone or has changed hands
+is consumed without a note, because its queue can no longer dispatch under that owner.
+
+**The honest failure case.** If the queue file itself could not be read at boot, nothing was
+loaded, so an absent ID cannot be told from one the process never saw. Consuming there would let
+a later boot reload the handoffs and resume them while the thread claimed they were not resumed.
+`_loadPending()` therefore returns whether the durable queue was actually accounted for (a file
+that exists but cannot be read or parsed returns `false`; a fresh install returns `true`, since
+it has nothing to lose), and while it is `false` **every** receipt stays pending, is reported as
+unresolved, and is retried by the next boot. That is the only change outside the listed scope —
+three lines in `server/delegations.ts` — and it is what makes the thread's claim true.
+
+**What a user sees.** When a receipt is settled at boot, the bot's thread gets an activity line:
+`error: the app restarted while a Stop was canceling queued handoffs — cleanup finished at
+startup; that work was not resumed`, and for a receipt that is still unresolved,
+`error: the app restarted while a Stop was canceling queued handoffs — cleanup could not be
+confirmed; check this bot's current work before stopping it again`. If a client still holds a
+token that the new process never issued, the retry now answers with the durable state instead of
+silence: the 409 keeps `code: STOP_CLEANUP_STALE` and adds `durableCleanup: {state, failedAt}`,
+with an `error` line that says which of the two happened. The 200 body is still exactly
+`{ok: true}` — the spawned-server harness asserts it.
+
+**Not verified, and not claimed.** No crash-during-write, power-loss or real-installation
+acceptance was run; the restart in the new suite re-initialises real module state but does not
+spawn a server process, and today's local evidence is not production behaviour. No browser or UI
+acceptance of the new wording: after a real page reload the web client's own ledger is still
+in-memory and empty, so the thread note is what a reloaded user sees, and the existing recovery
+surface is unchanged. A crash in the two statements between consuming a receipt and writing the
+thread note loses the note while the work still is not resumed; a failed `record()` write keeps
+the previous in-memory behaviour and logs loudly, so that failure mode is no worse than before
+but no better. The receipt's age is not re-checked at boot (the in-memory 24h retry window is
+unchanged); a receipt survives as long as it stays pending, because applying an old Stop the user
+did ask for is the conservative direction. No security claim is made about the table, the
+database or the installation.
+
+**Next:** the same durability question under a real crash schedule — kill a disposable
+installation's server with the queue file still obstructed, restart it unmodified, and confirm
+the boot report and the un-drained handoff from the process's own logs; then the browser-level
+reload case, once the web client is willing to carry a receipt across a page load.
+

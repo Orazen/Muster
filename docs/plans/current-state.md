@@ -10,8 +10,29 @@ shells, choices and sessions stable. Read [the stability contract](../guides/web
 six-second error banner. Receipts bind the original owner/bot/dispatch generation;
 retry never interrupts providers. Later starts invalidate old receipts. Normal
 layout is unchanged; the notice appears only after an uncertain/failed Stop.
-In-memory recovery does not survive reload/restart; durable failure/restart
-recovery remains open.
+
+**Loop90, uncommitted:** a failed Stop is now durable. The receipt is written to the same
+SQLite database as the transcript before the 503 is answered, and the next boot settles
+it before the handoff drain — only the captured queue IDs are removed, the row is consumed
+exactly once, the stopped work is not resumed, and the bot's thread says the Stop outcome
+is uncertain. A retry carrying a token the new process never issued still answers 409
+`STOP_CLEANUP_STALE`, now with `durableCleanup: {state, failedAt}` and a truthful message
+instead of silence. In-memory recovery for the *web client's* own ledger still does not
+survive a page reload, so a reloaded user sees the thread note, not the recovery notice:
+no UI change was made and none is claimed. Also unproven: no crash-during-write or
+power-loss acceptance on a real installation — the restart evidence re-initialises real
+module state (fresh `Store`, reopened database handle, reloaded queue file) inside Vitest,
+not a spawned server process.
+
+Full **261 files / 3944 passed / 8 skipped / 0 failed** (Loop90, working tree at `4335326`
+plus that uncommitted slice, 13 September 2026; exit 0, counts reproduced across three runs,
+the last at 395.71s), against a committed baseline of 260 / 3936 / 8 / 0 — **+1 file /
++8 tests, no decrease**. `npx oxlint .` exits 0 with the one
+pre-existing `unicorn/no-useless-spread` warning (`server/index.ts:3467`), and
+`npx tsc --noEmit -p tsconfig.server.json` exits 0. The spawned-server
+`peer-capabilities-harness` (18/18) was re-run and covers the real route. Not re-run in this
+pass: the browser 3/3, broker, updater, packaged-server and hash-freeze figures below, which
+stay Loop80/Loop89 evidence.
 
 Full **258 files / 3899 passed / 8 skipped / 0 failed**, re-measured at revision
 `22a7011` plus the uncommitted build-identity slice (13 September 2026); broker 2/2,
