@@ -4350,3 +4350,36 @@ Europe/Rome. No reset consumed. The handoff is ready, and no further implementat
 was started after this threshold. The wider goal remains open for the next agent.
 Read this latest ledger entry, current-state.md and the stability contract before
 historical plans, preserving the approved app.
+
+## Loop82 — onboarding recoverability and first-task intent (13 September 2026)
+
+**Status:** implementation slice complete and production-hosting-safe, scoped to
+web onboarding state handling.
+
+**Verification:** `tsc --noEmit -p tsconfig.server.json` passed before and after the
+slice. `npx vitest run src/state/onboarding-finish.test.ts` passed **1 file / 13 tests**.
+`npx vitest run` passed **254 files / 3863 tests / 8 skipped / 0 failed** with the
+slice included. No unrelated iOS/watch edits were committed in this loop.
+
+**Change summary:**
+- `src/state/onboarding-finish.ts`: added `sendFirstTask?: boolean` input and used it
+  to suppress first-task dispatch when the wizard is exited with no task intent.
+- `src/state/onboarding-finish.test.ts`: added a regression test covering skip-without-send
+  behavior while preserving resume state.
+- `src/components/Onboarding.tsx`: wired `finish(false)` through quick-start, "No teammate yet"
+  and final "Skip for now" paths; wired `finish(true)` only on explicit send path.
+
+**Goal alignment:** this directly improves onboarding completion behavior for
+Google/email users by preserving intent across sign-in and preventing silent task
+loss when users defer their first task, which previously looked like successful
+completion.
+
+**Loop81 continuity:** this loop includes no release-identity changes and no new
+layout redesign work; it advances the user-continuity requirement in the active
+mascot-led workspace goal while keeping the broader objective constraints intact.
+
+**Commit:** pushed `5ecc4a2` (`Align onboarding completion with user-first-task intent`).
+
+**Next:** continue the objective by auditing `muster.orazen.online` flow for
+`/app` continuation with explicit Google consent handoff verification and then
+the `/app`/`/os` trusted sync path and backup restore evidence in browser.
