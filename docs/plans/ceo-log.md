@@ -4417,3 +4417,24 @@ the `/app`/`/os` trusted sync path and backup restore evidence in browser.
 **Environment note:** Playwright browsers were initially missing in this host; installed via `npx playwright install chromium` to enable real browser verification.
 
 **Commercial implication:** Trustworthy behavior around first-task preservation and backup/write gating is verified on-browser, but no desktop/native companion flow has been modified in this loop.
+
+## Loop85 — /os command parser and chat handoff reliability (13 September 2026)
+
+**Status:** implementation slice committed and pushed. This slice keeps /app unchanged and focuses on /os trust and routing quality.
+
+**Verification:**
+- `npx vitest run src/components/os/CommandBar.test.ts src/components/os/window-stack.test.ts src/components/os/workspace-state.test.ts src/state/bot-chat-route.test.ts` => **4 files / 52 tests passed**
+- `npx vitest run` => **255 files / 3870 passed / 8 skipped / 0 failed** (`304.79s`)
+- `tsc --noEmit -p tsconfig.server.json` was not rerun in this loop because this scope is browser-only and had already passed after prior edits.
+
+**Change summary:**
+- `src/components/os/CommandBar.tsx`: exported `parseCommand(raw, bots)` and added `targetError` for unknown bot targets; preserves room command behavior; returns explicit guidance on unknown `bot:` or `@bot` syntax instead of silently sending to a fallback bot.
+- `src/components/os/CommandBar.test.ts`: added regression coverage for room-open parsing, targeted syntax (`jarvis:` and `@orchard`) and unknown-target recovery behavior.
+- `src/components/os/AgentWindow.tsx`: added `onSelectBot` callback and made `openChat` dispatch selection before route navigation.
+- `src/components/os/DesktopShell.tsx`: wired explicit selection dispatch for desktop /app chat entry points so OS windows and Workspace Home handoffs use the same selected bot state.
+
+**Commit:** `b529614` (`Harden OS command routing and chat handoff selection`), pushed.
+
+**Commercial implication:** no product claims; this slice makes OS command entry and chat transitions deterministic and prevents accidental task misrouting.
+
+**Next:** continue the `/app` and `/os` user-flow audit with live layout checks and any remaining platform gaps in the mandate queue.
