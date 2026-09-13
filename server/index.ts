@@ -7303,6 +7303,7 @@ let requestUserEmail = "";
         const bundle = workspaceBundle.buildBundle(store, DATA_DIR);
         const { payload, counts } = workspaceBundle.encryptBundle(bundle, passphrase, deploymentSigningSecret());
         const uploaded = await driveSync.uploadBundle(token.accessToken, payload);
+        syncState.stampSync("local", "push", "google-drive");
         return json(res, 200, { uploaded: uploaded.id, counts });
       } catch (e) {
         return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
@@ -7325,6 +7326,7 @@ let requestUserEmail = "";
         const result = workspaceBundle.restoreBundle(store, DATA_DIR, workspace);
         await reloadProviders();
         broadcast({ kind: "hello" });
+        syncState.stampSync("local", "pull", "google-drive");
         return json(res, 200, { restored: result });
       } catch (e) {
         return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
@@ -7375,7 +7377,6 @@ let requestUserEmail = "";
         }
         saveConfig({ telegramSync: { lastFileId: fileId } });
         Object.assign(cfg, loadConfig());
-        syncState.stampSync("local", "push", "telegram");
         syncState.stampSync("local", "push", "telegram");
         return json(res, 200, { uploaded: fileId, counts });
       } catch (e) {

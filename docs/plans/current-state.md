@@ -66,3 +66,6 @@ production recovery remain unverified; native metadata remains1.12.0/e241968.
 CI34715571217/autodeploy34715571179:4billing failures,1skip,0steps; registeredhook404.
 Another path nevertheless delivered frontend code. No hosted settings or sessions
 changed. Full254/3862/8 and browser 3/3 acceptance remain local fixture evidence.
+
+
+**Loop86 (13 September):** installation Drive success timestamps and duplicate Telegram stamp corrected. Full256 files/3872 passed/8 skipped; final affected suites2 files/141 passed and server typecheck pass. See the latest ledger entry for review timing and limits. muster.today sign-in rendered; GET availability3/3. Backend rollout, native release and actual Google consent remain unverified. Existing layout and paused automation preserved.

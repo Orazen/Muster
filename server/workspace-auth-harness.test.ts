@@ -194,24 +194,47 @@ describe.skipIf(process.platform === "win32")("configured local Drive over actua
   it("pushes encrypted bytes and restores missing memory with only the installation token", async () => {
     const before = state();
     const offset = local.transport.entries().length;
+    const pushStarted = Date.now();
     const pushed = await send("push");
     expect(pushed.status).toBe(200);
     expect(await pushed.json()).toMatchObject({ uploaded: "owned-workspace-file", counts: { memoryFiles: 1 } });
-    expect(state()).toEqual(before);
+    const pushedState = state();
+    const pushStamp = JSON.parse(pushedState.account.stamps.find((stamp) => stamp.name === "local.json")!.contents);
+    const previousStamp = JSON.parse(before.account.stamps.find((stamp) => stamp.name === "local.json")!.contents);
+    expect(pushStamp.lastPush.at).toBeGreaterThanOrEqual(pushStarted);
+    expect(pushStamp.lastPush.at).toBeLessThanOrEqual(Date.now());
+    expect(pushStamp.lastPull).toEqual(previousStamp.lastPull);
+    expect(pushedState).toEqual({ ...before, account: { ...before.account, stamps: pushedState.account.stamps } });
+    expect(pushedState.account.stamps.filter((stamp) => stamp.name !== "local.json")).toEqual(before.account.stamps.filter((stamp) => stamp.name !== "local.json"));
     const payload = readFileSync(local.transport.payloadPath, "utf8");
     expect(payload.startsWith("muster-workspace-bundle:1:")).toBe(true);
     expect(payload.includes(memoryCanary)).toBe(false);
     rmSync(local.memoryFile);
+    const pullStarted = Date.now();
     const pulled = await send("pull");
     expect(pulled.status).toBe(200);
     expect(await pulled.json()).toMatchObject({ restored: { memoryFilesRestored: 1 } });
-    expect(state()).toEqual(before);
+    const after = state();
+    const afterLocalState = after.account.stamps.find((stamp) => stamp.name === "local.json")!;
+    expect(after.account.accounts).toEqual(before.account.accounts);
+    expect(after.account.verification).toEqual(before.account.verification);
+    expect(after.config).toEqual(before.config);
+    expect(after.memory).toEqual(before.memory);
+    expect(after.account.stamps.filter((stamp) => stamp.name !== "local.json")).toEqual(before.account.stamps.filter((stamp) => stamp.name !== "local.json"));
+    const pullStamp = JSON.parse(afterLocalState.contents);
+    expect(pullStamp.lastPush).toEqual(pushStamp.lastPush);
+    expect(pullStamp.lastPull.at).toBeGreaterThanOrEqual(pullStarted);
+    expect(pullStamp.lastPull.at).toBeLessThanOrEqual(Date.now());
+    expect(pullStamp).toMatchObject({
+      lastPull: expect.objectContaining({ channel: "google-drive" }),
+      lastPush: expect.objectContaining({ at: expect.any(Number), channel: "google-drive" }),
+    });
     expect(operationsSince(offset)).toEqual(["refresh", "list", "upload", "refresh", "list", "download"]);
     expect(local.transport.entries().every((entry) => entry.credentialsMatch)).toBe(true);
   });
 
   it("preserves newer local memory during a successful pull and updates the same Drive file on push", async () => {
-    const account = accountState(local.dataDirectory);
+    const before = accountState(local.dataDirectory);
     writeFileSync(local.memoryFile, "owned newer local edit");
     try {
       const pulled = await send("pull");
@@ -221,7 +244,15 @@ describe.skipIf(process.platform === "win32")("configured local Drive over actua
       const pushed = await send("push");
       expect(pushed.status).toBe(200);
       expect(await pushed.json()).toMatchObject({ uploaded: "owned-workspace-file" });
-      expect(accountState(local.dataDirectory)).toEqual(account);
+      const after = accountState(local.dataDirectory);
+      const afterLocalState = after.stamps.find((stamp) => stamp.name === "local.json")!;
+      expect(after.accounts).toEqual(before.accounts);
+      expect(after.verification).toEqual(before.verification);
+      expect(after.stamps.filter((stamp) => stamp.name !== "local.json")).toEqual(before.stamps.filter((stamp) => stamp.name !== "local.json"));
+      expect(JSON.parse(afterLocalState.contents)).toMatchObject({
+        lastPull: expect.objectContaining({ channel: "google-drive" }),
+        lastPush: expect.objectContaining({ at: expect.any(Number), channel: "google-drive" }),
+      });
     } finally { writeFileSync(local.memoryFile, memoryCanary); }
     // Restore the actual encrypted fixture bytes used by later failure tests.
     expect((await send("push")).status).toBe(200);

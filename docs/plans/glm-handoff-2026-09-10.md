@@ -3175,3 +3175,16 @@ Europe/Rome. No reset consumed. The handoff is ready, and no further implementat
 was started after this threshold. The wider goal remains open for the next agent.
 Read this latest ledger entry, current-state.md and the stability contract before
 historical plans, preserving the approved app.
+
+
+## Loop86 — installation backup success bookkeeping (13 September 2026)
+
+Drive upload and restore now record installation push/pull timestamps after successful completion; restore stamps follow provider reload and broadcast. Removed a duplicate Telegram push stamp. No UI/layout or account capability change: these are installation bookkeeping receipts, not cross-device sync acceptance.
+
+Verification: server typecheck passed; full Vitest **256 files / 3872 passed / 8 skipped / 0 failed** (326.95s). Review adjustments landed during that full run, so final typecheck and both affected suites were rerun: **2 files / 141 passed / 0 failed** (9.35s). Tests prove fresh timestamps, opposite-direction preservation, encrypted transport, restored missing memory, preserved newer memory/config/account state, and unchanged receipts on covered failures. New bookkeeping tests isolate OMB_DATA_DIR without changing HOME. An accidentally overlapping focused run was stopped (exit130); it is not counted as acceptance.
+
+Files: server/index.ts, server/workspace-auth-harness.test.ts, server/sync-state.test.ts. Independent read-only review identified stale-fixture assertions and pre-reload stamping; both were corrected. Main pull/rebase reported already up to date. Source publication is recorded by this commit; production acceptance of the backend change remains unverified.
+
+Live observation: muster.today/app rendered the sign-in page with Google and email options. GET /app, /os and /api/health returned200. This proves availability only, not signed-in behavior, exact backend identity or deployment of this slice. No production mutation, native release, service restart or automation change.
+
+Next: finish exact web/server release identity acceptance, then authenticated Google consent and cross-device backup/restore; native signing/device, VM and full scanner gates remain open. Commercial value: accurate backup receipts support user trust; no revenue or security claim.
