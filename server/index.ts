@@ -7943,11 +7943,13 @@ let requestUserEmail = "";
 
     // public marketing pages at "/" — the landing itself plus any real
     // file that exists in the marketing dir (teams.html, images, css).
-    // Never intercepts /api or the app's deep links; SPA fallback below.
+    // Never intercepts /api or the app's deep links while a packaged app
+    // bundle exists. On marketing-only deployments, /app must still land on
+    // the app shell instead of 404.
     if (
       method === "GET" &&
       MARKETING_DIR &&
-      (path === "/" || (!path.startsWith("/api/") && !path.startsWith("/app") && /\.[a-z0-9]+$/i.test(path)))
+      (path === "/" || (!path.startsWith("/app") && !path.startsWith("/api/") && /\.[a-z0-9]+$/i.test(path)))
     ) {
       try {
         // SAFETY: strip any ".." segments so only files inside MARKETING_DIR resolve.
@@ -7963,6 +7965,25 @@ let requestUserEmail = "";
         return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
       } catch {
         /* fall through to the app SPA below */
+      }
+    }
+
+    if (
+      method === "GET" &&
+      MARKETING_DIR &&
+      !STATIC_DIR &&
+      path === "/app"
+    ) {
+      try {
+        const file = join(MARKETING_DIR, "index.html");
+        const data = readFileSync(file);
+        res.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache",
+        });
+        return res.end(withVerificationMeta(data.toString()));
+      } catch {
+        /* fall through to app route fallback */
       }
     }
 

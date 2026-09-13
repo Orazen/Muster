@@ -180,6 +180,11 @@ describe("harness HTTP API", () => {
     expect(root.headers.get("content-type")).toBe("text/html");
     expect(await root.text()).toContain("Packaged Muster");
 
+    const app = await fetch(`${BASE}/app`);
+    expect(app.status).toBe(200);
+    expect(app.headers.get("content-type")).toBe("text/html");
+    expect(await app.text()).toContain("Packaged Muster");
+
     const asset = await fetch(`${BASE}/assets/smoke.css`);
     expect(asset.status).toBe(200);
     expect(asset.headers.get("content-type")).toBe("text/css");
