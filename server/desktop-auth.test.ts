@@ -3,6 +3,7 @@ import {
   desktopSignInRetrySeconds,
   isLoopbackRedirect,
   issueDesktopGrant,
+  issueDesktopGrantWithReturn,
   issueHandoffCode,
   redeemHandoffCode,
 } from "./desktop-auth.ts";
@@ -48,6 +49,18 @@ describe("desktop handoff lifecycle", () => {
     expect(handoff).not.toBeNull();
     expect(handoff?.redirect).toBe("http://127.0.0.1:8799");
     expect(redeemHandoffCode(handoff!.code)).toEqual(identity);
+  });
+
+  it("stores and returns a sanitized local next-path for desktop handoff", () => {
+    const grant = issueDesktopGrantWithReturn("http://127.0.0.1:8799", "/app?tab=inbox", Date.now());
+    const handoff = issueHandoffCode(grant, identity);
+    expect(handoff?.returnTo).toBe("/app?tab=inbox");
+  });
+
+  it("drops absolute next URLs from desktop handoff state", () => {
+    const grant = issueDesktopGrantWithReturn("http://127.0.0.1:8799", "https://evil.example.com/app");
+    const handoff = issueHandoffCode(grant, identity);
+    expect(handoff?.returnTo).toBeUndefined();
   });
 
   it("a grant can only produce one code", () => {

@@ -157,7 +157,13 @@ import {
   userProviderFlags,
 } from "./user-keys.ts";
 import { vpsComputerStatus, vpsEnsureDesktop, vpsDockerHost, vpsReachable } from "./vps-computer.ts";
-import { desktopSignInRetrySeconds, isLoopbackRedirect, issueDesktopGrant, issueHandoffCode, redeemHandoffCode } from "./desktop-auth.ts";
+import {
+  desktopSignInRetrySeconds,
+  isLoopbackRedirect,
+  issueDesktopGrantWithReturn,
+  issueHandoffCode,
+  redeemHandoffCode,
+} from "./desktop-auth.ts";
 import { startAccountMerge, spendAccountMergeToken } from "./account-merge.ts";
 import { mergeUserVault } from "./user-keys.ts";
 import { PROVIDER_DRIVER_ENV, DATA_DIR } from "./config.ts";
@@ -4111,10 +4117,11 @@ let requestUserEmail = "";
       // grant riding through better-auth's callbackURL.
       const redirectRaw = url.searchParams.get("redirect") ?? "";
       const redirect = decodeURIComponent(redirectRaw);
+      const returnTo = url.searchParams.get("next") ?? "";
       if (!isLoopbackRedirect(redirect)) {
         return html(res, 400, "<body style=\"font:14px -apple-system,sans-serif;padding:2rem\">desktop sign-in needs a http://127.0.0.1 or localhost redirect.</body>");
       }
-      const grant = issueDesktopGrant(redirect);
+      const grant = issueDesktopGrantWithReturn(redirect, returnTo);
       const callback = `/desktop-auth/done?grant=${encodeURIComponent(grant)}`;
       // Better Auth's social endpoint is POST-only — a browser 302 at a GET
       // URL 404s. Resolve the Google URL server-side and bounce there.
@@ -4181,7 +4188,8 @@ let requestUserEmail = "";
       if (!handoff) return html(res, 400, "<body style=\"font:14px -apple-system,sans-serif;padding:2rem\">This desktop sign-in link expired. Start again from Muster.</body>");
       // Code rides in the FRAGMENT: browsers never send #... to servers, so
       // it can't leak into access logs or Referrer headers anywhere.
-      return res.writeHead(302, { Location: `${handoff.redirect}/oauth/finish#code=${encodeURIComponent(handoff.code)}` }).end();
+      const nextHash = handoff.returnTo ? `&next=${encodeURIComponent(handoff.returnTo)}` : "";
+      return res.writeHead(302, { Location: `${handoff.redirect}/oauth/finish#code=${encodeURIComponent(handoff.code)}${nextHash}` }).end();
     }
     if (method === "POST" && path === "/api/desktop-auth/exchange") {
       // Server-to-server: a desktop's LOCAL server burns the one-time code
@@ -4207,14 +4215,17 @@ let requestUserEmail = "";
 <body><div class="card"><div class="spin"></div><div id="msg">Finishing sign-in…</div></div>
 <script>
 (async () => {
-  const m = location.hash.match(/code=([A-Za-z0-9_-]+)/);
+  const params = new URLSearchParams(location.hash.slice(1));
+  const code = params.get("code");
+  const next = params.get("next") || "/app";
   const msg = document.getElementById("msg");
-  if (!m) { msg.textContent = "No sign-in code found — start again from Muster."; msg.className = "err"; return; }
+  if (!code) { msg.textContent = "No sign-in code found — start again from Muster."; msg.className = "err"; return; }
+  const destination = next ? decodeURIComponent(next) : "/app";
   try {
-    const r = await fetch("/oauth/finish/exchange", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify({ code: m[1] }) });
+    const r = await fetch("/oauth/finish/exchange", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify({ code }) });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || "sign-in failed");
-    msg.innerHTML = "Signed in as <b>" + (data.email || "your account") + "</b>.<br>You can close this window and return to Muster.";
+    msg.innerHTML = "Signed in as <b>" + (data.email || "your account") + "</b>.<br>You can close this window and return to <b>" + destination + "</b>.";
     setTimeout(() => window.close(), 1200);
   } catch (e) {
     msg.textContent = e.message; msg.className = "err";

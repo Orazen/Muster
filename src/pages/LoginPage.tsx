@@ -186,8 +186,8 @@ export function LoginPage() {
             onClick={async () => {
               setError("");
               if (desktopOAuthHandoff) {
-                const cloud = (capabilities.pairingCloudUrl ?? "https://muster.today").replace(/\/$/, "");
-                const url = `${cloud}/desktop-auth/start?redirect=${encodeURIComponent(window.location.origin)}`;
+              const cloud = (capabilities.pairingCloudUrl ?? "https://muster.today").replace(/\/$/, "");
+              const url = `${cloud}/desktop-auth/start?redirect=${encodeURIComponent(window.location.origin)}&next=${encodeURIComponent(next)}`;
                 if (window.ogb?.openExternal) window.ogb.openExternal(url);
                 else window.open(url, "_blank", "noopener");
                 setOauthWaiting(true);

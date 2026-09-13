@@ -23,6 +23,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 interface PendingGrant {
   /** loopback redirect the desktop asked us to return to */
   redirect: string;
+  /** optional path to return to after the browser window finishes OAuth */
+  returnTo?: string;
   expiresAt: number;
 }
 
@@ -39,6 +41,19 @@ export function desktopSignInRetrySeconds(value: string | null): number {
 
 const grants = new Map<string, PendingGrant>();
 const codes = new Map<string, { userId: string; email: string; name: string; expiresAt: number }>();
+
+function sanitizeReturnTo(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed, "https://muster.invalid");
+    if (parsed.origin !== "https://muster.invalid") return undefined;
+    if (!parsed.pathname || parsed.pathname.startsWith("//")) return undefined;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return undefined;
+  }
+}
 
 function sweep(now = Date.now()): void {
   for (const [k, g] of grants) if (g.expiresAt <= now) grants.delete(k);
@@ -61,9 +76,17 @@ export function isLoopbackRedirect(url: string): boolean {
 /** Step 1: a desktop asks for a handshake. Returns the grant id that must
  * ride through the Google callback round-trip. */
 export function issueDesktopGrant(redirect: string, now = Date.now()): string {
+  return issueDesktopGrantWithReturn(redirect, undefined, now);
+}
+
+export function issueDesktopGrantWithReturn(
+  redirect: string,
+  returnTo: string | undefined,
+  now = Date.now(),
+): string {
   sweep(now);
   const id = randomBytes(16).toString("base64url");
-  grants.set(id, { redirect, expiresAt: now + GRANT_TTL_MS });
+  grants.set(id, { redirect, returnTo: sanitizeReturnTo(returnTo ?? ""), expiresAt: now + GRANT_TTL_MS });
   return id;
 }
 
@@ -73,7 +96,7 @@ export function issueHandoffCode(
   grantId: string,
   identity: { userId: string; email: string; name: string },
   now = Date.now(),
-): { redirect: string; code: string } | null {
+): { redirect: string; code: string; returnTo?: string } | null {
   sweep(now);
   const grant = grants.get(grantId);
   if (!grant || grant.expiresAt <= now) {
@@ -83,7 +106,7 @@ export function issueHandoffCode(
   grants.delete(grantId); // grant burns even if the code is never redeemed
   const code = randomBytes(32).toString("base64url");
   codes.set(code, { ...identity, expiresAt: now + CODE_TTL_MS });
-  return { redirect: grant.redirect, code };
+  return { redirect: grant.redirect, code, returnTo: grant.returnTo };
 }
 
 /** Step 3 (desktop server, server-to-server): burn the code for identity. */

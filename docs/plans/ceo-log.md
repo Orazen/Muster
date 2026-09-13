@@ -4383,3 +4383,21 @@ mascot-led workspace goal while keeping the broader objective constraints intact
 **Next:** continue the objective by auditing `muster.orazen.online` flow for
 `/app` continuation with explicit Google consent handoff verification and then
 the `/app`/`/os` trusted sync path and backup restore evidence in browser.
+
+## Loop83 — desktop OAuth handoff continuation reliability (13 September 2026)
+
+**Status:** implementation slice complete for `/app` continuation from hosted auth handoff and stable in local verification. Scope: keep desktop OAuth flow from honoring the requested post-signin destination without broad redesign.
+
+**Verification:**
+- `tsc --noEmit -p tsconfig.server.json`
+- `npx vitest run server/desktop-auth.test.ts src/pages/AuthPages.test.ts server/desktop-auth-route.test.ts` => **3 files / 58 tests passed**
+- `npx vitest run` => **254 files / 3865 tests passed / 8 skipped / 0 failed**
+- no code in iOS/watch/tests was modified for this loop.
+
+**Change summary:**
+- `server/desktop-auth.ts`: store optional sanitized `next` destination on desktop grants and return it with handoff metadata.
+- `server/index.ts`: preserve `next` through `/desktop-auth/start`, pass it to `/desktop-auth/done`, and use it to return users from `/oauth/finish` to explicit destinations instead of always `/app`.
+- `src/pages/LoginPage.tsx`: desktop OAuth trigger now passes browser `next` into the handoff URL.
+- `server/desktop-auth.test.ts`: added negative/positive tests for sanitized local return paths.
+
+**Next:** keep this slice ready for user-authored `/app`/`/os` route audits and browser continuity checks in the active checklist.
