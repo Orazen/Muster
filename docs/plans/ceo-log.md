@@ -4401,3 +4401,19 @@ the `/app`/`/os` trusted sync path and backup restore evidence in browser.
 - `server/desktop-auth.test.ts`: added negative/positive tests for sanitized local return paths.
 
 **Next:** keep this slice ready for user-authored `/app`/`/os` route audits and browser continuity checks in the active checklist.
+
+## Loop84 — row 6 continuation evidence (13 September 2026)
+
+**Status:** no further code edits in web auth/onboarding logic this loop; validated behavior end-to-end through Playwright against the current slice.
+
+**Verification:**
+- `npx playwright test e2e/onboarding-draft.e2e.spec.ts` => **7/7 passed (1.0m)**
+  - Verified exact draft retention across reload, account-isolated drafts, explicit finish flow on template tasks, mutation-safe character route, keyboard/OS progress accessibility, and reduced-motion tour behavior.
+- `npx playwright test e2e/workspace-backup.e2e.spec.ts` => **4/4 passed (8.7s)**
+  - Verified local-only warning, configured transport failure handling with explicit retry, gated write enabling, and stale status retirement not overwriting current backup failure state.
+- `npx playwright test e2e/pairing.e2e.spec.ts` => **5/5 passed (14.5s)**
+  - Verified pairing bridge, exact account pairing, paired message survivability, Google redirect construction (without following redirect), and consumed-code rejection when desktop absent.
+
+**Environment note:** Playwright browsers were initially missing in this host; installed via `npx playwright install chromium` to enable real browser verification.
+
+**Commercial implication:** Trustworthy behavior around first-task preservation and backup/write gating is verified on-browser, but no desktop/native companion flow has been modified in this loop.
