@@ -4765,3 +4765,133 @@ installation's server with the queue file still obstructed, restart it unmodifie
 the boot report and the un-drained handoff from the process's own logs; then the browser-level
 reload case, once the web client is willing to carry a receipt across a page load.
 
+## Loop91 — the 320px stage control that was measured mid-scroll (13 September 2026)
+
+**Status:** the browser suite's one failing test is fixed, in the harness's measurement and
+nowhere else. No app file changed. `e2e/onboarding-draft.e2e.spec.ts` now re-scrolls a control
+into view until the position **holds** before it samples, because the browser was still applying
+the momentum of the suite's own wheel when the sample was taken. Every assertion is byte-identical
+to what it was: nothing skipped, weakened, deleted or reordered, and the spec files were not
+touched to hide the interaction. This is local fixture evidence from the harness's own servers on
+its own ports; no production, installed-app or security claim is made.
+
+**Reproduction.** The owner saw `Permissions and First task retain exact draft fields across
+reload at 320px` fail `1 failed / 21 passed` on two consecutive full-suite runs while the same
+spec passed 7/7 alone. On this machine, pre-fix, the full suite failed **2 of 6** runs
+(`1 failed / 21 passed` both times) and the spec file alone failed **2 of 4**; the single test run
+on its own passed every time. The failing control differed between runs — the Engines stage's
+`Set up later` once (failing `expectWithinViewport` with `bottom 578.375 > 569`), the Phone
+stage's `Not now` three times (failing the `uncovered` assertion, the reported one).
+
+The owner's artifact directory is cleared by each run (Playwright removes a test's output
+directory before it starts), so the set that shipped with the report no longer exists; its
+`error-context.md` carried this same assertion message for this same test before it was
+overwritten, and the trace from that run — extracted to `/tmp` before the first re-run — shows
+the same stage. Every measurement quoted below is from runs on this machine, not from that
+artifact.
+
+**What was actually on top of the control: nothing.** The diagnostic evaluate at the failing
+instant (Phone stage, 320×568, quoted from the run's `GEOM FAIL` line):
+
+```
+control  = BUTTON "Not now"  rect { x: 136.3, y: 555.4, w: 47.4, h: 18 }   → bottom 573.4
+scroller = .onboarding-stage-scroll  rect { top: 205.3, bottom: 559.1 }
+           scrollTop 145, scrollHeight 537, clientHeight 354
+window   = 320 × 568
+sample (144.3, 559.9) → DIV.onboarding-frame, insideScroller: false
+sample (175.7, 559.9) → DIV.onboarding-frame, insideScroller: false
+sample (144.3, 568.9) → null                       (below the window)
+sample (175.7, 568.9) → null
+dialogs  = []      shellRemovals = 0      activeElement = H2
+fixedOverlays = [DIV.glass-ambient z=0 pointer-events:none, DIV.onboarding-shell z=50]
+scrollLog (page clock, this element) = … [3694.8 → 183], [3712.6 → 169], [3721.1 → 156], [3729.3 → 145]
+```
+
+The four sampled inset points hit `.onboarding-frame` — the surface *behind* the scroll area's
+clipped edge — and then nothing at all, below the window. No dialog, no overlay, no toast, no
+remount (`shellRemovals = 0`, one `focusin` per step change and no others, the shell's own tag
+unchanged), and the app's only scroll call in this component (`stageScrollRef.scrollTo({top: 0})`)
+appears in the log as a single instant event on each *step change*, never during the stage. The
+container's maximum offset here is 537 − 354 = **183**, and `scrollIntoViewIfNeeded()` had reached
+it: at 183 the button sits at 517.4–535.4, comfortably inside the port that ends at 559.1, which
+is exactly what every passing run measures. The failure is the **eighteen milliseconds after
+that**: 183 → 169 → 156 → 145, a multi-frame drift that pulled the control back under the
+scrollport just as it was sampled.
+
+**The drift is the browser finishing a gesture the harness started.** `captureStageSizes` scrolls
+each stage to the top with real wheel input (`page.mouse.wheel(0, -10_000)`) and then polls until
+the *DOM offset* reads 0 — but Chromium keeps driving a wheel's scroll animation after the offset
+has already been clamped at the edge, and a programmatic scroll landing in that tail is simply
+overridden. A temporary probe (since removed) looked straight at that, with the app entirely out
+of the loop — it wrote `scrollTop` directly:
+
+```
+after the harness's wheel:  el.scrollTop = el.scrollHeight  →  "4:183","13:183","22:0"
+                            (offset assigned, then forced back to 0 within ~20 ms)
+same probe, run as a re-scroll-until-held loop (frame-count window):
+                            {"attempts":57, trace: [ … "526ms#56:moved", "568ms#57:held@106"]}
+                            {"attempts":60, trace: [ … "539ms#59:moved", "580ms#60:held@183"]}
+```
+
+So the wheel's animation stays armed for roughly **0.55–0.6 s** after the poll that the harness
+treats as "settled", and a re-scroll loop converges deterministically (56–61 attempts, then the
+offset holds at the maximum). That is why the failure looked full-suite-only: each test gets a
+fresh context and fresh servers, so nothing leaks between spec files — what differs is wall-clock
+load, which stretches that animation's tail past the poll. It is timing, not ordering, and it
+reproduces in a single file too.
+
+**Classification: (c) a test-harness measurement defect.** Not an app defect a real 320px user
+would hit: at rest the control is inside its scroll area and uncovered, the trial click that
+follows the assertion passes, and the only reason the sample missed is that the harness scrolled
+it and then sampled while the browser was still animating the scroll it had been given. Not a
+state leak either: no cross-test state exists to leak here.
+
+**The fix, and the first attempt that was not good enough.** `expectControlReachable` now scrolls
+into view, waits until the control **holds** — entirely inside both its scroll area and the
+window, with its offset, its content height and the port's own box unchanged — and re-scrolls
+until that happens, bounded at 5 s, after which the unchanged assertions run anyway. This mirrors
+what Playwright's own actionability does for a real click (re-scroll and re-check the hit target)
+and it does not relax anything: a control that cannot be brought out from under its own scroll
+area still fails `expectUncovered` with the same message, and a stage that keeps being scrolled
+away from the user still fails.
+
+The first version of that wait required **five consecutive animation frames** and it did not work:
+one of three full-suite runs still failed the same way. The trace showed why — the wait completed
+in **4.6 ms**, far too short to span the animation's ticks, because headless Chromium does not
+vsync-lock animation frames, so five frames is five gaps between compositor ticks and not the
+~80 ms a 60 Hz reading would suggest. The shipped criterion is therefore measured in
+**milliseconds (200 ms)**, and it compares the control's rect, the container's offset and content
+height and the port's box against the previous sample, so a layout shift under the control counts
+as movement exactly like a scroll does. `scrollHeld` was added beside it; no other file changed.
+
+**Verification (working tree at `6efe393` plus this uncommitted slice):**
+- `npx playwright test --reporter=line` → **exit 0**, `22 passed` — **seven consecutive runs**
+  with the millisecond window (five of them with the temporary trajectory logging still in the
+  file, two on the final tree with every diagnostic removed); one run of the frame-count version
+  failed in between, and pre-fix the same command failed 2 of 6 runs.
+- `npx playwright test e2e/onboarding-draft.e2e.spec.ts` → **exit 0**, `7 passed (1.1m)`, three
+  times in a row (pre-fix this file alone failed 2 of 4 runs).
+- `npx vitest run` → **exit 0**, **261 files / 3944 passed / 8 skipped / 0 failed** (baseline
+  unchanged; its `include` covers `server/`, `src/`, `electron/` and `companion/`, not `e2e/`).
+- `npx oxlint .` → **exit 0**, `Found 1 warning and 0 errors` — the one pre-existing
+  `unicorn/no-useless-spread` warning.
+- `npx tsc --noEmit -p tsconfig.server.json` → **exit 0**; `npx tsc --noEmit -p tsconfig.e2e.json`
+  → **exit 0** (the spec change typechecks under the e2e project as well).
+- `git status --short` → `M docs/plans/ceo-log.md`, `M e2e/onboarding-draft.e2e.spec.ts`; nothing
+  else in the tree is touched, and no git state was mutated.
+
+**Not verified, and not claimed.** Seven clean runs after a fix is not a proof: at the pre-fix
+rate of roughly one failure in three, seven clean runs would happen about 0.05 % of the time by
+chance, which is why the mechanism was also proven deterministically (the probe above) rather than
+inferred from the pass rate alone. The fix tolerates a *decaying* scroll or reflow up to five
+seconds, so it would also tolerate an app-driven scroll reset that ends by itself: a real user
+would see the stage jump back to the top and this harness would not flag it as unreachable. The
+instrumentation runs are the evidence that today's resets only fire on real step changes (one
+focus event per navigation, no remount), but the fixed measurement does not re-prove that on
+every run. The underlying browser behaviour is untouched — the suite's real wheel still leaves a
+live gesture animation, so any future check that samples geometry right after that wheel must do
+the same settle-and-re-verify. Only 320×568 and 1440×900 are exercised; other widths, stages
+beyond the seven wizard steps, and the desktop/Electron shell were not measured. The half-second
+tail is the shape of the window, not a budget, and the added wait costs the suite roughly 10–20
+seconds.
+

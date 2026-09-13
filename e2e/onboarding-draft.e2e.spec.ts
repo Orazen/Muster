@@ -120,12 +120,73 @@ async function expectUncovered(element: Locator): Promise<void> {
 }
 
 /** Vertical content scrolling and horizontal identity pickers are legitimate.
- * This measures real controls after Playwright's ordinary scroll-into-view. */
+ * This measures real controls after Playwright's ordinary scroll-into-view.
+ *
+ * A real wheel keeps driving the container after its offset first reads the
+ * target: Chromium clamps the offset at the edge while the gesture's scroll
+ * animation is still running, so a programmatic scroll that lands in that
+ * tail is pulled straight back under the scrollport — the swiped-up screen
+ * keeps travelling. Playwright's own actionability re-scrolls and re-checks
+ * the hit target for this reason; do the same, bounded, so the assertions
+ * below sample where the control actually rests instead of a frame the
+ * browser is still animating. A control that cannot be brought out from
+ * under its own scroll area still fails them. */
 async function expectControlReachable(control: Locator): Promise<void> {
   await expect(control).toBeEnabled();
-  await control.scrollIntoViewIfNeeded();
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    await control.scrollIntoViewIfNeeded();
+    if (await scrollHeld(control)) break;
+    if (Date.now() >= deadline) break;
+  }
   await expectUncovered(control);
   await control.click({ trial: true });
+}
+
+/** A single sample cannot tell a held scroll from an animating one: require
+ * the control to stay entirely inside both its scroll area and the window,
+ * with its offset, its content height and the port's own box unchanged, for
+ * a window long enough to span the animation's own ticks. Headless Chromium
+ * does not vsync-lock animation frames, so counting frames reads the gap
+ * between two ticks as rest; the window is measured in milliseconds. */
+const settleWindowMs = 200;
+
+async function scrollHeld(control: Locator): Promise<boolean> {
+  return control.evaluate(async (node, settleMs) => {
+    const frame = () => new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 250);
+      requestAnimationFrame(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    const read = () => {
+      const r = node.getBoundingClientRect();
+      let scroller: HTMLElement | null = node.parentElement;
+      while (scroller && !(scroller.scrollHeight > scroller.clientHeight + 1)) scroller = scroller.parentElement;
+      const s = scroller?.getBoundingClientRect();
+      const inside = r.top >= -0.5 && r.bottom <= innerHeight + 0.5
+        && (!s || (r.top >= s.top - 0.5 && r.bottom <= s.bottom + 0.5));
+      return { inside, key: [r.top, r.bottom, scroller?.scrollTop, scroller?.scrollHeight, s?.top, s?.bottom].join("/") };
+    };
+    const began = performance.now();
+    let stableSince = began;
+    let previous = read();
+    if (!previous.inside) return false;
+    for (;;) {
+      await frame();
+      const now = performance.now();
+      const current = read();
+      if (!current.inside) return false;
+      if (current.key !== previous.key) {
+        previous = current;
+        stableSince = now;
+        continue;
+      }
+      if (now - stableSince >= settleMs) return true;
+      if (now - began >= 1_000) return false;
+    }
+  }, settleWindowMs);
 }
 
 /** No locator.focus(): traversal starts from the actual current focus and
