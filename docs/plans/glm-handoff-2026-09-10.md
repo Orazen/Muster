@@ -3188,3 +3188,14 @@ Files: server/index.ts, server/workspace-auth-harness.test.ts, server/sync-state
 Live observation: muster.today/app rendered the sign-in page with Google and email options. GET /app, /os and /api/health returned200. This proves availability only, not signed-in behavior, exact backend identity or deployment of this slice. No production mutation, native release, service restart or automation change.
 
 Next: finish exact web/server release identity acceptance, then authenticated Google consent and cross-device backup/restore; native signing/device, VM and full scanner gates remain open. Commercial value: accurate backup receipts support user trust; no revenue or security claim.
+
+
+## Loop87 — release gate verification (13 September 2026)
+
+No product changes. Verified source4d15d70 with fresh broker **1 file/2 passed**, updater **14/14**, rebuilt packaged server **9/9** (owned HTTP1, proxy paths7, native database1). Runtime was Node22.22.3/ABI127/arm64/macOS, not Electron. Web build and project types passed; lint exit0 with the existing no-useless-spread warning at server/index.ts3438. Build warns of chunks above500kB. The Loop86 full result remains **256 files/3872 passed/8 skipped**; it was not redundantly rerun for this documentation-only receipt.
+
+Production GET **10/10**: app, OS, health and referenced JS/CSS on both muster.today and muster.orazen.online. Correct HTML/JSON/JS/CSS content types and matching bytes across domains. Observed entry index-CGNLpNrZ.js SHA256808fc0d01b3708c30ea6dadc74b60d89a4f5910c75bc8fef3701114db57b9da0; CSS index-C6Cegjsm.css SHA25617edab6c2e6f62aa8037582772850fbef1fb6548343e7451ef24594c4d6d0611. Fresh local build emits different entry names (DJN3buns/B8p-316f); this is not proof of a stale deployment. Health identifies Muster but exposes no source revision. Receipt: .omb-scratch/verification/loop87-release-gates/production-get.json. No backend revision or authenticated acceptance claim.
+
+Toolchain observation: global pnpm11.17.0 emits an ignored package.json overrides warning before the project command reports pinned10.33.0. Existing lockfile retains all four overrides. No install or dependency configuration change performed; do not infer a vulnerable resolution from that launcher warning alone.
+
+Next remains the audited build-identity implementation and full acceptance in web-release-identity-next-slice.md. Native signing/physical devices, actual Google consent, full sync/restore, VM, scanner and dependency alerts remain open. No application sessions, production settings or paused automations changed. These checks reduce release uncertainty; no public launch or revenue claim.
