@@ -47,3 +47,8 @@ dist/
 .claude-flow/
 musterbot-background/
 commit-audit-fixes.sh
+
+# agent tool-state directories — never product content
+.mimosa/
+.v2c/
+.video_agent/

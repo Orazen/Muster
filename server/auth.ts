@@ -728,6 +728,7 @@ export function isPublicApiPath(path: string): boolean {
   return (
     path.startsWith("/api/auth/") ||
     path === "/api/health" ||
+    path === "/api/build-identity" ||
     // The sign-in screen reads this before a session exists, to know which
     // providers to show and whether to offer "forgot password".
     path === "/api/auth-capabilities" ||

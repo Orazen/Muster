@@ -18,6 +18,7 @@
 // drivers/ nested; import.meta.url still resolves to the same location, so
 // that lookup is unaffected.
 import { build } from "esbuild";
+import { createBuildMetadata, writeBuildIdentity } from "./build-identity.mjs";
 import { fileURLToPath } from "node:url";
 import childProcess from "node:child_process";
 import { dirname, join } from "node:path";
@@ -48,7 +49,10 @@ const ENTRY_POINTS = [
 // dist-server/node_modules before falling back further up the tree.
 const NATIVE_EXTERNALS = ["better-sqlite3"];
 
+const identity = createBuildMetadata(root, JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version);
+
 await build({
+  define: { __MUSTER_BUILD_IDENTITY__: JSON.stringify(identity) },
   external: NATIVE_EXTERNALS,
   // Bundled CJS deps (telegraf, vaultgram's internals) call require() at
   // runtime; under ESM output esbuild's stub throws "Dynamic require".
@@ -177,3 +181,6 @@ function rewriteSpecifiers(dir, relPrefix) {
   }
 }
 rewriteSpecifiers(join(root, "dist-server"), "./");
+
+// Identity covers the final entry bytes after native import rewrites, not native ABI.
+writeBuildIdentity(join(root, "dist-server"), identity, "server", ["index.js"]);

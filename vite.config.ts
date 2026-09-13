@@ -1,3 +1,5 @@
+// @ts-expect-error Build-only JavaScript producer runs in Node without TypeScript loaders.
+import { webBuildIdentityPlugin } from "./scripts/build-identity.mjs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
@@ -11,7 +13,7 @@ const backend = devBackendPreview({
 });
 
 export default defineConfig({
-  plugins: [backend.plugin, react(), tailwindcss()],
+  plugins: [backend.plugin, react(), tailwindcss(), webBuildIdentityPlugin()],
   test: {
     environment: "node",
     include: [

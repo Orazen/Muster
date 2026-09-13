@@ -1,3 +1,4 @@
+import { createBuildDiagnostics } from "./build-identity.ts";
 // Muster server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
@@ -264,6 +265,7 @@ import { ComputerControl, type ControlSnapshot } from "./computer-control.ts";
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
+const buildDiagnostics = createBuildDiagnostics(STATIC_DIR);
 // Public marketing landing page (www/), served at "/" only — everything
 // else (the app itself, /api/*, /assets/*) is untouched. Not set for the
 // packaged Electron app, only the self-hosted Docker deployment.
@@ -6748,6 +6750,11 @@ let requestUserEmail = "";
     // identity handshake for the packaged app's port fallback: the forked
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
+    if (path === "/api/build-identity") {
+      if (method !== "GET") return json(res, 405, { error: "method not allowed" });
+      res.setHeader("Cache-Control", "no-store");
+      return json(res, 200, buildDiagnostics());
+    }
     if (method === "GET" && path === "/api/health") {
       return json(res, 200, { app: "muster", pid: process.pid, static: Boolean(STATIC_DIR), messageSendVersion: MESSAGE_SEND_VERSION, approvalActionVersion: APPROVAL_ACTION_VERSION });
     }
