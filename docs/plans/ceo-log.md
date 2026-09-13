@@ -4462,3 +4462,56 @@ Production GET **10/10**: app, OS, health and referenced JS/CSS on both muster.t
 Toolchain observation: global pnpm11.17.0 emits an ignored package.json overrides warning before the project command reports pinned10.33.0. Existing lockfile retains all four overrides. No install or dependency configuration change performed; do not infer a vulnerable resolution from that launcher warning alone.
 
 Next remains the audited build-identity implementation and full acceptance in web-release-identity-next-slice.md. Native signing/physical devices, actual Google consent, full sync/restore, VM, scanner and dependency alerts remain open. No application sessions, production settings or paused automations changed. These checks reduce release uncertainty; no public launch or revenue claim.
+
+## Loop88 — read-only repository audit and portable backup v2 prototype (13 September 2026)
+
+**Status:** one inert module plus its suite added to the working tree, and the audit that
+motivated it written down. No route imports it, no restore path exists, nothing was deployed
+and no git state was mutated; the tree is left for the owner's review. Full record in
+[the audit note](audit-2026-09-13-backup-v2-and-release-identity.md).
+
+**Verification (all on the frozen tree at `22a7011` plus the uncommitted slice):**
+- `npx oxlint .` → **exit 0**, one pre-existing warning (`server/index.ts:3440`,
+  `unicorn/no-useless-spread`).
+- `npx tsc --noEmit -p tsconfig.server.json` → **exit 0**.
+- `npx vitest run server/workspace-bundle-v2.test.ts` → **1 file / 15 passed / 0 failed**.
+- `node_modules/.bin/vitest run` → **259 files / 3914 passed / 8 skipped / 0 failed**
+  (352.47s, re-run on the frozen tree). The stamped baseline was 258/3899/8, so this is
+  **+1 file / +15 tests** and no regression.
+- `npx vitest run server/build-identity.test.ts server/build-identity-producer.test.ts`
+  → **2 files / 27 passed**, matching the count already recorded in current-state.md.
+
+**Audit findings:** the release-identity slice is implemented in the working tree and
+uncommitted (observer, producer, bundler and web wiring, `GET /api/build-identity` at
+`server/index.ts:6753`, public at `server/auth.ts:731`). Its lint cleanup was already in the
+tree and could not be re-derived from it — the files are untracked and carry no history —
+but the cleanup is load-bearing: removing the three `anti-slop/no-runtime-typeof` boundary
+disables from a copy of the producer reproduces 3 errors. Documented counts and capability
+rows had drifted from the code and are corrected in the same tree (Fleet MCP 6→8 tools and
+13/13→67 tests, approval hotkeys A–F, routine shapes, the Google-pull stamping claim) along
+with `engines.node` `>=22`→`>=23.4`. The v1 backup derives its key from
+`scrypt(passphrase + installation secret)` (`server/workspace-bundle.ts:39-40`), restores
+incrementally with loosely validated records, and carries no transcript rows at all — the
+live store is `messages`/`thread_state` in `server/message-db.ts:40-56`.
+
+**Change summary:** `server/workspace-bundle-v2.ts` exports `LIMITS`, `buildPayloadV2`
+(bounded scan, skipped entry per walked-past file, symlinks reported and never followed,
+`VACUUM INTO` snapshot read from a copy in a private temp directory, per-file and total
+limits abort loudly), `encryptBundleV2` (passphrase-only scrypt with its parameters in the
+envelope, canonical header minus `ciphertextB64`/`tagB64` as AEAD associated data),
+`decryptBundleV2` (statuses, never throws), `verifyBundleV2` (11 named checks), `planRestoreV2`
+(dry run, `writesNothing: true`, will not even open the target database) and `selftest`.
+`server/workspace-bundle-v2.test.ts` builds fixtures with the real schema, including a thread
+whose newest row is not its recorded head, and covers all twelve required cases.
+Documentation: this entry, the audit note, and two lines in current-state.md.
+
+**Not done:** no restore writer (the staged, all-or-nothing restore is the next slice), no
+route wiring, no cross-installation restore acceptance, no UI, no production verification and
+no security claim. `counts-declared` and `limits-respected` are never exercised as *failing*
+checks — both can only fail for a bundle this module did not produce — and the
+post-authentication `truncated` branch is not constructible through the public API, so those
+three are weaker than a green suite implies. An audit is not an acceptance.
+
+**Next:** the staged restore writer behind an explicit user action, then the
+cross-installation fixture the contract requires (export from A, destroy A, restore under an
+unrelated secret B, compare message, branch and file hashes).

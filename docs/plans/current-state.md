@@ -1,6 +1,6 @@
 # Current Muster state — read before editing
 
-Updated 12 September 2026. This snapshot takes precedence over historical roadmap
+Updated 13 September 2026. This snapshot takes precedence over historical roadmap
 status; the latest owner request takes precedence over this file.
 
 **Owner priority:** keep the existing web layout, Flower mascot, /app and /os
@@ -13,8 +13,10 @@ layout is unchanged; the notice appears only after an uncertain/failed Stop.
 In-memory recovery does not survive reload/restart; durable failure/restart
 recovery remains open.
 
-Full **254 files / 3862 passed / 8 skipped / 0 failed**; broker 2/2, updater 14/14,
-packaged server 9/9 under Node, not Electron. Focused42 server + 30 UI; browser 3/3
+Full **258 files / 3899 passed / 8 skipped / 0 failed**, re-measured at revision
+`22a7011` plus the uncommitted build-identity slice (13 September 2026); broker 2/2,
+updater 14/14 and packaged server 9/9 under Node, not Electron, were last measured in
+Loop80 and were not re-run in this pass. Focused42 server + 30 UI; browser 3/3
 covers actual503/retry, same-bot two-tab stale409, sign-out, draft and 320px notice.
 All 970 input hashes match. Types/lint/web build pass. Cleanup: 6 servers + 4 providers
 exited, 12 ports closed, 3 temporary roots removed. The latest ledger retains initial
@@ -38,12 +40,19 @@ and stash ownership in `.omb-scratch/verification/loop81-identity-handoff/`
 hash baseline. All12 must be restored before stopping. Restore exactly;
 never sweep them into cleanup commits. Retain the original preexisting stash.
 
-**Next:** [exact web/server build identity](web-release-identity-next-slice.md), then verified deployment wiring when
-Dokploy access is available. Finish the remaining peer/crash acceptance in the
-[peer plan](peer-capability-next-slice-2026-09-12.md), durable Stop recovery across
-reload, native signing/runtime, actual Google consent, full sync/backup, VM and
-Mimosa. Two Android Metro/image-size high alerts remain open; the read-only audit
-found no fixed published upgrade. Keep existing mitigations and automation PAUSED.
+**Next:** verified deployment wiring when Dokploy access is available. The
+[exact web/server build identity](web-release-identity-next-slice.md) slice is
+implemented and locally tested (observer plus producer contracts, 27 tests), but it
+is not deployed and its production identity is unverified. The
+[portable backup v2 prototype](audit-2026-09-13-backup-v2-and-release-identity.md)
+also landed as an inert module with its own tests: passphrase-only export and a
+dry-run restore plan, with **no restore writer, no route wiring and no
+cross-installation acceptance**. Finish the remaining peer/crash acceptance in
+the [peer plan](peer-capability-next-slice-2026-09-12.md),
+durable Stop recovery across reload, native signing/runtime, actual Google consent,
+full sync/backup, VM and Mimosa. Two Android Metro/image-size high alerts remain
+open; the read-only audit found no fixed published upgrade. Keep existing
+mitigations and automation PAUSED.
 
 **Handoff:** update this snapshot, the [ledger](glm-handoff-2026-09-10.md) and
 [CEO log](ceo-log.md) with real counts, deployed evidence and remaining scope.
@@ -52,9 +61,11 @@ redesigns. Read live account usage before applying the owner's 2% handoff thresh
 
 **Loop81 handoff:** the parallel read-only packaging/runtime audit expanded the
 [next slice](web-release-identity-next-slice.md) into concrete integration points
-and real-fixture acceptance. It is **not implemented**. All970 tested source input
-hashes still match Loop80; this documentation-only continuation ran0 new runtime
-tests. Current layout and user services were not changed.
+and real-fixture acceptance; Loop81 shipped none of it. That slice is now
+implemented in the working tree, uncommitted on the revision stamped above.
+All970 tested source input hashes still match Loop80; this documentation-only
+continuation ran0 new runtime tests. Current layout and user services were not
+changed.
 
 **Allowance snapshot:** final live check reached **2% remaining**, the owner’s handoff reserve; reset19 September2026 at16:43 Europe/Rome. No reset consumed. The handoff is ready; no further implementation was started after this threshold. The wider goal remains open for the next agent.
 
@@ -68,4 +79,4 @@ Another path nevertheless delivered frontend code. No hosted settings or session
 changed. Full254/3862/8 and browser 3/3 acceptance remain local fixture evidence.
 
 
-**Loop86 (13 September):** installation Drive success timestamps and duplicate Telegram stamp corrected. Full256 files/3872 passed/8 skipped; final affected suites2 files/141 passed and server typecheck pass. See the latest ledger entry for review timing and limits. muster.today sign-in rendered; GET availability3/3. Backend rollout, native release and actual Google consent remain unverified. Existing layout and paused automation preserved.
+**Loop86 (13 September):** installation Drive success timestamps and duplicate Telegram stamp corrected. Its full-suite run was256 files/3872 passed/8 skipped, superseded by the **258 files / 3899 passed / 8 skipped** baseline stamped above at revision `22a7011` plus the uncommitted build-identity slice; final affected suites2 files/141 passed and server typecheck pass. See the latest ledger entry for review timing and limits. muster.today sign-in rendered; GET availability3/3. Backend rollout, native release and actual Google consent remain unverified. Existing layout and paused automation preserved.

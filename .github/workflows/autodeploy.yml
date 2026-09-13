@@ -12,6 +12,14 @@
 #    autodeploy trigger").
 # 2. It also skips when the incoming push already touched
 #    `.deploy-trigger`, so manual trigger commits never double-fire.
+#
+# OPERATIONAL STATE, not a defect: this workflow stays committed and live while
+# Actions runs are billing-blocked, so every push records a billing-rejected run
+# instead of reaching Dokploy. The guides' "keep existing automation paused" is a
+# decision about what the owner starts, not something disabling this file could
+# establish — removing or skipping it would silently drop the trigger path that
+# has already delivered frontend code once. Verify the served files with GET
+# before treating a push as a deployment.
 name: autodeploy
 
 on:

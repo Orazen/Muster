@@ -38,11 +38,11 @@ Everything already shipped serves that sentence; everything below tightens it.
 | Capability | Where | Status |
 |---|---|---|
 | Fleet REST API (roster, threads, messages, receipts, memory, audit) | `server/index.ts` | Live, session-authed |
-| Fleet MCP server — 6 bounded tools | `server/fleet-mcp.ts` | 13/13 tests, live-verified against a running server |
+| Fleet MCP server — 8 bounded tools | `server/fleet-mcp.ts` | 67 tests (28 declarations), live-verified against a running server |
 | CLI: `muster mcp` prints client config; `--serve` runs stdio | `cli/muster.mjs` | Verified |
-| Approval cards with A/B/C/D hotkeys + history strip | `src/components/OptionCard.tsx` | Shipped |
-| Routines (daily/weekly/once) | `server/routines.ts` | Shipped + tested |
-| Why-journal + routine scorecards (ARC pattern) | `server/why-journal.ts` | Shipped, E2E-verified |
+| Approval cards with A–F hotkeys + history strip | `src/components/OptionCard.tsx` (hotkeys), `src/components/ApprovalCard.tsx` (history) | Shipped |
+| Routines (`once`, `daily{time,weekdays}`) | `server/routines.ts` | Shipped + tested |
+| Why-journal + routine scorecards (ARC pattern) | `server/why-journal.ts`, `server/routines.ts` | Shipped, unit-tested |
 | Receipts per settled task | `server/index.ts` (`/api/receipts/...`) | Live |
 | SOUL.md / MEMORY.md per bot | `/api/bots/{id}/soul.md`, `/memory` | Live |
 | MCP client side (bots consume MCP servers) | `server/mcp-client.ts` + proxies | Shipped |

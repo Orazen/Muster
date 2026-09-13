@@ -21,7 +21,7 @@
     "muster": "cli/muster.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=23.4"
   },
   "packageManager": "pnpm@10.33.0",
   "pnpm": {
