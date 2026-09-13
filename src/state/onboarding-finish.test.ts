@@ -92,6 +92,13 @@ describe("onboarding finish lifecycle", () => {
     expect(input.sendTask.mock.calls).toEqual([[greeter.id, input.task], [greeter.id, input.task]]);
   });
 
+  it("does not auto-send first task when user chooses to skip onboarding task", async () => {
+    const { input, session } = fixture();
+    const result = await session.finish({ ...input, sendFirstTask: false });
+    expect(input.sendTask).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ bot: { id: greeter.id }, task: "" });
+  });
+
   it("retains acceptance when final bookkeeping fails so retry does not PATCH or send again", async () => {
     const { input, session } = fixture();
     const accepted = await session.finish(input);

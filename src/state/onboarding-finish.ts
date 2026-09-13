@@ -8,6 +8,7 @@ export interface FirstTaskAcceptance {
 export interface OnboardingFinishInput {
   identity: SetupIdentity | null;
   task: string;
+  sendFirstTask?: boolean;
   readRoster(): Promise<Bot[]>;
   createBot(): Promise<{ bot: Bot }>;
   patchBot(botId: string, identity: SetupIdentity): Promise<{ bot: Bot }>;
@@ -60,7 +61,7 @@ export function createOnboardingFinishSession() {
         if (accepted) return accepted;
         const roster = await input.readRoster();
         check(attempt);
-        const result = await setupTeammate({
+      const result = await setupTeammate({
           roster,
           pending,
           identity: input.identity,
@@ -85,7 +86,7 @@ export function createOnboardingFinishSession() {
         pending = result.bot;
         input.onBotReady(result.bot);
         check(attempt);
-        const task = input.task.trim();
+        const task = input.sendFirstTask === false ? "" : input.task.trim();
         const receipt = task ? await input.sendTask(result.bot.id, task) : {};
         check(attempt);
         accepted = { bot: result.bot, task, message: receipt.message };

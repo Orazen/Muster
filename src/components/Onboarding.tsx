@@ -544,7 +544,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
    * Responses are checked through api(); a failure keeps the wizard open
    * with every input preserved, surfaces the API's message, and never
    * marks the gate done. */
-  const finish = async () => {
+  const finish = async (sendFirstTask = true) => {
     if (finishingRef.current || !finishSession.active) return;
     finishingRef.current = true;
     setCreating(true);
@@ -582,6 +582,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           method: "POST",
           body: JSON.stringify({ text }),
         }),
+        sendFirstTask,
       });
       if (!result || !finishSession.active) return;
       if (result.message) dispatch({ type: "messageAdded", threadId: result.bot.threadId, message: result.message });
@@ -684,7 +685,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         <button
           onClick={() => {
             track("onboarding_quick_start");
-            finish();
+            finish(false);
           }}
           disabled={creating}
           className="mt-2 w-full rounded-lg border border-hairline/60 bg-raised py-2 text-[13.5px] font-medium text-ink transition-colors hover:bg-raised-hover disabled:opacity-40"
@@ -1016,7 +1017,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               Back
             </button>
             <button
-              onClick={() => (botName.trim() ? setStep(5) : finish())}
+              onClick={() => (botName.trim() ? setStep(5) : finish(false))}
               disabled={creating}
               className="flex-1 rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white disabled:opacity-40"
             >
@@ -1148,14 +1149,18 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             Back
           </button>
           <button
-            onClick={finish}
+            onClick={() => finish(true)}
             disabled={creating}
             className="flex-1 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white disabled:opacity-40"
           >
             {creating ? "Setting up…" : botName.trim() ? `Muster ${botName.trim()} →` : "Start using Muster"}
           </button>
         </div>
-        <button onClick={finish} disabled={creating} className="mt-3 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-40">
+        <button
+          onClick={() => finish(false)}
+          disabled={creating}
+          className="mt-3 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-40"
+        >
           Skip for now
         </button>
         {/* Set the expectation before the handoff: the wizard closes into a
