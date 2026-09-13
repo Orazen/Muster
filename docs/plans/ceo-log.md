@@ -1,5 +1,25 @@
 # Verified slice log
 
+## Loop 21 — 2026-09-13 — First-task onboarding reliability (verification-only)
+
+Row 6 onboarding reliability checks were re-run on this checkout and already-present logic was confirmed.
+No code changes were required in this loop.
+
+Verification:
+- `npx playwright test e2e/onboarding-draft.e2e.spec.ts` → **7 passed**
+- `npx vitest run src/state/onboarding-finish.test.ts src/state/teammate-setup.test.ts src/state/onboarding-draft.test.ts` → **3 files / 89 passed / 0 failed**
+- `npx vitest run` → **261 files / 3944 passed / 8 skipped / 0 failed** (`3944` passed tests)
+- `git status --short` → clean
+
+Scope confirmed in this loop:
+- first-task draft persistence across reload/re-auth/sign-in
+- explicit-finish recovery without auto-send
+- draft restoration after failed sends
+- template prefill and exact-draft preservation behavior
+- duplicate-creation and 402/response-handling safety via existing unit coverage
+
+Commercial implication: this closes the remaining unverified acceptance gap in Row 6, but does not claim any product or market outcome beyond the current reliability gains.
+
 ## 2026-09-09 — AGI harness sequence
 
 Full-suite results below are actual Vitest runs before each slice's commit.
@@ -4894,4 +4914,3 @@ the same settle-and-re-verify. Only 320×568 and 1440×900 are exercised; other 
 beyond the seven wizard steps, and the desktop/Electron shell were not measured. The half-second
 tail is the shape of the window, not a budget, and the added wait costs the suite roughly 10–20
 seconds.
-
