@@ -38,6 +38,8 @@ export function UpdateBanner() {
   const status = s?.status;
   useEffect(() => setPending(null), [status]);
 
+  const manualDownloadUrl = window.location.origin ? `${window.location.origin}/downloads` : "/downloads";
+
   // A successful quitAndInstall tears down this whole renderer within
   // seconds — the OS replaces the running app. If this component is still
   // mounted and still showing "installing" after a real one would have
@@ -154,7 +156,7 @@ export function UpdateBanner() {
         <div className="mt-2.5 flex gap-2">
           {s.status === "available" && manualMac && (
             <a
-              href={`https://github.com/Orazen/Muster/releases/tag/v${encodeURIComponent(s.version ?? "")}`}
+              href={manualDownloadUrl}
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => {
@@ -236,7 +238,7 @@ export function UpdateBanner() {
                * failure, so always offer the one path that reliably works:
                * grab the new build directly. */}
               <a
-                href="https://github.com/Orazen/Muster/releases/latest"
+                href={manualDownloadUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-hairline/50 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
@@ -247,7 +249,7 @@ export function UpdateBanner() {
           )}
           {stuckInstalling && (
             <a
-              href="https://github.com/Orazen/Muster/releases/latest"
+              href={manualDownloadUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] text-ink hover:bg-raised-hover"

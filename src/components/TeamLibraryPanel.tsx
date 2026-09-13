@@ -501,15 +501,17 @@ export function TeamLibraryPanel({
 
                     <div className="flex min-h-56 flex-col justify-center rounded-2xl bg-raised/25 px-6">
                       <Github size={25} className="text-ink-secondary" />
-                      <h3 className="mt-3 text-[14px] font-medium text-ink">Load from GitHub</h3>
-                      <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">Paste a public repo or a direct team JSON link.</p>
+                      <h3 className="mt-3 text-[14px] font-medium text-ink">Load from repository</h3>
+                      <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">
+                        Paste a public repository path or a direct team JSON link.
+                      </p>
                       <div className="mt-4 flex gap-2">
                         <input
                           value={githubUrl}
                           onChange={(event) => setGithubUrl(event.target.value)}
                           onKeyDown={(event) => event.key === "Enter" && void loadGithubTeam()}
-                          placeholder="github.com/owner/repo"
-                          aria-label="GitHub team URL"
+                          placeholder="owner/repo"
+                          aria-label="Repository team URL"
                           className="min-w-0 flex-1 rounded-xl bg-raised/80 px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
                         />
                         <button
