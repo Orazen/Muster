@@ -1,13 +1,12 @@
-# Self-host Muster (web)
+# Private-hosted deployment (web)
 
-Muster is local-first by default, but it can run as a single-user web service
-you self-host and open in any browser — no Electron, no macOS requirement. The
-same harness server and React UI, packaged into one Docker image.
+Muster runs private-first by default, with your data and session local to your
+installed device. If you run a managed web deployment for remote access, the same
+harness server and React UI can be hosted behind a secure endpoint.
 
-> **One-user model.** Muster has no accounts, no multi-tenancy, and no hosted
-> auth. Self-hosting exposes *your* single workspace. Only deploy it where you
-> alone (or people you fully trust) can reach it, and put it behind a reverse
-> proxy with TLS if you expose it beyond your machine.
+> **Private-hosted mode.** This mode can run as a single-tenant deployment for your teams.
+> single-sign-on and account scope are handled by your auth strategy, not public Deploy it only where you and your users control access, and protect it with
+> TLS via a reverse proxy when exposed beyond localhost.
 
 ## Quick start
 
@@ -32,13 +31,13 @@ All settings are environment variables on the `muster` service.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `OMB_HOST` | `127.0.0.1` | Bind host for the harness + UI. The image sets `0.0.0.0` (self-hosted). |
+| `OMB_HOST` | `127.0.0.1` | Bind host for the harness + UI. The recommended private mode binds loopback only; set a public bind only when managed access is required. |
 | `OMB_PORT` | `8799` | Port the service listens on. |
 | `OMB_DATA_DIR` | `~/.muster` | Where bots/transcripts/config live. The image uses `/data` (a volume). |
-| `OMB_STATIC_DIR` | *(unset)* | Directory of the built web UI. The image sets `/app/dist`. |
+| `OMB_STATIC_DIR` | *(unset)* | Directory of the built web UI. The private image sets `/app/dist`. |
 | `OMB_PUBLIC_HOST` | *(unset)* | Public hostname (no port) when serving over a domain, e.g. `muster.example.com`. |
 | `OMB_ALLOWED_ORIGINS` | *(unset)* | Comma-separated extra origins allowed to call the API cross-origin (e.g. `https://app.example.com`). |
-| `BETTER_AUTH_SECRET` | — | **Required when self-hosting.** Signs session tokens. Generate with `openssl rand -base64 32`. The server refuses to boot without it once `OMB_HOST`/`OMB_PUBLIC_HOST` is set. Keep it stable, or every session is invalidated on restart. |
+| `BETTER_AUTH_SECRET` | — | **Required for public/private-hosted web access.** Signs session tokens. Generate with `openssl rand -base64 32`. Keep it stable, or every session is invalidated on restart. |
 | `OMB_PUBLIC_URL` | *(derived)* | Absolute base URL including scheme, e.g. `https://muster.example.com`. Used for verification links, password-reset links and OAuth callbacks. Falls back to `https://$OMB_PUBLIC_HOST`, then loopback. Set it if you terminate TLS on a non-default port or serve under a path. |
 | `OMB_ALLOW_SIGNUPS` | *(closed)* | `true` reopens email sign-up on the deployment. Default closed while per-account data isolation is being hardened; sign-in for existing accounts always works. |
 | `RESEND_API_KEY` | *(unset)* | Enables outbound email via [Resend](https://resend.com). Without it, email verification and password reset are hidden in the UI rather than silently failing; links are logged to the console instead. |
@@ -57,22 +56,22 @@ All settings are environment variables on the `muster` service.
   hosts and origins (DNS-rebinding + CSRF protection) and keeps peer-agent
   comms (`/api/internal/*`) loopback-only with a per-boot token.
 - **Binding to `0.0.0.0` opts in.** Setting `OMB_HOST` to a non-loopback address
-  (as the Docker image does) is the explicit "expose me" signal: the host gate
-  widens, and same-origin browser requests are allowed. Cross-origin clients
-  still require `OMB_ALLOWED_ORIGINS`.
+  is the explicit “public access” signal: the host gate widens, and same-origin
+  browser requests are allowed. Cross-origin clients still require
+  `OMB_ALLOWED_ORIGINS`.
 - **Peer-agent comms never leave loopback**, even under `0.0.0.0` — a remote
   socket to `/api/internal/*` is rejected before the token check.
-- **Every API route requires a session when self-hosting.** Once `OMB_HOST` is
+- **Every API route requires a session when access is public.** If `OMB_HOST` is
   non-loopback (or `OMB_PUBLIC_HOST` is set), requests to `/api/*` without a
   valid Better Auth session get a `401`. The only exceptions are `/api/auth/*`
-  (so sign-in is reachable) and `/api/health` (so load balancers can probe).
+  (so sign-in is reachable) and `/api/health` (for probing).
   Sign-in is rate-limited to 5 attempts per minute per IP, and passwords must
   be at least 12 characters.
-- **Loopback keeps implicit trust.** On a `127.0.0.1` desktop install the OS
-  boundary is the credential, so no login is demanded. The gate applies only
-  once you opt into exposure.
-- **Set `BETTER_AUTH_SECRET`.** The server will not start without it when
-  self-hosting. It signs session tokens; if it changes, every session dies, and
+- **Loopback keeps implicit trust.** On a `127.0.0.1` private-device install the OS
+  boundary is the credential, so no login is demanded. The session gate applies
+  once you opt into public access.
+- **Set `BETTER_AUTH_SECRET`.** The server will not start without it when running public/private-hosted web access.
+  It signs session tokens; if it changes, every session dies, and
   if it leaks, sessions can be forged.
 - **Optional flows are hidden, not broken.** Password reset and email
   verification only appear once `RESEND_API_KEY` is set; social buttons only
@@ -118,7 +117,7 @@ show as unavailable until you provide one:
 - **Use engine credentials** where a driver only needs a key (OpenCode Go,
   Compose/Box), or
 - **Run the container on a machine** where the CLIs are already on `PATH` via a
-  bind mount (see [`engines`](https://github.com/Orazen/Muster#engines)).
+  bind mount (see [engine documentation](/docs/engines)).
 
 Cloud computers (Box) work out of the box with a `BOX_TOKEN`. "This Mac" local
 computer control is **not** available in a container — it requires the desktop

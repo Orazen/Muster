@@ -63,9 +63,9 @@ const CREDENTIALS = {
     label: "OpenSandbox API key",
     placeholder: "Paste your OpenSandbox server API key",
     description:
-      "Self-hostable sandbox alternative to Box. Saving a key here stores it for future use — bot computer use doesn't run on it yet.",
+      "Private sandbox alternative to Box. Saving a key stores it for future use — local private sandboxes are not yet available in this release.",
     href: "/docs/self-host",
-    linkLabel: "Read the self-hosting guide",
+    linkLabel: "Read the private hosting guide",
     optional: true,
   },
   opencodeGo: {
@@ -88,11 +88,11 @@ const CREDENTIALS = {
     label: "Muster Cloud account",
     placeholder: "https://muster.today",
     description:
-      "Opt in to one shared identity: the same email and password sign in here and on the Muster Cloud server you point this at. Bots, threads, and messages stay local to this install — only the account itself is shared, nothing syncs.",
+      "Opt in to one shared identity: sign in here and on your Muster Cloud endpoint. Bots, threads, and messages can sync where you enable cloud relay; local mode keeps all user data on-device.",
     href: "/docs/self-host",
     linkLabel: "How it works",
     optional: true,
-    warning: "This install will need internet access to sign in once this is set, and trusts that server with your login.",
+    warning: "This install needs internet access to authenticate through the chosen cloud endpoint.",
   },
   hiNew: {
     label: "hi.new agent mail",

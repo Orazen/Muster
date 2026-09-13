@@ -1,9 +1,8 @@
-// App settings → Billing. Cloud-only.
+// App settings → Billing.
 //
-// Self-hosting is free and unlimited, so on a self-hosted or desktop install
-// the API returns 404 and this renders a short "you're self-hosting" note
-// instead of a plan picker. No licence key, no locked features — the paid
-// product is the hosting, not the software.
+// On private-device installs the API returns 404 and this renders a short
+// "private host" note instead of a plan picker. No seat keys, no locked features
+// — the paid product is managed cloud infrastructure, not software capability.
 import { useCallback, useEffect, useState } from "react";
 import { Card } from "./SettingsPrimitives";
 import { ExternalLink, Loader2 } from "lucide-react";
@@ -103,12 +102,11 @@ export function BillingSection() {
     return (
       <Card
         title="Billing"
-        subtitle="You're self-hosting. Muster is free and unlimited here — no seats, no plan, nothing to pay."
+        subtitle="You're on a private-device setup. Core features are available here; cloud hosting charges are managed in Muster Cloud."
       >
         <div className="text-[13px] leading-relaxed text-ink-secondary">
-          Every feature is available on this install. Muster Cloud exists for people who would
-          rather not run the computers themselves; it changes nothing about what the software can
-          do.
+          Every feature is available on this install. Muster Cloud is optional and only used
+          when you want managed compute capacity.
         </div>
       </Card>
     );

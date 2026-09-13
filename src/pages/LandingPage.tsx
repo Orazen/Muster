@@ -49,11 +49,11 @@ const FEATURES = [
 ];
 
 const DOWNLOADS = [
-  { os: "macOS", meta: "Apple silicon · unsigned build · one-click .dmg", href: "https://github.com/Orazen/Muster/releases/latest/download/Muster.dmg", label: "Download .dmg" },
-  { os: "macOS (Intel)", meta: "x64 · unsigned build · one-click .dmg", href: "https://github.com/Orazen/Muster/releases/latest/download/Muster-intel.dmg", label: "Download .dmg" },
-  { os: "Windows", meta: "64-bit · one-click installer, no admin rights", href: "https://github.com/Orazen/Muster/releases/latest/download/Muster-setup.exe", label: "Download .exe" },
-  { os: "Ubuntu", meta: "24.04 x64 · .deb or AppImage", href: "https://github.com/Orazen/Muster/releases/latest/download/Muster.deb", label: "Download .deb" },
-  { os: "Self-host (web)", meta: "Run the web UI + harness in Docker", href: "https://github.com/Orazen/Muster/blob/main/docs/self-host.md", label: "Docker guide" },
+  { os: "macOS", meta: "Apple silicon · unsigned build · one-click .dmg", href: "/downloads/Muster.dmg", label: "Download .dmg" },
+  { os: "macOS (Intel)", meta: "x64 · unsigned build · one-click .dmg", href: "/downloads/Muster-intel.dmg", label: "Download .dmg" },
+  { os: "Windows", meta: "64-bit · one-click installer, no admin rights", href: "/downloads/Muster-setup.exe", label: "Download .exe" },
+  { os: "Ubuntu", meta: "24.04 x64 · .deb or AppImage", href: "/downloads/Muster.deb", label: "Download .deb" },
+  { os: "Private-hosted web", meta: "Run the web UI + harness for your team", href: "/docs/self-host", label: "Private-hosting guide" },
 ];
 
 /* ── Motion primitives ──────────────────────────────────────────────
@@ -303,7 +303,7 @@ export function LandingPage() {
             <a href="#engines" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">Engines</a>
             <a href="#pricing" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">Pricing</a>
             <a href="#download" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">Download</a>
-            <a href="https://github.com/Orazen/Muster" target="_blank" rel="noopener" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">GitHub</a>
+            <a href="/support" className="text-[13px] font-medium text-[#a1a1a6] transition-colors hover:text-[#f5f5f5]">Support</a>
             {user ? (
               <Link to="/app" className="rounded-[10px] bg-[#f0460e] px-4 py-2 text-[13px] font-semibold text-white shadow-[0_0_0_1px_rgba(255,255,255,.06),0_8px_24px_rgba(240,70,14,.28)] transition-all hover:-translate-y-px hover:shadow-[0_0_0_1px_rgba(255,255,255,.1),0_12px_28px_rgba(240,70,14,.38)]">Open Muster</Link>
             ) : (
@@ -335,11 +335,8 @@ export function LandingPage() {
               <Link to={user ? "/app" : "/sign-up"} className="inline-flex items-center gap-2 rounded-xl bg-[#f0460e] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(240,70,14,.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(240,70,14,.42)]">
                 {user ? "Open Muster →" : "Get Started →"}
               </Link>
-              <a href="https://github.com/Orazen/Muster/releases/latest" target="_blank" rel="noopener" className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-7 py-3.5 text-[15px] font-semibold text-[#f5f5f5] transition-all hover:-translate-y-0.5 hover:border-white/20">
-                Download for macOS
-              </a>
-              <a href="https://github.com/Orazen/Muster" target="_blank" rel="noopener" className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-7 py-3.5 text-[15px] font-semibold text-[#f5f5f5] transition-all hover:-translate-y-0.5 hover:border-white/20">
-                View on GitHub
+              <a href="#download" className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.02] px-7 py-3.5 text-[15px] font-semibold text-[#f5f5f5] transition-all hover:-translate-y-0.5 hover:border-white/20">
+                Download builds
               </a>
             </motion.div>
             <motion.div {...heroItem(0.36)} className="mx-auto mt-14 max-w-[900px]">
@@ -504,7 +501,7 @@ export function LandingPage() {
           <div className="mx-auto max-w-6xl">
             <Reveal>
               <div className="mb-3 text-center text-[13px] font-semibold uppercase tracking-[0.12em] text-[#ff7a45]">Pricing</div>
-              <h2 className="text-center text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Free to self-host. Pay for the hands.</h2>
+              <h2 className="text-center text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Private-device free, cloud compute as needed.</h2>
               <p className="mx-auto mt-4 max-w-xl text-center text-[17px] leading-relaxed text-[#a1a1a6]">
                 Bots are free and unlimited. The metered unit is the cloud computer — the Linux desktop your bot actually drives — so you only pay when a bot gets real work done.
               </p>
@@ -512,23 +509,23 @@ export function LandingPage() {
             <div className="mt-10 grid gap-4 md:grid-cols-3">
               <Reveal>
                 <div className="flex h-full flex-col rounded-2xl border border-white/[0.08] bg-[#0a0a0a] p-6">
-                  <div className="text-[15px] font-semibold text-[#f5f5f5]">Self-host</div>
-                  <div className="mt-3 text-[36px] font-bold leading-none tracking-tight text-[#f5f5f5]">$0</div>
-                  <div className="mt-1 text-[13px] text-[#a1a1a6]">forever, on your own hardware</div>
-                  <ul className="mt-5 space-y-2 text-[13.5px] text-[#a1a1a6]">
-                    <li>✓ Every feature, nothing withheld</li>
-                    <li>✓ Unlimited bots & cloud computers</li>
-                    <li>✓ One Docker command to start</li>
-                  </ul>
-                  <a href="https://github.com/Orazen/Muster" target="_blank" rel="noopener" className="mt-6 inline-flex justify-center rounded-xl border border-white/[0.08] bg-white/[0.02] px-5 py-2.5 text-[14px] font-semibold text-[#f5f5f5] transition-all hover:border-white/20">Star on GitHub</a>
-                </div>
+              <div className="text-[15px] font-semibold text-[#f5f5f5]">Private-device starter</div>
+              <div className="mt-3 text-[36px] font-bold leading-none tracking-tight text-[#f5f5f5]">$0</div>
+              <div className="mt-1 text-[13px] text-[#a1a1a6]">on your own device, private and local-first</div>
+              <ul className="mt-5 space-y-2 text-[13.5px] text-[#a1a1a6]">
+                <li>✓ Every feature, nothing withheld</li>
+                <li>✓ Private local session and user data</li>
+                <li>✓ Start from your private web console</li>
+              </ul>
+                  <a href="/docs/self-host" className="mt-6 inline-flex justify-center rounded-xl border border-white/[0.08] bg-white/[0.02] px-5 py-2.5 text-[14px] font-semibold text-[#f5f5f5] transition-all hover:border-white/20">Private setup guide</a>
+            </div>
               </Reveal>
               <Reveal delay={0.05}>
                 <div className="relative flex h-full flex-col rounded-2xl border border-[rgba(240,70,14,.45)] bg-[#0a0a0a] p-6 shadow-[0_0_40px_rgba(240,70,14,.12)]">
                   <div className="absolute -top-3 left-6 rounded-full bg-[#f0460e] px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">Most popular</div>
-                  <div className="text-[15px] font-semibold text-[#f5f5f5]">Cloud · Monthly</div>
-                  <div className="mt-3 text-[36px] font-bold leading-none tracking-tight text-[#f5f5f5]">$20<span className="text-[16px] font-medium text-[#a1a1a6]"> /cloud computer /mo</span></div>
-                  <div className="mt-1 text-[13px] text-[#a1a1a6]">hosted, managed, ready in minutes</div>
+                <div className="text-[15px] font-semibold text-[#f5f5f5]">Cloud · Monthly</div>
+                <div className="mt-3 text-[36px] font-bold leading-none tracking-tight text-[#f5f5f5]">$20<span className="text-[16px] font-medium text-[#a1a1a6]"> /cloud computer /mo</span></div>
+                <div className="mt-1 text-[13px] text-[#a1a1a6]">managed, ready in minutes</div>
                   <ul className="mt-5 space-y-2 text-[13.5px] text-[#a1a1a6]">
                     <li>✓ No servers, no Docker, no setup</li>
                     <li>✓ Privacy Shield included</li>
@@ -589,7 +586,7 @@ export function LandingPage() {
               {[
                 { name: "macOS", note: "Universal · signed & notarized" },
                 { name: "Windows", note: "x64 installer + auto-update" },
-                { name: "Web", note: "Self-host in one Docker command" },
+                { name: "Web", note: "Private web console, private-first defaults" },
                 { name: "iOS", note: "Native companion · App Store kit ready" },
                 { name: "Android", note: "Companion · sideload or Play" },
               ].map((p) => (
@@ -609,7 +606,7 @@ export function LandingPage() {
           <div className="mx-auto max-w-6xl">
             <Reveal>
               <h2 className="text-[clamp(28px,4vw,40px)] font-bold tracking-[-0.02em] text-[#f5f5f5]">Ready to muster your team?</h2>
-              <p className="mt-3 text-[#a1a1a6]">Open source. Runs on the agents you already pay for.</p>
+              <p className="mt-3 text-[#a1a1a6]">Private-first by default. Run on user devices, and use Muster Cloud only for managed compute.</p>
               <Link to={user ? "/app" : "/sign-up"} className="mt-9 inline-flex items-center gap-2 rounded-xl bg-[#f0460e] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(240,70,14,.32)] transition-all hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(240,70,14,.42)]">
                 Open Muster →
               </Link>
@@ -623,8 +620,8 @@ export function LandingPage() {
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-5 text-[13px] text-[#a1a1a6]">
           <span>© 2026 Muster — built and maintained by <a href="https://orazen.online" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">Orazen</a>.</span>
           <span className="flex gap-4">
-            <a href="https://github.com/Orazen/Muster" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">GitHub</a>
-            <a href="https://github.com/Orazen/Muster/blob/main/LICENSE" target="_blank" rel="noopener" className="hover:text-[#f5f5f5]">BSL 1.1</a>
+            <a href="/docs/self-host" className="hover:text-[#f5f5f5]">Private hosting</a>
+            <a href="/support" className="hover:text-[#f5f5f5]">Support</a>
           </span>
         </div>
       </footer>

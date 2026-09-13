@@ -1,10 +1,10 @@
 # Billing
 
-**Self-hosting Muster is free and unlimited. It always will be.**
+**Private-device deployment includes core functionality with no seat licensing.**
 
-There is no licence key, no seat count, and no feature withheld from a self-hosted install. The
+There is no licence key, no seat count, and no feature withheld from a private deployment. The
 billing code in this repository is inert unless `MUSTER_CLOUD=true`, which only the hosted
-deployment sets. If you run Muster yourself, nothing on this page applies to you.
+deployment sets.
 
 This is the same model [Dokploy](https://github.com/Dokploy/dokploy) uses: the paid product is the
 hosting, not the software.
@@ -22,7 +22,7 @@ export const IS_CLOUD = process.env.MUSTER_CLOUD === "true";
 
 Every exported function returns `null` or a no-op when it is false, so no call site needs to branch.
 `/api/billing/*` returns `404 billing is not enabled`, and the Settings → Billing panel renders
-"You're self-hosting. Muster is free and unlimited here."
+"You're on a private deployment. Core features are available here."
 
 There is no `stripe` package dependency. `server/billing.ts` talks to Stripe's REST API with
 `fetch`. The harness is bundled into an Electron app and a Docker image where, for nearly every
@@ -36,14 +36,14 @@ Bots are free to create and cost nothing until one is given hands. Charging per 
 people for something that consumes no resources. This maps onto Stripe's quantity-based
 subscription items the same way Dokploy meters servers.
 
-| | Self-host | Muster Cloud |
+| | Private deployment | Muster Cloud |
 |---|---|---|
-| Price | Free, unlimited | Subscription |
+| Price | Included with private runtime | Subscription |
 | Bots | Unlimited | Unlimited |
 | Engines | Your own CLIs and keys | Your own CLIs and keys |
 | Cloud computers | You supply the Docker host | Managed, metered |
-| Auth | You run it | Managed, with OAuth |
-| Support | GitHub | Email |
+| Auth | Optional local auth | Managed, with OAuth |
+| Support | Contact form | Email |
 
 ## Environment
 
@@ -120,7 +120,7 @@ are acknowledged and ignored.
 
 `server/billing.test.ts` covers the signature verifier (correct, wrong secret, altered body,
 replayed timestamp, malformed header, no secret configured) and asserts that every entry point is
-inert when self-hosting.
+inert on private deployments.
 
 Network paths need a Stripe test key and belong in an integration run, not the unit suite. To
 exercise them locally:
@@ -137,7 +137,7 @@ All three are built:
 
 - **Enforcement.** Provisioning a cloud computer (`POST /api/bots/:id/computer/provision`, Box and
   OpenSandbox backends alike) checks the live Stripe subscription first. A `past_due` or missing
-  subscription answers `402` with the exact fix ("update your card" / "subscribe"). Self-hosting
+  subscription answers `402` with the exact fix ("update your card" / "subscribe"). private deployment
   never hits this path — null means billing does not apply.
 - **Dunning email.** On `invoice.payment_failed` the customer gets one clear notice with a direct
   link to the Billing panel. Bots and data are untouched; only new provisioning pauses.
