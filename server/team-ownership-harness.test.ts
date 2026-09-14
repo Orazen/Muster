@@ -290,4 +290,40 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
     expect(imported.status).toBe(201);
     expect(rows(local).filter((entry) => before.some((old) => old.id === entry.id)).every((entry) => entry.hidden)).toBe(true);
   });
+
+  it("keeps aggregate read surfaces and engine-fleet routes free of foreign tenants", async () => {
+    // Give bob's bot a global instance id so the usage route WOULD list it
+    // if it iterated the shared store unfiltered (PATCH accepts an offline
+    // instance by design — only startTurn refuses to run on it).
+    const patched = await request(hosted, `/api/bots/${bob.bots[0].id}`, "PATCH", { modelSelection: { instanceId: "ghost", model: "" } }, bob);
+    expect(patched.status).toBe(200);
+    // A canary message inside bob's own room: search indexes the global
+    // message DB, so this is the content-leak probe.
+    const bobRoom = await room(bob);
+    const canary = `cross-tenant-canary-${randomBytes(6).toString("hex")}`;
+    const sent = await request(hosted, `/api/groups/${bobRoom.id}/messages`, "POST", { text: canary, expectedThreadId: bobRoom.threadId }, bob);
+    expect(sent.status).toBe(202);
+    await expect.poll(() => JSON.stringify(transcript(bobRoom.threadId).messages), { timeout: 5_000 }).toContain(canary);
+
+    const searchAs = async (account: Account) => z.object({ hits: z.array(z.record(z.string(), z.unknown())) })
+      .parse(await (await request(hosted, `/api/search?q=${canary}`, "GET", undefined, account)).json()).hits;
+    expect(await searchAs(alice)).toEqual([]);
+    expect((await searchAs(bob)).length).toBeGreaterThan(0);
+
+    const usageText = async (account: Account) => JSON.stringify(await (await request(hosted, "/api/usage/providers", "GET", undefined, account)).json());
+    expect(await usageText(alice)).not.toContain("bob-one");
+    expect(await usageText(bob)).toContain("bob-one");
+
+    const wrappedText = JSON.stringify(await (await request(hosted, "/api/wrapped", "GET", undefined, alice)).json());
+    expect(wrappedText).not.toContain("bob-one");
+
+    // Engine-fleet metadata is operator-only: free-best answers before the
+    // infra guard runs, so it gates itself; custom-providers rides the guard.
+    expect((await request(hosted, "/api/models/free-best", "GET", undefined, alice)).status).toBe(404);
+    expect((await request(hosted, "/api/models/free-best", "GET", undefined, primary)).status).toBe(200);
+    expect((await request(hosted, "/api/custom-providers", "GET", undefined, alice)).status).toBe(404);
+    expect((await request(hosted, "/api/custom-providers", "POST", { name: "rogue", baseUrl: "https://example.com/v1", format: "openai", models: ["m"] }, alice)).status).toBe(404);
+    expect((await request(hosted, "/api/custom-providers/ghost", "DELETE", undefined, alice)).status).toBe(404);
+    expect((await request(hosted, "/api/custom-providers", "GET", undefined, primary)).status).toBe(200);
+  });
 });

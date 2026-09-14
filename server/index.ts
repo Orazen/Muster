@@ -3362,7 +3362,13 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
       providerFlags[id] = { configured: Boolean(entry?.configured) };
     }
   }
-  if (cfg.providers) {
+  // The global cfg.providers map is the operator/desktop's own keys. On a
+  // hosted multi-tenant deployment a non-primary account must NOT learn
+  // which providers the operator has configured (an existence oracle over
+  // secrets), so the global fill is gated to the operator/desktop only.
+  // Desktop (no userId) and the primary account keep the fill as before.
+  const isOperator = !userId || userId === primaryUserId();
+  if (cfg.providers && isOperator) {
     for (const [id, entry] of Object.entries(cfg.providers)) {
       // A live vault answer wins for this user; global config fills the rest
       // (desktop shares one config, so this is also the desktop path).
@@ -4875,7 +4881,9 @@ let requestUserEmail = "";
     // upgrade nudges. Caps are enforced server-side at the action sites.
     // Wrapped — weekly fleet review, shareable (public /w/<token> page).
     const currentWrappedCard = () => {
-      const bots = store.bots.map((b) => {
+      // Multi-tenant: the week review (and its public share page) is built
+      // from the caller's own bots only — never the whole shared fleet.
+      const bots = store.bots.filter(ownsRecord).map((b) => {
         const tasks = store.tasks(b.id) ?? [];
         let turns = 0;
         let tokensIn = 0;
@@ -4931,7 +4939,7 @@ let requestUserEmail = "";
         }
         return families.get(family)!;
       };
-      for (const bot of store.bots) {
+      for (const bot of store.bots.filter(ownsRecord)) {
         const instanceId = bot.modelSelection?.instanceId ?? "";
         if (!instanceId) continue;
         const agg = ensure(instanceId);
@@ -4966,6 +4974,13 @@ let requestUserEmail = "";
     // instances that just tripped a rate limit sit out their cooldown via
     // freeBestFailures. Read-only — nothing here mutates a bot.
     if (path === "/api/models/free-best" && method === "GET") {
+      // Engine-fleet metadata belongs to the deployment operator: this
+      // route runs before the infra guard below, so it gates itself —
+      // the whole registry would otherwise disclose every tenant's
+      // instance ids, states and model counts.
+      if (requestUserId && requestUserId !== primaryUserId()) {
+        return json(res, 404, { error: "no such resource" });
+      }
       const described = await registry.describe();
       // "custom" access means owner-supplied CLI keys — cost-free to the
       // owner in practice, so free-best treats them like free instances.
@@ -5730,6 +5745,11 @@ let requestUserEmail = "";
     if (!isPrimaryUser) {
       const infraPath =
         path === "/api/instances" ||
+        // BYOK custom providers live in the GLOBAL config (operator-owned
+        // engines): a non-primary account must not list them, add them,
+        // delete them, or point fetch-models at the operator's stored keys.
+        path === "/api/custom-providers" ||
+        path.startsWith("/api/custom-providers/") ||
         path.startsWith("/api/local-computer") ||
         path.startsWith("/api/mcp-servers") ||
         path.startsWith("/api/bots/") && /\/computer(\/|$)/.test(path);
@@ -5819,6 +5839,11 @@ let requestUserEmail = "";
           const bot = store.botByThread(hit.threadId);
           const group = bot ? undefined : store.groupByThread(hit.threadId);
           if (!bot && !group) return null;
+          // Multi-tenant: the LIKE search runs over the global message DB,
+          // so every hit must clear the same ownership choke point as the
+          // record routes — a foreign thread's snippet must look like it
+          // was never indexed.
+          if ((bot && !ownsRecord(bot)) || (group && !ownsRecord(group))) return null;
           const active = onActivePath(hit.threadId, hit.messageId);
           if (bot) {
             const task = store.taskByThread(bot.id, hit.threadId);

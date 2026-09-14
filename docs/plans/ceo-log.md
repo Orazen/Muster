@@ -5054,3 +5054,48 @@ recorded but **not** fixed or claimed as this slice's work: `@expo/metro-config`
 config load, and `expo export` here succeeds partly through a package the repository does not declare.
 That predates this change and is the same outside-the-repo hazard the image policy now catches for
 `image-size`; it deserves its own slice.
+
+## Loop93 — hosted tenant-isolation hotfix: aggregate reads and engine-fleet routes filtered (14 September 2026)
+
+**What was found.** A signed-in production browser E2E pass on muster.today (test account
+paneltest28583@…) surfaced a cluster of multi-tenant leaks: several routes iterate the global
+`store.bots`/message DB without the `ownsRecord` filter that `briefing` and `security-scan`
+already apply. Live evidence before the fix: `GET /api/search?q=Skye` returned another account's
+bot's message snippet (visible in the real sidebar search UI, not just the API);
+`GET /api/usage/providers` listed five foreign bot names + the operator's `custom-b-ai` instance;
+`GET /api/wrapped` reported a foreign `topBot` (and `/api/wrapped/share` could publish it);
+`GET /api/models/free-best` disclosed the whole fleet registry; `GET /api/custom-providers`
+rendered the operator's BYOK provider in a non-primary user's Settings with a live **Remove**
+button — and `POST /api/custom-providers/fetch-models` would send the operator's stored key to
+any public `baseUrl` the caller picks. The non-primary infra guard covered `/api/instances`,
+`/api/local-computer*`, `/api/mcp-servers*` and config writes, but not `/api/custom-providers`;
+`free-best` answers before the guard runs at all.
+
+**What shipped (server only, no client changes needed).**
+- `GET /api/search` — every hit must now clear `ownsRecord` on its bot/group; foreign threads look
+  unindexed.
+- `GET /api/usage/providers` and `currentWrappedCard()` (wrapped + its public share page) —
+  iterate `store.bots.filter(ownsRecord)`.
+- `GET /api/models/free-best` — self-gates to primary (404 otherwise), because the route sits
+  above the infra guard in the sequential dispatcher.
+- Infra guard — added `/api/custom-providers` (all methods, incl. `fetch-models`) so non-primary
+  accounts get the same 404 the engine routes already give.
+- `configStatus()` — the global `cfg.providers` fill is gated to the operator/desktop; hosted
+  non-primary accounts read their own vault flags only (no existence oracle over operator keys).
+
+**Verified.** `npx tsc -b` + `npx tsc -p tsconfig.server.json --noEmit` clean. New regression
+test in `server/team-ownership-harness.test.ts` ("keeps aggregate read surfaces and engine-fleet
+routes free of foreign tenants"): canary message in bob's room invisible to alice's search (and
+visible to bob), usage excludes `bob-one` for alice and includes it for bob, wrapped clean,
+free-best 404-for-alice/200-for-primary, custom-providers 404 on GET/POST/DELETE for alice and
+200 for primary. Focused file 25/25; full suite **261 files / 3,945 passed / 8 skipped, exit 0**
+(= Loop92 baseline +1, no regressions). Production verification after this push rolls: search for
+the foreign term must return zero hits and `/api/custom-providers` must 404 for the test account.
+
+**Not verified / not claimed.** No security claim beyond these five routes — a full scanner
+re-run is still owed; other aggregate surfaces were probed read-only and looked filtered
+(briefing, security-scan, bots list, SSE per-user frames) but were not exhaustively enumerated.
+The key-exfil path via `fetch-models` was proven by code reading + the guard's route list, not
+by a live exfil attempt (deliberately not performed). Desktop behavior is unchanged (no session
+⇒ `ownsRecord` true, guard inactive).
+
