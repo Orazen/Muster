@@ -3484,7 +3484,7 @@ Shipped commit `6db8677` — per-role benchmark grading: `server/role-eval.ts` (
 
 Verification: focused 15/15; full root suite **239 files / 3,367 passed / 8 skipped / 0 failed** run before each commit (295.75 s and 303.97 s); the 95 release-policy/workflow tests pass after the workflow edit. `muster bench` was additionally exercised end-to-end on a 6-scenario simulated capture: overall **passed**, all three roles passed, exit 0. Production GET after the first push returned **200**. Evidence and source-hash manifests: `.omb-scratch/verification/loop51-role-benchmark/`.
 
-A parallel GitHub Actions / release audit produced three actionable findings, two resolved or corrected during this loop: (1) Actions billing remains blocked on the account owner since 2026-09-07 — every job refuses before execution, so ~50 pushes since autodeploy run 34000382731 (2026-09-06) have no CI attestation; last release is v1.10.3 while package.json is 1.10.5. Owner action required. (2) The two open HIGH Dependabot alerts are `image-size` 1.2.1 in `android-companion/package-lock.json` (transitive of the Metro chain, CVE-2025-71329 JXL/HEIF infinite loop). **Not fixable in-repo today**: upstream has published no fixed release (latest is 2.0.2 = last_affected; the suggested 2.0.3 does not exist and a forced override makes `npm install` fail with ETARGET), Metro consumes the v1 API so a 2.x override would break RN asset bundling, and the exposure is dev-only (Metro parses local project assets, not attacker input). Recommendation: dismiss as dev_tooling or wait for the upstream fix. An override was attempted and fully reverted; `android-companion/` matches HEAD byte-for-byte. (3) The audit's claim that release.yml's `published` output is syntactically invalid was a **false positive** — the `${{ }}` expression is correct and Astra's `5a98daa` already guarded publication; no release.yml change was made.
+A parallel GitHub Actions / release audit produced three actionable findings, two resolved or corrected during this loop: (1) Actions billing remains blocked on the account owner since 2026-09-07 — every job refuses before execution, so ~50 pushes since autodeploy run 34000382731 (2026-09-06) have no CI attestation; last release is v1.10.3 while package.json is 1.10.5. Owner action required. (2) The two open HIGH Dependabot alerts are `image-size` 1.2.1 in `android-companion/package-lock.json` (transitive of the Metro chain, CVE-2025-71329 JXL/HEIF infinite loop). **Not fixable in-repo today**: upstream has published no fixed release (latest is 2.0.2 = last_affected; the suggested 2.0.3 does not exist and a forced override makes `npm install` fail with ETARGET), Metro consumes the v1 API so a 2.x override would break RN asset bundling, and the exposure is dev-only (Metro parses local project assets, not attacker input). Recommendation: dismiss as dev_tooling or wait for the upstream fix. An override was attempted and fully reverted; `android-companion/` matches HEAD byte-for-byte. **[Corrected in Loop92]** The alerts are indeed not closable in-repo, but the reasoning above was incomplete twice over. The vulnerable *code* can be removed: a minimal replacement parser is written and tested at `android-companion/vendor/image-size/`, with no ICNS/JXL/HEIF/JP2/AVIF parser in it at all. The *alerts* cannot be closed by any local wiring, for a different reason than the ETARGET failure recorded here: on npm 10.9.8 the `file:` override resolves against the dependent package and produces a dangling link under `node_modules/metro/`, and even in the workspace variant that links correctly, `npm audit` reports the advisories with `range: "*"` because it cannot compare a non-registry version. Only dropping `image-size` from the tree (Metro ≥ 0.87.1, i.e. the Expo/RN upgrade) closes them. The dev-tooling dismissal recommendation remains unsupported. (3) The audit's claim that release.yml's `published` output is syntactically invalid was a **false positive** — the `${{ }}` expression is correct and Astra's `5a98daa` already guarded publication; no release.yml change was made.
 
 Still open: Astra's Loop 50 Watch composer changes remain uncommitted pending native acceptance; billing/signing/mirror acceptance gate any release; the rest of the approved GLM plan (storage write-failure consistency, native mascot + task identity, memory history + rollback) is next.
 
@@ -4914,3 +4914,143 @@ the same settle-and-re-verify. Only 320×568 and 1440×900 are exercised; other 
 beyond the seven wizard steps, and the desktop/Electron shell were not measured. The half-second
 tail is the shape of the window, not a budget, and the added wait costs the suite roughly 10–20
 seconds.
+
+## Loop92 — a vendored image-size parser, wired in as a workspace (14 September 2026)
+
+The two open Dependabot high alerts on `android-companion/package-lock.json` were re-opened with
+one question: can the vulnerable code be taken out of the tree? The answer splits in two, and the
+split is the finding: **the code can be removed from the tree, and the alerts cannot be cleared from
+this machine.** The owner then directed the vendored parser to be *wired in* through the mechanism
+already proven to resolve — the workspace link — instead of being kept inert, and to be verified
+properly. This entry records that final state; the failed first attempt is kept because it is the
+reason the wiring looks the way it does.
+
+**Every published version is affected.** GHSA-w3rx-r6r6-pgpr (ICNS, CVE-2025-71330) and
+GHSA-5p2g-fcmc-qvqq (JXL/HEIF) both carry an affected range of `<=2.0.2`, and 2.0.2 is the newest
+publish, so there is no version to upgrade to and no registry pin that helps. `metro@0.87.1` dropped
+the dependency outright — which is why `npm audit` offers `react-native@0.87.1` — but this app is
+Expo SDK 52 / `react-native@0.76.7` / `metro@0.81.5`, so taking that Metro is a framework migration,
+not a dependency bump. Metro touches the package in exactly one place, `metro/src/Assets.js`, as
+`getImageSize(content)` reading only `{ width, height }`.
+
+**What was built.** `android-companion/vendor/image-size/` is a minimal drop-in parser: PNG, JPEG,
+GIF, BMP and WebP headers, read to the same byte layout upstream reads, with the same CommonJS shape
+(`module.exports = imageSize` plus `imageSize`/`types`/`disableFS`/`disableTypes`/`setConcurrency`)
+and the same `disabled file type: <type>` message the parent/worker mitigation depends on. It
+contains **no ICNS, JXL, HEIF/HEIC, JP2/J2C, AVIF, PSD, TIFF, KTX, ICO/CUR, DDS, TGA, PNM or SVG
+parser at all** — those are the code paths the advisories describe, so they were not ported. Every
+loop advances by at least one byte or returns, and every multi-byte read is bounds-checked, so the
+advisory's shape (an ICNS entry whose declared length is zero) is a prompt throw: measured at
+`0.14 ms` here, against an infinite loop upstream.
+
+**How it is wired in.** `android-companion/package.json` declares
+`"workspaces": ["vendor/image-size"]`, so npm links `node_modules/image-size -> ../vendor/image-size`
+and Metro's `require("image-size")` inside `metro/src/Assets.js` loads the owned file. That satisfies
+Metro's declared `image-size: ^1.0.2` without any registry copy, and because the vendored package has
+no dependencies the registry package's own `queue@6.0.2` leaves the tree with it. The registry
+`image-size` and `queue` entries in `package-lock.json` are replaced by a `{"resolved":
+"vendor/image-size", "link": true}` entry plus the workspace package entry — `12 insertions(+), 22
+deletions(-)`, no unrelated churn, no hand-editing, and no `Invalid Version:` entries. `npm install`
+run twice reports `up to date` on the second pass with the lockfile byte-identical
+(`ed5ac184…`). A real `npm ci` on a clean copy outside the tree also exits 0 and produces the same
+link. Two things now keep the wiring honest rather than merely present: `scripts/metro-image-policy.cjs`
+resolves the package the way Metro does and **throws unless the realpath is under
+`vendor/image-size/` and the version is the reviewed `1.2.1`**, and `scripts/verify-metro-assets.mjs`
+asserts resolution and Metro's behaviour on renamed advisory inputs. The policy change is load-bearing
+on this machine: `/Users/<user>/node_modules/image-size@1.2.1` really does exist outside the repository,
+so a missing link used to fall through to an unpatched copy; it now stops Metro instead. Removing the
+link trips the policy — checked with a fixture in both directions.
+
+**The override that does not resolve (kept as history).** The originally specified wiring —
+`overrides: {"image-size": "file:./vendor/image-size"}` — **does not work on npm 10.9.8**. npm resolved
+the path against the *dependent* package rather than the project root and produced
+`node_modules/metro/node_modules/image-size -> ../vendor/image-size`, a dangling link to a
+`node_modules/metro/vendor/image-size` that does not exist. Three consequences, in order of severity:
+Node then resolved `require("image-size")` **past the project root** to
+`/Users/<user>/node_modules/image-size@1.2.1`, an upstream copy outside the repository; `npm ls
+image-size` reported `invalid` with ELSPROBLEMS; and the two junk lockfile entries npm wrote made
+every subsequent `npm install` abort with `npm error Invalid Version:`. `"$image-size"`, npm's
+documented way to point an override at a direct dependency, fails the same way. That attempt also left
+a dangling `.bin/image-size` link under `node_modules/metro/`; it was removed when the workspace
+wiring landed, and fresh installs do not recreate it. The workspace form is what npm actually supports.
+
+**The vulnerable implementations are gone; the alerts are not proven closed.** `npm audit --json`
+still exits 1 and still reports both advisories on the wired tree, with the range rendered as `"*"`
+and the nodes as `["node_modules/image-size", "vendor/image-size"]`: npm cannot compare the version of
+a non-registry package, so it cannot report it as patched. Raising the vendored version above `<=2.0.2`
+does not help either — it stops satisfying Metro's `image-size: ^1.0.2`, so npm would install the
+registry copy alongside it. What *is* true: **no ICNS, JXL, HEIF or JP2 parser exists in this repository
+any more**, and `queue` is out of the tree. What is *not* proven: **Dependabot closure was not observed
+from this machine.** Dependabot resolves versions from `package-lock.json` registry entries, and this
+entry now carries `"link": true` with no version for a range to match, so the alerts may close — but
+there is no GitHub access from this session and no scan has run since the change. The next scheduled
+scan is the first real evidence. Until then the two alerts stay open and no closure is claimed. If they
+do not close, the fallbacks in order are (1) dismiss with a documented reason — the vulnerable code is
+absent, the path is a build tool parsing local project assets, the replacement is policy-gated and
+tested — or (2) the Expo SDK upgrade that ships `metro@0.87.1`, after which the dependency and the
+alerts leave together. The earlier "not fixable in-repo today" notes were right about the alerts and
+incomplete in not seeing that the code could still be removed; the `dev_tooling` dismissal
+recommendation remains unsupported.
+
+**Verification (working tree at `6efe393` plus this uncommitted slice):**
+- `npm ls image-size` → **exit 0**, `image-size@1.2.1 -> ./vendor/image-size`, and under metro
+  `image-size@1.2.1 deduped -> ./vendor/image-size`. `npm ls queue` → **exit 1 with `(empty)`**, which
+  is how npm reports an absent package — the registry `queue` is gone with the package that needed it.
+  `require.resolve("image-size", {paths: [<metro dir>]})` →
+  `/Users/ramagiritharun/muster-audit/android-companion/vendor/image-size/index.js`, i.e. Metro loads
+  the owned file, not a registry copy.
+- `git diff --stat package-lock.json` → `12 insertions(+), 22 deletions(-)`, sha256
+  `ac6c2ba690f33827c0ac557e1a18ef5942c3821fbb20aeb87e3b61d94ede2b52` →
+  `ed5ac184ec33b1468447efadc6b6502ddbf65ababffecdd3048c6cb2ae9788dd`. The diff is exactly three
+  things: the root `workspaces` array, `node_modules/image-size` becoming
+  `{"resolved":"vendor/image-size","link":true}`, and the `node_modules/queue` entry replaced by the
+  trailing `vendor/image-size` package entry. No unrelated entries were rewritten and nothing was
+  hand-edited.
+- `npm install` a second time → **exit 0**, `up to date, audited 979 packages in 2s`, lockfile hash
+  unchanged. `npm ci` was verified for real on a copy outside the tree, not merely assumed: the copy
+  installs clean (**exit 0**, `added 977 packages`), leaves its lockfile byte-identical, creates the
+  same `vendor/image-size` link, reports no `queue`, and produces no dangling `.bin/image-size`. A
+  stale dangling `.bin/image-size` left under `node_modules/metro/` by the earlier override attempt
+  (mtime 10:01, i.e. before this wiring) was removed, and the next `npm install` plus the clean `npm
+  ci` did not recreate it.
+- `node --test vendor/image-size/test.mjs` → **exit 0**, 10 tests / 10 pass / 0 fail / 0 skipped.
+- `npm test` (Jest, 2 projects) → **exit 0**, `11 suites / 555 tests passed` — the baseline exactly.
+- `npx tsc --noEmit` → **exit 0**; `npx oxlint --config .oxlintrc.json .` → **exit 0**, 0 warnings and
+  0 errors on 46 files (the vendored files lint clean).
+- `node scripts/verify-toolchain.mjs` → **exit 0**, 15/15; `node scripts/verify-metro-assets.mjs` →
+  **exit 0**, 29/29; `node --test plugins/with-companion-autolinking.test.cjs` → **exit 0**, 19/19.
+  The verifier's four unguarded controls had to change with the wiring: they asserted that the
+  **upstream** parser hangs on the ICNS/JXL fixtures, which is what the policy existed for. With the
+  owned parser they now assert the stronger property that the same inputs are refused **promptly with
+  no policy loaded at all** (a reintroduced loop still fails the check, via the operation timeout).
+  Same 29 checks, no goalposts moved: the guarded rejections, the PNG/JPEG dimensions and the worker
+  cache-key checks are untouched and still pass.
+- `npx expo export --platform android --output-dir /tmp/muster-expo-export-wired` → **exit 0**,
+  `Android Bundled 6390ms node_modules/expo/AppEntry.js (666 modules)`, output outside the repo.
+  Metro's own `getAssetData` (through the project's config, so the policy and worker are loaded)
+  returns `icon.png`, `splash.png` and `adaptive-icon.png` each `{width:1024, height:1024, type:"png",
+  scales:[1]}`, and the exported asset is byte-identical to the source (`sha256 ccc93f04…`, stored
+  under its content md5 `4ee9e838…`). Unlike Loop92's first pass, this bundle ran **with the vendored
+  parser on the runtime path**.
+- `npm audit --json` → **exit 1**, `6 high`, identical count to baseline, `image-size` at `range: "*"`
+  with nodes `["node_modules/image-size","vendor/image-size"]`. **0 of the 2 advisories closed** as far
+  as `npm audit` can see, and closure is not claimed (see above).
+- `git status --short` → `M android-companion/README.md`, `M android-companion/package-lock.json`,
+  `M android-companion/package.json` (`test:image-size` + `workspaces`),
+  `M android-companion/scripts/metro-image-policy.cjs`, `M android-companion/scripts/verify-metro-assets.mjs`,
+  the five `docs/plans` files, `M scripts/smoke-packaged-server.mjs` (pre-existing, not this slice),
+  `?? android-companion/vendor/`. No git state was mutated: no add, commit, checkout or stash.
+
+**Not verified, and not claimed.** No Android device, emulator or native/EAS build was involved; the
+evidence is Metro's own asset APIs, a real `expo export`, and the install commands. The vendor suite
+and the Metro fixtures use `sips`/`ffprobe`-checked dimensions as ground truth rather than this parser.
+**Dependabot's own behaviour was not observed** — there is no GitHub access from this session and no
+scan has run since the change; the note above is an expectation about how Dependabot reads a `link`
+entry, not a result. Nothing here is a security claim beyond the two named advisories; the Metro
+parent/worker parser mitigation stays in place and the alerts stay open. One environment finding is
+recorded but **not** fixed or claimed as this slice's work: `@expo/metro-config` resolves
+`expo-asset` from `/Users/<user>/node_modules/` **outside the repository** (it is not in
+`package.json` or the lockfile), so a clean checkout on a machine without that copy fails at Metro
+config load, and `expo export` here succeeds partly through a package the repository does not declare.
+That predates this change and is the same outside-the-repo hazard the image policy now catches for
+`image-size`; it deserves its own slice.

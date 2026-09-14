@@ -161,6 +161,22 @@ Additional platform gates, run separately from the root suite:
   export evidence was not rerun by this read-only review. A reviewed compatible
   parser backport or coordinated fixed toolchain is a future repair, with malformed
   input and actual worker-export gates. See `security/dependency-review.md`.
+  **[Updated in ceo-log Loop92]** That backport now exists **and is wired in**: a minimal
+  parser with no ICNS/JXL/HEIF/JP2/AVIF path at all lives at
+  `android-companion/vendor/image-size/` and is linked into `node_modules` as an npm
+  workspace, so Metro's `require("image-size")` loads the owned file
+  (`node --test vendor/image-size/test.mjs`, 10/10, including the advisory's
+  zero-length ICNS entry under a hard child-process timeout; `verify-metro-assets.mjs`
+  29/29 with the policy loaded and with no policy at all). The registry `image-size`
+  and its `queue` dependency left the lockfile with it, and the image policy now
+  refuses to run unless the resolved source is that directory. Wiring it in does
+  **not** clear the scanner alerts: the `file:` override form still dangles under
+  `node_modules/metro/` on npm 10.9.8, and `npm audit` still reports both advisories
+  with `range: "*"` for the linked package. Whether Dependabot closes them on the
+  `"link": true` lockfile entry was **not observed** — no scan has run since the
+  change — so both alerts stay open until that is seen, with the documented
+  dismissal and the Metro ≥ 0.87.1 Expo/RN upgrade as the fallbacks. The two
+  advisories remain the only security claim here; nothing was verified on a device.
 
 ## Loop 69: recoverable onboarding and one mascot character contract
 

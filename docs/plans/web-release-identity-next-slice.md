@@ -111,4 +111,9 @@ one verified slice, then commit/push on main and verify production with GET only
 Other release gates remain: durable Stop/crash recovery; the outstanding peer
 owner-merge/setup/restart acceptance; real Google consent; complete sync/backup;
 VM execution; native signing and physical-device acceptance; Mimosa; and the two
-Android Metro/image-size high alerts with no fixed published upgrade at this audit.
+Android Metro/image-size high alerts (see ceo-log Loop92). The vulnerable code is
+now replaced in-repo — the parser at `android-companion/vendor/image-size/` is
+wired in through the workspace link and the registry copy plus `queue` left the
+lockfile — but `npm audit` still reports both, and whether Dependabot closes them
+has not been observed from this machine. If it does not, the fallbacks are a
+documented dismissal or Metro ≥ 0.87.1 via the Expo/RN upgrade.

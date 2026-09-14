@@ -73,7 +73,16 @@ production acceptance** — and no security claim. Finish the remaining peer/cra
 the [peer plan](peer-capability-next-slice-2026-09-12.md),
 durable Stop recovery across reload, native signing/runtime, actual Google consent,
 full sync/backup, VM and Mimosa. Two Android Metro/image-size high alerts remain
-open; the read-only audit found no fixed published upgrade. Keep existing
+open: no published version is unaffected, and **no local dependency wiring closes
+them** — the `file:` override dangles under `node_modules/metro/` on npm 10.9.8, and
+`npm audit` still reports the advisories (`range: "*"`) even though the workspace
+link makes Metro load the local copy. The replacement parser with no ICNS/JXL/HEIF
+parser is **now wired in** at `android-companion/vendor/image-size/` (npm workspace
+link; lockfile `12 insertions(+), 22 deletions(-)`; `npm ci` verified), so the
+vulnerable implementations and `queue` are out of the tree — but whether Dependabot
+closes the alerts on a `"link": true` entry has **not been observed from this
+machine** and must be checked after the next scan. If they stay open: dismiss with a
+documented reason, or take Metro ≥ 0.87.1 via the Expo/RN upgrade. Keep existing
 mitigations and automation PAUSED.
 
 **Handoff:** update this snapshot, the [ledger](glm-handoff-2026-09-10.md) and
