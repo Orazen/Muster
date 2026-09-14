@@ -5270,3 +5270,17 @@ startContainerRuntime tests: already-running success, clean-start-but-silent-dae
 real-failure passthrough, sudo refusal before touching the shell); server tsc + oxlint clean;
 full suite green at commit time.
 
+**⭐ v1.12.1 RELEASED (14 September, 21:17Z).** The permanent fix path: patch release carrying
+Loops 93–97 (tenant-isolation hotfix, agent social layer S3+S4, Connected workspaces, brand mark +
+replayable tour + gaze avatars, VM memory guard + podman already-running fix). Built locally on the
+arm64 Mac (first `package:mac` attempt died in a transient Cua-download failure; clean retry
+succeeded — no bypass), then x64; latest-mac.yml hand-merged arm64-first (the recurring
+single-arch clobber trap), latest.json rebuilt with fresh sha256s, CLI rebuilt via
+RELEASE_VERSION/RELEASE_SHA contract. GitHub release published with 9 assets (sequential uploads);
+mirror rsynced from release/ cwd (11 files incl. stable-name Muster.dmg/Muster-intel.dmg);
+GET-verified end to end: mirror latest.json 1.12.1/67b1d63, latest-mac.yml arm64-first, dmg +
+arm64 zip 200, muster-cli.mjs self-reports 1.12.1. Installed apps auto-update from the mirror feed
+(verifyUpdateCodeSignature posture unchanged — no publisherName added). Windows/Linux artifacts
+remain at 1.12.0 on the mirror (unchanged code paths for this patch; win still blocked by the
+native-platform gate + Actions billing as before).
+
