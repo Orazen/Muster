@@ -96,12 +96,34 @@ export function setEmailGateDone(userId: string | undefined, status: "submitted"
 export async function clearOnboardingGate(userId: string | undefined): Promise<void> {
   localStorage.removeItem(gateKey(userId));
   localStorage.removeItem(gateKey(undefined));
+  requestTourReplay();
   await fetch("/api/me/onboarding", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     credentials: "include",
     body: JSON.stringify({ status: "reset" }),
   }).catch(() => {});
+}
+
+/** The wizard's returning-user guard (a transcript means you've seen it)
+ * must not auto-skip a deliberate replay. sessionStorage survives the
+ * reload and is consumed once, per tab. */
+const REPLAY_KEY = "muster:tour-replay";
+export function requestTourReplay(): void {
+  try {
+    sessionStorage.setItem(REPLAY_KEY, "1");
+  } catch {
+    // storage-blocked browsers lose only the replay, never the app
+  }
+}
+export function consumeTourReplay(): boolean {
+  try {
+    const v = sessionStorage.getItem(REPLAY_KEY);
+    if (v) sessionStorage.removeItem(REPLAY_KEY);
+    return Boolean(v);
+  } catch {
+    return false;
+  }
 }
 
 function gateKey(userId?: string): string {

@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { FlowerBot } from "@/lib/musterbot";
 import { AgentAvatar } from "./Avatar";
-import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, track } from "@/lib/analytics";
+import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, consumeTourReplay, track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
 import { ProviderMark } from "./ProviderIcons";
@@ -333,16 +333,25 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   // an account that finished via email sign-in must not see the wizard
   // again on its next Google sign-in, or vice versa.
   const [decided, setDecided] = useState(false);
+  // Read the replay intent exactly once (the effect below can re-run before
+  // `decided` settles; a second consumeTourReplay() would return false and
+  // let the history guard auto-skip a deliberate replay).
+  const replayRef = useRef<boolean | null>(null);
+  if (replayRef.current === null) replayRef.current = consumeTourReplay();
   useEffect(() => {
     if (decided || !state.connected) return;
     const hasRealHistory = state.bots.some((b) => b.messages.some((m) => m.role === "user"));
+    // A deliberate "Replay welcome tour" (set by the Settings card before its
+    // reload) overrides the returning-user auto-skip below — consumed once so
+    // a later fresh visit keeps the guard that stops nagging returning users.
+    const replay = replayRef.current;
     let cancelled = false;
     void serverGateDone().then((serverDone) => {
       if (cancelled) return;
       setDecided(true);
-      if (serverDone || emailGateDone(user?.id)) {
+      if (!replay && (serverDone || emailGateDone(user?.id))) {
         onDone();
-      } else if (hasRealHistory) {
+      } else if (!replay && hasRealHistory) {
         setEmailGateDone(user?.id, "skipped");
         onDone();
       } else if (user) {
