@@ -326,4 +326,51 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
     expect((await request(hosted, "/api/custom-providers/ghost", "DELETE", undefined, alice)).status).toBe(404);
     expect((await request(hosted, "/api/custom-providers", "GET", undefined, primary)).status).toBe(200);
   });
+
+  it("runs the full social journey across tenants: profile, request, consent, directory, page", async () => {
+    // both owners publish public profiles
+    const aliceProfile = await request(hosted, "/api/social/profile", "PUT", { botId: alice.bots[0].id, visibility: "public", tagline: "research lead" }, alice);
+    expect(aliceProfile.status).toBe(200);
+    const aliceHandle = z.object({ profile: z.object({ handle: z.string(), visibility: z.string() }) }).parse(await aliceProfile.json()).profile.handle;
+    expect(aliceHandle).toBe("alice-one");
+    expect((await request(hosted, "/api/social/profile", "PUT", { botId: bob.bots[0].id, visibility: "public" }, bob)).status).toBe(200);
+    // a bot with no profile cannot publish one through someone else
+    expect((await request(hosted, "/api/social/profile", "PUT", { botId: bob.bots[0].id, visibility: "public" }, alice)).status).toBe(404);
+
+    // anonymous directory sees only public profiles
+    const directory = z.object({ agents: z.array(z.object({ handle: z.string(), name: z.string() })) })
+      .parse(await (await request(hosted, "/api/directory/agents")).json()).agents;
+    expect(directory.map((a) => a.handle).sort()).toEqual(["alice-one", "bob-one"]);
+
+    // bob's bot requests alice's; the sender cannot accept it
+    const created = await request(hosted, "/api/social/friend-requests", "POST", { fromBotId: bob.bots[0].id, toHandle: aliceHandle, message: "collaborate?" }, bob);
+    expect(created.status).toBe(201);
+    const requestId = z.object({ request: z.object({ id: z.string() }) }).parse(await created.json()).request.id;
+    expect((await request(hosted, `/api/social/friend-requests/${requestId}/accept`, "POST", undefined, bob)).status).toBe(400);
+    // a stranger cannot even probe it
+    expect((await request(hosted, `/api/social/friend-requests/${requestId}/accept`, "POST", undefined, primary)).status).toBe(400);
+
+    // alice accepts; both see the friendship, the bystander never does
+    expect((await request(hosted, `/api/social/friend-requests/${requestId}/accept`, "POST", undefined, alice)).status).toBe(200);
+    const stateOf = async (account: Account) => JSON.parse(JSON.stringify(await (await request(hosted, "/api/social/state", "GET", undefined, account)).json())) as {
+      friends: { theirName: string }[]; incoming: unknown[]; outgoing: unknown[];
+    };
+    expect((await stateOf(alice)).friends.map((f) => f.theirName)).toEqual(["bob-one"]);
+    expect((await stateOf(bob)).friends.map((f) => f.theirName)).toEqual(["alice-one"]);
+    const primaryState = await stateOf(primary);
+    expect(primaryState.friends).toEqual([]);
+    expect(primaryState.incoming).toEqual([]);
+
+    // the public profile page renders for the public handle only
+    const page = await fetch(`${hosted.url}/p/${aliceHandle}`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain("alice-one");
+    expect((await fetch(`${hosted.url}/p/no-such-handle`)).status).toBe(404);
+
+    // unfriending by one owner removes the edge for both
+    const friendshipId = (await stateOf(alice)).friends.length ? JSON.parse(JSON.stringify(await (await request(hosted, "/api/social/state", "GET", undefined, alice)).json())).friends[0].friendship.id : "";
+    expect((await request(hosted, `/api/social/friends/${friendshipId}`, "DELETE", undefined, bob)).status).toBe(200);
+    expect((await stateOf(alice)).friends).toEqual([]);
+    expect((await stateOf(bob)).friends).toEqual([]);
+  });
 });

@@ -751,6 +751,9 @@ export function isPublicApiPath(path: string): boolean {
     // installable teams, deliberately consumable without an account so
     // agents and aggregators can index it (server/viral.ts rationale).
     path === "/api/directory/teams" ||
+    // The public agent-directory feed (server/social.ts): only profiles
+    // their owners set public, only the fields they chose to share.
+    path === "/api/directory/agents" ||
     // WhatsApp Business channel: authenticated by Meta's own signature
     // (X-Hub-Signature-256 over the raw body, timing-safe compare) plus the
     // subscription handshake token — not by a user session.

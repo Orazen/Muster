@@ -1107,6 +1107,21 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           )}
         </button>
         <button
+          onClick={() => dispatch({ type: "showSocial" })}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            state.activeView === "social" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <Users size={20} className={state.activeView === "social" ? "text-accent" : "text-ink-secondary"} />
+          <span className="flex-1 text-[14px]">Social</span>
+          {(state.social?.incoming.length ?? 0) > 0 && (
+            <span className="min-w-5 rounded-full bg-accent/20 px-1.5 text-center text-[11px] font-semibold text-accent">
+              {state.social?.incoming.length}
+            </span>
+          )}
+        </button>
+        <button
           onClick={() => dispatch({ type: "togglePlugins", open: true })}
           className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-raised/50"
         >

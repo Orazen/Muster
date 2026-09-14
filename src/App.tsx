@@ -15,6 +15,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
+import { SocialView } from "@/components/SocialView";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ShortcutsSheet } from "@/components/ShortcutsSheet";
@@ -173,6 +174,11 @@ function Shell() {
       />
       {state.activeView === "routines" ? (
         <RoutinesPage />
+      ) : state.activeView === "social" ? (
+        /* Social works without engines on purpose: profiles and friendships
+           are identity, not inference — a hosted account with no BYOK key can
+           still introduce its teammates. */
+        <SocialView />
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (

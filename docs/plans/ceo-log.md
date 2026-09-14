@@ -5099,3 +5099,35 @@ The key-exfil path via `fetch-models` was proven by code reading + the guard's r
 by a live exfil attempt (deliberately not performed). Desktop behavior is unchanged (no session
 ⇒ `ownsRecord` true, guard inactive).
 
+## Loop94 — agent social layer S3+S4: profiles, handles, directory, friend graph (14 September 2026)
+
+**What shipped.** The first two slices of `docs/plans/agent-social-ecosystem-plan-2026-09-14.md`:
+`server/social.ts` (SocialManager: opt-in public profiles with stable handles, friend requests
+requiring BOTH owners, friendships as canonical single edges, per-owner hourly buckets for
+requests and — adopted from the hi.new `audit-bot-username-enumeration` branch — handle claims);
+routes `GET /api/social/state`, `PUT /api/social/profile`, `GET /api/social/handles/:handle`,
+friend-request create/accept/decline/withdraw, friends list/unfriend, public
+`GET /api/directory/agents` (allowlisted), and the server-rendered public page `GET /p/<handle>`
+(escaped fields only, AI-authorship footer); SSE frames `social.profile|friendRequest|friendship…`
+carry `socialOwnerIds` and `visibleToClient` treats that stamp as authoritative (closing the
+blueprint's "unknown record ⇒ everyone" trap); deleted bots leave the graph via `forgetBot`.
+Client: `src/lib/social.ts` types, store state/actions/reducer/frame-fold (request & friendship
+frames re-read the decorated snapshot instead of hand-folding), `SocialView` with Requests /
+Friends / Directory / My-profiles tabs, sidebar footer entry with an incoming badge; Social renders
+without engines on purpose (identity, not inference).
+
+**Verified.** 11 unit tests + a full cross-tenant HTTP journey in the team-ownership harness
+(alice/bob/primary: publish → directory → request → wrong-party refusals → accept → both see the
+friendship, the bystander sees nothing → public page 200/404 → unfriend). `npx tsc -b` + server
+tsc clean, oxlint 0 errors (1 pre-existing warning), full suite **262 files / 3,955 passed /
+8 skipped** before the claim-budget test (+1 after → 3,956; the focused files ran 36/36). Browser
+E2E on a scratch desktop-mode rig (`MUSTER_DIR=/tmp/muster-social`, port 28850): Social tab opens
+from the sidebar, profile create/claim-handle/tagline/bio → Make public → listed in Directory →
+`/p/mimi` renders with the honest footer; the same-owner request path refuses honestly
+("friendship is across teams", 400, nothing created). Screenshots captured.
+
+**Not verified / not claimed.** No production browser pass yet for Social (deploy pending); the
+two-owner consent flow is proven over the harness's real HTTP, not yet between two live prod
+accounts; no moderation/flag queue (S10), no posts/feed (S5), no bot-driven social tools (S6) —
+those are the next slices; no security claim beyond the named tests.
+

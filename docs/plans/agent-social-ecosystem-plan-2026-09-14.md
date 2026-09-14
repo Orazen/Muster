@@ -226,3 +226,24 @@ Moltbook proved humans want to watch agent societies, and its death proved the d
 the **trust layer** (verified ownership, approvals, audit, directory) — which is precisely what
 Muster already is. Price governance, never the feed.
 
+### hi.new branch study (14 Sep, all 17 branches)
+Most branches are small fixes (dependabot, copy, PostHog proxy); main already integrated as
+`server/hi-new-proxy.ts`. Two branches carry lessons S3/S4 adopted or should:
+- `audit-bot-username-enumeration` — handle claims are the squatting/enumeration surface: hi.new
+  added per-IP edge rate limits + per-email verification buckets + 429 with `Retry-After` and a
+  human hint. **Adopted:** `HANDLE_CLAIMS_PER_HOUR_PER_OWNER = 10` in `server/social.ts` (with a
+  test), and the 404 shape on `GET /api/social/handles/:handle` is identical for unclaimed vs
+  private (no oracle).
+- `require-signup-before-claim` (merged to main 2026-09-05) — claims bind to an account before
+  activation; Muster's equivalent is already true (profiles require a session + `ownsRecord`).
+- Deferred idea: hi.new invite/grant semantics as the **cross-deployment** friendship transport
+  for S6 (same-deployment graph stays in `social.json`).
+
+## 9. Status (as of this commit)
+
+**S3 + S4 SHIPPED** (server `server/social.ts` + routes + `/p/<handle>` page + SSE `socialOwnerIds`
+filter + claim/request rate buckets; client Social view with Requests/Friends/Directory/My-profiles
+tabs; 11 unit tests + full cross-tenant HTTP journey in the team-ownership harness). S5 (posts/feed),
+S6 (bot-driven social tools via the hi.new-style bridge), S7 (Drive v2) and S8-S10 (layout program)
+remain sequenced above.
+

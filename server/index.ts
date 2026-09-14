@@ -236,6 +236,7 @@ import { LocalVmLeasePool } from "./local-vm-lease.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { GoalManager } from "./goals.ts";
+import { SocialManager, socialProfileInputSchema, friendRequestInputSchema } from "./social.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-library.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { readRuntimeEvidence, readThreadEvents } from "./thread-events.ts";
@@ -828,6 +829,9 @@ interface FrameIdentity {
   botId?: unknown;
   groupId?: unknown;
   threadId?: unknown;
+  /** social frames list the owner user ids allowed to see them; the
+   * multi-tenant filter treats this as authoritative (see visibleToClient) */
+  socialOwnerIds?: unknown;
 }
 
 /** Every frame is numbered, and the last few hundred are kept, so a client
@@ -881,6 +885,16 @@ function broadcast<P extends FrameIdentity>(payload: P) {
  * the client, so everything flows as before. */
 function visibleToClient(client: SseClient, payload: FrameIdentity): boolean {
   if (!client.userId) return true;
+  // Social frames are the one kind whose audience is decided by the payload
+  // itself: the manager stamps exactly the owner ids allowed to see it (a
+  // request belongs to both humans, a profile only to its owner). Anything
+  // without that stamp keeps the record-based rules below.
+  if (Array.isArray(payload.socialOwnerIds)) {
+    // SAFETY: the Array.isArray guard above proves every entry is checked
+    // against the client's userId by identity; the cast only erases the
+    // unknown[] element type for .some().
+    return (payload.socialOwnerIds as unknown[]).some((id) => id === client.userId);
+  }
   const botId = isText(payload.botId) ? payload.botId : null;
   if (botId) {
     const b = store.bot(botId);
@@ -1147,6 +1161,7 @@ function isUnattended(botId?: string | null): boolean {
 }
 let routines: RoutineManager | null = null;
 let goals: GoalManager | null = null;
+let social: SocialManager | null = null;
 // Desktop isolation: "shared" keeps one visible desktop every bot leases
 // one at a time; "perBot" gives each bot its own container, workspace,
 // viewer port and lease/idle lanes. All lanes live in pools keyed by the
@@ -2623,6 +2638,14 @@ routines = new RoutineManager({
 });
 routines.start();
 
+// ── agent social layer (server/social.ts) ──────────────────────────────
+// Profiles + friend graph state; every frame carries socialOwnerIds so the
+// SSE tenant filter scopes it. No engine, no file, no provider access.
+social = new SocialManager({
+  emit: (payload) => broadcast(payload),
+  botName: (botId) => store.bot(botId)?.name ?? null,
+});
+
 // Goals ride the same harness: one turn at a time, dispatch through
 // startTurn, budgets enforced here instead of inside any provider.
 goals = new GoalManager({
@@ -3624,6 +3647,45 @@ function shareNotFoundPage(): string {
     `<div class="card">
       <h1 style="font-size:1.5rem">This share link has expired</h1>
       <p class="muted">Share links hold the latest shared card. Ask for a fresh one — or better, muster your own agents and post yours.</p>
+      <a class="btn" href="/">Muster your agents</a>
+    </div>`,
+  );
+}
+
+/** Public agent profile (/p/<handle>) — only ever rendered for a profile
+ * whose owner set it public. Every field is escaped; nothing here reaches
+ * private state (no memory, no transcripts, no owner identity). */
+function agentProfilePage(args: { name: string; handle: string; tagline: string; bio: string; color: string }): string {
+  const palette = {
+    orange: "#f08a24", green: "#38d591", blue: "#1084fe", red: "#ff5667",
+    purple: "#a78bfa", cyan: "#22d3ee", pink: "#f472b6", yellow: "#facc15",
+    teal: "#2dd4bf", coral: "#fb7185",
+  } as const satisfies Record<string, string>;
+  // SAFETY: guarded by `in` — an unknown color falls through to the default.
+  const tint = args.color in palette ? palette[args.color as keyof typeof palette] : palette.orange;
+  const initials = args.name.trim().slice(0, 2).toUpperCase() || "M";
+  const body = `<div class="card">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="width:56px;height:56px;border-radius:50%;background:${tint};display:flex;align-items:center;justify-content:center;font-weight:700;color:#0a0a0a;font-size:1.25rem">${escapeHtml(initials)}</div>
+        <div>
+          <h1 style="font-size:1.5rem;margin:0">${escapeHtml(args.name)}</h1>
+          <p class="muted" style="margin:2px 0 0">@${escapeHtml(args.handle)}</p>
+        </div>
+      </div>
+      ${args.tagline ? `<p style="margin:18px 0 0;font-size:1.05rem">${escapeHtml(args.tagline)}</p>` : ""}
+      ${args.bio ? `<p style="margin:12px 0 0;white-space:pre-wrap">${escapeHtml(args.bio)}</p>` : ""}
+      <p class="muted" style="margin:22px 0 0;font-size:.8rem">A public agent profile on Muster · verified owner account · content authored by an AI agent</p>
+      <a class="btn" href="/">Muster your own agents</a>
+    </div>`;
+  return pageShell(`${args.name} (@${args.handle}) — Muster agent`, body);
+}
+
+function profileNotFoundPage(): string {
+  return pageShell(
+    "No such profile",
+    `<div class="card">
+      <h1 style="font-size:1.5rem">No public profile here</h1>
+      <p class="muted">This handle is unclaimed, or its owner keeps the profile private — public is always opt-in.</p>
       <a class="btn" href="/">Muster your agents</a>
     </div>`,
   );
@@ -5856,6 +5918,129 @@ let requestUserEmail = "";
       return json(res, 200, { hits });
     }
 
+    // ── agent social layer: identity + friend graph (server/social.ts) ──
+    // Opt-in public profiles and cross-account friendships where BOTH
+    // humans act: a request is sent by one owner, accepted by the other.
+    // Every read here answers with public profiles or the caller's own
+    // state — nothing foreign is ever enumerable through these routes.
+    if (path === "/api/social/state" && method === "GET") {
+      const uid = requestUserId ?? "local";
+      const nameOf = (botId: string) => store.bot(botId)?.name ?? "Removed teammate";
+      const withNames = <T extends { fromBotId: string; toBotId: string }>(r: T) => ({
+        ...r,
+        fromName: nameOf(r.fromBotId),
+        toName: nameOf(r.toBotId),
+      });
+      const friendsView = () =>
+        social!.friendsOf(uid).map((f) => {
+          const mine = f.ownerAId === uid ? f.botAId : f.botBId;
+          const theirs = f.ownerAId === uid ? f.botBId : f.botAId;
+          const theirBot = store.bot(theirs);
+          const theirProfile = social!.profileFor(theirs);
+          return {
+            friendship: f,
+            myBotId: mine,
+            theirBotId: theirs,
+            theirName: theirBot?.name ?? "Removed teammate",
+            theirHandle: theirProfile?.handle ?? "",
+            theirTagline: theirProfile?.tagline ?? "",
+          };
+        });
+      return json(res, 200, {
+        profiles: social!.profilesForOwner(uid),
+        incoming: social!.requestsForOwner(uid).incoming.map(withNames),
+        outgoing: social!.requestsForOwner(uid).outgoing.map(withNames),
+        history: social!.historyForOwner(uid).map(withNames),
+        friends: friendsView(),
+      });
+    }
+    if (path === "/api/social/profile" && method === "PUT") {
+      const body = await readBody(req);
+      const parsed = socialProfileInputSchema.safeParse(body);
+      if (!parsed.success) {
+        return json(res, 400, { error: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ") });
+      }
+      const bot = store.bot(parsed.data.botId);
+      if (!bot || !ownsRecord(bot)) return json(res, 404, { error: "no such bot" });
+      try {
+        return json(res, 200, { profile: social!.setProfile(parsed.data, bot.name, requestUserId ?? "local") });
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    const socialHandleMatch = path.match(/^\/api\/social\/handles\/([A-Za-z0-9-]+)$/);
+    if (socialHandleMatch && method === "GET") {
+      const profile = social!.byHandle(socialHandleMatch[1]!.toLowerCase());
+      if (!profile || profile.visibility !== "public") return json(res, 404, { error: "no such public profile" });
+      const bot = store.bot(profile.botId);
+      return json(res, 200, { profile, name: bot?.name ?? "", color: bot?.color ?? "orange", character: bot?.character ?? "star" });
+    }
+    if (path === "/api/social/friend-requests" && method === "POST") {
+      const body = await readBody(req);
+      const parsed = friendRequestInputSchema.safeParse(body);
+      if (!parsed.success) {
+        return json(res, 400, { error: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ") });
+      }
+      const from = store.bot(parsed.data.fromBotId);
+      if (!from || !ownsRecord(from)) return json(res, 404, { error: "no such bot" });
+      const target = social!.byHandle(parsed.data.toHandle.toLowerCase());
+      if (!target || target.visibility !== "public") {
+        return json(res, 404, { error: "no such public profile — share your teammate's profile before it can make friends" });
+      }
+      try {
+        const request = social!.createRequest({
+          fromBotId: from.id,
+          fromOwnerId: requestUserId ?? "local",
+          toBotId: target.botId,
+          toOwnerId: target.ownerId,
+          message: parsed.data.message ?? "",
+        });
+        return json(res, 201, { request });
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    const socialRequestActionMatch = path.match(/^\/api\/social\/friend-requests\/([\w-]+)\/(accept|decline)$/);
+    if (socialRequestActionMatch && method === "POST") {
+      try {
+        const uid = requestUserId ?? "local";
+        if (socialRequestActionMatch[2] === "accept") {
+          return json(res, 200, { friendship: social!.acceptRequest(socialRequestActionMatch[1]!, uid) });
+        }
+        return json(res, 200, { request: social!.declineRequest(socialRequestActionMatch[1]!, uid) });
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    const socialRequestMatch = path.match(/^\/api\/social\/friend-requests\/([\w-]+)$/);
+    if (socialRequestMatch && method === "DELETE") {
+      try {
+        return json(res, 200, { request: social!.withdrawRequest(socialRequestMatch[1]!, requestUserId ?? "local") });
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    const socialFriendMatch = path.match(/^\/api\/social\/friends\/([\w-]+)$/);
+    if (socialFriendMatch && method === "DELETE") {
+      try {
+        social!.unfriend(socialFriendMatch[1]!, requestUserId ?? "local");
+        return json(res, 200, { ok: true });
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    if (path === "/api/directory/agents" && method === "GET") {
+      // Public by design (allowlisted): only profiles their owner set to
+      // public, and only the fields the owner chose to share.
+      const agents = social!.publicProfiles().slice(0, 100).map((p) => {
+        const bot = store.bot(p.botId);
+        return bot
+          ? { handle: p.handle, name: bot.name, tagline: p.tagline, color: bot.color, character: bot.character ?? "star", updatedAt: p.updatedAt }
+          : null;
+      }).filter((a): a is NonNullable<typeof a> => a !== null);
+      return json(res, 200, { agents });
+    }
+
     // ── transcript export (the visible branch, human-readable) ──────────
     m = path.match(/^\/api\/threads\/([\w-]+)\/export$/);
     if (m && method === "GET") {
@@ -6337,6 +6522,8 @@ let requestUserEmail = "";
       await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(runningThread).catch(() => {});
       stopScreenPoller(bot.id);
       routines!.disableForBot(bot.id);
+      // a deleted bot leaves the social network too: profile, edges, requests
+      social!.forgetBot(bot.id);
       webhooks.disableForBot(bot.id);
       lastReply.delete(bot.threadId);
       // a peer approval naming this bot can never be meaningfully answered
@@ -7928,6 +8115,24 @@ let requestUserEmail = "";
       if (share.kind === "receipt")
         return html(res, 200, receiptSharePage(share.receipt, share.text, "signature" in share ? share.signature : undefined));
       return html(res, 200, wrappedSharePage(share.card, share.text));
+    }
+
+    // Public agent profile — /p/<handle>. Server-rendered, no auth, and it
+    // only ever answers for a profile whose owner chose "public". This is
+    // the page a friend request starts from and what a directory points at.
+    const agentPageMatch = path.match(/^\/p\/([A-Za-z0-9][A-Za-z0-9-]{1,31})$/);
+    if (agentPageMatch && method === "GET") {
+      const profile = social!.byHandle(agentPageMatch[1]!.toLowerCase());
+      if (!profile || profile.visibility !== "public") return html(res, 404, profileNotFoundPage());
+      const bot = store.bot(profile.botId);
+      if (!bot) return html(res, 404, profileNotFoundPage());
+      return html(res, 200, agentProfilePage({
+        name: bot.name,
+        handle: profile.handle,
+        tagline: profile.tagline,
+        bio: profile.bio,
+        color: bot.color,
+      }));
     }
 
     // Public receipt verification — anyone (a hiring manager, another

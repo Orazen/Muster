@@ -17,6 +17,7 @@ import {
 import type { EffortLevel } from "../../server/contracts.ts";
 import type { AgentCharacter, AgentColor, AgentMotion } from "@/lib/mascot";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
+import type { SocialProfile, SocialState } from "@/lib/social";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
 import { showNotification } from "@/lib/notify";
@@ -373,10 +374,12 @@ export interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines";
+  activeView: "chat" | "routines" | "social";
   routines: Routine[];
   goals: Goal[];
   routineRuns: RoutineRun[];
+  /** agent social layer state (profiles + friend graph); null until hydrated */
+  social: SocialState | null;
   webhooks: WebhookTrigger[];
   webhookAttempts: WebhookAttempt[];
   webhookIngress: WebhookIngressStatus | null;
@@ -462,6 +465,17 @@ export type Action =
   | { type: "webhookAttempted"; attempt: WebhookAttempt }
   | { type: "webhookDeleted"; webhookId: string }
   | { type: "createRoutine"; input: RoutineInput }
+  | { type: "showSocial" }
+  | { type: "socialHydrated"; social: SocialState }
+  | { type: "socialProfilePatched"; profile: SocialProfile }
+  | { type: "socialProfileDeleted"; botId: string }
+  | { type: "socialRefresh" }
+  | { type: "setSocialProfile"; input: { botId: string; tagline?: string; bio?: string; visibility: "private" | "public"; handle?: string } }
+  | { type: "sendFriendRequest"; input: { fromBotId: string; toHandle: string; message?: string } }
+  | { type: "acceptFriendRequest"; requestId: string }
+  | { type: "declineFriendRequest"; requestId: string }
+  | { type: "withdrawFriendRequest"; requestId: string }
+  | { type: "unfriend"; friendshipId: string }
   | { type: "updateRoutine"; routineId: string; patch: Partial<RoutineInput> }
   | { type: "deleteRoutine"; routineId: string }
   | { type: "runRoutine"; routineId: string }
@@ -595,6 +609,35 @@ export function reducer(state: AppState, action: Action): AppState {
         appSettingsOpen: false,
         pluginsOpen: false,
       };
+    case "showSocial":
+      return {
+        ...state,
+        activeView: "social",
+        settingsOpen: false,
+        computerOpen: false,
+        browserPanelOpen: false,
+        inspectorOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "socialHydrated":
+      return { ...state, social: action.social };
+    case "socialProfilePatched": {
+      if (!state.social) return state;
+      const exists = state.social.profiles.some((p) => p.botId === action.profile.botId);
+      return {
+        ...state,
+        social: {
+          ...state.social,
+          profiles: exists
+            ? state.social.profiles.map((p) => (p.botId === action.profile.botId ? action.profile : p))
+            : [...state.social.profiles, action.profile],
+        },
+      };
+    }
+    case "socialProfileDeleted":
+      if (!state.social) return state;
+      return { ...state, social: { ...state.social, profiles: state.social.profiles.filter((p) => p.botId !== action.botId) } };
     case "routinesHydrated":
       return { ...state, routines: action.routines, routineRuns: action.runs };
     case "routinePatched": {
@@ -1022,6 +1065,13 @@ export function reducer(state: AppState, action: Action): AppState {
     case "markRoutineRunSeen":
     case "startGoal":
     case "stopGoal":
+    case "socialRefresh":
+    case "setSocialProfile":
+    case "sendFriendRequest":
+    case "acceptFriendRequest":
+    case "declineFriendRequest":
+    case "withdrawFriendRequest":
+    case "unfriend":
       return state;
   }
 }
@@ -1041,6 +1091,7 @@ export const initialState: AppState = {
   routines: [],
   goals: [],
   routineRuns: [],
+  social: null,
   webhooks: [],
   webhookAttempts: [],
   webhookIngress: null,
@@ -1224,6 +1275,41 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
           break;
         case "markRoutineRunSeen":
           api(`/api/routine-runs/${action.runId}/seen`, { method: "POST" }).catch(showError);
+          break;
+        case "socialRefresh":
+          api("/api/social/state")
+            .then((social: SocialState) => rawDispatch({ type: "socialHydrated", social }))
+            .catch(() => {});
+          break;
+        case "setSocialProfile":
+          api("/api/social/profile", { method: "PUT", body: JSON.stringify(action.input) })
+            .then(({ profile }: { profile: SocialProfile }) => profile && rawDispatch({ type: "socialProfilePatched", profile }))
+            .catch(showError);
+          break;
+        case "sendFriendRequest":
+          api("/api/social/friend-requests", { method: "POST", body: JSON.stringify(action.input) })
+            .then(() => rawDispatch({ type: "socialRefresh" }))
+            .catch(showError);
+          break;
+        case "acceptFriendRequest":
+          api(`/api/social/friend-requests/${action.requestId}/accept`, { method: "POST" })
+            .then(() => rawDispatch({ type: "socialRefresh" }))
+            .catch(showError);
+          break;
+        case "declineFriendRequest":
+          api(`/api/social/friend-requests/${action.requestId}/decline`, { method: "POST" })
+            .then(() => rawDispatch({ type: "socialRefresh" }))
+            .catch(showError);
+          break;
+        case "withdrawFriendRequest":
+          api(`/api/social/friend-requests/${action.requestId}`, { method: "DELETE" })
+            .then(() => rawDispatch({ type: "socialRefresh" }))
+            .catch(showError);
+          break;
+        case "unfriend":
+          api(`/api/social/friends/${action.friendshipId}`, { method: "DELETE" })
+            .then(() => rawDispatch({ type: "socialRefresh" }))
+            .catch(showError);
           break;
         case "startGoal":
           api(`/api/bots/${action.botId}/goal`, {
@@ -1489,6 +1575,9 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
         api("/api/webhooks")
           .then(({ webhooks, attempts, ingress }) => alive && rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress }))
           .catch(() => {}),
+        api("/api/social/state")
+          .then((social: SocialState) => alive && rawDispatch({ type: "socialHydrated", social }))
+          .catch(() => {}),
       ]);
 
     // A snapshot and the live fold have to meet at a defined boundary. Start
@@ -1671,6 +1760,23 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
           break;
         case "goal":
           rawDispatch({ type: "goalPatched", goal: frame.goal });
+          break;
+        // ── agent social layer ──────────────────────────────────────────
+        // Profile frames fold directly (they only ever reach their owner).
+        // Request/friendship frames trigger a state re-read instead of a
+        // hand-fold: the decorated names and incoming/outgoing split are
+        // the server's job, and social traffic is rare enough that one GET
+        // per transition is the honest, correct fold.
+        case "social.profile":
+          rawDispatch({ type: "socialProfilePatched", profile: frame.profile });
+          break;
+        case "social.profile.deleted":
+          rawDispatch({ type: "socialProfileDeleted", botId: frame.botId });
+          break;
+        case "social.friendRequest":
+        case "social.friendship":
+        case "social.friendship.deleted":
+          rawDispatch({ type: "socialRefresh" });
           break;
         case "webhook":
           rawDispatch({ type: "webhookPatched", webhook: frame.webhook });
