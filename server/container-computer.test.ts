@@ -22,6 +22,7 @@ import {
   containerComputerScreenshot,
   containerComputerStatus,
   canAutoStartRuntime,
+  startContainerRuntime,
   managedImageDockerfile,
   setupCommands,
   type CommandRunner,
@@ -559,6 +560,47 @@ describe("canAutoStartRuntime", () => {
 
   it("is false with no runtime at all", () => {
     expect(canAutoStartRuntime(null, "darwin")).toBe(false);
+  });
+});
+
+describe("startContainerRuntime", () => {
+  const daemonUp: CommandRunner = async () => ({ stdout: "6.1.1\n" });
+  const daemonDown: CommandRunner = async () => {
+    throw new Error("cannot connect");
+  };
+
+  it("treats an already-running podman machine as success when the daemon answers", async () => {
+    // The field bug: `podman machine start` exits non-zero with "already
+    // running" — the desired end state — and the panel stayed red forever.
+    await expect(
+      startContainerRuntime("podman", "darwin", daemonUp, async () => {
+        throw new Error('Error: unable to start "podman-machine-default": already running');
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("verifies the daemon after a clean start and fails honestly when it never answers", async () => {
+    await expect(
+      startContainerRuntime("podman", "darwin", daemonDown, async () => undefined),
+    ).rejects.toThrow(/not answering yet/);
+  });
+
+  it("still surfaces real start failures when the daemon is down", async () => {
+    await expect(
+      startContainerRuntime("podman", "darwin", daemonDown, async () => {
+        throw new Error("podman machine start: SSH handshake failed");
+      }),
+    ).rejects.toThrow(/Could not start podman.*SSH handshake/s);
+  });
+
+  it("refuses sudo-requiring starts before touching the shell", async () => {
+    let shellTouched = false;
+    await expect(
+      startContainerRuntime("docker", "linux", daemonUp, async () => {
+        shellTouched = true;
+      }),
+    ).rejects.toThrow(/needs sudo/);
+    expect(shellTouched).toBe(false);
   });
 });
 

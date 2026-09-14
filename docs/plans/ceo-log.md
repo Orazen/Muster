@@ -5253,3 +5253,20 @@ machine proceeds); server tsc clean; oxlint 0/0; full suite green at commit time
 **Not verified.** No live podman run on the tester's machine (fix instructions given there directly);
 the probe's behavior on Apple `container` was reasoned, not executed.
 
+**Same loop, second fix (the tester came back still red after resizing).** Their panel showed
+"Could not start podman: … unable to start podman-machine-default: already running" even with the
+machine healthy — a second, worse bug: `startContainerRuntime` treated the start command's exit
+code as the truth, and `podman machine start` on an already-running machine exits non-zero with
+exactly that message, which IS the desired end state. The panel therefore could never recover.
+Fixed: a failed start whose message says "already running" (or whose daemon otherwise answers) is
+success, and every start is now followed by a daemon probe through the same `CommandRunner` the
+status panel uses (injectable shell + runner; four new tests). Related cold-start trap fixed in the
+same pass: the status daemon probe's 10 s budget timed out on the first `podman info` after a
+machine start (SSH tunnel + inventory rebuild), so a healthy daemon read as down — the probe now
+gets 20 s; genuinely-down daemons still fail fast.
+
+**Verified (second fix).** 61/61 across container-computer + desktop-isolation (4 new
+startContainerRuntime tests: already-running success, clean-start-but-silent-daemon failure,
+real-failure passthrough, sudo refusal before touching the shell); server tsc + oxlint clean;
+full suite green at commit time.
+

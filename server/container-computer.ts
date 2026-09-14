@@ -379,7 +379,12 @@ export async function containerComputerStatus(
         await runner(
           candidate,
           candidate === "container" ? ["system", "status"] : ["info", "--format", "{{.ServerVersion}}"],
-          10_000,
+          // A cold `podman info` right after a machine start opens an SSH
+          // tunnel and rebuilds the inventory; 10s timed out on real Macs and
+          // left the panel reading a healthy daemon as down. When nothing is
+          // listening the call fails fast, so the longer budget only costs the
+          // genuinely-starting case.
+          20_000,
         );
         return true;
       } catch {
@@ -805,7 +810,7 @@ export async function containerComputerAction(
   // not after it.
   if (action === "runtimeStart") {
     if (before.daemonUp) return before;
-    await startContainerRuntime(runtime, platform);
+    await startContainerRuntime(runtime, platform, runner);
     return containerComputerStatus(runner, platform, target);
   }
 
@@ -1083,10 +1088,18 @@ export function canAutoStartRuntime(runtime: Runtime | null, platform: NodeJS.Pl
  * canAutoStartRuntime() confirmed it doesn't need sudo. Uses a real shell
  * (not CommandRunner, which is scoped to "runtime <args>" invocations) since
  * these are heterogeneous commands: launching a GUI app, a VM manager, or a
- * system service, not the container runtime CLI itself. */
+ * system service, not the container runtime CLI itself.
+ *
+ * The start command's exit code is NOT the truth — `podman machine start` on
+ * an already-running machine exits non-zero with "already running", which IS
+ * the desired end state (the field bug: the Local VM panel stayed red forever
+ * because of it). So a failed start is followed by a daemon probe through the
+ * same runner the status panel uses: if the daemon answers, the start worked. */
 export async function startContainerRuntime(
   runtime: Runtime,
   platform: NodeJS.Platform = process.platform,
+  runner: CommandRunner = sh,
+  shell?: (command: string) => Promise<void>,
 ): Promise<void> {
   if (!canAutoStartRuntime(runtime, platform)) {
     throw Object.assign(new Error(`Starting ${runtime} on Linux needs sudo — run the command shown below yourself.`), {
@@ -1100,17 +1113,41 @@ export async function startContainerRuntime(
         ? "podman machine init 2>/dev/null; podman machine start"
         : "colima start || open -a Docker";
   const shellRun = promisify(execFile);
-  // Starting a VM/daemon can genuinely take a while on first run — same
-  // generous timeout the image-prepare and container actions already use.
-  await shellRun("/bin/sh", ["-c", command], { timeout: 2 * 60_000, env: { ...process.env, PATH: augmentedPath() } }).catch(
-    (e) => {
-      // "colima start || open -a Docker" exits 0 either way it succeeds, so
-      // a real failure here means neither worked.
-      throw Object.assign(new Error(`Could not start ${runtime}: ${e instanceof Error ? e.message : String(e)}`), {
+  const runShell = shell ?? (async (cmd: string) => {
+    // Starting a VM/daemon can genuinely take a while on first run — same
+    // generous timeout the image-prepare and container actions already use.
+    await shellRun("/bin/sh", ["-c", cmd], { timeout: 2 * 60_000, env: { ...process.env, PATH: augmentedPath() } });
+  });
+  const daemonAnswers = async () => {
+    try {
+      await runner(runtime, runtime === "container" ? ["system", "status"] : ["info", "--format", "{{.ServerVersion}}"], 20_000);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  try {
+    await runShell(command);
+  } catch (e) {
+    // "already running" is success by definition; anything else still gets
+    // one daemon check before failing, because a half-reported start (the
+    // VM came up but the CLI complained about forwarding/labels) should not
+    // lock the panel into a permanent red state.
+    const message = e instanceof Error ? e.message : String(e);
+    if (!/already running/i.test(message) && !(await daemonAnswers())) {
+      throw Object.assign(new Error(`Could not start ${runtime}: ${message}`), {
         status: 500,
       });
-    },
-  );
+    }
+  }
+  // A start that "succeeded" without the daemon ever answering is the cold
+  // `podman info` case: give the API forwarder a moment and ask again before
+  // declaring victory, so callers that re-check status immediately agree.
+  if (!(await daemonAnswers())) {
+    throw Object.assign(new Error(`Could not start ${runtime}: the command finished but ${runtime} is not answering yet — try Re-check in a moment`), {
+      status: 500,
+    });
+  }
 }
 
 /** Cloud boxes still use Muster's high-latency REST adapter. Local VMs
