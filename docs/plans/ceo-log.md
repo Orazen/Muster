@@ -5213,3 +5213,14 @@ the wizard re-show is a web-mode behavior — the production web pass below is t
 viewport vector by inheritance); the wizard re-show and poke squash await the production web pass;
 no security claim.
 
+**Follow-up in the same loop (352e395 + this commit).** The prod pass caught that the tour
+replay was defeated by the wizard's returning-user guard (`hasRealHistory` auto-skip from
+Loop82): a deliberate replay now sets a one-shot sessionStorage flag (`requestTourReplay`/
+`consumeTourReplay`, read once via ref) that overrides the guard. Also completed the
+domain-consistency sweep the Loop60 move left behind: every user-facing `muster.orazen.online`
+reference in www/ (landing, download, switch, teams, skill.md, docs index/install/agents/
+quick-start, www README) now reads `muster.today` — verified every /downloads artifact serves
+200 on muster.today before swapping, and the company-site `https://orazen.online` references
+(JSON-LD sameAs, footer credit) are deliberately kept. Landing re-rendered locally (approval
+simulator + hero intact, download links point at muster.today).
+

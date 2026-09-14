@@ -65,11 +65,11 @@
     <div class="table-scroll" role="region" tabindex="0" aria-label="Desktop downloads table">
 <table>
       <tr><th>Platform</th><th>Artifact</th><th>Install</th></tr>
-      <tr><td>macOS — Apple Silicon</td><td><a href="https://muster.orazen.online/downloads/Muster.dmg"><code>Muster.dmg</code></a></td><td>Drag to Applications.</td></tr>
-      <tr><td>macOS — Intel</td><td><a href="https://muster.orazen.online/downloads/Muster-intel.dmg"><code>Muster-intel.dmg</code></a></td><td>Same as above.</td></tr>
-      <tr><td>Windows (x64)</td><td><a href="https://muster.orazen.online/downloads/Muster-setup.exe"><code>Muster-setup.exe</code></a></td><td>One-click, per-user, no admin rights.</td></tr>
-      <tr><td>Ubuntu / Debian (x64)</td><td><a href="https://muster.orazen.online/downloads/Muster.deb"><code>Muster.deb</code></a></td><td><code>sudo dpkg -i Muster.deb</code></td></tr>
-      <tr><td>Linux — any distro (x64)</td><td><a href="https://muster.orazen.online/downloads/Muster.AppImage"><code>Muster.AppImage</code></a></td><td><code>chmod +x Muster.AppImage &amp;&amp; ./Muster.AppImage</code></td></tr>
+      <tr><td>macOS — Apple Silicon</td><td><a href="https://muster.today/downloads/Muster.dmg"><code>Muster.dmg</code></a></td><td>Drag to Applications.</td></tr>
+      <tr><td>macOS — Intel</td><td><a href="https://muster.today/downloads/Muster-intel.dmg"><code>Muster-intel.dmg</code></a></td><td>Same as above.</td></tr>
+      <tr><td>Windows (x64)</td><td><a href="https://muster.today/downloads/Muster-setup.exe"><code>Muster-setup.exe</code></a></td><td>One-click, per-user, no admin rights.</td></tr>
+      <tr><td>Ubuntu / Debian (x64)</td><td><a href="https://muster.today/downloads/Muster.deb"><code>Muster.deb</code></a></td><td><code>sudo dpkg -i Muster.deb</code></td></tr>
+      <tr><td>Linux — any distro (x64)</td><td><a href="https://muster.today/downloads/Muster.AppImage"><code>Muster.AppImage</code></a></td><td><code>chmod +x Muster.AppImage &amp;&amp; ./Muster.AppImage</code></td></tr>
     </table>
     </div>
     <div class="callout">
@@ -79,7 +79,7 @@
 
     <h2>The Muster CLI</h2>
     <p>One file, zero dependencies, ~40 KB. It boots the whole stack (<code>muster up</code>), prints the phone-pairing QR, and drives the roster from any terminal — including a VPS over SSH. Works against your local harness or Muster Cloud.</p>
-    <pre><code>curl -fsSL https://muster.orazen.online/downloads/muster-cli.mjs -o muster
+    <pre><code>curl -fsSL https://muster.today/downloads/muster-cli.mjs -o muster
 chmod +x muster
 ./muster help</code></pre>
     <p>Requires Node 22+. Every command works the same as from a checkout (<code>node cli/muster.mjs</code>) — <code>up · setup · stop · logs · pair · bots · send · approve · status · receipts · sessions</code>.</p>

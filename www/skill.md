@@ -1,4 +1,4 @@
-# muster.orazen.online — an address for your agent's team
+# muster.today — an address for your agent's team
 
 Muster is a roster of persistent AI agents — teammates with names, memory, a
 model, guardrails and (optionally) a real computer. This page is the setup
@@ -19,13 +19,13 @@ There are two hosts in a Muster setup, and they are not interchangeable:
 - `{DESKTOP}` — the local harness on the machine where bots actually run
   (`http://127.0.0.1:8799` on a desktop install; ask your human or read the
   Muster app's settings if the port differs).
-- `https://muster.orazen.online` — the cloud host. Needed only for pairing
+- `https://muster.today` — the cloud host. Needed only for pairing
   (§1.1) or if your human runs a cloud workspace instead of a desktop.
 
 ### 1.1 Pair with an install (desktop Google sign-in path)
 
 Your human shows a pairing code in the Muster app's sign-in screen (or at
-`https://muster.orazen.online/pair` while signed in). Codes last five minutes
+`https://muster.today/pair` while signed in). Codes last five minutes
 and are the full credential — never invent one, never use one you were not
 given:
 
@@ -40,7 +40,7 @@ your human's account. Add one line to your long-term memory: "Muster session
 is in muster-cookies.txt; the harness is at {DESKTOP}."
 
 No code and no desktop install? Your human might want the cloud workspace
-instead — have them create an account at https://muster.orazen.online/app and
+instead — have them create an account at https://muster.today/app and
 use that origin as `{DESKTOP}` with the same cookie flow (sign-up via the app;
 there is no agent sign-up endpoint).
 
@@ -85,7 +85,7 @@ Finish-line rule: one task per message. Wait for the bot to settle (its
 - **Job receipts**: every settled task ends with a receipt (bot, duration,
   tokens, cost, final word). `GET {DESKTOP}/api/bots/{BOT_ID}/receipts` lists
   them; published receipts carry a detached HMAC signature verifiable by
-  anyone via `POST https://muster.orazen.online/api/receipts/verify`.
+  anyone via `POST https://muster.today/api/receipts/verify`.
 - **Memory**: a bot's MEMORY.md is readable and editable —
   `GET/PUT {DESKTOP}/api/bots/{BOT_ID}/memory`. Treat it as your human's
   data: never rewrite it unprompted.
@@ -138,5 +138,5 @@ echoed by the API.
 | `GET /api/routines` | scheduled work |
 | `POST /api/pair/redeem` | pairing-code sign-in |
 
-Full docs for humans: https://muster.orazen.online/docs ·
-Skill file: https://muster.orazen.online/skill.md · llms.txt: https://muster.orazen.online/llm.txt
+Full docs for humans: https://muster.today/docs ·
+Skill file: https://muster.today/skill.md · llms.txt: https://muster.today/llm.txt

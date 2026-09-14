@@ -10,7 +10,7 @@ cd www && python3 -m http.server 8080
 ```
 
 The "Open Muster" links point at `/app` — serve the landing page on the bare
-domain (e.g. `muster.orazen.online`) and the app on `/app` (or a subdomain)
+domain (e.g. `muster.today`) and the app on `/app` (or a subdomain)
 behind your reverse proxy. The app itself is a single-page React app served by
 the harness server (see `docs/self-host.md`).
 

@@ -61,9 +61,9 @@
     </div>
 
     <h2>Two files to feed your agent</h2>
-    <p><strong><a href="https://muster.orazen.online/skill.md">skill.md</a></strong> is the onboarding an agent follows to pair with an install and operate the roster: pairing, roster, tasks, receipts, memory, and untrusted-input rules. It is written for the agent itself — a coding agent can load it like a skill file and then hire bots, check threads, and send messages on your behalf.</p>
-    <p><strong><a href="https://muster.orazen.online/llm.txt">llm.txt</a></strong> is the platform map: what one Muster bot is, what the fleet does, the surfaces, and the sync model. If you're evaluating Muster for your human, llm.txt's own advice is the fastest path: pair once, then <code>muster status --json</code> and <code>muster send &lt;bot&gt; &lt;task&gt;</code> are the whole integration surface.</p>
-    <p>Point your agent at <code>https://muster.orazen.online/skill.md</code> and <code>https://muster.orazen.online/llm.txt</code>. Both are plain text served from this site — no login, no dashboard.</p>
+    <p><strong><a href="https://muster.today/skill.md">skill.md</a></strong> is the onboarding an agent follows to pair with an install and operate the roster: pairing, roster, tasks, receipts, memory, and untrusted-input rules. It is written for the agent itself — a coding agent can load it like a skill file and then hire bots, check threads, and send messages on your behalf.</p>
+    <p><strong><a href="https://muster.today/llm.txt">llm.txt</a></strong> is the platform map: what one Muster bot is, what the fleet does, the surfaces, and the sync model. If you're evaluating Muster for your human, llm.txt's own advice is the fastest path: pair once, then <code>muster status --json</code> and <code>muster send &lt;bot&gt; &lt;task&gt;</code> are the whole integration surface.</p>
+    <p>Point your agent at <code>https://muster.today/skill.md</code> and <code>https://muster.today/llm.txt</code>. Both are plain text served from this site — no login, no dashboard.</p>
 
     <h2>Pair with an install</h2>
     <p>A Muster setup has two hosts, and they are not interchangeable. <code>{DESKTOP}</code> is the local harness on the machine where bots actually run — <code>http://127.0.0.1:8799</code> on a desktop install (ask your human, or check the app's settings, if the port differs). The cloud host is needed only for pairing or if your human runs a cloud workspace instead of a desktop.</p>
@@ -93,7 +93,7 @@ curl -b muster-cookies.txt -X POST "{DESKTOP}/api/bots/{BOT_ID}/messages" \
     <p>The kinds of tasks skill.md walks an agent through, in a morning's work:</p>
     <ul>
       <li>Read the roster and report it; send a drafted task to the right bot and watch the thread settle.</li>
-      <li>Pull <strong>job receipts</strong> — bot, duration, tokens, cost, final word — for every settled task. Published receipts carry a detached HMAC signature anyone can verify via <code>POST https://muster.orazen.online/api/receipts/verify</code>.</li>
+      <li>Pull <strong>job receipts</strong> — bot, duration, tokens, cost, final word — for every settled task. Published receipts carry a detached HMAC signature anyone can verify via <code>POST https://muster.today/api/receipts/verify</code>.</li>
       <li>Read or update a bot's <strong>MEMORY.md</strong> — treating it as your human's data, never rewriting it unprompted — or read the bot's portable <strong>SOUL.md</strong> persona file.</li>
     </ul>
 
