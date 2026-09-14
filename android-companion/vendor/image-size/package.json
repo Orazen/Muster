@@ -1,0 +1,12 @@
+{
+  "name": "image-size",
+  "version": "1.2.1",
+  "private": true,
+  "description": "Locally-owned minimal image header reader that replaces the upstream package; see README.md",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.x"
+  }
+}

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Parser regressions always run in disposable children. A timeout is expected
-// only for the explicit unguarded controls, never for a guarded assertion.
+// Parser regressions always run in disposable children. No check expects a
+// timeout: the owned parser refuses every malformed header promptly, with or
+// without the policy loaded, so a timeout means a hanging parser is back.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -167,11 +168,26 @@ async function main() {
       writeFileSync(join(scratch, `valid.${format}`), Buffer.from(base64, "base64"));
       copyFileSync(join(scratch, `valid.${format}`), join(scratch, `scaled@2x.${format}`));
     }
+    // These four ran against the upstream parser until `image-size` became the
+    // owned copy in `vendor/image-size`; upstream looped forever here, which is
+    // what the advisory describes and what the guards below were added for.
+    // The property to hold now is stronger: with no config and no worker policy
+    // loaded at all, the parser itself must refuse the signature promptly. A
+    // timeout would fail the assertion, so a reintroduced loop cannot pass.
     for (const format of ["icns", "jxl"]) for (const api of ["buffer", "file"]) {
-      await check(`unguarded ${format} ${api} control reaches the owned timeout`, async () => {
-        const result = await runChild(scratch, "none", api, join(scratch, `${format}.png`), controller.signal);
-        assert.equal(result.status, "timeout");
-        assert(["SIGTERM", "SIGKILL"].includes(result.signal), "The timed-out process must be reaped after termination");
+      await check(`unguarded ${format} ${api} control refuses without any policy loaded`, async () => {
+        const assetPath = join(scratch, `${format}.png`);
+        const result = await runChild(scratch, "none", api, assetPath, controller.signal);
+        assert.equal(result.status, "rejected");
+        // Metro calls the buffer form as `getImageSize(content)` (no path) and
+        // the file form with the resolved asset path, which is what the owned
+        // parser reports back in the refusal.
+        assert.equal(
+          result.message,
+          api === "buffer"
+            ? `unsupported file type: ${format} (file: undefined)`
+            : `unsupported file type: ${format} (file: ${assetPath})`,
+        );
       });
     }
     for (const guard of ["config", "worker"]) {

@@ -80,25 +80,35 @@ local template extraction, plist parsing, UUID consumers and Metro's PostCSS
 path with owned fixtures. They complement the app tests and Android export;
 they do not prove native installation or device behavior.
 
-Metro's parent process and complete Expo transform worker disable ICNS, HEIF
-(including AVIF), JXL and JXL-stream dimension parsing, including content renamed
-with a supported extension such as `.png`. Use PNG or JPEG for companion images.
-The worker retains Expo's transforms and cache key, adding the local policy bytes
-so a policy change invalidates cached transforms. This uses the installed parser's
-`disableTypes` API and does not edit its dependency files.
+Metro's `image-size` dependency **is the owned parser in `vendor/image-size/`**,
+declared as an npm workspace so `node_modules/image-size` links to it and the
+registry package is never installed. It has no ICNS, JXL, HEIF (including AVIF),
+JP2 or AVIF parser at all; the formats it reads are PNG, JPEG, GIF, BMP and WebP.
+Metro's parent process and complete Expo transform worker additionally disable
+ICNS, HEIF, JXL and JXL-stream dimension parsing through `disableTypes`,
+including content renamed with a supported extension such as `.png`, so a refused
+format is named before any parser is consulted. Use PNG or JPEG for companion
+images. The worker retains Expo's transforms and cache key, adding the local
+policy bytes so a policy change invalidates cached transforms.
 
 The policy is reviewed for Expo Metro config 0.19.12, Metro 0.81.5 and image-size
-1.2.1; a version change stops Metro until the policy is reviewed. Detection still
-runs before the disabled-format check. The bounded child-process checks exercise
-the known ICNS/JXL loops and rejection through Metro's buffer and file asset APIs,
-alongside ordinary PNG/JPEG dimensions. They are a build-tool mitigation, not a
-general image sanitizer or a device-runtime check. Asset plugins and a Babel-only
-transformer are too late to apply this policy.
+1.2.1, and it requires Metro to resolve that parser from `vendor/image-size/`;
+a version change **or** a resolution that lands anywhere else (including outside
+the repository) stops Metro until the policy is reviewed. The bounded
+child-process checks exercise refusal of the known ICNS/JXL/HEIF/JXL-stream
+inputs through Metro's buffer and file asset APIs — with the policy loaded and
+with no policy at all — alongside ordinary PNG/JPEG dimensions. They are a
+build-tool mitigation, not a general image sanitizer or a device-runtime check.
+Asset plugins and a Babel-only transformer are too late to apply this policy.
 
-The two upstream image-size advisories still have no published fixed version.
-They remain tracked even with this local mitigation; this is not a whole-project
-security assessment. Native packaging may use other image tools and requires its
-own verification.
+The two upstream image-size advisories are still reported by `npm audit` even
+though the vulnerable implementations are no longer in the tree: the alert keys
+on the package name and on Metro's declared range, and npm cannot compare a
+non-registry version (it renders the range as `*`). Whether the Dependabot
+alerts close on the linked workspace entry has **not been observed** — no scan
+has run since the change. Nothing here is a whole-project security assessment,
+and native packaging may use other image tools that require their own
+verification. See `vendor/image-size/README.md` for the full record.
 
 Native autolinking is confined to this package's installed dependencies,
 including Expo's nested SDK modules. Expo 52 runs parts of discovery from the

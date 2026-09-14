@@ -2,12 +2,16 @@
   "name": "muster-mobile",
   "version": "1.0.0",
   "private": true,
+  "workspaces": [
+    "vendor/image-size"
+  ],
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "test": "jest --runInBand",
+    "test:image-size": "node --test vendor/image-size/test.mjs",
     "lint": "oxlint --config .oxlintrc.json .",
     "build:android": "eas build --platform android",
     "build:android:preview": "eas build --platform android --profile preview",
