@@ -79,6 +79,19 @@ export function setOnboardingStatus(dataDir: string, userId: string, status: Onb
   writeFileAtomic(path, JSON.stringify(file, null, 2), { mode: 0o600 });
 }
 
+/** Clear one account's gate so the welcome wizard greets them again — the
+ * server half of "Replay welcome tour". Idempotent; a never-onboarded user
+ * clearing is a no-op. */
+export function clearOnboardingStatus(dataDir: string, userId: string): void {
+  const path = gatePath(dataDir);
+  const map = loadGate(path);
+  if (!(userId in map)) return;
+  delete map[userId];
+  gates.set(path, map);
+  const file: GateFile = { version: 1, gates: map };
+  writeFileAtomic(path, JSON.stringify(file, null, 2), { mode: 0o600 });
+}
+
 /** Test helper: drop the in-memory map for a path. Not used by production
  * code paths. */
 export function resetOnboardingGateForTest(dataDir: string): void {

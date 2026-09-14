@@ -90,6 +90,20 @@ export function setEmailGateDone(userId: string | undefined, status: "submitted"
   }).catch(() => {});
 }
 
+/** Undo the dismissal everywhere — the client half of "Replay welcome
+ * tour". Awaited, so the caller only reloads once the server gate is truly
+ * cleared (a stale server flag would silently re-hide the wizard). */
+export async function clearOnboardingGate(userId: string | undefined): Promise<void> {
+  localStorage.removeItem(gateKey(userId));
+  localStorage.removeItem(gateKey(undefined));
+  await fetch("/api/me/onboarding", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ status: "reset" }),
+  }).catch(() => {});
+}
+
 function gateKey(userId?: string): string {
   return userId ? `omb-email-gate.${userId}` : "omb-email-gate.legacy";
 }

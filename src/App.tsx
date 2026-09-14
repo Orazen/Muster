@@ -30,6 +30,7 @@ import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, serverGateDone } from "@/lib/analytics";
+import { installGazeTracking } from "@/lib/musterbot/gaze";
 import { PairPage } from "@/pages/PairPage";
 import { ClaimPage } from "@/pages/ClaimPage";
 import { DesktopShell } from "@/components/os/DesktopShell";
@@ -70,6 +71,10 @@ function Shell() {
   // account across Google/email sign-ins and browsers), then falls back
   // to this browser's cached key; onboarding persists to both.
   const [gateDecision, setGateDecision] = useState<"pending" | "show" | "hide">("pending");
+  // one global pointer listener feeds every bot avatar's eyes (gaze.ts)
+  useEffect(() => {
+    installGazeTracking();
+  }, []);
   useEffect(() => {
     if (gateDecision !== "pending" || authLoading || !user) return;
     let cancelled = false;

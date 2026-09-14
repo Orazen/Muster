@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Brain, Building2, Coins, CreditCard, Download, KeyRound, Monitor, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
+import { clearOnboardingGate } from "@/lib/analytics";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
 import { WorkspaceSyncCard } from "./WorkspaceSyncCard";
@@ -105,6 +106,34 @@ function TeamContextCard() {
 /** Name + email, persisted to /api/config {profile} on blur. Pre-fills from
  * the signed-in account when the local profile override hasn't been set
  * yet, so a freshly created account doesn't show a blank name/email box. */
+/** The benchmark's "Replay welcome tour": the 7-step walkthrough (engines,
+ * permissions, phone, your first teammate) is account-gated, so replaying it
+ * means clearing that gate on the server + this browser, then reloading. */
+function TourCard() {
+  const { user: authUser } = useAuth();
+  const [busy, setBusy] = useState(false);
+  return (
+    <Card
+      title="First-run tour"
+      subtitle="The walkthrough: engines, permissions, phone, and your first teammate. You can replay it any time."
+    >
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          void clearOnboardingGate(authUser?.id).then(() => {
+            window.location.href = "/app";
+          });
+        }}
+        className="rounded-lg bg-raised px-3 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-raised-hover disabled:opacity-50"
+      >
+        {busy ? "Preparing…" : "Replay welcome tour"}
+      </button>
+    </Card>
+  );
+}
+
 function ProfileFields() {
   const { state, dispatch } = useStore();
   const { user: authUser } = useAuth();
@@ -679,6 +708,7 @@ export function SettingsModal() {
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
                   <ProfileFields />
                 </Card>
+                <TourCard />
                 <ChannelTurnCapCard />
                 <VpsCard />
                 <DiagnosticsCard />

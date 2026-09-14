@@ -35,7 +35,7 @@ import {
 } from "./whatsapp.ts";
 import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from "./whatsapp-threads.ts";
 import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER, type WhyEntry } from "./why-journal.ts";
-import { readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
+import { clearOnboardingStatus, readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
 import { SeedAnswerDispatcher, seedAnswerInputSchema, seedStartInputSchema, seedStatusInputSchema } from "./seed-answer-dispatch.ts";
 import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
@@ -4659,6 +4659,13 @@ let requestUserEmail = "";
         return json(res, 200, { done: readOnboardingStatus(DATA_DIR, gateUserId) !== undefined });
       }
       const body = await readBody(req);
+      // "reset" is the Replay-welcome-tour verb: it clears the account's
+      // gate so the wizard greets them again. It is an action, never a
+      // stored status — the file only ever holds submitted|skipped.
+      if (body?.status === "reset") {
+        clearOnboardingStatus(DATA_DIR, gateUserId);
+        return json(res, 200, { done: false });
+      }
       if (body?.status !== "submitted" && body?.status !== "skipped") {
         return json(res, 400, { error: "status must be submitted or skipped" });
       }

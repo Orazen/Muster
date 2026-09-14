@@ -5159,3 +5159,57 @@ sync — a lost browser loses the bookmarks, not the workspaces); no cross-devic
 roaming; the probe cannot distinguish "reachable but not Muster" from "reachable" (opaque
 no-cors by design); production pass follows the deploy.
 
+## Loop96 — brand mark in the shell, replayable tour, living avatars + two research specs (14 September 2026)
+
+**What shipped.** Four things the owner asked for after the Connected-workspaces pass:
+1. **Sidebar brand.** The browser build's fake macOS traffic lights are gone — the header now
+   wears the canonical `MusterBotMark` flower + wordmark (`Sidebar.tsx`). (The macOS build keeps
+   its inset real lights; Electron chrome untouched.)
+2. **Replay welcome tour** — the benchmark's Settings affordance. New server verb:
+   `PUT /api/me/onboarding {status:"reset"}` clears the account's gate (`clearOnboardingStatus`
+   in `onboarding-gate.ts`; "reset" is an action, never a stored status — the file still holds
+   only submitted|skipped). Client: `clearOnboardingGate` (analytics.ts) drops both localStorage
+   keys and awaits the server before reloading; General settings gains a First-run tour card
+   ("The walkthrough: engines, permissions, phone, and your first teammate.").
+3. **Living avatars (page-mascot pattern, built for 15-30 avatars at once).** New
+   `src/lib/musterbot/gaze.ts`: ONE passive `pointermove` + ONE shared rAF writing `--mx/--my`
+   on documentElement (viewport vector) and per `[data-gaze]` element (exact convergent vector,
+   read-then-write passes, no thrash), gated by `(hover:hover) and (pointer:fine)` and
+   prefers-reduced-motion (live MediaQueryList watchers). `FlowerBot` moved pointer-gaze out of
+   the JS transform into a dedicated `.flower-bot__gaze` CSS layer (pose and pointer never share
+   a transform slot; the caller-pinned `gaze` prop now wins via inline custom properties), gained
+   `data-gaze` + per-instance blink-phase desync (`--bot-blink-seed` hash) and size-scaled gaze
+   ranges; `.bot-host:active` plays a chin-pivoted pop squash (page-mascot's boop, CSS-only);
+   `AgentAvatar` wraps every character in one `.bot-host` span carrying the `--bot-gaze-on`
+   kill-switch, so the ~20 render sites stayed untouched; StarTeammate inherits for free;
+   installed once from `App.tsx`.
+4. **Two research specs landed in docs/plans**: `landing-redesign-spec-2026-09-14.md` (benchmark
+   marketing DNA → Muster landing, 3 slices, token deltas, proposed copy, evidence citations) and
+   `muster-store-spec-2026-09-14.md` (Rome OS store pattern → Muster Store: Listing/Version
+   split, deterministic packs, sha256-verified installs, the ApprovalCard-shaped confirm moment,
+   6 slices). The hi.new all-branch study fed Loop95's claim-budget; its invite/grant semantics
+   stay the planned cross-deployment transport (S6).
+
+**Verified.** `computeGaze` unit tests (centering, clamp, attenuation falloff, zero-size rect);
+mascot suites 13/13 (`flower.test.ts` structure pins still green through the DOM restructure);
+`tsc -b` + server tsc clean; oxlint 0 errors on all ten touched files (the one remaining warning
+is the pre-existing `server/index.ts` spread). Browser pass: sidebar shows the flower + wordmark
+(fake dots gone), avatars' eyes track the cursor (per-element `--mx` updates on pointermove, the
+`.flower-bot__gaze` layer carries a live transform), Settings → General shows the First-run tour
+card, and the reset verb demonstrably rewrote the onboarding gate file.
+
+**Incident (disclosed, cleaned).** The scratch rig booted with `MUSTER_DIR=…`, which the bundled
+server does NOT read — `server/config.ts:160-161` isolates rigs via `OMB_DATA_DIR`. The rig
+therefore served the operator's real `~/.muster` on :28850, and the profile/tour tests wrote
+there: a `social.json` (two local profiles) was created and the onboarding gate was cleared once.
+Both artifacts were removed/restored (social.json deleted; the gate file now holds the account's
+own `skipped`), the rig was killed, and the desktop build in use predates the social layer, so
+nothing was ever externally reachable (loopback, single user). The tour-replay click was
+re-verified only server-side on desktop (the client gate effect requires a signed-in `user`, so
+the wizard re-show is a web-mode behavior — the production web pass below is the real check).
+
+**Not verified / not claimed.** BlobBot/lottie characters don't consume the gaze variables yet
+(phase 2 of the tracker plan); no per-avatar convergence on unregistered surfaces (they get the
+viewport vector by inheritance); the wizard re-show and poke squash await the production web pass;
+no security claim.
+

@@ -32,6 +32,7 @@ import { api, useStore, formatTime, visibleMessages, type Bot, type Group } from
 
 import { AgentAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
+import { MusterBotMark } from "@/lib/musterbot/MusterBotMark";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 import { downloadAllBots } from "@/lib/team-files";
@@ -949,7 +950,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
       )}
     >
-      {/* macOS owns inset traffic lights; Linux/Windows use native chrome. */}
+      {/* macOS owns inset traffic lights; the browser wears the brand. */}
       <div
         className="flex items-center justify-between px-4 pt-3.5 pb-1"
         // SAFETY: Electron honors the non-standard -webkit-app-region drag
@@ -960,9 +961,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           <div className="w-14" />
         ) : browser ? (
           <div className="flex items-center gap-2">
-            <span className="size-3 rounded-full bg-[#ff5f57]" />
-            <span className="size-3 rounded-full bg-[#febc2e]" />
-            <span className="size-3 rounded-full bg-[#28c840]" />
+            <MusterBotMark size={22} label="Muster" />
+            <span className="text-[15px] font-semibold tracking-tight text-ink">Muster</span>
           </div>
         ) : <div />}
         <div

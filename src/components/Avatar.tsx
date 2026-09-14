@@ -229,6 +229,8 @@ function AgentAvatarComponent(
   }
 
   if (character === "flower") {
+    // pointer-follow is the CSS-variable gaze tracker's job (data-gaze on
+    // the FlowerBot root); only a caller-PINNED gaze rides the prop.
     return (
       <FlowerBot
         state={motionState ?? state}
@@ -236,7 +238,7 @@ function AgentAvatarComponent(
         size={size}
         label={label}
         animated={animated}
-        gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
+        gaze={gaze}
       />
     );
   }
@@ -288,7 +290,23 @@ function AgentAvatarComponent(
   );
 }
 
-export const AgentAvatar = memo(forwardRef(AgentAvatarComponent));
+const AgentAvatarInner = forwardRef(AgentAvatarComponent);
+
+/** Every avatar lives inside a .bot-host: the gaze kill-switch (who may
+ * track the cursor at all) and the CSS hook for the poke squash hang here,
+ * so the ~20 render sites stay untouched. */
+export const AgentAvatar = memo(forwardRef(function AgentAvatar(props: AgentAvatarProps, ref: React.Ref<AgentAvatarHandle>) {
+  // SAFETY: CSS custom properties are outside React's style typings; the
+  // value is a 0|1 number consumed only as a CSS variable.
+  const hostStyle = {
+    "--bot-gaze-on": props.trackPointer !== false && props.animated !== false ? 1 : 0,
+  } as React.CSSProperties;
+  return (
+    <span className="bot-host inline-flex shrink-0" style={hostStyle}>
+      <AgentAvatarInner {...props} ref={ref} />
+    </span>
+  );
+}));
 
 export function InitialsAvatar({
   initials,

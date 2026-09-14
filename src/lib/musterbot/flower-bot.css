@@ -30,8 +30,44 @@
   transform-origin: center;
 }
 
+/* Gaze layer — the sole consumer of the tracker's --mx/--my (see gaze.ts).
+ * It lives between the eye anchor (so the vector rides the anchor's -4°
+ * tilt, left and right spreading apart together) and the pose layer (so
+ * pointer and expression never share a transform slot). 120ms linear keeps
+ * it under the 300ms pose transition: the eye never lags the cursor
+ * noticeably, and pose morphs stay smooth. */
+.flower-bot__gaze {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: translate(
+    calc(var(--mx, 0) * var(--bot-gaze-on, 1) * var(--bot-gaze-range-x, 7) * 1px),
+    calc(var(--my, 0) * var(--bot-gaze-on, 1) * var(--bot-gaze-range-y, 5) * 1px)
+  );
+  transition: transform 120ms linear;
+}
+
+/* Poke reaction: a chin-pivoted squash, page-mascot style, on its own
+ * layer above the pose body so nothing overrides anything. */
+.flower-bot__pop {
+  transform-box: view-box;
+  transform-origin: 50% 78%;
+}
+.bot-host:active .flower-bot__pop {
+  animation: flower-bot-pop 420ms linear;
+}
+
+@keyframes flower-bot-pop {
+  0%, 100% { transform: scale(1, 1); }
+  18% { transform: scale(1.1, 0.86); }
+  45% { transform: scale(0.95, 1.08); }
+  72% { transform: scale(1.03, 0.97); }
+}
+
 .flower-bot[data-animated="true"] .flower-bot__eyelid {
   animation: flower-bot-blink 5.7s ease-in-out infinite;
+  /* phase-shift the shared keyframe per instance so a roster never blinks
+   * in army lockstep; the seed is a deterministic hash set at render */
+  animation-delay: calc(var(--bot-blink-seed, 0) * -5.7s);
 }
 
 /* Float animates the path child, not the body group — a CSS animation on
@@ -58,6 +94,10 @@
   .flower-bot *::before {
     animation: none !important;
     transition: none !important;
+  }
+  /* belt-and-braces beside the tracker's own gate: eyes rest centered */
+  .flower-bot__gaze {
+    transform: none !important;
   }
 }
 
