@@ -348,6 +348,7 @@ export interface InstanceInfo {
 
 export type AppSettingsSection =
   | "general"
+  | "workspaces"
   | "brain"
   | "appearance"
   | "connections"

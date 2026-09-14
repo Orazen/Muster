@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Brain, Coins, CreditCard, Download, KeyRound, Monitor, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
+import { Brain, Building2, Coins, CreditCard, Download, KeyRound, Monitor, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
@@ -21,6 +21,7 @@ import { VaultSection } from "./VaultSection";
 import { BillingSection } from "./BillingSection";
 import { VoiceSettings } from "./VoiceSettings";
 import { ProvidersSection } from "./ProvidersSection";
+import { ConnectedWorkspacesSection } from "./ConnectedWorkspacesSection";
 import { McpServersSection } from "./McpServersSection";
 import { AuditPanel } from "./AuditPanel";
 import { WhyPanel } from "./WhyPanel";
@@ -30,6 +31,7 @@ import "./settings-modal.css";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User; keywords: string[] }> = [
   { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "account", "updates", "turn cap", "diagnostics"] },
+  { id: "workspaces", label: "Connected workspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "connect", "pair", "switch", "local", "address"] },
   { id: "brain", label: "Brain", icon: Brain, keywords: ["brain", "team context", "shared knowledge", "memory", "brief", "goals"] },
   { id: "appearance", label: "Appearance", icon: Palette, keywords: ["skin", "theme", "colors", "dark mode"] },
   { id: "connections", label: "Connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "connected apps", "opensandbox", "muster cloud"] },
@@ -671,6 +673,7 @@ export function SettingsModal() {
                 </Card>
               </>
             )}
+            {section === "workspaces" && <ConnectedWorkspacesSection />}
             {section === "general" && (
               <>
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">

@@ -5131,3 +5131,31 @@ two-owner consent flow is proven over the harness's real HTTP, not yet between t
 accounts; no moderation/flag queue (S10), no posts/feed (S5), no bot-driven social tools (S6) —
 those are the next slices; no security claim beyond the named tests.
 
+## Loop95 — Connected workspaces: the web-app twin of the desktop workspace switcher (14 September 2026)
+
+**What shipped.** A "Connected workspaces" section in App settings, laid out to the benchmark
+desktop's design (intro line → "Your workspaces" card with per-row icon/name/origin, Current
+check or Switch, Forget trash → "Connect hosted workspace" card with address-or-pairing-link
+field, optional name, helper copy, a "Need a pairing link?" `<details>` carrying
+`node cli/muster.mjs pair`, error alert, spinner Connect button). `src/lib/workspaces.ts` owns
+the rules: the list is a per-account browser bookmark (localStorage; switching is plain
+navigation — the other deployment owns its session); validation refuses http, localhost,
+dotless hosts, `.local/.internal/.lan/.home` suffixes, and every private/reserved/IPv6 literal
+(same family the browser-panel navigation guard refuses); a `muster://pair?address=…` deep link
+resolves to its address parameter and carries the code through to the target's `/pair#CODE`.
+Reachability is a browser-side no-cors probe of `/api/health` — the server never fetches user
+input. Cap 12; dedupe by origin.
+
+**Verified.** 7 unit tests (`src/lib/workspaces.test.ts` — validation classes, dedupe, per-account
+isolation, corrupt storage, switch target). `npx tsc -b` clean, oxlint 0 errors on the four
+touched/new files. Browser E2E on the scratch rig: section renders in the nav (searching "pair"
+filters to Connected workspaces + Companion), a private http address is refused with the honest
+inline alert, `https://muster.today` saves with name + Switch row after a successful probe,
+desktop 1280 and mobile 390 screenshots captured (nav collapses to the Section dropdown, zero
+overflow inside the dialog).
+
+**Not verified / not claimed.** The saved-workspace list is deliberately browser-local (no server
+sync — a lost browser loses the bookmarks, not the workspaces); no cross-device workspace
+roaming; the probe cannot distinguish "reachable but not Muster" from "reachable" (opaque
+no-cors by design); production pass follows the deploy.
+
