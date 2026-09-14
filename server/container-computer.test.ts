@@ -497,6 +497,39 @@ describe("containerComputerAction", () => {
     );
   });
 
+  it("refuses to run the desktop on a container machine smaller than its memory floor", async () => {
+    // The field failure: a podman machine created with the old 2 GiB default
+    // starts the 4 GiB desktop and OOM-kills it, surfacing as a mysterious
+    // "desktop failed to start". The run guard must name the resize command.
+    const fake = runner({
+      "/usr/bin/which docker": new Error("missing"),
+      "/usr/bin/which podman": "podman\n",
+      "podman info --format {{.ServerVersion}}": "6.1.1\n",
+      "podman info --format {{.Host.MemTotal}}": "2147483648\n",
+      [`podman image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`podman inspect ${CONTAINER}`]: new Error("missing container"),
+    });
+
+    await expect(containerComputerAction("run", fake.run, "darwin")).rejects.toThrow(
+      /2 GiB of memory.*podman machine set --memory 8192/s,
+    );
+    expect(fake.calls.some((call) => call.startsWith("podman run "))).toBe(false);
+  });
+
+  it("proceeds with the run when the machine has enough memory", async () => {
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      "docker info --format {{.Host.MemTotal}}": "8589934592\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: new Error("missing container"),
+    });
+
+    await containerComputerAction("run", fake.run, "linux");
+    expect(fake.calls.some((call) => call.startsWith("docker run "))).toBe(true);
+  });
+
   it("runtimeStart no-ops without touching the runner when the daemon is already up", async () => {
     const fake = runner({
       "/usr/bin/which docker": "docker\n",

@@ -5224,3 +5224,32 @@ quick-start, www README) now reads `muster.today` — verified every /downloads 
 (JSON-LD sameAs, footer credit) are deliberately kept. Landing re-rendered locally (approval
 simulator + hero intact, download links point at muster.today).
 
+## Loop97 — Local VM: why `podman pull muster/cua-local-vm` can never work, + a machine-RAM guard (14 September 2026)
+
+**The report.** A tester (separate Mac, podman 6.1.1) pasted a terminal where
+`podman pull muster/cua-local-vm:driver-0.20.0-v3` fails with docker.io "requested access to the
+resource is denied" and `podman search muster/...` fails DNS. Diagnosis from `server/container-computer.ts`:
+that tag is **not a published image** — it is built locally by the Prepare action
+(`prepareManagedImage`): pull the public digest-pinned base `docker.io/trycua/xfce-cua@sha256:274e…`
+(manifest re-verified 200 today) → generate the Dockerfile (SHA-256-verified Cua-driver wheel + labels)
+→ `build -t muster/cua-local-vm:driver-0.20.0-v3`. Pulling the derived tag from Docker Hub is expected
+to be denied; the correct user path is the app's Prepare button (or the displayed `pull` command, which
+already names the BASE image, not the derivative). No app-side pull bug existed.
+
+**The real blocker found in the same log:** their podman machine has **2 GiB memory** while the desktop
+runs under a 4 GiB ceiling — `run` would start the container and OOM the desktop, surfacing as a
+mysterious "desktop failed to start". Fixed defensively: `containerComputerAction("run")` now probes
+`<runtime> info --format {{.Host.MemTotal}}` and, below the floor, throws a 409 naming the exact
+resize command (`podman machine stop && podman machine set --memory 8192 && podman machine start`;
+Docker/colima variant for docker runtimes). The probe fails-safe two ways: runtimes that reject the
+format key, and implausible answers below 256 MiB (the desktop-isolation fake answers every `docker
+info` with "29" — a version string must never read as a 29-byte machine; the suite caught this and
+the sanity floor fixes both the test and the production edge).
+
+**Verified.** `server/container-computer.test.ts` + `server/desktop-isolation.test.ts` 57/57 (2 new
+guard tests: small-machine refusal asserts the message + that no `podman run` was attempted; 8-GiB
+machine proceeds); server tsc clean; oxlint 0/0; full suite green at commit time.
+
+**Not verified.** No live podman run on the tester's machine (fix instructions given there directly);
+the probe's behavior on Apple `container` was reasoned, not executed.
+

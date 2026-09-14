@@ -762,6 +762,22 @@ async function ensureVmWorkspace(platform: NodeJS.Platform, workspaceDir: string
   if (platform !== "win32") await chmod(workspaceDir, 0o700);
 }
 
+/** Total memory visible to the container daemon (the host, or its VM).
+ * null when the probe is unavailable OR implausible (a runtime answering a
+ * version string where bytes were expected must never look like a 29-byte
+ * machine and block a working desktop) — the run guard stays silent in both
+ * cases rather than blocking a setup it cannot actually read. */
+async function hostMemoryBytes(runtime: Runtime, runner: CommandRunner): Promise<number | null> {
+  try {
+    const { stdout } = await runner(runtime, ["info", "--format", "{{.Host.MemTotal}}"]);
+    const bytes = Number(stdout.trim());
+    const SANE_MINIMUM = 256 * 1024 * 1024; // no real daemon VM is smaller
+    return Number.isSafeInteger(bytes) && bytes >= SANE_MINIMUM ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
 async function prepareManagedImage(runtime: Runtime, runner: CommandRunner): Promise<void> {
   await runner(runtime, ["pull", BASE_IMAGE], 10 * 60_000);
   const context = await mkdtemp(join(tmpdir(), "muster-cua-image-"));
@@ -794,6 +810,26 @@ export async function containerComputerAction(
   }
 
   if (!before.daemonUp) throw Object.assign(new Error(before.problem ?? `${runtime} is not running`), { status: 409 });
+
+  // The desktop runs under a 4 GiB ceiling, but a podman/docker VM created
+  // with the old 2 GiB default can't even honor `--memory 4g` — the container
+  // starts and the desktop OOMs, which surfaces as a mysterious "failed to
+  // start". Fail early with the exact resize command instead. Skipped when
+  // the probe is unavailable (a runtime that rejects the format key).
+  if (action === "run") {
+    const hostMem = await hostMemoryBytes(runtime, runner);
+    if (hostMem !== null && hostMem < MEMORY_BYTES) {
+      const gib = Math.round(hostMem / 1024 ** 3);
+      const fix =
+        runtime === "podman"
+          ? "podman machine stop && podman machine set --memory 8192 && podman machine start"
+          : "raise the Docker/colima VM memory to at least 8 GiB (Docker Desktop: Settings → Resources, or colima start --memory 8)";
+      throw Object.assign(
+        new Error(`The ${runtime} machine has about ${gib} GiB of memory, but the desktop needs at least 4 GiB — ${fix}`),
+        { status: 409 },
+      );
+    }
+  }
 
   if (action === "run" && before.container !== "missing") {
     // The classic trap: a previous container still holds the viewer port
