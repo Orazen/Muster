@@ -693,10 +693,13 @@ raised CTA, footer glow).
 
 Migration phases (one loop each; mark ✔ with the commit hash):
 
-- **G1 chat surface** — composer, model-selector, tool-calls-section,
-  slash-command-dropdown, compact-markdown, code-block. Highest value:
-  this is what users look at all day, and GAIA is purpose-built for
-  agent UIs.
+- ✔ **G1a chat surface — composer** (531f97b) — GAIA two-row bubble layout
+  with circular toolbar chips; all Muster composer behavior preserved.
+- ✔ **G1b tool activity** (0562d9a) — tool-calls-section header pattern:
+  borderless line, stacked ±8° family glyphs, +N overflow; waterfall and
+  status chips kept inside.
+- **G1c remaining chat surface** — model-selector, slash-command-dropdown
+  (the /commands palette, also Phase U4), compact-markdown/code-block.
 - **G2 shell & nav** — navbar-menu (app header), nested-menu (row context
   menus), search-results-tabs (sidebar search), notification-card.
 - **G3 landing marketing** — holo-card, grain-overlay, pricing-card,
