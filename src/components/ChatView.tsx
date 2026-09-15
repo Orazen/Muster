@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 
 import { ChatFindBar } from "./ChatFindBar";
+import { buildRunWaterfall, formatStepDuration, stepLabel } from "@/lib/run-waterfall";
 import { ConversationHeader } from "./ConversationHeader";
 import { TaskUsageStats } from "./TaskUsageStats";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
@@ -560,6 +561,16 @@ function ToolRunGroup({ items }: { items: Message[] }) {
   // Zero-length runs just skip the duration — "Worked for 0s" is noise.
   const span = items.length > 1 ? Math.max(0, (items[items.length - 1].at ?? 0) - (items[0].at ?? 0)) : 0;
   const duration = span > 999 ? `Worked for ${formatRunDuration(span)} · ` : "";
+  // traceroot-style waterfall: each step's bar is the wait its report ended.
+  // Pure module (src/lib/run-waterfall.ts) so the geometry is contract-tested;
+  // null for runs too short to have a story.
+  const waterfall = open
+    ? buildRunWaterfall(
+        items
+          .filter((m) => m.tool)
+          .map((m) => ({ id: m.id, name: m.tool!.name, ok: m.tool!.ok, at: m.at ?? 0 })),
+      )
+    : null;
   return (
     <div className="flex justify-start">
       <div className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-hairline/40 bg-panel">
@@ -582,6 +593,37 @@ function ToolRunGroup({ items }: { items: Message[] }) {
         </button>
         {open && (
           <div className="flex flex-col gap-1 border-t border-hairline/40 p-2">
+            {waterfall && (
+              <div
+                className="mb-1 flex flex-col gap-[3px] rounded-lg bg-inset/60 px-2.5 py-2"
+                role="img"
+                aria-label={`Run timeline: ${waterfall.steps.length} steps over ${formatStepDuration(waterfall.totalMs)}`}
+              >
+                {waterfall.steps.map((step) => (
+                  <div key={step.id} className="flex items-center gap-2">
+                    <span className="w-[92px] shrink-0 truncate text-[10.5px] text-ink-secondary" title={step.name}>
+                      {stepLabel(step.name)}
+                    </span>
+                    <span className="relative h-[7px] min-w-0 flex-1 overflow-hidden rounded-full bg-hairline/25">
+                      <span
+                        className={cn(
+                          "absolute inset-y-0 rounded-full",
+                          step.inProgress
+                            ? "bg-accent/45"
+                            : step.ok === false
+                              ? "bg-danger/60"
+                              : "bg-success/55",
+                        )}
+                        style={{ left: `${step.leftPct}%`, width: `${step.widthPct}%` }}
+                      />
+                    </span>
+                    <span className="w-[52px] shrink-0 text-right text-[10.5px] tabular-nums text-ink-secondary">
+                      {step.durationMs > 0 ? formatStepDuration(step.durationMs) : "—"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             {items.map((m) => (
               <ActivityChip key={m.id} message={m} />
             ))}
