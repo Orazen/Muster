@@ -12,11 +12,14 @@ import {
   IMAGE,
   IMAGE_LAYER_LABEL,
   IMAGE_LAYER_VERSION,
+  LEGACY_CONTAINER,
   MANAGED_LABEL,
+  SHARED_LOCAL_VM_TARGET,
   VM_WORKSPACE_DIR,
   VM_WORKSPACE_GUEST,
   WORKSPACE_LABEL,
   computerProxyEnv,
+  conciseProbeError,
   containerComputerAction,
   containerComputerMcp,
   containerComputerScreenshot,
@@ -92,7 +95,7 @@ const READY_INSPECT = {
     },
     Env: ["VNC_PW=secret123"],
   },
-  State: { Running: true },
+  State: { Running: true } as { Running: boolean; StartedAt?: string },
   Image: "sha256:managed-image-id",
   HostConfig: {
     Memory: 4 * 1024 * 1024 * 1024,
@@ -616,8 +619,8 @@ describe("setupCommands", () => {
 
   it("publishes only the password-protected viewer and only on loopback", () => {
     const command = setupCommands("podman", "linux").run!;
-    expect(command).toContain("-p 127.0.0.1:6080:6901");
-    expect(command).not.toContain(" -p 6080:6901");
+    expect(command).toContain(`-p 127.0.0.1:${SHARED_LOCAL_VM_TARGET.viewerPort}:6901`);
+    expect(command).not.toContain(` -p ${SHARED_LOCAL_VM_TARGET.viewerPort}:6901`);
     expect(command).not.toContain("5900");
     // The displayed command carries the target's REAL stored viewer secret
     // (never the CHANGE_ME placeholder and never an empty/weak value), so
@@ -666,5 +669,157 @@ describe("setupCommands", () => {
 
   it("offers the supported Podman Desktop installer on Windows", () => {
     expect(setupCommands(null, "win32").install).toBe("winget install -e --id RedHat.Podman-Desktop");
+  });
+});
+
+describe("Local VM first-run field bugs", () => {
+  /** Runner whose `docker run` fails the first `failFirst` attempts exactly,
+   * standing in for Docker Desktop's VirtioFS lag on a brand-new folder. */
+  function flakyRunRunner(failFirst: number, failMessage: string) {
+    const calls: string[] = [];
+    let runAttempts = 0;
+    const responses: Record<string, string | Error> = {
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: new Error("missing container"),
+    };
+    const run: CommandRunner = async (command, args) => {
+      const key = [command, ...args].join(" ");
+      calls.push(key);
+      if (key.startsWith("docker run ")) {
+        runAttempts += 1;
+        if (runAttempts <= failFirst) throw new Error(failMessage);
+        return { stdout: "container-id\n" };
+      }
+      const response = responses[key];
+      if (response instanceof Error || response === undefined) {
+        throw response ?? new Error(`unexpected command: ${key}`);
+      }
+      return { stdout: response };
+    };
+    return { calls, run, attempts: () => runAttempts };
+  }
+
+  it("retries a first docker run when the fresh workspace folder isn't visible to the VM yet", async () => {
+    const fake = flakyRunRunner(
+      1,
+      'Command failed: docker run -d --name x\ndocker: Error response from daemon: invalid mount config for type "bind": bind source path does not exist: /x/vm-home',
+    );
+    await containerComputerAction("run", fake.run, "linux");
+    expect(fake.attempts()).toBe(2);
+    // The legacy-singleton probe ran (and found nothing) before the retry.
+    expect(fake.calls).toContain(`docker inspect ${LEGACY_CONTAINER}`);
+  });
+
+  it("refuses the workspace race politely after the retries, without echoing the run command", async () => {
+    const fake = flakyRunRunner(
+      9,
+      'Command failed: docker run -d --name x -e VNC_PW=sup3rsecret\ndocker: Error response from daemon: invalid mount config for type "bind": bind source path does not exist: /x/vm-home',
+    );
+    const error = await containerComputerAction("run", fake.run, "linux").catch((e) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toMatch(/could not see the durable workspace/);
+    expect(error.message).not.toContain("sup3rsecret");
+    expect(error.message).not.toContain("Command failed:");
+    expect(fake.attempts()).toBe(4);
+  });
+
+  it("maps a viewer-port collision to an actionable message free of the secret", async () => {
+    const fake = flakyRunRunner(
+      9,
+      "Command failed: docker run -d --name x -e VNC_PW=sup3rsecret\ndocker: Error response from daemon: driver failed programming external connectivity: Bind for 127.0.0.1:6080 failed: port is already allocated",
+    );
+    const error = await containerComputerAction("run", fake.run, "linux").catch((e) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toMatch(/viewer port \d+ is already in use/);
+    expect(error.message).not.toContain("sup3rsecret");
+    expect(error.message).not.toContain("Command failed:");
+    // No pointless retry loop for a deterministic collision.
+    expect(fake.attempts()).toBe(1);
+  });
+
+  it("replaces the legacy singleton VM owned by this install before running the new one", async () => {
+    const legacyInspect = JSON.stringify([
+      { Mounts: [{ Type: "bind", Source: VM_WORKSPACE_DIR, Destination: VM_WORKSPACE_GUEST }] },
+    ]);
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: new Error("missing container"),
+      [`docker inspect ${LEGACY_CONTAINER}`]: legacyInspect,
+      [`docker rm -f ${LEGACY_CONTAINER}`]: "",
+    });
+    await containerComputerAction("run", fake.run, "linux");
+    const rmAt = fake.calls.indexOf(`docker rm -f ${LEGACY_CONTAINER}`);
+    const runAt = fake.calls.findIndex((c) => c.startsWith("docker run "));
+    expect(rmAt).toBeGreaterThanOrEqual(0);
+    expect(rmAt).toBeLessThan(runAt);
+  });
+
+  it("leaves a legacy VM mounted to another install's workspace untouched", async () => {
+    const legacyInspect = JSON.stringify([
+      { Mounts: [{ Type: "bind", Source: "/Users/someone-else/.muster/vm-home", Destination: VM_WORKSPACE_GUEST }] },
+    ]);
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: new Error("missing container"),
+      [`docker inspect ${LEGACY_CONTAINER}`]: legacyInspect,
+    });
+    await containerComputerAction("run", fake.run, "linux");
+    expect(fake.calls).not.toContain(`docker rm -f ${LEGACY_CONTAINER}`);
+    expect(fake.calls.some((c) => c.startsWith("docker run "))).toBe(true);
+  });
+
+  it("treats 'daemon is not running' on a young container as booting, not failure", async () => {
+    const young = new Date(Date.now() - 5_000).toISOString();
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: readyInspect({ State: { Running: true, StartedAt: young } }),
+      [versionProbe]: `cua-driver ${CUA_DRIVER_VERSION}\n`,
+      [statusProbe]: new Error(`Command failed: docker exec -u cua ${CONTAINER} ${CUA_EXECUTABLE} status --socket ${CUA_SOCKET}\nCua Driver daemon is not running`),
+    });
+    const status = await containerComputerStatus(fake.run);
+    expect(status.desktop_starting).toBe(true);
+    expect(status.desktop_error).toBeNull();
+    expect(status.ready).toBe(false);
+    expect(status.problem).toMatch(/starting/i);
+    expect(status.problem).not.toContain("docker exec");
+  });
+
+  it("still reports real desktop failures after the grace window — minus the echoed command and secret", async () => {
+    const old = new Date(Date.now() - 10 * 60_000).toISOString();
+    const errorLog = `docker exec ${CONTAINER} tail -n 4 /var/log/supervisor/cua-driver.error.log`;
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: readyInspect({ State: { Running: true, StartedAt: old } }),
+      [versionProbe]: `cua-driver ${CUA_DRIVER_VERSION}\n`,
+      [statusProbe]: new Error(`Command failed: docker exec -e VNC_PW=abc123 ${CONTAINER} ${CUA_EXECUTABLE} status --socket ${CUA_SOCKET}\nCua Driver daemon is not running`),
+      [errorLog]: new Error("no log"),
+    });
+    const status = await containerComputerStatus(fake.run);
+    expect(status.desktop_starting).toBe(false);
+    expect(status.desktop_error).toBe("Cua Driver daemon is not running");
+    expect(status.problem).toBe("The Local VM desktop failed to start: Cua Driver daemon is not running");
+    expect(status.problem).not.toContain("Command failed");
+    expect(status.problem).not.toContain("VNC_PW");
+  });
+
+  it("conciseProbeError drops the command echo and redacts secrets", () => {
+    expect(conciseProbeError("Command failed: docker run -e VNC_PW=secret123 img\ndocker: nope")).toBe("docker: nope");
+    expect(conciseProbeError("single line")).toBe("single line");
+    expect(conciseProbeError("x VNC_PW=secret123 y")).toContain("VNC_PW=•");
   });
 });

@@ -112,12 +112,17 @@ describe("desktop isolation configuration", () => {
 });
 
 describe("desktop targets", () => {
-  it("keeps the historical shared identity byte-for-byte", () => {
+  it("scopes the shared identity to this install, away from the legacy singleton", () => {
     expect(SHARED_LOCAL_VM_TARGET.key).toBe("shared");
     expect(SHARED_LOCAL_VM_TARGET.containerName).toBe(CONTAINER);
+    // Per-install digest suffix: two Muster data directories on one machine
+    // get distinct containers instead of fighting over `muster-computer`.
+    expect(CONTAINER).toMatch(/^muster-computer-[0-9a-f]{8}$/);
     expect(SHARED_LOCAL_VM_TARGET.workspaceDir).toBe(VM_WORKSPACE_DIR);
-    // The shared viewer keeps its fixed port for compatibility.
-    expect(SHARED_LOCAL_VM_TARGET.viewerPort).toBe(6080);
+    // The per-install viewer sits in a band disjoint from the legacy 6080 and
+    // from the 6081-6208 per-bot range.
+    expect(SHARED_LOCAL_VM_TARGET.viewerPort).toBeGreaterThanOrEqual(6209);
+    expect(SHARED_LOCAL_VM_TARGET.viewerPort).toBeLessThan(6273);
     expect(PER_BOT_VIEWER_PORT_BASE).toBe(6081);
   });
 
@@ -148,7 +153,7 @@ describe("run arguments", () => {
     expect(args).toContain("--memory 4g --memory-swap 4g");
     expect(args).toContain("--cpus 2");
     expect(args).toContain("--pids-limit 512");
-    expect(args).toContain("-p 127.0.0.1:6080:6901");
+    expect(args).toContain(`-p 127.0.0.1:${SHARED_LOCAL_VM_TARGET.viewerPort}:6901`);
     expect(args).toContain(VM_WORKSPACE_DIR);
   });
 

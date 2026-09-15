@@ -38,7 +38,16 @@ export const IMAGE_REPOSITORY = "muster/cua-local-vm";
 export const IMAGE_LAYER_VERSION = "3";
 export const IMAGE_LAYER_LABEL = "com.muster.image-layer";
 export const IMAGE = `${IMAGE_REPOSITORY}:driver-${CUA_DRIVER_VERSION}-v${IMAGE_LAYER_VERSION}`;
-export const CONTAINER = "muster-computer";
+// The pre-scoping singleton name. Only kept to recognize (and replace) VMs
+// an older Muster created; new containers never use it.
+export const LEGACY_CONTAINER = "muster-computer";
+// Two Muster instances on one machine — packaged app beside a dev server, or
+// several rigs — used to fight over the one `muster-computer` name and the
+// one 6080 viewer port, so only the first could ever run a Local VM. The
+// install-scoped suffix is a digest of the resolved DATA_DIR: stable across
+// restarts, no coordination state, unique per data directory.
+const installDigest = createHash("sha256").update(resolve(DATA_DIR)).digest("hex");
+export const CONTAINER = `${LEGACY_CONTAINER}-${installDigest.slice(0, 8)}`;
 export const MANAGED_LABEL = "com.muster.local-vm";
 export const DRIVER_LABEL = "com.muster.cua-driver";
 export const BASE_IMAGE_LABEL = "com.muster.cua-base";
@@ -58,7 +67,17 @@ export type LifecycleAction = "pull" | "run" | "start" | "stop" | "remove" | "ru
 export const LIMITS_LABEL = "com.muster.resource-limits";
 
 const INTERNAL_VIEWER_PORT = 6901;
-const HOST_VIEWER_PORT = 6080;
+// Historical fixed host port for the pre-scoping singleton VM. New VMs get a
+// per-install port so co-located instances don't collide.
+export const LEGACY_HOST_VIEWER_PORT = 6080;
+// Per-bot viewers fan out over 6081-6208; per-install shared viewers occupy
+// a disjoint band above it (6209-6272). Digest-derived offsets need no
+// allocation state and survive restarts. Two installs whose digests happen to
+// share an offset still collide — with 64 slots that's rare, and the run
+// error is mapped to a friendly port-in-use message if it happens.
+const SHARED_VIEWER_PORT_BASE = 6209;
+const SHARED_VIEWER_PORT_RANGE = 64;
+const sharedViewerOffset = parseInt(installDigest.slice(20, 24), 16) % SHARED_VIEWER_PORT_RANGE;
 const MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
 const NANO_CPUS = 2_000_000_000;
 const PIDS_LIMIT = 512;
@@ -79,13 +98,13 @@ export const SHARED_LOCAL_VM_TARGET: LocalVmTarget = {
   key: "shared",
   containerName: CONTAINER,
   workspaceDir: VM_WORKSPACE_DIR,
-  viewerPort: HOST_VIEWER_PORT,
+  viewerPort: SHARED_VIEWER_PORT_BASE + sharedViewerOffset,
   label: "shared",
 };
 
-// Per-bot viewers fan out above the fixed shared port; a digest-derived
+// Per-bot viewers fan out above the legacy shared port; a digest-derived
 // offset needs no allocation state and survives server restarts.
-export const PER_BOT_VIEWER_PORT_BASE = HOST_VIEWER_PORT + 1;
+export const PER_BOT_VIEWER_PORT_BASE = LEGACY_HOST_VIEWER_PORT + 1;
 export const PER_BOT_VIEWER_PORT_RANGE = 128;
 
 /** Derive a bot's desktop identities from a SHA-256 digest, never from its
@@ -227,6 +246,9 @@ export interface ContainerComputerStatus {
   security: "hardened" | "unsafe" | "unknown";
   persistence: "durable" | "unsafe" | "unknown";
   desktopReady: boolean;
+  /** True while a young container's Cua driver daemon is still booting —
+   * distinct from desktop_error, which means the desktop genuinely failed. */
+  desktop_starting: boolean;
   desktop_error: string | null;
   ready: boolean;
   problem: string | null;
@@ -254,6 +276,7 @@ function emptyStatus(platform: NodeJS.Platform, target: LocalVmTarget): Containe
     security: "unknown",
     persistence: "unknown",
     desktopReady: false,
+    desktop_starting: false,
     desktop_error: null,
     ready: false,
     problem: "Install a supported container runtime first",
@@ -279,6 +302,8 @@ function statusProblem(status: ContainerComputerStatus): string | null {
   if (status.security === "unsafe") return "The existing Local VM is missing safety limits; recreate it";
   if (status.persistence === "unsafe") return "The existing Local VM is missing its durable workspace; recreate it";
   if (status.container === "stopped") return "The Local VM is stopped — start it again from the previous step";
+  if (status.desktop_starting)
+    return "Starting the Local VM desktop — Cua Driver boots with it and is usually ready within a few seconds";
   if (status.desktop_error) return `The Local VM desktop failed to start: ${status.desktop_error}`;
   if (!status.desktopReady) return "The Local VM started, but Cua Driver is not ready yet";
   return null;
@@ -299,6 +324,20 @@ function containerLabelsMatch(labels: Record<string, string> | undefined): boole
 
 function normalizeImageId(id: string | undefined): string | null {
   return id?.trim().replace(/^sha256:/, "") || null;
+}
+
+// Cua Driver starts with the desktop; for the first seconds of a young
+// container "daemon is not running" is normal boot progress, not a failure.
+const DESKTOP_BOOT_GRACE_MS = 90_000;
+const DAEMON_STARTING = /daemon is not running|connection refused|could not connect|no such file or directory/i;
+
+/** Keep engine output actionable and secret-free: execFile messages start
+ * with "Command failed: <the full command>", which for Local VM commands
+ * embeds the viewer password. Drop the echoed command line and redact. */
+export function conciseProbeError(raw: string): string {
+  const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+  const body = lines.length > 1 ? lines.slice(1).join(" ") : lines[0] ?? "";
+  return (body || raw).replace(/VNC_PW=\S+/gi, "VNC_PW=•").replace(/\s+/g, " ").slice(0, 320);
 }
 
 /** Apple's `container inspect` reports the image either as a bare reference
@@ -334,7 +373,7 @@ function viewerPassword(env: string[] | Record<string, string> | undefined): str
   return env?.VNC_PW || null;
 }
 
-function viewerUrl(password: string | null, hostPort = HOST_VIEWER_PORT): string {
+function viewerUrl(password: string | null, hostPort: number): string {
   const base = `http://127.0.0.1:${hostPort}/vnc.html`;
   if (!password) return base;
   const fragment = new URLSearchParams({ autoconnect: "true", resize: "scale", password });
@@ -409,6 +448,10 @@ export async function containerComputerStatus(
     // The prepared Muster derivative has not been built yet.
   }
 
+  // Container start time powers the boot grace in the probe catch below;
+  // engines that don't report it simply get no grace.
+  let containerStartedAt: number | null = null;
+
   try {
     const { stdout } = await runner(status.runtime, ["inspect", target.containerName]);
     if (status.runtime === "container") {
@@ -471,11 +514,13 @@ export async function containerComputerStatus(
           Destination?: string;
           RW?: boolean;
         }>;
-        State?: { Running?: boolean };
+        State?: { Running?: boolean; StartedAt?: string };
         Image?: string;
       }>;
       const detail = inspected[0];
       status.container = detail?.State?.Running ? "running" : "stopped";
+      const startedAtMs = detail?.State?.StartedAt ? Date.parse(detail.State.StartedAt) : Number.NaN;
+      containerStartedAt = Number.isFinite(startedAtMs) ? startedAtMs : null;
       status.network = dockerPortsAreLocal(detail?.HostConfig?.PortBindings) ? "loopback" : "unsafe";
       status.imageMatches =
         detail?.Config?.Image === IMAGE &&
@@ -546,21 +591,33 @@ export async function containerComputerStatus(
       }
       status.desktopReady = true;
     } catch (error) {
-      // An empty log means XFCE and the supervisor-owned Cua daemon are
-      // probably still starting. A real startup failure should be actionable
-      // in the panel instead of looking like an endless readiness wait.
-      status.desktop_error = error instanceof Error ? error.message.slice(0, 320) : null;
-      try {
-        const errorLog = await runner(
-          status.runtime,
-          ["exec", target.containerName, "tail", "-n", "4", "/var/log/supervisor/cua-driver.error.log"],
-          4000,
-        );
-        status.desktop_error =
-          errorLog.stdout.replace(/\s+/g, " ").trim().slice(0, 320) ||
-          status.desktop_error;
-      } catch {
-        // The log may not exist during the first seconds of container boot.
+      const raw = error instanceof Error ? error.message : String(error);
+      // A young container whose driver daemon isn't answering yet is booting,
+      // not broken — report it as progress instead of alarming the panel with
+      // a raw engine error (whose first line echoes the command). Older
+      // containers, or other failures, stay actionable: real startup failures
+      // surface the supervisor log tail in the panel rather than looking like
+      // an endless readiness wait.
+      if (
+        containerStartedAt !== null &&
+        Date.now() - containerStartedAt < DESKTOP_BOOT_GRACE_MS &&
+        DAEMON_STARTING.test(raw)
+      ) {
+        status.desktop_starting = true;
+      } else {
+        status.desktop_error = conciseProbeError(raw);
+        try {
+          const errorLog = await runner(
+            status.runtime,
+            ["exec", target.containerName, "tail", "-n", "4", "/var/log/supervisor/cua-driver.error.log"],
+            4000,
+          );
+          status.desktop_error =
+            errorLog.stdout.replace(/\s+/g, " ").trim().slice(0, 320) ||
+            status.desktop_error;
+        } catch {
+          // The log may not exist during the first seconds of container boot.
+        }
       }
     }
   }
@@ -767,6 +824,74 @@ async function ensureVmWorkspace(platform: NodeJS.Platform, workspaceDir: string
   if (platform !== "win32") await chmod(workspaceDir, 0o700);
 }
 
+// Docker Desktop's VM (VirtioFS) can take a moment to notice a just-created
+// host directory, so the first `docker run` against a brand-new vm-home
+// intermittently fails with "bind source path does not exist" even though the
+// folder exists on the host. Without a retry, the very first click of
+// "Create Local VM" on a fresh install dies with a confusing 500 and only the
+// second click works.
+const BIND_SOURCE_NOT_VISIBLE = /bind source path does not exist/i;
+const delay = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+
+/** Map raw engine failures on lifecycle actions to actionable, secret-free
+ * messages. `execFile` prepends "Command failed: <full command>", which for
+ * `run` embeds the viewer password — that string must never reach the UI. */
+function friendlyContainerError(error: unknown, runtime: Runtime, target: LocalVmTarget): Error {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (/port is already allocated|address already in use|bind for 127\.0\.0\.1/i.test(raw)) {
+    return Object.assign(
+      new Error(`The viewer port ${target.viewerPort} is already in use — close the app holding it, press Re-check, then try again`),
+      { status: 409 },
+    );
+  }
+  if (BIND_SOURCE_NOT_VISIBLE.test(raw)) {
+    return Object.assign(
+      new Error(`The container runtime could not see the durable workspace folder at ${target.workspaceDir} — check that folder's permissions and try again`),
+      { status: 500 },
+    );
+  }
+  const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+  const tail = ((lines.length > 1 ? lines.slice(1).join(" ") : lines[0] ?? "").replace(/VNC_PW=\S+/gi, "VNC_PW=•")).slice(0, 240);
+  return Object.assign(
+    new Error(`The ${runtime} command failed${tail ? `: ${tail}` : " for a reason the log did not explain"}`),
+    { status: 502 },
+  );
+}
+
+/** Replace the pre-scoping singleton VM when it belongs to THIS install —
+ * proven by its durable workspace mount pointing at this DATA_DIR's vm-home.
+ * A legacy VM owned by another install is left alone: new containers carry
+ * install-scoped names and ports and can't collide with it. */
+async function removeLegacyOwnedVm(
+  runtime: Runtime,
+  runner: CommandRunner,
+  target: LocalVmTarget,
+  platform: NodeJS.Platform,
+): Promise<void> {
+  let stdout: string;
+  try {
+    ({ stdout } = await runner(runtime, ["inspect", LEGACY_CONTAINER], 15_000));
+  } catch {
+    return; // no legacy VM — the normal case
+  }
+  try {
+    // SAFETY: engine inspect output; the shape is validated field by field and
+    // anything unparseable leaves the legacy container untouched.
+    const parsed = JSON.parse(stdout) as Array<{
+      Mounts?: Array<{ Source?: string }>;
+      configuration?: { mounts?: Array<{ source?: string }> };
+    }>;
+    const sources = [
+      ...(parsed[0]?.Mounts ?? []).map((mount) => mount.Source ?? ""),
+      ...(parsed[0]?.configuration?.mounts ?? []).map((mount) => mount.source ?? ""),
+    ];
+    if (!sources.some((source) => source && sameWorkspaceSource(source, platform, target.workspaceDir))) return;
+    await runner(runtime, ["rm", runtime === "container" ? "--force" : "-f", LEGACY_CONTAINER], 60_000);
+  } catch {
+    // Unparseable inspect or removal refused: leave the legacy VM alone.
+  }
+}
+
 /** Total memory visible to the container daemon (the host, or its VM).
  * null when the probe is unavailable OR implausible (a runtime answering a
  * version string where bytes were expected must never look like a 29-byte
@@ -871,31 +996,60 @@ export async function containerComputerAction(
   if (action === "pull") {
     await prepareManagedImage(runtime, runner);
   } else {
-    if (action === "run") await ensureVmWorkspace(platform, target.workspaceDir);
+    if (action === "run") {
+      await ensureVmWorkspace(platform, target.workspaceDir);
+      if (target.key === SHARED_LOCAL_VM_TARGET.key) {
+        await removeLegacyOwnedVm(runtime, runner, target, platform);
+      }
+    }
     const args =
       action === "run"
         ? containerRunArgs(runtime, viewerPasswordFor(target), target)
         : action === "remove"
           ? ["rm", runtime === "container" ? "--force" : "-f", target.containerName]
           : [action, target.containerName];
-    try {
-      await runner(runtime, args, 2 * 60_000);
-    } catch (error) {
-      // Guard for runtimes that reject --memory/--cpus outright (some podman
-      // roots and old docker builds): recreate once without numeric caps so a
-      // desktop still comes up. Capability drops are kept in every retry, and
-      // the original failure is surfaced when even the unbounded run refuses.
-      const limitsRejected = action === "run" && args.includes("--memory");
-      if (!limitsRejected) throw error;
+    let attempts = 0;
+    for (;;) {
+      attempts += 1;
       try {
-        await containerComputerStatus(runner, platform, target).then(async (after) => {
-          if (after.container !== "missing") {
-            await runner(runtime, ["rm", runtime === "container" ? "--force" : "-f", target.containerName], 60_000);
-          }
-        });
-        await runner(runtime, containerRunArgs(runtime, viewerPasswordFor(target), target, false), 2 * 60_000);
-      } catch {
-        throw error;
+        await runner(runtime, args, 2 * 60_000);
+        break;
+      } catch (error) {
+        if (
+          action === "run" &&
+          attempts <= 3 &&
+          BIND_SOURCE_NOT_VISIBLE.test(error instanceof Error ? error.message : String(error))
+        ) {
+          // The fresh folder isn't visible to the VM yet: let VirtioFS
+          // sync, re-ensure, and retry — a single click must not fail.
+          // Field observation: lazy share enumeration can take several
+          // seconds, so the budget goes up to ~9s (desktop boot itself
+          // takes ~30s — the user waits either way).
+          await delay(attempts * 1_500);
+          await ensureVmWorkspace(platform, target.workspaceDir);
+          continue;
+        }
+        // Guard for runtimes that reject --memory/--cpus outright (some podman
+        // roots and old docker builds): recreate once without numeric caps so a
+        // desktop still comes up. Only errors that actually mention a resource
+        // flag qualify — a port collision retried unbounded just fails twice.
+        // Capability drops are kept in every retry, and the original failure
+        // is surfaced when even the unbounded run refuses.
+        const rawError = error instanceof Error ? error.message : String(error);
+        const limitsRejected =
+          action === "run" && args.includes("--memory") && /memory|cpus|pids/i.test(rawError);
+        if (!limitsRejected) throw friendlyContainerError(error, runtime, target);
+        try {
+          await containerComputerStatus(runner, platform, target).then(async (after) => {
+            if (after.container !== "missing") {
+              await runner(runtime, ["rm", runtime === "container" ? "--force" : "-f", target.containerName], 60_000);
+            }
+          });
+          await runner(runtime, containerRunArgs(runtime, viewerPasswordFor(target), target, false), 2 * 60_000);
+          break;
+        } catch {
+          throw friendlyContainerError(error, runtime, target);
+        }
       }
     }
   }

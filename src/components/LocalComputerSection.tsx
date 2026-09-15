@@ -30,6 +30,7 @@ interface Status {
   security: "hardened" | "unsafe" | "unknown";
   persistence: "durable" | "unsafe" | "unknown";
   desktopReady: boolean;
+  desktop_starting: boolean;
   ready: boolean;
   problem: string | null;
   image_ref: string;
