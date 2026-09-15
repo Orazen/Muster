@@ -20,6 +20,8 @@ import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { SocialProfile, SocialState } from "@/lib/social";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
+import { soulMdFor, type AgentTemplate } from "@/lib/agent-templates";
+import { seedDraft } from "@/lib/drafts";
 import { showNotification } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { readChatSelection, resolveChatSelection, saveChatSelection } from "./chat-selection";
@@ -521,6 +523,7 @@ export type Action =
   | { type: "renameTask"; botId: string; threadId: string; title: string }
   | { type: "deleteTask"; botId: string; threadId: string }
   | { type: "newBot" }
+  | { type: "hireTemplate"; template: AgentTemplate }
   | { type: "botAdded"; bot: Bot }
   | { type: "deleteBot"; botId: string }
   | { type: "duplicateBot"; botId: string }
@@ -1052,6 +1055,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "taskSwitched":
       return updateBot(state, action.bot.id, (bot) => ({ ...bot, ...action.bot, messages: action.bot.messages ?? [] }));
     case "newBot":
+    case "hireTemplate":
     case "duplicateBot":
     case "interrupt":
     case "createGroup":
@@ -1411,6 +1415,37 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
             .then(({ bot }) => rawDispatch({ type: "botAdded", bot }))
             .catch(showError);
           break;
+        case "hireTemplate": {
+          // Agent Hub: create → apply the template's identity → drop the
+          // persona as SOUL.md → pre-fill the first task → open the chat.
+          // The identity PATCH is the load-bearing step (same two-call shape
+          // as duplicateBot); a failed soul PUT leaves the PATCHed persona
+          // in place — degraded, never broken.
+          const t = action.template;
+          api("/api/bots", { method: "POST" })
+            .then(({ bot }) =>
+              api(`/api/bots/${bot.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({
+                  name: t.name,
+                  title: t.title,
+                  description: t.role,
+                  color: t.color,
+                  character: t.character,
+                }),
+              }).then(({ bot: patched }) => {
+                rawDispatch({ type: "botAdded", bot: { ...bot, ...patched, messages: bot.messages } });
+                api(`/api/bots/${bot.id}/soul.md`, {
+                  method: "PUT",
+                  body: JSON.stringify({ text: soulMdFor(t) }),
+                }).catch(() => {});
+                seedDraft(`bot:${bot.id}`, t.firstTask);
+                rawDispatch({ type: "select", id: bot.id });
+              }),
+            )
+            .catch(showError);
+          break;
+        }
         case "duplicateBot": {
           const source = stateRef.current.bots.find((b) => b.id === action.botId);
           if (!source) break;

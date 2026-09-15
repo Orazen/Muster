@@ -25,6 +25,7 @@ import {
   Rows3,
   Search,
   Settings,
+  Sparkles,
   Puzzle,
   Trash2,
   Users,
@@ -51,6 +52,8 @@ import { downloadAllBots } from "@/lib/team-files";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
 import { TeamLibraryPanel, type TeamImportResult } from "./TeamLibraryPanel";
+import { TemplatesModal } from "./TemplatesModal";
+import { RecoveryCard } from "./RecoveryCard";
 import { RenameTitle } from "./RenameTitle";
 
 /** "Ramagiritharun" → "RG", "alex" → "A", "you@x.dev" → "Y", unset → "?" */
@@ -988,6 +991,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [plusOpen, setPlusOpen] = useState(false);
   const [newRoom, setNewRoom] = useState(false);
   const [teamLibraryOpen, setTeamLibraryOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [archivedBotsOpen, setArchivedBotsOpen] = useState(false);
   const [exportingTeam, setExportingTeam] = useState(false);
   const [teamFeedback, setTeamFeedback] = useState<{
@@ -1255,6 +1259,16 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 <button
                   onClick={() => {
                     setPlusOpen(false);
+                    setTemplatesOpen(true);
+                  }}
+                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+                >
+                  <Sparkles size={16} className="text-ink-secondary" />
+                  Agent Hub
+                </button>
+                <button
+                  onClick={() => {
+                    setPlusOpen(false);
                     setNewRoom(true);
                   }}
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
@@ -1323,6 +1337,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       {/* Bot list */}
       <div className="flex-1 overflow-y-auto px-2">
         <div className="flex flex-col gap-0.5">
+          {state.bots.filter((b) => !b.hidden).length <= 1 && density !== "icons" && <RecoveryCard />}
           {!chiefBot && visibleBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && density !== "icons" && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">Nothing matches “{query}”</div>
           )}
@@ -1502,6 +1517,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           }}
         />
       )}
+      {templatesOpen && <TemplatesModal onClose={() => setTemplatesOpen(false)} />}
       {teamFeedback &&
         createPortal(
           <div

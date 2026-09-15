@@ -74,6 +74,13 @@ function getStore(): Store {
   }
 }
 
+/** Programmatic pre-fill (the Agent Hub drops a template's first task into
+ * the new teammate's composer). Same failure posture as every draft path:
+ * blocked storage costs the pre-fill, never the action that asked for it. */
+export function seedDraft(key: string, text: string): void {
+  setDraft(getStore(), key, text);
+}
+
 /** useState for the composer text, persisted under `id` (a bot or room). */
 export function useDraft(id: string): [string, (next: string) => void] {
   const store = getStore();
