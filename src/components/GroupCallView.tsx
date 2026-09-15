@@ -4,7 +4,7 @@
 // native recognizer has no acoustic echo cancellation. Bot replies are
 // explicitly queued so a fast second member never cuts off the first.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, PhoneOff, X } from "lucide-react";
+import { Captions, CaptionsOff, Loader2, Mic, MicOff, PhoneOff, X } from "lucide-react";
 
 import { currentCall, deferCallCleanup, endCall, useOnCall } from "@/lib/call";
 import { getDictation } from "@/lib/dictation";
@@ -12,6 +12,7 @@ import { routeSpokenGroupMessage } from "@/lib/group-call";
 import { track } from "@/lib/analytics";
 import { normalizeState } from "@/lib/mascot";
 import { speaker } from "@/lib/tts";
+import { cursorWords } from "@/lib/tts/word-cursor";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { useStore, type Bot, type Group, type Message } from "@/state/store";
@@ -22,12 +23,15 @@ import { pendingApprovals } from "./PendingApproval";
 
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
 const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it)\b/i;
+/** Same spoken-handshake rule as one-to-one calls: only a leading, explicit
+ * end-call phrase hangs up — a sentence that merely mentions a call does not. */
+const END_CALL = /^\s*(please\s+)?(end|stop|finish|close|leave)( the)? call\b|^\s*(hang up|goodbye)\b/i;
 const CALL_ENDPOINT_MS = 850;
 
 /** Speech-helper stdout is line-delimited JSON; only primitive strings are transcript text. */
 const isText = (v: string | undefined): v is string => Object.is(String(v), v);
 
-type Phase = "listening" | "sending" | "working" | "speaking";
+type Phase = "listening" | "muted" | "sending" | "working" | "speaking";
 
 export function GroupCallButton({ group, members }: { group: Group; members: Bot[] }) {
   if (group.dm) return null;
@@ -64,6 +68,12 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const initialPhase: Phase = group.busyBotId ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [heard, setHeard] = useState("");
+  // Partial transcripts render grey until finalized (CallView parity).
+  const [heardFinal, setHeardFinal] = useState(false);
+  // Mute is mic-only: the room keeps talking, un-mute rejoins anywhere.
+  const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
+  const [captions, setCaptions] = useState(true);
   const [note, setNote] = useState<string | null>(null);
   const [speakingMemberId, setSpeakingMemberId] = useState<string | null>(null);
   const pushToTalk = usePushToTalk(group.id, phase === "listening", () => {
@@ -111,9 +121,16 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
 
   const listen = useCallback(() => {
     if (!alive.current || currentCall() !== group.id) return;
+    // Mute is a closed mic, not an ended call: every path that would open
+    // the microphone lands in "muted" instead, and un-mute rejoins here.
+    if (mutedRef.current) {
+      move("muted");
+      return;
+    }
     move("listening");
     setSpeakingMemberId(null);
     setHeard("");
+    setHeardFinal(false);
     setNote(null);
     void getDictation().speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === group.id) {
@@ -121,6 +138,18 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       }
     });
   }, [group.id, move]);
+
+  const toggleMute = useCallback(() => {
+    const next = !mutedRef.current;
+    mutedRef.current = next;
+    setMuted(next);
+    if (next) {
+      hush();
+      if (phaseRef.current === "listening") move("muted");
+    } else if (phaseRef.current === "muted") {
+      listen();
+    }
+  }, [hush, listen, move]);
 
   const scheduleListen = useCallback(
     (force = false, delay = 140) => {
@@ -212,9 +241,14 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       }
       if (!isText(line.text)) return;
       setHeard(line.text);
+      setHeardFinal(line.partial === false);
       if (line.partial !== false) return;
       const said = line.text.trim();
       if (!said) return listen();
+      if (END_CALL.test(said)) {
+        endCall(group.id);
+        return;
+      }
 
       const openApproval = askedApproval.current;
       if (openApproval) {
@@ -392,17 +426,19 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const workingMember = members.find((member) => member.id === group.busyBotId);
   const focusId = speakingMember?.id ?? workingMember?.id;
   const status =
-    phase === "listening"
-      ? pushToTalk
-        ? "Push to talk"
-        : "Listening"
-      : phase === "sending"
-        ? "Bringing the room in"
-        : phase === "speaking"
-          ? (speakingMember?.name ?? "Room member") + " is speaking"
-          : workingMember
-            ? workingMember.name + " is working"
-            : "Working";
+    phase === "muted"
+      ? "Muted"
+      : phase === "listening"
+        ? pushToTalk
+          ? "Push to talk"
+          : "Listening"
+        : phase === "sending"
+          ? "Bringing the room in"
+          : phase === "speaking"
+            ? (speakingMember?.name ?? "Room member") + " is speaking"
+            : workingMember
+              ? workingMember.name + " is working"
+              : "Working";
 
   return (
     <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 bg-app/95 px-8 backdrop-blur-sm">
@@ -461,19 +497,33 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       </div>
 
       <div className="min-h-[3.5rem] max-w-[620px] text-center text-[15px] leading-relaxed text-ink">
-        {phase === "listening" ? (
-          heard || (
-            <span className="text-ink-secondary">
-              {pushToTalk
-                ? "Release Control + Option to send…"
-                : "Say a name, say “everyone,” or just talk to the room…"}
-            </span>
-          )
-        ) : phase === "speaking" ? (
-          speech.caption
-        ) : (
-          <span className="text-ink-secondary">{workingMember ? "You’ll hear each response in turn." : ""}</span>
-        )}
+        {captions &&
+          (phase === "listening" || phase === "muted" ? (
+            heard ? (
+              <span className={heardFinal ? "" : "text-ink-secondary"}>{heard}</span>
+            ) : (
+              <span className="text-ink-secondary">
+                {phase === "muted"
+                  ? "You're muted — the room keeps talking"
+                  : pushToTalk
+                    ? "Release Control + Option to send…"
+                    : "Say a name, say “everyone,” or just talk to the room…"}
+              </span>
+            )
+          ) : phase === "speaking" ? (
+            // Karaoke caption, same word-cursor estimate as one-to-one calls.
+            speech.caption ? (
+              <span>
+                {cursorWords(speech.caption).map((word, i) => (
+                  <span key={i} className={i === speech.captionWord ? "text-accent" : undefined}>
+                    {word}{" "}
+                  </span>
+                ))}
+              </span>
+            ) : null
+          ) : (
+            <span className="text-ink-secondary">{workingMember ? "You’ll hear each response in turn." : ""}</span>
+          ))}
       </div>
 
       {note && (
@@ -490,6 +540,34 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       {speech.error && <div className="max-w-[460px] text-center text-[12.5px] text-danger">{speech.error}</div>}
 
       <div className="flex items-center gap-3">
+        <button
+          onClick={toggleMute}
+          aria-pressed={muted}
+          aria-label={muted ? "Unmute microphone" : "Mute microphone"}
+          title={muted ? "Unmute — the call keeps running" : "Mute — the call keeps running"}
+          className={cn(
+            "flex size-11 items-center justify-center rounded-full border transition-colors",
+            muted
+              ? "border-danger/50 bg-danger/15 text-danger hover:bg-danger/25"
+              : "border-hairline/50 text-ink hover:bg-raised",
+          )}
+        >
+          {muted ? <MicOff size={18} /> : <Mic size={18} />}
+        </button>
+        <button
+          onClick={() => setCaptions((on) => !on)}
+          aria-pressed={captions}
+          aria-label={captions ? "Hide live captions" : "Show live captions"}
+          title={captions ? "Hide live captions" : "Show live captions"}
+          className={cn(
+            "flex size-11 items-center justify-center rounded-full border transition-colors",
+            captions
+              ? "border-accent/40 bg-accent/10 text-accent"
+              : "border-hairline/50 text-ink-secondary hover:bg-raised hover:text-ink",
+          )}
+        >
+          {captions ? <Captions size={18} /> : <CaptionsOff size={18} />}
+        </button>
         {speaker.isSpeaking() && (
           <button
             onClick={interruptSpeech}
@@ -508,8 +586,8 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
 
       <div className="text-[11.5px] text-ink-secondary/70">
         {getDictation().kind === "native"
-          ? "Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up"
-          : "Say a member’s name to direct the turn · a short pause sends it · Esc hangs up"}
+          ? "Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · say “end the call” or press Esc to hang up"
+          : "Say a member’s name to direct the turn · a short pause sends it · say “end the call” or press Esc to hang up"}
       </div>
     </div>
   );
