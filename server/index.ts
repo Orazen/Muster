@@ -1763,12 +1763,17 @@ bus.subscribe((event: RuntimeEvent) => {
 });
 
 function drainQueuedSends() {
-  drainSteeredMessages(store, (botId, threadId, prompt, userMessage) =>
-    // A plain attended turn — no automationSource, no unattended, no comms
-    // depth: exactly what typing the same words into an idle bot would run.
-    // The messages are already in the transcript; userMessage keeps
-    // startTurn from appending the joined prompt as a duplicate.
-    startTurn(botId, prompt, { threadId, userMessage }).catch((err) => {
+  drainSteeredMessages(
+    store,
+    (botId, threadId, prompt, userMessage) =>
+      // A plain attended turn — no automationSource, no unattended, no comms
+      // depth: exactly what typing the same words into an idle bot would run.
+      // The messages are already in the transcript; userMessage keeps
+      // startTurn from appending the joined prompt as a duplicate. Rejections
+      // go to the queue module: a transient busy refusal re-queues for the
+      // next settle; anything else reaches the give-up note below.
+      startTurn(botId, prompt, { threadId, userMessage }),
+    (threadId, err) => {
       store.appendMessage(
         threadId,
         {
@@ -1781,7 +1786,7 @@ function drainQueuedSends() {
         },
         { bestEffort: true },
       );
-    }),
+    },
   );
 }
 

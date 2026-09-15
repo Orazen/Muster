@@ -34,9 +34,18 @@ interface QueueEntry {
    * queue's bot is idle now", which needs the bot, not the settling thread. */
   botId: string;
   items: Array<{ messageId: string; text: string }>;
+  /** Failed dispatches already spent on this entry (see MAX_REQUEUES). */
+  attempts?: number;
 }
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
+
+/** A drained dispatch that fails because the bot went busy again (a goal
+ * round or routine claimed it between the settle and the dispatch) is
+ * transient: the words go back on the queue for the NEXT settle, up to this
+ * many times. Anything else — a 402 budget, an engine refusal — is final and
+ * goes straight to onGiveUp, never a silent drop. */
+const MAX_REQUEUES = 3;
 
 /** Land a message in the busy bot's active thread now; it auto-sends when
  * the turn settles. The `queued` flag is the transcript's "will send when
@@ -54,10 +63,16 @@ export function queueSteeredMessage(store: SteerStore, bot: BotRecord, text: str
  * queued texts joined with newlines. `userMessage` is the last queued
  * message so the caller's startTurn appends nothing new — the messages are
  * already in the transcript. Entries are removed BEFORE running so a
- * settle racing another settle can never fire the same queue twice. */
+ * settle racing another settle can never fire the same queue twice.
+ * `run` may reject: a transient busy refusal (status 409) puts the entry
+ * back for the next settle (max MAX_REQUEUES times, affordance restored);
+ * every other failure — and the requeue budget running out — reaches
+ * `onGiveUp` so the caller can say so in the thread. Nothing is ever
+ * dropped silently. */
 export function drainSteeredMessages(
   store: SteerStore,
   run: (botId: string, threadId: string, prompt: string, userMessage: Message) => void | Promise<void>,
+  onGiveUp: (threadId: string, error: unknown) => void = () => {},
 ): void {
   // deleting only the entry being visited is safe under Map iteration
   for (const [threadId, entry] of queues) {
@@ -81,7 +96,35 @@ export function drainSteeredMessages(
     // deleted out from under the queue; there is nothing to run against
     if (!last) continue;
     const prompt = entry.items.map((item) => item.text).join("\n");
-    void run(entry.botId, threadId, prompt, last);
+    // A synchronous throw from run is folded into the same rejection path.
+    let settled: void | Promise<void>;
+    try {
+      settled = run(entry.botId, threadId, prompt, last);
+    } catch (error) {
+      settled = Promise.reject(error);
+    }
+    void Promise.resolve(settled).catch((error: unknown) => {
+      const transient = (error as { status?: number })?.status === 409;
+      if (transient && (entry.attempts ?? 0) < MAX_REQUEUES) {
+        // The bot went busy again between this settle and the dispatch —
+        // the user's words wait for the next settle, in front of anything
+        // queued since, with the affordance restored so the promise is
+        // visible again.
+        entry.attempts = (entry.attempts ?? 0) + 1;
+        const waiting = queues.get(threadId);
+        if (waiting) {
+          waiting.items = [...entry.items, ...waiting.items];
+          waiting.attempts = entry.attempts;
+        } else {
+          queues.set(threadId, entry);
+        }
+        for (const item of entry.items) {
+          store.patchMessage(threadId, item.messageId, { queued: true });
+        }
+        return;
+      }
+      onGiveUp(threadId, error);
+    });
   }
 }
 

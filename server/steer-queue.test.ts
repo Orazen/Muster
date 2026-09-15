@@ -131,6 +131,78 @@ describe("steer-queue module", () => {
     expect(run).not.toHaveBeenCalled();
     expect(_queuedCount("thread-e")).toBe(0);
   });
+
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const busyRefusal = () =>
+    Promise.reject(Object.assign(new Error("the bot is already working — interrupt it first"), { status: 409 }));
+
+  it("re-queues a transient busy refusal and runs it on the next settle", async () => {
+    const bot = fakeBot("bot-r1", "thread-r1", true);
+    const store = fakeStore([bot]);
+    const message = queueSteeredMessage(store, bot, "steer me");
+    bot.busy = false;
+    let attempts = 0;
+    const giveUp = vi.fn();
+    drainSteeredMessages(store, () => { attempts += 1; return busyRefusal(); }, giveUp);
+    await flush();
+    expect(attempts).toBe(1);
+    expect(giveUp).not.toHaveBeenCalled();
+    // back on the queue with the affordance restored — the promise is visible again
+    expect(_queuedCount("thread-r1")).toBe(1);
+    expect(store.messages.find((m) => m.id === message.id)?.queued).toBe(true);
+    // the next settle succeeds
+    const okRun = vi.fn();
+    drainSteeredMessages(store, okRun, giveUp);
+    expect(okRun).toHaveBeenCalledTimes(1);
+    expect(_queuedCount("thread-r1")).toBe(0);
+    expect(giveUp).not.toHaveBeenCalled();
+  });
+
+  it("gives up with a note after the requeue budget, never silently", async () => {
+    const bot = fakeBot("bot-r2", "thread-r2", true);
+    const store = fakeStore([bot]);
+    queueSteeredMessage(store, bot, "stubborn");
+    bot.busy = false;
+    const giveUp = vi.fn();
+    let attempts = 0;
+    // 1 dispatch + MAX_REQUEUES(3) retries, then the give-up note
+    for (let i = 0; i < 4; i += 1) {
+      drainSteeredMessages(store, () => { attempts += 1; return busyRefusal(); }, giveUp);
+      await flush();
+    }
+    expect(attempts).toBe(4);
+    expect(giveUp).toHaveBeenCalledTimes(1);
+    expect(giveUp.mock.calls[0][0]).toBe("thread-r2");
+    expect(_queuedCount("thread-r2")).toBe(0);
+  });
+
+  it("gives up immediately on a final failure like a spent budget", async () => {
+    const bot = fakeBot("bot-r3", "thread-r3", true);
+    const store = fakeStore([bot]);
+    queueSteeredMessage(store, bot, "broke");
+    bot.busy = false;
+    const run = vi.fn(() => Promise.reject(Object.assign(new Error("token budget spent"), { status: 402 })));
+    const giveUp = vi.fn();
+    drainSteeredMessages(store, run, giveUp);
+    await flush();
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(giveUp).toHaveBeenCalledTimes(1);
+    expect(_queuedCount("thread-r3")).toBe(0);
+  });
+
+  it("runs re-queued words before anything queued after the refusal", async () => {
+    const bot = fakeBot("bot-r4", "thread-r4", true);
+    const store = fakeStore([bot]);
+    queueSteeredMessage(store, bot, "old steer");
+    bot.busy = false;
+    drainSteeredMessages(store, busyRefusal, () => {});
+    await flush();
+    queueSteeredMessage(store, bot, "new steer");
+    const okRun = vi.fn();
+    drainSteeredMessages(store, okRun, () => {});
+    expect(okRun).toHaveBeenCalledTimes(1);
+    expect(okRun.mock.calls[0][2]).toBe("old steer\nnew steer");
+  });
 });
 
 // ── e2e: the real server on the gated fake ACP fleet ───────────────────
