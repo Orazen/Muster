@@ -15,6 +15,7 @@
 // server-computed approval key.
 
 import { speechText } from "./speech-text";
+import { cursorWords, wordIndexFromCharIndex, wordIndexFromProgress } from "./word-cursor";
 
 export type SpeechStatus = "idle" | "preparing" | "speaking";
 
@@ -25,8 +26,13 @@ export interface SpeechSnapshot {
   messageId?: string;
   /** the utterance currently audible — call mode shows it as a caption */
   caption?: string;
+  /** 0-based index into caption of the word the voice is (estimated to be) on */
+  captionWord?: number;
   error?: string;
 }
+
+/** The snapshot fields a caption playhead update must carry forward. */
+type CaptionBase = Pick<SpeechSnapshot, "status" | "botId" | "messageId" | "caption">;
 
 interface SpeakOptions {
   voiceId?: string;
@@ -152,8 +158,14 @@ export class Speaker {
       const synth = window.speechSynthesis;
       for (let i = 0; i < utterances.length; i += 1) {
         if (!live()) return;
-        this.set({ status: "speaking", botId: opts.botId, messageId: opts.messageId, caption: utterances[i] });
-        const finished = await this.playNative(synth, utterances[i], controller.signal, live);
+        const base: CaptionBase = {
+          status: "speaking",
+          botId: opts.botId,
+          messageId: opts.messageId,
+          caption: utterances[i],
+        };
+        this.set(base);
+        const finished = await this.playNative(synth, utterances[i], base, controller.signal, live);
         if (!finished) return;
       }
       if (live()) this.set(IDLE);
@@ -187,8 +199,14 @@ export class Speaker {
         return;
       }
       if (!live()) return;
-      this.set({ status: "speaking", botId: opts.botId, messageId: opts.messageId, caption: utterances[i] });
-      const finished = await this.play(rendered.blob, live);
+      const base: CaptionBase = {
+        status: "speaking",
+        botId: opts.botId,
+        messageId: opts.messageId,
+        caption: utterances[i],
+      };
+      this.set(base);
+      const finished = await this.play(rendered.blob, base, live);
       if (!finished || !live()) {
         if (live()) this.set({ ...IDLE, error: "The generated voice clip couldn't be played." });
         if (this.request === controller) this.request = null;
@@ -226,13 +244,15 @@ export class Speaker {
     return res.blob();
   }
 
-  /** Resolves true when the clip finished, false when it was interrupted. */
   /** Free voice: speak one utterance through the browser's built-in
    * speechSynthesis. Resolves true when finished, false when interrupted,
-   * mirroring play() exactly so callers treat both paths the same. */
+   * mirroring play() exactly so callers treat both paths the same.
+   * Boundary events (where the engine emits them) drive the caption
+   * word-cursor; engines that don't simply leave the caption unhighlighted. */
   private playNative(
     synth: SpeechSynthesis,
     text: string,
+    base: CaptionBase,
     signal: AbortSignal,
     live: () => boolean,
   ): Promise<boolean> {
@@ -241,12 +261,15 @@ export class Speaker {
       synth.cancel(); // one voice for the whole window — new cancels old
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1;
+      const wordCount = cursorWords(text).length;
+      let lastWord = -1;
       let settled = false;
       const done = (ok: boolean) => {
         if (settled) return;
         settled = true;
         utterance.onend = null;
         utterance.onerror = null;
+        utterance.onboundary = null;
         signal.removeEventListener("abort", onAbort);
         resolve(ok);
       };
@@ -255,13 +278,20 @@ export class Speaker {
         done(false);
       };
       signal.addEventListener("abort", onAbort);
+      utterance.onboundary = (event) => {
+        if (!live() || wordCount === 0 || !Number.isFinite(event.charIndex)) return;
+        const idx = wordIndexFromCharIndex(text, event.charIndex);
+        if (idx === lastWord) return;
+        lastWord = idx;
+        this.set({ ...base, captionWord: idx });
+      };
       utterance.onend = () => done(true);
       utterance.onerror = () => done(false);
       synth.speak(utterance);
     });
   }
 
-  private play(blob: Blob, live: () => boolean): Promise<boolean> {
+  private play(blob: Blob, base: CaptionBase, live: () => boolean): Promise<boolean> {
     return new Promise((resolve) => {
       if (!live()) return resolve(false);
       this.teardownAudio();
@@ -269,10 +299,17 @@ export class Speaker {
       const audio = new Audio(url);
       this.audio = audio;
       this.objectUrl = url;
+      // The clip carries no word timeline, so the cursor estimates one:
+      // played fraction, rate-capped (see word-cursor.ts). timeupdate fires
+      // a few times a second — enough granularity for a word that lasts
+      // longer than that, and cheap enough to not need rAF.
+      const wordCount = cursorWords(base.caption ?? "").length;
+      let lastWord = -1;
       let settled = false;
       const done = (ok: boolean) => {
         if (settled) return;
         settled = true;
+        audio.ontimeupdate = null;
         audio.onended = null;
         audio.onerror = null;
         if (this.settlePlayback === done) this.settlePlayback = null;
@@ -280,6 +317,13 @@ export class Speaker {
         resolve(ok);
       };
       this.settlePlayback = done;
+      audio.ontimeupdate = () => {
+        if (!live() || wordCount === 0) return;
+        const idx = wordIndexFromProgress(audio.currentTime, audio.duration, wordCount);
+        if (idx === lastWord) return;
+        lastWord = idx;
+        this.set({ ...base, captionWord: idx });
+      };
       audio.onended = () => done(true);
       // a clip that cannot decode should not strand the whole message
       audio.onerror = () => done(false);

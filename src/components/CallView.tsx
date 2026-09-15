@@ -24,6 +24,7 @@ import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
 import { getDictation } from "@/lib/dictation";
 import { speaker } from "@/lib/tts";
+import { cursorWords } from "@/lib/tts/word-cursor";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { AgentAvatar } from "./Avatar";
@@ -560,7 +561,19 @@ function Call({ bot }: { bot: Bot }) {
               </span>
             )
           ) : (
-            speech.caption
+            // Karaoke-style caption: the word cursor marks which word the
+            // voice is on. The cursor is an estimate (word-cursor.ts), so
+            // the styling is deliberately subtle — wrong-by-one reads fine,
+            // a flashing neon underline would not.
+            speech.caption ? (
+              <span>
+                {cursorWords(speech.caption).map((word, i) => (
+                  <span key={i} className={i === speech.captionWord ? "text-accent" : undefined}>
+                    {word}{" "}
+                  </span>
+                ))}
+              </span>
+            ) : null
           ))}
       </div>
 

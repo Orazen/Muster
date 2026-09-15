@@ -6,14 +6,33 @@ class FakeAudio {
   static latest: FakeAudio | null = null;
 
   src: string;
+  currentTime = 0;
+  duration = 0;
   onended: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  ontimeupdate: (() => void) | null = null;
   pause = vi.fn();
   play = vi.fn(async () => {});
 
   constructor(src: string) {
     this.src = src;
     FakeAudio.latest = this;
+  }
+}
+
+/** Stand-in for the browser's SpeechSynthesisUtterance on the free-voice path. */
+class FakeUtterance {
+  static latest: FakeUtterance | null = null;
+
+  text: string;
+  rate = 1;
+  onend: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onboundary: ((e: { charIndex: number }) => void) | null = null;
+
+  constructor(text: string) {
+    this.text = text;
+    FakeUtterance.latest = this;
   }
 }
 
@@ -35,6 +54,7 @@ describe("Speaker lifecycle", () => {
   beforeEach(() => {
     FakeAudio.latest = null;
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     vi.stubGlobal("Audio", FakeAudio);
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:voice-test");
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
@@ -78,6 +98,61 @@ describe("Speaker lifecycle", () => {
 
     await expect(speaking).resolves.toBeUndefined();
     expect(signal?.aborted).toBe(true);
+    expect(speaker.state).toEqual({ status: "idle" });
+  });
+
+  it("advances the caption word cursor with the clip playhead", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) =>
+        String(input).endsWith("/prepare")
+          ? json({ ready: true, utterances: ["alpha bravo charlie delta echo"] })
+          : new Response(new Blob(["mp3"]), { status: 200 }),
+      ),
+    );
+    const speaker = new Speaker();
+    const speaking = speaker.speak("alpha bravo charlie delta echo");
+    await vi.waitFor(() => expect(FakeAudio.latest).not.toBeNull());
+    expect(speaker.state.captionWord).toBeUndefined();
+
+    const audio = FakeAudio.latest!;
+    audio.duration = 10;
+    audio.currentTime = 5;
+    audio.ontimeupdate?.();
+    expect(speaker.state.caption).toBe("alpha bravo charlie delta echo");
+    expect(speaker.state.captionWord).toBe(2);
+
+    audio.currentTime = 8;
+    audio.ontimeupdate?.();
+    expect(speaker.state.captionWord).toBe(4);
+
+    audio.onended?.();
+    await speaking;
+    expect(speaker.state).toEqual({ status: "idle" });
+  });
+
+  it("drives the caption cursor from native boundary events on the free-voice path", async () => {
+    FakeUtterance.latest = null;
+    // node test env: the free-voice path probes window.speechSynthesis, so
+    // the window itself must exist for the fallback to engage.
+    const fakeSynth = { cancel: vi.fn(), speak: vi.fn() };
+    vi.stubGlobal("window", { speechSynthesis: fakeSynth });
+    vi.stubGlobal("SpeechSynthesisUtterance", FakeUtterance);
+    // prepare refuses (no ElevenLabs key) → the free-voice fallback speaks raw text
+    vi.stubGlobal("fetch", vi.fn(async () => json({ ready: false })));
+    const speaker = new Speaker();
+    const speaking = speaker.speak("alpha bravo charlie");
+    await vi.waitFor(() => expect(FakeUtterance.latest).not.toBeNull());
+    expect(speaker.state.caption).toBe("alpha bravo charlie");
+    expect(speaker.state.captionWord).toBeUndefined();
+
+    FakeUtterance.latest!.onboundary?.({ charIndex: 6 });
+    expect(speaker.state.captionWord).toBe(1);
+    FakeUtterance.latest!.onboundary?.({ charIndex: 12 });
+    expect(speaker.state.captionWord).toBe(2);
+
+    FakeUtterance.latest!.onend?.();
+    await speaking;
     expect(speaker.state).toEqual({ status: "idle" });
   });
 
