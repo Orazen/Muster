@@ -556,7 +556,7 @@ owed (scanner disk-blocked) and no release attests to it until then.
 
 ## 37. Testing strategy
 
-Vitest (fileParallelism off, CI retry 2): **267 files / 3,992 passed / 8
+Vitest (fileParallelism off, CI retry 2): **268 files / 4,007 passed / 8
 skipped** baseline. Rules: per-file tests while developing, full suite once
 before commit; failure injection via real SQLite triggers; team-ownership
 harness for every new record route; E2E on throwaway rigs isolated via
@@ -582,8 +582,78 @@ release pipeline.
 | M1–M2 | memory retrieval pipeline · shared-memory grants | — |
 | T1 | Telegram inbound gateway | firewall |
 | SS1 | Social Studio (accounts, calendar, approval-queue publishing) | connectors |
-| L1–L3 | landing redesign (Polsia study pending) · store S1–S2 | — |
+| ✔ | L1 landing redesign — dark-glass editorial pass shipped (d8d7e47) | — |
+| ✔ | L103 Agent Hub hire + recovery card · L104 Local VM per-install scoping | — |
+| L2–L3 | store S1–S2 | — |
+| X1 | steer-queue mark-processed-before-execute (zeron's queue lesson — closes the known double-delivery class) | — |
+| X2 | run waterfall: tree+Gantt span view over turn/tool data, live-SSE merge (traceroot pattern, Apache-2.0) | receipts |
+| X3 | `/webagents.md` self-published action manifest + one-batch endpoint for bot-driven Muster ops (WebAgents spec, MIT) | contracts |
+| X4 | chat empty-state trust pills + queued-draft auto-send composer (OrcaChat patterns) | — |
+| X5 | URL-gated credential vault: fill only on allowlisted origins, secrets redacted from results (betterwright model) | approvals |
+| X6 | post-run grading pass on JobReceipts: tool-failure/stall/needs-user detectors → findings + notify (future-agi/traceroot concept) | X2 |
 | R1 | release bump + 4-platform desktop rollout + mirror | suite green |
+
+## 39. Benchmark research fleet (2026-09-15, two passes)
+
+Owner brief: study the sibling/benchmark repos, port what makes Muster beat
+them, redesign the landing accordingly. Landing shipped (d8d7e47); Agent Hub
+hire flow + recovery card shipped (1ecbe4c); Local VM hardening shipped
+(loop 104). Verified findings, pass 1:
+
+- **HelmRyth** (Apache-2.0) — direct sibling; its "accountability spine"
+  (provenance on every action) is the cheapest trust layer and is already
+  reflected in the hub templates' provenance fields.
+- **Vellum assistant/org** — the `/assistant/identity` page is the bot's own
+  first-person profile: integration map, memory, model. Muster's bot profile
+  drawer covers avatar/name; an identity *view* (what this teammate can see
+  and touch, stated in first person) is the gap.
+- **xybrid / zeron** — zeron's mark-processed-before-execute queue maps
+  directly onto Muster's steer-queue weakness → X1.
+- **awesome-native-macosx-apps** — menu-bar/utility patterns; no immediate
+  port, reference for the desktop shell's future polish.
+- **sintra-AI / fablewright** — sintra's named-cast rhythm fed the landing
+  roster marquee; sintra itself is reference-only (contradictory license).
+
+Pass 2 (this session):
+
+- **betterwright** (MIT, substantial, near-daily releases) — persistent
+  policy-guarded browser runtime. Portables: diffable aria/ref page snapshots
+  (token cost), live-view + human-handoff for MFA (BrowserPanel's preview is
+  already honest about being non-interactive; the handoff round-trip is the
+  upgrade), URL-gated credential vault → X5, non-disableable network floor
+  (block private/loopback) worth copying into the VM's egress story, and
+  `muster skill install` / `muster doctor` CLI verbs. CAPTCHA claims are
+  oversold even by their own README — do not echo them.
+- **WebAgents** (MIT, thin v0.1 spec) — site-published action manifest +
+  one bounded batch call. Adopt the *concept* for Muster's own API (X3);
+  treat as inspiration, not a dependency (1 commit, 0 stars).
+- **OrcaChat** (Next.js, real) — GitHub-dark chat UI: empty state as brand
+  moment with trust pills, grouped history with relative timestamps, model
+  picker as compact pill + fixed dropdown, user bubbles right/dark/bordered
+  while assistant stays transparent, queued-draft auto-send while streaming
+  → X4.
+- **OpenMausBot docs + screenshots** — the public docs describe Muster's own
+  expected UX (same product family): four computer backends, "Preview is not
+  permission", renewable-lease ownership, per-bot maxInstances — all match
+  shipped behavior; the Local VM loop-104 fixes align the panel with the
+  documented contract. Design tone: near-black flat dark, mascot personality,
+  tool calls as tiny green-check pill chips, structured bot questions as
+  in-stream A–D option cards (the killer pattern — candidate for the ask-user
+  card), and a segmented "Runs on" control in the computer panel. Gaps
+  Muster can beat: they lack Linux/Windows dictation and push-wake.
+- **future-agi** (Apache-2.0 core, open-core EE) — heavyweight eval stack;
+  do NOT adopt the runtime. Mine concepts: post-run quality grading → X6,
+  content-level PII/injection scanning beside the key-name redaction, checked-in
+  flaky-test quarantine (`.test_quarantine.json`) — worth adopting as process.
+- **traceroot** (YC S25, Apache-2.0 non-`ee/` paths) — the direct blueprint
+  for run history: two-panel scroll-synced span tree + Gantt waterfall,
+  adaptive time ruler (~50 lines), live-SSE span merge semantics (placeholder
+  vs real spans), detectors→findings on receipts → X2/X6, one-click golden
+  datasets from production runs (pin a run as a regression case for SOUL.md
+  changes — feeds fleet-eval).
+
+License discipline: port only from Apache-2.0/MIT non-EE paths with
+attribution; sintra and any NOASSERTION repo stay reference-only.
 
 ---
 
