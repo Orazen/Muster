@@ -211,14 +211,25 @@
     transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease, border-color 180ms ease, color 180ms ease;
   }
   .button--primary {
+    /* the reference CTA: solid accent, half-alpha border, color-matched
+       glow, glossy top edge — scale, never lift, on hover */
+    position: relative; overflow: hidden;
     color: #fff;
-    background: linear-gradient(to bottom, var(--accent-soft), var(--accent));
-    box-shadow: 0 2px 10px rgba(240, 70, 14, 0.24);
+    background: var(--accent);
+    border-color: rgba(240, 70, 14, 0.5);
+    box-shadow: 0 4px 5px 0 rgba(240, 70, 14, 0.2);
+    transition: transform 400ms ease-out, box-shadow 400ms ease-out;
+  }
+  .button--primary::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.6);
+    background: linear-gradient(to bottom, rgba(255, 255, 255, 0.3), transparent);
   }
   .button--primary:hover, .button--primary:focus-visible {
-    transform: translateY(-1px);
-    box-shadow: 0 12px 30px rgba(240, 70, 14, 0.32);
+    transform: scale(1.10);
+    box-shadow: 0 8px 18px 0 rgba(240, 70, 14, 0.28);
   }
+  .button--primary:active { transform: scale(0.96); }
   .button--secondary {
     color: var(--body); background: var(--surface);
     border-color: var(--line); box-shadow: var(--shadow-soft);
@@ -472,8 +483,16 @@
 
   /* ---------- footer ---------- */
   .site-footer {
+    position: relative;
     display: flex; justify-content: space-between; gap: 24px;
     margin-top: 70px; padding: 60px 0 70px; border-top: 1px solid var(--line);
+  }
+  /* footer glow — the reference site closes every page with a soft
+     accent wash rising from the bottom edge */
+  .site-footer::before {
+    content: ""; position: absolute; left: 0; right: 0; top: -140px; height: 140px;
+    background: radial-gradient(60% 100% at 50% 100%, rgba(240, 70, 14, 0.12), transparent 70%);
+    pointer-events: none;
   }
   .site-footer__brand, .site-footer__links {
     display: flex; align-items: center; flex-wrap: wrap; gap: 18px; padding-top: 40px;
@@ -687,11 +706,24 @@
   .hero__terminal li .t-red { color: var(--accent-soft); }
   .hero__terminal li .t-dim { color: var(--muted-2); }
 
-  /* per-word headline reveal */
-  .hero h1 .w { display: inline-block; opacity: 0; filter: blur(10px); transform: translateY(10px); }
+  /* per-letter headline reveal — the reference landing's signature move:
+     soft-blur-in, 500ms, cubic-bezier(0.22,1,0.36,1), 40ms stagger. Each
+     letter clips its own white→grey gradient (per-element background-clip
+     is the robust form; ancestor-clip + descendant filters is not). */
+  .hero h1 .wr { display: inline-block; }
+  .hero h1 .w {
+    display: inline-block; opacity: 0;
+    background: linear-gradient(to bottom, #ffffff, #dbdbdb);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero h1 .accent .w { background: none; -webkit-background-clip: initial; background-clip: initial; color: var(--accent); }
   .hero h1.revealed .w {
-    opacity: 1; filter: none; transform: none;
-    transition: opacity 500ms ease, filter 500ms ease, transform 500ms cubic-bezier(0.24, 1, 0.4, 1);
+    animation: soft-blur-in 500ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation-delay: var(--d, 0ms);
+  }
+  @keyframes soft-blur-in {
+    from { opacity: 0; filter: blur(12px); transform: translateY(16px); }
+    to { opacity: 1; filter: none; transform: none; }
   }
 
   /* manifesto — three scroll-snap statements with a dot rail */
@@ -754,7 +786,7 @@
   @media (prefers-reduced-motion: reduce) {
     .promo-banner__dot, .hero__terminal-bar::before { animation: none; }
     .roster-marquee__track { animation: none; flex-wrap: wrap; width: auto; }
-    .hero h1 .w { opacity: 1; filter: none; transform: none; transition: none; }
+    .hero h1 .w { opacity: 1; filter: none; transform: none; transition: none; animation: none; }
     .hero__terminal li { opacity: 1; transform: none; transition: none; }
     .feature-card { transform: none !important; }
     .manifesto { scroll-snap-type: none; }
@@ -2095,24 +2127,34 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
     });
   })();
 
-  // Hero headline: per-word reveal (words, not characters — 12 nodes max).
+  // Hero headline: per-letter soft-blur-in reveal (word wrappers keep the
+  // text wrappable; ~40 nodes is nothing for a static landing).
   (function () {
     var h1 = document.getElementById("hero-title");
     if (!h1) return;
     if (REDUCED) { h1.classList.add("revealed"); return; }
     var walk = function (node) {
       var out = [];
-      Array.prototype.forEach.call(node.childNodes, function (child) {
+      // snapshot first: replaceChild mutates the live childNodes and a
+      // live iteration would skip the .accent span entirely
+      var kids = Array.prototype.slice.call(node.childNodes);
+      kids.forEach(function (child) {
         if (child.nodeType === 3) {
           var words = child.textContent.split(/(\s+)/);
           var frag = document.createDocumentFragment();
           words.forEach(function (w) {
             if (!w) return;
             if (/^\s+$/.test(w)) { frag.appendChild(document.createTextNode(w)); return; }
-            var span = document.createElement("span");
-            span.className = "w";
-            span.textContent = w;
-            frag.appendChild(span);
+            // word wrapper keeps words unbreakable; letters carry the stagger
+            var word = document.createElement("span");
+            word.className = "wr";
+            Array.prototype.forEach.call(w, function (ch) {
+              var l = document.createElement("span");
+              l.className = "w";
+              l.textContent = ch;
+              word.appendChild(l);
+            });
+            frag.appendChild(word);
           });
           node.replaceChild(frag, child);
         } else if (child.nodeType === 1) {
@@ -2123,7 +2165,7 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
     };
     walk(h1);
     var spans = h1.querySelectorAll(".w");
-    spans.forEach(function (s, i) { s.style.transitionDelay = Math.min(i * 45, 600) + "ms"; });
+    spans.forEach(function (s, i) { s.style.setProperty("--d", Math.min(i * 40, 700) + "ms"); });
     requestAnimationFrame(function () { h1.classList.add("revealed"); });
   })();
 
