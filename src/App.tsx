@@ -9,7 +9,9 @@ import { SettingsPanel } from "@/components/SettingsPanel";
 import { PluginsPanel } from "@/components/PluginsPanel";
 import { ComputerPanel } from "@/components/ComputerPanel";
 import { BrowserPanel } from "@/components/BrowserPanel";
-import { FleetOrb } from "@/components/FleetOrb";
+// FleetOrb is no longer mounted anywhere (owner direction 2026-09-15):
+// presence now lives on the roster rows and their threads. The component
+// and its CSS stay in the tree for reuse; nothing imports them.
 import { InspectorPanel } from "@/components/InspectorPanel";
 import { SettingsModal } from "@/components/SettingsModal";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -270,8 +272,9 @@ function Shell() {
         />
       )}
       </div>
-      {/* In flow so fleet attention never sits over Send or an approval. */}
-      <FleetOrb />
+      {/* The floating fleet orb is retired (owner direction 2026-09-15):
+          presence lives on the roster rows that carry it — the benchmark's
+          threads-under-teammates pattern replaced the corner pill. */}
     </div>
   );
 }

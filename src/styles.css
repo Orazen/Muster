@@ -245,7 +245,7 @@ body {
   color: transparent;
 }
 @media (prefers-reduced-motion: reduce) {
-  .animate-caret, .animate-msg-in, .animate-shimmer, .timeline-pulse, .menu-pop { animation: none; }
+  .animate-caret, .animate-msg-in, .animate-shimmer, .timeline-pulse, .menu-pop, .turn-tail-in { animation: none; }
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
   /* The drawer still moves, it just arrives instantly. */
   aside { transition: none; }
@@ -259,6 +259,16 @@ body {
 }
 .menu-pop {
   animation: menu-pop-in 175ms cubic-bezier(.24, 1, .4, 1);
+}
+
+/* Chat turn tail: the working mascot scales in; the answer grows from it. */
+@keyframes turn-tail-in {
+  from { opacity: 0; transform: scale(.7) translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.turn-tail-in {
+  display: inline-flex;
+  animation: turn-tail-in 380ms cubic-bezier(.16, 1, .3, 1);
 }
 
 /* Muster vector motion. The fast horizontal compression is the edge-on

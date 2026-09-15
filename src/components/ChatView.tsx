@@ -1220,14 +1220,19 @@ export function ChatView({ bot }: { bot: Bot }) {
             showWorkingDots(bot.busy, streaming, messages.at(-1)) && (
               <div className="flex justify-start">
                 <div className="flex items-center gap-2.5 rounded-2xl bg-raised px-4 py-3">
-                  {/* OpenManus-style step mark: [→] says "in progress" the
-                      way a plan tool renders it, the shimmer says it's alive
-                      — no bouncing dots */}
-                  <span
-                    className="flex size-5 items-center justify-center rounded-md border border-hairline bg-panel font-mono text-[11px] leading-none text-live"
-                    aria-hidden="true"
-                  >
-                    →
+                  {/* Turn tail: the bot's own face, working expression, scales
+                      in beside the shimmer — the answer appears to grow from
+                      the mascot, not from a spinner. (benchmark pattern,
+                      2026-09-15) */}
+                  <span className="turn-tail-in" aria-hidden="true">
+                    <AgentAvatar
+                      character={bot.character}
+                      color={bot.color}
+                      state="working"
+                      size={24}
+                      motion="none"
+                      motionKey={0}
+                    />
                   </span>
                   <span className="thinking-shimmer text-[13px] font-medium">Working</span>
                   <WorkingTimer since={lastUserMessage?.at ?? Date.now()} />

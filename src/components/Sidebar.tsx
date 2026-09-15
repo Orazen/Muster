@@ -615,6 +615,57 @@ function SectionHeader({
   );
 }
 
+/** Benchmark threads-under-bot: the rooms a teammate lives in, nested under
+ * its row. Attention-first (unread and busy sort up), capped so a busy bot
+ * never floods the roster; icons rail has no room for them. */
+function BotThreadRows({ bot, density }: { bot: Bot; density: SidebarDensity }) {
+  const { state, dispatch } = useStore();
+  const rooms = state.groups.filter((g) => g.memberIds.includes(bot.id));
+  if (rooms.length === 0) return null;
+  const attention = (g: Group) => (g.unread ? 0 : g.busyBotId ? 1 : 2);
+  const ordered = [...rooms].sort((a, b) => attention(a) - attention(b));
+  const shown = ordered.slice(0, 4);
+  const rest = ordered.length - shown.length;
+  return (
+    <div className="ml-[27px] space-y-0.5 border-l border-hairline/40 pb-1 pl-2">
+      {shown.map((g) => {
+        const active = state.activeView === "chat" && state.selectedId === g.id;
+        const peers = g.memberIds
+          .filter((id) => id !== bot.id)
+          .map((id) => state.bots.find((b) => b.id === id)?.name)
+          .filter((n): n is string => Boolean(n));
+        const label = peers.length === 1 ? `⇄ ${peers[0]}` : g.name;
+        return (
+          <button
+            key={g.id}
+            onClick={() => dispatch({ type: "select", id: g.id })}
+            aria-label={`Open thread ${label}`}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left",
+              density === "compact" ? "text-[11.5px]" : "text-[12px]",
+              active ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
+            )}
+          >
+            <span
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                g.unread ? "bg-accent" : g.busyBotId ? "bg-[#38d591]" : "bg-hairline",
+              )}
+            />
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            {g.busyBotId && !g.unread && (
+              <span className="shrink-0 text-[10px] text-ink-secondary/70">working</span>
+            )}
+          </button>
+        );
+      })}
+      {rest > 0 && (
+        <div className="px-2 py-0.5 text-[10.5px] text-ink-secondary/60">+{rest} more</div>
+      )}
+    </div>
+  );
+}
+
 function BotListItem({
   bot,
   onMenu,
@@ -656,6 +707,9 @@ function BotListItem({
         size={DENSITY_AVATAR[density]}
         motion={mascotMotion?.kind ?? "none"}
         motionKey={mascotMotion?.nonce ?? 0}
+        /* Benchmark cost discipline: a resting row is a single static frame —
+           animation runs only where something is actually happening. */
+        animated={selected || Boolean(bot.busy) || Boolean(bot.unread) || Boolean(mascotMotion)}
       />
       <PresenceDot activity={bot.activity} />
     </div>
@@ -760,6 +814,8 @@ function BotListItem({
       >
         {body}
       </div>
+      {/* the icons rail returns above — density is comfortable|compact here */}
+      <BotThreadRows bot={bot} density={density} />
       <button
         type="button"
         disabled={archiveDisabled}
