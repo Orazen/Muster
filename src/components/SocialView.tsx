@@ -36,7 +36,24 @@ type Tab = "friends" | "requests" | "directory" | "profiles";
 
 export function SocialView() {
   const { state } = useStore();
-  const [tab, setTab] = useState<Tab>("requests");
+  // A shared profile link (/app?add-handle=<handle>) lands here: open the
+  // Directory pre-searched for that agent, and strip the param so a refresh
+  // or a back navigation doesn't re-announce it.
+  const [addIntent] = useState<string | null>(() => {
+    try {
+      const url = new URL(window.location.href);
+      const raw = url.searchParams.get("add-handle");
+      if (raw && /^[A-Za-z0-9][A-Za-z0-9-]{1,31}$/.test(raw)) {
+        url.searchParams.delete("add-handle");
+        window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+        return raw.toLowerCase();
+      }
+    } catch {
+      /* no history/URL in this environment */
+    }
+    return null;
+  });
+  const [tab, setTab] = useState<Tab>(addIntent ? "directory" : "requests");
   const social = state.social;
   const openRequests = (social?.incoming.length ?? 0) + (social?.outgoing.length ?? 0);
 
@@ -77,7 +94,7 @@ export function SocialView() {
       <div className="mx-auto w-full max-w-[720px] flex-1 px-6 py-5">
         {tab === "requests" && <RequestsTab />}
         {tab === "friends" && <FriendsTab />}
-        {tab === "directory" && <DirectoryTab />}
+        {tab === "directory" && <DirectoryTab initialQuery={addIntent ?? ""} />}
         {tab === "profiles" && <ProfilesTab />}
       </div>
     </div>
@@ -207,10 +224,10 @@ function FriendsTab() {
 }
 
 // ── directory ─────────────────────────────────────────────────────────
-function DirectoryTab() {
+function DirectoryTab({ initialQuery = "" }: { initialQuery?: string }) {
   const { state } = useStore();
   const [agents, setAgents] = useState<DirectoryAgent[] | null>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [requesting, setRequesting] = useState<DirectoryAgent | null>(null);
   const load = () =>
     api("/api/directory/agents")
@@ -357,6 +374,7 @@ function ProfileCard({
   onSave: (input: { botId: string; tagline?: string; bio?: string; visibility: "private" | "public"; handle?: string }) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [tagline, setTagline] = useState(profile?.tagline ?? "");
   const [bio, setBio] = useState(profile?.bio ?? "");
   const [handle, setHandle] = useState(profile?.handle ?? "");
@@ -378,6 +396,25 @@ function ProfileCard({
           <a href={`/p/${profile.handle}`} target="_blank" rel="noreferrer" className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">
             View
           </a>
+        )}
+        {profile && isPublic && (
+          <button
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(`${window.location.origin}/p/${profile.handle}`)
+                .then(() => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1600);
+                })
+                .catch(() => {
+                  /* clipboard denied — the View link still carries the URL */
+                });
+            }}
+            className="rounded-lg px-3 py-1.5 text-[13px] font-medium text-accent hover:bg-raised"
+            title="Copy the public profile link to share"
+          >
+            {copied ? "Copied ✓" : "Share"}
+          </button>
         )}
         <button
           onClick={() => {

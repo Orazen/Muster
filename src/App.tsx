@@ -143,6 +143,19 @@ function Shell() {
     setDrawerOpen(false);
   }, [state.selectedId, state.activeView, state.pluginsOpen, state.settingsOpen]);
 
+  // A shared profile link (/app?add-handle=<h>) opens the Social view right
+  // away — SocialView reads the param, pre-searches the Directory, and
+  // cleans the URL. AuthGate carries the query through sign-in, so the
+  // viral loop works for logged-out visitors too.
+  useEffect(() => {
+    try {
+      const raw = new URLSearchParams(window.location.search).get("add-handle");
+      if (raw && /^[A-Za-z0-9][A-Za-z0-9-]{1,31}$/.test(raw)) dispatch({ type: "showSocial" });
+    } catch {
+      /* no URL in this environment */
+    }
+  }, [dispatch]);
+
   if (handoff.kind === "wait" || (handoff.kind === "consume" && handoff.selectedId && handoff.selectedId !== state.selectedId)) {
     return <main className="flex h-full items-center justify-center p-6 text-ink-secondary" role="status">Opening bot conversation…</main>;
   }

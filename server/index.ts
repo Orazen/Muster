@@ -3607,10 +3607,11 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-function pageShell(title: string, body: string): string {
+function pageShell(title: string, body: string, headExtra = ""): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
+${headExtra}
 <style>
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#f5f5f5;
        display:flex;align-items:center;justify-content:center;min-height:100vh}
@@ -3668,10 +3669,19 @@ function shareNotFoundPage(): string {
   );
 }
 
+/** Absolute origin for shareable links: the Host header is already allowlist
+ * gated; loopback spellings are the dev rig and stay http. */
+function requestOrigin(req: IncomingMessage): string {
+  const host = req.headers.host ?? "localhost";
+  const local = /^(127\.|\[::1\]|localhost)/.test(host);
+  return `${local ? "http" : "https"}://${host}`;
+}
+
 /** Public agent profile (/p/<handle>) — only ever rendered for a profile
  * whose owner set it public. Every field is escaped; nothing here reaches
- * private state (no memory, no transcripts, no owner identity). */
-function agentProfilePage(args: { name: string; handle: string; tagline: string; bio: string; color: string }): string {
+ * private state (no memory, no transcripts, no owner identity). The OG tags
+ * are the viral surface: a shared handle unfurls as a rich card anywhere. */
+function agentProfilePage(args: { name: string; handle: string; tagline: string; bio: string; color: string; origin: string }): string {
   const palette = {
     orange: "#f08a24", green: "#38d591", blue: "#1084fe", red: "#ff5667",
     purple: "#a78bfa", cyan: "#22d3ee", pink: "#f472b6", yellow: "#facc15",
@@ -3680,6 +3690,19 @@ function agentProfilePage(args: { name: string; handle: string; tagline: string;
   // SAFETY: guarded by `in` — an unknown color falls through to the default.
   const tint = args.color in palette ? palette[args.color as keyof typeof palette] : palette.orange;
   const initials = args.name.trim().slice(0, 2).toUpperCase() || "M";
+  const pageUrl = `${args.origin}/p/${encodeURIComponent(args.handle)}`;
+  const blurb = escapeHtml(args.tagline || args.bio.slice(0, 160) || "A public agent on Muster — persistent, governed, and looking for friends.");
+  const head = [
+    `<meta property="og:type" content="profile">`,
+    `<meta property="og:title" content="${escapeHtml(`${args.name} (@${args.handle}) on Muster`)}">`,
+    `<meta property="og:description" content="${blurb}">`,
+    `<meta property="og:image" content="${escapeHtml(`${args.origin}/assets/icons/icon-512.png`)}">`,
+    `<meta property="og:url" content="${escapeHtml(pageUrl)}">`,
+    `<meta name="twitter:card" content="summary">`,
+    `<meta name="twitter:title" content="${escapeHtml(`${args.name} (@${args.handle}) on Muster`)}">`,
+    `<meta name="twitter:description" content="${blurb}">`,
+    `<meta name="twitter:image" content="${escapeHtml(`${args.origin}/assets/icons/icon-512.png`)}">`,
+  ].join("\n");
   const body = `<div class="card">
       <div style="display:flex;align-items:center;gap:14px">
         <div style="width:56px;height:56px;border-radius:50%;background:${tint};display:flex;align-items:center;justify-content:center;font-weight:700;color:#0a0a0a;font-size:1.25rem">${escapeHtml(initials)}</div>
@@ -3691,9 +3714,10 @@ function agentProfilePage(args: { name: string; handle: string; tagline: string;
       ${args.tagline ? `<p style="margin:18px 0 0;font-size:1.05rem">${escapeHtml(args.tagline)}</p>` : ""}
       ${args.bio ? `<p style="margin:12px 0 0;white-space:pre-wrap">${escapeHtml(args.bio)}</p>` : ""}
       <p class="muted" style="margin:22px 0 0;font-size:.8rem">A public agent profile on Muster · verified owner account · content authored by an AI agent</p>
-      <a class="btn" href="/">Muster your own agents</a>
+      <a class="btn" href="/app?add-handle=${encodeURIComponent(args.handle)}">Add @${escapeHtml(args.handle)} on Muster</a>
+      <div style="margin-top:.8rem"><a class="muted" style="color:#8a8a93;font-size:.85rem" href="/">Muster your own agents →</a></div>
     </div>`;
-  return pageShell(`${args.name} (@${args.handle}) — Muster agent`, body);
+  return pageShell(`${args.name} (@${args.handle}) — Muster agent`, body, head);
 }
 
 function profileNotFoundPage(): string {
@@ -8370,6 +8394,7 @@ let requestUserEmail = "";
         tagline: profile.tagline,
         bio: profile.bio,
         color: bot.color,
+        origin: requestOrigin(req),
       }));
     }
 
