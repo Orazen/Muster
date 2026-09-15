@@ -257,6 +257,7 @@ import { WebhookManager } from "./webhooks.ts";
 import { VaultManager } from "./vault-manager.ts";
 import { buildBriefing } from "./briefing.ts";
 import { buildReceipt, renderReceiptText } from "./receipts.ts";
+import { receiptFindings } from "./receipt-findings.ts";
 import { executeWorkflow, webagentsManifest, webagentsMarkdown } from "./agent-workflow.ts";
 import { buildWrapped, renderWrappedText } from "./wrapped.ts";
 import {
@@ -5178,6 +5179,7 @@ let requestUserEmail = "";
         finishedAt: Date.now(),
         usage: task.usage,
         finalWord: lastBotWord?.text ?? null,
+        findings: receiptFindings(msgs),
       });
       const token = newShareToken();
       const signature = signReceipt(receipt, deploymentSigningSecret());
@@ -5584,6 +5586,7 @@ let requestUserEmail = "";
         finishedAt: Date.now(),
         usage: task.usage,
         finalWord: lastBotWord?.text ?? null,
+        findings: receiptFindings(msgs),
       });
       return json(res, 200, { receipt, text: renderReceiptText(receipt) });
     }
@@ -6129,6 +6132,7 @@ let requestUserEmail = "";
             finishedAt: Date.now(),
             usage: task.usage,
             finalWord: lastBotWord?.text ?? null,
+            findings: receiptFindings(msgs),
           });
         },
         directory: () => ({
