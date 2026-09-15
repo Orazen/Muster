@@ -584,13 +584,17 @@ release pipeline.
 | SS1 | Social Studio (accounts, calendar, approval-queue publishing) | connectors |
 | ✔ | L1 landing redesign — dark-glass editorial pass shipped (d8d7e47) | — |
 | ✔ | L103 Agent Hub hire + recovery card · L104 Local VM per-install scoping | — |
+| ✔ | L105 engine guard ownership-aware (2bbe52d) · voice mute/captions/spoken-end-call (c40ba38) | — |
 | L2–L3 | store S1–S2 | — |
-| X1 | steer-queue mark-processed-before-execute (zeron's queue lesson — closes the known double-delivery class) | — |
-| X2 | run waterfall: tree+Gantt span view over turn/tool data, live-SSE merge (traceroot pattern, Apache-2.0) | receipts |
-| X3 | `/webagents.md` self-published action manifest + one-batch endpoint for bot-driven Muster ops (WebAgents spec, MIT) | contracts |
-| X4 | chat empty-state trust pills + queued-draft auto-send composer (OrcaChat patterns) | — |
+| ✔ | X1 steer-queue: re-queue transient refusals, capped retries + give-up note (1c7ce5a; delete-before-execute was already sound) | — |
+| ✔ | X2 run waterfall: per-step Gantt bars in tool-run groups (3870ed9); live-SSE span merge + tree view remain | receipts |
+| ✔ | X3 `/webagents.md` + read-only batch endpoint (9ce7e5f); write-ops remain approval-gated by contract | contracts |
+| ✔ | X4 chat empty-state trust pills (c9a8384); queued-draft composer verified already shipped | — |
 | X5 | URL-gated credential vault: fill only on allowlisted origins, secrets redacted from results (betterwright model) — SPEC'd docs/plans/credential-vault-spec.md, V1–V4 slices | approvals |
-| X6 | post-run grading pass on JobReceipts: tool-failure/stall/needs-user detectors → findings + notify (future-agi/traceroot concept) | X2 |
+| ✔ | X6 receipt findings: deterministic failed-step/unanswered/stall detectors (4f8443b); LLM grading stays out | X2 |
+| W1–W5 | voice parity plan (docs/plans/voice-auth-agents-plan-2026-09-15.md): GroupCall mute/captions · spoken register rewrite · TTS-playhead word cursor · browser-AEC barge-in (device-tested, default off) · voice session controls | — |
+| A1–A4 | dry-run restore report on v2 verify · sliding session expiry · hosted email-allowlist scopes · per-user key Test button + browser CLI sign-in | — |
+| RC | live run-card (plan ticks pending→active→done on one editable message, actions valid later) + approval tiers as SOUL.md data + teach-as-routine + visible handoff + throttled-edit Telegram streaming | approvals |
 | R1 | release bump + 4-platform desktop rollout + mirror | suite green |
 
 ## 39. Benchmark research fleet (2026-09-15, two passes)
@@ -654,6 +658,18 @@ Pass 2 (this session):
 
 License discipline: port only from Apache-2.0/MIT non-EE paths with
 attribution; sintra and any NOASSERTION repo stay reference-only.
+
+Pass 3 (voice/auth/agents, same day): vellum-assistant full monorepo
+(WS live-voice protocol, barge-in guard, silent-PCM mute, TTS-playhead
+captions, PKCE login, .vbundle + encrypted offsite — NOTE: Vellum has NO
+Google Drive chat backup; Muster's Drive v2 bundle already covers the
+user's ask), OpenMausBot's 1,051 PRs (voice stack #85/#105/#415/#1139,
+anti-dead-end engine rules #97/#1024/#975/#1053, auth #693/#970/#889,
+backup #1072), GetStream Grok-bot materials (unlicensed tutorial —
+concepts only; Vision-Agents is the Apache-2.0 one). Synthesized in
+docs/plans/voice-auth-agents-plan-2026-09-15.md; shipped from it: mute-
+without-ending + caption toggle + provisional grey tail + spoken "end the
+call" (c40ba38) and the ownership-aware engine guard (2bbe52d).
 
 ---
 
