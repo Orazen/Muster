@@ -12,6 +12,7 @@ import { routeSpokenGroupMessage } from "@/lib/group-call";
 import { track } from "@/lib/analytics";
 import { normalizeState } from "@/lib/mascot";
 import { speaker } from "@/lib/tts";
+import { applySpeechControl, CONTROL_ACKS, matchSpeechControl } from "@/lib/tts/session-controls";
 import { cursorWords } from "@/lib/tts/word-cursor";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
@@ -19,6 +20,7 @@ import { useStore, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { AgentAvatar } from "./Avatar";
 import { CallTargetButton } from "./CallView";
+import { SpeechControlChips } from "./SpeechControlChips";
 import { pendingApprovals } from "./PendingApproval";
 
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
@@ -217,6 +219,8 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
 
   useEffect(() => {
     alive.current = true;
+    // Per-call voice: every room call starts with a neutral voice.
+    speaker.resetSpeechControls();
     return () => {
       alive.current = false;
       queueGeneration.current += 1;
@@ -247,6 +251,14 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       if (!said) return listen();
       if (END_CALL.test(said)) {
         endCall(group.id);
+        return;
+      }
+      // Voice session controls (same rule as one-to-one calls): consumed
+      // here, never routed to the room.
+      const control = matchSpeechControl(said);
+      if (control) {
+        speaker.setSpeechControls(applySpeechControl(speaker.speechControls, control));
+        enqueueSpeech(CONTROL_ACKS[control], undefined, true);
         return;
       }
 
@@ -493,6 +505,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
           {(phase === "working" || phase === "sending") && <Loader2 size={13} className="animate-spin" />}
           {status}
+          <SpeechControlChips rate={speech.rate} volume={speech.volume} />
         </div>
       </div>
 

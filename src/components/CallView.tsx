@@ -24,10 +24,12 @@ import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
 import { getDictation } from "@/lib/dictation";
 import { speaker } from "@/lib/tts";
+import { applySpeechControl, CONTROL_ACKS, matchSpeechControl } from "@/lib/tts/session-controls";
 import { cursorWords } from "@/lib/tts/word-cursor";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { AgentAvatar } from "./Avatar";
+import { SpeechControlChips } from "./SpeechControlChips";
 import { WaveSpinner } from "./ui/wave-spinner";
 import { pendingApprovals } from "./PendingApproval";
 import { cn } from "@/lib/cn";
@@ -314,6 +316,8 @@ function Call({ bot }: { bot: Bot }) {
   // permanently disabled for a call nobody could see.
   useEffect(() => {
     alive.current = true;
+    // Per-call voice: every call starts with a neutral voice.
+    speaker.resetSpeechControls();
     return () => {
       alive.current = false;
       sayGeneration.current += 1;
@@ -347,6 +351,14 @@ function Call({ bot }: { bot: Bot }) {
       if (!said) return listen();
       if (END_CALL.test(said)) {
         endCall(bot.id);
+        return;
+      }
+      // Voice session controls: words that change HOW the voice speaks are
+      // consumed here and never become a conversation turn.
+      const control = matchSpeechControl(said);
+      if (control) {
+        speaker.setSpeechControls(applySpeechControl(speaker.speechControls, control));
+        void sayThenListen(CONTROL_ACKS[control]);
         return;
       }
 
@@ -539,6 +551,7 @@ function Call({ bot }: { bot: Bot }) {
             <WaveSpinner size="xs" pattern="line" color="primary" aria-label={status} />
           )}
           {status}
+          <SpeechControlChips rate={speech.rate} volume={speech.volume} />
         </div>
       </div>
 

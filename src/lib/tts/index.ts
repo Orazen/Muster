@@ -15,6 +15,7 @@
 // server-computed approval key.
 
 import { speechText } from "./speech-text";
+import { DEFAULT_SPEECH_CONTROLS, type SpeechControls } from "./session-controls";
 import { cursorWords, wordIndexFromCharIndex, wordIndexFromProgress } from "./word-cursor";
 
 export type SpeechStatus = "idle" | "preparing" | "speaking";
@@ -28,6 +29,9 @@ export interface SpeechSnapshot {
   caption?: string;
   /** 0-based index into caption of the word the voice is (estimated to be) on */
   captionWord?: number;
+  /** session speech controls currently in effect (voice session controls) */
+  rate?: number;
+  volume?: number;
   error?: string;
 }
 
@@ -54,6 +58,8 @@ export class Speaker {
   private objectUrl: string | null = null;
   private settlePlayback: ((finished: boolean) => void) | null = null;
   private request: AbortController | null = null;
+  /** Voice session controls (W5): how the voice speaks, per session. */
+  private controls: SpeechControls = { ...DEFAULT_SPEECH_CONTROLS };
 
   subscribe(fn: (s: SpeechSnapshot) => void): () => void {
     this.watchers.add(fn);
@@ -66,8 +72,31 @@ export class Speaker {
   }
 
   private set(next: SpeechSnapshot) {
-    this.snapshot = next;
-    for (const watcher of this.watchers) watcher(next);
+    // Non-idle snapshots always carry the live controls so the call UI can
+    // show them; idle stays bare (it means "nothing happening", not "nothing
+    // happening at 1.15x").
+    this.snapshot =
+      next.status === "idle" ? next : { ...next, rate: this.controls.rate, volume: this.controls.volume };
+    for (const watcher of this.watchers) watcher(this.snapshot);
+  }
+
+  get speechControls(): SpeechControls {
+    return { ...this.controls };
+  }
+
+  /** Apply new rate/volume, effective immediately — even mid-clip. */
+  setSpeechControls(next: Partial<SpeechControls>) {
+    this.controls = { ...this.controls, ...next };
+    if (this.audio) {
+      this.audio.volume = this.controls.volume;
+      this.audio.playbackRate = this.controls.rate;
+    }
+    if (this.snapshot.status !== "idle") this.set(this.snapshot);
+  }
+
+  /** Calls start with a neutral voice: last session's settings don't leak. */
+  resetSpeechControls() {
+    this.setSpeechControls({ ...DEFAULT_SPEECH_CONTROLS });
   }
 
   /** True while this exact message is the one being spoken. */
@@ -260,7 +289,8 @@ export class Speaker {
       if (!live()) return resolve(false);
       synth.cancel(); // one voice for the whole window — new cancels old
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1;
+      utterance.rate = this.controls.rate;
+      utterance.volume = this.controls.volume;
       const wordCount = cursorWords(text).length;
       let lastWord = -1;
       let settled = false;
@@ -299,10 +329,14 @@ export class Speaker {
       const audio = new Audio(url);
       this.audio = audio;
       this.objectUrl = url;
+      audio.volume = this.controls.volume;
+      audio.playbackRate = this.controls.rate;
       // The clip carries no word timeline, so the cursor estimates one:
-      // played fraction, rate-capped (see word-cursor.ts). timeupdate fires
-      // a few times a second — enough granularity for a word that lasts
-      // longer than that, and cheap enough to not need rAF.
+      // played fraction, rate-capped (see word-cursor.ts) — the cap scales
+      // with playbackRate because a 1.3x clip really does say more words
+      // per second. timeupdate fires a few times a second — enough
+      // granularity for a word that lasts longer than that, and cheap
+      // enough to not need rAF.
       const wordCount = cursorWords(base.caption ?? "").length;
       let lastWord = -1;
       let settled = false;
@@ -319,7 +353,7 @@ export class Speaker {
       this.settlePlayback = done;
       audio.ontimeupdate = () => {
         if (!live() || wordCount === 0) return;
-        const idx = wordIndexFromProgress(audio.currentTime, audio.duration, wordCount);
+        const idx = wordIndexFromProgress(audio.currentTime, audio.duration, wordCount, 3.2 * this.controls.rate);
         if (idx === lastWord) return;
         lastWord = idx;
         this.set({ ...base, captionWord: idx });

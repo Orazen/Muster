@@ -8,6 +8,8 @@ class FakeAudio {
   src: string;
   currentTime = 0;
   duration = 0;
+  volume = 1;
+  playbackRate = 1;
   onended: (() => void) | null = null;
   onerror: (() => void) | null = null;
   ontimeupdate: (() => void) | null = null;
@@ -154,6 +156,40 @@ describe("Speaker lifecycle", () => {
     FakeUtterance.latest!.onend?.();
     await speaking;
     expect(speaker.state).toEqual({ status: "idle" });
+  });
+
+  it("applies session speech controls to clips and stamps the snapshot", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) =>
+        String(input).endsWith("/prepare")
+          ? json({ ready: true, utterances: ["alpha bravo charlie"] })
+          : new Response(new Blob(["mp3"]), { status: 200 }),
+      ),
+    );
+    const speaker = new Speaker();
+    speaker.setSpeechControls({ rate: 1.15, volume: 0.7 });
+    const speaking = speaker.speak("alpha bravo charlie");
+    await vi.waitFor(() => expect(FakeAudio.latest).not.toBeNull());
+
+    expect(FakeAudio.latest!.playbackRate).toBe(1.15);
+    expect(FakeAudio.latest!.volume).toBe(0.7);
+    expect(speaker.state.rate).toBe(1.15);
+    expect(speaker.state.volume).toBe(0.7);
+
+    // mid-clip changes hit the live element immediately
+    speaker.setSpeechControls({ volume: 0.5 });
+    expect(FakeAudio.latest!.volume).toBe(0.5);
+    expect(speaker.state.volume).toBe(0.5);
+
+    FakeAudio.latest!.onended?.();
+    await speaking;
+    // idle snapshots stay bare, but the controls persist for the next speak
+    expect(speaker.state).toEqual({ status: "idle" });
+    expect(speaker.speechControls).toEqual({ rate: 1.15, volume: 0.5 });
+
+    speaker.resetSpeechControls();
+    expect(speaker.speechControls).toEqual({ rate: 1, volume: 1 });
   });
 
   it("passes a per-bot voice through preparation and synthesis", async () => {
