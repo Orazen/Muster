@@ -18,7 +18,7 @@
 // it happens, which is why waiting feels like listening to someone work
 // rather than listening to nothing.
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Loader2, Phone, PhoneOff, X } from "lucide-react";
+import { Captions, CaptionsOff, Loader2, Mic, MicOff, Phone, PhoneOff, X } from "lucide-react";
 
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
@@ -37,8 +37,12 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
  * sentence that merely contained the word "sure". */
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
 const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it)\b/i;
+// Vellum's spoken session controls, reduced to the one that needs no
+// capability handshake: a clear spoken "end the call" hangs up. Matched on
+// the whole phrase, never a word that merely appeared inside a sentence.
+const END_CALL = /^\s*(please\s+)?(end|stop|finish|close|leave)( the)? call\b|^\s*(hang up|goodbye)\b/i;
 
-type Phase = "listening" | "sending" | "working" | "speaking";
+type Phase = "listening" | "sending" | "working" | "speaking" | "muted";
 const CALL_ENDPOINT_MS = 850;
 
 export function CallButton({ bot }: { bot: Bot }) {
@@ -193,6 +197,16 @@ function Call({ bot }: { bot: Bot }) {
   const initialPhase: Phase = bot.busy ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [heard, setHeard] = useState("");
+  // GetStream's dictation polish: a still-guessing (partial) transcript
+  // renders grey so a mis-heard sentence is visibly provisional; the
+  // finalized turn is what the bot will actually receive.
+  const [heardFinal, setHeardFinal] = useState(false);
+  // Vellum voice-mode parity: mute the mic WITHOUT ending the session, and
+  // toggle live captions anytime. Mute is mic-only — the bot keeps talking,
+  // and un-muting rejoins the listen loop wherever the call currently is.
+  const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
+  const [captions, setCaptions] = useState(true);
   const [note, setNote] = useState<string | null>(null);
   const pushToTalk = usePushToTalk(bot.id, phase === "listening", () => {
     setNote("Push to talk couldn't start. Check Microphone and Speech Recognition access.");
@@ -240,8 +254,15 @@ function Call({ bot }: { bot: Bot }) {
 
   const listen = useCallback(() => {
     if (!alive.current || currentCall() !== bot.id) return;
+    // Mute is a closed mic, not an ended call: every path that would open
+    // the microphone lands in "muted" instead, and un-mute rejoins here.
+    if (mutedRef.current) {
+      move("muted");
+      return;
+    }
     move("listening");
     setHeard("");
+    setHeardFinal(false);
     setNote(null);
     void getDictation().speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === bot.id) {
@@ -249,6 +270,18 @@ function Call({ bot }: { bot: Bot }) {
       }
     });
   }, [bot.id, move]);
+
+  const toggleMute = useCallback(() => {
+    const next = !mutedRef.current;
+    mutedRef.current = next;
+    setMuted(next);
+    if (next) {
+      hush();
+      if (phaseRef.current === "listening") move("muted");
+    } else if (phaseRef.current === "muted") {
+      listen();
+    }
+  }, [hush, listen, move]);
 
   /** Speak, with the microphone closed for the duration (see the header
    * comment — an open mic during playback is a feedback loop). */
@@ -305,10 +338,15 @@ function Call({ bot }: { bot: Bot }) {
       }
       if (line.text === undefined) return;
       setHeard(line.text);
+      setHeardFinal(line.partial === false);
       if (line.partial !== false) return;
       // final result — Apple's recognizer decided the turn ended
       const said = line.text.trim();
       if (!said) return listen();
+      if (END_CALL.test(said)) {
+        endCall(bot.id);
+        return;
+      }
 
       const open = askedApproval.current;
       if (open) {
@@ -465,12 +503,14 @@ function Call({ bot }: { bot: Bot }) {
   }, [bot.id, listen]);
 
   const mascotState =
-    phase === "listening" ? "listening" : phase === "speaking" ? "sending" : phase === "sending" ? "thinking" : "working";
+    phase === "listening" ? "listening" : phase === "speaking" ? "sending" : phase === "sending" ? "thinking" : phase === "muted" ? "idle" : "working";
   const status =
     phase === "listening"
       ? pushToTalk
         ? "Push to talk"
         : "Listening"
+      : phase === "muted"
+        ? "Muted"
       : phase === "sending"
         ? "One moment"
         : phase === "speaking"
@@ -497,17 +537,27 @@ function Call({ bot }: { bot: Bot }) {
         </div>
       </div>
 
-      {/* one line, whichever is current: what you're saying, or what it is */}
-      <div className="min-h-[3.5rem] max-w-[560px] px-6 text-center text-[15px] leading-relaxed text-ink">
-        {phase === "listening" ? (
-          heard || (
-            <span className="text-ink-secondary">
-              {pushToTalk ? "Release Control + Option to send…" : "Say something…"}
-            </span>
-          )
-        ) : (
-          speech.caption
-        )}
+      {/* one line, whichever is current: what you're saying, or what it is.
+          A partial (still-guessing) transcript renders grey — the finalized
+          turn is what the bot will actually receive. Captions can be hidden
+          anytime without touching the call. */}
+      <div className="flex min-h-[3.5rem] max-w-[560px] items-center justify-center px-6 text-center text-[15px] leading-relaxed text-ink">
+        {captions &&
+          (phase === "listening" || phase === "muted" ? (
+            heard ? (
+              <span className={heardFinal ? "" : "text-ink-secondary"}>{heard}</span>
+            ) : (
+              <span className="text-ink-secondary">
+                {phase === "muted"
+                  ? "You're muted — the mic is closed"
+                  : pushToTalk
+                    ? "Release Control + Option to send…"
+                    : "Say something…"}
+              </span>
+            )
+          ) : (
+            speech.caption
+          ))}
       </div>
 
       {note && (
@@ -524,6 +574,32 @@ function Call({ bot }: { bot: Bot }) {
       {speech.error && <div className="max-w-[420px] text-center text-[12.5px] text-danger">{speech.error}</div>}
 
       <div className="flex items-center gap-3">
+        <button
+          onClick={toggleMute}
+          aria-pressed={muted}
+          aria-label={muted ? "Unmute microphone" : "Mute microphone"}
+          title={muted ? "Unmute — the call keeps running" : "Mute — the call keeps running"}
+          className={cn(
+            "flex size-11 items-center justify-center rounded-full border transition-colors",
+            muted
+              ? "border-danger/50 bg-danger/15 text-danger hover:bg-danger/25"
+              : "border-hairline/50 text-ink hover:bg-raised",
+          )}
+        >
+          {muted ? <MicOff size={18} /> : <Mic size={18} />}
+        </button>
+        <button
+          onClick={() => setCaptions((on) => !on)}
+          aria-pressed={captions}
+          aria-label={captions ? "Hide live captions" : "Show live captions"}
+          title={captions ? "Hide live captions" : "Show live captions"}
+          className={cn(
+            "flex size-11 items-center justify-center rounded-full border transition-colors",
+            captions ? "border-accent/40 bg-accent/10 text-accent" : "border-hairline/50 text-ink-secondary hover:bg-raised hover:text-ink",
+          )}
+        >
+          {captions ? <Captions size={18} /> : <CaptionsOff size={18} />}
+        </button>
         {speaker.isSpeaking() && (
           <button
             onClick={() => {
@@ -547,7 +623,7 @@ function Call({ bot }: { bot: Bot }) {
       <div className="text-[11.5px] text-ink-secondary/70">
         {getDictation().kind === "native"
           ? "Hold Control + Option to talk · Space interrupts · Esc hangs up"
-          : "Just talk — a short pause sends your turn · Esc hangs up"}
+          : "Just talk — a short pause sends your turn · say “end the call” or press Esc to hang up"}
       </div>
     </div>
   );
