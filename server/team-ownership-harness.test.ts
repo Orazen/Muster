@@ -146,6 +146,31 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
     }
   });
 
+  it("engine guard: a non-primary bot refuses on foreign engines with an actionable path, and rides its own vault instance", async () => {
+    const bot = alice.bots[0];
+    // Fresh account, no vault keys: the bot's selection is not a
+    // user-scoped instance, so the turn must refuse — and say HOW to fix
+    // it (Settings → Providers), never the old "run your own server"
+    // dead-end that stranded users who had already brought their keys.
+    const denied = await request(hosted, `/api/bots/${bot.id}/messages`, "POST", { text: "hello" }, alice);
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).error).toContain("power this bot with your own model key");
+    // Pointing at ANOTHER user's vault instance refuses with the
+    // isolation note, not the setup note.
+    await request(hosted, `/api/bots/${bot.id}`, "PATCH", { modelSelection: { instanceId: `deepseekApi:${bob.id}`, model: "x" } }, alice);
+    const foreign = await request(hosted, `/api/bots/${bot.id}/messages`, "POST", { text: "hello" }, alice);
+    expect(foreign.status).toBe(403);
+    expect((await foreign.json()).error).toContain("another user's engine");
+    // Own-suffixed instance: the guard passes. The turn then fails at
+    // instance resolution (no such engine registered) — an engine-setup
+    // error, NOT the operator-policy refusal.
+    await request(hosted, `/api/bots/${bot.id}`, "PATCH", { modelSelection: { instanceId: `deepseekApi:${alice.id}`, model: "x" } }, alice);
+    const past = await request(hosted, `/api/bots/${bot.id}/messages`, "POST", { text: "hello" }, alice);
+    const body = await past.json();
+    expect(body.error ?? "").not.toContain("your own model key");
+    expect(body.error ?? "").not.toContain("another user's engine");
+  });
+
   it("refuses a legacy mixed-owner room before any user echo, head or activity changes", async () => {
     const before = { files: files(hosted), transcript: transcript(hosted.legacyThreadId), fleet: await (await request(hosted, "/api/bots", "GET", undefined, primary)).json() };
     const response = await request(hosted, `/api/groups/${hosted.legacyRoomId}/messages`, "POST", { text: "Must not reach the foreign member", expectedThreadId: hosted.legacyThreadId }, primary);

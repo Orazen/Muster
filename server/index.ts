@@ -1988,16 +1988,27 @@ async function startTurn(
     if (!current || current === dispatchLease) store.setActivity(bot.id, "idle");
     throw err;
   };
-  // Multi-tenant engine guard: turns run on the deployment's engines, which
-  // belong to the operator. Another user's bot can hold a transcript but
-  // cannot spend the fleet's credentials until per-user engine config ships.
+  // Multi-tenant engine guard: a turn may only run on credentials that
+  // belong to the bot's owner. Two legitimate shapes: the operator's own
+  // engines on the primary account, and per-user vault engines — instance
+  // ids of the form `providerApi:<userId>`, created by adding a key under
+  // Settings → Providers. The old blanket refusal predated the vault and
+  // dead-ended users who had already brought their own keys; now only a
+  // genuinely foreign engine (the operator's fleet, or another user's
+  // vault) refuses — and it says exactly how to fix it, never a dead end.
   if (SELF_HOSTED && bot.ownerId && primaryUserId() && bot.ownerId !== primaryUserId()) {
-    fail(Object.assign(
-      new Error(
-        "engines on this deployment belong to its operator — run Muster Desktop or your own self-host to power this bot",
-      ),
-      { status: 403 },
-    ));
+    const instanceId = bot.modelSelection?.instanceId ?? "";
+    const engineOwner = userInstanceOwner(instanceId);
+    if (engineOwner !== bot.ownerId) {
+      fail(Object.assign(
+        new Error(
+          engineOwner
+            ? "this bot points at another user's engine — choose one of yours under Settings → Providers"
+            : "power this bot with your own model key: Settings → Providers → add a key (Anthropic, OpenAI, DeepSeek, OpenRouter, …), then send again",
+        ),
+        { status: 403 },
+      ));
+    }
   }
   const threadId = opts?.threadId ?? bot.threadId;
   // a webhook turn, or one inherited from a bot already running unattended
