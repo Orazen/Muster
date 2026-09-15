@@ -56,7 +56,7 @@ const appConfigSchema = z.object({
   /** Telegram workspace sync (server/telegram-sync.ts): the @BotFather bot
    * token and the chat the owner started with it. The chat only ever holds
    * the encrypted bundle; the token alone cannot read a workspace. */
-  telegramSync: z.object({ botToken: optionalText, chatId: z.number().optional(), chatLabel: optionalText, lastFileId: optionalText }).optional(),
+  telegramSync: z.object({ botToken: optionalText, chatId: z.number().optional(), chatLabel: optionalText, lastFileId: optionalText, lastFileIdV2: optionalText }).optional(),
   /** Self-hosted OpenSandbox server: an alternative to box.ascii.dev for the
    * cloud computer feature, running on infrastructure the operator controls
    * instead of a third-party vendor. url defaults to the SDK's own default
@@ -122,7 +122,7 @@ export interface AppConfig {
   /** Google Drive workspace sync tokens (server/drive-sync.ts). */
   driveSync?: { refreshToken?: string; accessToken?: string; expiresAt?: number };
   /** Telegram workspace sync credentials (server/telegram-sync.ts). */
-  telegramSync?: { botToken?: string; chatId?: number; chatLabel?: string; lastFileId?: string };
+  telegramSync?: { botToken?: string; chatId?: number; chatLabel?: string; lastFileId?: string; lastFileIdV2?: string };
   opensandbox?: { url?: string; apiKey?: string; useServerProxy?: boolean };
   /** Opt-in identity bridge — see server/muster-cloud.ts. Off by default;
    * an unset url means fully local, no network dependency, unchanged. */

@@ -3,7 +3,7 @@ import { createBuildDiagnostics } from "./build-identity.ts";
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFileSync, statSync, unlinkSync } from "node:fs";
+import { readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { writeFileAtomic } from "./atomic.ts";
 import { createServer, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
@@ -227,6 +227,17 @@ import {
 } from "./workspace.ts";
 import * as browserPanel from "./browser-panel.ts";
 import * as workspaceBundle from "./workspace-bundle.ts";
+import * as bundleV2 from "./workspace-bundle-v2.ts";
+import {
+  applyPendingRestore,
+  clearPendingRestore,
+  PENDING_RESTORE_FORMAT,
+  readLastReceipt,
+  readPendingRestore,
+  stagingPathFor,
+  writePendingRestore,
+  type PendingRestore,
+} from "./restore-apply.ts";
 import * as driveSync from "./drive-sync.ts";
 import * as telegramSync from "./telegram-sync.ts";
 import * as syncState from "./sync-state.ts";
@@ -445,6 +456,11 @@ async function defaultSelection(forUserId?: string) {
   return { instanceId: pick?.instanceId ?? "", model: pick?.models.default ?? "" };
 }
 let bootSelection = { instanceId: "", model: "" };
+// A staged v2 restore commits HERE — before the Store reads bots/groups and
+// before the message database opens — so the live process never overwrites
+// what the swap just wrote. Routines come back disabled and goals stopped;
+// nothing a restore brought back acts on its own.
+applyPendingRestore(DATA_DIR);
 const store = new Store(() => bootSelection);
 /** Local desktop is one installation; hosted legacy records belong to primary. */
 function peerOwnerOf(bot: { ownerId?: string }): string {
@@ -7675,6 +7691,221 @@ let requestUserEmail = "";
         broadcast({ kind: "hello" });
         syncState.stampSync("local", "pull", "telegram");
         return json(res, 200, { restored: result });
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    // ── Portable workspace backup v2 (server/workspace-bundle-v2.ts) ────
+    // Passphrase-only, everything-included bundles: bots, groups, memory,
+    // transcripts, routines, goals, approval history, the social graph.
+    // Restores stage while the server runs and COMMIT AT BOOT
+    // (server/restore-apply.ts) — the live Store never races the swap. The
+    // whole /api/workspace/ family is already denied on hosted installs at
+    // the choke point above; these routes are desktop/local by inheritance.
+    interface StageOkBody {
+      staged: true;
+      restartRequired: true;
+      counts: bundleV2.StagedCounts | null;
+      reconsentRequired: bundleV2.ReconsentEntry[];
+      summary: bundleV2.BundleSummary | null;
+    }
+    interface StageErrBody {
+      status?: string;
+      error: string;
+      blocked?: bundleV2.RestoreBlocked[];
+    }
+    const stageV2Restore = (
+      passphrase: string,
+      payloadText: string,
+      source: string,
+    ): { ok: true; body: StageOkBody } | { ok: false; status: number; body: StageErrBody } => {
+      const bytes = Buffer.from(payloadText, "utf8");
+      const decrypt = bundleV2.decryptBundleV2(bytes, { passphrase });
+      if (decrypt.status !== "ok" || decrypt.payload === undefined) {
+        const v1Hint = payloadText.startsWith("muster-workspace-bundle:")
+          ? " — that is a v1 bundle; restore it with the original v1 flow on the same installation"
+          : "";
+        return { ok: false, status: 400, body: { status: decrypt.status, error: `${decrypt.error ?? "the bundle could not be decrypted"}${v1Hint}` } };
+      }
+      const verify = bundleV2.verifyBundleV2(bytes, { passphrase });
+      if (verify.status !== "ok") {
+        return { ok: false, status: 400, body: { status: verify.status, error: `the bundle did not verify: ${verify.status}` } };
+      }
+      // ids are KEPT (remapIds: false): the commit replaces the covered files
+      // wholesale, so there is nothing to merge with — and routines, goals,
+      // decisions and social rows all reference bots by id.
+      const staged = bundleV2.stageRestoreV2(decrypt.payload, {
+        stagingDir: stagingPathFor(DATA_DIR),
+        remapIds: false,
+      });
+      if (staged.status !== "staged") {
+        return { ok: false, status: 400, body: { status: staged.status, error: staged.error ?? "the restore was refused", blocked: staged.blocked } };
+      }
+      try {
+        const pending: PendingRestore = {
+          version: 1,
+          format: PENDING_RESTORE_FORMAT,
+          stagingDir: staged.stagingDir,
+          createdAt: Date.now(),
+          source,
+          reconsentRequired: staged.reconsentRequired,
+        };
+        if (staged.counts !== undefined) pending.counts = staged.counts;
+        writePendingRestore(DATA_DIR, pending);
+      } catch (e) {
+        return { ok: false, status: 409, body: { error: e instanceof Error ? e.message : String(e) } };
+      }
+      return {
+        ok: true,
+        body: {
+          staged: true,
+          restartRequired: true,
+          counts: staged.counts ?? null,
+          reconsentRequired: staged.reconsentRequired,
+          summary: verify.summary ?? null,
+        },
+      };
+    };
+
+    if (path === "/api/workspace/v2/status" && (method === "GET" || method === "POST")) {
+      const pending = readPendingRestore(DATA_DIR);
+      const receipt = readLastReceipt(DATA_DIR);
+      // the staging path is server-local bookkeeping — the UI never needs it
+      const pendingView: { createdAt: number; source: string; reconsentRequired: unknown[]; counts?: unknown } | null =
+        pending ? { createdAt: pending.createdAt, source: pending.source, reconsentRequired: pending.reconsentRequired } : null;
+      if (pending && pendingView) pendingView.counts = pending.counts;
+      const receiptView: { appliedAt: number; status: string; createdAt: number; source: string; reconsentRequired: unknown[]; error?: string; blocked?: { path: string; detail: string }[] } | null =
+        receipt ? { appliedAt: receipt.appliedAt, status: receipt.status, createdAt: receipt.createdAt, source: receipt.source, reconsentRequired: receipt.reconsentRequired } : null;
+      if (receipt && receiptView) {
+        receiptView.error = receipt.error;
+        receiptView.blocked = receipt.blocked;
+      }
+      return json(res, 200, { pending: pendingView, receipt: receiptView });
+    }
+    if (path === "/api/workspace/v2/export" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      try {
+        const payload = bundleV2.buildPayloadV2({ dataDir: DATA_DIR, appVersion: appVersion() });
+        const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
+        return json(res, 200, {
+          payload: bytes.toString("utf8"),
+          counts: payload.counts,
+          skipped: payload.skipped ?? [],
+          skippedTruncated: payload.skippedTruncated === true,
+        });
+      } catch (e) {
+        return json(res, 500, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/v2/verify" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      const payload = isText(body?.payload) ? body.payload : "";
+      if (!payload) return json(res, 400, { error: "payload is required" });
+      const result = bundleV2.verifyBundleV2(Buffer.from(payload, "utf8"), { passphrase });
+      return json(res, 200, result);
+    }
+    if (path === "/api/workspace/v2/restore" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      const payload = isText(body?.payload) ? body.payload : "";
+      if (!payload) return json(res, 400, { error: "payload is required" });
+      if (body?.confirm !== true) return json(res, 400, { error: "restoring replaces the current fleet — send confirm: true to proceed" });
+      const out = stageV2Restore(passphrase, payload, "file");
+      return json(res, out.ok ? 200 : out.status, out.body);
+    }
+    if (path === "/api/workspace/v2/restore/discard" && method === "POST") {
+      clearPendingRestore(DATA_DIR);
+      try {
+        rmSync(stagingPathFor(DATA_DIR), { recursive: true, force: true });
+      } catch {
+        /* staging may already be gone */
+      }
+      return json(res, 200, { discarded: true });
+    }
+    if (path === "/api/workspace/v2/drive/push" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const refreshToken = cfg.driveSync?.refreshToken;
+      if (!refreshToken) return json(res, 400, { error: "Google Drive is not connected yet" });
+      try {
+        const token = await driveSync.refreshDriveToken(refreshToken);
+        const payload = bundleV2.buildPayloadV2({ dataDir: DATA_DIR, appVersion: appVersion() });
+        const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
+        const uploaded = await driveSync.uploadBundle(token.accessToken, bytes.toString("utf8"), driveSync.BUNDLE_V2_NAME);
+        syncState.stampSync("local", "push", "google-drive");
+        return json(res, 200, { uploaded: uploaded.id, counts: payload.counts, skipped: payload.skipped ?? [] });
+      } catch (e) {
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/v2/drive/pull" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const refreshToken = cfg.driveSync?.refreshToken;
+      if (!refreshToken) return json(res, 400, { error: "Google Drive is not connected yet" });
+      try {
+        const token = await driveSync.refreshDriveToken(refreshToken);
+        const payload = await driveSync.downloadBundle(token.accessToken, driveSync.BUNDLE_V2_NAME);
+        if (cfg.driveSync?.refreshToken !== refreshToken) {
+          return json(res, 409, { error: "Google Drive connection changed during download — check the connection and try again." });
+        }
+        if (!payload) return json(res, 404, { error: "no portable backup exists in Drive yet — push from the other device first" });
+        const out = stageV2Restore(passphrase, payload, "google-drive");
+        if (out.ok) syncState.stampSync("local", "pull", "google-drive");
+        return json(res, out.ok ? 200 : out.status, out.body);
+      } catch (e) {
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/v2/telegram/push" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const botToken = cfg.telegramSync?.botToken;
+      const chatId = cfg.telegramSync?.chatId;
+      if (!botToken || !chatId) return json(res, 400, { error: "Telegram is not connected yet — paste a @BotFather token and connect first" });
+      try {
+        const payload = bundleV2.buildPayloadV2({ dataDir: DATA_DIR, appVersion: appVersion() });
+        const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
+        const fileId = await telegramSync.pushBundle(botToken, chatId, bytes.toString("utf8"), driveSync.BUNDLE_V2_NAME);
+        if (!telegramSync.telegramConnectionMatches(cfg.telegramSync, botToken, chatId)) {
+          return json(res, 409, { error: "Telegram connection changed during upload — the file was sent but not recorded." });
+        }
+        saveConfig({ telegramSync: { lastFileIdV2: fileId } });
+        Object.assign(cfg, loadConfig());
+        syncState.stampSync("local", "push", "telegram");
+        return json(res, 200, { fileId, counts: payload.counts, skipped: payload.skipped ?? [] });
+      } catch (e) {
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path === "/api/workspace/v2/telegram/pull" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const botToken = cfg.telegramSync?.botToken;
+      const chatId = cfg.telegramSync?.chatId ?? null;
+      if (!botToken) return json(res, 400, { error: "Telegram is not connected yet — paste a @BotFather token and connect first" });
+      try {
+        // the v2 file_id recorded at push time first; then the newest document
+        // in the chat (covers a fresh install where the owner forwarded the
+        // file). A v1 document surfaces as an honest "that is a v1 bundle".
+        let fileId = cfg.telegramSync?.lastFileIdV2 ?? "";
+        if (!fileId) fileId = (await telegramSync.resolveLatestFileId(botToken, chatId)) ?? "";
+        if (!fileId) return json(res, 404, { error: "no portable backup in the Telegram chat yet — push from the other device first" });
+        const payload = await telegramSync.downloadBundle(botToken, fileId);
+        if (!telegramSync.telegramRestoreConnectionMatches(cfg.telegramSync, botToken, chatId)) {
+          return json(res, 409, { error: "Telegram connection changed during download — check the connection and try again." });
+        }
+        const out = stageV2Restore(passphrase, payload, "telegram");
+        if (out.ok) syncState.stampSync("local", "pull", "telegram");
+        return json(res, out.ok ? 200 : out.status, out.body);
       } catch (e) {
         return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
       }

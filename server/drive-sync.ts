@@ -12,6 +12,9 @@ const LIST_URL = "https://www.googleapis.com/drive/v3/files";
 const FILE_URL = "https://www.googleapis.com/drive/v3/files";
 const APPDATA_FOLDER = "appDataFolder";
 const BUNDLE_NAME = "muster-workspace.enc";
+/** The portable v2 bundle keeps its own file so a v2 push never clobbers a
+ * v1 backup the user may still need to restore on an older build. */
+export const BUNDLE_V2_NAME = "muster-workspace-v2.enc";
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID?.trim() ?? "";
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "";
@@ -105,10 +108,10 @@ async function driveFetch(accessToken: string, url: string, init?: RequestInit):
 }
 
 /** Upload (create or overwrite) the workspace bundle in the app folder. */
-export async function uploadBundle(accessToken: string, payload: string): Promise<{ id: string }> {
-  const fileId = await findBundleFile(accessToken);
+export async function uploadBundle(accessToken: string, payload: string, fileName = BUNDLE_NAME): Promise<{ id: string }> {
+  const fileId = await findBundleFile(accessToken, fileName);
   // Updating content must not try to move the file's parent folder.
-  const metadata = JSON.stringify(fileId ? { name: BUNDLE_NAME } : { name: BUNDLE_NAME, parents: [APPDATA_FOLDER] });
+  const metadata = JSON.stringify(fileId ? { name: fileName } : { name: fileName, parents: [APPDATA_FOLDER] });
   const boundary = `muster-${randomBytes(8).toString("hex")}`;
   const body = [
     `--${boundary}`,
@@ -148,9 +151,9 @@ const driveListSchema = z.object({
 }).strict();
 
 /** Find the existing bundle file id, if any. */
-export async function findBundleFile(accessToken: string): Promise<string | null> {
+export async function findBundleFile(accessToken: string, fileName = BUNDLE_NAME): Promise<string | null> {
   const query = new URLSearchParams({
-    spaces: APPDATA_FOLDER, q: `name = '${BUNDLE_NAME}' and trashed = false`,
+    spaces: APPDATA_FOLDER, q: `name = '${fileName}' and trashed = false`,
     orderBy: "modifiedTime desc", pageSize: "100", fields: "files(id),nextPageToken,incompleteSearch",
   });
   const seenPages = new Set<string>();
@@ -172,8 +175,8 @@ export async function findBundleFile(accessToken: string): Promise<string | null
 }
 
 /** Download the bundle payload. Returns null when no bundle exists yet. */
-export async function downloadBundle(accessToken: string): Promise<string | null> {
-  const fileId = await findBundleFile(accessToken);
+export async function downloadBundle(accessToken: string, fileName = BUNDLE_NAME): Promise<string | null> {
+  const fileId = await findBundleFile(accessToken, fileName);
   if (!fileId) return null;
   const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(fileId)}?alt=media`);
   if (res.status === 404) return null;

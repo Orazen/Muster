@@ -336,7 +336,19 @@ function kdfProblem(kdf: BundleKdf): string | null {
 // Export — build the payload
 // ---------------------------------------------------------------------------
 
-const SUBSET_ROOT_FILES = new Set(["bots.json", "groups.json", "MEMORY.md"]);
+const SUBSET_ROOT_FILES = new Set([
+  "bots.json",
+  "groups.json",
+  "MEMORY.md",
+  // the automation and history layer — a restore that lost routines, goals,
+  // approval history or the social graph was only half a restore. Routines
+  // and goals are de-weaponized by the boot apply (server/restore-apply.ts);
+  // keys, connections and the installation secret stay outside the subset.
+  "routines.json",
+  "goals.json",
+  "decisions.json",
+  "social.json",
+]);
 
 export interface BuildPayloadV2Options {
   dataDir: string;

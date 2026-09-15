@@ -182,10 +182,10 @@ export async function resolveLatestFileId(token: string, chatId: number | null):
 
 /** Upload the encrypted bundle as one document into the bot chat. Returns
  * the Telegram file_id for later pulls. */
-export async function pushBundle(token: string, chatId: number, payload: string): Promise<string> {
+export async function pushBundle(token: string, chatId: number, payload: string, fileName = BUNDLE_NAME): Promise<string> {
   const form = new FormData();
   form.set("chat_id", String(chatId));
-  form.set("document", new File([payload], BUNDLE_NAME, { type: "application/octet-stream" }));
+  form.set("document", new File([payload], fileName, { type: "application/octet-stream" }));
   const sent = await callTelegram(token, "sendDocument", TRANSFER_TIMEOUT, documentSentSchema, "Telegram upload failed", {
     method: "POST",
     body: form,
