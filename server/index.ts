@@ -257,6 +257,7 @@ import { WebhookManager } from "./webhooks.ts";
 import { VaultManager } from "./vault-manager.ts";
 import { buildBriefing } from "./briefing.ts";
 import { buildReceipt, renderReceiptText } from "./receipts.ts";
+import { executeWorkflow, webagentsManifest, webagentsMarkdown } from "./agent-workflow.ts";
 import { buildWrapped, renderWrappedText } from "./wrapped.ts";
 import {
   MAX_REDEEM_PER_INVITEE,
@@ -6093,6 +6094,57 @@ let requestUserEmail = "";
       return json(res, 200, { agents });
     }
 
+    // ── agent batch workflow (WebAgents-style, read-only v1) ───────────
+    // One bounded batch instead of many round trips. Requires a JSON
+    // content-type (non-simple cross-origin request; no CORS permission is
+    // ever emitted, so a hostile page cannot submit it) and, under
+    // self-hosting, the session gate above. Only the allowlisted read-only
+    // ops in server/agent-workflow.ts run; writes stay behind approvals.
+    if (path === "/api/agent/workflow" && method === "POST") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const body = await readBody(req);
+      const outcome = executeWorkflow(body, {
+        health: () => ({ app: "muster" }),
+        bots: () =>
+          store.bots
+            .filter((b) => !b.hidden && ownsRecord(b))
+            .map((b) => ({ id: b.id, name: b.name, title: b.title, busy: Boolean(b.busy) })),
+        tasks: (botId) => {
+          const bot = store.bot(botId);
+          if (!bot || !ownsRecord(bot)) return null;
+          return store.tasks(botId).map((t) => ({ threadId: t.threadId, title: t.title, createdAt: t.createdAt }));
+        },
+        receipt: (botId, threadId) => {
+          const bot = store.bot(botId);
+          const task = store.taskByThread(botId, threadId);
+          if (!bot || !task || !ownsRecord(bot)) return null;
+          const msgs = store.messagesFor(threadId);
+          const lastBotWord = [...msgs].reverse().find((mm) => mm.role === "bot" && mm.kind === "text" && mm.text?.trim());
+          return buildReceipt({
+            botName: bot.name,
+            taskTitle: task.title,
+            createdAt: task.createdAt,
+            finishedAt: Date.now(),
+            usage: task.usage,
+            finalWord: lastBotWord?.text ?? null,
+          });
+        },
+        directory: () => ({
+          agents: social!
+            .publicProfiles()
+            .slice(0, 100)
+            .map((p) => {
+              const bot = store.bot(p.botId);
+              return bot ? { handle: p.handle, name: bot.name, tagline: p.tagline } : null;
+            })
+            .filter((a): a is NonNullable<typeof a> => a !== null),
+        }),
+      });
+      return json(res, outcome.status, outcome.error ? { error: outcome.error } : { results: outcome.results });
+    }
+
     // ── transcript export (the visible branch, human-readable) ──────────
     m = path.match(/^\/api\/threads\/([\w-]+)\/export$/);
     if (m && method === "GET") {
@@ -8447,6 +8499,19 @@ let requestUserEmail = "";
       } catch {
         return html(res, 502, "<h1>Team library is unavailable right now</h1>");
       }
+    }
+
+    // WebAgents-style discovery: the manifest an agent reads BEFORE calling
+    // /api/agent/workflow. Public by design (a directory of capabilities
+    // leaks nothing), served in both spec forms from one generated object.
+    if ((method === "GET" || method === "HEAD") && (path === "/webagents.md" || path === "/.well-known/webagents.json")) {
+      const isJson = path.endsWith(".json");
+      const payload = isJson ? JSON.stringify(webagentsManifest(), null, 2) : webagentsMarkdown();
+      res.writeHead(200, {
+        "content-type": isJson ? "application/json; charset=utf-8" : "text/markdown; charset=utf-8",
+        "cache-control": "public, max-age=300",
+      });
+      return res.end(method === "HEAD" ? undefined : payload);
     }
 
     // self-hosted docs at pretty URLs: /docs, /docs/quick-start, /docs/security.
