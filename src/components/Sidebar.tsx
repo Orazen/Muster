@@ -1106,7 +1106,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   return (
     <aside
       className={cn(
-        "glass-shell-sidebar flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel transition-[width] duration-200",
+        "glass-shell-sidebar flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel transition-[width] duration-200 ease-[cubic-bezier(.24,1,.4,1)]",
         DENSITY_WIDTH[density],
         // Below md only: the sidebar leaves the flow and slides in over the chat.
         // Scoped with max-md: rather than cancelled with md: on purpose — Tailwind
@@ -1154,7 +1154,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             {densityMenu && (
               <>
                 <div className="fixed inset-0 z-30" onMouseDown={() => setDensityMenu(false)} />
-                <div className="absolute right-8 top-full z-40 mt-1 w-44 overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60">
+                <div className="menu-pop absolute right-8 top-full z-40 mt-1 w-44 origin-top-right overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60">
                   {([
                     ["comfortable", "Comfortable"],
                     ["compact", "Compact"],

@@ -245,10 +245,20 @@ body {
   color: transparent;
 }
 @media (prefers-reduced-motion: reduce) {
-  .animate-caret, .animate-msg-in, .animate-shimmer, .timeline-pulse { animation: none; }
+  .animate-caret, .animate-msg-in, .animate-shimmer, .timeline-pulse, .menu-pop { animation: none; }
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
   /* The drawer still moves, it just arrives instantly. */
   aside { transition: none; }
+}
+
+/* Contextual popovers grow from their trigger (Astryx motion budget: fast
+   entrance, single easing, instant under reduced motion). */
+@keyframes menu-pop-in {
+  from { opacity: 0; transform: scale(.96) translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+.menu-pop {
+  animation: menu-pop-in 175ms cubic-bezier(.24, 1, .4, 1);
 }
 
 /* Muster vector motion. The fast horizontal compression is the edge-on
