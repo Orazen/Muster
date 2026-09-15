@@ -25,7 +25,9 @@ import {
   ShieldCheck,
   Square,
   Target,
+  Terminal,
   Webhook,
+  Wrench,
   X,
 } from "lucide-react";
 
@@ -544,16 +546,21 @@ function ActivityChip({ message }: { message: Message }) {
   );
 }
 
-/** Status mark for one tool run — shared by the chip and the group header. */
-function ToolStatusMark({ tool }: { tool: NonNullable<Message["tool"]> }) {
-  const failed = tool.ok === false;
-  if (tool.ok === undefined) return <Loader2 size={13} className="animate-spin" />;
-  return failed ? <X size={13} /> : <Check size={13} className="text-success" />;
+/** Collapse consecutive tool calls into one calm GAIA-style line: the run's
+ * duration, a stacked icon per tool family, expandable to the individual
+ * chips plus the waterfall timeline. */
+/** Tool-name → glyph, GAIA's category-icon idea rendered with lucide. */
+function toolGlyph(name: string): typeof Wrench {
+  const n = name.toLowerCase();
+  if (/^(bash|exec|shell|terminal|zsh)/.test(n)) return Terminal;
+  if (/^(read|glob|grep|find|ls)/.test(n)) return Search;
+  if (/^(write|edit|patch|apply)/.test(n)) return Pencil;
+  if (/^(web|fetch|http|curl)/.test(n)) return Globe;
+  if (/^(task|agent|spawn|sub)/.test(n)) return Cpu;
+  if (/^(file|folder|dir|path)/.test(n)) return Folder;
+  return Wrench;
 }
 
-/** gaia-ui-style collapsed run: consecutive tool calls become one calm line
- * — how long the run took, how many tools it used, stacked status marks,
- * expandable to the individual chips. */
 function ToolRunGroup({ items }: { items: Message[] }) {
   const [open, setOpen] = useState(false);
   const running = items.filter((m) => m.tool?.ok === undefined).length;
@@ -571,28 +578,52 @@ function ToolRunGroup({ items }: { items: Message[] }) {
           .map((m) => ({ id: m.id, name: m.tool!.name, ok: m.tool!.ok, at: m.at ?? 0 })),
       )
     : null;
+  // GAIA's stacked-icon header: dedupe by tool family, alternate ±8° tilt,
+  // overflow chip past six — the run reads as a handful of instruments,
+  // not a pile of status dots.
+  const seen = new Set<string>();
+  const unique = items.filter((m) => {
+    const key = (m.tool?.name ?? "").split(":")[0].toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const shown = unique.slice(0, 6);
   return (
     <div className="flex justify-start">
-      <div className="w-full max-w-[560px] overflow-hidden rounded-2xl border border-hairline/40 bg-panel">
+      <div className="w-full max-w-[560px]">
         <button
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-[13px] text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
+          className="flex w-full items-center gap-2.5 py-2 text-[13px] text-ink-secondary transition-colors hover:text-ink"
         >
-          <span className="flex -space-x-1.5">
-            {items.slice(-4).map((m) => (
-              <span key={m.id} className="rounded-full border border-hairline/40 bg-panel p-1">
-                {m.tool ? <ToolStatusMark tool={m.tool} /> : null}
+          <span className="flex min-h-8 items-center -space-x-2">
+            {shown.map((m, i) => {
+              const Glyph = toolGlyph(m.tool?.name ?? "");
+              return (
+                <span
+                  key={m.id}
+                  className="flex size-8 items-center justify-center rounded-lg border border-hairline/40 bg-panel text-ink-secondary"
+                  style={{ rotate: shown.length > 1 ? `${i % 2 === 0 ? 8 : -8}deg` : undefined, zIndex: i }}
+                >
+                  <Glyph size={15} />
+                </span>
+              );
+            })}
+            {unique.length > 6 && (
+              <span className="z-0 flex size-7 items-center justify-center rounded-lg bg-raised text-[11px] text-ink-secondary">
+                +{unique.length - 6}
               </span>
-            ))}
+            )}
           </span>
           <span>
-            {duration}Used {items.length} tools{running > 0 ? ` · ${running} running` : ""}
+            {duration}Used {items.length} tool{items.length === 1 ? "" : "s"}
+            {running > 0 ? ` · ${running} running` : ""}
           </span>
           <ChevronDown size={14} className={cn("ml-auto transition-transform", open && "rotate-180")} />
         </button>
         {open && (
-          <div className="flex flex-col gap-1 border-t border-hairline/40 p-2">
+          <div className="flex flex-col gap-1 pb-1 pl-1">
             {waterfall && (
               <div
                 className="mb-1 flex flex-col gap-[3px] rounded-lg bg-inset/60 px-2.5 py-2"
