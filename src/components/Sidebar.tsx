@@ -10,6 +10,7 @@ import {
   Bot as BotIcon,
   CalendarDays,
   Check,
+  ChevronDown,
   ClipboardCopy,
   Copy,
   Crown,
@@ -21,6 +22,7 @@ import {
   PinOff,
   Plus,
   RefreshCw,
+  Rows3,
   Search,
   Settings,
   Puzzle,
@@ -29,6 +31,16 @@ import {
   X,
 } from "lucide-react";
 import { api, useStore, formatTime, visibleMessages, type Bot, type Group } from "@/state/store";
+import {
+  DENSITY_AVATAR,
+  DENSITY_WIDTH,
+  loadCollapsedSections,
+  loadDensity,
+  saveCollapsedSections,
+  saveDensity,
+  type SidebarDensity,
+  type SidebarSection,
+} from "@/lib/sidebar-preferences";
 
 import { AgentAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
@@ -161,26 +173,29 @@ function groupPreview(group: Group, bots: Bot[]): string {
   return last.from ? `${last.from.name}: ${text}` : text;
 }
 
-/** Room avatar: 2–3 overlapping agents in the same 56px slot a bot gets. */
-function StackedAgents({ members }: { members: Bot[] }) {
+/** Room avatar: 2–3 overlapping agents in the same slot a bot gets. */
+function StackedAgents({ members, size = 56 }: { members: Bot[]; size?: number }) {
+  const slot = `${Math.round(size * 0.7)}px`;
   if (members.length <= 1) {
     const b = members[0];
     return (
-      <div className="flex size-14 shrink-0 items-center justify-center">
-        {b ? <AgentAvatar color={b.color} character={b.character} state="happy" size={56} /> : <Users size={24} className="text-ink-secondary" />}
+      <div className="relative flex shrink-0 items-center justify-center" style={{ width: slot, height: slot }}>
+        {b ? <AgentAvatar color={b.color} character={b.character} state="happy" size={size} /> : <Users size={24} className="text-ink-secondary" />}
       </div>
     );
   }
   const shown = members.slice(0, 3);
   const extra = members.length - shown.length;
   return (
-    <div className="flex size-14 shrink-0 items-center justify-center">
-      <div className="flex items-center -space-x-3">
-        {shown.map((b) => (
-          <AgentAvatar key={b.id} color={b.color} character={b.character} state="happy" size={30} />
+    <div className="relative flex shrink-0 items-center justify-center" style={{ width: slot, height: slot }}>
+      <div className="flex items-center" style={{ marginLeft: -Math.round(size * 0.22) }}>
+        {shown.map((b, i) => (
+          <span key={b.id} className="relative" style={{ marginLeft: i === 0 ? 0 : -Math.round(size * 0.22), zIndex: i }}>
+            <AgentAvatar color={b.color} character={b.character} state="happy" size={Math.round(size * 0.54)} />
+          </span>
         ))}
         {extra > 0 && (
-          <span className="z-10 flex size-[22px] items-center justify-center rounded-full border border-hairline/40 bg-raised text-[10px] font-medium text-ink-secondary">
+          <span className="z-10 flex items-center justify-center rounded-full border border-hairline/40 bg-raised font-medium text-ink-secondary" style={{ width: Math.round(size * 0.4), height: Math.round(size * 0.4), marginLeft: -Math.round(size * 0.22), fontSize: Math.max(9, Math.round(size * 0.18)) }}>
             +{extra}
           </span>
         )}
@@ -189,13 +204,38 @@ function StackedAgents({ members }: { members: Bot[] }) {
   );
 }
 
-function GroupListItem({ group, onMenu }: { group: Group; onMenu: (menu: { groupId: string; x: number; y: number }) => void }) {
+function GroupListItem({ group, onMenu, density }: { group: Group; onMenu: (menu: { groupId: string; x: number; y: number }) => void; density: SidebarDensity }) {
   const { state, dispatch } = useStore();
   const selected = state.activeView === "chat" && state.selectedId === group.id;
   const members = group.memberIds
     .map((id) => state.bots.find((b) => b.id === id))
     .filter((b): b is Bot => Boolean(b));
   const last = group.messages.at(-1);
+  const rowClass = cn(
+    "flex w-full items-center gap-3 rounded-xl text-left",
+    density === "compact" ? "px-3 py-2" : "px-3 py-2.5",
+    density === "icons" ? "justify-center px-2 py-2" : "",
+    selected ? "bg-raised" : "hover:bg-raised/50",
+  );
+  if (density === "icons") {
+    return (
+      <button
+        onClick={() => dispatch({ type: "select", id: group.id })}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onMenu({ groupId: group.id, x: e.clientX, y: e.clientY });
+        }}
+        title={group.name}
+        aria-label={`Open room ${group.name}`}
+        className={rowClass}
+      >
+        <div className="relative">
+          <StackedAgents members={members} size={DENSITY_AVATAR.icons} />
+          {group.unread && <span className="absolute right-0 top-0 size-2 rounded-full bg-accent" />}
+        </div>
+      </button>
+    );
+  }
   return (
     <button
       onClick={() => dispatch({ type: "select", id: group.id })}
@@ -203,19 +243,19 @@ function GroupListItem({ group, onMenu }: { group: Group; onMenu: (menu: { group
         e.preventDefault();
         onMenu({ groupId: group.id, x: e.clientX, y: e.clientY });
       }}
-      className={cn(
-        "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left",
-        selected ? "bg-raised" : "hover:bg-raised/50",
-      )}
+      className={rowClass}
     >
-      <StackedAgents members={members} />
+      <div className="relative shrink-0">
+        <StackedAgents members={members} size={DENSITY_AVATAR[density]} />
+        <PresenceDot activity={group.busyBotId ? "working" : undefined} />
+      </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
+          <span className={cn("truncate font-semibold text-ink", density === "compact" ? "text-[14px]" : "text-[15px]")}>{group.name}</span>
           {selected && last && <span className="shrink-0 text-xs text-ink-secondary">{formatTime(last.at)}</span>}
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[13px] text-ink-secondary">{groupPreview(group, state.bots)}</span>
+          <span className={cn("truncate text-ink-secondary", density === "compact" ? "text-[11.5px]" : "text-[13px]")}>{groupPreview(group, state.bots)}</span>
           {group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
         </div>
       </div>
@@ -504,16 +544,89 @@ function BotContextMenu({
   );
 }
 
+/** Benchmark-style presence ring on the avatar: green = working, amber =
+ * waiting on you. A resting teammate gets no dot — presence should never
+ * out-shout the unread marker. */
+function PresenceDot({ activity }: { activity?: Bot["activity"] }) {
+  if (activity !== "working" && activity !== "waiting-on-you") return null;
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-panel",
+        activity === "working" ? "bg-[#38d591]" : "bg-warning",
+      )}
+    />
+  );
+}
+
+/** Collapsible roster section header (Rooms / Teammates). A collapsed
+ * header keeps the attention counts the rows can no longer show. */
+function SectionHeader({
+  label,
+  collapsed,
+  onToggle,
+  waiting,
+  unread,
+  compact,
+}: {
+  label: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  waiting: number;
+  unread: number;
+  /** Icons-only rail: no room for the label — a centered chevron carries
+   * the toggle, and a dot takes over from the numeric attention badges. */
+  compact?: boolean;
+}) {
+  if (compact) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        aria-label={`${collapsed ? "Expand" : "Collapse"} ${label}`}
+        title={label}
+        className="relative flex w-full items-center justify-center rounded-lg py-1.5 text-ink-secondary transition-colors hover:text-ink"
+      >
+        <ChevronDown size={12} className={cn("shrink-0 transition-transform duration-200", collapsed && "-rotate-90")} />
+        {collapsed && (waiting > 0 || unread > 0) && (
+          <span className={cn("absolute right-2 top-1 size-1.5 rounded-full", waiting > 0 ? "bg-warning" : "bg-accent")} />
+        )}
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      className="flex w-full items-center gap-1.5 rounded-lg px-3 pb-1 pt-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-secondary transition-colors hover:text-ink"
+    >
+      <ChevronDown size={12} className={cn("shrink-0 transition-transform duration-200", collapsed && "-rotate-90")} />
+      <span className="flex-1">{label}</span>
+      {collapsed && waiting > 0 && (
+        <span className="min-w-4 rounded-full bg-warning/20 px-1 text-center text-[10px] font-semibold text-warning">{waiting}</span>
+      )}
+      {collapsed && unread > 0 && (
+        <span className="min-w-4 rounded-full bg-accent/20 px-1 text-center text-[10px] font-semibold text-accent">{unread}</span>
+      )}
+    </button>
+  );
+}
+
 function BotListItem({
   bot,
   onMenu,
   onArchive,
   archiveDisabled,
+  density,
 }: {
   bot: Bot;
   onMenu: (menu: MenuState) => void;
   onArchive: (bot: Bot) => void;
   archiveDisabled: boolean;
+  density: SidebarDensity;
 }) {
   const { state, dispatch } = useStore();
   const [renaming, setRenaming] = useState(false);
@@ -523,7 +636,9 @@ function BotListItem({
   const visible = visibleMessages(bot);
   const last = visible.at(-1);
   const rowClass = cn(
-    "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 pr-10 text-left",
+    "flex w-full items-center gap-3 rounded-xl border text-left",
+    density === "compact" ? "px-3 py-2" : "px-3 py-2.5",
+    density === "icons" ? "justify-center px-2 py-2" : "pr-10",
     bot.chiefOfStaff
       ? selected
         ? "border-accent/40 bg-accent/15"
@@ -532,19 +647,59 @@ function BotListItem({
         ? "border-transparent bg-raised"
         : "border-transparent hover:bg-raised/50",
   );
-  const body = (
-    <>
+  const avatar = (
+    <div className="relative shrink-0">
       <AgentAvatar
         character={bot.character}
         color={bot.color}
         state={stateForBot({ ...bot, messages: visible })}
-        size={56}
+        size={DENSITY_AVATAR[density]}
         motion={mascotMotion?.kind ?? "none"}
         motionKey={mascotMotion?.nonce ?? 0}
       />
+      <PresenceDot activity={bot.activity} />
+    </div>
+  );
+  const onContextMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    onMenu({ botId: bot.id, x: event.clientX, y: event.clientY });
+  };
+
+  // Icons-only rail: the avatar IS the row; the tooltip carries identity,
+  // and the unread marker moves to the corner the text used to occupy.
+  if (density === "icons") {
+    return (
+      <div className="group relative">
+        <div
+          role="button"
+          tabIndex={0}
+          title={bot.activity === "waiting-on-you" ? `${bot.name} — waiting on you` : bot.name}
+          aria-label={`Open ${bot.name}`}
+          onClick={() => dispatch({ type: "select", id: bot.id })}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              dispatch({ type: "select", id: bot.id });
+            }
+          }}
+          onContextMenu={onContextMenu}
+          className={rowClass}
+        >
+          {avatar}
+          {bot.unread && <span className="absolute right-1.5 top-1.5 size-2 shrink-0 rounded-full bg-accent" />}
+        </div>
+      </div>
+    );
+  }
+  const body = (
+    <>
+      {avatar}
       <div className="min-w-0 flex-1">
+        {bot.title && (
+          <div className="truncate text-[11px] leading-tight text-ink-secondary">{bot.title}</div>
+        )}
         <div className="flex items-baseline justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
+          <span className={cn("flex min-w-0 items-center gap-1.5 truncate font-semibold text-ink", density === "compact" ? "text-[14px]" : "text-[15px]")}>
             {bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
             <RenameTitle
               value={bot.name}
@@ -561,7 +716,7 @@ function BotListItem({
           )}
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-ink-secondary">
+          <span className={cn("flex min-w-0 items-center gap-1.5 truncate text-ink-secondary", density === "compact" ? "text-[11.5px]" : "text-[13px]")}>
             {bot.chiefOfStaff && (
               <span className="flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-accent">
                 <Crown size={11} /> Chief of Staff
@@ -577,10 +732,6 @@ function BotListItem({
       </div>
     </>
   );
-  const onContextMenu = (event: React.MouseEvent) => {
-    event.preventDefault();
-    onMenu({ botId: bot.id, x: event.clientX, y: event.clientY });
-  };
 
   // Keep the rename <input> out of role="button" — a button's descendants
   // are presentational, which hides the field from assistive tech.
@@ -790,6 +941,24 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     restoreBot?: { id: string; name: string };
   } | null>(null);
   const [query, setQuery] = useState("");
+  // Benchmark layout program: three densities (persisted) + collapsible
+  // roster sections (Rooms / Teammates) with attention badges.
+  const [density, setDensity] = useState<SidebarDensity>(() => loadDensity());
+  const [densityMenu, setDensityMenu] = useState(false);
+  const [collapsed, setCollapsed] = useState<SidebarSection[]>(() => loadCollapsedSections());
+  const setSidebarDensity = (next: SidebarDensity) => {
+    setDensity(next);
+    saveDensity(next);
+    setDensityMenu(false);
+    track("sidebar_density", { density: next });
+  };
+  const toggleSection = (section: SidebarSection) => {
+    setCollapsed((prev) => {
+      const next = prev.includes(section) ? prev.filter((s) => s !== section) : [...prev, section];
+      saveCollapsedSections(next);
+      return next;
+    });
+  };
 
   // Esc closes the drawer, mirroring ApiKeys.tsx:75-85. Bound only while the
   // drawer is open — on mobile, exactly when a bot/room context menu or the
@@ -937,7 +1106,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   return (
     <aside
       className={cn(
-        "glass-shell-sidebar flex h-full w-[320px] shrink-0 flex-col border-r border-hairline/40 bg-panel",
+        "glass-shell-sidebar flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel transition-[width] duration-200",
+        DENSITY_WIDTH[density],
         // Below md only: the sidebar leaves the flow and slides in over the chat.
         // Scoped with max-md: rather than cancelled with md: on purpose — Tailwind
         // v4 emits the native `translate` property, and any value other than
@@ -952,7 +1122,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     >
       {/* macOS owns inset traffic lights; the browser wears the brand. */}
       <div
-        className="flex items-center justify-between px-4 pt-3.5 pb-1"
+        className={cn("flex items-center justify-between px-4 pt-3.5 pb-1", density === "icons" && "flex-col gap-2 px-2")}
         // SAFETY: Electron honors the non-standard -webkit-app-region drag
         // style, which React's CSSProperties does not declare.
         style={macInset ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined}
@@ -962,7 +1132,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         ) : browser ? (
           <div className="flex items-center gap-2">
             <MusterBotMark size={22} label="Muster" />
-            <span className="text-[15px] font-semibold tracking-tight text-ink">Muster</span>
+            {density !== "icons" && <span className="text-[15px] font-semibold tracking-tight text-ink">Muster</span>}
           </div>
         ) : <div />}
         <div
@@ -971,14 +1141,46 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           // style, which React's CSSProperties does not declare.
           style={macInset ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined}
         >
-          <button
-            ref={importReturnRef}
-            onClick={() => setPlusOpen((o) => !o)}
-            className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
-            title="New or share"
-          >
-            <Plus size={20} strokeWidth={2} />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={() => setDensityMenu((o) => !o)}
+              className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+              title="Sidebar density"
+              aria-label="Sidebar density"
+              aria-expanded={densityMenu}
+            >
+              <Rows3 size={18} />
+            </button>
+            {densityMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onMouseDown={() => setDensityMenu(false)} />
+                <div className="absolute right-8 top-full z-40 mt-1 w-44 overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60">
+                  {([
+                    ["comfortable", "Comfortable"],
+                    ["compact", "Compact"],
+                    ["icons", "Icons only"],
+                  ] as const).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      onClick={() => setSidebarDensity(mode)}
+                      className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+                    >
+                      <span className="flex-1">{label}</span>
+                      {density === mode && <Check size={14} className="text-accent" />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            <button
+              ref={importReturnRef}
+              onClick={() => setPlusOpen((o) => !o)}
+              className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+              title="New or share"
+            >
+              <Plus size={20} strokeWidth={2} />
+            </button>
+          </div>
           {plusOpen && (
             <>
               <div className="fixed inset-0 z-30" onMouseDown={() => setPlusOpen(false)} />
@@ -1044,7 +1246,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
       </div>
 
-      {/* Search */}
+      {/* Search — the rail has no room for it; ⌘K and the mobile drawer
+          keep the full search. */}
+      {density !== "icons" && (
       <div className="px-3 pt-2 pb-3">
         <div className="flex items-center gap-2 rounded-lg bg-raised/70 px-3 py-2">
           <Search size={16} className="text-ink-secondary" />
@@ -1058,11 +1262,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           />
         </div>
       </div>
+      )}
 
       {/* Bot list */}
       <div className="flex-1 overflow-y-auto px-2">
         <div className="flex flex-col gap-0.5">
-          {!chiefBot && visibleBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && (
+          {!chiefBot && visibleBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && density !== "icons" && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">Nothing matches “{query}”</div>
           )}
           {chiefBot && (
@@ -1072,19 +1277,41 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 onMenu={setMenu}
                 onArchive={(bot) => void archiveBot(bot)}
                 archiveDisabled
+                density={density}
               />
             </div>
           )}
-          {visibleGroups.map((g) => (
-            <GroupListItem key={g.id} group={g} onMenu={setRoomMenu} />
+          {visibleGroups.length > 0 && (
+            <SectionHeader
+              label="Rooms"
+              collapsed={collapsed.includes("rooms")}
+              onToggle={() => toggleSection("rooms")}
+              waiting={0}
+              unread={visibleGroups.filter((g) => g.unread).length}
+              compact={density === "icons"}
+            />
+          )}
+          {!collapsed.includes("rooms") && visibleGroups.map((g) => (
+            <GroupListItem key={g.id} group={g} onMenu={setRoomMenu} density={density} />
           ))}
-          {visibleBots.map((b) => (
+          {visibleBots.length > 0 && (
+            <SectionHeader
+              label="Teammates"
+              collapsed={collapsed.includes("teammates")}
+              onToggle={() => toggleSection("teammates")}
+              waiting={visibleBots.filter((b) => b.activity === "waiting-on-you").length}
+              unread={visibleBots.filter((b) => b.unread).length}
+              compact={density === "icons"}
+            />
+          )}
+          {!collapsed.includes("teammates") && visibleBots.map((b) => (
             <BotListItem
               key={b.id}
               bot={b}
               onMenu={setMenu}
               onArchive={(bot) => void archiveBot(bot)}
               archiveDisabled={activeBotCount <= 1}
+              density={density}
             />
           ))}
           <SearchResults query={query} onLanded={() => setQuery("")} />
@@ -1095,43 +1322,59 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       <div className="px-3 pb-3 pt-2">
         <button
           onClick={() => dispatch({ type: "showRoutines" })}
+          title="Automations"
           className={cn(
             "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            density === "icons" && "justify-center px-0",
             state.activeView === "routines" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
           )}
         >
           <CalendarDays size={20} className={state.activeView === "routines" ? "text-accent" : "text-ink-secondary"} />
-          <span className="flex-1 text-[14px]">Automations</span>
+          {density !== "icons" && <span className="flex-1 text-[14px]">Automations</span>}
           {state.routineRuns.some((run) => ["failed", "missed"].includes(run.status) && !run.seenAt) && (
             <span className="size-2 rounded-full bg-danger" />
           )}
         </button>
         <button
           onClick={() => dispatch({ type: "showSocial" })}
+          title="Social"
           className={cn(
             "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+            density === "icons" && "justify-center px-0",
             state.activeView === "social" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
           )}
         >
           <Users size={20} className={state.activeView === "social" ? "text-accent" : "text-ink-secondary"} />
-          <span className="flex-1 text-[14px]">Social</span>
+          {density !== "icons" && <span className="flex-1 text-[14px]">Social</span>}
           {(state.social?.incoming.length ?? 0) > 0 && (
-            <span className="min-w-5 rounded-full bg-accent/20 px-1.5 text-center text-[11px] font-semibold text-accent">
-              {state.social?.incoming.length}
-            </span>
+            density === "icons" ? (
+              <span className="size-2 rounded-full bg-accent" />
+            ) : (
+              <span className="min-w-5 rounded-full bg-accent/20 px-1.5 text-center text-[11px] font-semibold text-accent">
+                {state.social?.incoming.length}
+              </span>
+            )
           )}
         </button>
         <button
           onClick={() => dispatch({ type: "togglePlugins", open: true })}
-          className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-raised/50"
+          title="Connected apps"
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-raised/50",
+            density === "icons" && "justify-center px-0",
+          )}
         >
           <Puzzle size={20} className="text-ink-secondary" />
-          <span className="text-[14px] text-ink">Connected apps</span>
+          {density !== "icons" && <span className="text-[14px] text-ink">Connected apps</span>}
         </button>
         <div className="flex items-center">
           <button
             onClick={() => dispatch({ type: "toggleAppSettings" })}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-raised/50"
+            title={state.config?.profile?.name?.trim() || authUser?.name?.trim() || "You"}
+            className={cn(
+              "flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-raised/50",
+              density === "icons" && "justify-center px-0",
+            )}
           >
             <InitialsAvatar
               initials={profileInitials({
@@ -1140,19 +1383,23 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               })}
               size={28}
             />
-            <span className="truncate text-[14px] text-ink">
-              {state.config?.profile?.name?.trim() ||
-                authUser?.name?.trim() ||
-                state.config?.profile?.email?.trim() ||
-                authUser?.email?.trim() ||
-                "You"}
-            </span>
+            {density !== "icons" && (
+              <span className="truncate text-[14px] text-ink">
+                {state.config?.profile?.name?.trim() ||
+                  authUser?.name?.trim() ||
+                  state.config?.profile?.email?.trim() ||
+                  authUser?.email?.trim() ||
+                  "You"}
+              </span>
+            )}
           </button>
           <UpdateButton />
+          {density !== "icons" && (
           <Link to="/os" aria-label="Open Muster OS" title="Open Muster OS"
             className="hidden min-h-9 items-center rounded-md px-2 text-xs font-semibold text-ink-secondary hover:bg-raised hover:text-ink md:flex">
             OS
           </Link>
+          )}
           <button
             onClick={() => dispatch({ type: "toggleAppSettings" })}
             className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
