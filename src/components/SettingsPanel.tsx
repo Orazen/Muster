@@ -17,6 +17,7 @@ import { botUsage, costCaption, formatTokens, formatUsd } from "@/lib/usage";
 import { shortPath } from "@/lib/short-path";
 import { MemoryTab } from "./bot-profile/MemoryTab";
 import { MemoryHistory, type MemoryVersion } from "./bot-profile/MemoryHistory";
+import { FilesTab } from "./bot-profile/FilesTab";
 
 function Field({
   label,
@@ -1091,6 +1092,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 
           {/* keyed so switching bots never shows one bot's notes under another's name */}
           <MemoryCard key={bot.id} bot={bot} />
+          <FilesTab key={`files-${bot.id}`} bot={bot} />
 
           <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
             <div>

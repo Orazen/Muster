@@ -234,6 +234,13 @@ import {
   MEMORY_FILE_MAX_BYTES,
   MEMORY_BUDGET,
 } from "./workspace.ts";
+import {
+  deleteWorkspaceFile,
+  listWorkspaceFiles,
+  readWorkspaceDownload,
+  readWorkspaceFile,
+  writeWorkspaceFile,
+} from "./workspace-files.ts";
 import * as browserPanel from "./browser-panel.ts";
 import * as workspaceBundle from "./workspace-bundle.ts";
 import * as bundleV2 from "./workspace-bundle-v2.ts";
@@ -6791,6 +6798,53 @@ let requestUserEmail = "";
         return json(res, 404, { error: "no such memory version" });
       }
       return json(res, 200, { ok: true, ...readMemoryFile(m[1]) });
+    }
+
+    // ── bot workspace file browser (droppy-style) ───────────────────────
+    // The whole private workspace, not just memory topics: list, read,
+    // write, download, delete. Ownership is the global /api/bots/ guard;
+    // path safety is resolveWorkspacePath (decode-then-validate, realpath
+    // containment, no dotfiles, no symlinks, size caps).
+    m = path.match(/^\/api\/bots\/([\w-]+)\/files$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { files: listWorkspaceFiles(m[1]) });
+    }
+    if (m && method === "DELETE") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const rel = url.searchParams.get("path") ?? "";
+      const removed = deleteWorkspaceFile(m[1], rel);
+      if (!removed.ok) return json(res, removed.status, { error: removed.reason });
+      return json(res, 200, { ok: true });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/files\/content$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const rel = url.searchParams.get("path") ?? "";
+      const read = readWorkspaceFile(m[1], rel);
+      if (!read.ok) return json(res, read.status, { error: read.reason });
+      return json(res, 200, { path: rel, text: read.text, bytes: read.bytes });
+    }
+    if (m && method === "PUT") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const body = await readBody(req);
+      if (!isText(body?.path) || typeof body?.text !== "string") {
+        return json(res, 400, { error: "path and text are required" });
+      }
+      const wrote = writeWorkspaceFile(m[1], body.path, body.text);
+      if (!wrote.ok) return json(res, wrote.status, { error: wrote.reason });
+      return json(res, 200, { ok: true });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/files\/download$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const got = readWorkspaceDownload(m[1], url.searchParams.get("path") ?? "");
+      if (!got.ok) return json(res, got.status, { error: got.reason });
+      res.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-disposition": `attachment; filename="${got.name.replace(/[^\w.()-]/g, "_")}"`,
+      });
+      return res.end(got.data);
     }
 
     // A welcome answer and its user message are one durable operation. Reads
