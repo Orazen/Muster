@@ -14,5 +14,8 @@
     "utils": "@/lib/cn",
     "ui": "@/components/ui",
     "lib": "@/lib"
+  },
+  "registries": {
+    "@heygaia": "https://ui.heygaia.io/r/{name}.json"
   }
 }

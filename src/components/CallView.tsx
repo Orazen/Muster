@@ -18,7 +18,7 @@
 // it happens, which is why waiting feels like listening to someone work
 // rather than listening to nothing.
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Captions, CaptionsOff, Loader2, Mic, MicOff, Phone, PhoneOff, X } from "lucide-react";
+import { Captions, CaptionsOff, Mic, MicOff, Phone, PhoneOff, X } from "lucide-react";
 
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
@@ -27,6 +27,7 @@ import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { AgentAvatar } from "./Avatar";
+import { WaveSpinner } from "./ui/wave-spinner";
 import { pendingApprovals } from "./PendingApproval";
 import { cn } from "@/lib/cn";
 import { track } from "@/lib/analytics";
@@ -532,7 +533,10 @@ function Call({ bot }: { bot: Bot }) {
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{bot.name}</div>
         <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
-          {(phase === "working" || phase === "sending") && <Loader2 size={13} className="animate-spin" />}
+          {(phase === "working" || phase === "sending") && (
+            // GAIA's wave spinner — the voice UI's signature "alive" beat.
+            <WaveSpinner size="xs" pattern="line" color="primary" aria-label={status} />
+          )}
           {status}
         </div>
       </div>

@@ -1,0 +1,64 @@
+/* Wave Spinner Animations
+ * Adapted from GAIA UI wave-spinner.css, Copyright (c) 2026 The Experience Company.
+ * Source: https://github.com/theexperiencecompany/gaia-ui/blob/14e20153ff1fa89897e2e90aa13eb17c69d4b156/registry/new-york/ui/wave-spinner.css
+ * Upstream commit: 14e20153ff1fa89897e2e90aa13eb17c69d4b156 (MIT).
+ * Full license: public/third-party-notices.txt, included in application builds.
+ * Adaptation: the reduced-motion rule was scoped from the global [role="status"]
+ * selector to .wave-spinner, so it only calms this component and never other
+ * status regions on the page. */
+
+@keyframes waveSpinnerPulse {
+	0%,
+	100% {
+		opacity: 0.3;
+		transform: scale(0.8);
+	}
+	50% {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
+@keyframes waveSpinnerFade {
+	0%,
+	100% {
+		opacity: 0.2;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+@keyframes waveSpinnerBounce {
+	0%,
+	100% {
+		transform: translateY(0) scale(1);
+		opacity: 0.6;
+	}
+	50% {
+		transform: translateY(-25%) scale(1.1);
+		opacity: 1;
+	}
+}
+
+@keyframes waveSpinnerGrow {
+	0%,
+	100% {
+		transform: scale(0.5);
+		opacity: 0.4;
+	}
+	50% {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+	.wave-spinner div {
+		animation-duration: 0s !important;
+		animation-delay: 0s !important;
+		opacity: 0.7 !important;
+		transform: scale(1) !important;
+	}
+}

@@ -15,7 +15,25 @@ Grouped corners and message tails adapted to Muster's theme palette and
 transcript spacing. Source reference checked at the commit above; the existing
 adaptation predates the addition of this notice.
 
-The following license covers both adaptations listed above.
+RaisedButton
+Source: https://github.com/theexperiencecompany/gaia-ui/blob/14e20153ff1fa89897e2e90aa13eb17c69d4b156/registry/new-york/ui/raised-button.tsx
+Upstream commit: 14e20153ff1fa89897e2e90aa13eb17c69d4b156
+Muster adaptations: import paths (cn, color utils), focus ring rides the
+skin-aware focus token, upstream dark-zinc fallback replaced by theme tokens.
+
+WaveSpinner (+ wave-spinner.css)
+Source: https://github.com/theexperiencecompany/gaia-ui/blob/14e20153ff1fa89897e2e90aa13eb17c69d4b156/registry/new-york/ui/wave-spinner.tsx
+Upstream commit: 14e20153ff1fa89897e2e90aa13eb17c69d4b156
+Muster adaptations: "primary" preset follows the skin accent token instead of
+GAIA blue; the reduced-motion rule is scoped to .wave-spinner so it cannot
+affect other status regions.
+
+colorUtils
+Source: https://github.com/theexperiencecompany/gaia-ui/blob/14e20153ff1fa89897e2e90aa13eb17c69d4b156/lib/utils/colorUtils.ts
+Upstream commit: 14e20153ff1fa89897e2e90aa13eb17c69d4b156
+Moved to src/lib/color-utils.ts unchanged.
+
+The following license covers all adaptations listed above.
 
 MIT License
 

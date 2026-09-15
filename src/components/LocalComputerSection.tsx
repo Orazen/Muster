@@ -13,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Card, CommandLine } from "./SettingsPrimitives";
+import { RaisedButton } from "./ui/raised-button";
 import { cn } from "@/lib/cn";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate" | "runtimeStart";
@@ -87,18 +88,25 @@ function ActionButton({
   onClick: () => void;
   danger?: boolean;
 }) {
+  // Primary actions are GAIA's raised button — the glossy tactile CTA;
+  // destructive stays a flat danger chip.
+  if (danger) {
+    return (
+      <button
+        onClick={onClick}
+        disabled={pending !== null}
+        className="flex items-center gap-1.5 rounded-lg bg-danger/15 px-3 py-1.5 text-[12.5px] font-medium text-danger hover:bg-danger/20 disabled:opacity-50"
+      >
+        {pending === action && <Loader2 size={13} className="animate-spin" />}
+        {children}
+      </button>
+    );
+  }
   return (
-    <button
-      onClick={onClick}
-      disabled={pending !== null}
-      className={cn(
-        "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-50",
-        danger ? "bg-danger/15 text-danger hover:bg-danger/20" : "bg-accent text-white hover:brightness-110",
-      )}
-    >
+    <RaisedButton size="sm" onClick={onClick} disabled={pending !== null} className="text-[12.5px]">
       {pending === action && <Loader2 size={13} className="animate-spin" />}
       {children}
-    </button>
+    </RaisedButton>
   );
 }
 

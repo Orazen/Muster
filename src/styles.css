@@ -44,6 +44,35 @@
 
   --radius-lg: 6px;
   --radius-xl: 10px;
+
+  /* GAIA UI / shadcn semantic aliases. Vendored components (the GAIA
+     registry is now wired in components.json) speak these names; var()
+     chains resolve against whichever [data-theme] skin is active, so the
+     aliases are skin-correct for free. Deliberately NOT aliased: `accent`
+     — shadcn means neutral hover fill by it while Muster's bg-accent is
+     the brand blue; vendored components map hover states to bg-raised
+     instead, and that mapping is part of the vendor checklist. */
+  --color-background: var(--color-app);
+  --color-foreground: var(--color-ink);
+  --color-card-foreground: var(--color-ink);
+  --color-popover: var(--color-panel);
+  --color-popover-foreground: var(--color-ink);
+  --color-primary: var(--color-accent);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--color-inset);
+  --color-secondary-foreground: var(--color-ink);
+  --color-muted: var(--color-raised);
+  --color-muted-foreground: var(--color-ink-secondary);
+  --color-destructive: var(--color-danger);
+  --color-destructive-foreground: #ffffff;
+  --color-input: var(--color-hairline);
+  --color-ring: var(--color-focus);
+  --color-border: var(--color-hairline);
+  --color-chart-1: var(--color-accent);
+  --color-chart-2: var(--color-live);
+  --color-chart-3: var(--color-success);
+  --color-chart-4: var(--color-warning);
+  --color-chart-5: #a78bfa;
 }
 
 /* Skins. Every surface already paints itself from the palette custom
