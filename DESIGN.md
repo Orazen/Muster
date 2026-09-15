@@ -671,6 +671,49 @@ docs/plans/voice-auth-agents-plan-2026-09-15.md; shipped from it: mute-
 without-ending + caption toggle + provisional grey tail + spoken "end the
 call" (c40ba38) and the ownership-aware engine guard (2bbe52d).
 
+## 40. Component system: GAIA UI (owner directive, 2026-09-15)
+
+**Rule**: from now on, every new UI component comes from
+`theexperiencecompany/gaia-ui` (MIT — the registry only; the gaia product
+repo is PolyForm Noncommercial and is never copied). Existing bespoke
+components are migrated phase by phase; nothing new is hand-rolled.
+
+Mechanics: the registry is wired in `components.json`
+(`https://ui.heygaia.io/r/{name}.json`); shadcn semantic aliases
+(`bg-muted`, `text-muted-foreground`, …) are chained to Muster's skins in
+`src/styles.css` `@theme`; brand blue stays `--color-accent` and vendored
+components map their hover fills to `bg-raised` (the accent-collision
+policy). Every vendored file carries the attribution header and is listed
+in `public/third-party-notices.txt`.
+
+Vendored + adopted: raised-button, wave-spinner, color-utils (cabb74e —
+call Working line, Local VM actions); stat-row, message-bubble (chat).
+Landing received the GAIA hero pass (4b509bf — letter-split reveal,
+raised CTA, footer glow).
+
+Migration phases (one loop each; mark ✔ with the commit hash):
+
+- **G1 chat surface** — composer, model-selector, tool-calls-section,
+  slash-command-dropdown, compact-markdown, code-block. Highest value:
+  this is what users look at all day, and GAIA is purpose-built for
+  agent UIs.
+- **G2 shell & nav** — navbar-menu (app header), nested-menu (row context
+  menus), search-results-tabs (sidebar search), notification-card.
+- **G3 landing marketing** — holo-card, grain-overlay, pricing-card,
+  footer-wordmark (footer-glow already echoed in the hero pass).
+- **G4 data surfaces** — area/bar/pie/gauge charts (usage stats),
+  todo-item (tasks), workflow-card + goal-card (routines),
+  calendar-event-card, file-dropzone/file-preview (Drive, Workspace
+  files panel).
+- **G5 primitives convergence** — re-skin badge/button/card/dialog/input
+  onto their GAIA equivalents where the API allows a drop-in; retire any
+  local duplicate that GAIA already ships.
+
+Voice W-items shipped the same day: W2 spoken register (1cc4f56), W3
+caption word-cursor (9b7d30c), W1 room-call parity (8ba3970), W5 session
+controls (c0e0064). W4 barge-in remains plan-only pending real-device
+testing.
+
 ---
 
 *Mermaid diagrams: §2 system, §10 sync, §12 restore. This document is

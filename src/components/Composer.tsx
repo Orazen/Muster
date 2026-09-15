@@ -382,12 +382,15 @@ export function Composer({
           externalNotice={imageNotice}
           onDismissExternalNotice={() => setImageNotice(null)}
         />
-        {/* Gaia composer: rounded bubble-container, hairline ring, bg-inset,
-            accent border while focused (see chat/message-bubble.css) */}
-        <div className="muster-composer flex items-end gap-2 py-2.5 pl-4 pr-2.5">
-        <textarea
-          ref={inputRef}
-          rows={1}
+        {/* GAIA composer layout (ui.heygaia.io composer, tokens remapped to
+            Muster's scale): rounded-3xl inset bubble, input row on top,
+            circular toolbar buttons below — context controls left, send
+            right. All Muster behavior (drafts, mentions, goal mode, dictation)
+            is unchanged; see chat/message-bubble.css for the bubble tokens. */}
+        <div className="muster-composer px-1 pt-1 pb-2">
+          <textarea
+            ref={inputRef}
+            rows={1}
           value={text}
           onChange={(e) => {
             setText(e.target.value);
@@ -468,67 +471,78 @@ export function Composer({
                   : `Message ${bot?.name ?? ""}`
           }
           aria-label={`Message ${group ? group.name : (bot?.name ?? "")}`}
-          className="max-h-40 w-full resize-none self-center bg-transparent py-1 text-[15px] leading-6 text-ink placeholder:text-ink-secondary focus:outline-none"
+          className="max-h-40 w-full resize-none bg-transparent px-3 py-3 text-[15px] font-light leading-6 text-ink placeholder:text-ink-secondary focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
         />
-        {busy && (
-          <button
-            onClick={() => {
-              if (group) dispatch({ type: "interruptGroup", groupId: group.id });
-              else if (bot) dispatch({ type: "interrupt", botId: bot.id });
-            }}
-            aria-label="Stop this turn"
-            disabled={Boolean(stopAction.pending)}
-            aria-busy={Boolean(stopAction.pending)}
-            className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
-            title="Stop"
-          >
-            <Square size={14} className="fill-current" />
-          </button>
-        )}
-        {!busy && !hasContent && capabilities.dictation.available && (
-          <button
-            onClick={toggleMic}
-            aria-label={recording ? "Stop dictation" : "Start dictation"}
-            className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full",
-              recording
-                ? "animate-pulse bg-danger/20 text-danger"
-                : "text-ink-secondary hover:bg-raised hover:text-ink",
+        <div className="flex items-center justify-between px-2 pt-1">
+          {/* Left: the voice that joins the conversation (GAIA context-button
+              treatment — circular raised chips). */}
+          <div className="flex items-center gap-1">
+            {!busy && !hasContent && capabilities.dictation.available && (
+              <button
+                onClick={toggleMic}
+                aria-label={recording ? "Stop dictation" : "Start dictation"}
+                className={cn(
+                  "flex size-9 shrink-0 items-center justify-center rounded-full transition-colors",
+                  recording
+                    ? "animate-pulse bg-danger/20 text-danger"
+                    : "bg-raised text-ink-secondary hover:bg-raised-hover hover:text-ink",
+                )}
+                title={recording ? "Stop dictation (Esc)" : "Dictate"}
+              >
+                <Mic size={18} />
+              </button>
             )}
-            title={recording ? "Stop dictation (Esc)" : "Dictate"}
-          >
-            <Mic size={18} />
-          </button>
-        )}
-        {bot && !group && !busy && (
-          <button
-            onClick={() => setGoalMode((v) => !v)}
-            aria-pressed={goalMode}
-            aria-label={goalMode ? "Goal mode on — the next message starts an autonomous loop" : "Goal mode — work toward the next message autonomously"}
-            className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full",
-              goalMode ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink",
+            {bot && !group && !busy && (
+              <button
+                onClick={() => setGoalMode((v) => !v)}
+                aria-pressed={goalMode}
+                aria-label={goalMode ? "Goal mode on — the next message starts an autonomous loop" : "Goal mode — work toward the next message autonomously"}
+                className={cn(
+                  "flex size-9 shrink-0 items-center justify-center rounded-full transition-colors",
+                  goalMode
+                    ? "bg-accent/15 text-accent"
+                    : "bg-raised text-ink-secondary hover:bg-raised-hover hover:text-ink",
+                )}
+                title={goalMode ? "Goal mode on — the next message becomes a self-driving loop" : "Goal mode — let the bot work toward this on its own"}
+              >
+                <Target size={16} />
+              </button>
             )}
-            title={goalMode ? "Goal mode on — the next message becomes a self-driving loop" : "Goal mode — let the bot work toward this on its own"}
-          >
-            <Target size={16} />
-          </button>
-        )}
-        {hasContent && (
-          <button
-            onClick={send}
-            aria-label={goalArmed ? "Start goal" : busy ? "Queue message" : "Send message"}
-            title={goalArmed ? "Start goal loop" : busy ? "Sends when the current turn finishes" : "Send"}
-            className={cn(
-              "flex size-9 shrink-0 items-center justify-center rounded-full text-white",
-              busy
-                ? "bg-raised text-ink-secondary hover:bg-raised-hover"
-                : "bg-accent muster-send-glow hover:brightness-110",
+          </div>
+          {/* Right: stop (while a turn runs) or the GAIA circular send. */}
+          <div className="flex items-center gap-1">
+            {busy && (
+              <button
+                onClick={() => {
+                  if (group) dispatch({ type: "interruptGroup", groupId: group.id });
+                  else if (bot) dispatch({ type: "interrupt", botId: bot.id });
+                }}
+                aria-label="Stop this turn"
+                disabled={Boolean(stopAction.pending)}
+                aria-busy={Boolean(stopAction.pending)}
+                className="flex size-9 shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-50"
+                title="Stop"
+              >
+                <Square size={14} className="fill-current" />
+              </button>
             )}
-          >
-            {goalArmed ? <Target size={15} /> : busy ? <Clock size={15} /> : <ArrowUp size={17} />}
-          </button>
-        )}
+            {hasContent && (
+              <button
+                onClick={send}
+                aria-label={goalArmed ? "Start goal" : busy ? "Queue message" : "Send message"}
+                title={goalArmed ? "Start goal loop" : busy ? "Sends when the current turn finishes" : "Send"}
+                className={cn(
+                  "flex size-9 shrink-0 items-center justify-center rounded-full text-white transition-[filter,background-color]",
+                  busy
+                    ? "bg-raised text-ink-secondary hover:bg-raised-hover"
+                    : "bg-accent muster-send-glow hover:brightness-110",
+                )}
+              >
+                {goalArmed ? <Target size={15} /> : busy ? <Clock size={15} /> : <ArrowUp size={17} />}
+              </button>
+            )}
+          </div>
+        </div>
         </div>
       </div>
     </div>
