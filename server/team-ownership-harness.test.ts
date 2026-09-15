@@ -154,19 +154,19 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
     // dead-end that stranded users who had already brought their keys.
     const denied = await request(hosted, `/api/bots/${bot.id}/messages`, "POST", { text: "hello" }, alice);
     expect(denied.status).toBe(403);
-    expect((await denied.json()).error).toContain("power this bot with your own model key");
+    expect(z.object({ error: z.string() }).parse(await denied.json()).error).toContain("power this bot with your own model key");
     // Pointing at ANOTHER user's vault instance refuses with the
     // isolation note, not the setup note.
     await request(hosted, `/api/bots/${bot.id}`, "PATCH", { modelSelection: { instanceId: `deepseekApi:${bob.id}`, model: "x" } }, alice);
     const foreign = await request(hosted, `/api/bots/${bot.id}/messages`, "POST", { text: "hello" }, alice);
     expect(foreign.status).toBe(403);
-    expect((await foreign.json()).error).toContain("another user's engine");
+    expect(z.object({ error: z.string() }).parse(await foreign.json()).error).toContain("another user's engine");
     // Own-suffixed instance: the guard passes. The turn then fails at
     // instance resolution (no such engine registered) — an engine-setup
     // error, NOT the operator-policy refusal.
     await request(hosted, `/api/bots/${bot.id}`, "PATCH", { modelSelection: { instanceId: `deepseekApi:${alice.id}`, model: "x" } }, alice);
     const past = await request(hosted, `/api/bots/${bot.id}/messages`, "POST", { text: "hello" }, alice);
-    const body = await past.json();
+    const body = z.object({ error: z.string().optional() }).parse(await past.json());
     expect(body.error ?? "").not.toContain("your own model key");
     expect(body.error ?? "").not.toContain("another user's engine");
   });
