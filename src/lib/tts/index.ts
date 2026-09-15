@@ -14,6 +14,8 @@
 // transcripts, and keeping it in one place is the same reasoning as the
 // server-computed approval key.
 
+import { speechText } from "./speech-text";
+
 export type SpeechStatus = "idle" | "preparing" | "speaking";
 
 export interface SpeechSnapshot {
@@ -98,6 +100,13 @@ export class Speaker {
    * that should take a caller's turn down with it.
    */
   async speak(text: string, opts: SpeakOptions = {}): Promise<void> {
+    // Spoken register first: agent replies are written for eyes, and a
+    // voice reciting markdown reads out syntax instead of meaning.
+    text = speechText(text);
+    if (!text) {
+      this.set(IDLE);
+      return;
+    }
     this.stop();
     const mine = this.token;
     const controller = new AbortController();
