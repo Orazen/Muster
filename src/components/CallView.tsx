@@ -22,6 +22,7 @@ import { Loader2, Phone, PhoneOff, X } from "lucide-react";
 
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
+import { getDictation } from "@/lib/dictation";
 import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
@@ -65,10 +66,18 @@ export function CallTargetButton({
   const { state, dispatch } = useStore();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const active = useOnCall() === targetId;
-  const supported = capabilities.dictation.available && Boolean(window.ogb?.speechStart);
+  // Dictation: the native helper on desktop, the browser's own free
+  // recognizer on web. Voice: ElevenLabs when a key is configured, the
+  // browser's built-in speech synthesis otherwise — a call is never
+  // paywalled.
+  const dictation = getDictation();
+  const supported = dictation.kind === "web" || (dictation.kind === "native" && capabilities.dictation.available);
   const configured = Boolean(state.config?.tts?.configured);
-  const voiceReady =
-    configured && Boolean(state.config?.tts?.ready || (voices.length > 0 && voices.every((voice) => Boolean(voice))));
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- capability probe of a window global, not input shaping
+  const freeVoice = typeof window !== "undefined" && "speechSynthesis" in window;
+  const voiceReady = configured
+    ? Boolean(state.config?.tts?.ready || (voices.length > 0 && voices.every((voice) => Boolean(voice))))
+    : freeVoice;
   const unavailable = !active && (!capabilitiesReady || !supported || !voiceReady);
   const voiceSetupRequired = capabilitiesReady && supported && !voiceReady;
   const [helpOpen, setHelpOpen] = useState(false);
@@ -80,26 +89,20 @@ export function CallTargetButton({
     : !capabilitiesReady
       ? "Checking call availability"
       : !supported
-        ? "Calls currently need the macOS desktop app"
-        : !configured
-          ? "Add an ElevenLabs key in App Settings to make calls"
-          : !voiceReady
-            ? "Pick a voice in App Settings to make calls"
-            : `Call ${targetName}`;
+        ? "This browser has no speech recognition — try Chrome, Edge or Safari"
+        : !voiceReady
+          ? "Pick a voice in App Settings to make calls"
+          : `Call ${targetName}`;
 
   const reason = !capabilitiesReady
     ? "Checking whether this device can make calls."
-    : !capabilities.dictation.available
-      ? "Calls require Muster for macOS because speech recognition runs on-device."
-      : !window.ogb?.speechStart
-        ? "The speech service is unavailable in this app build. Restart or update Muster."
-        : !configured
-          ? "Add an ElevenLabs API key so the bot can speak during calls."
-          : !voiceReady
-            ? voices.length > 1
-              ? "Choose an app voice, or give every room member their own ElevenLabs voice."
-              : "Choose an ElevenLabs voice before starting a call."
-            : "";
+    : !supported
+      ? "Calls need speech recognition. The desktop app and Chrome, Edge and Safari all have it built in — this browser does not."
+      : !voiceReady
+        ? voices.length > 1
+          ? "Choose an app voice, or give every room member their own voice."
+          : "Choose a voice before starting a call."
+        : "";
 
   useEffect(() => {
     if (!helpOpen) return;
@@ -232,7 +235,7 @@ function Call({ bot }: { bot: Bot }) {
   }, []);
 
   const hush = useCallback(() => {
-    void window.ogb?.speechStop();
+    void getDictation().speechStop();
   }, []);
 
   const listen = useCallback(() => {
@@ -240,7 +243,7 @@ function Call({ bot }: { bot: Bot }) {
     move("listening");
     setHeard("");
     setNote(null);
-    void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void getDictation().speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === bot.id) {
         setNote("The microphone couldn't start. Check Microphone and Speech Recognition access.");
       }
@@ -288,12 +291,16 @@ function Call({ bot }: { bot: Bot }) {
 
   // ── the microphone ───────────────────────────────────────────────────
   useEffect(() => {
-    const bridge = window.ogb;
-    if (!bridge) return;
-    const offTranscript = bridge.onSpeechTranscript((line) => {
+    const dictation = getDictation();
+    if (dictation.kind === "none") return;
+    const offTranscript = dictation.onSpeechTranscript((line) => {
       if (!alive.current || currentCall() !== bot.id || phaseRef.current !== "listening") return;
       if (line.error) {
-        setNote("Dictation stopped unexpectedly. Check Microphone and Speech Recognition access.");
+        setNote(
+          dictation.kind === "web"
+            ? "The browser stopped listening. Check the microphone permission for this site."
+            : "Dictation stopped unexpectedly. Check Microphone and Speech Recognition access.",
+        );
         return;
       }
       if (line.text === undefined) return;
@@ -335,17 +342,19 @@ function Call({ bot }: { bot: Bot }) {
       move("sending");
       dispatch({ type: "send", botId: bot.id, text: said });
     });
-    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
+    const offEnd = dictation.onSpeechEnd(({ code, reason }) => {
       if (!alive.current || currentCall() !== bot.id) return;
       if (code === 2) {
-        setNote("Calls need macOS dictation, which isn't available here yet.");
+        setNote("Calls need speech recognition, which isn't available here yet.");
         return;
       }
       if (code === 1) {
         setNote(
           reason === "helper-build-failed"
             ? "The dictation helper couldn't be built. Install Apple's Command Line Tools and try again."
-            : "Dictation needs Microphone + Speech Recognition access in System Settings.",
+            : reason?.startsWith("web-")
+              ? "The browser's speech service refused to run. Check the microphone permission for this site."
+              : "Dictation needs Microphone + Speech Recognition access in System Settings.",
         );
         return;
       }
@@ -358,7 +367,7 @@ function Call({ bot }: { bot: Bot }) {
     return () => {
       offTranscript();
       offEnd();
-      void window.ogb?.speechStop();
+      void dictation.speechStop();
     };
     // busy/approval are intentionally initial snapshots. Their live changes
     // are handled below without tearing down native event listeners.
@@ -536,7 +545,9 @@ function Call({ bot }: { bot: Bot }) {
       </div>
 
       <div className="text-[11.5px] text-ink-secondary/70">
-        Hold Control + Option to talk · Space interrupts · Esc hangs up
+        {getDictation().kind === "native"
+          ? "Hold Control + Option to talk · Space interrupts · Esc hangs up"
+          : "Just talk — a short pause sends your turn · Esc hangs up"}
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, PhoneOff, X } from "lucide-react";
 
 import { currentCall, deferCallCleanup, endCall, useOnCall } from "@/lib/call";
+import { getDictation } from "@/lib/dictation";
 import { routeSpokenGroupMessage } from "@/lib/group-call";
 import { track } from "@/lib/analytics";
 import { normalizeState } from "@/lib/mascot";
@@ -105,7 +106,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   }, []);
 
   const hush = useCallback(() => {
-    void window.ogb?.speechStop();
+    void getDictation().speechStop();
   }, []);
 
   const listen = useCallback(() => {
@@ -114,7 +115,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     setSpeakingMemberId(null);
     setHeard("");
     setNote(null);
-    void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void getDictation().speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === group.id) {
         setNote("The microphone couldn't start. Check Microphone and Speech Recognition access.");
       }
@@ -197,12 +198,16 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   }, [group.id]);
 
   useEffect(() => {
-    const bridge = window.ogb;
-    if (!bridge) return;
-    const offTranscript = bridge.onSpeechTranscript((line) => {
+    const dictation = getDictation();
+    if (dictation.kind === "none") return;
+    const offTranscript = dictation.onSpeechTranscript((line) => {
       if (!alive.current || currentCall() !== group.id || phaseRef.current !== "listening") return;
       if (line.error) {
-        setNote("Dictation stopped unexpectedly. Check Microphone and Speech Recognition access.");
+        setNote(
+          dictation.kind === "web"
+            ? "The browser stopped listening. Check the microphone permission for this site."
+            : "Dictation stopped unexpectedly. Check Microphone and Speech Recognition access.",
+        );
         return;
       }
       if (!isText(line.text)) return;
@@ -259,17 +264,19 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       dispatch({ type: "sendGroup", groupId: group.id, text: routed.text });
       scheduleListen(false, 600);
     });
-    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
+    const offEnd = dictation.onSpeechEnd(({ code, reason }) => {
       if (!alive.current || currentCall() !== group.id) return;
       if (code === 2) {
-        setNote("Calls need macOS dictation, which isn't available here yet.");
+        setNote("Calls need speech recognition, which isn't available here yet.");
         return;
       }
       if (code === 1) {
         setNote(
           reason === "helper-build-failed"
             ? "The dictation helper couldn't be built. Install Apple's Command Line Tools and try again."
-            : "Dictation needs Microphone + Speech Recognition access in System Settings.",
+            : reason?.startsWith("web-")
+              ? "The browser's speech service refused to run. Check the microphone permission for this site."
+              : "Dictation needs Microphone + Speech Recognition access in System Settings.",
         );
         return;
       }
@@ -280,7 +287,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     return () => {
       offTranscript();
       offEnd();
-      void window.ogb?.speechStop();
+      void dictation.speechStop();
     };
     // Live busy/card changes are handled below without restarting native capture.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -500,7 +507,9 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       </div>
 
       <div className="text-[11.5px] text-ink-secondary/70">
-        Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up
+        {getDictation().kind === "native"
+          ? "Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up"
+          : "Say a member’s name to direct the turn · a short pause sends it · Esc hangs up"}
       </div>
     </div>
   );
