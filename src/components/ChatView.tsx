@@ -12,14 +12,17 @@ import {
   Bug,
   Clock,
   Copy,
+  Cpu,
   Crown,
   Folder,
   Globe,
+  Hand,
   Loader2,
   Monitor,
   Pencil,
   RefreshCw,
   Search,
+  ShieldCheck,
   Square,
   Target,
   Webhook,
@@ -722,6 +725,25 @@ const MessagesList = memo(function MessagesList({
           />
           <div className="max-w-[360px] text-[14px] text-ink-secondary">
             {bot.description || "Send a message to start the conversation."}
+          </div>
+          {/* OrcaChat-style empty state: the brand moment is a row of honest
+              trust claims, not decoration. Each pill states behavior Muster
+              actually ships — local-first runtime, BYO engines, approval
+              gate. No unearned claims. */}
+          <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5">
+            {[
+              { icon: ShieldCheck, label: "Runs on your machine" },
+              { icon: Cpu, label: "Bring your own engine" },
+              { icon: Hand, label: "Nothing acts without approval" },
+            ].map(({ icon: Icon, label }) => (
+              <span
+                key={label}
+                className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised px-2.5 py-1 text-[11.5px] text-ink-secondary"
+              >
+                <Icon size={12} className="shrink-0 opacity-70" />
+                {label}
+              </span>
+            ))}
           </div>
         </div>
       )}
