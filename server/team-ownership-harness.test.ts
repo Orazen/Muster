@@ -138,7 +138,13 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
 
   it("establishes distinct real hosted identities and the primary-only legacy roster", async () => {
     expect((await request(hosted, "/api/instances", "GET", undefined, primary)).status).toBe(200);
-    expect((await request(hosted, "/api/instances", "GET", undefined, alice)).status).toBe(404);
+    // Non-primary gets 200 with ONLY their own engines — before they've
+    // configured anything that's an honest empty list (the operator's
+    // "ghost" fleet is not offered to them; it would be unusable anyway).
+    const aliceInstances = z
+      .object({ instances: z.array(z.object({ instanceId: z.string() })) })
+      .parse(await (await request(hosted, "/api/instances", "GET", undefined, alice)).json());
+    expect(aliceInstances.instances.map((i) => i.instanceId)).not.toContain("ghost");
     for (const account of [primary, alice, bob]) {
       const response = await request(hosted, "/api/bots", "GET", undefined, account);
       expect(response.status).toBe(200);
@@ -343,13 +349,67 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
     expect(wrappedText).not.toContain("bob-one");
 
     // Engine-fleet metadata is operator-only: free-best answers before the
-    // infra guard runs, so it gates itself; custom-providers rides the guard.
+    // infra guard runs, so it gates itself.
     expect((await request(hosted, "/api/models/free-best", "GET", undefined, alice)).status).toBe(404);
     expect((await request(hosted, "/api/models/free-best", "GET", undefined, primary)).status).toBe(200);
-    expect((await request(hosted, "/api/custom-providers", "GET", undefined, alice)).status).toBe(404);
-    expect((await request(hosted, "/api/custom-providers", "POST", { name: "rogue", baseUrl: "https://example.com/v1", format: "openai", models: ["m"] }, alice)).status).toBe(404);
-    expect((await request(hosted, "/api/custom-providers/ghost", "DELETE", undefined, alice)).status).toBe(404);
-    expect((await request(hosted, "/api/custom-providers", "GET", undefined, primary)).status).toBe(200);
+    // Custom providers are PER-USER on hosted: the routes answer from the
+    // caller's own store, never the operator's global config. This closes
+    // the "no such resource" dead-end that left non-primary accounts with
+    // an empty model picker and no way to add their own endpoint.
+    const added = await request(
+      hosted,
+      "/api/custom-providers",
+      "POST",
+      { name: "Bai", baseUrl: "https://api.b.ai/v1", format: "openai", models: ["glm-4.5"], apiKey: "sk-alice-bai" },
+      alice,
+    );
+    expect(added.status).toBe(201);
+    const addedBody = z.object({ id: z.string(), instanceId: z.string() }).parse(await added.json());
+    expect(addedBody.id).toBe("bai");
+    expect(addedBody.instanceId).toBe(`custom-baiApi:${alice.id}`);
+    const aliceProviders = z
+      .object({ providers: z.array(z.object({ id: z.string(), configured: z.boolean(), instanceId: z.string() })) })
+      .parse(await (await request(hosted, "/api/custom-providers", "GET", undefined, alice)).json());
+    expect(aliceProviders.providers).toEqual([{ id: "bai", configured: true, instanceId: `custom-baiApi:${alice.id}` }]);
+    // Neither bob nor the operator can see or clobber it.
+    expect((await request(hosted, "/api/custom-providers", "GET", undefined, bob)).status).toBe(200);
+    const bobProviders = z
+      .object({ providers: z.array(z.object({ id: z.string() })) })
+      .parse(await (await request(hosted, "/api/custom-providers", "GET", undefined, bob)).json());
+    expect(bobProviders.providers.map((p) => p.id)).not.toContain("bai");
+    const primaryProviders = z
+      .object({ providers: z.array(z.object({ id: z.string() })) })
+      .parse(await (await request(hosted, "/api/custom-providers", "GET", undefined, primary)).json());
+    expect(primaryProviders.providers.map((p) => p.id)).not.toContain("bai");
+    // The picker now lists her own instance and nothing of the operator's.
+    const aliceFleet = z
+      .object({ instances: z.array(z.object({ instanceId: z.string() })) })
+      .parse(await (await request(hosted, "/api/instances", "GET", undefined, alice)).json());
+    expect(aliceFleet.instances.map((i) => i.instanceId)).toContain(`custom-baiApi:${alice.id}`);
+    expect(aliceFleet.instances.map((i) => i.instanceId)).not.toContain("ghost");
+    // fetch-models is reachable for her (SSRF refusal, not 404): the route
+    // validates scheme/host before any network call.
+    expect(
+      (await request(hosted, "/api/custom-providers/fetch-models", "POST", { baseUrl: "http://127.0.0.1:9/v1" }, alice)).status,
+    ).toBe(400);
+    // Deleting clears her metadata and her vault key; bob adds his own
+    // "bai" in his own namespace — same id, different engine.
+    expect((await request(hosted, `/api/custom-providers/bai`, "DELETE", undefined, alice)).status).toBe(200);
+    expect(
+      z
+        .object({ providers: z.array(z.object({ id: z.string() })) })
+        .parse(await (await request(hosted, "/api/custom-providers", "GET", undefined, alice)).json())
+        .providers,
+    ).toEqual([]);
+    const bobAdd = await request(
+      hosted,
+      "/api/custom-providers",
+      "POST",
+      { name: "Bai", baseUrl: "https://api.b.ai/v1", format: "openai", models: ["glm-4.5"] },
+      bob,
+    );
+    expect(bobAdd.status).toBe(201);
+    expect(z.object({ instanceId: z.string() }).parse(await bobAdd.json()).instanceId).toBe(`custom-baiApi:${bob.id}`);
   });
 
   it("runs the full social journey across tenants: profile, request, consent, directory, page", async () => {

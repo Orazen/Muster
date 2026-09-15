@@ -151,12 +151,21 @@ import {
 import {
   allUserInstanceConfigs,
   clearUserProviderKey,
+  resolveUserProviderKey,
   userInstanceId,
   setUserProviderKey,
   userInstanceConfigs,
   userInstanceOwner,
   userProviderFlags,
 } from "./user-keys.ts";
+import {
+  addUserCustomProvider,
+  allUserCustomInstanceConfigs,
+  listUserCustomProviders,
+  removeUserCustomProvider,
+  userCustomInstanceConfigs,
+  userCustomProviderUsers,
+} from "./user-custom-providers.ts";
 import { vpsComputerStatus, vpsEnsureDesktop, vpsDockerHost, vpsReachable } from "./vps-computer.ts";
 import {
   desktopSignInRetrySeconds,
@@ -248,7 +257,7 @@ import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { GoalManager } from "./goals.ts";
 import { SocialManager, socialProfileInputSchema, friendRequestInputSchema } from "./social.ts";
-import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-library.ts";
+import { fetchGithubTeam, fetchLibraryTeam, fetchLibraryTeamReadme, fetchTeamCatalog } from "./team-library.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { readRuntimeEvidence, readThreadEvents } from "./thread-events.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
@@ -434,10 +443,16 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
 async function defaultSelection(forUserId?: string) {
   const described = await registry.describe();
   let available = described.filter((d) => d.snapshot.state === "available");
-  // Per-user preference: when the requesting user has vault instances,
-  // prefer those over the operator's global fleet. If none exist, fall
-  // back to any CLI engine so a fresh account still gets a working bot.
-  if (forUserId) {
+  // Per-user scoping: a non-primary hosted account may only be seeded onto
+  // engines THEY own (vault keys or custom providers, suffixed with their
+  // id). The old "fall back to any CLI engine" predates the engine guard
+  // and seeded fresh accounts onto the operator's fleet — a selection that
+  // could only ever 403. An empty selection is honest: the UI shows the
+  // setup path, and adding a key heals the bot onto it.
+  if (forUserId && forUserId !== primaryUserId()) {
+    const suffix = `:${forUserId}`;
+    available = available.filter((d) => d.instanceId.endsWith(suffix));
+  } else if (forUserId) {
     const suffix = `:${forUserId}`;
     const own = available.filter((d) => d.instanceId.endsWith(suffix));
     if (own.length) available = own;
@@ -3486,7 +3501,10 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
  * isolated: turn-start refuses an instance whose owner suffix does not
  * match the bot's owner. */
 async function reloadUserInstances(userId: string): Promise<void> {
-  const userConfigs = userInstanceConfigs(DATA_DIR, userId, PROVIDER_DRIVER_ENV);
+  const userConfigs = {
+    ...userInstanceConfigs(DATA_DIR, userId, PROVIDER_DRIVER_ENV),
+    ...userCustomInstanceConfigs(DATA_DIR, userId, (vid) => resolveUserProviderKey(DATA_DIR, userId, vid) ?? undefined),
+  };
   for (const bot of store.bots) {
     if (bot.modelSelection.instanceId.endsWith(`:${userId}`)) {
       stopCleanups.invalidate(bot.id);
@@ -3499,7 +3517,12 @@ async function reloadUserInstances(userId: string): Promise<void> {
 /** Register every user's vault instances (boot path). */
 async function reloadUserInstancesAll(): Promise<void> {
   try {
-    const configs = allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV);
+    const configs = {
+      ...allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV),
+      ...allUserCustomInstanceConfigs(DATA_DIR, [...loadVaultUsers(), ...userCustomProviderUsers(DATA_DIR)], (uid, vid) =>
+        resolveUserProviderKey(DATA_DIR, uid, vid) ?? undefined,
+      ),
+    };
     await registry.load(configs);
     console.log(
       `[instances] vault engines registered: ${Object.keys(configs).length} across ${Object.keys(loadVaultUsers()).length} users`,
@@ -5869,16 +5892,15 @@ let requestUserEmail = "";
     // Engines, computers and provider credentials belong to the deployment
     // operator (the primary account). Other signed-in users get full use of
     // their OWN bots/transcripts — the isolation above — but never this
-    // machine's fleet: listing it, configuring it, or executing on it.
+    // machine's fleet: no listing of the operator's engines, no executing
+    // on them, no touching the local computer or MCP servers.
+    // /api/instances and /api/custom-providers are deliberately NOT blocked:
+    // their handlers answer non-primary users from per-user state only
+    // (own vault instances + own custom providers), never the global
+    // config — so the picker fills and "add your own key" is a real path.
     const isPrimaryUser = !requestUserId || requestUserId === primaryUserId();
     if (!isPrimaryUser) {
       const infraPath =
-        path === "/api/instances" ||
-        // BYOK custom providers live in the GLOBAL config (operator-owned
-        // engines): a non-primary account must not list them, add them,
-        // delete them, or point fetch-models at the operator's stored keys.
-        path === "/api/custom-providers" ||
-        path.startsWith("/api/custom-providers/") ||
         path.startsWith("/api/local-computer") ||
         path.startsWith("/api/mcp-servers") ||
         path.startsWith("/api/bots/") && /\/computer(\/|$)/.test(path);
@@ -7298,12 +7320,13 @@ let requestUserEmail = "";
       // this the answer is frozen at boot and "check again" is a no-op.
       resetPathCache();
       const described = await registry.describe();
-      // Non-operators see global instances + their OWN vault instances.
+      // Non-operators see ONLY their own engines (vault keys + custom
+      // providers, both suffixed with their user id). The operator's global
+      // fleet is not listed for them — turn-start would refuse it anyway,
+      // and a picker full of unusable engines is the bug this replaces.
       if (requestUserId && requestUserId !== primaryUserId()) {
         const suffix = `:${requestUserId}`;
-        const filtered = described.filter(
-          (d) => !d.instanceId.includes(":") || d.instanceId.endsWith(suffix),
-        );
+        const filtered = described.filter((d) => d.instanceId.endsWith(suffix));
         return json(res, 200, { instances: filtered });
       }
       return json(res, 200, { instances: described });
@@ -8012,14 +8035,35 @@ let requestUserEmail = "";
     // base URL, key, model list. Each entry becomes a first-class instance
     // (custom-<id>) riding the chat-completions or Anthropic driver.
     if (path === "/api/custom-providers" && method === "GET") {
-      const list = (cfg.customProviders ?? []).map((p) => ({
+      // Operator (and desktop): the global list. Non-primary hosted users:
+      // their OWN per-user set — same shape, keys resolved from their own
+      // vault, instance ids in their own namespace. The operator's providers
+      // remain invisible to them, and vice versa.
+      if (isPrimaryUser) {
+        const list = (cfg.customProviders ?? []).map((p) => ({
+          id: p.id,
+          name: p.name,
+          baseUrl: p.baseUrl,
+          format: p.format,
+          models: p.models,
+          configured: Boolean(cfg.providers?.[`custom-${p.id}`]?.apiKey),
+          instanceId: `custom-${p.id}`,
+        }));
+        return json(res, 200, { providers: list });
+      }
+      // Unreachable under SELF_HOSTED (the session gate ran first), but the
+      // narrowing is what lets the per-user store calls take a string. The
+      // const capture keeps that narrowing alive inside the map callback.
+      if (!requestUserId) return json(res, 401, { error: "sign in first" });
+      const uid = requestUserId;
+      const list = listUserCustomProviders(DATA_DIR, uid).map((p) => ({
         id: p.id,
         name: p.name,
         baseUrl: p.baseUrl,
         format: p.format,
         models: p.models,
-        configured: Boolean(cfg.providers?.[`custom-${p.id}`]?.apiKey),
-        instanceId: `custom-${p.id}`,
+        configured: Boolean(resolveUserProviderKey(DATA_DIR, uid, `custom-${p.id}`)),
+        instanceId: userInstanceId(`custom-${p.id}`, uid),
       }));
       return json(res, 200, { providers: list });
     }
@@ -8044,6 +8088,23 @@ let requestUserEmail = "";
       if (!check.ok) return json(res, 400, { error: check.reason });
       if (input.models.length < CUSTOM_MODELS_MIN) {
         return json(res, 400, { error: "Add at least one model before adding the provider" });
+      }
+      if (!isPrimaryUser) {
+        if (!requestUserId) return json(res, 401, { error: "sign in first" });
+        // Per-user path: metadata in the user store, key in the vault,
+        // instances registered under `custom-<id>Api:<uid>`. Deliberately
+        // NOT providerConfigBusy/reloadProviders — those are the global
+        // fleet's machinery; this write touches only this user's engines
+        // (reloadUserInstances settles just their bots).
+        const provider = addUserCustomProvider(DATA_DIR, requestUserId, input);
+        if (!provider) {
+          return json(res, 400, { error: `At most ${CUSTOM_PROVIDER_MAX} custom providers` });
+        }
+        if (isText(body?.apiKey) && body.apiKey.trim()) {
+          setUserProviderKey(DATA_DIR, requestUserId, `custom-${provider.id}`, body.apiKey.trim());
+        }
+        await reloadUserInstances(requestUserId);
+        return json(res, 201, { id: provider.id, instanceId: userInstanceId(`custom-${provider.id}`, requestUserId) });
       }
       if ((cfg.customProviders ?? []).length >= CUSTOM_PROVIDER_MAX) {
         return json(res, 400, { error: `At most ${CUSTOM_PROVIDER_MAX} custom providers` });
@@ -8071,6 +8132,17 @@ let requestUserEmail = "";
     const customDelete = path.match(/^\/api\/custom-providers\/([\w-]+)$/);
     if (customDelete && method === "DELETE") {
       const id = customDelete[1];
+      if (!isPrimaryUser) {
+        if (!requestUserId) return json(res, 401, { error: "sign in first" });
+        // Per-user delete: own metadata + own vault key, settle only this
+        // user's bots. The operator's global store is never touched.
+        if (!removeUserCustomProvider(DATA_DIR, requestUserId, id)) {
+          return json(res, 404, { error: "no such custom provider" });
+        }
+        clearUserProviderKey(DATA_DIR, requestUserId, `custom-${id}`);
+        await reloadUserInstances(requestUserId);
+        return json(res, 200, { ok: true });
+      }
       const next = (cfg.customProviders ?? []).filter((p) => p.id !== id);
       if (next.length === (cfg.customProviders ?? []).length) return json(res, 404, { error: "no such custom provider" });
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
@@ -8102,7 +8174,17 @@ let requestUserEmail = "";
       if (!isText(body?.baseUrl)) return json(res, 400, { error: "baseUrl must be a string" });
       const check = validateProviderBaseUrl(body.baseUrl, SELF_HOSTED);
       if (!check.ok) return json(res, 400, { error: check.reason });
-      const apiKey = isText(body?.apiKey) ? body.apiKey : cfg.providers?.[`custom-${isText(body?.id) ? body.id : ""}`]?.apiKey;
+      // Key fallback must never reach a key the caller doesn't own: the
+      // global cfg key only for the operator, a non-primary user's own
+      // vault entry for everyone else.
+      const requestedId = isText(body?.id) ? body.id : "";
+      const apiKey = isText(body?.apiKey)
+        ? body.apiKey
+        : isPrimaryUser
+          ? cfg.providers?.[`custom-${requestedId}`]?.apiKey
+          : requestUserId
+            ? resolveUserProviderKey(DATA_DIR, requestUserId, `custom-${requestedId}`) ?? undefined
+            : undefined;
       try {
         const models = await fetchProviderModelIds(body.baseUrl, apiKey);
         return json(res, 200, { models });
@@ -8502,6 +8584,19 @@ let requestUserEmail = "";
         return json(res, 502, { error: "The team library is unavailable" });
       }
     }
+    // One team's full record for the /teams directory detail view: the
+    // validated manifest (members, appearances, routines) + its README.
+    // Public like the catalog itself — it only ever serves the library repo.
+    m = path.match(/^\/api\/directory\/teams\/([a-z0-9][a-z0-9-]*)$/);
+    if (m && method === "GET") {
+      try {
+        const [team, readme] = await Promise.all([fetchLibraryTeam(m[1]!), fetchLibraryTeamReadme(m[1]!)]);
+        return json(res, 200, { team, readme });
+      } catch (e) {
+        const status = (e as { status?: number })?.status;
+        return json(res, status === 404 ? 404 : 502, { error: status === 404 ? "no such team" : "The team library is unavailable" });
+      }
+    }
 
     // Public team-library directory — /bots. Serves the same catalog the
     // in-app browser shows, as a plain marketing page with install links.
@@ -8527,6 +8622,18 @@ let requestUserEmail = "";
         "cache-control": "public, max-age=300",
       });
       return res.end(method === "HEAD" ? undefined : payload);
+    }
+
+    // The team library directory at a pretty URL: one static file from the
+    // marketing dir (the SPA fallback would otherwise swallow /teams).
+    // A miss 404s rather than falling through, same rule as /docs.
+    if (method === "GET" && path === "/teams" && MARKETING_DIR) {
+      try {
+        const data = readFileSync(join(MARKETING_DIR, "teams.html"));
+        return html(res, 200, withVerificationMeta(data.toString()));
+      } catch {
+        return html(res, 404, "<h1>Not found</h1>");
+      }
     }
 
     // self-hosted docs at pretty URLs: /docs, /docs/quick-start, /docs/security.

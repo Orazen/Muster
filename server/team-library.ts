@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { parseJson, type JsonObject, type JsonValue } from "./schema.ts";
 import { parseTeamManifest, type ParsedTeamManifest } from "./team-manifest.ts";
 
@@ -7,6 +9,7 @@ export const TEAM_LIBRARY_CATALOG_URL = `${TEAM_LIBRARY_RAW_ROOT}/catalog.json`;
 
 const MAX_CATALOG_BYTES = 256_000;
 const MAX_MANIFEST_BYTES = 1_000_000;
+const MAX_README_BYTES = 200_000;
 
 export interface TeamCatalogEntry {
   slug: string;
@@ -18,6 +21,13 @@ export interface TeamCatalogEntry {
   members: number;
   skills: string[];
   requires: { apps: string[] };
+  /** Optional BotMRR-style enrichment (adopted field names, MIT repo).
+   * Absent on older catalogs; present-but-malformed still throws — the
+   * catalog is remote input and strictness is the contract. */
+  outcome?: string;
+  setupMinutes?: number;
+  featured?: boolean;
+  author?: { name: string; url?: string };
 }
 
 export interface TeamCatalog {
@@ -82,7 +92,7 @@ export function parseTeamCatalog(value: JsonValue): TeamCatalog {
     slugs.add(slug);
     const prefix = `teams/${slug}/`;
     const requires = isRecord(raw.requires) ? raw.requires : {};
-    return {
+    const entry: TeamCatalogEntry = {
       slug,
       name: text(raw.name, `${field}.name`, 100),
       summary: text(raw.summary, `${field}.summary`, 300),
@@ -100,6 +110,29 @@ export function parseTeamCatalog(value: JsonValue): TeamCatalog {
         : (() => { throw new Error(`${field}.skills is invalid`); })(),
       requires: { apps: stringList(requires.apps ?? [], `${field}.requires.apps`, 30) },
     };
+    // Optional enrichment: absent stays absent; present must be well-formed.
+    if (raw.outcome !== undefined) entry.outcome = text(raw.outcome, `${field}.outcome`, 200);
+    if (raw.setupMinutes !== undefined) {
+      if (!isCount(raw.setupMinutes) || raw.setupMinutes < 1 || raw.setupMinutes > 24 * 60) {
+        throw new Error(`${field}.setupMinutes is invalid`);
+      }
+      entry.setupMinutes = raw.setupMinutes;
+    }
+    if (raw.featured !== undefined) {
+      if (typeof raw.featured !== "boolean") throw new Error(`${field}.featured is invalid`);
+      entry.featured = raw.featured;
+    }
+    if (raw.author !== undefined) {
+      if (!isRecord(raw.author)) throw new Error(`${field}.author is invalid`);
+      // zod at the boundary: the generic isText predicate does not narrow a
+      // union member cleanly enough for the spread's inferred type.
+      const authorUrl = z.string().regex(/^https:\/\//).max(300).safeParse(raw.author.url);
+      entry.author = {
+        name: text(raw.author.name, `${field}.author.name`, 100),
+        ...(authorUrl.success ? { url: authorUrl.data } : {}),
+      };
+    }
+    return entry;
   });
   return {
     format: "muster.catalog",
@@ -109,8 +142,7 @@ export function parseTeamCatalog(value: JsonValue): TeamCatalog {
   };
 }
 
-async function fetchJson(url: string, maxBytes: number, fetcher: Fetcher): Promise<JsonValue> {
-  const response = await fetcher(url, {
+async function fetchJson(url: string, maxBytes: number, fetcher: Fetcher): Promise<JsonValue> {  const response = await fetcher(url, {
     headers: { accept: "application/json, text/plain;q=0.9" },
     redirect: "error",
     signal: AbortSignal.timeout(10_000),
@@ -141,6 +173,32 @@ export async function fetchLibraryTeam(slug: string, fetcher: Fetcher = fetch): 
   if (!entry) throw Object.assign(new Error("That library team was not found"), { status: 404 });
   const value = await fetchJson(`${TEAM_LIBRARY_RAW_ROOT}/${entry.manifest}`, MAX_MANIFEST_BYTES, fetcher);
   return parseTeamManifest(value);
+}
+
+/** Same discipline as fetchJson, for the markdown README: fixed host (the
+ * path is catalog-validated relativeFile), no redirects, byte-capped. */
+async function fetchText(url: string, maxBytes: number, fetcher: Fetcher): Promise<string> {
+  const response = await fetcher(url, {
+    headers: { accept: "text/plain, text/markdown;q=0.9" },
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    throw Object.assign(new Error(`GitHub returned HTTP ${response.status}`), { status: response.status });
+  }
+  const announced = Number(response.headers.get("content-length") ?? 0);
+  if (announced > maxBytes) throw new Error("The remote team file is too large");
+  const raw = await response.text();
+  if (Buffer.byteLength(raw) > maxBytes) throw new Error("The remote team file is too large");
+  return raw;
+}
+
+export async function fetchLibraryTeamReadme(slug: string, fetcher: Fetcher = fetch): Promise<string> {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) throw new Error("That team name is invalid");
+  const catalog = await fetchTeamCatalog(fetcher);
+  const entry = catalog.teams.find((team) => team.slug === slug);
+  if (!entry) throw Object.assign(new Error("That library team was not found"), { status: 404 });
+  return fetchText(`${TEAM_LIBRARY_RAW_ROOT}/${entry.readme}`, MAX_README_BYTES, fetcher);
 }
 
 function safeSegment(value: string): boolean {

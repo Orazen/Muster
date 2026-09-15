@@ -534,8 +534,14 @@ Socket.prototype.connect = blocked;
     seedGoogleAccount(local.dataDirectory);
     // Confirm the HTTP server really distinguishes these roles, rather than
     // accidentally testing two sessions on a loopback-trusted deployment.
+    // /api/instances proves it: primary sees the operator fleet; secondary
+    // gets 200 but ONLY their own per-user engines (never the fleet). A
+    // secondary with no vault keys/custom providers sees an empty list.
     expect((await request(shared, "/api/instances", "GET", undefined, primary.cookie)).status).toBe(200);
-    expect((await request(shared, "/api/instances", "GET", undefined, secondary.cookie)).status).toBe(404);
+    const secondaryFleet = z
+      .object({ instances: z.array(z.unknown()) })
+      .parse(await (await request(shared, "/api/instances", "GET", undefined, secondary.cookie)).json());
+    expect(secondaryFleet.instances).toHaveLength(0);
     sharedConfig = readFileSync(join(shared.dataDirectory, "config.json"), "utf8");
   }, 60_000);
 

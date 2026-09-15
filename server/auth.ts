@@ -750,7 +750,10 @@ export function isPublicApiPath(path: string): boolean {
     // The public team-directory feed (/bots page): read-only catalog of
     // installable teams, deliberately consumable without an account so
     // agents and aggregators can index it (server/viral.ts rationale).
+    // The /teams directory detail view reads one team's manifest + README
+    // through the same public surface.
     path === "/api/directory/teams" ||
+    path.startsWith("/api/directory/teams/") ||
     // The public agent-directory feed (server/social.ts): only profiles
     // their owners set public, only the fields they chose to share.
     path === "/api/directory/agents" ||
