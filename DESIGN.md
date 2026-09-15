@@ -589,7 +589,7 @@ release pipeline.
 | X2 | run waterfall: tree+Gantt span view over turn/tool data, live-SSE merge (traceroot pattern, Apache-2.0) | receipts |
 | X3 | `/webagents.md` self-published action manifest + one-batch endpoint for bot-driven Muster ops (WebAgents spec, MIT) | contracts |
 | X4 | chat empty-state trust pills + queued-draft auto-send composer (OrcaChat patterns) | — |
-| X5 | URL-gated credential vault: fill only on allowlisted origins, secrets redacted from results (betterwright model) | approvals |
+| X5 | URL-gated credential vault: fill only on allowlisted origins, secrets redacted from results (betterwright model) — SPEC'd docs/plans/credential-vault-spec.md, V1–V4 slices | approvals |
 | X6 | post-run grading pass on JobReceipts: tool-failure/stall/needs-user detectors → findings + notify (future-agi/traceroot concept) | X2 |
 | R1 | release bump + 4-platform desktop rollout + mirror | suite green |
 
