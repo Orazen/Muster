@@ -32,7 +32,7 @@ does not establish it. This directive takes priority over older redesign languag
 
 ## Priority stack (top wins; re-derive under it as you ship)
 
-1. **Audit** — work through `docs/AUDIT.md` and the AGI-harness surfaces end to end: every broken thing found gets fixed or filed in the ceo-log with severity. Nothing found twice.
+1. **Audit** — work through `docs/audits/repository-audit-2026-08-19.md` and the AGI-harness surfaces end to end: every broken thing found gets fixed or filed in the ceo-log with severity. Nothing found twice.
 2. **AGI harness advancement** — plan rehearsal on cards is the queued next ARC slice; then the ranked slices in `docs/plans/astra-gpt6-mvp-brief.md` (eval harness as product, `get_why_journal`/`get_scorecard` read-only MCP tools, cross-fleet delegation, engine parity with OpenMausBot's 11).
 3. **Monetization ("make money from Muster")** — write `docs/plans/monetization.md`: packaging (open-core thesis: desktop/CLI free, cloud fleet + compliance + team features paid), pricing tiers with real numbers, which surfaces convert. Implement everything that doesn't need external keys (pricing page, plan gates, license-check hooks); **gate any real payment-provider wiring on the board providing keys** — never ship fake keys or a mock checkout to prod.
 4. **UI + landing page redesign** — production-grade conversion surfaces in `www/` and `src/`: landing, download, docs, pricing. Showcase the CLI, the coding agent, the fleet, the Watch approvals. Quality bar: Linear/Stripe-grade, better than OpenMausBot's site. All claims on the page must be backed by shipped code.

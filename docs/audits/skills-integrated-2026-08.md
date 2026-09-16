@@ -40,13 +40,13 @@ GOAL_APPLIED = {
 
 ## 4. Outerloop (@outerloop)
 # Evidence → Verdict → Answerability (governance layer over loop)
-# Applied: Security audit — evidence (56 findings) → verdict (all false positives/display) → answerability (MUSTER_AUDIT_STRATEGY.md + docs)
+# Applied: Security audit — evidence (56 findings) → verdict (all false positives/display) → answerability (docs/audits/audit-strategy-2026-08.md + docs)
 
 OUTERLOOP_APPLIED = {
   inner_run: "agent process executes (Muster harness + agent CLI)",
   evidence: "lint report (1113 → 0) + security findings (56 triaged)",
   human_verdict: "fix approved (mechanical) + security approved (false positives)",
-  ledger: "commit 225ae54 + working tree + MUSTER_AUDIT_STRATEGY.md",
+  ledger: "commit 225ae54 + working tree + docs/audits/audit-strategy-2026-08.md",
   answerability: "Every fix has SAFETY justification comment",
   outerloop_governance: "Applied to audit + code quality enforcement",
 }

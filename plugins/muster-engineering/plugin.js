@@ -19,10 +19,10 @@ export const MUSTER_ENGINEERING_BUILD = {
   ],
   phases_complete: ["audit", "ui_integration", "cloud_monitization", "docs", "skills_integration"],
   artifacts_verified_locally: [
-    "docs/MUSTER_AUDIT_STRATEGY.md",
+    "docs/audits/audit-strategy-2026-08.md",
     "Dockerfile.cloud",
-    "docs/MUSTER_MONETIZATION.md",
-    "docs/MUSTER_SKILLS_INTEGRATED.md",
+    "docs/audits/monetization-tiers-2026-08.md",
+    "docs/audits/skills-integrated-2026-08.md",
     "MemoryTab.tsx",
     "NotificationCard.tsx",
     "gaia-theme.ts",

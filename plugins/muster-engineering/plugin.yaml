@@ -43,19 +43,19 @@ phases:
     target_arr_12mo: 18950
 
   phase_4_docs:
-    strategy_doc: docs/MUSTER_AUDIT_STRATEGY.md
+    strategy_doc: docs/audits/audit-strategy-2026-08.md
     self_host_updated: docs/self-host.md
     docs_cloud_section: yes
 
   phase_5_skills:
-    skills_integrated_doc: docs/MUSTER_SKILLS_INTEGRATED.md
+    skills_integrated_doc: docs/audits/skills-integrated-2026-08.md
     skills_count: 6
 
 files_delivered:
-  - docs/MUSTER_AUDIT_STRATEGY.md
+  - docs/audits/audit-strategy-2026-08.md
   - Dockerfile.cloud
-  - docs/MUSTER_MONETIZATION.md
-  - docs/MUSTER_SKILLS_INTEGRATED.md
+  - docs/audits/monetization-tiers-2026-08.md
+  - docs/audits/skills-integrated-2026-08.md
   - src/components/bot-profile/MemoryTab.tsx
   - src/components/NotificationCard.tsx
   - src/lib/gaia-theme.ts
@@ -73,6 +73,6 @@ usage:
   # To deploy locally:
   #   docker build -f Dockerfile.cloud -t muster:cloud .
   # To review the audit:
-  #   cat docs/MUSTER_AUDIT_STRATEGY.md
+  #   cat docs/audits/audit-strategy-2026-08.md
   # To view integrated skills:
-  #   cat docs/MUSTER_SKILLS_INTEGRATED.md
+  #   cat docs/audits/skills-integrated-2026-08.md
