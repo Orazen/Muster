@@ -42,7 +42,7 @@ function modeOf(code: string): CarriedCodeMode | null {
  * opened normally. A present-but-unrecognised fragment (e.g. `#pricing`) returns
  * null rather than an error — the page should degrade to showing its own code,
  * not block the visitor. */
-export function parseFragmentCode(hash: string): CarriedCode | null {
+export function parseFragmentCode(hash: string | null | undefined): CarriedCode | null {
   const fragment = String(hash ?? "").replace(/^#/, "").trim();
   const keyed = new URLSearchParams(fragment).get("code");
   const candidate = (keyed ?? (BARE_CODE_FRAGMENT.test(fragment) ? fragment : "")).trim();
