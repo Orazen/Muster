@@ -86,7 +86,11 @@ public enum SeedCardContract {
     public static let title = "What do you mostly want help with?"
     public static let subtitle = "Pick whatever's closest; we can always expand from there."
     public static let options = ["Work & projects", "Writing & research", "Life admin", "A bit of everything"]
-    public static let maximumAttempt = 9_007_199_254_740_991
+    // The server's attempt counter is a JS number, so the valid domain ends
+    // at 2^53−1. The watchOS simulator is arm64_32, where Int.max is smaller
+    // than that — and smaller than any attempt count that can ever exist —
+    // so the clamp is semantically identical: "no real attempt reaches this".
+    public static let maximumAttempt: Int = Int(min(Double(Int.max), 9_007_199_254_740_991))
 
     public static func exactText(_ lhs: String, _ rhs: String) -> Bool {
         lhs.utf16.elementsEqual(rhs.utf16)

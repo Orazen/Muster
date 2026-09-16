@@ -22,13 +22,19 @@ final class IdentityAcceptance: XCTestCase {
         let url = try XCTUnwrap(URL(string: try XCTUnwrap(env["MUSTER58_PAIR_URL"])), "pair URL missing")
         app.launch()
         XCUIDevice.shared.system.open(url)
-        // iOS may ask before handing a custom-scheme URL to the app.
+        // iOS may ask before handing a custom-scheme URL to the app, and on a
+        // cold simulator the prompt can land well after the open call. Keep
+        // watching for it until the confirm screen shows — whichever comes
+        // first. A missed prompt otherwise dead-ends the test with
+        // "pairing confirm never appeared".
         let prompt = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
-        if prompt.waitForExistence(timeout: 3) {
-            let open = prompt.buttons["Open"]
-            if open.exists { open.tap() }
-        }
+        let open = prompt.buttons["Open"]
         let confirm = app.buttons["pairing-confirm"]
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            if open.waitForExistence(timeout: 1) { open.tap(); continue }
+            if confirm.exists { break }
+        }
         XCTAssertTrue(confirm.waitForExistence(timeout: 20), "pairing confirm never appeared")
         confirm.tap()
         // whatever happened, the next screen is the evidence
