@@ -217,7 +217,16 @@ export function replaySkill(
   const steps = substituteInputs(skill, overrides);
   for (let index = 0; index < steps.length; index += 1) {
     const expected = expectedFor(steps[index]);
-    const outcome = runStep(steps[index], index) ?? {};
+    // A backend that throws is still a replay failure, not an escape hatch
+    // from the verdict contract: convert it into a named failed step so the
+    // caller never receives a bare exception where a verdict was promised.
+    let outcome: StepObservation = {};
+    try {
+      outcome = runStep(steps[index], index) ?? {};
+    } catch (cause) {
+      const observed = cause instanceof Error ? cause.message : String(cause);
+      return { ok: false, failedStep: index, observed, expected };
+    }
     if (outcome.error !== undefined) {
       return { ok: false, failedStep: index, observed: outcome.error, expected };
     }

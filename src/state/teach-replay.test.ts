@@ -143,6 +143,20 @@ describe("teach-replay verifier", () => {
       throw new Error("runner must not be called for an empty skill");
     })).toEqual({ ok: true });
   });
+
+  it("turns a throwing backend into a failed verdict that names the step", () => {
+    const skill = compileTrajectory(recorded);
+    const verdict = replaySkill(skill, {}, (_step, index) => {
+      if (index === 1) throw new Error("browser context closed");
+      return { observed: 'button "Sign in"' };
+    });
+    expect(verdict).toEqual({
+      ok: false,
+      failedStep: 1,
+      observed: "browser context closed",
+      expected: "sam@example.com",
+    });
+  });
 });
 
 describe("teach-replay harness freedom", () => {
@@ -150,5 +164,16 @@ describe("teach-replay harness freedom", () => {
     const source = readFileSync(fileURLToPath(new URL("./teach-replay.ts", import.meta.url)), "utf8");
     const specifiers = [...source.matchAll(/\bfrom\s+"([^"]+)"/g)].map((match) => match[1]);
     expect(specifiers).toEqual(["zod"]);
+  });
+
+  it("imports nothing from electron, node:net or any other harness module", () => {
+    const source = readFileSync(fileURLToPath(new URL("./teach-replay.ts", import.meta.url)), "utf8");
+    const specifiers = [...source.matchAll(/\bfrom\s+"([^"]+)"/g)].map((match) => match[1]);
+    for (const specifier of specifiers) {
+      expect(specifier.startsWith("electron")).toBe(false);
+      expect(specifier.startsWith("node:net")).toBe(false);
+      expect(specifier.startsWith("node:")).toBe(false);
+    }
+    expect(source).not.toMatch(/\brequire\s*\(/);
   });
 });
