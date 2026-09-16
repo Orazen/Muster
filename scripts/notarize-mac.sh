@@ -119,6 +119,35 @@ echo "Verifying..."
 xcrun stapler validate "$DMG"
 spctl --assess --type open --context context:primary-signature -v "$DMG" || true
 
+# Stapling rewrites the DMG, so a manifest written at build time now carries a
+# hash and size for bytes that no longer exist. electron-updater compares
+# those against the download and refuses a mismatch, so refresh the entry.
+MANIFEST="$(dirname "$DMG")/latest-mac.yml"
+if [ -f "$MANIFEST" ] && command -v python3 >/dev/null; then
+  echo "Updating $(basename "$MANIFEST") with the stapled size and hash..."
+  python3 - "$MANIFEST" "$DMG" <<'PY'
+import base64, hashlib, os, re, sys
+
+manifest, dmg = sys.argv[1], sys.argv[2]
+with open(dmg, "rb") as handle:
+    digest = base64.b64encode(hashlib.sha512(handle.read()).digest()).decode()
+size = os.path.getsize(dmg)
+name = os.path.basename(dmg)
+
+with open(manifest) as handle:
+    text = handle.read()
+
+pattern = re.compile(r"(- url: " + re.escape(name) + r"\n    sha512: )[^\n]+(\n    size: )\d+")
+updated, count = pattern.subn(lambda m: f"{m.group(1)}{digest}{m.group(2)}{size}", text)
+if count:
+    with open(manifest, "w") as handle:
+        handle.write(updated)
+    print(f"  {name}: {size} bytes")
+else:
+    print(f"  no {name} entry in {os.path.basename(manifest)}; left unchanged")
+PY
+fi
+
 echo
 echo "Done. $DMG carries a stapled ticket and will open without a Gatekeeper prompt."
 echo "Publish it with the matching stable alias, e.g.:  cp '$DMG' release/Muster.dmg"
