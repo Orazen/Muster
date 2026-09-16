@@ -330,7 +330,12 @@ final class WatchSession: ObservableObject {
             status = .unauthorized
         } catch {
             guard identity == approvalSessionId else { return }
-            if !quietly { actionError = error.localizedDescription }
+            if !quietly {
+                actionError = error.localizedDescription
+                // The wrist is often the only feedback: the failure is
+                // otherwise a line of text the owner is not looking at.
+                WKInterfaceDevice.current().play(.failure)
+            }
         }
     }
 }

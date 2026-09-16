@@ -59,6 +59,10 @@ enum WatchRoute: Hashable {
     case approval(threadId: String, messageId: String)
     case bot(id: String)
     case room(id: String)
+    /// A message opened full screen in the reader. Keyed by id rather than
+    /// carrying the value, because the message can be patched while the
+    /// reader is open and the reader should show the harness's version.
+    case message(threadId: String, messageId: String)
 }
 
 // MARK: - Root
@@ -220,6 +224,29 @@ struct FleetView: View {
         }
     }
 
+    /// The bot or room a thread belongs to. The reader needs the owner to
+    /// reply into it and to label the navigation bar when the body carries no
+    /// heading of its own.
+    private func chat(forThread threadId: String) -> WatchChat? {
+        if let bot = session.state.bots.first(where: { $0.threadId == threadId }) {
+            return .bot(bot)
+        }
+        if let room = session.state.rooms.first(where: { $0.threadId == threadId }) {
+            return .room(room)
+        }
+        return nil
+    }
+
+    private func readable(_ message: Message, chat: WatchChat) -> ReadableMessage {
+        let body = message.text ?? ""
+        return ReadableMessage(
+            id: message.id,
+            title: ReaderText.title(for: body, fallback: chat.name),
+            body: body,
+            from: message.from
+        )
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -285,6 +312,13 @@ struct FleetView: View {
                     BotChatView(botId: id)
                 case let .room(id):
                     RoomChatView(roomId: id)
+                case let .message(threadId, messageId):
+                    if let chat = chat(forThread: threadId),
+                       let message = session.state.transcript(forThread: threadId).first(where: { $0.id == messageId }) {
+                        MessageReaderView(message: readable(message, chat: chat), chat: chat)
+                    } else {
+                        Text("That message is gone.").foregroundStyle(.secondary)
+                    }
                 }
             }
             .onChange(of: approvals.count) { _, count in
@@ -652,16 +686,6 @@ struct ChatView: View {
                     }
                 }
 
-                if let streaming, !streaming.isEmpty {
-                    Text(streaming)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .italic()
-                }
-
-                ForEach(tail) { message in
-                    Bubble(message: message)
-                }
 
                 if tail.isEmpty, streaming == nil {
                     Text("No messages yet.")
@@ -708,6 +732,9 @@ struct ChatView: View {
         let text = draft.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
         draft = ""
+        // A tap the wearer can feel. The send is otherwise invisible until
+        // the harness echoes it back, which on a slow turn is seconds away.
+        WKInterfaceDevice.current().play(.click)
         Task {
             switch chat {
             case let .bot(bot): await session.send(text, to: bot)
@@ -747,14 +774,26 @@ private struct Bubble: View {
                 .foregroundStyle(.secondary)
         case .text, .unknown:
             if let text = message.text, !text.isEmpty {
-                Text(text)
-                    .font(.footnote)
-                    .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
-                    .padding(8)
-                    .background(
-                        message.role == .user ? Color.accentColor.opacity(0.35) : Color.gray.opacity(0.2),
-                        in: RoundedRectangle(cornerRadius: 10)
-                    )
+                Group {
+                    // The model's replies are markdown, and the phone has
+                    // rendered them as such since it shipped. The watch was
+                    // showing the source — `**bold**`, `- ` bullets and
+                    // bracketed URLs as literal characters, on the screen
+                    // with the least room to spare. What you typed stays as
+                    // you typed it: markdown you did not intend is worse than
+                    // markdown you did.
+                    if message.role == .bot {
+                        WatchMarkdown(source: text, size: 13)
+                    } else {
+                        Text(text).font(.system(size: 13))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+                .padding(8)
+                .background(
+                    message.role == .user ? Color.accentColor.opacity(0.35) : Color.gray.opacity(0.2),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
             }
         }
     }
