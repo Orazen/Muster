@@ -180,6 +180,7 @@ struct ChatView: View {
                         .frame(width: 32, height: 32)
                 }
                 .glassSurface(in: Circle())
+                .accessibilityIdentifier("chat-back")
             }
             ToolbarItem(placement: .principal) {
                 // Identity + task label: the bot's flower and name, and under

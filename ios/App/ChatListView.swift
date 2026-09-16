@@ -16,6 +16,7 @@ struct ChatListView: View {
     @State private var path = NavigationPath()
     @State private var searchHits: [SearchHit] = []
     @State private var searching = false
+    @State private var showingWalkie = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -111,6 +112,10 @@ struct ChatListView: View {
                 searchHits = await session.search(expected)
                 searching = false
             }
+            .fullScreenCover(isPresented: $showingWalkie) {
+                WalkieView()
+                    .environmentObject(session)
+            }
         }
     }
 
@@ -145,6 +150,22 @@ struct ChatListView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .glassCapsule()
+
+            // The radio. Walkie is the fastest way to put something into a
+            // bot on a phone, so it sits beside the roster's own search —
+            // same size, same glass, same corner of the screen.
+            Button {
+                showingWalkie = true
+            } label: {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+            .glassSurface(in: Circle())
+            .accessibilityLabel("Walkie")
+            .accessibilityIdentifier("walkie-open")
 
             // Same place the desktop puts it, top-right of the roster.
             Button {

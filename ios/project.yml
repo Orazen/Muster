@@ -84,6 +84,16 @@ targets:
         NSCameraUsageDescription: >-
           Muster uses the camera only to scan a pairing QR code shown on
           your computer.
+        # Walkie: push-to-talk transcription and spoken replies. The
+        # speech-recognition prompt and the microphone prompt are two
+        # separate iOS permissions, and both strings must exist or the app
+        # is killed the moment either is requested.
+        NSSpeechRecognitionUsageDescription: >-
+          Muster converts your voice into messages for your bots while you
+          hold the Walkie button.
+        NSMicrophoneUsageDescription: >-
+          Muster listens only while you hold the Walkie button, so you can
+          talk to your bots hands-free.
         NSBonjourServices:
           - _muster._tcp
         # ATS configuration for entered and discovered endpoints. This is
