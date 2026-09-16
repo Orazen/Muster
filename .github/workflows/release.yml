@@ -41,9 +41,13 @@
 #     APPLE_CERTIFICATE_PASSWORD   Export password for that .p12
 #
 #   macOS notarization — ANY absent → skip notarize/staple; signed-but-
-#   unstapled (or unsigned) artifacts still upload:
-#     APPLE_ID                     Apple ID email for notarytool
-#     APPLE_APP_PASSWORD           App-specific password for notarytool
+#   unstapled (or unsigned) artifacts still upload. Uses the App Store
+#   Connect API key, NOT an Apple ID app-specific password: the API key is
+#   the credential this team can actually mint and rotate without a browser,
+#   and notarytool accepts it identically.
+#     ASC_KEY_ID                   App Store Connect key id (e.g. Z8854APF6U)
+#     ASC_ISSUER_ID                Issuer UUID from the same Keys page
+#     ASC_KEY_CONTENT              The .p8 private key, verbatim
 #     APPLE_TEAM_ID                10-char Apple team identifier
 #
 #   Windows signing — BOTH absent → unsigned NSIS (SmartScreen "unknown
@@ -166,9 +170,14 @@ jobs:
     env:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # Notarization credentials. The App Store Connect API key replaces the
+      # Apple ID + app-specific-password pair: notarytool accepts either, and
+      # the API key is the one this team can create and revoke without the
+      # Apple ID account page.
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
       # The full "Developer ID Application: NAME (TEAMID)" string. afterPack
       # writes it into the trusted-mac-updates marker, which is what unlocks
       # in-place Squirrel.Mac updates; without it every install stays on the
@@ -273,15 +282,20 @@ jobs:
       # Notarization (optional — skipped if secrets are not set)
       - name: Notarize and staple
         id: notarize
-        if: ${{ success() && needs.prepare.outputs.dry_run == 'false' && env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
+        if: ${{ success() && needs.prepare.outputs.dry_run == 'false' && env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.ASC_KEY_CONTENT != '' && env.APPLE_TEAM_ID != '' }}
         run: |
           set -euo pipefail
+          # The .p8 is written to the runner temp dir, never the workspace, so
+          # it cannot be picked up by an upload or a later checkout step.
+          ASC_KEY_PATH="$RUNNER_TEMP/asc-notary.p8"
+          printf '%s\n' "$ASC_KEY_CONTENT" > "$ASC_KEY_PATH"
+          chmod 600 "$ASC_KEY_PATH"
           for f in release/*.dmg release/*.zip; do
             [ -e "$f" ] || continue
             out=$(xcrun notarytool submit "$f" \
-              --apple-id "$APPLE_ID" \
-              --password "$APPLE_APP_PASSWORD" \
-              --team-id "$APPLE_TEAM_ID" \
+              --key "$ASC_KEY_PATH" \
+              --key-id "$ASC_KEY_ID" \
+              --issuer "$ASC_ISSUER_ID" \
               --wait 2>&1)
             echo "$out" | tail -2
             echo "$out" | grep -q "status: Accepted" || {
