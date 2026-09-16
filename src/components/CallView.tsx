@@ -25,11 +25,12 @@ import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/
 import { getDictation } from "@/lib/dictation";
 import { speaker } from "@/lib/tts";
 import { applySpeechControl, CONTROL_ACKS, matchSpeechControl } from "@/lib/tts/session-controls";
-import { cursorWords } from "@/lib/tts/word-cursor";
 import { useSpeech } from "@/lib/tts/useSpeech";
+import { roomToneForColor, voiceRoomVars } from "@/lib/voice-surface";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { AgentAvatar } from "./Avatar";
 import { SpeechControlChips } from "./SpeechControlChips";
+import { VoiceCaption } from "./VoiceCaption";
 import { WaveSpinner } from "./ui/wave-spinner";
 import { pendingApprovals } from "./PendingApproval";
 import { cn } from "@/lib/cn";
@@ -518,6 +519,8 @@ function Call({ bot }: { bot: Bot }) {
 
   const mascotState =
     phase === "listening" ? "listening" : phase === "speaking" ? "sending" : phase === "sending" ? "thinking" : phase === "muted" ? "idle" : "working";
+  // The whole room wears the bot's color; chrome reads the derived tones.
+  const roomTone = roomToneForColor(bot.color);
   const status =
     phase === "listening"
       ? pushToTalk
@@ -532,23 +535,38 @@ function Call({ bot }: { bot: Bot }) {
           : "Working";
 
   return (
-    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 bg-app/95 backdrop-blur-sm">
+    // Vellum's voice room: a full-bleed surface painted with the speaking
+    // bot's own palette color. Every chrome tone below comes from the
+    // --room-* vars derived from that fill (voice-surface.ts) — theme tokens
+    // would vanish on an arbitrary color.
+    <div
+      className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 px-8"
+      style={voiceRoomVars(roomTone)}
+    >
       <button
         onClick={() => endCall(bot.id)}
         aria-label="Hang up"
-        className="absolute right-5 top-5 rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
+        className="absolute right-5 top-5 rounded-md p-2 text-[var(--room-fg-muted)] transition-colors hover:bg-[var(--room-wash)] hover:text-[var(--room-fg)]"
       >
         <X size={18} />
       </button>
 
-      <AgentAvatar character={bot.character} color={bot.color} state={mascotState} size={220} animated trackPointer />
+      {/* The flower is the bot's own color — the same hue as the fill — so it
+          sits on Vellum's soft raised disc, which keeps it legible on every
+          palette color without stealing the bot's identity. */}
+      <div
+        className="flex size-[260px] items-center justify-center rounded-full"
+        style={{ background: "var(--room-bubble)" }}
+      >
+        <AgentAvatar character={bot.character} color={bot.color} state={mascotState} size={220} animated trackPointer />
+      </div>
 
       <div className="flex flex-col items-center gap-1.5 text-center">
-        <div className="text-[20px] font-medium text-ink">{bot.name}</div>
-        <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
+        <div className="text-[20px] font-medium text-[var(--room-fg)]">{bot.name}</div>
+        <div className="flex items-center gap-2 text-[13.5px] text-[var(--room-fg-muted)]">
           {(phase === "working" || phase === "sending") && (
             // GAIA's wave spinner — the voice UI's signature "alive" beat.
-            <WaveSpinner size="xs" pattern="line" color="primary" aria-label={status} />
+            <WaveSpinner size="xs" pattern="line" color="var(--room-fg-muted)" aria-label={status} />
           )}
           {status}
           <SpeechControlChips rate={speech.rate} volume={speech.volume} />
@@ -556,16 +574,16 @@ function Call({ bot }: { bot: Bot }) {
       </div>
 
       {/* one line, whichever is current: what you're saying, or what it is.
-          A partial (still-guessing) transcript renders grey — the finalized
+          A partial (still-guessing) transcript renders muted — the finalized
           turn is what the bot will actually receive. Captions can be hidden
           anytime without touching the call. */}
-      <div className="flex min-h-[3.5rem] max-w-[560px] items-center justify-center px-6 text-center text-[15px] leading-relaxed text-ink">
+      <div className="flex min-h-[3.5rem] max-w-[560px] items-center justify-center px-6 text-center text-[15px] leading-relaxed text-[var(--room-fg)]">
         {captions &&
           (phase === "listening" || phase === "muted" ? (
             heard ? (
-              <span className={heardFinal ? "" : "text-ink-secondary"}>{heard}</span>
+              <span className={heardFinal ? "" : "text-[var(--room-fg-muted)]"}>{heard}</span>
             ) : (
-              <span className="text-ink-secondary">
+              <span className="text-[var(--room-fg-muted)]">
                 {phase === "muted"
                   ? "You're muted — the mic is closed"
                   : pushToTalk
@@ -573,35 +591,27 @@ function Call({ bot }: { bot: Bot }) {
                     : "Say something…"}
               </span>
             )
-          ) : (
-            // Karaoke-style caption: the word cursor marks which word the
-            // voice is on. The cursor is an estimate (word-cursor.ts), so
-            // the styling is deliberately subtle — wrong-by-one reads fine,
-            // a flashing neon underline would not.
-            speech.caption ? (
-              <span>
-                {cursorWords(speech.caption).map((word, i) => (
-                  <span key={i} className={i === speech.captionWord ? "text-accent" : undefined}>
-                    {word}{" "}
-                  </span>
-                ))}
-              </span>
-            ) : null
-          ))}
+          ) : speech.caption ? (
+            <VoiceCaption caption={speech.caption} word={speech.captionWord} />
+          ) : null)}
       </div>
 
       {note && (
-        <div className="flex max-w-[460px] flex-col items-center gap-2 text-center text-[12.5px] text-warning">
+        <div className="flex max-w-[460px] flex-col items-center gap-2 text-center text-[12.5px] text-[var(--room-fg)]">
           <span>{note}</span>
           <button
             onClick={listen}
-            className="rounded-full border border-warning/40 px-3 py-1.5 text-[12px] hover:bg-warning/10"
+            className="rounded-full border border-[var(--room-fg-muted)] px-3 py-1.5 text-[12px] transition-colors hover:bg-[var(--room-wash)]"
           >
             Try microphone again
           </button>
         </div>
       )}
-      {speech.error && <div className="max-w-[420px] text-center text-[12.5px] text-danger">{speech.error}</div>}
+      {speech.error && (
+        <div className="max-w-[420px] text-center text-[12.5px]" style={{ color: "var(--room-muted-ink)" }}>
+          {speech.error}
+        </div>
+      )}
 
       <div className="flex items-center gap-3">
         <button
@@ -610,11 +620,10 @@ function Call({ bot }: { bot: Bot }) {
           aria-label={muted ? "Unmute microphone" : "Mute microphone"}
           title={muted ? "Unmute — the call keeps running" : "Mute — the call keeps running"}
           className={cn(
-            "flex size-11 items-center justify-center rounded-full border transition-colors",
-            muted
-              ? "border-danger/50 bg-danger/15 text-danger hover:bg-danger/25"
-              : "border-hairline/50 text-ink hover:bg-raised",
+            "flex size-11 items-center justify-center rounded-full transition-colors",
+            muted ? "bg-[var(--room-wash)]" : "text-[var(--room-fg)] hover:bg-[var(--room-wash)]",
           )}
+          style={muted ? { color: "var(--room-muted-ink)" } : undefined}
         >
           {muted ? <MicOff size={18} /> : <Mic size={18} />}
         </button>
@@ -624,8 +633,10 @@ function Call({ bot }: { bot: Bot }) {
           aria-label={captions ? "Hide live captions" : "Show live captions"}
           title={captions ? "Hide live captions" : "Show live captions"}
           className={cn(
-            "flex size-11 items-center justify-center rounded-full border transition-colors",
-            captions ? "border-accent/40 bg-accent/10 text-accent" : "border-hairline/50 text-ink-secondary hover:bg-raised hover:text-ink",
+            "flex size-11 items-center justify-center rounded-full transition-colors",
+            captions
+              ? "bg-[var(--room-wash)] text-[var(--room-fg)]"
+              : "text-[var(--room-fg-muted)] hover:bg-[var(--room-wash)] hover:text-[var(--room-fg)]",
           )}
         >
           {captions ? <Captions size={18} /> : <CaptionsOff size={18} />}
@@ -637,7 +648,8 @@ function Call({ bot }: { bot: Bot }) {
               speaker.stop();
               listen();
             }}
-            className="rounded-full border border-hairline/50 px-4 py-2 text-[13.5px] text-ink hover:bg-raised"
+            className="rounded-full px-4 py-2 text-[13.5px] text-[var(--room-fg)] transition-colors hover:bg-[var(--room-wash)]"
+            style={{ boxShadow: "inset 0 0 0 1px var(--room-fg-muted)" }}
           >
             Interrupt
           </button>
@@ -650,7 +662,7 @@ function Call({ bot }: { bot: Bot }) {
         </button>
       </div>
 
-      <div className="text-[11.5px] text-ink-secondary/70">
+      <div className="text-[11.5px] text-[var(--room-fg-muted)]">
         {getDictation().kind === "native"
           ? "Hold Control + Option to talk · Space interrupts · Esc hangs up"
           : "Just talk — a short pause sends your turn · say “end the call” or press Esc to hang up"}

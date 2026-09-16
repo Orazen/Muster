@@ -13,14 +13,15 @@ import { track } from "@/lib/analytics";
 import { normalizeState } from "@/lib/mascot";
 import { speaker } from "@/lib/tts";
 import { applySpeechControl, CONTROL_ACKS, matchSpeechControl } from "@/lib/tts/session-controls";
-import { cursorWords } from "@/lib/tts/word-cursor";
 import { useSpeech } from "@/lib/tts/useSpeech";
+import { roomToneForColor, voiceRoomVars } from "@/lib/voice-surface";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { useStore, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { AgentAvatar } from "./Avatar";
 import { CallTargetButton } from "./CallView";
 import { SpeechControlChips } from "./SpeechControlChips";
+import { VoiceCaption } from "./VoiceCaption";
 import { pendingApprovals } from "./PendingApproval";
 
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
@@ -452,12 +453,19 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
               ? workingMember.name + " is working"
               : "Working";
 
+  // The room wears the speaking member's color (Vellum paints the session
+  // assistant's); a member-less room falls to the deep ambient dark.
+  const roomTone = roomToneForColor(speakingMember?.color ?? workingMember?.color ?? members[0]?.color);
+
   return (
-    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 bg-app/95 px-8 backdrop-blur-sm">
+    <div
+      className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 px-8"
+      style={voiceRoomVars(roomTone)}
+    >
       <button
         onClick={() => endCall(group.id)}
         aria-label="Hang up"
-        className="absolute right-5 top-5 rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
+        className="absolute right-5 top-5 rounded-md p-2 text-[var(--room-fg-muted)] transition-colors hover:bg-[var(--room-wash)] hover:text-[var(--room-fg)]"
       >
         <X size={18} />
       </button>
@@ -479,8 +487,9 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
                 key={member.id}
                 className={cn(
                   "flex w-[124px] flex-col items-center gap-2 rounded-3xl px-2 py-3 transition-all duration-200",
-                  focused ? "scale-105 bg-raised/70 shadow-lg" : "opacity-75",
+                  focused ? "scale-105" : "opacity-75",
                 )}
+                style={focused ? { background: "var(--room-bubble)" } : undefined}
               >
                 <AgentAvatar
                   character={member.character}
@@ -491,7 +500,9 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
                   motion={workingMember?.id === member.id ? "working" : "none"}
                   motionKey={workingMember?.id === member.id ? 1 : 0}
                 />
-                <span className={cn("text-[13px] font-medium", focused ? "text-ink" : "text-ink-secondary")}>
+                <span
+                  className={cn("text-[13px] font-medium", focused ? "text-[var(--room-fg)]" : "text-[var(--room-fg-muted)]")}
+                >
                   {member.name}
                 </span>
               </div>
@@ -501,21 +512,21 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       </div>
 
       <div className="flex flex-col items-center gap-1.5 text-center">
-        <div className="text-[20px] font-medium text-ink">{group.name}</div>
-        <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
+        <div className="text-[20px] font-medium text-[var(--room-fg)]">{group.name}</div>
+        <div className="flex items-center gap-2 text-[13.5px] text-[var(--room-fg-muted)]">
           {(phase === "working" || phase === "sending") && <Loader2 size={13} className="animate-spin" />}
           {status}
           <SpeechControlChips rate={speech.rate} volume={speech.volume} />
         </div>
       </div>
 
-      <div className="min-h-[3.5rem] max-w-[620px] text-center text-[15px] leading-relaxed text-ink">
+      <div className="min-h-[3.5rem] max-w-[620px] text-center text-[15px] leading-relaxed text-[var(--room-fg)]">
         {captions &&
           (phase === "listening" || phase === "muted" ? (
             heard ? (
-              <span className={heardFinal ? "" : "text-ink-secondary"}>{heard}</span>
+              <span className={heardFinal ? "" : "text-[var(--room-fg-muted)]"}>{heard}</span>
             ) : (
-              <span className="text-ink-secondary">
+              <span className="text-[var(--room-fg-muted)]">
                 {phase === "muted"
                   ? "You're muted — the room keeps talking"
                   : pushToTalk
@@ -524,33 +535,28 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
               </span>
             )
           ) : phase === "speaking" ? (
-            // Karaoke caption, same word-cursor estimate as one-to-one calls.
-            speech.caption ? (
-              <span>
-                {cursorWords(speech.caption).map((word, i) => (
-                  <span key={i} className={i === speech.captionWord ? "text-accent" : undefined}>
-                    {word}{" "}
-                  </span>
-                ))}
-              </span>
-            ) : null
+            speech.caption ? <VoiceCaption caption={speech.caption} word={speech.captionWord} /> : null
           ) : (
-            <span className="text-ink-secondary">{workingMember ? "You’ll hear each response in turn." : ""}</span>
+            <span className="text-[var(--room-fg-muted)]">{workingMember ? "You’ll hear each response in turn." : ""}</span>
           ))}
       </div>
 
       {note && (
-        <div className="flex max-w-[520px] flex-col items-center gap-2 text-center text-[12.5px] text-warning">
+        <div className="flex max-w-[520px] flex-col items-center gap-2 text-center text-[12.5px] text-[var(--room-fg)]">
           <span>{note}</span>
           <button
             onClick={listen}
-            className="rounded-full border border-warning/40 px-3 py-1.5 text-[12px] hover:bg-warning/10"
+            className="rounded-full border border-[var(--room-fg-muted)] px-3 py-1.5 text-[12px] transition-colors hover:bg-[var(--room-wash)]"
           >
             Try microphone again
           </button>
         </div>
       )}
-      {speech.error && <div className="max-w-[460px] text-center text-[12.5px] text-danger">{speech.error}</div>}
+      {speech.error && (
+        <div className="max-w-[460px] text-center text-[12.5px]" style={{ color: "var(--room-muted-ink)" }}>
+          {speech.error}
+        </div>
+      )}
 
       <div className="flex items-center gap-3">
         <button
@@ -559,11 +565,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           aria-label={muted ? "Unmute microphone" : "Mute microphone"}
           title={muted ? "Unmute — the call keeps running" : "Mute — the call keeps running"}
           className={cn(
-            "flex size-11 items-center justify-center rounded-full border transition-colors",
-            muted
-              ? "border-danger/50 bg-danger/15 text-danger hover:bg-danger/25"
-              : "border-hairline/50 text-ink hover:bg-raised",
+            "flex size-11 items-center justify-center rounded-full transition-colors",
+            muted ? "bg-[var(--room-wash)]" : "text-[var(--room-fg)] hover:bg-[var(--room-wash)]",
           )}
+          style={muted ? { color: "var(--room-muted-ink)" } : undefined}
         >
           {muted ? <MicOff size={18} /> : <Mic size={18} />}
         </button>
@@ -573,10 +578,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           aria-label={captions ? "Hide live captions" : "Show live captions"}
           title={captions ? "Hide live captions" : "Show live captions"}
           className={cn(
-            "flex size-11 items-center justify-center rounded-full border transition-colors",
+            "flex size-11 items-center justify-center rounded-full transition-colors",
             captions
-              ? "border-accent/40 bg-accent/10 text-accent"
-              : "border-hairline/50 text-ink-secondary hover:bg-raised hover:text-ink",
+              ? "bg-[var(--room-wash)] text-[var(--room-fg)]"
+              : "text-[var(--room-fg-muted)] hover:bg-[var(--room-wash)] hover:text-[var(--room-fg)]",
           )}
         >
           {captions ? <Captions size={18} /> : <CaptionsOff size={18} />}
@@ -584,7 +589,8 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         {speaker.isSpeaking() && (
           <button
             onClick={interruptSpeech}
-            className="rounded-full border border-hairline/50 px-4 py-2 text-[13.5px] text-ink hover:bg-raised"
+            className="rounded-full px-4 py-2 text-[13.5px] text-[var(--room-fg)] transition-colors hover:bg-[var(--room-wash)]"
+            style={{ boxShadow: "inset 0 0 0 1px var(--room-fg-muted)" }}
           >
             Interrupt
           </button>
@@ -597,7 +603,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         </button>
       </div>
 
-      <div className="text-[11.5px] text-ink-secondary/70">
+      <div className="text-[11.5px] text-[var(--room-fg-muted)]">
         {getDictation().kind === "native"
           ? "Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · say “end the call” or press Esc to hang up"
           : "Say a member’s name to direct the turn · a short pause sends it · say “end the call” or press Esc to hang up"}
