@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { companionPairingLink } from "./companion-pairing";
 import { isPairingLinkInput, parsePairingLink, planWorkspaceConnect } from "./pairing-link";
 
 describe("parsePairingLink", () => {
@@ -73,17 +74,47 @@ describe("parsePairingLink", () => {
     }
   });
 
-  it("keeps a present-but-wrong code an error, not a missing code", () => {
-    const r = parsePairingLink("https://bots.example.com/pair#code=short");
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.missingCode).toBeUndefined();
-      expect(r.reason).toMatch(/no valid pairing code/i);
+  it("accepts Muster's own 8-character code, keyed and bare", () => {
+    // server/pairing.ts and server/claim.ts issue 8 chars of this alphabet
+    expect(parsePairingLink("https://bots.example.com/pair#code=ABCD2345")).toEqual({
+      ok: true,
+      host: "bots.example.com",
+      code: "ABCD2345",
+      mode: "self-hosted",
+    });
+    expect(parsePairingLink("https://bots.example.com/pair#ABCD2345")).toEqual({
+      ok: true,
+      host: "bots.example.com",
+      code: "ABCD2345",
+      mode: "self-hosted",
+    });
+    // the grouped 12-character form and a long code both round-trip too
+    expect(parsePairingLink("https://bots.example.com/pair#ABCD-EFGH-IJKL")).toMatchObject({ ok: true, mode: "self-hosted" });
+    expect(parsePairingLink(`https://bots.example.com/pair#${"A".repeat(64)}`)).toMatchObject({ ok: true, code: "A".repeat(64) });
+  });
+
+  it("reads a bare fragment as a code only on the /pair page", () => {
+    // a plain anchor on any other path is not a code and not a mistake: the
+    // address still connects (this is the regression the review caught)
+    expect(parsePairingLink("https://muster.today/#pricing")).toMatchObject({ ok: false, missingCode: true });
+    expect(parsePairingLink("https://bots.example.com/app#section")).toMatchObject({ ok: false, missingCode: true });
+    // on /pair the fragment is the code by contract
+    expect(parsePairingLink("https://bots.example.com/pair#482913")).toMatchObject({ ok: true, mode: "companion" });
+  });
+
+  it("treats an unusable fragment as no code at all, so the address still connects", () => {
+    for (const link of ["https://bots.example.com/pair#step=1", "https://bots.example.com/pair#a.b", "https://bots.example.com/pair#code=%20"]) {
+      const r = parsePairingLink(link);
+      expect(r.ok, link).toBe(false);
+      if (!r.ok) {
+        expect(r.missingCode, link).toBe(true);
+        expect(r.reason).toMatch(/no pairing code/i);
+      }
     }
   });
 
   it("returns a reason and never throws on malformed or empty input", () => {
-    const bad = ["", "   ", "not a url", "https://", "://nope", "https://bots.example.com/pair#code=short"];
+    const bad = ["", "   ", "not a url", "https://", "://nope", "https://%"];
     for (const input of bad) {
       expect(() => parsePairingLink(input)).not.toThrow();
       const r = parsePairingLink(input);
@@ -94,16 +125,23 @@ describe("parsePairingLink", () => {
 });
 
 describe("isPairingLinkInput", () => {
-  it("recognises http(s) links that carry a code or point at /pair", () => {
-    expect(isPairingLinkInput("https://bots.example.com/pair#code=ABCD-EFGH-IJKL")).toBe(true);
-    expect(isPairingLinkInput("https://bots.example.com/pair#ABCD-EFGH-IJKL")).toBe(true);
-    expect(isPairingLinkInput("https://bots.example.com/pair?code=ABCD-EFGH-IJKL")).toBe(true);
+  it("recognises a /pair page or an explicitly keyed code, with or without a scheme", () => {
+    expect(isPairingLinkInput("https://bots.example.com/pair#code=ABCD2345")).toBe(true);
+    expect(isPairingLinkInput("https://bots.example.com/pair#ABCD2345")).toBe(true);
+    expect(isPairingLinkInput("https://bots.example.com/pair?code=ABCD2345")).toBe(true);
     expect(isPairingLinkInput("https://bots.example.com/pair")).toBe(true);
+    // the scheme can be lost in transit (paste, chat client) and must not
+    // change which rules apply
+    expect(isPairingLinkInput("bots.example.com/pair#code=482913")).toBe(true);
+    expect(isPairingLinkInput("https://bots.example.com/app#code=ABCD2345")).toBe(true);
   });
 
-  it("leaves bare addresses and the native deep link on the address path", () => {
+  it("leaves plain addresses, plain anchors and the native deep link alone", () => {
     expect(isPairingLinkInput("https://bots.example.com")).toBe(false);
     expect(isPairingLinkInput("bots.example.com")).toBe(false);
+    // a fragment with no code key is an anchor on a non-/pair path
+    expect(isPairingLinkInput("https://muster.today/#pricing")).toBe(false);
+    expect(isPairingLinkInput("https://bots.example.com/app#section")).toBe(false);
     // muster://pair is the desktop-companion handoff, parsed by workspaces.ts
     expect(isPairingLinkInput("muster://pair?address=https://bots.example.com&code=XYZW123")).toBe(false);
     expect(isPairingLinkInput("")).toBe(false);
@@ -146,12 +184,43 @@ describe("planWorkspaceConnect", () => {
     expect(planWorkspaceConnect("bots.example.com")).toEqual({ kind: "address", origin: "https://bots.example.com", code: null });
   });
 
-  it("keeps the native deep link working, code and all", () => {
-    expect(planWorkspaceConnect("muster://pair?address=https://bots.example.com&code=XYZW123")).toEqual({
+  // Regression pins: the first cut of this slice routed every URL containing a
+  // '#' into the strict parser, which turned ordinary anchors into errors.
+  it("still connects an address that merely carries an anchor", () => {
+    expect(planWorkspaceConnect("https://muster.today/#pricing")).toEqual({
       kind: "address",
-      origin: "https://bots.example.com",
-      code: "XYZW123",
+      origin: "https://muster.today",
+      code: null,
     });
+    expect(planWorkspaceConnect("https://bots.example.com/app#section")).toMatchObject({ kind: "address", code: null });
+  });
+
+  // Regression pins: a code Muster actually issues must round-trip, and losing
+  // the scheme in transit must not change which rules apply.
+  it("carries a real Muster code instead of refusing it", () => {
+    expect(planWorkspaceConnect("https://bots.example.com/pair#code=ABCD2345")).toEqual({
+      kind: "link",
+      origin: "https://bots.example.com",
+      code: "ABCD2345",
+    });
+    expect(planWorkspaceConnect("https://bots.example.com/pair#ABCD2345")).toMatchObject({ kind: "link", code: "ABCD2345" });
+  });
+
+  it("applies the same rules to a link pasted without its scheme", () => {
+    expect(planWorkspaceConnect("bots.example.com/pair#code=482913")).toEqual({ kind: "desktop-code", code: "482913" });
+    const query = planWorkspaceConnect("bots.example.com/pair?code=ABCD2345");
+    expect(query.kind).toBe("error");
+    if (query.kind === "error") expect(query.error).toMatch(/fragment/i);
+  });
+
+  it("recognises the desktop app's own deep link instead of failing it as a workspace", () => {
+    const real = companionPairingLink({ address: "mac.local", port: 8810, code: "004209", token: `omb_pair_${"a".repeat(43)}` })!;
+    expect(real).toContain("muster://pair");
+    expect(planWorkspaceConnect(real)).toEqual({ kind: "desktop-code", code: "004209" });
+    // a deep link whose code is not a companion code is still the desktop handoff
+    const other = planWorkspaceConnect("muster://pair?address=mac.local:8810&code=XYZW123");
+    expect(other.kind).toBe("error");
+    if (other.kind === "error") expect(other.error).toMatch(/desktop/i);
   });
 
   it("refuses private, loopback and network-local hosts on every path", () => {

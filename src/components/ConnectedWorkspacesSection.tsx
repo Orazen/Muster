@@ -7,14 +7,8 @@ import { useEffect, useState } from "react";
 import { Check, Cloud, Laptop, Loader2, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { Card } from "./SettingsPrimitives";
-import { planWorkspaceConnect } from "@/lib/pairing-link";
+import { DESKTOP_LINK_GUIDANCE, planWorkspaceConnect } from "@/lib/pairing-link";
 import { addWorkspace, forgetWorkspace, loadWorkspaces, probeWorkspace, switchTarget, type SavedWorkspace } from "@/lib/workspaces";
-
-/** A 6-digit code is the desktop app's handoff. Saying so is the honest
- * answer: switching this browser to the code's host would connect the wrong
- * thing, and silently ignoring it would look like nothing happened. */
-const DESKTOP_CODE_NOTICE =
-  "That is a 6-digit companion code. Open Muster Desktop on the computer it was issued for and enter it in the app's pairing field — a companion code pairs the desktop app and does not connect a workspace here.";
 
 export function ConnectedWorkspacesSection() {
   const { user } = useAuth();
@@ -36,7 +30,7 @@ export function ConnectedWorkspacesSection() {
     }
     if (plan.kind === "desktop-code") {
       setError("");
-      setNotice(DESKTOP_CODE_NOTICE);
+      setNotice(DESKTOP_LINK_GUIDANCE);
       return;
     }
     setBusy(true);
@@ -143,14 +137,17 @@ export function ConnectedWorkspacesSection() {
             />
           </label>
           <p className="text-[12px] leading-relaxed text-ink-secondary">
-            Paste a pairing link from your server&rsquo;s Settings → Remote access, or enter its
-            address and sign in there. This browser stays connected afterward. A pairing code has
-            to be in the link&rsquo;s <code>#fragment</code>, not its query string.
+            Enter the address of the deployment you want to reach, or paste a link it gave you. A
+            pairing code belongs in the link&rsquo;s <code>#fragment</code>, never its query string.
+            This browser stays connected afterward.
           </p>
           <details className="text-[12px] text-ink-secondary">
-            <summary className="cursor-pointer">Need a pairing link?</summary>
-            <p className="mt-2">Run this on the server and copy the link it prints:</p>
-            <code className="mt-1 block select-all break-words rounded-md bg-inset px-2 py-2 text-ink">node cli/muster.mjs pair</code>
+            <summary className="cursor-pointer">Address, link, or code?</summary>
+            <p className="mt-2">
+              An address connects this browser to another deployment. A link carries a code in its
+              fragment. A 6-digit code is the desktop app&rsquo;s handoff and is entered there, not
+              here. For a workspace on your own network, open its address directly in a browser tab.
+            </p>
           </details>
           {error && (
             <p role="alert" className="text-[12px] text-danger">
