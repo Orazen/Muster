@@ -259,37 +259,41 @@ struct WalkieView: View {
     // MARK: - Controls
 
     private var controls: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Spacer(minLength: 0)
-            control(
-                image: "arrow.counterclockwise",
-                label: "Replay",
-                identifier: "walkie-replay",
-                enabled: announcer.canReplay
-            ) { announcer.replay() }
+        // Four glass controls in one row: they belong to a single cluster, so
+        // their surfaces merge where they meet rather than stacking.
+        GlassCluster(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Spacer(minLength: 0)
+                control(
+                    image: "arrow.counterclockwise",
+                    label: "Replay",
+                    identifier: "walkie-replay",
+                    enabled: announcer.canReplay
+                ) { announcer.replay() }
 
-            control(
-                image: "stop.fill",
-                label: "Stop",
-                identifier: "walkie-stop",
-                enabled: (selected?.busy == true) || talk.phase == .listening
-            ) { stop() }
+                control(
+                    image: "stop.fill",
+                    label: "Stop",
+                    identifier: "walkie-stop",
+                    enabled: (selected?.busy == true) || talk.phase == .listening
+                ) { stop() }
 
-            control(
-                image: voiceOn ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                label: voiceOn ? "Voice on" : "Voice off",
-                identifier: "walkie-voice"
-            ) { voiceOn.toggle() }
+                control(
+                    image: voiceOn ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                    label: voiceOn ? "Voice on" : "Voice off",
+                    identifier: "walkie-voice"
+                ) { voiceOn.toggle() }
 
-            control(
-                image: "bubble.left.and.bubble.right.fill",
-                label: "Open chat",
-                identifier: "walkie-open-chat",
-                enabled: selected != nil
-            ) {
-                if let bot = selected { path.append(Chat.bot(bot)) }
+                control(
+                    image: "bubble.left.and.bubble.right.fill",
+                    label: "Open chat",
+                    identifier: "walkie-open-chat",
+                    enabled: selected != nil
+                ) {
+                    if let bot = selected { path.append(Chat.bot(bot)) }
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
         }
     }
 

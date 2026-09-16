@@ -132,60 +132,67 @@ struct ChatListView: View {
             }
             .buttonStyle(.plain)
 
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.secondary)
-
-                TextField("Search chats", text: $query)
-                    .font(.system(size: 16))
-                    .submitLabel(.search)
-                    .autocorrectionDisabled()
-
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
+            // Search, Walkie and New bot sit shoulder to shoulder, so they
+            // share one glass cluster: inside it their surfaces merge into a
+            // single object instead of meeting edge against edge.
+            GlassCluster(spacing: 12) {
+                HStack(spacing: 12) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.secondary)
+
+                        TextField("Search chats", text: $query)
+                            .font(.system(size: 16))
+                            .submitLabel(.search)
+                            .autocorrectionDisabled()
+
+                        if !query.isEmpty {
+                            Button {
+                                query = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(Color.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .glassCapsule()
+
+                    // The radio. Walkie is the fastest way to put something into a
+                    // bot on a phone, so it sits beside the roster's own search —
+                    // same size, same glass, same corner of the screen.
+                    Button {
+                        showingWalkie = true
+                    } label: {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.primary)
+                            .frame(width: 34, height: 34)
                     }
                     .buttonStyle(.plain)
+                    .glassSurface(in: Circle())
+                    .accessibilityLabel("Walkie")
+                    .accessibilityIdentifier("walkie-open")
+
+                    // Same place the desktop puts it, top-right of the roster.
+                    Button {
+                        Task {
+                            if let bot = await session.createBot() { path.append(Chat.bot(bot)) }
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color.primary)
+                            .frame(width: 34, height: 34)
+                    }
+                    .buttonStyle(.plain)
+                    .glassSurface(in: Circle())
+                    .accessibilityLabel("New bot")
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .glassCapsule()
-
-            // The radio. Walkie is the fastest way to put something into a
-            // bot on a phone, so it sits beside the roster's own search —
-            // same size, same glass, same corner of the screen.
-            Button {
-                showingWalkie = true
-            } label: {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.primary)
-                    .frame(width: 34, height: 34)
-            }
-            .buttonStyle(.plain)
-            .glassSurface(in: Circle())
-            .accessibilityLabel("Walkie")
-            .accessibilityIdentifier("walkie-open")
-
-            // Same place the desktop puts it, top-right of the roster.
-            Button {
-                Task {
-                    if let bot = await session.createBot() { path.append(Chat.bot(bot)) }
-                }
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Color.primary)
-                    .frame(width: 34, height: 34)
-            }
-            .buttonStyle(.plain)
-            .glassSurface(in: Circle())
-            .accessibilityLabel("New bot")
         }
         .padding(.horizontal, 16)
         .padding(.top, 6)

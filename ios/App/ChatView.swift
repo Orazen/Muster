@@ -182,6 +182,7 @@ struct ChatView: View {
                 .glassSurface(in: Circle())
                 .accessibilityIdentifier("chat-back")
             }
+            .bareToolbarBackground()
             ToolbarItem(placement: .principal) {
                 // Identity + task label: the bot's flower and name, and under
                 // them the open task's title — the thing a transcript is
@@ -219,6 +220,7 @@ struct ChatView: View {
                 .accessibilityLabel(accessibilitySummary)
                 .accessibilityHint(isBotChat ? "Opens the task list" : "")
             }
+            .bareToolbarBackground()
             if case let .bot(bot) = current {
                 // Rooms have no computer of their own — whichever member is
                 // speaking owns one, and picking for the reader would be a

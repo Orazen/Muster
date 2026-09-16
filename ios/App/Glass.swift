@@ -38,6 +38,24 @@ extension View {
     }
 }
 
+extension ToolbarContent {
+    /// Drop the system's own Liquid Glass background from a toolbar item.
+    ///
+    /// On iOS 26 a toolbar item is given a shared glass background by the
+    /// navigation bar. This app draws its own glass on the items it wants
+    /// glass on, so leaving the system's in place stacks two of them — a
+    /// muddy ring around a capsule that already has an edge. Hiding it
+    /// leaves exactly one layer. Before iOS 26 there is no system
+    /// background to hide, and the modifier does not exist.
+    @ToolbarContentBuilder func bareToolbarBackground() -> some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            self.sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
+    }
+}
+
 /// A round floating glyph button — the toolbar's unit. 44pt is the touch
 /// floor; the label carries the accessibility name, the glyph stays quiet.
 struct GlassButton: View {
@@ -55,5 +73,31 @@ struct GlassButton: View {
         .buttonStyle(.plain)
         .glassSurface(in: Circle())
         .accessibilityLabel(label)
+    }
+}
+
+/// A row of glass controls that should read as one object.
+///
+/// Adjacent Liquid Glass surfaces merge where they touch, and the merge is
+/// what makes a cluster of buttons look like a single control rather than
+/// several overlapping ones. That effect only happens inside a container
+/// that knows the surfaces belong together, so this wraps them and drops
+/// the wrapper where the API does not exist — before iOS 26 the controls
+/// are simply siblings, which is what they already were.
+struct GlassCluster<Content: View>: View {
+    var spacing: CGFloat
+    private let content: () -> Content
+
+    init(spacing: CGFloat = 10, @ViewBuilder content: @escaping () -> Content) {
+        self.spacing = spacing
+        self.content = content
+    }
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) { content() }
+        } else {
+            content()
+        }
     }
 }
