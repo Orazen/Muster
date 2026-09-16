@@ -24,7 +24,7 @@ You are working on **Muster** (source version: `package.json`; installed/live ve
 
 ## Your mission (from the owner)
 
-Advance the AGI harness beyond its current pass: turn provenance via-chips, Goal mode bounded autonomy, why-journal HYPOTHESIS/FINDINGS, routine scorecards are shipped — **plan rehearsal on cards is the queued next ARC slice**, then keep executing the ranked slices in the Astra brief. Beat OpenMausBot (github.com/milind-soni/OpenMausBot) on the benchmark defined in the brief. Build like a billion-dollar company is auditing every line.
+Advance the AGI harness beyond its current pass: turn provenance via-chips, Goal mode bounded autonomy, why-journal HYPOTHESIS/FINDINGS, routine scorecards and **plan rehearsal on approval cards** are shipped, then keep executing the ranked slices in the Astra brief. Beat OpenMausBot (github.com/milind-soni/OpenMausBot) on the benchmark defined in the brief. Build like a billion-dollar company is auditing every line.
 
 ## Repo map (do not re-derive this)
 
@@ -32,7 +32,7 @@ Advance the AGI harness beyond its current pass: turn provenance via-chips, Goal
 |---|---|
 | Server API (one big file, ~8k lines) | `server/index.ts` |
 | Contracts/wire shapes | `server/contracts.ts` |
-| Fleet MCP server (6 bounded tools) | `server/fleet-mcp.ts` (+ `.test.ts`) |
+| Fleet MCP server (8 bounded tools; `send_task` writes) | `server/fleet-mcp.ts` (+ `.test.ts`) |
 | Engine drivers | `server/drivers/` |
 | MCP client/proxies | `server/mcp-client.ts`, `server/*-proxy.ts` |
 | Web UI (React) | `src/` |
