@@ -157,7 +157,7 @@ export function verifyReleaseWorkflow(workflow) {
     'Mac feed must follow stapling and precede final checksums');
   for (const success of [true, false]) for (const dry of ['false', 'true', '']) {
     for (const credentials of [true, false]) {
-      const env = Object.fromEntries(['APPLE_ID', 'APPLE_APP_PASSWORD', 'APPLE_TEAM_ID'].map((key) => [key, credentials ? 'present' : '']));
+      const env = Object.fromEntries(['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT', 'APPLE_TEAM_ID'].map((key) => [key, credentials ? 'present' : '']));
       check(evaluateGuard(notarize.if, { success, env, needs: { prepare: { outputs: { dry_run: dry } } } }) ===
         (success && dry === 'false' && credentials), 'Notarization must not submit from a dry or failed run');
     }
