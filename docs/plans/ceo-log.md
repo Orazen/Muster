@@ -5532,3 +5532,16 @@ untouched (path + hash receipt carried in the Loop98 entry). Inherited
 
 **Still open, honestly:** no browser (Playwright) acceptance for any pairing slice; the /pair page displays a carried code but never redeems it (owner decision — POST /api/pair/verify is a device redeemer and in-browser redemption would consume the desktop's code); no pairing scopes, no paired-device list work, no /pair email one-time-code + domain allowlist; pairing-link's SELF_HOSTED_CODE accepts any 4-64 char run of [A-Za-z0-9_-], so #code=short parses — the pre-rewrite pin for that case was deleted in the writer's rewrite and should be re-pinned if a minimum entropy rule is wanted. Engines "Add account", channels in /app, the onboarding tour pacing and voice W1-W3 gaps are unchanged. No security claim. Production was not touched; no deploy, no restart, no trigger change.
 
+
+## Loop101 — 1.12.3 released, installed, and TestFlight is public (17 September 2026)
+
+**Push.** The nine commits accumulated on main (pairing client role, carried-code display, teach-replay verdict fix, lint clearance, docs) were pushed to origin/main at 01:05 local; origin/main is now bb2dd77.
+
+**Release.** Built macOS arm64 locally: Developer ID signed (THARUN RAMAGIRI 7375K23WFU), notarized (submission 624233c8-068b-4c2c-9507-3a11e61844e0, Accepted) and stapled. spctl verdict on the DMG's app: accepted / source=Notarized Developer ID — the exact check 1.12.1 failed. Payload published as GitHub release v1.12.3 (public, not draft): Muster-1.12.3.dmg, Muster-1.12.3-arm64.zip + blockmaps, latest-mac.yml, muster-cli.mjs / Muster-1.12.3-cli.mjs / SHA256SUMS-cli.txt, and SHA256SUMS-darwin-arm64.txt (dmg sha256 09f4850f…d86f2). The CLI bundle self-reports version 1.12.3 / sha bb2dd77.
+
+**Install.** /Applications/Muster.app did not exist — the running desktop was an orphaned App-Translocation copy of a deleted DMG (unverifiable, unable to self-update). Installed 1.12.3 into /Applications via ditto, verified the seal (codesign deep-strict OK, spctl accepted/Notarized Developer ID) and launched it. Its companion sidecar answers :8810 (401 unpaired — correct posture) and the control port :8811 is listening; the harness port :8799 belongs to the separately running OpenMausBot app and was not touched. The user's previous translocated instance was left running; /Applications/Muster.app is the update path for next launch.
+
+**TestFlight.** Apple APPROVED Beta App Review for builds 1 and 4 since the last agent checked (the prior blocker is gone). Build 5 (5eb5a40b, the newest, external state IN_BETA_TESTING) is attached to the Muster Public Beta group and its review is APPROVED. Public invite link is live: https://testflight.apple.com/join/vvrDFsp1.
+
+**Not done, honestly.** The download mirror still serves 1.12.1: SSH to 173.249.38.101 remains permission-denied for every key (reconfirmed this loop), so scripts/release-payload.mjs mirror could not promote 1.12.3 there — in-app auto-updates stay pinned until the owner fixes VPS access or the mirror is promoted another way. No Windows/Linux legs exist (Actions billing unchanged — no CI build ran for this release). No local release verification claim beyond what is listed; no security claim.
+
