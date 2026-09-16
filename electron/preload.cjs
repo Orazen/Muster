@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld("ogb", {
      * only ever acts on the pid it recorded as foreign, never on one the
      * renderer supplies. */
     stopForeign: () => ipcRenderer.invoke("companion:stop-foreign"),
+    /** Keep this computer awake while the companion is on. A laptop that
+     * sleeps stops serving the phones already paired to it. */
+    setKeepAwake: (enabled) => ipcRenderer.invoke("companion:keep-awake", enabled),
     pairing: (open) => ipcRenderer.invoke("companion:pairing", open),
     cloudDesktop: (deviceId, allowed) => ipcRenderer.invoke("companion:cloud-desktop", deviceId, allowed),
     revoke: (deviceId) => ipcRenderer.invoke("companion:revoke", deviceId),

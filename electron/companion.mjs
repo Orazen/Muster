@@ -10,8 +10,9 @@
 // through here, which keeps the UI on one origin, avoids CORS, and means the
 // narrow list of things the renderer may ask for is written down in one
 // place rather than implied by whatever the control server happens to serve.
-import { app, utilityProcess } from "electron";
+import { app, powerSaveBlocker, utilityProcess } from "electron";
 import { desktopProfile } from "./profile-paths.mjs";
+import { readCompanionSettings, writeCompanionSettings } from "./companion-settings.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -34,6 +35,46 @@ let foreign = null;
  * path can re-run the identical start without the renderer resupplying
  * anything (it does not know resourcesPath or the harness port). */
 let lastStartOptions = null;
+
+/** Where the remembered preferences live. userData, not the companion's own
+ * directory: this is a fact about the app's own setting, and it must be
+ * readable before the sidecar has ever run. */
+const settingsFile = () => path.join(app.getPath("userData"), "companion-settings.json");
+
+/** The preferences as last written. Read once and kept, so the panel and the
+ * keep-awake holder cannot disagree about what the file says. */
+let preferences = null;
+
+function loadPreferences() {
+  if (!preferences) preferences = readCompanionSettings(settingsFile());
+  return preferences;
+}
+
+function savePreferences(next) {
+  preferences = { enabled: next.enabled === true, keepAwake: next.keepAwake === true };
+  writeCompanionSettings(settingsFile(), preferences);
+  return preferences;
+}
+
+/** The keep-awake blocker, held only while the companion is running and the
+ * user asked for it. A laptop that sleeps stops serving the phones already
+ * paired to it, which reads as the companion having failed rather than as a
+ * power setting the user never found. */
+let keepAwakeId = null;
+
+function syncKeepAwake(running) {
+  const wanted = running && loadPreferences().keepAwake;
+  if (wanted && keepAwakeId === null) {
+    keepAwakeId = powerSaveBlocker.start("prevent-app-suspension");
+  } else if (!wanted && keepAwakeId !== null) {
+    try {
+      powerSaveBlocker.stop(keepAwakeId);
+    } catch {
+      /* already stopped */
+    }
+    keepAwakeId = null;
+  }
+}
 
 /** The companion directory a child forked right now would use — the same
  * resolution the sidecar itself performs (OMB_COMPANION_DIR, else the shared
@@ -230,6 +271,8 @@ async function start(options, retried = false) {
       }
       proc = child;
       foreign = null;
+      savePreferences({ ...loadPreferences(), enabled: true });
+      syncKeepAwake(true);
       return companionState();
     } catch {
       await new Promise((r) => setTimeout(r, 150));
@@ -276,8 +319,9 @@ async function stop() {
 /** Everything the panel renders. Shaped so "off" is a complete answer rather
  * than an absence — the panel should never have to guess. */
 export async function companionState() {
+  const settings = loadPreferences();
   if (!proc) {
-    const state = { enabled: false, port: COMPANION_PORT, devices: [], pairing: null };
+    const state = { enabled: false, keepAwake: settings.keepAwake, port: COMPANION_PORT, devices: [], pairing: null };
     // a complete answer names why the companion is off when it is known
     if (lastError) state.error = lastError;
     // and names the process to stop when the panel can offer that action
@@ -286,11 +330,47 @@ export async function companionState() {
   }
   try {
     const state = await control("GET", "/state");
-    return { enabled: true, ...state };
+    return { enabled: true, keepAwake: settings.keepAwake, ...state };
   } catch {
     // running but unreachable: report it rather than claiming health
-    return { enabled: true, port: COMPANION_PORT, devices: [], pairing: null, error: "the companion is not responding" };
+    return {
+      enabled: true,
+      keepAwake: settings.keepAwake,
+      port: COMPANION_PORT,
+      devices: [],
+      pairing: null,
+      error: "the companion is not responding",
+    };
   }
+}
+
+/** Turn the keep-awake preference on or off and apply it immediately.
+ * Separate from start/stop because it is orthogonal to whether the companion
+ * is running: the user may set it before turning the companion on, and it
+ * takes effect the moment the companion next runs. */
+export function setCompanionKeepAwake(enabled) {
+  return serialize(() => {
+    savePreferences({ ...loadPreferences(), keepAwake: Boolean(enabled) });
+    syncKeepAwake(proc !== null);
+    return companionState();
+  });
+}
+
+/** Start the companion at launch when it was on last time.
+ *
+ * Without this a relaunch silently strands every paired phone: the sidecar is
+ * off, nothing tells the user why, and the pairing code they would need to
+ * re-pair with has to be minted from the very panel they have not opened yet.
+ * A failure here is recorded in lastError like any other start — the app
+ * still comes up, and the panel explains what happened. */
+export async function reviveCompanionAtLaunch(options) {
+  if (!loadPreferences().enabled) {
+    // Honour the preference even when it is off, so a keep-awake left set
+    // from a previous run cannot keep the machine awake for nothing.
+    syncKeepAwake(false);
+    return companionState();
+  }
+  return startCompanion(options);
 }
 
 /** Open or close a pairing window on the running sidecar. */

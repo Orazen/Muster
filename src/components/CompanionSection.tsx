@@ -28,6 +28,8 @@ interface Device {
 
 interface CompanionState {
   enabled: boolean;
+  /** Whether the computer is held awake while the companion is on. */
+  keepAwake?: boolean;
   port: number;
   devices: Device[];
   pairing: { code: string; token: string; expiresAt: number } | null;
@@ -58,6 +60,7 @@ type Bridge = {
   start: () => Promise<CompanionState>;
   stop: () => Promise<CompanionState>;
   stopForeign: () => Promise<CompanionState>;
+  setKeepAwake: (enabled: boolean) => Promise<CompanionState>;
   pairing: (open: boolean) => Promise<CompanionState>;
   cloudDesktop: (deviceId: string, allowed: boolean) => Promise<CompanionState>;
   revoke: (deviceId: string) => Promise<CompanionState>;
@@ -308,6 +311,31 @@ export function CompanionSection() {
         {state.enabled && tailnet && state.lan && (
           <div className="mt-3 text-[13px] text-ink-secondary">
             On this network only: {state.lan}:{state.port}
+          </div>
+        )}
+        {/* Awake is only meaningful while the companion is on: it keeps a
+            laptop from sleeping mid-session. Shown next to the toggle it
+            modifies rather than as a general power setting. */}
+        {state.enabled && (
+          <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline/30 pt-3">
+            <div className="min-w-0">
+              <div className="text-[13px] text-ink">Keep this computer awake</div>
+              <div className="mt-0.5 text-[12px] text-ink-secondary">
+                {state.keepAwake
+                  ? "This computer will not sleep while the companion is on."
+                  : "This computer may sleep, which stops the companion until you wake it."}
+              </div>
+            </div>
+            <button
+              role="switch"
+              aria-checked={Boolean(state.keepAwake)}
+              aria-label="Keep this computer awake"
+              disabled={busy}
+              onClick={() => void act((c) => c.setKeepAwake(!state.keepAwake))}
+              className={cnSwitch(Boolean(state.keepAwake))}
+            >
+              <span className={cnKnob(Boolean(state.keepAwake))} />
+            </button>
           </div>
         )}
         {/* A tailnet address with no name is workable on a laptop and not on

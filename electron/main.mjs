@@ -159,6 +159,8 @@ import {
   companionCloudDesktopAccess,
   companionRevoke,
   companionState,
+  reviveCompanionAtLaunch,
+  setCompanionKeepAwake,
   startCompanion,
   stopCompanion,
   stopForeignCompanion,
@@ -503,6 +505,7 @@ ipcMain.handle("companion:start", () =>
 );
 ipcMain.handle("companion:stop", () => stopCompanion());
 ipcMain.handle("companion:stop-foreign", () => stopForeignCompanion());
+ipcMain.handle("companion:keep-awake", (_event, enabled) => setCompanionKeepAwake(Boolean(enabled)));
 ipcMain.handle("companion:pairing", (_event, open) => companionPairing(Boolean(open)));
 ipcMain.handle("companion:cloud-desktop", (_event, deviceId, allowed) =>
   companionCloudDesktopAccess(deviceId, Boolean(allowed)),
@@ -588,6 +591,10 @@ app.whenReady().then(async () => {
   // Enable for this session action in the bot's Computer panel.
   if (app.isPackaged) serverReady = await startServerPackaged();
   const win = createWindow();
+  // Revive a companion that was on last time, once the window exists to report
+  // a failure in and SERVER_PORT has settled. Fire-and-forget: a companion
+  // that will not come up must not delay the app.
+  void reviveCompanionAtLaunch({ resourcesPath: process.resourcesPath, harnessPort: SERVER_PORT, log: slog });
   // in-app auto-update (packaged only) — checks GitHub releases, downloads on
   // the user's click, installs on "Restart to update"
   startUpdater(win);
