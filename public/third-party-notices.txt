@@ -33,8 +33,16 @@ Source: https://github.com/theexperiencecompany/gaia-ui/blob/14e20153ff1fa89897e
 Upstream commit: 14e20153ff1fa89897e2e90aa13eb17c69d4b156
 Moved to src/lib/color-utils.ts unchanged.
 
-The following license covers all adaptations listed above.
+OpenMausBot companion — adapted component (separate license below)
 
+Glass (floating-control surfaces)
+Source: https://github.com/milind-soni/OpenMausBot/blob/main/ios/App/Glass.swift
+Muster adaptation: ios/App/Glass.swift — the native-Liquid-Glass-with-material-
+fallback pattern and the one-glass-language rule, restated for Muster's surfaces
+(glassSurface/glassCapsule/glassSheet); the GlassGroup merge container and
+GlassButton glyph unit were not needed and were not carried over.
+
+The following license covers all adaptations listed above.
 MIT License
 
 Copyright (c) 2026 The Experience Company
@@ -92,3 +100,24 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+The OpenMausBot companion adaptation (ios/App/Glass.swift) is covered by the
+following Apache-2.0 license instead of the MIT texts above.
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+   Copyright 2026 OpenMausBot contributors

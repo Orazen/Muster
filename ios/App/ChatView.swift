@@ -178,8 +178,8 @@ struct ChatView: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Color.primary)
                         .frame(width: 32, height: 32)
-                        .background(Circle().fill(Color.secondary.opacity(0.16)))
                 }
+                .glassSurface(in: Circle())
             }
             ToolbarItem(placement: .principal) {
                 // Identity + task label: the bot's flower and name, and under
@@ -210,7 +210,7 @@ struct ChatView: View {
                     .padding(.leading, 10)
                     .padding(.trailing, 14)
                     .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.secondary.opacity(0.16)))
+                    .glassCapsule()
                 }
                 .buttonStyle(.plain)
                 .disabled(!isBotChat)
@@ -339,12 +339,12 @@ struct ChatView: View {
             HStack(spacing: 10) {
                 TextField("Ask \(chat.name)", text: Binding(
                     get: { session.composerDraft(context).text },
-                    set: { session.editComposer($0, context: context, lease: lease) }
+                        set: { session.editComposer($0, context: context, lease: lease) }
                 ), axis: .vertical)
                     .lineLimit(1...5)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
-                    .background(Capsule().fill(Color.secondary.opacity(0.16)))
+                    .glassCapsule()
                     .focused($composerFocused)
                     .disabled(!canEdit)
                     .accessibilityLabel("Message draft")

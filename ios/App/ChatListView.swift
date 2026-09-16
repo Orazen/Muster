@@ -144,7 +144,7 @@ struct ChatListView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(Capsule().fill(Color.secondary.opacity(0.16)))
+            .glassCapsule()
 
             // Same place the desktop puts it, top-right of the roster.
             Button {
@@ -158,6 +158,7 @@ struct ChatListView: View {
                     .frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
+            .glassSurface(in: Circle())
             .accessibilityLabel("New bot")
         }
         .padding(.horizontal, 16)
