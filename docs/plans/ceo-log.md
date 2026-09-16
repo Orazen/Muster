@@ -5371,7 +5371,7 @@ arm64 zip 200, muster-cli.mjs self-reports 1.12.1. Installed apps auto-update fr
 remain at 1.12.0 on the mirror (unchanged code paths for this patch; win still blocked by the
 native-platform gate + Actions billing as before).
 
-## Loop98 — remote-access client role: a pairing link is parsed before it connects (16 September 2026)
+## Loop98 (second entry — the parallel writer's record of the same loop) — remote-access client role: a pairing link is parsed before it connects (16 September 2026)
 
 **The defect.** The web client role (Settings → Connected workspaces) validated
 everything through `parseWorkspaceInput()`, which accepts a pairing code from the
