@@ -836,8 +836,8 @@ const delay = (ms: number): Promise<void> => new Promise((done) => setTimeout(do
 /** Map raw engine failures on lifecycle actions to actionable, secret-free
  * messages. `execFile` prepends "Command failed: <full command>", which for
  * `run` embeds the viewer password — that string must never reach the UI. */
-function friendlyContainerError(error: unknown, runtime: Runtime, target: LocalVmTarget): Error {
-  const raw = error instanceof Error ? error.message : String(error);
+function friendlyContainerError(cause: unknown, runtime: Runtime, target: LocalVmTarget): Error {
+  const raw = cause instanceof Error ? cause.message : String(cause);
   if (/port is already allocated|address already in use|bind for 127\.0\.0\.1/i.test(raw)) {
     return Object.assign(
       new Error(`The viewer port ${target.viewerPort} is already in use — close the app holding it, press Re-check, then try again`),

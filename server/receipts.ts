@@ -52,7 +52,7 @@ export function buildReceipt(input: ReceiptInput): JobReceipt {
   const rawSummary = (input.finalWord ?? "").trim();
   // SAFETY: slice after trim; collapse newlines so the receipt stays one card.
   const summary = rawSummary.replace(/\s+/g, " ").slice(0, MAX_SUMMARY_CHARS);
-  return {
+  const receipt: JobReceipt = {
     version: 1,
     bot: input.botName,
     job: input.taskTitle,
@@ -65,9 +65,10 @@ export function buildReceipt(input: ReceiptInput): JobReceipt {
     costUsd: input.usage?.costUsd ?? null,
     result: rawSummary ? "done" : "no-reply",
     summary,
-    // JsonObject forbids undefined values — spread conditionally.
-    ...(input.findings && input.findings.length > 0 ? { findings: input.findings } : {}),
   };
+  // JsonObject forbids undefined values — attach findings only when present.
+  if (input.findings && input.findings.length > 0) receipt.findings = input.findings;
+  return receipt;
 }
 
 /** Plain-text rendering — what "Copy receipt" puts on the clipboard and

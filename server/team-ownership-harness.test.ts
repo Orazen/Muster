@@ -437,6 +437,8 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
 
     // alice accepts; both see the friendship, the bystander never does
     expect((await request(hosted, `/api/social/friend-requests/${requestId}/accept`, "POST", undefined, alice)).status).toBe(200);
+    // SAFETY: the social-state route answers with this envelope for every
+    // account; the JSON round-trip only deep-copies it so each call is fresh.
     const stateOf = async (account: Account) => JSON.parse(JSON.stringify(await (await request(hosted, "/api/social/state", "GET", undefined, account)).json())) as {
       friends: { theirName: string }[]; incoming: unknown[]; outgoing: unknown[];
     };

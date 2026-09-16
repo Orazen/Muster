@@ -32,6 +32,11 @@ export const FILES_READ_MAX_BYTES = 1024 * 1024;
  * routes and invariants. The browser must never delete them. */
 const PROTECTED = new Set(["MEMORY.md", "SOUL.md"]);
 
+/** True only for primitive strings — the domain of every caller-supplied
+ * path or text field; untyped callers passing null/number/etc. fail here
+ * instead of being coerced by the length checks below. */
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
 export interface FileEntry {
   path: string;
   bytes: number;
@@ -43,7 +48,7 @@ export type PathRejection = { ok: false; reason: string } | { ok: true; abs: str
 /** Validate a caller-supplied relative path against the bot's workspace.
  * Pure string checks first (fast, testable), filesystem truth second. */
 export function resolveWorkspacePath(botId: string, rel: string, mustExist: boolean): PathRejection {
-  if (typeof rel !== "string" || !rel.length || rel.length > 400) return { ok: false, reason: "path is required" };
+  if (!isText(rel) || !rel.length || rel.length > 400) return { ok: false, reason: "path is required" };
   if (rel.includes("\\") || rel.startsWith("/") || rel.endsWith("/")) return { ok: false, reason: "path is not valid" };
   const segments = rel.split("/");
   if (segments.length > FILES_DEPTH_MAX) return { ok: false, reason: "path is too deep" };
@@ -156,7 +161,7 @@ export function readWorkspaceFile(botId: string, rel: string): ReadResult {
 export type WriteResult = { ok: true } | { ok: false; reason: string; status: number };
 
 export function writeWorkspaceFile(botId: string, rel: string, text: string): WriteResult {
-  if (typeof text !== "string" || Buffer.byteLength(text, "utf8") > MEMORY_FILE_MAX_BYTES) {
+  if (!isText(text) || Buffer.byteLength(text, "utf8") > MEMORY_FILE_MAX_BYTES) {
     return { ok: false, reason: `file is capped at ${MEMORY_FILE_MAX_BYTES / 1024}KB`, status: 400 };
   }
   const at = resolveWorkspacePath(botId, rel, false);

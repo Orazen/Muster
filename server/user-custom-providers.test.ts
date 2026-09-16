@@ -81,7 +81,10 @@ describe("instance registration", () => {
     const entry = configs["custom-baiApi:alice"]!;
     expect(entry).toMatchObject({ driver: "customOpenai", displayName: "Bai" });
     expect(entry.environment?.CUSTOM_PROVIDER_BAI_API_KEY).toBe("sk-secret");
+    // SAFETY: the entry was just written from `input`, so the config keys the
+    // provider input declares are present on the round-tripped registration.
     expect((entry.config as { url: string }).url).toBe("https://api.b.ai/v1");
+    // SAFETY: same registration — the input's models block is carried through.
     expect((entry.config as { models: { default: string } }).models.default).toBe("glm-4.5");
   });
 

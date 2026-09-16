@@ -83,6 +83,11 @@ function preparedImageInspect() {
 
 /** The healthy ready-container inspect a status check expects; tests may
  * override top-level fields to exercise degraded shapes. */
+interface InspectState {
+  Running: boolean;
+  StartedAt?: string;
+}
+
 const READY_INSPECT = {
   Config: {
     Image: IMAGE,
@@ -95,7 +100,9 @@ const READY_INSPECT = {
     },
     Env: ["VNC_PW=secret123"],
   },
-  State: { Running: true } as { Running: boolean; StartedAt?: string },
+  // SAFETY: the happy-path inspect this fixture stands in for always reports a
+  // running container; `StartedAt` is present only in the uptime variants.
+  State: { Running: true } as InspectState,
   Image: "sha256:managed-image-id",
   HostConfig: {
     Memory: 4 * 1024 * 1024 * 1024,
@@ -678,13 +685,13 @@ describe("Local VM first-run field bugs", () => {
   function flakyRunRunner(failFirst: number, failMessage: string) {
     const calls: string[] = [];
     let runAttempts = 0;
-    const responses: Record<string, string | Error> = {
-      "/usr/bin/which docker": "docker\n",
-      "/usr/bin/which podman": new Error("missing"),
-      "docker info --format {{.ServerVersion}}": "29\n",
-      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
-      [`docker inspect ${CONTAINER}`]: new Error("missing container"),
-    };
+    const responses = new Map<string, string | Error>([
+      ["/usr/bin/which docker", "docker\n"],
+      ["/usr/bin/which podman", new Error("missing")],
+      ["docker info --format {{.ServerVersion}}", "29\n"],
+      [`docker image inspect ${IMAGE}`, preparedImageInspect()],
+      [`docker inspect ${CONTAINER}`, new Error("missing container")],
+    ]);
     const run: CommandRunner = async (command, args) => {
       const key = [command, ...args].join(" ");
       calls.push(key);
@@ -693,7 +700,7 @@ describe("Local VM first-run field bugs", () => {
         if (runAttempts <= failFirst) throw new Error(failMessage);
         return { stdout: "container-id\n" };
       }
-      const response = responses[key];
+      const response = responses.get(key);
       if (response instanceof Error || response === undefined) {
         throw response ?? new Error(`unexpected command: ${key}`);
       }

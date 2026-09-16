@@ -14,6 +14,9 @@
 
 import { z } from "zod";
 
+/** A value that is genuinely a string at runtime, not merely typed as one. */
+const isText = <T>(value: T): value is T & string => String(value) === value;
+
 export const TEACH_REPLAY_SCHEMA_VERSION = 1;
 
 // A demonstrated value is either a literal the recording captured or a named
@@ -168,7 +171,7 @@ export function substituteInputs(
     if (!declared.has(name)) {
       throw new Error(`TeachReplay skill declares no input "${name}".`);
     }
-    if (typeof value !== "string") {
+    if (!isText(value)) {
       throw new Error(`TeachReplay input "${name}" must be a string.`);
     }
   }

@@ -70,9 +70,17 @@ describe("roomToneForColor", () => {
 
 describe("voiceRoomVars", () => {
   it("carries the full --room contract plus the fill", () => {
-    const style = voiceRoomVars(toneForBg("#01A492")) as Record<string, string>;
+    const style = voiceRoomVars(toneForBg("#01A492"));
     expect(style.backgroundColor).toBe("#01A492");
-    for (const key of ["--room-fg", "--room-fg-muted", "--room-wash", "--room-bubble", "--room-bubble-fg", "--room-muted-ink"]) {
+    const roomKeys = [
+      "--room-fg",
+      "--room-fg-muted",
+      "--room-wash",
+      "--room-bubble",
+      "--room-bubble-fg",
+      "--room-muted-ink",
+    ] as const;
+    for (const key of roomKeys) {
       expect(style[key], key).toBeTruthy();
     }
   });

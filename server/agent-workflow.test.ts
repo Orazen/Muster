@@ -22,7 +22,7 @@ describe("executeWorkflow", () => {
   it("rejects structural problems as a whole batch", () => {
     expect(executeWorkflow({}, ctx).status).toBe(400);
     expect(executeWorkflow({ ops: [] }, ctx).status).toBe(400);
-    expect(executeWorkflow({ ops: new Array(WORKFLOW_MAX_OPS + 1).fill({ id: "x", op: "health" }) }, ctx).status).toBe(400);
+    expect(executeWorkflow({ ops: Array.from({ length: WORKFLOW_MAX_OPS + 1 }, () => ({ id: "x", op: "health" })) }, ctx).status).toBe(400);
     expect(executeWorkflow({ ops: [{ id: "a", op: "health" }, { id: "a", op: "health" }] }, ctx).status).toBe(400);
   });
 

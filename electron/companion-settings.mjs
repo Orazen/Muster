@@ -34,7 +34,7 @@ export function parseCompanionSettings(text) {
   } catch {
     return { ...DEFAULT_COMPANION_SETTINGS };
   }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (parsed === null || !(parsed instanceof Object) || Array.isArray(parsed)) {
     return { ...DEFAULT_COMPANION_SETTINGS };
   }
   const enabled = strictBoolean(parsed.enabled);

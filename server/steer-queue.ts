@@ -40,6 +40,16 @@ interface QueueEntry {
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
 
+/** An error surfaced from a dispatch: engine/turn failures stamp a numeric
+ * HTTP `status` on the Error they throw; every other rejection is a plain
+ * Error or a string, carrying no status. */
+type PossiblyHttpError = { status?: number } | Error | string;
+
+/** True only when the rejection carries the HTTP status stamped by dispatch. */
+function isHttpError(error: PossiblyHttpError): error is { status?: number } {
+  return error instanceof Object && "status" in error;
+}
+
 /** A drained dispatch that fails because the bot went busy again (a goal
  * round or routine claimed it between the settle and the dispatch) is
  * transient: the words go back on the queue for the NEXT settle, up to this
@@ -72,7 +82,7 @@ export function queueSteeredMessage(store: SteerStore, bot: BotRecord, text: str
 export function drainSteeredMessages(
   store: SteerStore,
   run: (botId: string, threadId: string, prompt: string, userMessage: Message) => void | Promise<void>,
-  onGiveUp: (threadId: string, error: unknown) => void = () => {},
+  onGiveUp: (threadId: string, error: PossiblyHttpError) => void = () => {},
 ): void {
   // deleting only the entry being visited is safe under Map iteration
   for (const [threadId, entry] of queues) {
@@ -103,8 +113,8 @@ export function drainSteeredMessages(
     } catch (error) {
       settled = Promise.reject(error);
     }
-    void Promise.resolve(settled).catch((error: unknown) => {
-      const transient = (error as { status?: number })?.status === 409;
+    void Promise.resolve(settled).catch((error: PossiblyHttpError) => {
+      const transient = isHttpError(error) && error.status === 409;
       if (transient && (entry.attempts ?? 0) < MAX_REQUEUES) {
         // The bot went busy again between this settle and the dispatch —
         // the user's words wait for the next settle, in front of anything

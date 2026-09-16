@@ -129,6 +129,6 @@ export function userCustomProviderUsers(dataDir: string): string[] {
 }
 
 /** Validate a wire body into a provider input; issues joined for display. */
-export function parseUserCustomProviderInput(body: JsonValue | Record<string, unknown> | undefined) {
+export function parseUserCustomProviderInput(body: JsonValue | undefined) {
   return customProviderSchema.omit({ id: true }).safeParse(body ?? {});
 }

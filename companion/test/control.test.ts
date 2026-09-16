@@ -149,7 +149,7 @@ describe("origins the control server will change state for", () => {
     // stale copy of its own sidecar from another install's before ever
     // signalling a process it does not own.
     expect(body.pid).toBe(process.pid);
-    expect(typeof body.dir).toBe("string");
+    expect(body.dir).toEqual(expect.any(String));
     expect(body.dir.length).toBeGreaterThan(0);
     expect(body.port).toBe(8810);
   });

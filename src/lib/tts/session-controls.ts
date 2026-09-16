@@ -16,14 +16,23 @@ export interface SpeechControls {
 
 export const DEFAULT_SPEECH_CONTROLS: SpeechControls = { rate: 1, volume: 1 };
 
+/** How one control moves the speech settings: which field, by what factor,
+ * and the bounds the voice stays recognizable inside. */
+interface StepSpec {
+  key: keyof SpeechControls;
+  factor: number;
+  min: number;
+  max: number;
+}
+
 /** Step sizes and bounds. Volume is perceptual enough in ~30% steps; rate
  * stays inside the range where the voice still sounds like itself. */
-const STEPS: Record<Exclude<SpeechControl, "normal">, { key: keyof SpeechControls; factor: number; min: number; max: number }> = {
+const STEPS = {
   quieter: { key: "volume", factor: 0.7, min: 0.2, max: 1 },
   louder: { key: "volume", factor: 1.3, min: 0.2, max: 1 },
   faster: { key: "rate", factor: 1.15, min: 0.7, max: 1.6 },
   slower: { key: "rate", factor: 0.87, min: 0.7, max: 1.6 },
-};
+} satisfies Record<Exclude<SpeechControl, "normal">, StepSpec>;
 
 const MATCHERS: Array<[SpeechControl, RegExp]> = [
   // "lower" only counts as quieter after speak/talk/turn-it — never as a bare
@@ -36,13 +45,13 @@ const MATCHERS: Array<[SpeechControl, RegExp]> = [
 ];
 
 /** Short acknowledgements — spoken back so the control is confirmed by ear. */
-export const CONTROL_ACKS: Record<SpeechControl, string> = {
+export const CONTROL_ACKS = {
   quieter: "Okay, quieter.",
   louder: "Okay, louder.",
   faster: "Okay, faster.",
   slower: "Okay, slower.",
   normal: "Okay, back to normal.",
-};
+} satisfies Record<SpeechControl, string>;
 
 /** Which controls a call understands (capability tags for UI/tests). */
 export const SPEECH_CONTROL_CAPABILITIES: SpeechControl[] = ["quieter", "louder", "faster", "slower", "normal"];

@@ -6,15 +6,34 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getDictation, resetDictationForTests, type DictationEnd, type DictationLine } from "./dictation";
 
-class FakeRecognition {
+/** The window stub's shape: the two recognizer constructors the adapter
+ * probes, plus the optional native bridge a desktop shell would expose. */
+interface StubWindow {
+  SpeechRecognition?: WebSpeechCtor;
+  webkitSpeechRecognition?: WebSpeechCtor;
+  ogb?: StubNativeBridge;
+}
+
+/** The four bridge members nativeSource() reads. */
+interface StubNativeBridge {
+  speechStart(): Promise<void>;
+  speechStop(): Promise<void>;
+  onSpeechTranscript(cb: (line: { partial?: boolean; text?: string; error?: string }) => void): () => void;
+  onSpeechEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
+}
+
+class FakeRecognition implements WebSpeechRecognitionLike {
   continuous = false;
   interimResults = false;
   lang = "";
   started = 0;
   aborted = 0;
-  onresult: ((event: { resultIndex: number; results: { length: number; [i: number]: unknown } }) => void) | null = null;
-  onerror: ((event: { error: string }) => void) | null = null;
+  onresult: ((event: WebSpeechEvent) => void) | null = null;
+  onerror: ((event: WebSpeechErrorEvent) => void) | null = null;
   onend: (() => void) | null = null;
+  constructor() {
+    rememberFake(this);
+  }
   start() {
     this.started += 1;
   }
@@ -26,8 +45,9 @@ class FakeRecognition {
   }
   /** drive one recognizer result like the browser would */
   emit(text: string, isFinal: boolean) {
-    const result = { isFinal, length: 1, 0: { transcript: text, confidence: 0.9 } };
-    const results = { length: 1, 0: result };
+    const alternative: WebSpeechAlternative = { transcript: text, confidence: 0.9 };
+    const result: WebSpeechResult = { isFinal, length: 1, 0: alternative };
+    const results: WebSpeechResultList = { length: 1, 0: result };
     this.onresult?.({ resultIndex: 0, results });
   }
   emitError(error: string) {
@@ -38,14 +58,15 @@ class FakeRecognition {
 
 let fake: FakeRecognition | null = null;
 
-function stubWindow(withWeb: boolean) {
-  const Ctor = function (this: unknown) {
-    const rec = new FakeRecognition();
-    fake = rec;
-    return rec;
-  } as unknown as new () => FakeRecognition;
-  const win: Record<string, unknown> = {};
-  if (withWeb) win.webkitSpeechRecognition = Ctor;
+/** The adapter constructs the recognizer itself, so the fake records itself
+ * at construction time for the test to drive. */
+function rememberFake(rec: FakeRecognition): void {
+  fake = rec;
+}
+
+function stubWindow(withWeb: boolean): StubWindow {
+  const win: StubWindow = {};
+  if (withWeb) win.webkitSpeechRecognition = FakeRecognition;
   vi.stubGlobal("window", win);
   return win;
 }

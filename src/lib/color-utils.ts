@@ -5,7 +5,14 @@
  * Full license: public/third-party-notices.txt, included in application builds.
  * Adaptations: none to logic; moved into Muster's src/lib layout.
  */
-const CSS_COLOR_NAMES: Record<string, [number, number, number]> = {
+/** An 8-bit RGB triple — one channel per field, 0–255. */
+export interface Rgb {
+	r: number;
+	g: number;
+	b: number;
+}
+
+const CSS_COLOR_NAMES = {
 	black: [0, 0, 0],
 	white: [255, 255, 255],
 	red: [255, 0, 0],
@@ -28,7 +35,7 @@ const CSS_COLOR_NAMES: Record<string, [number, number, number]> = {
 	lime: [0, 255, 0],
 	aqua: [0, 255, 255],
 	fuchsia: [255, 0, 255],
-};
+} satisfies Record<string, [number, number, number]>;
 
 export function hexToRgb(
 	hex: string,
@@ -101,7 +108,7 @@ export function parseColor(
 	if (hexResult) return hexResult;
 
 	try {
-		if (typeof document !== "undefined") {
+		if ("document" in globalThis) {
 			const tempElement = document.createElement("div");
 			tempElement.style.color = color;
 			document.body.appendChild(tempElement);
@@ -164,7 +171,7 @@ export function hslToRgb(
 	h: number,
 	s: number,
 	l: number,
-): { r: number; g: number; b: number } {
+): Rgb {
 	let r: number, g: number, b: number;
 
 	if (s === 0) {

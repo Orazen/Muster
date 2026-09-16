@@ -71,7 +71,7 @@ const RaisedButton = React.forwardRef<HTMLButtonElement, RaisedButtonProps>(
 					"--shadow-color": `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${shadowOpacity})`,
 					boxShadow: `0 4px ${shadowBlur} 0px var(--shadow-color)`,
 					transition: "all 0.2s ease-in-out",
-				} as React.CSSProperties;
+				};
 			} catch (e) {
 				console.error("Error processing color:", e);
 				return {};

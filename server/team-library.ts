@@ -43,6 +43,8 @@ type Fetcher = typeof fetch;
 const isText = <T>(value: T): value is T & string => String(value) === value;
 /** True only for safe integers — what JSON decoding yields for count fields. */
 const isCount = <T>(value: T): value is T & number => Number.isSafeInteger(value);
+/** True only for primitive booleans — what JSON decoding yields for flag fields. */
+const isFlag = <T>(value: T): value is T & boolean => Boolean(value) === value;
 
 const isRecord = (value: JsonValue): value is JsonObject =>
   Boolean(value) && value instanceof Object && !Array.isArray(value);
@@ -119,7 +121,7 @@ export function parseTeamCatalog(value: JsonValue): TeamCatalog {
       entry.setupMinutes = raw.setupMinutes;
     }
     if (raw.featured !== undefined) {
-      if (typeof raw.featured !== "boolean") throw new Error(`${field}.featured is invalid`);
+      if (!isFlag(raw.featured)) throw new Error(`${field}.featured is invalid`);
       entry.featured = raw.featured;
     }
     if (raw.author !== undefined) {
@@ -127,10 +129,10 @@ export function parseTeamCatalog(value: JsonValue): TeamCatalog {
       // zod at the boundary: the generic isText predicate does not narrow a
       // union member cleanly enough for the spread's inferred type.
       const authorUrl = z.string().regex(/^https:\/\//).max(300).safeParse(raw.author.url);
-      entry.author = {
-        name: text(raw.author.name, `${field}.author.name`, 100),
-        ...(authorUrl.success ? { url: authorUrl.data } : {}),
-      };
+      const authorName = text(raw.author.name, `${field}.author.name`, 100);
+      entry.author = authorUrl.success
+        ? { name: authorName, url: authorUrl.data }
+        : { name: authorName };
     }
     return entry;
   });

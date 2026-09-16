@@ -6,7 +6,7 @@
 
   // ── theme: light-first like the reference site, persisted choice ─────
   var stored = null;
-  try { stored = localStorage.getItem("muster-docs-theme"); } catch (e) {}
+  try { stored = localStorage.getItem("muster-docs-theme"); } catch {}
   function apply(theme) {
     document.documentElement.setAttribute("data-theme", theme);
   }
@@ -37,7 +37,7 @@
       btn.addEventListener("click", function () {
         var next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
         apply(next);
-        try { localStorage.setItem("muster-docs-theme", next); } catch (e) {}
+        try { localStorage.setItem("muster-docs-theme", next); } catch {}
         paint();
       });
       links.insertBefore(btn, links.firstChild);

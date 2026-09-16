@@ -3557,7 +3557,7 @@ function loadVaultUsers(): string[] {
 async function reloadProviders() {
   // Settle accepted handoff receipts before setup/disposal awaits can race the
   // generic dispatch-failure path. The finalizer consumes each watch once.
-  for (const threadId of [...delegationWatch.keys()]) {
+  for (const threadId of Array.from(delegationWatch.keys())) {
     finalizeDelegationWatch(threadId, false, "", "Delegated turn did not finish — provider settings changed");
   }
   for (const bot of store.bots) {
@@ -6828,7 +6828,7 @@ let requestUserEmail = "";
     if (m && method === "PUT") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
       const body = await readBody(req);
-      if (!isText(body?.path) || typeof body?.text !== "string") {
+      if (!isText(body?.path) || !isText(body?.text)) {
         return json(res, 400, { error: "path and text are required" });
       }
       const wrote = writeWorkspaceFile(m[1], body.path, body.text);
@@ -8647,6 +8647,9 @@ let requestUserEmail = "";
         const [team, readme] = await Promise.all([fetchLibraryTeam(m[1]!), fetchLibraryTeamReadme(m[1]!)]);
         return json(res, 200, { team, readme });
       } catch (e) {
+        // SAFETY: the library fetch helpers reject with an Error carrying a
+        // numeric `status` when the upstream answers non-2xx; a rejection
+        // without one falls through to the upstream-failure answer below.
         const status = (e as { status?: number })?.status;
         return json(res, status === 404 ? 404 : 502, { error: status === 404 ? "no such team" : "The team library is unavailable" });
       }

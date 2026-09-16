@@ -21,30 +21,37 @@
 
 import { z } from "zod";
 
+import type { JsonValue } from "./schema.ts";
+
 export const WORKFLOW_MAX_OPS = 8;
 export const WEBAGENTS_SCHEMA = "webagents/v0.1";
 
 /** Everything the ops need, injected so the module stays store-free and
  * the whole surface is unit-testable with a fake. */
+/** What a read-only op produces. Ops project store and directory data, and the
+ * whole batch response is serialized as JSON, so the contract is the
+ * serializable surface rather than a per-op shape. */
+export type OpPayload = object | string | number | boolean | null;
+
 export interface WorkflowContext {
   health(): { app: string };
   bots(): Array<{ id: string; name: string; title: string; busy: boolean }>;
   /** null = no such bot for this session. */
   tasks(botId: string): Array<{ threadId: string; title: string; createdAt: number }> | null;
   /** null = no such task. */
-  receipt(botId: string, threadId: string): unknown | null;
-  directory(): unknown;
+  receipt(botId: string, threadId: string): OpPayload | null;
+  directory(): OpPayload;
 }
 
 interface OpSpec {
   description: string;
   args: z.ZodType<Record<string, string>>;
-  run: (ctx: WorkflowContext, args: Record<string, string>) => unknown;
+  run: (ctx: WorkflowContext, args: Record<string, string>) => OpPayload;
 }
 
 const idArg = z.string().min(1).max(128);
 
-export const AGENT_OPS: Record<string, OpSpec> = {
+export const AGENT_OPS = {
   "health": {
     description: "Liveness and version of this Muster deployment.",
     args: z.object({}).strict(),
@@ -78,7 +85,15 @@ export const AGENT_OPS: Record<string, OpSpec> = {
     args: z.object({}).strict(),
     run: (ctx) => ctx.directory(),
   },
-};
+} satisfies Record<string, OpSpec>;
+
+/** The table keeps its known keys, so the batch loop narrows by name instead of
+ * widening the whole map back to a string index. */
+function opSpec(name: string): OpSpec | undefined {
+  // SAFETY: hasOwn proved `name` is one of the table's own keys, so the
+  // assertion only names a key TypeScript can already prove exists.
+  return Object.hasOwn(AGENT_OPS, name) ? AGENT_OPS[name as keyof typeof AGENT_OPS] : undefined;
+}
 
 const workflowSchema = z.object({
   ops: z
@@ -97,18 +112,22 @@ export interface WorkflowResult {
   id: string;
   op: string;
   ok: boolean;
-  result?: unknown;
+  result?: OpPayload;
+  error?: string;
+}
+
+/** The batch answer: every op's outcome, or the single reason the whole batch
+ * was refused before any op ran. */
+export interface WorkflowResponse {
+  status: number;
+  results?: WorkflowResult[];
   error?: string;
 }
 
 /** Validate + execute a bounded batch sequentially. Structural problems
  * (bad body, >8 ops, duplicate ids) reject the whole batch up front; a bad
  * or failing OP is answered per-op so one typo can't burn the other seven. */
-export function executeWorkflow(body: unknown, ctx: WorkflowContext): {
-  status: number;
-  results?: WorkflowResult[];
-  error?: string;
-} {
+export function executeWorkflow(body: JsonValue, ctx: WorkflowContext): WorkflowResponse {
   const parsed = workflowSchema.safeParse(body);
   if (!parsed.success) {
     return { status: 400, error: `workflow must be { ops: [1..${WORKFLOW_MAX_OPS}] } with unique ids` };
@@ -120,7 +139,7 @@ export function executeWorkflow(body: unknown, ctx: WorkflowContext): {
   }
   const results: WorkflowResult[] = [];
   for (const { id, op, args } of parsed.data.ops) {
-    const spec = AGENT_OPS[op];
+    const spec = opSpec(op);
     if (!spec) {
       results.push({ id, op, ok: false, error: `unknown op "${op}" — see /webagents.md for the allowlist` });
       continue;

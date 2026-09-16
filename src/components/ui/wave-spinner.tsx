@@ -117,7 +117,7 @@ export interface WaveSpinnerProps extends VariantProps<
   /** Animation duration in seconds */
   duration?: number;
   /** The shape of individual dots */
-  dotShape?: "square" | "rounded" | "circle";
+  dotVariant?: "square" | "rounded" | "circle";
   /** Additional className for customization */
   className?: string;
   /** Label for accessibility */
@@ -172,14 +172,14 @@ const getDelayForIndex = (
 const SpecialLayoutDots: FC<{
   config: (typeof GRID_CONFIGS)[GridPattern];
   color: string;
-  dotShape: string;
+  dotVariant: string;
   animation: DelayPattern;
   duration: number;
-}> = ({ config, color, dotShape, animation, duration }) => {
+}> = ({ config, color, dotVariant, animation, duration }) => {
   if (!("specialLayout" in config)) return null;
 
   const borderRadius =
-    dotShape === "circle" ? "50%" : dotShape === "rounded" ? "30%" : "0";
+    dotVariant === "circle" ? "50%" : dotVariant === "rounded" ? "30%" : "0";
 
   if (config.specialLayout === "diamond") {
     // Diamond pattern: center + 4 corners arranged as diamond
@@ -302,18 +302,19 @@ export const WaveSpinner: FC<WaveSpinnerProps> = ({
   pattern = "square3x3",
   animation = "diagonalTL",
   duration = 0.7,
-  dotShape = "square",
+  dotVariant = "square",
   size,
   className,
   "aria-label": ariaLabel = "Loading",
 }) => {
   // Resolve color from preset or use as-is
+  // SAFETY: the `in` check above proved `color` is a key of COLOR_PRESETS, so the narrowed string is a ColorPreset literal.
   const resolvedColor =
     color in COLOR_PRESETS ? COLOR_PRESETS[color as ColorPreset] : color;
 
   const gridConfig = GRID_CONFIGS[pattern];
   const borderRadius =
-    dotShape === "circle" ? "50%" : dotShape === "rounded" ? "30%" : "0";
+    dotVariant === "circle" ? "50%" : dotVariant === "rounded" ? "30%" : "0";
 
   // Check if this is a special layout
   const isSpecialLayout = "specialLayout" in gridConfig;
@@ -329,7 +330,7 @@ export const WaveSpinner: FC<WaveSpinnerProps> = ({
           <SpecialLayoutDots
             config={gridConfig}
             color={resolvedColor}
-            dotShape={dotShape}
+            dotVariant={dotVariant}
             animation={animation}
             duration={duration}
           />

@@ -113,8 +113,19 @@ export function roomToneForColor(color: AgentColor | undefined): RoomTone {
   return toneForBg(hex ?? ROOM_DARK);
 }
 
+/** The style's full shape: React's CSSProperties plus the --room-* custom
+ * properties, which CSSProperties cannot name. */
+export interface RoomVars extends CSSProperties {
+  "--room-fg": string;
+  "--room-fg-muted": string;
+  "--room-wash": string;
+  "--room-bubble": string;
+  "--room-bubble-fg": string;
+  "--room-muted-ink": string;
+}
+
 /** Inline style: the fill plus the --room-* contract the call chrome reads. */
-export function voiceRoomVars(tone: RoomTone): CSSProperties {
+export function voiceRoomVars(tone: RoomTone): RoomVars {
   return {
     backgroundColor: tone.bg,
     "--room-fg": tone.fg,
@@ -123,5 +134,5 @@ export function voiceRoomVars(tone: RoomTone): CSSProperties {
     "--room-bubble": tone.bubble,
     "--room-bubble-fg": tone.bubbleFg,
     "--room-muted-ink": tone.mutedInk,
-  } as CSSProperties;
+  };
 }
