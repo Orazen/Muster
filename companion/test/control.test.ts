@@ -59,6 +59,54 @@ describe("origins the control server will change state for", () => {
     expect((await ask("POST", "/devices/missing/cloud-desktop")).status).toBe(404);
   });
 
+  it("opens a pairing window with the requested scope", async () => {
+    const { status, body } = await ask("POST", "/pairing?access=approvals");
+    expect(status).toBe(201);
+    expect(body.pairing.access).toBe("approvals");
+    await ask("DELETE", "/pairing");
+
+    // Absent means full — every existing caller sends no scope at all.
+    const plain = await ask("POST", "/pairing");
+    expect(plain.body.pairing.access).toBe("full");
+    await ask("DELETE", "/pairing");
+  });
+
+  it("changes a paired device's scope, and rejects an unknown one", async () => {
+    const { code } = devices.openPairing();
+    const paired = devices.redeem(code, "Scope test phone");
+    if ("error" in paired) throw new Error(paired.error);
+    expect(paired.device.access).toBe("full");
+
+    const narrowed = await ask("PUT", `/devices/${paired.device.id}/access?access=approvals`);
+    expect(narrowed.status).toBe(200);
+    expect(devices.authenticate(paired.token)?.access).toBe("approvals");
+
+    const widened = await ask("PUT", `/devices/${paired.device.id}/access?access=full`);
+    expect(widened.status).toBe(200);
+    expect(devices.authenticate(paired.token)?.access).toBe("full");
+
+    expect((await ask("PUT", "/devices/missing/access?access=approvals")).status).toBe(404);
+  });
+
+  it("reports a scope write failure without dropping the control server", async () => {
+    const [device] = devices.list();
+    const persist = devices.persist;
+    devices.persist = () => {
+      throw new Error("ENOSPC: no space left on device");
+    };
+    try {
+      const failed = await ask("PUT", `/devices/${device.id}/access?access=approvals`);
+      expect(failed).toEqual({
+        status: 500,
+        body: { error: "could not save device access" },
+      });
+      expect(devices.list().find((candidate) => candidate.id === device.id)?.access).toBe("full");
+      expect((await ask("GET", "/state")).status).toBe(200);
+    } finally {
+      devices.persist = persist;
+    }
+  });
+
   it("reports a permission write failure without dropping the control server", async () => {
     const [device] = devices.list();
     // persist is the registry's disk-write hook (public for exactly this

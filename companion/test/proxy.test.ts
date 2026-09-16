@@ -170,7 +170,7 @@ beforeAll(async () => {
   sidecar = createServer(
     createProxyHandler({
       harnessPort: HARNESS_PORT,
-      authenticate: (t) => (t === TOKEN ? { cloudDesktopAccess: true } : null),
+      authenticate: (t) => (t === TOKEN ? { access: "full", cloudDesktopAccess: true } : null),
       redeem: (code, deviceName) =>
         code === "424242"
           ? { token: TOKEN, device: { id: "d1", name: String(deviceName) } }
@@ -367,11 +367,67 @@ describe("the sidecar in front of an unmodified harness", () => {
     }
   });
 
+  // The allowlist is unit-tested against `denyReason` directly, which proves
+  // the policy but not that the proxy feeds it the scope. This is the seam a
+  // scope regression would slip through: authenticate returns the device, the
+  // handler reads `device.access`, and only then is the request forwarded.
+  it("refuses new work from a chats-and-approvals phone, without reaching the harness", async () => {
+    let reached = 0;
+    const harness = createServer((_req, res) => {
+      reached += 1;
+      res.writeHead(200, { "content-type": "application/json" }).end("{}");
+    });
+    await new Promise<void>((r) => harness.listen(0, "127.0.0.1", r));
+    // SAFETY: address() is AddressInfo — an object with a port — for any
+    // IP server that is listening, which the awaited listen guarantees.
+    const harnessPort = (harness.address() as { port: number }).port;
+
+    const limited = createServer(
+      createProxyHandler({
+        harnessPort,
+        authenticate: (t) =>
+          t === TOKEN ? { access: "approvals" as const, cloudDesktopAccess: false } : null,
+        redeem: () => ({ error: "not in this test" }),
+        serverName: () => "Test computer",
+      }),
+    );
+    await new Promise<void>((r) => limited.listen(0, "127.0.0.1", r));
+    // SAFETY: same AddressInfo guarantee as above.
+    const limitedPort = (limited.address() as { port: number }).port;
+
+    try {
+      const send = await fetch(`http://127.0.0.1:${limitedPort}/api/bots/bot_1/messages`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ text: "hello" }),
+      });
+      expect(send.status).toBe(403);
+      // SAFETY: the proxy's denial body is its { error: string } contract.
+      expect(((await send.json()) as { error: string }).error).toContain("chats and approvals only");
+      // The refusal has to happen here. A forwarded request would still 4xx at
+      // the harness in some configurations, so the status alone does not prove
+      // the gate held — the counter does.
+      expect(reached).toBe(0);
+
+      // and the same device may still answer a card
+      const approve = await fetch(`http://127.0.0.1:${limitedPort}/api/bots/bot_1/cards/c_1/answer`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ answer: "yes" }),
+      });
+      expect(approve.status).toBe(200);
+      expect(reached).toBe(1);
+    } finally {
+      await new Promise<void>((r) => limited.close(() => r()));
+      await new Promise<void>((r) => harness.close(() => r()));
+    }
+  });
+
   it("says the harness is down rather than hanging, when it is", async () => {
     const orphan = createServer(
       createProxyHandler({
         harnessPort: 1,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ access: "full" as const, cloudDesktopAccess: true }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),
@@ -409,7 +465,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const stalled = createServer(
       createProxyHandler({
         harnessPort: mutePort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ access: "full" as const, cloudDesktopAccess: true }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
         // the shipped value is 30s; the behaviour under test is the same one
@@ -466,7 +522,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const relay = createServer(
       createProxyHandler({
         harnessPort: slowPort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ access: "full" as const, cloudDesktopAccess: true }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),
@@ -529,7 +585,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const relay = createServer(
       createProxyHandler({
         harnessPort: floodPort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ access: "full" as const, cloudDesktopAccess: true }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),

@@ -15,6 +15,16 @@ import { join } from "node:path";
 
 import { DATA_DIR, ensureDataDir, writeFileAtomic } from "./state.ts";
 
+/** What a paired device may originate.
+ *
+ * A separate setting from cloud desktop because it answers a different
+ * question. `full` is a phone the owner handed the machine to. `approvals`
+ * is the cautious pairing: it reads conversations and unblocks pending
+ * cards, but it cannot start a turn. New devices default to `full` — the
+ * code that paired them was minted by someone sitting at the computer, and
+ * silently crippling the common case would make the phone read as broken. */
+export type DeviceAccess = "full" | "approvals";
+
 /** One paired phone, as it is written to disk. */
 export interface DeviceRecord {
   id: string;
@@ -23,6 +33,8 @@ export interface DeviceRecord {
   tokenHash: string;
   createdAt: number;
   lastSeenAt: number;
+  /** What this device may originate. See DeviceAccess. */
+  access: DeviceAccess;
   /** Full interactive access to a bot's cloud desktop. Deliberately off on
    * every new and migrated device until the computer owner enables it. */
   cloudDesktopAccess: boolean;
@@ -43,6 +55,10 @@ export interface PairingWindow {
   token: string;
   expiresAt: number;
   attemptsLeft: number;
+  /** The scope stamped onto whatever device redeems this window. Chosen on
+   * the computer when the window opens, because the phone has no way to
+   * consent to less than it is offered. */
+  access: DeviceAccess;
 }
 
 const DEVICES_FILE = join(DATA_DIR, "devices.json");
@@ -117,6 +133,13 @@ const isStorableDevice = (
   return record !== null && isText(record.id) && isText(record.tokenHash);
 };
 
+/** A stored scope, or the permissive default. A devices.json written before
+ * this field existed has devices that were paired under the old rules, where
+ * the only scope was full — so an absent field means full, not approvals.
+ * Guessing the other way would silently downgrade every existing phone. */
+const normalizeAccess = (value: JsonField | undefined): DeviceAccess =>
+  value === "approvals" ? "approvals" : "full";
+
 /** Complete a stored record, whatever shape the file had. `lastSeenAt` falls
  * back to `createdAt` rather than to the clock: a device we have never heard
  * from since pairing was last seen when it paired. */
@@ -128,6 +151,7 @@ function normalizeDevice(record: Partial<DeviceRecord> & { id: string; tokenHash
     name: cleanDeviceName(record.name),
     createdAt,
     lastSeenAt: timestamp(record.lastSeenAt, createdAt),
+    access: normalizeAccess(record.access),
     cloudDesktopAccess: record.cloudDesktopAccess === true,
   };
 }
@@ -187,13 +211,18 @@ export class DeviceRegistry {
   }
 
   /** Open a fresh window, replacing any that was already open. The code is
-   * from `randomInt`, not `Math.random` — it is a credential for two minutes. */
-  openPairing(): PairingWindow {
+   * from `randomInt`, not `Math.random` — it is a credential for two minutes.
+   *
+   * The scope is fixed here rather than chosen by the phone at redeem: the
+   * device that redeems is the untrusted half of the handshake, and letting
+   * it name its own privileges would make the setting decorative. */
+  openPairing(access: DeviceAccess = "full"): PairingWindow {
     this.window = {
       code: String(randomInt(0, 1_000_000)).padStart(6, "0"),
       token: `omb_pair_${randomBytes(32).toString("base64url")}`,
       expiresAt: Date.now() + PAIRING_TTL_MS,
       attemptsLeft: MAX_PAIRING_ATTEMPTS,
+      access: normalizeAccess(access),
     };
     return this.window;
   }
@@ -239,6 +268,10 @@ export class DeviceRegistry {
       tokenHash: sha256(token),
       createdAt: Date.now(),
       lastSeenAt: Date.now(),
+      // The window's scope, not a fresh default: closePairing() above only
+      // clears this.window, and the local `window` still carries the choice
+      // made when the code was minted.
+      access: window.access,
       cloudDesktopAccess: false,
     };
     this.devices.push(device);
@@ -290,6 +323,24 @@ export class DeviceRegistry {
     if (this.devices.length === before) return false;
     this.lastSeenWrites.delete(id);
     this.persist();
+    return true;
+  }
+
+  /** Change what a device may originate, after it is already paired. The
+   * same rollback-on-write-failure shape as the capability below: a scope
+   * that lives in memory but not on disk is a promise the next restart
+   * breaks without telling anyone. */
+  setAccess(id: string, access: DeviceAccess): boolean {
+    const device = this.devices.find((candidate) => candidate.id === id);
+    if (!device) return false;
+    const previous = device.access;
+    device.access = normalizeAccess(access);
+    try {
+      this.persist();
+    } catch (error) {
+      device.access = previous;
+      throw error;
+    }
     return true;
   }
 

@@ -14,7 +14,7 @@
 // withhold.
 import { createServer, type Server, type ServerResponse } from "node:http";
 
-import type { DeviceRegistry } from "./devices.ts";
+import type { DeviceAccess, DeviceRegistry } from "./devices.ts";
 import { lanAddresses, tailnetName, tailscaleAddress } from "./listener.ts";
 import { DATA_DIR } from "./state.ts";
 
@@ -100,7 +100,7 @@ interface CompanionState {
   tailnetName?: string;
   /** A LAN address, when one exists alongside the tailnet route. */
   lan: string | null;
-  pairing: { code: string; token: string; expiresAt: number } | null;
+  pairing: { code: string; token: string; expiresAt: number; access: DeviceAccess } | null;
   devices: ReturnType<DeviceRegistry["list"]>;
   discovery: { advertising: boolean; name: string };
 }
@@ -119,7 +119,9 @@ export function companionState(options: ControlOptions): CompanionState {
     dir: DATA_DIR,
     addresses,
     lan: addresses.find((a) => a !== tailscale) ?? null,
-    pairing: pairing ? { code: pairing.code, token: pairing.token, expiresAt: pairing.expiresAt } : null,
+    pairing: pairing
+      ? { code: pairing.code, token: pairing.token, expiresAt: pairing.expiresAt, access: pairing.access }
+      : null,
     devices: options.devices.list(),
     discovery: options.discovery(),
   };
@@ -186,7 +188,12 @@ export function createControlServer(options: ControlOptions): Server {
     }
     if (method === "GET" && path === "/state") return json(res, 200, companionState(options));
     if (method === "POST" && path === "/pairing") {
-      const window = options.devices.openPairing();
+      // The scope rides a query parameter rather than a body: this server
+      // has no body parser at all, and adding one to carry a single enum
+      // would be the largest thing in this file. Absent means full, which is
+      // what every existing caller sends.
+      const requested = new URL(req.url ?? "/", "http://127.0.0.1").searchParams.get("access");
+      const window = options.devices.openPairing(requested === "approvals" ? "approvals" : "full");
       // Keep the freshly issued credentials at the top level as well as in
       // `pairing`, matching the existing code response and making this write
       // sufficient for native control clients that do not immediately poll.
@@ -198,6 +205,23 @@ export function createControlServer(options: ControlOptions): Server {
     }
     if (method === "DELETE" && path === "/pairing") {
       options.devices.closePairing();
+      return json(res, 200, companionState(options));
+    }
+    // PUT with an explicit value rather than a POST/DELETE pair: the setting
+    // has two named values and neither is the absence of the other, so a
+    // method that means "turn on the restricted one" would read backwards
+    // half the time.
+    const access = path.match(/^\/devices\/([\w-]+)\/access$/);
+    if (access && method === "PUT") {
+      const requested = new URL(req.url ?? "/", "http://127.0.0.1").searchParams.get("access");
+      const scope: DeviceAccess = requested === "approvals" ? "approvals" : "full";
+      try {
+        if (!options.devices.setAccess(access[1], scope)) {
+          return json(res, 404, { error: "no such device" });
+        }
+      } catch {
+        return json(res, 500, { error: "could not save device access" });
+      }
       return json(res, 200, companionState(options));
     }
     const cloudDesktop = path.match(/^\/devices\/([\w-]+)\/cloud-desktop$/);
@@ -306,24 +330,40 @@ function render(s) {
   el("pair").innerHTML = s.pairing
     ? "<h2>Pair a phone</h2><div class=code>" + esc(s.pairing.code) + "</div>" +
       "<p class=dim>Expires in <span id=left></span>s. Enter it on your phone.</p>" +
+      "<p class=dim>" + (s.pairing.access === "approvals"
+        ? "This phone will get chats and approvals only."
+        : "This phone will get full access.") + "</p>" +
       "<button id=cancel>Cancel</button>"
-    : "<h2>Pair a phone</h2><p class=dim>The code lasts two minutes.</p><button id=start>Start pairing</button>";
+    : "<h2>Pair a phone</h2><p class=dim>The code lasts two minutes. Full access can start new work; chats and approvals cannot.</p>" +
+      "<button id=start data-access=full>Start pairing — full access</button> " +
+      "<button id=start-limited data-access=approvals>Start pairing — chats and approvals</button>";
 
   el("devices").innerHTML =
     "<h2>Paired devices</h2>" +
     (s.devices.length
       ? "<ul>" + s.devices.map((d) =>
           "<li><div class='grow'><div class=name>" + esc(d.name) + "</div>" +
-          "<div class=dim>Last seen " + ago(d.lastSeenAt) + "</div>" +
+          "<div class=dim>Last seen " + ago(d.lastSeenAt) + " · " +
+          (d.access === "approvals" ? "chats and approvals only" : "full access") + "</div>" +
+          "<button data-access-toggle='" + esc(d.id) + "' data-next='" +
+          (d.access === "approvals" ? "full" : "approvals") + "'>" +
+          (d.access === "approvals" ? "Give full access" : "Limit to chats and approvals") + "</button> " +
           "<button data-cloud='" + esc(d.id) + "' data-allowed='" + (d.cloudDesktopAccess ? "1" : "0") + "'>" +
           (d.cloudDesktopAccess ? "Cloud desktop on" : "Allow cloud desktop") + "</button></div>" +
           "<button data-revoke='" + esc(d.id) + "'>Remove</button></li>").join("") + "</ul>"
       : "<p class=dim>No phones are paired yet.</p>");
 
-  el("start")?.addEventListener("click", async () => render(await api("/pairing", "POST")));
+  el("start")?.addEventListener("click", async () => render(await api("/pairing?access=full", "POST")));
+  el("start-limited")?.addEventListener("click", async () => render(await api("/pairing?access=approvals", "POST")));
   el("cancel")?.addEventListener("click", async () => render(await api("/pairing", "DELETE")));
   for (const b of document.querySelectorAll("[data-revoke]")) {
     b.addEventListener("click", async () => render(await api("/devices/" + b.dataset.revoke, "DELETE")));
+  }
+  for (const b of document.querySelectorAll("[data-access-toggle]")) {
+    b.addEventListener("click", async () => render(await api(
+      "/devices/" + b.dataset.accessToggle + "/access?access=" + b.dataset.next,
+      "PUT"
+    )));
   }
   for (const b of document.querySelectorAll("[data-cloud]")) {
     b.addEventListener("click", async () => render(await api(

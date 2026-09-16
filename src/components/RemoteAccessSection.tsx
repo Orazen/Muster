@@ -11,11 +11,15 @@ import { Check, Copy, Loader2, Monitor, Smartphone, TriangleAlert } from "lucide
 import { companionPairingLink } from "../lib/companion-pairing";
 import { Card } from "./SettingsPrimitives";
 
+/** What a paired device may originate. Mirrors the sidecar's DeviceAccess. */
+type DeviceAccess = "full" | "approvals";
+
 interface Device {
   id: string;
   name: string;
   createdAt: number;
   lastSeenAt: number;
+  access: DeviceAccess;
   cloudDesktopAccess: boolean;
 }
 
@@ -24,7 +28,7 @@ interface CompanionState {
   keepAwake?: boolean;
   port: number;
   devices: Device[];
-  pairing: { code: string; token: string; expiresAt: number } | null;
+  pairing: { code: string; token: string; expiresAt: number; access: DeviceAccess } | null;
   addresses?: string[];
   tailscale?: string;
   tailnetName?: string;
@@ -40,7 +44,8 @@ type Bridge = {
   stop: () => Promise<CompanionState>;
   stopForeign: () => Promise<CompanionState>;
   setKeepAwake: (enabled: boolean) => Promise<CompanionState>;
-  pairing: (open: boolean) => Promise<CompanionState>;
+  pairing: (open: boolean, access?: DeviceAccess) => Promise<CompanionState>;
+  setAccess: (deviceId: string, access: DeviceAccess) => Promise<CompanionState>;
   cloudDesktop: (deviceId: string, allowed: boolean) => Promise<CompanionState>;
   revoke: (deviceId: string) => Promise<CompanionState>;
 };
@@ -52,7 +57,7 @@ const bridge = (): Bridge | null =>
 /** The access scope a code grants. Full is the default — a phone the user
  * explicitly pairs is normally meant to drive the machine; approvals-only is
  * the cautious choice for a device that should not start new work. */
-type AccessScope = "full" | "approvals";
+type AccessScope = DeviceAccess;
 
 const cnSwitch = (on: boolean) =>
   `relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-40 ${on ? "bg-accent" : "bg-raised"}`;
@@ -181,7 +186,9 @@ export function RemoteAccessSection() {
     void act(async (companion) => {
       const started = state.enabled ? state : await companion.start();
       if (!started.enabled || started.error) return started;
-      return companion.pairing(true);
+      // The scope is fixed when the code is minted, not chosen by the phone
+      // at redeem — see companion/src/devices.ts openPairing.
+      return companion.pairing(true, scope);
     });
 
   const copyLink = async () => {
@@ -284,6 +291,11 @@ export function RemoteAccessSection() {
                 <div className="mt-1 text-[13px] text-ink-secondary">
                   Expires in {secondsLeft}s{address ? ` · ${address}:${state.port}` : ""}
                 </div>
+                <div className="mt-0.5 text-[12px] text-ink-secondary">
+                  {state.pairing.access === "approvals"
+                    ? "This code grants chats and approvals only."
+                    : "This code grants full access."}
+                </div>
                 <div className="mt-3 flex flex-wrap items-start gap-2">
                   <button
                     type="button"
@@ -329,7 +341,23 @@ export function RemoteAccessSection() {
                   ) : (
                     <Smartphone size={15} className="shrink-0 text-ink-secondary" />
                   )}
-                  <div className="min-w-0 flex-1 truncate text-[13.5px] text-ink">{device.name}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13.5px] text-ink">{device.name}</div>
+                    <div className="text-[11.5px] text-ink-secondary">
+                      {device.access === "approvals" ? "Chats and approvals only" : "Full access"}
+                    </div>
+                  </div>
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      void act((c) =>
+                        c.setAccess(device.id, device.access === "approvals" ? "full" : "approvals"),
+                      )
+                    }
+                    className="shrink-0 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-40"
+                  >
+                    {device.access === "approvals" ? "Give full access" : "Limit access"}
+                  </button>
                   <button
                     disabled={busy}
                     onClick={() => void act((c) => c.revoke(device.id))}

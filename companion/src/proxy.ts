@@ -13,7 +13,7 @@
 // serve. Nothing upstream has to change, or even know this exists.
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 
-import { bearerToken } from "./devices.ts";
+import { bearerToken, type DeviceAccess } from "./devices.ts";
 import { denyReason, isCloudDesktopJoin } from "./routes.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
@@ -28,8 +28,9 @@ type JsonValue = JsonPrimitive | JsonMap | JsonValue[];
 export interface ProxyOptions {
   /** Where the harness is listening on loopback. */
   harnessPort: number;
-  /** Does this bearer token belong to a paired device? */
-  authenticate: (token: string | undefined) => { cloudDesktopAccess: boolean } | null;
+  /** Does this bearer token belong to a paired device? The scope rides along
+   * so the allowlist can enforce it without a second lookup. */
+  authenticate: (token: string | undefined) => { access: DeviceAccess; cloudDesktopAccess: boolean } | null;
   /** Redeem a pairing code. Handled here and never forwarded: the harness
    * has no such route and no idea devices exist — pairing is the sidecar's
    * own concern, and the one thing a device does before it has a token. */
@@ -157,6 +158,9 @@ export function createProxyHandler(options: ProxyOptions) {
       // that disagree about what a credential looks like means the header a
       // phone sends authenticates on one code path and not the other.
       authenticated: Boolean(device),
+      // undefined on an unauthenticated request, which the policy reads as
+      // "no scope to narrow" — the 401 above fires before the scope matters.
+      access: device?.access,
     });
     if (denial) return sendJson(res, denial.status, { error: denial.error });
 

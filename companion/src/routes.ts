@@ -18,6 +18,8 @@
 // calls. Adding a feature to the phone means adding its route here, on
 // purpose, in a diff someone can read. That cost is the feature.
 
+import type { DeviceAccess } from "./devices.ts";
+
 /** A refusal to send back, or null to let the request through. */
 export interface Denial {
   status: number;
@@ -30,6 +32,10 @@ export interface RouteRequest {
   method: string;
   /** Whether the bearer token on the request matched a paired device. */
   authenticated: boolean;
+  /** The matched device's scope. Absent on a request that did not
+   * authenticate, and absent means full — the pre-existing behaviour for
+   * every caller that has not been taught about scopes. */
+  access?: DeviceAccess;
 }
 
 /** The one companion route that crosses into full interactive desktop
@@ -100,6 +106,36 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/search$/ },
 ];
 
+/** The routes that START something, in a fleet-scoped sense.
+ *
+ * Every one of these is on ALLOWED — a phone with full access may drive all
+ * of them, and always could. This list exists only to answer the narrower
+ * question a `approvals`-scoped device asks: does this request originate
+ * work, or does it respond to work already in flight?
+ *
+ * The split is by effect, not by HTTP method. Answering a pending approval,
+ * reading a thread, reacting, and marking read are all POSTs and all pass.
+ * Sending a message, making a bot, starting a seed answer, and rewriting a
+ * task list do not. When a new route is added to ALLOWED, the question to
+ * ask is which side of that line it belongs on — omitting it here means
+ * approvals-scoped phones can reach it, which is the wrong default for
+ * anything that costs a turn.
+ */
+const NEW_WORK: ReadonlyArray<{ method: string; path: RegExp }> = [
+  { method: "POST", path: /^\/api\/bots$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/cards\/[\w-]+\/answer\/start$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
+  { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
+  { method: "DELETE", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
+  { method: "POST", path: /^\/api\/groups\/[\w-]+\/messages$/ },
+  CLOUD_DESKTOP_JOIN_ROUTE,
+];
+
 /** Route families worth naming in the refusal.
  *
  * Everything not allowed is denied either way; this only decides whether the
@@ -133,7 +169,7 @@ const EXPLAINED: ReadonlyArray<{ path: RegExp; error: string }> = [
  * is what keeps a stolen token from mapping the API. An allowlist rather than
  * a blocklist is the property this whole module exists for, and the one that
  * quietly stopped being true once before. */
-export function denyReason({ path, method, authenticated }: RouteRequest): Denial | null {
+export function denyReason({ path, method, authenticated, access }: RouteRequest): Denial | null {
   // Pairing is the one thing a device does before it has a credential.
   if (method === "POST" && path === "/api/pair") return null;
 
@@ -141,7 +177,20 @@ export function denyReason({ path, method, authenticated }: RouteRequest): Denia
     return { status: 401, error: "pair this device from the Muster companion on your computer" };
   }
 
-  if (ALLOWED.some((route) => route.method === method && route.path.test(path))) return null;
+  if (ALLOWED.some((route) => route.method === method && route.path.test(path))) {
+    // Second gate, and a narrower one than the allowlist: this route is on
+    // the phone surface, but the device asking for it is set to chats and
+    // approvals. Reads, reactions, read receipts, branch switching and
+    // answering a pending card all pass through — none of them originates a
+    // turn. Sending a message, making a bot, or reshaping a task list does.
+    if (access === "approvals" && NEW_WORK.some((route) => route.method === method && route.path.test(path))) {
+      return {
+        status: 403,
+        error: "this phone is set to chats and approvals only — change it in Muster → Settings → Remote access",
+      };
+    }
+    return null;
+  }
 
   const explained = EXPLAINED.find((family) => family.path.test(path));
   if (explained) return { status: 403, error: explained.error };

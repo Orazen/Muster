@@ -400,10 +400,15 @@ export async function reviveCompanionAtLaunch(options) {
   return startCompanion(options);
 }
 
-/** Open or close a pairing window on the running sidecar. */
-export async function companionPairing(open) {
+/** Open or close a pairing window on the running sidecar.
+ *
+ * `access` is fixed when the window opens, not chosen by the phone at
+ * redeem: the device that redeems is the untrusted half of the handshake,
+ * and letting it name its own privileges would make the setting decorative. */
+export async function companionPairing(open, access) {
   if (!proc) return companionState();
-  await control(open ? "POST" : "DELETE", "/pairing").catch(() => {});
+  const scope = access === "approvals" ? "approvals" : "full";
+  await control(open ? "POST" : "DELETE", open ? `/pairing?access=${scope}` : "/pairing").catch(() => {});
   return companionState();
 }
 
@@ -413,6 +418,19 @@ export async function companionRevoke(deviceId) {
   // the id came from the renderer, so it does not get to shape a path
   if (!/^[\w-]{1,64}$/.test(String(deviceId ?? ""))) return companionState();
   await control("DELETE", `/devices/${deviceId}`).catch(() => {});
+  return companionState();
+}
+
+/** Change what one paired phone may originate. "approvals" is the narrow
+ * scope: it reads conversations and unblocks pending cards, but cannot start
+ * a turn. The sidecar owns the enum, so an unexpected value is normalized
+ * there rather than trusted here. */
+export async function companionSetAccess(deviceId, access) {
+  if (!proc) return companionState();
+  // the id came from the renderer, so it does not get to shape a path
+  if (!/^[\w-]{1,64}$/.test(String(deviceId ?? ""))) return companionState();
+  const scope = access === "approvals" ? "approvals" : "full";
+  await control("PUT", `/devices/${deviceId}/access?access=${scope}`).catch(() => {});
   return companionState();
 }
 

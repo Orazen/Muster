@@ -158,6 +158,7 @@ import {
   companionPairing,
   companionCloudDesktopAccess,
   companionRevoke,
+  companionSetAccess,
   companionState,
   reviveCompanionAtLaunch,
   setCompanionKeepAwake,
@@ -506,7 +507,8 @@ ipcMain.handle("companion:start", () =>
 ipcMain.handle("companion:stop", () => stopCompanion());
 ipcMain.handle("companion:stop-foreign", () => stopForeignCompanion());
 ipcMain.handle("companion:keep-awake", (_event, enabled) => setCompanionKeepAwake(Boolean(enabled)));
-ipcMain.handle("companion:pairing", (_event, open) => companionPairing(Boolean(open)));
+ipcMain.handle("companion:pairing", (_event, open, access) => companionPairing(Boolean(open), access));
+ipcMain.handle("companion:access", (_event, deviceId, access) => companionSetAccess(deviceId, access));
 ipcMain.handle("companion:cloud-desktop", (_event, deviceId, allowed) =>
   companionCloudDesktopAccess(deviceId, Boolean(allowed)),
 );

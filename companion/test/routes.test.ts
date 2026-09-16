@@ -9,8 +9,12 @@ import { describe, expect, it } from "vitest";
 
 import { denyReason } from "../src/routes.ts";
 
-const ask = (method: string, path: string, authenticated = true) =>
-  denyReason({ method, path, authenticated });
+const ask = (
+  method: string,
+  path: string,
+  authenticated = true,
+  access?: "full" | "approvals",
+) => denyReason({ method, path, authenticated, access });
 
 const allowed = (method: string, path: string) => ask(method, path) === null;
 
@@ -59,6 +63,70 @@ describe("what the app may do", () => {
   for (const [method, path] of calls) {
     it(`allows ${method} ${path}`, () => expect(ask(method, path)).toBeNull());
   }
+
+  // The scope is a second gate over the same list, so full access must keep
+  // reaching everything — a regression here would look like a working phone
+  // that suddenly cannot send a message.
+  for (const [method, path] of calls) {
+    it(`still allows ${method} ${path} with full access`, () =>
+      expect(ask(method, path, true, "full")).toBeNull());
+  }
+});
+
+describe("the chats-and-approvals scope", () => {
+  // Answering a card, reading, reacting, and marking read are how a phone
+  // unblocks work already in flight. None of them costs a turn, so none of
+  // them may be gated — a restricted phone that cannot approve anything is
+  // the opposite of what the setting is for.
+  const responsive: Array<[string, string]> = [
+    ["GET", "/api/health"],
+    ["GET", "/api/events"],
+    ["GET", "/api/bots"],
+    ["POST", "/api/bots/bot_123/cards/card_456/answer"],
+    ["GET", "/api/bots/bot_123/cards/card_456/answer"],
+    ["POST", "/api/bots/bot_123/read"],
+    ["POST", "/api/bots/bot_123/always-allow"],
+    ["POST", "/api/groups/room-1/read"],
+    ["GET", "/api/threads/th_1/messages"],
+    ["POST", "/api/threads/th_1/messages/msg_2/reactions"],
+    ["POST", "/api/threads/th_1/respond"],
+    ["GET", "/api/search"],
+  ];
+
+  for (const [method, path] of responsive) {
+    it(`allows ${method} ${path}`, () =>
+      expect(ask(method, path, true, "approvals")).toBeNull());
+  }
+
+  // Everything that originates work, or reshapes the task list it lives in.
+  const originating: Array<[string, string]> = [
+    ["POST", "/api/bots"],
+    ["POST", "/api/bots/bot_123/messages"],
+    ["POST", "/api/bots/bot_123/interrupt"],
+    ["POST", "/api/bots/bot_123/cards/card_456/answer/start"],
+    ["POST", "/api/bots/bot_123/messages/msg_2/edit"],
+    ["POST", "/api/bots/bot_123/active-branch"],
+    ["POST", "/api/bots/bot_123/tasks"],
+    ["POST", "/api/bots/bot_123/tasks/th_1"],
+    ["PATCH", "/api/bots/bot_123/tasks/th_1"],
+    ["DELETE", "/api/bots/bot_123/tasks/th_1"],
+    ["POST", "/api/groups/room-1/messages"],
+    ["POST", "/api/bots/bot_123/computer/join"],
+  ];
+
+  for (const [method, path] of originating) {
+    it(`refuses ${method} ${path}`, () => {
+      const denial = ask(method, path, true, "approvals");
+      expect(denial?.status).toBe(403);
+      expect(denial?.error).toContain("chats and approvals only");
+    });
+  }
+
+  it("does not leak the refusal to an unauthenticated caller", () => {
+    // 401 for a missing credential, not the scope message — the scope is a
+    // fact about a paired device and must not be readable without one.
+    expect(ask("POST", "/api/bots", false, "approvals")?.status).toBe(401);
+  });
 });
 
 describe("seed answer route boundary", () => {

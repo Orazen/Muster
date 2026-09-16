@@ -56,7 +56,7 @@ beforeAll(async () => {
   const harnessPort = await listen(upstream);
   proxy = createServer(createProxyHandler({
     harnessPort,
-    authenticate: (token) => token === TOKEN ? { cloudDesktopAccess: false } : null,
+    authenticate: (token) => token === TOKEN ? { access: "full" as const, cloudDesktopAccess: false } : null,
     redeem: () => ({ error: "not used" }),
     serverName: () => "Owned seed fixture",
   }));

@@ -28,7 +28,8 @@ contextBridge.exposeInMainWorld("ogb", {
     /** Keep this computer awake while the companion is on. A laptop that
      * sleeps stops serving the phones already paired to it. */
     setKeepAwake: (enabled) => ipcRenderer.invoke("companion:keep-awake", enabled),
-    pairing: (open) => ipcRenderer.invoke("companion:pairing", open),
+    pairing: (open, access) => ipcRenderer.invoke("companion:pairing", open, access),
+    setAccess: (deviceId, access) => ipcRenderer.invoke("companion:access", deviceId, access),
     cloudDesktop: (deviceId, allowed) => ipcRenderer.invoke("companion:cloud-desktop", deviceId, allowed),
     revoke: (deviceId) => ipcRenderer.invoke("companion:revoke", deviceId),
   },

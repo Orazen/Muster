@@ -74,6 +74,54 @@ describe("DeviceRegistry", () => {
     expect(reloaded.authenticate(token)?.id).toBe(device.id);
   });
 
+  // A devices.json written before scopes existed holds phones paired under
+  // the old rules, where full access was the only kind. Defaulting them to
+  // the restricted scope would silently take away something the owner never
+  // agreed to give up — and the phone would read as broken.
+  it("gives a record with no stored scope full access, not the narrow one", () => {
+    const registry = new DeviceRegistry();
+    const { token, device } = pair(registry);
+
+    const file = join(DATA_DIR, "devices.json");
+    const stored = JSON.parse(readFileSync(file, "utf8"));
+    delete stored.devices[0].access;
+    writeFileSync(file, JSON.stringify(stored));
+
+    const reloaded = new DeviceRegistry();
+    expect(reloaded.list()[0].access).toBe("full");
+    expect(reloaded.list()[0].id).toBe(device.id);
+    expect(reloaded.authenticate(token)?.access).toBe("full");
+  });
+
+  it("stamps the scope the pairing window was opened with", () => {
+    const registry = new DeviceRegistry();
+    const { code } = registry.openPairing("approvals");
+    const result = registry.redeem(code, "iPhone");
+    if ("error" in result) throw new Error(result.error);
+
+    expect(result.device.access).toBe("approvals");
+    expect(registry.authenticate(result.token)?.access).toBe("approvals");
+  });
+
+  it("changes a device's scope after pairing, and remembers it", () => {
+    const registry = new DeviceRegistry();
+    const { token, device } = pair(registry);
+    expect(device.access).toBe("full");
+
+    expect(registry.setAccess(device.id, "approvals")).toBe(true);
+    expect(registry.authenticate(token)?.access).toBe("approvals");
+    // a restart must not undo it — the write is the promise, not memory
+    expect(new DeviceRegistry().authenticate(token)?.access).toBe("approvals");
+
+    expect(registry.setAccess(device.id, "full")).toBe(true);
+    expect(registry.authenticate(token)?.access).toBe("full");
+  });
+
+  it("refuses to change the scope of a device that is not paired", () => {
+    const registry = new DeviceRegistry();
+    expect(registry.setAccess("no-such-id", "approvals")).toBe(false);
+  });
+
   // POSIX only. Windows has no mode bits — `stat` reports a synthesised 0666
   // for anything not marked read-only, and the mode arguments this asserts on
   // are ignored when the file is created. Access there is an ACL question,
