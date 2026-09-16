@@ -4,7 +4,7 @@ import { Check, Copy, RefreshCw } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { AuthShell, authButtonCls, authInputCls } from "@/components/AuthShell";
 import { PairingFlow, pairingSecondsLeft } from "@/lib/pairing-flow";
-import { parseFragmentCode, carriedCodeInstruction } from "@/lib/pair-fragment";
+import { parseFragmentCode, carriedCodeInstruction } from "@/lib/pairing-link";
 
 /** Cloud pairing codes retain their value until they expire or are used. */
 export function PairPage() {

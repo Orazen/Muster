@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { companionPairingLink } from "./companion-pairing";
-import { isPairingLinkInput, parsePairingLink, planWorkspaceConnect } from "./pairing-link";
+import { carriedCodeInstruction, isPairingLinkInput, parseFragmentCode, parsePairingLink, planWorkspaceConnect, type CarriedCodeMode } from "./pairing-link";
 
 describe("parsePairingLink", () => {
   it("parses a valid self-hosted 12-char fragment link", () => {
@@ -75,22 +75,23 @@ describe("parsePairingLink", () => {
   });
 
   it("accepts Muster's own 8-character code, keyed and bare", () => {
-    // server/pairing.ts and server/claim.ts issue 8 chars of this alphabet
+    // server/pairing.ts and server/claim.ts issue 8 chars of this alphabet;
+    // ABCD2345 is a run of the unambiguous cloud alphabet, so it is a cloud code
     expect(parsePairingLink("https://bots.example.com/pair#code=ABCD2345")).toEqual({
       ok: true,
       host: "bots.example.com",
       code: "ABCD2345",
-      mode: "self-hosted",
+      mode: "cloud",
     });
     expect(parsePairingLink("https://bots.example.com/pair#ABCD2345")).toEqual({
       ok: true,
       host: "bots.example.com",
       code: "ABCD2345",
-      mode: "self-hosted",
+      mode: "cloud",
     });
-    // the grouped 12-character form and a long code both round-trip too
+    // the grouped 12-character form (one key and two groups) round-trips too
     expect(parsePairingLink("https://bots.example.com/pair#ABCD-EFGH-IJKL")).toMatchObject({ ok: true, mode: "self-hosted" });
-    expect(parsePairingLink(`https://bots.example.com/pair#${"A".repeat(64)}`)).toMatchObject({ ok: true, code: "A".repeat(64) });
+    expect(parsePairingLink("https://bots.example.com/pair#A234-BCDE-FGHJ")).toMatchObject({ ok: true, code: "A234-BCDE-FGHJ" });
   });
 
   it("reads a bare fragment as a code only on the /pair page", () => {
@@ -110,6 +111,16 @@ describe("parsePairingLink", () => {
         expect(r.missingCode, link).toBe(true);
         expect(r.reason).toMatch(/no pairing code/i);
       }
+    }
+  });
+
+  // The widened-shape regression: a 4-64 char free run accepted #code=short as
+  // a code. The rule is Muster's own shapes, so a short fragment is no code.
+  it("refuses short or underscore-bearing fragments as codes", () => {
+    for (const link of ["https://bots.example.com/pair#code=short", "https://bots.example.com/pair#code=ab", "https://bots.example.com/pair#code=ab_cd", "https://bots.example.com/pair#short"]) {
+      const r = parsePairingLink(link);
+      expect(r.ok, link).toBe(false);
+      if (!r.ok) expect(r.missingCode, link).toBe(true);
     }
   });
 
@@ -232,5 +243,78 @@ describe("planWorkspaceConnect", () => {
   it("returns an error rather than throwing on empty input", () => {
     const plan = planWorkspaceConnect("   ");
     expect(plan.kind).toBe("error");
+  });
+});
+
+// The /pair page reads the fragment of the URL it was opened with and shows
+// the code instead of dropping it. It never redeems: POST /api/pair/verify is
+// a device redeemer, and in-browser redemption would consume the code the
+// desktop app needs.
+describe("parseFragmentCode", () => {
+  it("reads Muster's own 8-character cloud code, keyed and bare", () => {
+    expect(parseFragmentCode("#code=ABCD2345")).toEqual({ code: "ABCD2345", mode: "cloud" });
+    expect(parseFragmentCode("#ABCD2345")).toEqual({ code: "ABCD2345", mode: "cloud" });
+  });
+
+  it("reads a 6-digit desktop-companion code", () => {
+    expect(parseFragmentCode("#code=482913")).toEqual({ code: "482913", mode: "companion" });
+    expect(parseFragmentCode("#482913")).toEqual({ code: "482913", mode: "companion" });
+  });
+
+  it("reads the grouped 12-character self-hosted form", () => {
+    expect(parseFragmentCode("#code=ABCD-EFGH-IJKL")).toEqual({ code: "ABCD-EFGH-IJKL", mode: "self-hosted" });
+    expect(parseFragmentCode("#ABCD-EFGH-IJKL")).toEqual({ code: "ABCD-EFGH-IJKL", mode: "self-hosted" });
+  });
+
+  it("returns null for a normal anchor, empty or junk fragment", () => {
+    for (const hash of ["", "#", "#pricing", "#section=1", "#step=1", "#code=", "#nope!", "#ab", "#!!!"]) {
+      const parsed = parseFragmentCode(hash);
+      expect(parsed === null, `fragment ${JSON.stringify(hash)} must not parse`).toBe(true);
+    }
+  });
+
+  it("reads an 8-char lowercase fragment as self-hosted, not cloud (the cloud alphabet is uppercase)", () => {
+    // lowercase cannot be the cloud alphabet; it is still a legal 8-char
+    // self-hosted code, so it is classified there rather than dropped
+    expect(parseFragmentCode("#abcd2345")).toEqual({ code: "abcd2345", mode: "self-hosted" });
+  });
+
+  // parseFragmentCode's parameter accepts null/undefined because real callers
+  // pass window.location.hash, which can be absent in odd embeds; it must
+  // return null rather than throw for any of these.
+  it("never throws on malformed input, including a non-string hash", () => {
+    const malformed: Array<string | null | undefined> = [null, undefined, "   ", "#", "#code=short", "#ab", "#!!!"];
+    for (const hash of malformed) {
+      expect(() => parseFragmentCode(hash)).not.toThrow();
+      expect(parseFragmentCode(hash)).toBeNull();
+    }
+  });
+
+  it("keeps the mode set to a known value for each issuer", () => {
+    const modes = new Set<CarriedCodeMode>();
+    for (const hash of ["#ABCD2345", "#482913", "#ABCD-EFGH-IJKL"]) {
+      const r = parseFragmentCode(hash);
+      if (r === null) throw new Error(`expected ${hash} to parse`);
+      modes.add(r.mode);
+    }
+    expect(modes).toEqual(new Set(["cloud", "companion", "self-hosted"]));
+  });
+});
+
+describe("carriedCodeInstruction", () => {
+  it("names the desktop pairing field for a companion code", () => {
+    const text = carriedCodeInstruction({ code: "482913", mode: "companion" }, "https://muster.example");
+    expect(text).toMatch(/Muster Desktop/);
+  });
+
+  it("points a self-hosted code at the app connecting to that server", () => {
+    const text = carriedCodeInstruction({ code: "ABCD-EFGH-IJKL", mode: "self-hosted" }, "https://bots.example.com");
+    expect(text).toContain("https://bots.example.com");
+    expect(text).toMatch(/server pairing code/);
+  });
+
+  it("gives the cloud redeem command for a cloud code", () => {
+    const text = carriedCodeInstruction({ code: "ABCD2345", mode: "cloud" }, "https://muster.example");
+    expect(text).toContain("muster pair --redeem ABCD2345 --cloud https://muster.example");
   });
 });

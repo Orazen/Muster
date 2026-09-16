@@ -3,8 +3,9 @@
 // Muster's own codes are 8 characters from the unambiguous alphabet
 // (server/pairing.ts and server/claim.ts), and a desktop-companion code is 6
 // digits (src/lib/companion-pairing.ts). A deployment may also print a grouped
-// 12-character form. All of them are runs of [A-Za-z0-9_-], which is the set
-// src/lib/workspaces.ts already accepts, so that is the rule here.
+// 12-character form. The rule below accepts exactly those shapes — eight code
+// characters, or hyphen-separated groups of four — so a short or
+// underscore-bearing fragment is no longer parsed as a code.
 //
 // The shape that matters is positional, not stylistic: a pairing *code* must
 // arrive in the link fragment, never in the query string.
@@ -14,7 +15,7 @@
 // parseWorkspaceInput host check rather than restating the rules.
 import { parseWorkspaceInput } from "./workspaces";
 
-export type PairingMode = "self-hosted" | "companion";
+export type PairingMode = "self-hosted" | "companion" | "cloud";
 
 /** `missingCode` marks the one failure that is not a mistake the user made: a
  * link that points at a real /pair page and simply has no usable code in it,
@@ -24,12 +25,64 @@ export type PairingLinkResult =
   | { ok: false; reason: string; missingCode?: boolean };
 
 /** Any code Muster or a compatible deployment issues: 8-char alphabet codes,
- * 6-digit companion codes, and the grouped 12-character form. */
-const SELF_HOSTED_CODE = /^[A-Za-z0-9][A-Za-z0-9_-]{3,63}$/;
+ * 6-digit companion codes, and the grouped 12-character form — 8 to 64 code
+ * characters, hyphens only as group separators. A short fragment ("#code=ab")
+ * is no code at all, and an underscore never appears in an issued code. */
+const SELF_HOSTED_CODE = /^(?:[A-Za-z0-9]{8}|[A-Za-z0-9]{4}(?:-[A-Za-z0-9]{4}){1,15})$/;
 const COMPANION_CODE = /^\d{6}$/;
+/** The cloud issuer's alphabet: 8 characters, no 0/O/1/I/L, typed by hand off
+ * another screen (server/pairing.ts, server/claim.ts). */
+const CLOUD_CODE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/;
 /** A bare fragment is only a code on the /pair page; anywhere else it is an
  * ordinary anchor and must not be read as one. */
 const PAIR_PATH = /\/pair\/?$/i;
+
+export type CarriedCodeMode = "cloud" | "companion" | "self-hosted";
+
+export interface CarriedCode {
+  code: string;
+  mode: CarriedCodeMode;
+}
+
+/** A bare fragment is only read as a code when it is at least plausibly one —
+ * ordinary anchors like #pricing or #step=1 are left for the page to handle
+ * its own way rather than guessed; modeOf makes the final call. */
+const PLAUSIBLE_CODE_FRAGMENT = /^[A-Za-z0-9-]{6,64}$/;
+
+function modeOf(code: string): CarriedCodeMode | null {
+  // Six digits is checked first: it is also a valid run of the cloud alphabet,
+  // and the two shapes mean different things. The cloud alphabet is checked
+  // before the group form so an 8-character code keeps its issuer's mode.
+  if (COMPANION_CODE.test(code)) return "companion";
+  if (CLOUD_CODE.test(code)) return "cloud";
+  if (SELF_HOSTED_CODE.test(code)) return "self-hosted";
+  return null;
+}
+
+/** The code carried by a `/pair` visit's fragment, or null when the page was
+ * opened normally. A present-but-unrecognised fragment (e.g. `#pricing`)
+ * returns null rather than an error — the page should degrade to showing its
+ * own code, not block the visitor. */
+export function parseFragmentCode(hash: string | null | undefined): CarriedCode | null {
+  const fragment = String(hash ?? "").replace(/^#/, "").trim();
+  const keyed = new URLSearchParams(fragment).get("code");
+  const candidate = (keyed ?? (PLAUSIBLE_CODE_FRAGMENT.test(fragment) ? fragment : "")).trim();
+  if (!candidate) return null;
+  const mode = modeOf(candidate);
+  return mode ? { code: candidate, mode } : null;
+}
+
+/** One-line, copyable redemption instruction keyed to how the code was
+ * issued. The page that shows a carried code never redeems it itself. */
+export function carriedCodeInstruction(code: CarriedCode, origin: string): string {
+  if (code.mode === "cloud") {
+    return `Enter this code in Muster Desktop to sign in as the account that issued it on ${origin}, or run \`muster pair --redeem ${code.code} --cloud ${origin}\` on that account.`;
+  }
+  if (code.mode === "self-hosted") {
+    return `This is a server pairing code for ${origin}. Enter it in the app connecting to that server — or paste the whole link there.`;
+  }
+  return "This is a desktop-companion code — enter it in Muster Desktop's pairing field on the computer it was issued for.";
+}
 
 /** What a 6-digit code, or a deep link the browser cannot redeem, deserves to
  * be told. Exported so the copy lives beside the decision that produces it. */
@@ -80,8 +133,10 @@ export function parsePairingLink(raw: string): PairingLinkResult {
   const candidate = (keyed ?? (PAIR_PATH.test(url.pathname) ? fragment : "")).trim();
 
   // Six digits is checked first: it is also a valid run of the code alphabet,
-  // and the two shapes mean different things.
+  // and the two shapes mean different things. The cloud alphabet is checked
+  // next so an 8-character code keeps its cloud mode (modeOf's ordering).
   if (COMPANION_CODE.test(candidate)) return { ok: true, host, code: candidate, mode: "companion" };
+  if (CLOUD_CODE.test(candidate)) return { ok: true, host, code: candidate, mode: "cloud" };
   if (SELF_HOSTED_CODE.test(candidate)) return { ok: true, host, code: candidate, mode: "self-hosted" };
   return { ok: false, reason: "That link has no pairing code in its fragment (#code=...).", missingCode: true };
 }
