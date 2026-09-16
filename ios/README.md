@@ -44,11 +44,20 @@ ios/
     SSE.swift                    line parser + URLSession event stream
     Client.swift                 every call the phone is allowed to make
     Store.swift                  the fold: frames → state
+    FlowerArtwork.swift          the mascot's body path, eye anchors, palette
+    FlowerMotion.swift           pose table + blink/float/speech as pure f(t)
+    FleetMood.swift              the fleet as one face, precedence in one place
+    SpeechText.swift             markdown → words worth hearing, bounded
+    VoiceActivity.swift          which face a spoken utterance belongs to
   Tests/CompanionCoreTests/
     Fixtures/                    captured from a real server — do not hand-edit
     DecodingTests.swift          the contract with the harness
     SSETests.swift               the parser, which is where this goes wrong
     StoreTests.swift             the fold
+    FlowerMotionTests.swift      the pose invariant and the motion bounds
+    FleetMoodTests.swift         the precedence, including "offline wins"
+    SpeechTextTests.swift        what a voice may and may not read
+    VoiceActivityTests.swift     scope preparation and thread matching
   App/                           SwiftUI, and everything that needs a device
     CompanionApp.swift           entry; owns when the stream lives and dies
     Session.swift                connection, lifecycle, actions
@@ -62,11 +71,24 @@ ios/
     ComputerView.swift           opt-in live view of a bot's computer
     MarkdownText.swift           the supported Markdown presentation layer
     SettingsView.swift           status, and unpair
+    WalkieView.swift             push-to-talk, spoken replies, the bot's quote
+    WalkieVoice.swift            the mic and the speaker, on iOS only
+    FlowerAvatar.swift           the flower, drawn and animated
   Watch/                         the watch app — an independent watchOS target
     MusterWatchApp.swift         entry; same scenePhase lifecycle rule
     WatchSession.swift           a trimmed Session: restore/backoff/hydrate kept
     WatchViews.swift             fleet, approvals, short replies, settings
+    WatchFlower.swift            the same flower, at wrist size, with motion
+    WatchVoice.swift             local TTS, scoped so the right face pulses
 ```
+
+**Voice is scoped, not global.** `Announcer` (phone) and `WatchVoice` (watch)
+each publish the `VoiceActivity` in flight. A flower pulses only for the
+utterance that is about it: the watch fleet header for the aggregate status
+line, a roster row or chat header for its own thread's reply. The speaker is
+app-scoped on both surfaces — hoisted out of `WalkieView` for exactly this —
+which is also why closing Walkie no longer stops the reading, and why the chat
+header carries a stop-speaking control while its thread is being read.
 
 ## The watch app
 

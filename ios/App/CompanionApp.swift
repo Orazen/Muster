@@ -9,12 +9,18 @@ import SwiftUI
 @main
 struct CompanionApp: App {
     @StateObject private var session = Session()
+    /// One speaker for the whole app, hoisted out of Walkie so the roster and
+    /// the chat header can see whose reply is being read. The watch does the
+    /// same with `WatchVoice`; two speakers would fight over the single audio
+    /// session anyway.
+    @StateObject private var announcer = Announcer()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(session)
+                .environmentObject(announcer)
                 .onAppear {
                     // Categories must exist before a banner is delivered, or
                     // its action is a dead tap; the closure routes a tap to

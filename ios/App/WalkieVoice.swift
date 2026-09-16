@@ -7,6 +7,7 @@
 // what to capture and what to say comes from CompanionCore's Walkie; these
 // two classes only move electrons.
 import AVFoundation
+import CompanionCore
 import Foundation
 import Speech
 
@@ -177,20 +178,35 @@ final class Announcer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     @Published private(set) var speaking = false
     @Published private(set) var canReplay = false
 
+    /// Which face the utterance in flight belongs to, so the roster can pulse
+    /// the bot whose answer is being read rather than every face at once.
+    /// The watch publishes the same value through `WatchVoice`.
+    @Published private(set) var activity: VoiceActivity?
+
     private let synth = AVSpeechSynthesizer()
     private var last: String?
+    /// The scope travels with the replayable text, because Replay re-says the
+    /// same words and should move the same face.
+    private var lastScope: VoiceScope = .fleet
 
     override init() {
         super.init()
         synth.delegate = self
     }
 
-    func speak(_ text: String) {
+    /// True while the utterance in flight is this thread's.
+    func isSpeaking(threadId: String) -> Bool {
+        speaking && (activity?.isSpeaking(threadId: threadId) ?? false)
+    }
+
+    func speak(_ text: String, scope: VoiceScope) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         last = trimmed
+        lastScope = scope
         canReplay = true
         synth.stopSpeaking(at: .immediate)
+        activity = VoiceActivity(scope: scope, text: trimmed)
         let utterance = AVSpeechUtterance(string: trimmed)
         utterance.rate = 0.5
         synth.speak(utterance)
@@ -199,6 +215,7 @@ final class Announcer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     func replay() {
         guard let last else { return }
         synth.stopSpeaking(at: .immediate)
+        activity = VoiceActivity(scope: lastScope, text: last)
         let utterance = AVSpeechUtterance(string: last)
         utterance.rate = 0.5
         synth.speak(utterance)
@@ -207,6 +224,7 @@ final class Announcer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     func stop() {
         synth.stopSpeaking(at: .immediate)
         speaking = false
+        activity = nil
     }
 
     // MARK: - Delegate
@@ -216,10 +234,16 @@ final class Announcer: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.speaking = false }
+        Task { @MainActor in
+            self.speaking = false
+            self.activity = nil
+        }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.speaking = false }
+        Task { @MainActor in
+            self.speaking = false
+            self.activity = nil
+        }
     }
 }

@@ -9,6 +9,7 @@ import CompanionCore
 
 struct ChatListView: View {
     @EnvironmentObject private var session: Session
+    @EnvironmentObject private var announcer: Announcer
     @State private var query = ""
     /// Driven so that making a bot can open it. Value-based navigation alone
     /// cannot push without a tap, and a new bot appearing silently at the
@@ -118,8 +119,11 @@ struct ChatListView: View {
             .onChange(of: session.pendingOpenThreadId) { _, _ in openPendingNotification() }
             .onChange(of: session.state.chatSummaries.count) { _, _ in openPendingNotification() }
             .fullScreenCover(isPresented: $showingWalkie) {
+                // A cover is a new environment root: it does not inherit the
+                // app's objects, so both have to be handed in explicitly.
                 WalkieView()
                     .environmentObject(session)
+                    .environmentObject(announcer)
             }
         }
     }
@@ -262,10 +266,19 @@ struct ChatRow: View {
     let chat: Chat
     let preview: String
     let at: Double
+    @EnvironmentObject private var announcer: Announcer
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            FlowerAvatar(color: chat.color, size: 52, state: chat.mascotState)
+            FlowerAvatar(
+                color: chat.color,
+                size: 52,
+                state: chat.mascotState,
+                seed: chat.id,
+                // Pulses while this bot's reply is the one being read, so the
+                // roster shows whose voice is in the room.
+                speaking: announcer.isSpeaking(threadId: chat.threadId)
+            )
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
@@ -323,10 +336,17 @@ struct ChatRow: View {
 struct WaitingRow: View {
     let chat: Chat
     let card: OptionCard?
+    @EnvironmentObject private var announcer: Announcer
 
     var body: some View {
         HStack(spacing: 12) {
-            FlowerAvatar(color: chat.color, size: 38, state: "notifying")
+            FlowerAvatar(
+                color: chat.color,
+                size: 38,
+                state: "notifying",
+                seed: chat.id,
+                speaking: announcer.isSpeaking(threadId: chat.threadId)
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 Label("\(chat.name) is waiting on you", systemImage: "hand.raised.fill")

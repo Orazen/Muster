@@ -15,7 +15,9 @@ struct WalkieView: View {
     @Environment(\.dismiss) private var dismiss
 
     @StateObject private var talk = TalkSession()
-    @StateObject private var announcer = Announcer()
+    /// App-scoped, not owned here: the roster rows outside Walkie also pulse
+    /// while a reply is read, so the speaker outlives this sheet.
+    @EnvironmentObject private var announcer: Announcer
 
     @AppStorage("walkie.voiceOn") private var voiceOn = true
     @AppStorage("walkie.botId") private var selectedId = ""
@@ -62,6 +64,9 @@ struct WalkieView: View {
         }
         .onChange(of: transcriptTail) { _, _ in speakNewReply() }
         .onChange(of: voiceOn) { _, on in if !on { announcer.stop() } }
+        // Closing the sheet deliberately does NOT stop the reading: the
+        // speaker is app-scoped now, so a reply can finish while the reader
+        // moves through the roster, and the chat header offers the Stop.
     }
 
     // MARK: - Header
@@ -135,7 +140,15 @@ struct WalkieView: View {
         let status = Walkie.status(bot: bot, state: session.state)
         return Button { select(bot) } label: {
             HStack(spacing: 12) {
-                FlowerAvatar(color: bot.color, size: 40, state: flowerState(for: bot))
+                FlowerAvatar(
+                    color: bot.color,
+                    size: 40,
+                    state: flowerState(for: bot),
+                    seed: bot.id,
+                    // Pulses while this bot's own reply is the one being
+                    // read, so the roster shows whose voice is in the room.
+                    speaking: announcer.isSpeaking(threadId: bot.threadId)
+                )
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
                         Text(bot.name)
@@ -441,6 +454,8 @@ struct WalkieView: View {
         // The boundary advances even muted — unmuting should not dump a
         // backlog; Replay is the way back to a missed reply.
         guard voiceOn, let text = message.text else { return }
-        announcer.speak(Walkie.spokenText(text))
+        // Scoped to the thread: the bot whose answer is read is the bot whose
+        // face pulses, and a fleet-level line never moves a roster row.
+        announcer.speak(Walkie.spokenText(text), scope: .thread(bot.threadId))
     }
 }

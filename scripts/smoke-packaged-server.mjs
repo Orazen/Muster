@@ -2,8 +2,8 @@
 // Default: standalone Node. For desktop gates pass the packaged executable,
 // its exact Electron version and architecture; never silently test host Node.
 import { execFile, spawn } from "node:child_process";
-import { randomInt } from "node:crypto";
-import { cpSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { randomInt, createHash, randomUUID } from "node:crypto";
+import { cpSync, mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -44,6 +44,53 @@ const onParentMessage = (message) => { if (message === "muster-smoke-cancel") in
 process.on("SIGINT", onInterrupt);
 process.on("SIGTERM", onInterrupt);
 process.on("message", onParentMessage);
+
+function fileHash(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+async function snapshotBundle(port, urlPrefix = `http://127.0.0.1`) {
+  const healthResponse = await fetch(`${urlPrefix}:${port}/api/health`, {
+    signal: AbortSignal.any([AbortSignal.timeout(5_000), interruption.signal]),
+  });
+  if (!healthResponse.ok) throw new Error(`health request failed: ${healthResponse.status}`);
+  const health = await healthResponse.json();
+  const identityResponse = await fetch(`${urlPrefix}:${port}/api/build-identity`, {
+    signal: AbortSignal.any([AbortSignal.timeout(5_000), interruption.signal]),
+  });
+  if (!identityResponse.ok) throw new Error(`build-identity request failed: ${identityResponse.status}`);
+  const identityResponseJson = await identityResponse.json();
+  const identity = {
+    backend: identityResponseJson.backend ?? null,
+    web: identityResponseJson.web ?? null,
+    observationCacheMs: identityResponseJson.observationCacheMs ?? 0,
+  };
+  const [root, app] = await Promise.all([
+    fetch(`${urlPrefix}:${port}/`, { signal: AbortSignal.any([AbortSignal.timeout(5_000), interruption.signal]) }).then((it) => it.text()),
+    fetch(`${urlPrefix}:${port}/app`, { signal: AbortSignal.any([AbortSignal.timeout(5_000), interruption.signal]) }).then((it) => it.text()),
+  ]);
+  return { identity, health, root, app };
+}
+
+function writeWebSwapBundle(stagingWeb, marker) {
+  const index = join(stagingWeb, "index.html");
+  const generated = `<!doctype html><html><body><h1>smoke-${marker}</h1></body></html>`;
+  writeFileSync(index, generated);
+  const indexSha = fileHash(index);
+  const manifest = {
+    schema: 1,
+    buildId: randomUUID(),
+    source: { revision: null, dirty: null },
+    version: "0.0.0",
+    artifact: "web",
+    files: [{
+      path: "index.html",
+      sha256: indexSha,
+      size: Buffer.byteLength(generated, "utf8"),
+    }],
+  };
+  writeFileSync(join(stagingWeb, "build-identity.json"), `${JSON.stringify(manifest)}\n`);
+}
 
 async function freePortPair() {
   for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -139,6 +186,24 @@ async function stopOwnedChild(child) {
 
 try {
   cpSync(source, staging, { recursive: true, dereference: true });
+  const stagingWeb = join(staging, "dist");
+  const webSource = join(root, "..", "dist");
+  if (existsSync(webSource)) {
+    cpSync(webSource, stagingWeb, { recursive: true, dereference: true });
+  } else {
+    mkdirSync(stagingWeb, { recursive: true });
+    writeFileSync(join(stagingWeb, "index.html"), "<!doctype html><html><body><p>muster smoke</p></body></html>");
+    const defaultHtml = join(stagingWeb, "index.html");
+    const seed = {
+      schema: 1,
+      buildId: randomUUID(),
+      source: { revision: null, dirty: null },
+      version: "0.0.0",
+      artifact: "web",
+      files: [{ path: "index.html", sha256: fileHash(defaultHtml), size: readFileSync(defaultHtml).length }],
+    };
+    writeFileSync(join(stagingWeb, "build-identity.json"), `${JSON.stringify(seed)}\n`);
+  }
   for (const directory of [fixtureHome, fixtureData]) mkdirSync(directory, { recursive: true });
   writeFileSync(join(fixtureData, "config.json"), JSON.stringify({
     instances: { ghost: { driver: "not-a-real-driver", displayName: "Offline package fixture" } },
@@ -149,6 +214,7 @@ try {
   const childEnv = {
     HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_USER_DATA: fixtureData,
     OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
+    OMB_STATIC_DIR: stagingWeb,
     OMB_COMPANION_DIR: join(fixture, "companion"),
   };
   for (const key of ["PATH", "SystemRoot", "TMPDIR", "TEMP", "TMP", "LANG"]) {
@@ -203,7 +269,50 @@ try {
     await delay(200);
   }
   if (!healthy) throw new Error(`Packaged server failed its owned health check: ${childError?.message ?? child.exitCode}\n${output}`);
-  verifiedReport = { passed: proxyCount + 2, checks: { ownedHttp: 1, proxyPaths: proxyCount, nativeDatabase: 1 }, runtime: { electron: report.electron, node: report.node, abi: report.abi, arch: report.arch, platform: report.platform } };
+  const before = await snapshotBundle(port);
+  const checks = {
+    ownedHttp: 1, proxyPaths: proxyCount, nativeDatabase: 1,
+  };
+  if (!before.health.static) {
+    checks.staticDisabled = 1;
+  } else {
+    await delay(10_500);
+    writeWebSwapBundle(stagingWeb, `${Date.now()}`);
+    const after = await snapshotBundle(port);
+    if (JSON.stringify(before.identity.backend) !== JSON.stringify(after.identity.backend)) {
+      throw new Error(`Backend identity changed during UI replacement: ${JSON.stringify({ before: before.identity.backend, after: after.identity.backend })}`);
+    }
+    if (!before.identity.web || !after.identity.web) {
+      throw new Error(`Web identity payload missing: ${JSON.stringify({ before: before.identity.web, after: after.identity.web })}`);
+    }
+    if (before.identity.web && after.identity.web && before.identity.web.status !== after.identity.web.status && ![before.identity.web.status, after.identity.web.status].includes("unknown")) {
+      throw new Error(`Unexpected web observation status change: ${JSON.stringify({ before: before.identity.web.status, after: after.identity.web.status })}`);
+    }
+    if (before.app === after.app) {
+      throw new Error("Replacing staged web bundle did not change app HTML");
+    }
+    if (before.identity.web && after.identity.web && before.identity.web.sha256 === after.identity.web.sha256) {
+      throw new Error("Replacing staged web bundle did not change web identity digest");
+    }
+    if (before.identity.web && after.identity.web && before.identity.web.observedAt === after.identity.web.observedAt) {
+      throw new Error("Web build identity cache did not refresh after web replacement");
+    }
+    if (before.identity.web && before.identity.web.status === "matching" && after.identity.web && after.identity.web.status !== "matching" && after.identity.web.status !== "mismatched") {
+      throw new Error(`Unexpected final web status after web replacement: ${JSON.stringify(after.identity.web.status)}`);
+    }
+    checks.buildIdentity = 1;
+    checks.webReplacement = 1;
+    checks.cacheRefresh = 1;
+    checks.rootServed = 1;
+    checks.appServed = 1;
+  }
+  const baseChecks = 9;
+  const staticChecks = before.health?.static ? 5 : 0;
+  verifiedReport = {
+    passed: baseChecks + staticChecks,
+    checks,
+    runtime: { electron: report.electron, node: report.node, abi: report.abi, arch: report.arch, platform: report.platform },
+  };
 } catch (error) {
   executionError = error;
 }

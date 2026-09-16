@@ -18,6 +18,7 @@ import UIKit
 struct ChatView: View {
     let chat: Chat
     @EnvironmentObject private var session: Session
+    @EnvironmentObject private var announcer: Announcer
     @Environment(\.dismiss) private var dismiss
     @State private var composerLease: ComposerViewLease?
     @State private var approvalLease: ApprovalViewLease?
@@ -195,7 +196,15 @@ struct ChatView: View {
                 } label: {
                     VStack(spacing: 1) {
                         HStack(spacing: 8) {
-                            FlowerAvatar(color: current.color, size: 24, state: current.mascotState)
+                            FlowerAvatar(
+                                color: current.color,
+                                size: 24,
+                                state: current.mascotState,
+                                seed: current.id,
+                                // The header face moves while this thread's
+                                // reply is being read aloud in Walkie.
+                                speaking: announcer.isSpeaking(threadId: current.threadId)
+                            )
                             Text(current.name)
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(Color.primary)
@@ -264,6 +273,20 @@ struct ChatView: View {
             if current.busy, case let .bot(bot) = current {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Stop") { Task { await session.interrupt(bot: bot) } }
+                }
+            }
+            // Reading continues after Walkie closes, so the stop control has
+            // to exist where the reader actually is.
+            if announcer.isSpeaking(threadId: current.threadId) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        announcer.stop()
+                    } label: {
+                        Image(systemName: "speaker.slash.fill")
+                            .foregroundStyle(Color.primary)
+                    }
+                    .accessibilityLabel("Stop reading aloud")
+                    .accessibilityIdentifier("chat-stop-speaking")
                 }
             }
         }

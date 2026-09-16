@@ -28,6 +28,18 @@ targets:
     dependencies:
       - package: CompanionCore
         product: CompanionCore
+      # The watch rides inside this bundle for TestFlight. A standalone
+      # watch-only app is App Store-eligible but has no beta path at all:
+      # Xcode offers only ad-hoc export for it, and altool cannot even name
+      # its platform. Embedding is what makes the watch testable.
+      - target: MusterWatch
+        embed: true
+        # Without this the dependency is resolved for the parent's platform,
+        # and the build system is asked to build a watchapp2 product type for
+        # iOS — which has no such product type. The filter scopes the
+        # dependency to watchOS so the watch builds with its own SDK and the
+        # Embed Watch Content phase copies the finished bundle.
+        platformFilter: watchos
     entitlements:
       path: App/MusterCompanion.entitlements
       properties:
@@ -39,8 +51,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion
+        DEVELOPMENT_TEAM: 7375K23WFU
+        CODE_SIGN_STYLE: Automatic
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "5"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         # The catalog lives in App/, which is already a source path. Generated
@@ -135,6 +149,17 @@ targets:
   # query). What remains is what a wrist is good for: glance at the fleet,
   # settle approvals, dictate a short reply.
   MusterWatch:
+    # The watch rides inside the iOS bundle (see the dependency on the phone
+    # target) because a standalone watch-only app has no TestFlight path.
+    # Embedding works with the plain `application` type: the embed phase
+    # places the bundle, and the normal link produces the universal watch
+    # binary (arm64 + arm64_32) it copies.
+    #
+    # `application.watchapp2` is deliberately not used. It declares a stub
+    # binary and adds a CopyAndPreserveArchs step that writes the same
+    # executable path as the linker, so every archive fails with "Multiple
+    # commands produce …/MusterWatch.app/MusterWatch". The type is the
+    # cause; the embed settings above and below are not.
     type: application
     platform: watchOS
     sources:
@@ -150,22 +175,41 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion.watchkitapp
+        DEVELOPMENT_TEAM: 7375K23WFU
+        CODE_SIGN_STYLE: Automatic
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "5"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "4"
+        # Watch/Assets.xcassets carries the single 1024pt icon. Without a
+        # named app icon the catalog is compiled but nothing points at it,
+        # and App Store Connect rejects the bundle with 90391/90713 even
+        # though the PNG is present.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Embedded, not installed: the container's "Embed Watch Content"
+        # phase places the app inside the phone bundle, and a second install
+        # into the archive would write the same binary twice.
+        SKIP_INSTALL: YES
     info:
       path: Watch/Info.plist
       properties:
         CFBundleDisplayName: Muster
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        # Single-target watch app: no extension, no companion embedding.
+        # Required for iOS 11+ SDK builds; App Store Connect reads this to
+        # find the icon in the compiled asset catalog (error 90713).
+        CFBundleIconName: AppIcon
+        # Single-target watch app: no extension, but now embedded in the iOS
+        # bundle so it can reach TestFlight. WKWatchOnly is gone on purpose —
+        # an app that declares itself watch-only cannot be embedded, and
+        # TestFlight has no other door for a watch app.
         WKApplication: true
-        # This target pairs directly with the harness, with no iPhone bundle.
-        # Use only WKWatchOnly: declaring independence from an iPhone
-        # companion at the same time makes watchOS reject installation.
-        WKWatchOnly: true
+        WKCompanionAppBundleIdentifier: com.muster.companion
+        # Independent at runtime still: the watch pairs with the computer
+        # directly and works whether or not the phone app is installed. This
+        # flag is what separates "embedded to be distributable" from "needs
+        # the phone", and the pairing and streaming code assumes the former.
+        WKRunsIndependentlyOfCompanionApp: true
         # Keep the shared Bonjour declarations. Apple TN3179 does not list
         # watchOS as supporting local-network privacy; do not assume these
         # keys produce an iOS-style permission prompt on the watch.

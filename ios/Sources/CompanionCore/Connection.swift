@@ -40,7 +40,14 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
 
     public static func urlHost(_ host: String) -> String {
         let bare = host.hasPrefix("[") && host.hasSuffix("]") ? String(host.dropFirst().dropLast()) : host
-        return bare.contains(":") ? "[\(bare)]" : bare
+        // An interface zone belongs only to a link-local IPv6 literal. A
+        // routable IPv4 address comes back zone-tagged too — NWEndpoint prints
+        // a discovered "192.168.1.5" as "192.168.1.5%en0" — and a zone is not
+        // part of a URL authority: keeping it fails validation outright, so a
+        // computer found by discovery is unusable the moment it is chosen.
+        let parts = bare.split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false)
+        let unzoned = parts.count == 2 && !parts[0].contains(":") ? String(parts[0]) : bare
+        return unzoned.contains(":") ? "[\(unzoned)]" : unzoned
     }
 
     /// Explicit URLs use standard ports; an unqualified manual address keeps

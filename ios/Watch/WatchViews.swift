@@ -223,6 +223,15 @@ struct FleetView: View {
     var body: some View {
         NavigationStack {
             List {
+                // The mascot first, the way the watch reads: one face that
+                // answers "does anything need me?" before any row is
+                // scrolled. Tapping it reads the state aloud.
+                Section {
+                    FleetHeader()
+                        .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 6, trailing: 0))
+                        .listRowBackground(Color.clear)
+                }
+
                 if case let .offline(reason) = session.status {
                     Section { Text(reason).foregroundStyle(.secondary) }
                 }
@@ -291,14 +300,59 @@ struct FleetView: View {
     }
 }
 
+/// The mascot, plus the one line of text that says the same thing in words.
+/// Both are always present: the face is never the only carrier of meaning.
+private struct FleetHeader: View {
+    @EnvironmentObject private var session: WatchSession
+    @EnvironmentObject private var voice: WatchVoice
+
+    var body: some View {
+        let mood = session.fleetMood
+        VStack(spacing: 4) {
+            Button {
+                voice.toggle(mood.spoken, scope: .fleet)
+            } label: {
+                WatchFlower(
+                    color: "orange",
+                    state: mood.state,
+                    size: 80,
+                    // The pulse rides the fleet utterance specifically: a
+                    // reply being read aloud in a chat must not move the
+                    // status face, and vice versa.
+                    speaking: voice.isSpeakingFleet
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Muster status")
+            .accessibilityValue(mood.label)
+            .accessibilityHint(voice.speaking ? "Stops reading the status" : "Reads the status aloud")
+            .accessibilityIdentifier("watch-fleet-mascot")
+
+            Text(mood.label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
 private struct BotRow: View {
     let bot: Bot
+    @EnvironmentObject private var voice: WatchVoice
 
     var body: some View {
         HStack {
-            Circle()
-                .fill(WatchPalette.color(bot.color))
-                .frame(width: 8, height: 8)
+            // The bot's own face, at roster size. An 8-point colour dot was
+            // the one place the watch refused to show the flower.
+            //
+            // It pulses while this bot's reply is the one being read, so the
+            // roster shows whose voice is in the room.
+            WatchFlower(
+                color: bot.color,
+                state: flowerState(for: bot),
+                size: 28,
+                speaking: voice.isSpeaking(threadId: bot.threadId)
+            )
             VStack(alignment: .leading) {
                 Text(bot.name).lineLimit(1)
                 if bot.busy == true {
@@ -553,6 +607,7 @@ enum WatchChat: Identifiable, Hashable {
 /// just say", not "what did it say in March".
 struct ChatView: View {
     @EnvironmentObject private var session: WatchSession
+    @EnvironmentObject private var voice: WatchVoice
     let chat: WatchChat
 
     @State private var draft = ""
@@ -563,6 +618,24 @@ struct ChatView: View {
 
     private var streaming: String? {
         session.state.streaming[chat.threadId]
+    }
+
+    /// The most recent bot message that says something, ready to be read
+    /// aloud. `SpeechText` drops code fences and bounds the length, so a
+    /// button that appears here always has something worth hearing.
+    private var latestBotSpeech: VoiceActivity? {
+        let text = session.state.visibleTranscript(forThread: chat.threadId)
+            .last { $0.role == .bot && !($0.text ?? "").isEmpty }?
+            .text
+        guard let text else { return nil }
+        // Scoped to the thread, not the fleet: the roster row for this bot is
+        // what should pulse while its answer is read.
+        return VoiceActivity(scope: .thread(chat.threadId), source: text)
+    }
+
+    /// True while this conversation's own reply is the utterance in flight.
+    private var isReadingThisChat: Bool {
+        voice.isSpeaking(threadId: chat.threadId)
     }
 
     var body: some View {
@@ -593,6 +666,22 @@ struct ChatView: View {
                 if tail.isEmpty, streaming == nil {
                     Text("No messages yet.")
                         .foregroundStyle(.secondary)
+                }
+
+                // Never automatic, always cancellable: the same control
+                // starts and stops the reading, so a reply is never spoken
+                // at someone who did not ask for it.
+                if let speech = latestBotSpeech {
+                    Button {
+                        voice.toggle(speech)
+                    } label: {
+                        Label(
+                            isReadingThisChat ? "Stop" : "Read aloud",
+                            systemImage: isReadingThisChat ? "stop.fill" : "speaker.wave.2.fill"
+                        )
+                    }
+                    .tint(isReadingThisChat ? .red : .accentColor)
+                    .accessibilityIdentifier("watch-speak")
                 }
 
                 // The watch keyboard's first-class affordance is dictation;

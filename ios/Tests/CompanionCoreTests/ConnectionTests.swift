@@ -116,6 +116,21 @@ final class ConnectionTests: XCTestCase {
         XCTAssertEqual(Connection.parse("https://[fe80::1%25en0]")?.host, "[fe80::1%en0]")
         XCTAssertEqual(Connection.parse("fe80::1%en0")?.baseURL?.absoluteString, "http://[fe80::1%25en0]:8810")
     }
+    /// NWEndpoint prints a resolved address with its interface zone, so a
+    /// discovered computer arrives as "192.168.1.5%en0". A zone is not part of
+    /// a URL authority and only means anything on a link-local IPv6 literal;
+    /// keeping it on IPv4 made every discovered computer unusable.
+    func testDiscoveredIPv4ZoneIsStrippedButIPv6ZoneSurvives() throws {
+        XCTAssertEqual(Connection.urlHost("192.168.95.24%en0"), "192.168.95.24")
+        XCTAssertEqual(Connection.urlHost("10.0.0.2%utun3"), "10.0.0.2")
+        XCTAssertEqual(Connection.urlHost("fe80::1%en0"), "[fe80::1%en0]")
+        XCTAssertEqual(Connection.urlHost("2001:db8::1%en0"), "[2001:db8::1%en0]")
+
+        let discovered = Connection(name: "Tharun Ramagiri's computer", host: "192.168.95.24%en0", port: 8810)
+        XCTAssertEqual(discovered.host, "192.168.95.24")
+        XCTAssertEqual(discovered.displayAddress, "http://192.168.95.24:8810")
+        XCTAssertEqual(try XCTUnwrap(Connection.parse(discovered.displayAddress)).host, "192.168.95.24")
+    }
     func testLegacyPersistencePreservesIdentityAndStoredAddressBytes() throws {
         let raw = Data(#"{"id":"original-keychain-id","name":"My Mac","host":"::1","port":9910}"#.utf8)
         let connection = try JSONDecoder().decode(Connection.self, from: raw)

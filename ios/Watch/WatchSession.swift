@@ -44,6 +44,19 @@ final class WatchSession: ObservableObject {
     /// Transient, user-facing failures from an action they just took.
     @Published var actionError: String?
 
+    /// The fleet as one face. Precedence lives in `FleetMood` so the header
+    /// and any future surface cannot disagree about what matters most.
+    var fleetMood: FleetMood {
+        var isOffline = false
+        if case .offline = status { isOffline = true }
+        return FleetMood.from(
+            isOffline: isOffline,
+            approvals: state.pendingApprovals.count,
+            working: state.bots.filter { $0.busy == true }.count,
+            unread: state.bots.filter(\.unread).count + state.rooms.filter(\.unread).count
+        )
+    }
+
     private var client: CompanionClient? {
         didSet {
             streamGeneration += 1
