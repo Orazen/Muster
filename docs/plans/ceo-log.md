@@ -5310,6 +5310,37 @@ the approval card, M3 true playback, M4 unattended eval gate, and M1's
 bot-written scorecard. The `docs/research/glm/` docs are the source of several
 of those stale claims — read them as a dated snapshot, not as status.
 
+**Correction to this entry (same day, 16 September) — commit `5a6950c` shipped
+two real regressions, and I own them.**
+
+1. **It refused every code Muster itself issues.** `SELF_HOSTED_CODE` in
+   `5a6950c` was `/^[A-Za-z0-9]{4}-{4}-{4}$/` — the competitor's grouped
+   12-character form — but **both** `server/pairing.ts:19,21` and
+   `server/claim.ts:27,30` issue **8 characters** of
+   `ABCDEFGHJKMNPQRSTUVWXYZ23456789`. So `parsePairingLink` on a real Muster link
+   (`https://host/pair#code=ABCD2345`) returned "no valid pairing code found".
+   The carried-code path — the entire point of the slice — could not have worked
+   in production. The cause is exact and worth naming: I took the code shape from
+   the competitor study instead of reading Muster's own issuer, and only read
+   `server/pairing.ts` *after* committing.
+2. **It turned ordinary anchors into hard errors.** `isPairingLinkInput` returned
+   true for any `https?://` URL containing `#` or `?`, so pasting
+   `https://muster.today/#pricing` into "Connect hosted workspace" was routed into
+   the strict parser, where the bare fragment `pricing` is not a code, producing
+   "No valid pairing code found" and refusing an address that connects fine. The
+   bare-fragment form must be read as a code **only on a `/pair` path**.
+
+Both are fixed on the working tree (uncommitted follow-up: `PAIR_PATH` gate,
+`withScheme()` so scheme-less pastes are judged by the same rules, and the
+accepted shapes widened to what Muster actually issues; `pairing-link.test.ts`
+is 26 tests, green, with typecheck and lint clean). That fix is **not this
+agent's commit and is not committed** — it is another writer's in-flight work, so
+it is left alone rather than staked a claim to. What this entry originally said
+about a green full suite remains true of `5a6950c`'s *tests*, but those tests
+encoded the wrong code shape, so they were passing on a contract that could not
+work. Lesson recorded: a green suite is not evidence that the contract is right;
+verify the issuer's actual format before pinning it.
+
 
 ## Loop97 — Local VM: why `podman pull muster/cua-local-vm` can never work, + a machine-RAM guard (14 September 2026)
 
