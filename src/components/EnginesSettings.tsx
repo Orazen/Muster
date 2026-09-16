@@ -1,22 +1,44 @@
-// Engines settings — per-instance CLI path override. One "Set CLI…" button
-// per engine reveals a picker: a "detected" dropdown of every binary the
-// server found on PATH, plus a manual path input. Saving first probes the
-// binary (`<cli> --version`, same PATH a real turn uses); a failed probe
-// asks before registering — the classic miss is a path the terminal sees
-// but this GUI app can't.
+// Engines and accounts — connect the AI tools that power your bots. One row
+// per engine: its mark, what account it runs as, whether it is Ready or Needs
+// setup, and its version. The Ready / Needs setup split is the same split the
+// model picker's rail uses (access === "custom" is Local), so the two surfaces
+// never disagree about which group an engine is in.
+//
+// The per-engine CLI override from before is still here: expanding a row
+// reveals the detected-binary dropdown and a manual path input. It is folded
+// behind the row rather than shown inline because the common case is "is this
+// engine ready", not "which binary does it run".
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Loader2, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineGroupLabel } from "./EngineGroupLabel";
 import { ProviderMark } from "./ProviderIcons";
-import { splitEngineRail } from "@/lib/engine-rail";
 import { cn } from "@/lib/cn";
 
 interface ProbeResult {
   ok: boolean;
   version?: string;
   message?: string;
+}
+
+/** Ready means the driver reported an available snapshot. Everything else —
+ * unavailable, or never probed — reads as Needs setup, which is the only
+ * other state the panel can act on. */
+function isReady(instance: InstanceInfo): boolean {
+  return instance.snapshot.state === "available";
+}
+
+/** The subtitle under an engine's name: the account it runs as when the
+ * engine reports one, otherwise the driver's default binary or a plain
+ * description of how it is configured. */
+function accountLine(instance: InstanceInfo): string {
+  const reason = instance.snapshot.reason;
+  if (!isReady(instance) && reason) return reason;
+  if (instance.snapshot.authenticated === false) return "Needs sign-in";
+  if (instance.cli) return instance.cli;
+  if (instance.cliDefault) return instance.cliDefault;
+  return instance.access === "custom" ? "Bring your own model" : "Managed account";
 }
 
 function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
@@ -32,8 +54,6 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
   // the ghost value — the form would look empty yet refuse to save.
   const [selected, setSelected] = useState<string>("");
   const [manual, setManual] = useState<string>(
-    // the current override rides the manual input unless it is exactly a
-    // detected path (then the dropdown preselects it below)
     instance.cli && !(instance.cliCandidates ?? []).includes(instance.cli) ? instance.cli : "",
   );
   const [probing, setProbing] = useState(false);
@@ -42,8 +62,6 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
   const [error, setError] = useState<string | null>(null);
   const fetchedRef = useRef(false);
 
-  // The describe() snapshot can be stale (CLI installed since last refresh);
-  // re-fetch candidates once when the picker mounts so the dropdown is current.
   useEffect(() => {
     if (fetchedRef.current) return;
     fetchedRef.current = true;
@@ -51,8 +69,6 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
       .then(({ candidates: found }: { candidates: string[] }) => {
         setCandidates(found);
         if (!instance.cli) return;
-        // preselect a detected override in the dropdown; a non-detected one
-        // (wrapper string, moved binary) rides the manual input instead
         if (found.includes(instance.cli)) setSelected(instance.cli);
         else setManual(instance.cli);
       })
@@ -63,7 +79,6 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
   const dirty = value !== (instance.cli ?? "");
   const busy = probing || saving;
 
-  // Editing the path invalidates a previous probe result.
   useEffect(() => {
     setProbe(null);
   }, [value]);
@@ -72,15 +87,11 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
     if (busy || !value || !dirty) return;
     setSaving(true);
     setError(null);
-    const committed = value; // freeze: inputs disable during save, but the
-    // closure must not see a later keystroke either
+    const committed = value;
     api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, {
       method: "PATCH",
       body: JSON.stringify({ cli: committed }),
     })
-      // onSaved (refreshInstances) failing must NOT read as "not saved" —
-      // the PATCH already returned 200. Close regardless; the global banner
-      // from refreshInstances already reports the refresh failure.
       .then(() => Promise.resolve(onSaved()).catch(() => {}))
       .then(onClose)
       .catch((e) => setError(e.message))
@@ -97,7 +108,6 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
     })
       .then((result: ProbeResult) => {
         setProbe(result);
-        // ok → save immediately; failed → hold for explicit confirmation
         if (result.ok) persist();
       })
       .catch((e) => setError(e.message))
@@ -133,7 +143,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
         onKeyDown={(e) => {
           if (e.key !== "Enter") return;
           e.preventDefault();
-          if (!value || !dirty) return; // nothing to save — same hint the disabled button gives
+          if (!value || !dirty) return;
           save();
         }}
         placeholder={candidates?.length ? "Enter path manually…" : "/absolute/path/to/cli"}
@@ -204,11 +214,8 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wasOpenFor = useRef<string | null>(null);
+  const ready = isReady(instance);
 
-  // Close the picker when this instance's override changes to anything else
-  // — a save from this row, another tab, or the 5-min refresh. The picker
-  // initialized its fields from the OLD value and never re-syncs, so staying
-  // open would show stale state.
   useEffect(() => {
     if (wasOpenFor.current !== null && wasOpenFor.current !== instance.cli) {
       setOpen(false);
@@ -224,90 +231,143 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
       method: "PATCH",
       body: JSON.stringify({ cli: "" }),
     })
-      // The reset already succeeded once PATCH returns 200. A follow-up list
-      // refresh failure should not tell the user the reset itself failed.
       .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
       .catch((e) => setError(e.message))
       .finally(() => setSwitching(false));
   };
 
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2 text-[13px]">
-        <span className={cn("size-1.5 shrink-0 rounded-full", instance.cli ? "bg-accent" : "bg-raised-hover")} />
-        <ProviderMark driverKind={instance.driverKind} size={14} />
-        <span className="min-w-0 flex-1 basis-[100px] text-ink">{instance.displayName}</span>
-        {instance.cli ? (
-          <span className="order-last w-full truncate font-mono text-[11.5px] text-accent" title={instance.cli}>
-            {instance.cli}
+    <div className="border-b border-hairline/25 py-2.5 last:border-b-0">
+      <div className="flex items-center gap-3">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-inset">
+          <ProviderMark driverKind={instance.driverKind} size={15} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13.5px] text-ink">{instance.displayName}</div>
+          <div className="mt-0.5 truncate text-[12px] text-ink-secondary" title={accountLine(instance)}>
+            {accountLine(instance)}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2.5">
+          <span className={cn("text-[12px]", ready ? "text-success" : "text-warning")}>
+            {ready ? "Ready" : "Needs setup"}
           </span>
-        ) : (
-          instance.cliDefault && (
-            <span className="order-last w-full truncate text-[11px] text-ink-secondary">{instance.cliDefault} · default</span>
-          )
-        )}
-        {instance.cli && (
-          <button
-            onClick={reset}
-            disabled={switching}
-            className="shrink-0 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
-          >
-            {switching ? "Resetting…" : "Reset"}
-          </button>
-        )}
-        <button
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className={cn(
-            "shrink-0 rounded-lg border border-hairline/40 px-3 py-1 text-[12px]",
-            open ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
+          {instance.snapshot.version && (
+            <span className="font-mono text-[11.5px] text-ink-secondary">{instance.snapshot.version}</span>
           )}
-        >
-          Set CLI…
-        </button>
+          {!ready && (
+            <button
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+              className="rounded-lg bg-raised px-2.5 py-1 text-[12px] text-ink hover:bg-raised-hover"
+            >
+              Set up
+            </button>
+          )}
+          <button
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-label={`${instance.displayName} options`}
+            className="rounded p-1 text-ink-secondary hover:bg-raised/50 hover:text-ink"
+          >
+            <ChevronDown size={13} className={cn("transition-transform", open && "rotate-180")} />
+          </button>
+        </div>
       </div>
       {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
       {open && (
-        <CustomPicker
-          instance={instance}
-          cliDefault={instance.cliDefault}
-          onClose={() => setOpen(false)}
-          onSaved={refreshInstances}
-        />
+        <div className="mt-1 pl-10">
+          {instance.cli && (
+            <div className="mb-1.5 flex items-center gap-2 text-[12px] text-ink-secondary">
+              <span className="truncate font-mono text-accent" title={instance.cli}>{instance.cli}</span>
+              <button
+                onClick={reset}
+                disabled={switching}
+                className="shrink-0 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
+              >
+                {switching ? "Resetting…" : "Reset"}
+              </button>
+            </div>
+          )}
+          <CustomPicker
+            instance={instance}
+            cliDefault={instance.cliDefault}
+            onClose={() => setOpen(false)}
+            onSaved={refreshInstances}
+          />
+        </div>
       )}
     </div>
   );
 }
 
+function EngineGroup({ label, rows }: { label: string; rows: InstanceInfo[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-1">
+      <EngineGroupLabel>{label} · {rows.length} engine{rows.length === 1 ? "" : "s"}</EngineGroupLabel>
+      <div className="mt-1.5">
+        {rows.map((i) => (
+          <EngineRow key={i.instanceId} instance={i} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function EnginesSettings() {
-  const { state } = useStore();
-  // every KNOWN-driver instance has cliDefault; unknown-driver shadows have
+  const { state, refreshInstances } = useStore();
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Every KNOWN-driver instance has cliDefault; unknown-driver shadows have
   // neither unless an override was set. Including them keeps a Reset-able row
   // (and a Set CLI… path) for engines the running build doesn't recognize.
-  const rows = state.instances.filter((i) => i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable");
+  const rows = state.instances.filter(
+    (i) => i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state !== "available",
+  );
+  // Ready first — an engine that works is the answer to "what can I use",
+  // and the ones that need setup are the call to action underneath it.
+  const ready = rows.filter(isReady);
+  const needsSetup = rows.filter((i) => !isReady(i));
+
+  const checkAgain = () => {
+    if (checking) return;
+    setChecking(true);
+    setError(null);
+    Promise.resolve(refreshInstances())
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setChecking(false));
+  };
 
   return (
-    <div className="flex flex-col gap-5">
-      {rows.length === 0 && (
-        <div className="text-[13px] text-ink-secondary">No CLI engines detected yet.</div>
+    <div className="flex flex-col gap-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-[13px] leading-relaxed text-ink-secondary">
+          Connect the AI tools that power your bots. Accounts, setup, and updates—all in one place.
+        </div>
+        <button
+          onClick={checkAgain}
+          disabled={checking}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-raised disabled:opacity-50"
+        >
+          {checking && <Loader2 size={13} className="animate-spin" />}
+          Check again
+        </button>
+      </div>
+      {error && <div role="alert" className="text-[12px] text-danger">{error}</div>}
+
+      {rows.length === 0 ? (
+        <div className="text-[13px] text-ink-secondary">No engines detected yet.</div>
+      ) : (
+        <>
+          <EngineGroup label="Ready" rows={ready} />
+          <EngineGroup label="Needs setup" rows={needsSetup} />
+        </>
       )}
-      {(() => {
-        const { subscription, custom } = splitEngineRail(rows);
-        return (
-          <>
-            {subscription.length > 0 && <EngineGroupLabel>Cloud</EngineGroupLabel>}
-            {subscription.map((i) => (
-              <EngineRow key={i.instanceId} instance={i} />
-            ))}
-            {custom.length > 0 && <EngineGroupLabel className="pt-1">Local</EngineGroupLabel>}
-            {custom.map((i) => (
-              <EngineRow key={i.instanceId} instance={i} />
-            ))}
-          </>
-        );
-      })()}
+
       <div className="text-[12px] leading-relaxed text-ink-secondary">
-        Set CLI points an engine at a specific binary — a versioned build, a wrapper script, or an
+        Expand an engine to point it at a specific binary — a versioned build, a wrapper script, or an
         absolute path. Saving reloads providers and interrupts any running turns.
       </div>
     </div>

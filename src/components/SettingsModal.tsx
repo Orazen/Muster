@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Brain, Building2, Coins, CreditCard, Download, KeyRound, Monitor, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
+import { Brain, Building2, Coins, CreditCard, Download, FlaskConical, KeyRound, Monitor, Network, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { clearOnboardingGate } from "@/lib/analytics";
 import { useAuth } from "@/lib/auth";
@@ -14,6 +14,7 @@ import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
+import { RemoteAccessSection } from "./RemoteAccessSection";
 import { Card } from "./SettingsPrimitives";
 import { SkinPicker } from "./SkinPicker";
 import { UsageSection } from "./UsageSection";
@@ -34,13 +35,16 @@ import "./settings-modal.css";
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User; keywords: string[] }> = [
   { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "account", "updates", "turn cap", "diagnostics"] },
   { id: "workspaces", label: "Connected workspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "connect", "pair", "switch", "local", "address"] },
+  { id: "organisation", label: "Organisation", icon: Building2, keywords: ["company", "team", "org", "models", "gateway", "policy", "members"] },
   { id: "brain", label: "Brain", icon: Brain, keywords: ["brain", "team context", "shared knowledge", "memory", "brief", "goals"] },
   { id: "appearance", label: "Appearance", icon: Palette, keywords: ["skin", "theme", "colors", "dark mode"] },
+  { id: "experimental", label: "Experimental", icon: FlaskConical, keywords: ["labs", "beta", "flags", "preview", "unstable"] },
   { id: "connections", label: "Connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "connected apps", "opensandbox", "muster cloud"] },
   { id: "engines", label: "Engines", icon: Terminal, keywords: ["models", "claude", "grok", "cli", "xai", "opencode"] },
   { id: "providers", label: "Providers", icon: Cloud, keywords: ["provider api keys", "llm", "deepseek", "openai", "anthropic"] },
   { id: "mcp", label: "MCP Servers", icon: Plug, keywords: ["mcp", "tools", "stdio", "servers"] },
   { id: "companion", label: "Companion", icon: Smartphone, keywords: ["phone", "mobile", "ios", "pair"] },
+  { id: "remoteAccess", label: "Remote access", icon: Network, keywords: ["remote", "pair", "phone", "computer", "tailscale", "wifi", "https", "troubleshooting"] },
   { id: "computer", label: "Local VM", icon: Monitor, keywords: ["vm", "virtual machine", "desktop", "sandbox", "isolation"] },
   { id: "voice", label: "Voice", icon: Volume2, keywords: ["tts", "speech", "elevenlabs", "speak"] },
   { id: "usage", label: "Usage", icon: Coins, keywords: ["tokens", "cost", "spend", "history"] },
@@ -704,6 +708,24 @@ export function SettingsModal() {
               </>
             )}
             {section === "workspaces" && <ConnectedWorkspacesSection />}
+
+            {section === "organisation" && (
+              <Card title="Organisation" subtitle="Company-wide defaults shared by everyone on this workspace.">
+                <div className="text-[13px] leading-relaxed text-ink-secondary">
+                  A company model is one provider account the whole organisation runs through, so
+                  individual bots do not each carry their own key. Until a company gateway is
+                  connected, configure engines and keys under Engines and Providers as usual.
+                </div>
+              </Card>
+            )}
+
+            {section === "experimental" && (
+              <Card title="Experimental" subtitle="Features still being tested. Off unless you turn them on.">
+                <div className="text-[13px] leading-relaxed text-ink-secondary">
+                  Nothing experimental is enabled on this build yet.
+                </div>
+              </Card>
+            )}
             {section === "general" && (
               <>
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
@@ -781,6 +803,8 @@ export function SettingsModal() {
             {section === "mcp" && <McpServersSection />}
 
             {section === "companion" && <CompanionSection />}
+
+            {section === "remoteAccess" && <RemoteAccessSection />}
 
             {section === "voice" && <VoiceSettings />}
 

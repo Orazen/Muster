@@ -130,6 +130,20 @@ async function control(method, urlPath) {
   return res.json();
 }
 
+/** Ask the control port who is listening when it is not our child. Returns
+ * { pid, dir } for a sidecar that answers our schema, or null when the port is
+ * silent or answers something we do not recognise — an unrelated service must
+ * never be reported as a stoppable companion. */
+async function probeControlOwner() {
+  try {
+    const state = await control("GET", "/state");
+    if (!Number.isInteger(state?.pid) || state.pid <= 0) return null;
+    return { pid: state.pid, dir: state.dir ?? "unknown" };
+  } catch {
+    return null;
+  }
+}
+
 /** Whether this process owns a running sidecar. */
 export function companionRunning() {
   return proc !== null;
@@ -234,6 +248,19 @@ async function start(options, retried = false) {
   // request, which reads as a broken app rather than a failed start.
   for (let i = 0; i < 40; i++) {
     if (exited) {
+      // The usual cause is the control port being held by a sidecar we did not
+      // fork: a stale copy left by a previous run, or another install. The
+      // child dies on the bind before it can answer, so "check the log" is all
+      // this branch could say — and it is a dead end for the user, because the
+      // panel then offers no action. Ask the port directly who owns it
+      // instead, which turns the failure into the stop-it-and-retry action
+      // stopForeignCompanion already implements.
+      const owner = await probeControlOwner();
+      if (owner) {
+        foreign = owner;
+        lastError = `port ${CONTROL_PORT} is already serving another companion (pid ${owner.pid}) — stop it and try again`;
+        return companionState();
+      }
       lastError = "the companion could not start — check the log";
       return companionState();
     }

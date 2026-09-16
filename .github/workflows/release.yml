@@ -169,6 +169,13 @@ jobs:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # The full "Developer ID Application: NAME (TEAMID)" string. afterPack
+      # writes it into the trusted-mac-updates marker, which is what unlocks
+      # in-place Squirrel.Mac updates; without it every install stays on the
+      # direct-download flow. Not used as CSC_NAME — electron-builder rejects
+      # the "Developer ID Application:" prefix there and picks the identity
+      # from the imported keychain instead.
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -226,6 +233,7 @@ jobs:
       - name: Build (macOS arm64)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.APPLE_CERTIFICATE != '' && 'true' || 'false' }}
+          MAC_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
         run: pnpm package:mac:arm64
 
       - name: "Gate: signature must verify BEFORE notarization"
@@ -233,10 +241,24 @@ jobs:
         run: |
           set -euo pipefail
           # notarytool ACCEPTS binaries codesign rejects — this gate is the
-          # only chance to catch a bad seal before it's notarized
+          # only chance to catch a bad seal before it's notarized. Verifying
+          # the seal is NOT enough: an "Apple Development" signature verifies
+          # cleanly and is still not distributable, which is how the 1.12.1
+          # mirror shipped a DMG Gatekeeper rejects on every other Mac.
+          # Assert the AUTHORITY and the hardened runtime too.
           APP=release/mac-arm64/Muster.app
           codesign --verify --deep --strict "$APP"
-          echo "ok: signature verifies ($APP)"
+          AUTHORITY=$(codesign -dv --verbose=4 "$APP" 2>&1 | awk -F= '/^Authority=Developer ID Application/ {print $2; exit}')
+          if [ -z "$AUTHORITY" ]; then
+            FOUND=$(codesign -dv --verbose=4 "$APP" 2>&1 | awk -F= '/^Authority=/ {print $2; exit}')
+            echo "::error::$APP is not Developer ID signed (found: ${FOUND:-none})"
+            exit 1
+          fi
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep -q 'flags=0x10000(runtime)' || {
+            echo "::error::$APP was not built with the hardened runtime"
+            exit 1
+          }
+          echo "ok: signature verifies, Developer ID signed, hardened runtime ($APP)"
 
       - name: "Gate: actual packaged Electron storage and server"
         id: native-smoke
