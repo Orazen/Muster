@@ -45,6 +45,10 @@ interface CompanionState {
   discovery?: { advertising: boolean; name: string };
   /** Why it is not running, or not answering. */
   error?: string;
+  /** When the error is "another companion holds the port": that process,
+   * recorded by the main process — the panel may ask for exactly this one to
+   * be stopped, and nothing else. */
+  foreign?: { pid: number; dir: string };
 }
 
 /** The bridge the preload exposes. Absent in a browser tab — the companion
@@ -53,6 +57,7 @@ type Bridge = {
   state: () => Promise<CompanionState>;
   start: () => Promise<CompanionState>;
   stop: () => Promise<CompanionState>;
+  stopForeign: () => Promise<CompanionState>;
   pairing: (open: boolean) => Promise<CompanionState>;
   cloudDesktop: (deviceId: string, allowed: boolean) => Promise<CompanionState>;
   revoke: (deviceId: string) => Promise<CompanionState>;
@@ -323,7 +328,21 @@ export function CompanionSection() {
           </div>
         )}
         {(error || state.error) && (
-          <div className="mt-3 text-[13px] text-danger">{error ?? state.error}</div>
+          <div className="mt-3 text-[13px] text-danger">
+            {error ?? state.error}
+            {/* The dead-end rule: an error card must offer one action that
+                works from inside the client. "Stop it and try again" told
+                someone to hunt a process down; this does the hunting. */}
+            {state.foreign && (
+              <button
+                onClick={() => void act((c) => c.stopForeign())}
+                disabled={busy}
+                className="mt-2 block rounded-full border border-danger/40 px-3 py-1.5 text-[12px] text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
+              >
+                Stop the other companion and retry
+              </button>
+            )}
+          </div>
         )}
       </Card>
 

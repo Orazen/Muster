@@ -16,6 +16,7 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 
 import type { DeviceRegistry } from "./devices.ts";
 import { lanAddresses, tailnetName, tailscaleAddress } from "./listener.ts";
+import { DATA_DIR } from "./state.ts";
 
 /** What the pairing page needs to render itself and act on what you click. */
 export interface ControlOptions {
@@ -88,6 +89,12 @@ const json = <B>(res: ServerResponse, status: number, body: B) => {
 interface CompanionState {
   pid: number;
   port: number;
+  /** Where this sidecar keeps its paired fleet. The desktop app compares it
+   * against the directory it would pass a child, to tell "a stale copy of my
+   * own companion" from "another install's companion" when the control port
+   * is already taken — the first it may stop on the user's behalf, the
+   * second only on an explicit request. */
+  dir: string;
   addresses: string[];
   tailscale?: string;
   tailnetName?: string;
@@ -109,6 +116,7 @@ export function companionState(options: ControlOptions): CompanionState {
     // answer on the port proves something is listening, not that it is ours.
     pid: process.pid,
     port: options.companionPort,
+    dir: DATA_DIR,
     addresses,
     lan: addresses.find((a) => a !== tailscale) ?? null,
     pairing: pairing ? { code: pairing.code, token: pairing.token, expiresAt: pairing.expiresAt } : null,

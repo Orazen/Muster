@@ -161,6 +161,7 @@ import {
   companionState,
   startCompanion,
   stopCompanion,
+  stopForeignCompanion,
 } from "./companion.mjs";
 
 function slog(line) {
@@ -492,14 +493,16 @@ ipcMain.handle("speech:finish", () => {
 });
 
 // ── companion sidecar ──────────────────────────────────────────────────
-// The renderer gets these five and nothing else: it can turn the companion
-// on and off, look at it, open or cancel a pairing window, and remove a
-// device. It cannot reach the sidecar's control port itself.
+// The renderer gets these and nothing else: it can turn the companion on and
+// off, look at it, open or cancel a pairing window, remove a device, and —
+// when the port is held by a foreign sidecar — ask for that one to be stopped
+// in the user's place. It cannot reach the sidecar's control port itself.
 ipcMain.handle("companion:state", () => companionState());
 ipcMain.handle("companion:start", () =>
   startCompanion({ resourcesPath: process.resourcesPath, harnessPort: SERVER_PORT, log: slog }),
 );
 ipcMain.handle("companion:stop", () => stopCompanion());
+ipcMain.handle("companion:stop-foreign", () => stopForeignCompanion());
 ipcMain.handle("companion:pairing", (_event, open) => companionPairing(Boolean(open)));
 ipcMain.handle("companion:cloud-desktop", (_event, deviceId, allowed) =>
   companionCloudDesktopAccess(deviceId, Boolean(allowed)),

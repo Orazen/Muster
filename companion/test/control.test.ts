@@ -93,6 +93,19 @@ describe("origins the control server will change state for", () => {
     expect((await ask("GET", "/state")).body.pairing).toBeNull();
   });
 
+  it("answers /state with the ownership fields the desktop app matches on", async () => {
+    const { status, body } = await ask("GET", "/state");
+    expect(status).toBe(200);
+    // pid proves "this is the child we forked"; dir proves "this is the
+    // companion belonging to THIS profile" — together they let the app tell a
+    // stale copy of its own sidecar from another install's before ever
+    // signalling a process it does not own.
+    expect(body.pid).toBe(process.pid);
+    expect(typeof body.dir).toBe("string");
+    expect(body.dir.length).toBeGreaterThan(0);
+    expect(body.port).toBe(8810);
+  });
+
   it("refuses an opaque origin", async () => {
     // A sandboxed iframe and a file:// page both send the literal string
     // "null". Treating that as absent would hand the hole straight back.

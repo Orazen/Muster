@@ -13,6 +13,7 @@
 import { app, utilityProcess } from "electron";
 import { desktopProfile } from "./profile-paths.mjs";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 // Passed to the fork rather than left to the sidecar's own defaults, so the
@@ -25,6 +26,42 @@ const COMPANION_PORT = 8810;
 
 let proc = null;
 let lastError = null;
+/** The sidecar that got to the control port first, when it was not ours:
+ * { pid, dir }. The panel offers one action for it — stop it and retry —
+ * because "go find the process in a terminal" is a dead end. */
+let foreign = null;
+/** The options the last start() was called with, so the retry-after-stop
+ * path can re-run the identical start without the renderer resupplying
+ * anything (it does not know resourcesPath or the harness port). */
+let lastStartOptions = null;
+
+/** The companion directory a child forked right now would use — the same
+ * resolution the sidecar itself performs (OMB_COMPANION_DIR, else the shared
+ * default). A foreign sidecar reporting THIS dir is a stale copy of ours. */
+const expectedCompanionDir = () =>
+  process.env.OMB_COMPANION_DIR || path.join(os.homedir(), ".muster-companion");
+
+/** Ask the (foreign) sidecar to die, then wait for the control port to go
+ * quiet. The pid came from a loopback /state answer shaped like our schema,
+ * and is validated here as a positive integer before anything is signalled. */
+async function stopForeignSidecar(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // ESRCH: already gone — the port check below decides whether we can start.
+  }
+  const deadline = Date.now() + 4000;
+  while (Date.now() < deadline) {
+    try {
+      await control("GET", "/state");
+    } catch {
+      return true; // port answered nothing anymore — it is free
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return false;
+}
 
 /** Where the sidecar's compiled entry lives.
  *
@@ -91,9 +128,32 @@ export function stopCompanion() {
   return serialize(() => stop());
 }
 
+/** The panel's answer to "another companion is holding the port": stop THAT
+ * process (only ever one the user explicitly asked about) and start ours in
+ * its place. A no-op when nothing foreign is recorded. */
+export function stopForeignCompanion() {
+  return serialize(async () => {
+    const target = foreign;
+    if (!target) return companionState();
+    foreign = null;
+    const freed = await stopForeignSidecar(target.pid);
+    if (!freed) {
+      lastError = "the other companion did not stop — it may have restarted under a new process";
+      return companionState();
+    }
+    if (!lastStartOptions) {
+      lastError = null;
+      return companionState();
+    }
+    return start(lastStartOptions, true);
+  });
+}
+
 /** startCompanion's body, run inside the transition queue. */
-async function start({ resourcesPath, harnessPort, log }) {
+async function start(options, retried = false) {
   if (proc) return companionState();
+  lastStartOptions = options;
+  const { resourcesPath, harnessPort, log } = options;
   lastError = null;
   const entry = entryPoint(resourcesPath);
   if (!entry) {
@@ -149,10 +209,27 @@ async function start({ resourcesPath, harnessPort, log }) {
         } catch {
           /* already gone */
         }
-        lastError = `port ${CONTROL_PORT} is already serving another companion — stop it and try again`;
+        // Whose companion is it? The sidecar reports the directory holding
+        // its paired fleet. Ours (a stale copy from a previous run of THIS
+        // profile) is stopped and replaced without ceremony — leaving the
+        // toggle broken would be the worse outcome, and the phones it serves
+        // reconnect to the fresh copy. Someone else's companion is not ours
+        // to kill: it may be another profile's install with its own paired
+        // phones, so the panel asks before acting.
+        if (state.dir && state.dir === expectedCompanionDir()) {
+          log?.(`companion: stopping stale same-profile sidecar pid ${state.pid}`);
+          if (!retried && (await stopForeignSidecar(state.pid))) {
+            return start(options, true);
+          }
+          lastError = "the old companion would not release the port — try again";
+          return companionState();
+        }
+        foreign = Number.isInteger(state.pid) && state.pid > 0 ? { pid: state.pid, dir: state.dir ?? "unknown" } : null;
+        lastError = `port ${CONTROL_PORT} is already serving another companion (pid ${state.pid}) — stop it and try again`;
         return companionState();
       }
       proc = child;
+      foreign = null;
       return companionState();
     } catch {
       await new Promise((r) => setTimeout(r, 150));
@@ -172,6 +249,7 @@ async function stop() {
   const child = proc;
   proc = null;
   lastError = null;
+  foreign = null;
   if (!child) return companionState();
   try {
     child.kill();
@@ -202,6 +280,8 @@ export async function companionState() {
     const state = { enabled: false, port: COMPANION_PORT, devices: [], pairing: null };
     // a complete answer names why the companion is off when it is known
     if (lastError) state.error = lastError;
+    // and names the process to stop when the panel can offer that action
+    if (foreign) state.foreign = foreign;
     return state;
   }
   try {

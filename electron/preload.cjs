@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld("ogb", {
     state: () => ipcRenderer.invoke("companion:state"),
     start: () => ipcRenderer.invoke("companion:start"),
     stop: () => ipcRenderer.invoke("companion:stop"),
+    /** The panel's "stop the other companion and retry" — the main process
+     * only ever acts on the pid it recorded as foreign, never on one the
+     * renderer supplies. */
+    stopForeign: () => ipcRenderer.invoke("companion:stop-foreign"),
     pairing: (open) => ipcRenderer.invoke("companion:pairing", open),
     cloudDesktop: (deviceId, allowed) => ipcRenderer.invoke("companion:cloud-desktop", deviceId, allowed),
     revoke: (deviceId) => ipcRenderer.invoke("companion:revoke", deviceId),
