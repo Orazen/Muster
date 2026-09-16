@@ -32,7 +32,7 @@ function PairCodeView({ email }: { email: string }) {
     return () => window.clearInterval(timer);
   }, [state.pairing]);
 
-              const seconds = state.pairing ? pairingSecondsLeft(state.pairing.expiresAt, now) : 0;
+  const seconds = state.pairing ? pairingSecondsLeft(state.pairing.expiresAt, now) : 0;
   const expired = state.pairing !== null && seconds === 0;
   const busy = state.status === "idle" || state.status === "loading";
   const usable = state.status === "ready" && !expired && state.pairing !== null;
@@ -55,7 +55,7 @@ function PairCodeView({ email }: { email: string }) {
       subtitle="Open Muster Desktop and enter this code in its pairing field."
       footer={<><p className="break-all">Signed in as {email}.</p><Link to="/app">Back to your workspace</Link></>}
     >
-                  {carried && (
+      {carried && (
         <div className="rounded-lg border border-hairline/40 bg-inset p-3">
           <div className="text-[12px] font-medium text-ink">Pairing code carried in this link</div>
           <code className="mt-1 block break-all font-mono text-[13px] text-ink">{carried.code}</code>

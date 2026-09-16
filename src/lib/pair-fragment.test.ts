@@ -17,9 +17,10 @@ describe("parseFragmentCode", () => {
     expect(parseFragmentCode("#ABCD-EFGH-IJKL")).toEqual({ code: "ABCD-EFGH-IJKL", mode: "self-hosted" });
   });
 
-    it("returns null for a normal anchor, empty or junk fragment", () => {
+  it("returns null for a normal anchor, empty or junk fragment", () => {
     for (const hash of ["", "#", "#pricing", "#section=1", "#step=1", "#code=", "#nope!", "#ab", "#!!!"]) {
-      expect(parseFragmentCode(hash), hash).toBeNull();
+      const parsed = parseFragmentCode(hash);
+      expect(parsed === null, `fragment ${JSON.stringify(hash)} must not parse`).toBe(true);
     }
   });
 
@@ -27,8 +28,12 @@ describe("parseFragmentCode", () => {
     expect(parseFragmentCode("#abcd2345")).toBeNull();
   });
 
-  it("never throws on malformed input", () => {
-    for (const hash of [null as unknown as string, undefined as unknown as string, "   "]) {
+  // parseFragmentCode's parameter accepts null/undefined because real callers
+  // pass window.location.hash, which can be absent in odd embeds; it must
+  // return null rather than throw for any of these.
+  it("never throws on malformed input, including a non-string hash", () => {
+    const malformed: Array<string | null | undefined> = [null, undefined, "   ", "#", "#code=short", "#ab", "#!!!"];
+    for (const hash of malformed) {
       expect(() => parseFragmentCode(hash)).not.toThrow();
       expect(parseFragmentCode(hash)).toBeNull();
     }
@@ -38,8 +43,8 @@ describe("parseFragmentCode", () => {
     const modes = new Set<CarriedCodeMode>();
     for (const hash of ["#ABCD2345", "#482913", "#ABCD-EFGH-IJKL"]) {
       const r = parseFragmentCode(hash);
-      expect(r).not.toBeNull();
-      modes.add(r!.mode);
+      if (r === null) throw new Error(`expected ${hash} to parse`);
+      modes.add(r.mode);
     }
     expect(modes).toEqual(new Set(["cloud", "companion", "self-hosted"]));
   });
