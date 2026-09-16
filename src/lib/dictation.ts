@@ -35,6 +35,8 @@ export interface DictationSource {
 // The vendor API's shape lives in src/types/web-speech.d.ts (ambient, like
 // the desktop bridge) — never trust what we read from it beyond those fields.
 
+import { getListeningLanguage } from "./voice-first-run";
+
 function webSpeechCtor(): WebSpeechCtor | null {
   return window.SpeechRecognition ?? window.webkitSpeechRecognition ?? null;
 }
@@ -64,7 +66,7 @@ function webSource(ctor: WebSpeechCtor): DictationSource {
 
   return {
     kind: "web",
-    lang: () => navigator.language || "en-US",
+    lang: () => getListeningLanguage() ?? (navigator.language || "en-US"),
     async speechStart() {
       // one utterance per listen — the browser's own silence detection is
       // the endpointer, mirroring the native helper's contract
@@ -74,7 +76,7 @@ function webSource(ctor: WebSpeechCtor): DictationSource {
       active = rec;
       rec.continuous = true;
       rec.interimResults = true;
-      rec.lang = navigator.language || "en-US";
+      rec.lang = getListeningLanguage() ?? (navigator.language || "en-US");
       rec.onresult = (event) => {
         if (active !== rec) return;
         for (let i = event.resultIndex; i < event.results.length; i++) {

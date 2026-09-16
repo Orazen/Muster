@@ -1,11 +1,15 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Clock, Mic, Square, Target, Users, X } from "lucide-react";
+import { ArrowUp, AudioLines, Clock, Mic, Square, Target, Users, X } from "lucide-react";
 import { useStore, useStopCleanup, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { startCall } from "@/lib/call";
+import { getDictation } from "@/lib/dictation";
+import { markVoiceFirstRunSeen, voiceFirstRunSeen } from "@/lib/voice-first-run";
 import { useComposerDraft } from "@/lib/drafts";
 import { AgentAvatar } from "./Avatar";
 import { ComposerAttachments } from "./ComposerAttachments";
+import { VoiceFirstRunCard } from "./VoiceFirstRunCard";
 import {
   composeMessage,
   isLongPaste,
@@ -142,6 +146,9 @@ export function Composer({
   );
   const [recording, setRecording] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
+  // Vellum's voice-mode entry: a composer control that opens the spoken
+  // conversation (first tap shows the one-time welcome card).
+  const [voiceCardOpen, setVoiceCardOpen] = useState(false);
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null); // Esc'd this @
@@ -219,6 +226,25 @@ export function Composer({
   // arrow becomes a target so the user always knows what the click means.
   const [goalMode, setGoalMode] = useState(false);
   const goalArmed = Boolean(bot && !group && goalMode && !busy);
+  // Vellum's voice-mode entry: same availability rule as the header call
+  // button — a recognizer to hear with and a voice (paid or free) to answer
+  // with. First tap shows the one-time welcome card; later taps go straight
+  // into the call room.
+  const dictationKind = getDictation().kind;
+  const voiceSupported =
+    dictationKind === "web" || (dictationKind === "native" && capabilities.dictation.available);
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- capability probe of a window global, not input shaping
+  const freeVoice = typeof window !== "undefined" && "speechSynthesis" in window;
+  const voiceModeAvailable = Boolean(bot) && !group && voiceSupported && (Boolean(state.config?.tts?.configured) || freeVoice);
+  const startVoiceMode = () => {
+    if (!bot) return;
+    if (!voiceFirstRunSeen(bot.id)) {
+      setVoiceCardOpen(true);
+      return;
+    }
+    track("voice_mode_started", { botId: bot.id });
+    startCall(bot.id);
+  };
   const send = () => {
     const t = composeMessage(text, attachments);
     if (!t) return;
@@ -477,6 +503,16 @@ export function Composer({
           {/* Left: the voice that joins the conversation (GAIA context-button
               treatment — circular raised chips). */}
           <div className="flex items-center gap-1">
+            {voiceModeAvailable && !recording && (
+              <button
+                onClick={startVoiceMode}
+                aria-label="Start voice mode"
+                title="Talk out loud with voice mode"
+                className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-[filter] hover:brightness-110 active:scale-[0.97]"
+              >
+                <AudioLines size={16} strokeWidth={2} />
+              </button>
+            )}
             {!busy && !hasContent && capabilities.dictation.available && (
               <button
                 onClick={toggleMic}
@@ -545,6 +581,20 @@ export function Composer({
         </div>
         </div>
       </div>
+      {bot && !group && (
+        <VoiceFirstRunCard
+          bot={bot}
+          open={voiceCardOpen}
+          onDismiss={() => setVoiceCardOpen(false)}
+          onStart={() => {
+            markVoiceFirstRunSeen(bot.id);
+            setVoiceCardOpen(false);
+            track("voice_mode_started", { botId: bot.id, firstRun: true });
+            startCall(bot.id);
+          }}
+          onPickVoice={(voice) => dispatch({ type: "updateBot", botId: bot.id, patch: { voice } })}
+        />
+      )}
     </div>
   );
 }
