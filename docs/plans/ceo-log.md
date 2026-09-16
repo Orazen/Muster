@@ -5480,6 +5480,40 @@ absent: `/pair` email one-time-code + domain allowlist, an evidence-carrying
 persona-change proposal on the approval card, true certify-then-commit playback,
 and an unattended weekly eval gate. The Fleet MCP surface is **8** tools
 (`server/fleet-mcp.ts`), so `AGENTS.md`'s "6 bounded tools" is the stale number —
-and not all 8 are read-only (`send_task` writes). No security claim anywhere in
-this entry.
+No security claim anywhere in this entry.
+
+## Loop99 — display a pairing code that a followed /pair link carries (16 September 2026)
+
+**The gap.** `switchTarget()` emits `/pair#CODE` links that nothing consumed:
+`grep -rn location.hash src` is empty, and `PairPage.tsx` only rendered a
+server-issued code, ignoring the fragment. The parser in `pairing-link.ts`
+accepts the bare-fragment form, so the first half of the client role round-trips —
+but the second half (the browser *showing* the carried code) did not.
+
+**What shipped.** `src/lib/pair-fragment.ts` (`parseFragmentCode`,
+`carriedCodeInstruction`) reads the /pair fragment and classifies the three code
+shapes Muster actually issues: the 8-character cloud code
+(`server/pairing.ts` and `server/claim.ts`:
+`ABCDEFGHJKMNPQRSTUVWXYZ23456789`), the 6-digit desktop-companion code
+(`src/lib/companion-pairing.ts`), and the grouped 12-character form.
+`src/pages/PairPage.tsx` renders a `role=status` panel with the carried code and
+a copyable instruction, and explicitly says the page **does not redeem** the code.
+The page still does not redeem: `POST /api/pair/verify` is a desktop/CLI
+redeemer (`cli/muster.mjs pair --redeem`), and redeeming in-browser would consume
+the code the owner's desktop needs — left to a separate owner-decision slice.
+
+**Verified.** `src/lib/pair-fragment.test.ts` **7 passed**; `pairing-link.test.ts`
++ `workspaces.test.ts` **33 passed**; `tsc -p tsconfig.json` exit 0;
+`npx oxlint .` **0 warnings / 0 errors**; `npx vite build` built. NOT re-run:
+the full suite, because the working tree still holds another writer's
+uncommitted changes to `pairing-link.ts` / `ConnectedWorkspacesSection.tsx` /
+`current-state.md`, so a full run would not isolate this slice.
+
+**Committed scoped, not via git add -A.** This commit touches only the three
+source files above plus this log entry; the other writer's in-flight work is left
+untouched (path + hash receipt carried in the Loop98 entry). Inherited
+`docs/research/glm/*` and `www/templates.html` (hashes unchanged vs Loop80) and
+`src/state/teach-replay.ts` + test remain uncommitted and byte-preserved.
+
+
 

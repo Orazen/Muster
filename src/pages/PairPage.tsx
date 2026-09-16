@@ -4,6 +4,7 @@ import { Check, Copy, RefreshCw } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { AuthShell, authButtonCls, authInputCls } from "@/components/AuthShell";
 import { PairingFlow, pairingSecondsLeft } from "@/lib/pairing-flow";
+import { parseFragmentCode, carriedCodeInstruction } from "@/lib/pair-fragment";
 
 /** Cloud pairing codes retain their value until they expire or are used. */
 export function PairPage() {
@@ -31,10 +32,13 @@ function PairCodeView({ email }: { email: string }) {
     return () => window.clearInterval(timer);
   }, [state.pairing]);
 
-  const seconds = state.pairing ? pairingSecondsLeft(state.pairing.expiresAt, now) : 0;
+              const seconds = state.pairing ? pairingSecondsLeft(state.pairing.expiresAt, now) : 0;
   const expired = state.pairing !== null && seconds === 0;
   const busy = state.status === "idle" || state.status === "loading";
   const usable = state.status === "ready" && !expired && state.pairing !== null;
+  // A `/pair` visit may carry a pairing code in the link fragment. The page
+  // does not redeem it — it only ever displays it (see pair-fragment.ts).
+  const carried = parseFragmentCode(window.location.hash);
   const refreshLabel = busy ? "Getting your code…" : state.status === "error" ? "Try again" : expired ? "Get a new code" : "Refresh code";
 
   const copy = async () => {
@@ -51,6 +55,19 @@ function PairCodeView({ email }: { email: string }) {
       subtitle="Open Muster Desktop and enter this code in its pairing field."
       footer={<><p className="break-all">Signed in as {email}.</p><Link to="/app">Back to your workspace</Link></>}
     >
+                  {carried && (
+        <div className="rounded-lg border border-hairline/40 bg-inset p-3">
+          <div className="text-[12px] font-medium text-ink">Pairing code carried in this link</div>
+          <code className="mt-1 block break-all font-mono text-[13px] text-ink">{carried.code}</code>
+          <p className="mt-1 text-[12px] text-ink-secondary">
+            {carriedCodeInstruction(carried, window.location.origin)}
+          </p>
+          <p className="mt-2 text-[11px] text-ink-tertiary">
+            This page does not redeem the code. It is single-use and expires in 5
+            minutes, like the code you would generate below.
+          </p>
+        </div>
+      )}
       <div className="flex flex-col gap-3">
       {state.error && <div className="auth-notice auth-error" role="alert">{state.error}</div>}
       <label htmlFor="pairing-code" className="text-sm font-medium">Pairing code</label>
