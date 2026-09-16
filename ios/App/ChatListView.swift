@@ -112,6 +112,11 @@ struct ChatListView: View {
                 searchHits = await session.search(expected)
                 searching = false
             }
+            // A notification tap can arrive before the roster knows the bot.
+            // Try on the request and again whenever the roster gains a chat,
+            // so the first frame that can resolve it opens the conversation.
+            .onChange(of: session.pendingOpenThreadId) { _, _ in openPendingNotification() }
+            .onChange(of: session.state.chatSummaries.count) { _, _ in openPendingNotification() }
             .fullScreenCover(isPresented: $showingWalkie) {
                 WalkieView()
                     .environmentObject(session)
@@ -201,6 +206,15 @@ struct ChatListView: View {
         if let bot = session.state.bot(forThread: threadId) { return .bot(bot) }
         if let room = session.state.room(forThread: threadId) { return .room(room) }
         return nil
+    }
+
+    /// Open the conversation a notification tap asked for, once it resolves.
+    private func openPendingNotification() {
+        guard let threadId = session.pendingOpenThreadId,
+              let chat = session.chat(forThread: threadId)
+        else { return }
+        path.append(chat)
+        session.pendingOpenThreadId = nil
     }
 }
 

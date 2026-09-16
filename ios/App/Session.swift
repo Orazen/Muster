@@ -47,6 +47,11 @@ final class Session: ObservableObject {
     @Published private(set) var notificationAuthorization: UNAuthorizationStatus = .notDetermined
     /// A short-lived desktop handoff waiting for PairingView to present it.
     @Published private(set) var pairingInvite: PairingInvite?
+    /// A conversation a notification tap asked to open. It stays set until a
+    /// roster can actually resolve it to a chat, because a cold launch from a
+    /// banner reaches the roster before the stream has folded the bot — the
+    /// first frame that carries it satisfies the request and clears it.
+    @Published var pendingOpenThreadId: String?
 
     private var client: CompanionClient? {
         didSet {
@@ -597,6 +602,14 @@ final class Session: ObservableObject {
 
     func consumeFocus(_ messageId: String) {
         if focusedMessageId == messageId { focusedMessageId = nil }
+    }
+
+    /// The chat a thread belongs to, bot or room — the lookup a notification
+    /// tap needs to turn a bare threadId into something the roster can open.
+    func chat(forThread threadId: String) -> Chat? {
+        if let bot = state.bot(forThread: threadId) { return .bot(bot) }
+        if let room = state.room(forThread: threadId) { return .room(room) }
+        return nil
     }
 
     func createTask(for bot: Bot, title: String?) async {

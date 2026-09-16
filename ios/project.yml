@@ -192,6 +192,18 @@ targets:
         TEST_TARGET_NAME: MusterCompanion
 
 schemes:
+  # The app's own scheme. Without it there is no way to archive MusterCompanion
+  # for distribution — `xcodebuild archive` wants a scheme, and the only ones
+  # that existed built the package, the watch, or the test harness. Release
+  # config so the archive is the thing that ships.
+  MusterCompanion:
+    build:
+      targets:
+        MusterCompanion: all
+    run:
+      config: Debug
+    archive:
+      config: Release
   MusterOwnedAcceptance:
     build:
       targets:

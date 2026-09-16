@@ -15,7 +15,16 @@ struct CompanionApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(session)
-                .onAppear { session.setForeground(scenePhase == .active); session.connect() }
+                .onAppear {
+                    // Categories must exist before a banner is delivered, or
+                    // its action is a dead tap; the closure routes a tap to
+                    // the conversation that produced the alert.
+                    NotificationCoordinator.shared.registerCategories()
+                    NotificationCoordinator.shared.onOpenThread = { threadId in
+                        session.pendingOpenThreadId = threadId
+                    }
+                    session.setForeground(scenePhase == .active); session.connect()
+                }
                 .onOpenURL { session.receivePairingURL($0) }
                 .onChange(of: scenePhase) { _, phase in
                     session.setForeground(phase == .active)
