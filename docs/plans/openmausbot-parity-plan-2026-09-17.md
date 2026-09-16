@@ -117,18 +117,32 @@ slice was already present and was not rebuilt.
 workspaces):
 
 - `planWorkspaceConnect()` is the single decision point for what someone pastes
-  into "Connect hosted workspace": a self-hosted `#code=XXXX-XXXX-XXXX` link
-  connects and carries the code; a bare address (or a `/pair` page with no code
-  yet) connects without one; a **6-digit companion code is reported as a
-  desktop-app handoff instead of silently switching the workspace**.
-- Query-string codes (`?code=...`) are refused on the link path, matching the
-  competitor's stated rule; the code must be in the fragment.
+  into "Connect hosted workspace": a self-hosted pairing link connects and
+  carries its code; a bare address (or a `/pair` page with no code yet) connects
+  without one; a **6-digit companion code — or the desktop app's own
+  `muster://pair` deep link — is reported as a desktop-app handoff instead of
+  silently switching the workspace**.
+- Query-string codes (`?code=...`) are refused on the link path, and the rule is
+  applied whether or not the pasted text still carries its `https://` scheme.
+- Code shapes follow what Muster actually issues: 8 characters from the
+  unambiguous alphabet (`server/pairing.ts`, `server/claim.ts`), the 6-digit
+  companion form, and a grouped 12-character form. An earlier cut of this slice
+  accepted **only** the grouped 12-character shape, which refused every code
+  Muster itself issues — see the correction note below.
 - The **bare-fragment form `/pair#CODE` that Muster's own `switchTarget()`
-  emits** now parses. Before this, the strict parser rejected a link Muster had
-  produced itself — a round-trip defect.
-- `missingCode` distinguishes "this link has no code yet" (connect as an
-  address) from "this link's code is malformed" (error), so a plain `/pair`
-  address is not rejected.
+  emits** now parses, but only on a `/pair` path; on any other path a fragment is
+  an ordinary anchor, so `https://muster.today/#pricing` still connects exactly
+  as it did before.
+
+**Correction (16 September, same day).** The first commit of this slice
+(`5a6950c`) shipped two real regressions that an independent read-only review
+caught before any release: every https URL containing a `#` was routed into the
+strict parser, so ordinary anchors (`https://host/#pricing`) became hard errors;
+and the accepted code shapes matched no code Muster emits, so a real
+`#code=ABCD2345` link went from "connects" to "error". Both are fixed in the
+follow-up commit, which also applies the rules to scheme-less pastes (the
+original defect survived a paste that lost its `https://`) and pins each case in
+`src/lib/pairing-link.test.ts`. Test counts below are from the corrected tree.
 
 **Still not done in slice 1 — do not claim it:**
 
@@ -141,7 +155,14 @@ workspaces):
   keep-awake or `/pair` email/domain allowlist work — those remain as described
   in §2.
 - No browser (Playwright) acceptance ran for this slice; evidence is focused
-  unit tests, the web typecheck, the web build and the full suite.
+  unit tests, the web typecheck, the web build and the full suite. The
+  independent review's first pass found two regressions that the focused tests
+  of the time did not pin; the corrected tests now do.
+- A client role that connects to *another browser's* workspace over `https` is
+  what exists. The web app still cannot reach a LAN self-host (`http://host:port`
+  is refused by design), and it cannot redeem the desktop companion's deep link —
+  it now *names* that link as the desktop handoff instead of reporting it as a bad
+  workspace address.
 
 ## 6. Explicitly not verified
 

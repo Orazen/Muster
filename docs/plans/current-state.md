@@ -11,28 +11,50 @@ remote-access **client role** now holds pairing links to the strict fragment
 rule and stops treating a desktop-companion code as a workspace.
 `planWorkspaceConnect()` (`src/lib/pairing-link.ts`) is the single decision point
 and `src/components/ConnectedWorkspacesSection.tsx` renders its verdict:
-self-hosted `#code=XXXX-XXXX-XXXX` links connect and carry the code; a query-string
-code is refused; a **6-digit companion code** produces an explicit
-`role="status"` notice instead of a silent workspace switch; a `/pair` address
-with no code yet still connects (`missingCode` keeps "no code yet" apart from
-"code is malformed"); and the bare-fragment form `/pair#CODE` that Muster's own
-`switchTarget()` emits now parses, so a Muster-produced link round-trips.
+self-hosted pairing links connect and carry the code; a query-string
+code is refused whether or not the paste still carries a scheme; a **6-digit
+companion code** (and the desktop app's own `muster://pair` deep link) produces an
+explicit `role="status"` notice instead of a silent workspace switch; a `/pair`
+address with no code yet still connects; and the bare-fragment form `/pair#CODE`
+that Muster's own `switchTarget()` emits parses **on a `/pair` path only**, so a
+Muster-produced link round-trips while `https://host/#pricing` remains an ordinary
+anchor.
 
-Full **281 files / 4218 passed / 8 skipped / 0 failed** (386.13s, exit 0) at
-`1c1eaef` plus this slice — against the newest *recorded* baseline of 261 / 3944
-/ 8 (Loop90, 13 September) that is **+20 files / +274 tests, no decrease, 0
-failures**, most of which landed in commits after Loop90; this slice's own share
-is **+1 file / +14 tests**. Focused: `src/lib/pairing-link.test.ts` 21 passed
-(7 before, +14) and `src/lib/workspaces.test.ts` 7 passed. Both typechecks exit
-0, and **`npx oxlint .` is now 0 warnings / 0 errors** — the single
-`unicorn/no-useless-spread` warning recorded in the Loop90 text below was cleared
-by `1c1eaef` and no longer exists. `npx vite build` ✓ 14.42s.
+**Loop98 correction (same day, 16 September):** the slice's first commit
+(`5a6950c`) shipped two real regressions that an independent read-only review
+caught before any release — every https URL containing a `#` was routed into the
+strict parser, so ordinary anchors became hard errors, and the accepted code
+shapes were the competitor's grouped 12-character form, which refused **every code
+Muster itself issues** (`server/pairing.ts`, `server/claim.ts` issue 8 characters
+of `ABCDEFGHJKMNPQRSTUVWXYZ23456789`). Both are fixed in the follow-up commit, which
+also applies the rules to scheme-less pastes, and all four cases are now pinned in
+`src/lib/pairing-link.test.ts`. Treat the counts below as re-measured on the
+**corrected** tree.
 
-**Not proven:** no browser/Playwright run for this slice; the browser still does
-not *consume* a followed pairing code (nothing in `src/` reads `location.hash`,
-and `PairPage.tsx` shows a server-issued code), so making a followed link pair,
-plus scopes, keep-awake and a `/pair` email/domain allowlist, stays open. No live
-remote pairing, no deployment claim, no security claim.
+Full **282 files / 4230 passed / 8 skipped / 0 failed** (393.68s, exit 0) on the
+corrected tree with the carried-code slice (`9db2794`) and the working-tree
+pairing-link/teach-replay revisions — against the newest *recorded* baseline of
+281 / 4218 / 8 (the first Loop98 run) that is **+1 file / +12 tests, no decrease,
+0 failures**. Focused: `pairing-link.test.ts` 26, `pair-fragment.test.ts` 7,
+`workspaces.test.ts` 7, `teach-replay.test.ts` 20 — 4 files / 60 passed. Both
+typechecks exit 0, **`npx oxlint .` is 0 warnings / 0 errors** (the 6 anti-slop
+type-assertion errors a parallel writer left in `pair-fragment.test.ts` are
+cleared), and `npx vite build` ✓ 14.43s.
+
+**Not proven:** no browser/Playwright run for this slice; the browser displays a
+followed pairing code (`PairPage.tsx` renders the fragment code, per Loop99) but
+still does not *redeem* it, so pairing scopes, keep-awake and a `/pair`
+email/domain allowlist stay open. No live remote pairing, no deployment claim,
+no security claim.
+
+**Committed after the Loop98 correction (17 September, this loop):** the
+working-tree revisions of `src/lib/pairing-link.ts` + test +
+`ConnectedWorkspacesSection.tsx` (https-only, scheme-less pastes, code shapes
+widened to Muster's own issuers, `/pair`-path-only bare fragments, `muster://pair`
+handoff), the `src/state/teach-replay.ts` verdict-contract fix (+2 tests, its
+author's slice, now committed separately), and the lint/tidy of
+`pair-fragment.test.ts` + `PairPage.tsx`. The inherited `docs/research/glm/*` and
+`www/templates.html` remain **uncommitted and byte-preserved** as recorded below.
 
 **Inherited, preserved and deliberately NOT committed** (hashes byte-identical to
 `.omb-scratch/verification/loop80-stop-recovery/inherited-preservation.json`):

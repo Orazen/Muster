@@ -5517,3 +5517,18 @@ untouched (path + hash receipt carried in the Loop98 entry). Inherited
 
 
 
+
+## Loop100 — the follow-up landed: pairing rules corrected, verdict contract held, lint cleared (17 September 2026)
+
+**Three loose ends inherited from a writer that stopped mid-turn** (inference cap), all now closed:
+
+1. **The pairing-link revision** the writer left uncommitted is now committed (`689dd82`): https-only, scheme-less pastes judged by the same rules, code shapes widened to what Muster actually issues (8-char alphabet codes from server/pairing.ts and server/claim.ts, the 6-digit companion form, the grouped 12-char form), bare fragments read as codes on a /pair path only, and the desktop app's muster://pair deep link reported as the desktop handoff it is. ConnectedWorkspacesSection copy updated to explain address vs link vs 6-digit code.
+2. **The teach-replay verdict contract** is committed (`867a053`): a replay backend that throws mid-step now yields { ok: false, failedStep, observed, expected } — replaySkill never escapes its verdict promise. This was the author's own slice, committed separately and preserved as the standing contract required.
+3. **The lint backlog is cleared** (`0639697`): the carried-code slice left 6 anti-slop type-assertion errors in pair-fragment.test.ts (the only oxlint errors in the repo) and two mangled indentation artifacts in PairPage.tsx. The malformed-input test now passes null/undefined through parseFragmentCode's widened parameter (no chained assertions, no non-null assertions), and the page indent is consistent.
+
+**Verified on this tree, all real numbers.** Focused: pairing-link 26 + pair-fragment 7 + workspaces 7 + teach-replay 20 = 4 files / 60 passed / 0 failed. Full suite **282 files / 4230 passed / 8 skipped / 0 failed** (393.68s, exit 0) — against the Loop98 baseline of 281 / 4218 / 8 that is +1 file / +12 tests, no decrease. tsc -p tsconfig.json and tsc -p tsconfig.server.json both exit 0. npx oxlint . is **0 warnings / 0 errors** — the Loop98/Loop99 "0/0" claims were false between the carry-slice commit and this fix; they are true again as of 0639697. npx vite build ✓ 14.43s with the same pre-existing >500 kB chunk notice.
+
+**Committed in three scoped slices, not git add -A**: the inherited docs/research/glm/* (6 files) and www/templates.html remain **untracked and byte-preserved** exactly as the Loop80 receipt records; docs/plans/current-state.md and the parity plan were updated by the stopped writer with the correction narrative and are committed as docs only. Seven product commits now sit on main unpushed (5a6950c, 7bb3a54, 9175ded, 9db2794, 689dd82, 867a053, 0639697); pushing and deployment remain the owner's call per the stability contract.
+
+**Still open, honestly:** no browser (Playwright) acceptance for any pairing slice; the /pair page displays a carried code but never redeems it (owner decision — POST /api/pair/verify is a device redeemer and in-browser redemption would consume the desktop's code); no pairing scopes, no paired-device list work, no /pair email one-time-code + domain allowlist; pairing-link's SELF_HOSTED_CODE accepts any 4-64 char run of [A-Za-z0-9_-], so #code=short parses — the pre-rewrite pin for that case was deleted in the writer's rewrite and should be re-pinned if a minimum entropy rule is wanted. Engines "Add account", channels in /app, the onboarding tour pacing and voice W1-W3 gaps are unchanged. No security claim. Production was not touched; no deploy, no restart, no trigger change.
+
