@@ -71,8 +71,14 @@ targets:
         # read when Xcode generates the Info.plist itself, and this target
         # supplies one, so they are silently ignored.
         UILaunchScreen: {}
+        # All four, including upside-down portrait, because the target
+        # declares iPad support (TARGETED_DEVICE_FAMILY 1,2). App Store
+        # Connect rejects an iPad-capable bundle that omits any of them
+        # (error 90474) — the app never rotates that way, but the
+        # multitasking contract requires the key to allow it.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         # Explain iOS local-network access and declare the Bonjour service.
