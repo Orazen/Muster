@@ -1,15 +1,87 @@
 # Current Muster state — read before editing
 
-Updated 13 September 2026. This snapshot takes precedence over historical roadmap
+Updated 16 September 2026. This snapshot takes precedence over historical roadmap
 status; the latest owner request takes precedence over this file.
 
 **Owner priority:** keep the existing web layout, Flower mascot, /app and /os
 shells, choices and sessions stable. Read [the stability contract](../guides/web-app-stability.md).
 
+**Loop98 (16 September), working tree at `1c1eaef` plus this slice:** the
+remote-access **client role** now holds pairing links to the strict fragment
+rule and stops treating a desktop-companion code as a workspace.
+`planWorkspaceConnect()` (`src/lib/pairing-link.ts`) is the single decision point
+and `src/components/ConnectedWorkspacesSection.tsx` renders its verdict:
+self-hosted `#code=XXXX-XXXX-XXXX` links connect and carry the code; a query-string
+code is refused; a **6-digit companion code** produces an explicit
+`role="status"` notice instead of a silent workspace switch; a `/pair` address
+with no code yet still connects (`missingCode` keeps "no code yet" apart from
+"code is malformed"); and the bare-fragment form `/pair#CODE` that Muster's own
+`switchTarget()` emits now parses, so a Muster-produced link round-trips.
+
+Full **281 files / 4218 passed / 8 skipped / 0 failed** (386.13s, exit 0) at
+`1c1eaef` plus this slice — against the newest *recorded* baseline of 261 / 3944
+/ 8 (Loop90, 13 September) that is **+20 files / +274 tests, no decrease, 0
+failures**, most of which landed in commits after Loop90; this slice's own share
+is **+1 file / +14 tests**. Focused: `src/lib/pairing-link.test.ts` 21 passed
+(7 before, +14) and `src/lib/workspaces.test.ts` 7 passed. Both typechecks exit
+0, and **`npx oxlint .` is now 0 warnings / 0 errors** — the single
+`unicorn/no-useless-spread` warning recorded in the Loop90 text below was cleared
+by `1c1eaef` and no longer exists. `npx vite build` ✓ 14.42s.
+
+**Not proven:** no browser/Playwright run for this slice; the browser still does
+not *consume* a followed pairing code (nothing in `src/` reads `location.hash`,
+and `PairPage.tsx` shows a server-issued code), so making a followed link pair,
+plus scopes, keep-awake and a `/pair` email/domain allowlist, stays open. No live
+remote pairing, no deployment claim, no security claim.
+
+**Inherited, preserved and deliberately NOT committed** (hashes byte-identical to
+`.omb-scratch/verification/loop80-stop-recovery/inherited-preservation.json`):
+`docs/research/glm/{01..05,README}.md` and `www/templates.html`
+(`aa2ba679…2f09c60`), plus the uncommitted **M** `src/state/teach-replay.ts` +
+`.test.ts` from a later session, whose focused suite passes **20/20** but which
+belongs to its author's slice. `git add` was scoped rather than `-A` for this
+reason. **Treat `docs/research/glm/` as a dated snapshot, not as status** — an
+independent audit this loop found several of its claims stale (see the CEO log
+Loop98 entry).
+
 **Published source: b3786bb.** Loop80 adds cleanup-only Stop recovery, separate from the
 six-second error banner. Receipts bind the original owner/bot/dispatch generation;
 retry never interrupts providers. Later starts invalidate old receipts. Normal
 layout is unchanged; the notice appears only after an uncertain/failed Stop.
+**Loop98 (16 September 2026):** the web **client role** for remote access now
+decides what a pasted pairing link means before it connects anywhere.
+`src/lib/pairing-link.ts` owns `planWorkspaceConnect()`: a self-hosted
+`#code=XXXX-XXXX-XXXX` link connects and carries its code; a bare address (or a
+`/pair` page with no code yet) connects without one; and a **6-digit companion
+code is reported as a desktop-app handoff instead of silently switching the
+workspace**. Query-string codes (`?code=...`) are refused on the link path, and
+the bare-fragment form `/pair#CODE` that `switchTarget()` itself emits is now
+accepted — it was rejected before, so Muster could not parse a link Muster had
+produced. Settings → Connected workspaces is the only UI that changed; the
+channel integration added one `role="status"` notice and one clarifying
+sentence, with no layout, route, mascot or saved-choice change.
+
+Focused `src/lib/pairing-link.test.ts` + `src/lib/workspaces.test.ts`: **2 files
+/ 28 passed / 0 failed**. Full suite **281 files / 4218 passed / 8 skipped /
+0 failed** (386.13s, zero FAIL/✗/unhandled lines in the log) against the newest
+previously recorded **261 / 3944 / 8 / 0** — an increase, but that delta spans
+the intervening commits and inherited uncommitted work, not this slice alone.
+`tsc -p tsconfig.json` and `tsc -p tsconfig.server.json` exit 0; `npx oxlint .`
+now reports **0 warnings and 0 errors** (the `unicorn/no-useless-spread` warning
+recorded below was cleared by `1c1eaef`, so the "exits 0 with one warning" line
+is historical); `vite build` succeeds in 14.42s with the same pre-existing
+>500 kB chunk notice. Production was read only and unchanged by this slice:
+GET `/app` 200 and GET `/api/health` 200.
+
+**Not shipped and not claimed by Loop98:** the browser still does not *consume* a
+code it follows — `PairPage.tsx` renders a server-issued cloud code, and **no
+`location.hash` read exists anywhere in `src/`** — so the client role validates
+and routes a pairing code but does not redeem one. Also absent: pairing scopes
+(full vs chat-and-approvals), paired-device list changes, keep-awake changes, a
+`/pair` email/domain allowlist, and any browser (Playwright) acceptance for this
+slice. See the parity plan's slice-1 status section for the exact boundary.
+
+
 
 **Loop90, uncommitted:** a failed Stop is now durable. The receipt is written to the same
 SQLite database as the transcript before the 503 is answered, and the next boot settles

@@ -106,7 +106,44 @@ and defect work that the audits already queued.
 3. **SSH to the mirror VPS** refused for every key.
 4. **Apple Beta App Review** — nothing to fix locally.
 
-## 5. Explicitly not verified
+## 5. Slice 1 status — remote-access client mode (partially shipped, dated)
+
+Updated by the implementation pass on 16 September 2026. Slice 1's **client
+role and pairing-link parsing** are now implemented and tested; the rest of the
+slice was already present and was not rebuilt.
+
+**Shipped in this pass and wired** (`src/lib/pairing-link.ts` →
+`src/components/ConnectedWorkspacesSection.tsx`, Settings → Connected
+workspaces):
+
+- `planWorkspaceConnect()` is the single decision point for what someone pastes
+  into "Connect hosted workspace": a self-hosted `#code=XXXX-XXXX-XXXX` link
+  connects and carries the code; a bare address (or a `/pair` page with no code
+  yet) connects without one; a **6-digit companion code is reported as a
+  desktop-app handoff instead of silently switching the workspace**.
+- Query-string codes (`?code=...`) are refused on the link path, matching the
+  competitor's stated rule; the code must be in the fragment.
+- The **bare-fragment form `/pair#CODE` that Muster's own `switchTarget()`
+  emits** now parses. Before this, the strict parser rejected a link Muster had
+  produced itself — a round-trip defect.
+- `missingCode` distinguishes "this link has no code yet" (connect as an
+  address) from "this link's code is malformed" (error), so a plain `/pair`
+  address is not rejected.
+
+**Still not done in slice 1 — do not claim it:**
+
+- The browser does not *consume* a pairing code it follows. `switchTarget()`
+  emits `/pair#CODE`, the parser now accepts that form, but **no code path in
+  `src/` reads `location.hash`** (verified by grep), and `PairPage.tsx` renders
+  a server-issued cloud code rather than redeeming a pasted one. Making a
+  followed link actually pair is a separate server + `/pair` slice.
+- No scopes (`scope.admin` vs `scope.client`), no paired-device list changes, no
+  keep-awake or `/pair` email/domain allowlist work — those remain as described
+  in §2.
+- No browser (Playwright) acceptance ran for this slice; evidence is focused
+  unit tests, the web typecheck, the web build and the full suite.
+
+## 6. Explicitly not verified
 
 - No OMB binary was run; no competitor test executed.
 - The "eleven engines" figure remains a documentation claim, not re-verified.
@@ -114,7 +151,7 @@ and defect work that the audits already queued.
   exercising its pairing or account-add flows.
 - No security claim: the last full security scan did not complete cleanly.
 
-## 6. Verification discipline (per the stability contract)
+## 7. Verification discipline (per the stability contract)
 
 Each slice: state defect + expected behavior + smallest touched surface;
 reproduce first; owned fixture, explicit free ports, isolated `OMB_DATA_DIR`;

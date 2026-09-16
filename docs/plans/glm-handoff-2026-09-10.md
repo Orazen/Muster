@@ -3199,3 +3199,64 @@ Production GET **10/10**: app, OS, health and referenced JS/CSS on both muster.t
 Toolchain observation: global pnpm11.17.0 emits an ignored package.json overrides warning before the project command reports pinned10.33.0. Existing lockfile retains all four overrides. No install or dependency configuration change performed; do not infer a vulnerable resolution from that launcher warning alone.
 
 Next remains the audited build-identity implementation and full acceptance in web-release-identity-next-slice.md. Native signing/physical devices, actual Google consent, full sync/restore, VM, scanner and dependency alerts remain open. No application sessions, production settings or paused automations changed. These checks reduce release uncertainty; no public launch or revenue claim.
+
+## Loop98 — remote-access client role: pairing links parsed before connecting (16 September 2026)
+
+**Product change, one surface.** The web client role for remote access now decides
+what a pasted pairing link means before it connects anywhere. New
+`src/lib/pairing-link.ts` owns `parsePairingLink` (strict: the code must be in the
+fragment; a query-string `?code=` is refused), `isPairingLinkInput` and
+`planWorkspaceConnect`; `src/components/ConnectedWorkspacesSection.tsx` calls it.
+A self-hosted `#code=XXXX-XXXX-XXXX` link connects and carries its code; a bare
+address — or a `/pair` page with no code yet — connects without one; a 6-digit
+companion code is reported as a desktop-app handoff instead of switching the
+workspace; the bare-fragment `/pair#CODE` form that `switchTarget()` itself emits
+is now accepted (it was rejected before, so Muster could not parse its own link).
+UI delta is one `role="status"` notice and one clarifying sentence in Settings →
+Connected workspaces. No layout, route, mascot, saved-choice or session change;
+port 8845 and existing user services untouched; no deploy, restart, trigger or
+hosted-setting change.
+
+**Verified.** Focused `src/lib/pairing-link.test.ts` + `src/lib/workspaces.test.ts`
+**2 files / 28 passed / 0 failed** (pairing-link 7 → 21 tests). Full suite
+**281 files / 4218 passed / 8 skipped / 0 failed**, 386.13s, log scanned for zero
+FAIL/✗/unhandled lines, against the newest previously recorded
+**261 files / 3944 passed / 8 skipped / 0 failed** — **no decrease**, but the
+delta spans the intervening commits and inherited uncommitted work, not this slice
+alone. `npx tsc --noEmit -p tsconfig.json` and `-p tsconfig.server.json` both exit
+0. `npx oxlint .` **0 warnings / 0 errors**; the one `unicorn/no-useless-spread`
+warning recorded in `current-state.md` is gone (cleared by `1c1eaef`), so that
+line is historical. `vite build` 14.42s, same pre-existing >500 kB chunk notice.
+Production GET only: `/app` 200, `/api/health` 200 — availability evidence, not
+deployment of this slice.
+
+**Not verified / not claimed.** No browser (Playwright) acceptance, so the notice
+and refusal are unit-tested decisions, not rendered pixels. The browser does not
+**redeem** a followed code: `PairPage.tsx` renders a server-issued cloud code and
+no code path in `src/` reads `location.hash`. No pairing scopes, no paired-device
+list change, no `/pair` email/domain allowlist. No security claim.
+
+**Inherited work preserved, NOT committed here** (path + SHA-256):
+`src/state/teach-replay.ts` `0c9264a3…5433`; `src/state/teach-replay.test.ts`
+`a02734c5…6abb`; `www/templates.html` `aa2ba679…9c60`; `docs/research/glm/*.md`
+(6 untracked files; README `05b382d0…b769`). The teach-replay pair is a distinct,
+passing slice and was left for its own review rather than folded into this commit.
+This is a deliberate deviation from a blanket `git add -A`; the diff and
+`git status --short` were reviewed first.
+
+**Independent subagent corrections to the standing picture:** the Fleet MCP
+surface is **8** tools, not 6 (`server/fleet-mcp.ts`; `send_task` writes, so not all
+are read-only); plan rehearsal is shipped, wired and E2E-specced, so `AGENTS.md`'s
+"queued next ARC slice" line is stale; `/api/connectors/catalog` +
+`PluginsPanel.tsx` and per-bot memory history/rollback do exist. Genuinely absent:
+`/pair` email one-time-code + domain allowlist, eval deltas on the approval card,
+true certify-then-commit playback, unattended weekly eval gate.
+
+**Next smallest slice:** make a followed pairing link actually redeem — teach
+`/pair` (and its server route) to accept a fragment code instead of only
+displaying a cloud-issued one — or, if the owner prefers value over parity,
+the engines "Add account" flow ranked second in the parity plan. Native
+signing/device, actual Google consent, full sync/restore, VM, scanner and the two
+high dependency alerts remain open. Allowance and reset readings were not
+re-measured in this pass.
+

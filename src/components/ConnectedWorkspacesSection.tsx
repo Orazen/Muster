@@ -7,7 +7,14 @@ import { useEffect, useState } from "react";
 import { Check, Cloud, Laptop, Loader2, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { Card } from "./SettingsPrimitives";
-import { addWorkspace, forgetWorkspace, loadWorkspaces, parseWorkspaceInput, probeWorkspace, switchTarget, type SavedWorkspace } from "@/lib/workspaces";
+import { planWorkspaceConnect } from "@/lib/pairing-link";
+import { addWorkspace, forgetWorkspace, loadWorkspaces, probeWorkspace, switchTarget, type SavedWorkspace } from "@/lib/workspaces";
+
+/** A 6-digit code is the desktop app's handoff. Saying so is the honest
+ * answer: switching this browser to the code's host would connect the wrong
+ * thing, and silently ignoring it would look like nothing happened. */
+const DESKTOP_CODE_NOTICE =
+  "That is a 6-digit companion code. Open Muster Desktop on the computer it was issued for and enter it in the app's pairing field — a companion code pairs the desktop app and does not connect a workspace here.";
 
 export function ConnectedWorkspacesSection() {
   const { user } = useAuth();
@@ -17,18 +24,26 @@ export function ConnectedWorkspacesSection() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   useEffect(() => setSaved(loadWorkspaces(accountId)), [accountId]);
 
   const connect = async () => {
-    const parsed = parseWorkspaceInput(address);
-    if ("error" in parsed) {
-      setError(parsed.error);
+    const plan = planWorkspaceConnect(address);
+    if (plan.kind === "error") {
+      setNotice("");
+      setError(plan.error);
+      return;
+    }
+    if (plan.kind === "desktop-code") {
+      setError("");
+      setNotice(DESKTOP_CODE_NOTICE);
       return;
     }
     setBusy(true);
     setError("");
-    const reachable = await probeWorkspace(parsed.origin);
-    const added = addWorkspace(accountId, parsed.origin, name);
+    setNotice("");
+    const reachable = await probeWorkspace(plan.origin);
+    const added = addWorkspace(accountId, plan.origin, name);
     setSaved(added.list);
     setBusy(false);
     if (added.error) setError(added.error);
@@ -38,7 +53,7 @@ export function ConnectedWorkspacesSection() {
       setAddress("");
       setName("");
       // a pairing link carries its code straight through to the other host
-      if (parsed.code) window.location.href = switchTarget(parsed.origin, parsed.code);
+      if (plan.code) window.location.href = switchTarget(plan.origin, plan.code);
     }
   };
 
@@ -129,7 +144,8 @@ export function ConnectedWorkspacesSection() {
           </label>
           <p className="text-[12px] leading-relaxed text-ink-secondary">
             Paste a pairing link from your server&rsquo;s Settings → Remote access, or enter its
-            address and sign in there. This browser stays connected afterward.
+            address and sign in there. This browser stays connected afterward. A pairing code has
+            to be in the link&rsquo;s <code>#fragment</code>, not its query string.
           </p>
           <details className="text-[12px] text-ink-secondary">
             <summary className="cursor-pointer">Need a pairing link?</summary>
@@ -139,6 +155,11 @@ export function ConnectedWorkspacesSection() {
           {error && (
             <p role="alert" className="text-[12px] text-danger">
               {error}
+            </p>
+          )}
+          {notice && (
+            <p role="status" className="text-[12px] text-ink-secondary">
+              {notice}
             </p>
           )}
           <button

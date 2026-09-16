@@ -5224,6 +5224,93 @@ quick-start, www README) now reads `muster.today` — verified every /downloads 
 (JSON-LD sameAs, footer credit) are deliberately kept. Landing re-rendered locally (approval
 simulator + hero intact, download links point at muster.today).
 
+## Loop98 — remote-access client mode: strict pairing links, and the desktop code stays out of the browser (16 September 2026)
+
+**The defect, reproduced by reading the tree.** The client role — Settings →
+Connected workspaces, the web app's "connect to another computer" surface —
+validated everything through `parseWorkspaceInput`, whose `readCode()` reads
+`fromHash || fromQuery`. Two consequences, both wrong and both confirmed at
+`src/lib/workspaces.ts:71-77`:
+
+1. A pairing code in the **query string** was accepted, although the rule the
+   competitor ships and Muster's own strict parser state is fragment-only.
+2. A **6-digit desktop-companion code** was treated exactly like a 12-character
+   self-hosted server code, so pasting one silently navigated this browser at
+   the code's host — connecting the wrong thing rather than saying so.
+
+A third defect made the strict parser unusable: `switchTarget()`
+(`src/lib/workspaces.ts:137-139`) emits the **bare-fragment** form
+(`/pair#CODE`, pinned by `workspaces.test.ts:87`), and `parsePairingLink`
+required the keyed form (`#code=CODE`). A link Muster produced itself could not
+round-trip through Muster's own parser.
+
+**What shipped.** `planWorkspaceConnect()` in `src/lib/pairing-link.ts` is now
+the single decision point for that field, and
+`src/components/ConnectedWorkspacesSection.tsx` renders its verdict:
+
+- self-hosted `#code=XXXX-XXXX-XXXX` link → connect, carry the code;
+- bare address, or a `/pair` page with no code yet → connect without one (a new
+  `missingCode` flag keeps "no code yet" distinct from "code is malformed", so a
+  plain `/pair` address is not rejected);
+- query-string code → refused, with the fragment rule in the message;
+- 6-digit companion code → an explicit `role="status"` notice telling the person
+  to enter it in Muster Desktop's pairing field. Nothing navigates. The old
+  silent workspace switch is gone;
+- the bare-fragment form now parses, so Muster's own link round-trips.
+
+**Verified.** `src/lib/pairing-link.test.ts` **21 passed** (7 before this pass,
++14) and `src/lib/workspaces.test.ts` **7 passed** — 2 files / 28 tests, focused.
+Full suite **281 files / 4218 passed / 8 skipped / 0 failed** in 386.13s, exit 0.
+`npx tsc --noEmit -p tsconfig.json` clean; `npx tsc --noEmit -p tsconfig.server.json`
+exit 0; `npx oxlint .` **0 warnings and 0 errors** (the one
+`unicorn/no-useless-spread` warning recorded at Loop90 is gone — the latest
+commit cleared it, so that line in `current-state.md` is stale). `npx vite build`
+✓ built in 14.42s with the pre-existing >500 kB chunk notice.
+
+Against the newest recorded baseline (261 files / 3944 passed / 8 skipped, Loop90
+on 13 September) this run is **+20 files / +274 tests, no decrease, 0 failures**.
+That growth is mostly commits that landed after Loop90; **this slice's own share
+is +1 file / +14 tests**, and the run is a fresh full-suite result at
+`1c1eaef` plus this slice, not a re-run of the recorded baseline.
+
+**Not verified — do not claim.** No browser/Playwright acceptance ran for this
+slice; the evidence is unit tests, both typechecks, lint and the web build. The
+browser still does not *consume* a code it follows: `switchTarget()` emits
+`/pair#CODE`, the parser now accepts that form, but **no path in `src/` reads
+`location.hash`** (verified by grep) and `PairPage.tsx` renders a server-issued
+cloud code rather than redeeming a pasted one. Making a followed link actually
+pair, plus scopes, keep-awake and the `/pair` email/domain allowlist, remains
+open. No production or live-server pairing was exercised, so there is no
+deployment claim and no security claim.
+
+**Inherited work preserved, not committed.** `git add` was scoped to this slice
+rather than `-A`, because the tree carries another author's uncommitted work and
+two long-standing artifacts that earlier loops (Loop75/79/80) recorded as
+byte-for-byte preserved. Receipt, hashes unchanged from
+`.omb-scratch/verification/loop80-stop-recovery/inherited-preservation.json`:
+
+- `docs/research/glm/{01..05,README}.md` — e.g. `01-where-muster-stands.md`
+  sha256 `f225d5d5…a10b283`, `README.md` `05b382d0…53b769` (all six match Loop80).
+- `www/templates.html` — sha256 `aa2ba679…2f09c60` (matches Loop80).
+- `src/state/teach-replay.ts` + `.test.ts` — uncommitted **M** from a later
+  session (the teach-replay slice). Its focused suite was run and passes
+  **20/20**, but it is not this slice, so it is left in place for its author to
+  commit deliberately with the rest of that work.
+
+A fresh independent read-only audit of the handed-over research summary ran in
+parallel with this slice and found the summary's status table materially wrong:
+the connected-apps marketplace **is** shipped and wired (`PluginsPanel.tsx` +
+`/api/connectors/catalog` + `/api/connectors/:slug/authorize`), memory history
+and rollback **are** shipped (routes at `server/index.ts:6765-6797` +
+`MemoryHistory.tsx`), plan rehearsal **is** implemented, wired and E2E-specced
+(`server/plan-rehearsal.ts`, `PendingApproval.tsx`, `e2e/approval-rehearsal.e2e.spec.ts`),
+and the quoted baselines (238/3352, 172/1689) are stale. Genuinely open, and
+confirmed absent: engines "Add account", channels in `/app`, M2 eval deltas on
+the approval card, M3 true playback, M4 unattended eval gate, and M1's
+bot-written scorecard. The `docs/research/glm/` docs are the source of several
+of those stale claims — read them as a dated snapshot, not as status.
+
+
 ## Loop97 — Local VM: why `podman pull muster/cua-local-vm` can never work, + a machine-RAM guard (14 September 2026)
 
 **The report.** A tester (separate Mac, podman 6.1.1) pasted a terminal where
@@ -5283,4 +5370,85 @@ arm64 zip 200, muster-cli.mjs self-reports 1.12.1. Installed apps auto-update fr
 (verifyUpdateCodeSignature posture unchanged — no publisherName added). Windows/Linux artifacts
 remain at 1.12.0 on the mirror (unchanged code paths for this patch; win still blocked by the
 native-platform gate + Actions billing as before).
+
+## Loop98 — remote-access client role: a pairing link is parsed before it connects (16 September 2026)
+
+**The defect.** The web client role (Settings → Connected workspaces) validated
+everything through `parseWorkspaceInput()`, which accepts a pairing code from the
+**query string** (`readCode`: `fromHash || fromQuery`) and cannot tell a 6-digit
+desktop-companion code from a 12-character self-hosted server code. Two
+observable consequences: a `…/pair?code=…` link — which the benchmark app's own
+surface explicitly rejects — connected anyway; and a 6-digit companion code was
+treated as a server pairing code and navigated the browser to
+`<host>/pair#<code>`, which is the wrong destination for a desktop handoff.
+
+**The third symptom was the interesting one.** `switchTarget()` emits the
+bare-fragment form `/pair#CODE`, and the strict parser inherited in the working
+tree (`src/lib/pairing-link.ts`, untracked, tested) **rejected that form** — it
+only accepted `#code=CODE`. Muster could not parse a pairing link Muster itself
+had produced, and the module was imported by nothing.
+
+**Fix.** `planWorkspaceConnect()` is now the single decision point that
+`ConnectedWorkspacesSection` calls: self-hosted `#code=XXXX-XXXX-XXXX` connects
+and carries the code; a bare address — or a `/pair` page with no code yet —
+connects without one (`missingCode` distinguishes "no code yet" from "malformed
+code", so a plain `/pair` address is not refused); a 6-digit code produces an
+honest `role="status"` notice that it is a desktop-app handoff instead of
+switching the workspace to a host that cannot use it; a query-string code is
+refused with the fragment rule stated; and `muster://pair` deep links keep the
+address path, code and all. The bare-fragment form is now accepted, so Muster's
+own links round-trip. Only Settings → Connected workspaces changed in the UI: one
+notice, one clarifying sentence. No layout, route, mascot or saved-choice change;
+port 8845 and existing sessions untouched.
+
+**Verified.** Focused `src/lib/pairing-link.test.ts` + `src/lib/workspaces.test.ts`
+**2 files / 28 passed / 0 failed** (pairing-link went 7 → 21 tests). Full suite
+**281 files / 4218 passed / 8 skipped / 0 failed** (386.13s; the log contains zero
+FAIL/✗/unhandled lines) against the newest previously recorded
+**261 / 3944 / 8 / 0** — an increase, but that delta spans the intervening commits
+and inherited uncommitted work, not this slice alone. `tsc -p tsconfig.json` and
+`tsc -p tsconfig.server.json` exit 0; `npx oxlint .` reports **0 warnings / 0
+errors** (the `unicorn/no-useless-spread` warning in `current-state.md` was cleared
+by `1c1eaef`); `vite build` succeeds in 14.42s with the same pre-existing
+>500 kB chunk notice. Production was read with GET only and unchanged by this
+slice: `/app` 200, `/api/health` 200. No deploy, no restart, no hosted setting
+change, no trigger touch.
+
+**Not verified.** No browser acceptance ran, so the notice and the refusal are
+evidence of unit-tested decisions, not of rendered pixels. The client role still
+does not **redeem** a code it follows: `PairPage.tsx` renders a server-issued
+cloud code and **no code path in `src/` reads `location.hash`** — following a link
+is a separate server + `/pair` slice. No pairing scopes, no paired-device list
+work, no `/pair` email/domain allowlist. No security claim.
+
+**Inherited work preserved and deliberately NOT included in this commit** (path +
+SHA-256 so a future agent can review each on its own merits):
+
+| path | sha256 |
+|---|---|
+| `src/state/teach-replay.ts` | `0c9264a33b56cc0d44d321087a0cc3638ef73e5c3c0beb9c80ecc4699bfb5433` |
+| `src/state/teach-replay.test.ts` | `a02734c517b49614bae4c77b4cbe83bbf5c74fef0feb4d8e10632735cc8e6abb` |
+| `www/templates.html` | `aa2ba679c2053609effa6b169e4371a152acff35c7ec1080d7cc0c4032f09c60` |
+| `docs/research/glm/*.md` (6 files; README shown) | `05b382d07641246659d5a5a83bd88316ccb0a6c9bf0195e5472724af3153b769` |
+
+The teach-replay pair converts a thrown backend error into a named failed step so
+`replaySkill` never escapes its verdict contract; its 20 tests pass inside the
+green full-suite run above. This is a distinct slice and was left uncommitted
+rather than folded into this commit.
+
+**Independent read-only audit (subagent, separate run).** A read-only agent audited
+a research summary against this tree. Confirmed false: "238 files / 3,352 passed"
+is the Astra Loop-48 figure; "172 files / 1,689 passed" is the old mandate figure;
+"plan rehearsal is the queued next ARC slice and not implemented" is inverted —
+`server/plan-rehearsal.ts`, the card field, its tests and
+`e2e/approval-rehearsal.e2e.spec.ts` are all present; "no pairing tests at all" is
+false. Confirmed present although reported missing: `/api/connectors/catalog`
+(`server/index.ts`) with `PluginsPanel.tsx`, and per-bot memory history/rollback
+(`/api/bots/:id/memory/history`, rendered in `SettingsPanel.tsx`). Genuinely
+absent: `/pair` email one-time-code + domain allowlist, an evidence-carrying
+persona-change proposal on the approval card, true certify-then-commit playback,
+and an unattended weekly eval gate. The Fleet MCP surface is **8** tools
+(`server/fleet-mcp.ts`), so `AGENTS.md`'s "6 bounded tools" is the stale number —
+and not all 8 are read-only (`send_task` writes). No security claim anywhere in
+this entry.
 
