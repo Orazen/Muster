@@ -38,6 +38,7 @@ import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER, type WhyEntry } fr
 import { clearOnboardingStatus, readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
 import { SeedAnswerDispatcher, seedAnswerInputSchema, seedStartInputSchema, seedStatusInputSchema } from "./seed-answer-dispatch.ts";
 import { recommendTeam, type JevCandidate } from "./jev-dispatch.ts";
+import { workspaceBrain } from "./workspace-brain.ts";
 import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
@@ -4928,6 +4929,62 @@ let requestUserEmail = "";
         return json(res, 200, { messageIds });
       }
       return json(res, 404, { error: "unknown internal endpoint" });
+    }
+
+    // ── workspace brain (server/workspace-brain.ts) ─────────────────
+    // Explicit facts with provenance, withdrawal (never deletion), a
+    // zero-LLM entity graph, and gap-aware retrieval. Owner-scoped like
+    // every other record: undefined owner = the one desktop user, and a
+    // signed-in caller only ever reads and writes their own slice — the
+    // gbrain company-brain invariant, enforced structurally.
+    //
+    // Owner resolution: under SELF_HOSTED the gate above already set
+    // requestUserId (and 401'd anonymous callers). On a LOCAL install the
+    // gate never resolves a session, so the brain resolves it read-only
+    // here — the same seam the workspace-backup family uses — because a
+    // local install can still carry multiple signed-in accounts (Google
+    // login). Without this, facts written by one account would land
+    // unowned and leak into every other account's queries.
+    const brainOwner = requestUserId ?? (await getSession(req).catch(() => null))?.userId;
+    if (path === "/api/brain" && method === "GET") {
+      return json(res, 200, { brain: workspaceBrain().stats(brainOwner) });
+    }
+    if (path === "/api/brain/query" && method === "POST") {
+      const body = await readBody(req);
+      const q = isText(body.text) ? body.text : "";
+      if (!q.trim()) return json(res, 400, { error: "text required" });
+      const limitRaw = Number(body.limit);
+      return json(res, 200, {
+        result: workspaceBrain().query(q, brainOwner, {
+          limit: Number.isInteger(limitRaw) ? limitRaw : undefined,
+          includingWithdrawn: body.includingWithdrawn === true,
+        }),
+      });
+    }
+    if (path === "/api/brain/facts" && method === "POST") {
+      const body = await readBody(req);
+      const text = isText(body.text) ? body.text.trim() : "";
+      const source = isText(body.source) ? body.source.trim() : "";
+      if (!text || !source) return json(res, 400, { error: "text and source required" });
+      try {
+        const fact = workspaceBrain().add({
+          text,
+          source,
+          kind: isText(body.kind) ? body.kind : undefined,
+          origin: isText(body.origin) ? body.origin : undefined,
+          supersedes: isText(body.supersedes) ? body.supersedes : undefined,
+          ownerId: brainOwner,
+        });
+        return json(res, 201, { fact });
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    let brainMatch = path.match(/^\/api\/brain\/facts\/([\w-]+)\/withdraw$/);
+    if (brainMatch && method === "POST") {
+      // Withdrawal is owner-checked inside the brain; a foreign id is 404.
+      const ok = workspaceBrain().withdraw(brainMatch[1], brainOwner);
+      return json(res, ok ? 200 : 404, ok ? { withdrawn: true } : { error: "no such fact" });
     }
 
     // ── routines calendar ────────────────────────────────────────────────
