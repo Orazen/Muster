@@ -5558,3 +5558,15 @@ untouched (path + hash receipt carried in the Loop98 entry). Inherited
 
 **Still open.** Mirror promotion (VPS SSH still refused — unchanged), Windows/Linux legs (CI billing), pairing scopes/allowlist, /pair redemption decision, Engines Add-account, channels in /app, tour pacing, voice W1-W3. No security claim.
 
+
+## Loop103 — account-linked Google Drive backup shipped end to end (17 September 2026)
+
+**The slice (318ddaa, pushed).** The 501-stubbed account transport is now real: /api/workspace/google/connect issues a consent URL from the session's own Google account row, /callback trades the code for a drive.appdata refresh token stored on that account row, and /push + /pull move the encrypted v2 workspace bundle through the user's own Drive (ciphertext-only; the passphrase never leaves the client). PortableBackupCard shows the Connect-Google step and account push/pull buttons from the capability contract, which now carries { available, connected } instead of a hard false. The UI card's account section renders only when the status route advertises it for a live session.
+
+**The harness caught my first draft being wrong, and it was right to.** My initial routes used a primaryUserId() fallback, which let a session-less request reach account credentials (the harness's noCredentialMismatch cleanup check failed) and let /app?drive=… be navigated by anyone. The final contract: every account route answers the historical 501 when no session exists - checked before body parsing - the hosted installation-backup wall keeps returning 403 ahead of them, state is HMAC-signed with a 10-minute TTL, and the callback only exchanges a code when the state-bound user equals the session user. Availability is advertised only to a live session. The harness's containment tests pass unchanged; its capability helper was updated to the new shape.
+
+**Verification (all run this turn).** Full suite 281 files / 4235 passed / 8 skipped / 0 failed. Harness file alone 139 passed. Focused 3 files / 113 passed. Both typechecks exit 0, oxlint 0 warnings / 0 errors, vite build ok. Pushed as 318ddaa on top of the Loop102 state.
+
+**Competitive refresh (docs/research/vellum-omb-refresh-2026-09-17.md, this commit).** OMB shipped 13 releases in the week to v0.1.83 (coordination ergonomics, routines deferral, VPS unattended runs, Android threads); Vellum's default branch moved the morning of this note (inline integration connect, memory v3 capture, desktop frame-time discipline). The Drive slice is a genuine differentiator today; cadence and guided-first-run remain the open fronts. Method: public API/source only, 0 competitor runtime checks, no security claim.
+
+**Still open.** Browser/Playwright acceptance of the Drive connect flow (needs live OAuth config to exercise end to end), mirror promotion (VPS SSH still owner-blocked), Windows/Linux legs (CI billing), and the standing feature backlog (channels in /app, Engines Add-account, guided first run, tour pacing, voice W1-W3). Inherited preservation set untouched: docs/research/glm/ + www/templates.html.
