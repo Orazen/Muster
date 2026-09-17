@@ -6,7 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { z } from "zod";
-import { uploadBundle, downloadBundle } from "./drive-sync.ts";
+import { uploadBundle, downloadBundle, BUNDLE_V2_NAME } from "./drive-sync.ts";
 import { deploymentSigningSecret } from "./auth.ts";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -41,10 +41,9 @@ export function googleTokensFor(db: DatabaseSync, userId: string): GoogleAccount
 const tokenResponseSchema = z.object({
   access_token: z.string().min(1),
   expires_in: z.number().optional(),
-});
-
-/** Refresh the Google access token with the stored refresh token. */
-export async function refreshGoogleToken(refreshToken: string): Promise<string> {
+});/** Refresh the Google access token and persist it on the account row so the
+ * next operation reuses it instead of paying Google a fresh grant. */
+async function refreshGoogleToken(db: DatabaseSync, userId: string, refreshToken: string): Promise<string> {
   if (!CLIENT_ID || !CLIENT_SECRET) throw new Error("Google OAuth is not configured on this deployment");
   const res = await fetch(TOKEN_URL, {
     method: "POST",
@@ -58,28 +57,42 @@ export async function refreshGoogleToken(refreshToken: string): Promise<string> 
     signal: AbortSignal.timeout(15_000),
   });
   const parsed = tokenResponseSchema.safeParse(await res.json().catch(() => null));
+
   if (!res.ok || !parsed.success) throw new Error("could not refresh the Google session — sign in with Google again");
+  db.prepare(
+    `UPDATE "account" SET "accessToken" = ?, "accessTokenExpiresAt" = ?, "updatedAt" = ?
+     WHERE "userId" = ? AND "providerId" = 'google'`,
+  ).run(
+    parsed.data.access_token,
+    parsed.data.expires_in ? new Date(Date.now() + parsed.data.expires_in * 1000).toISOString() : null,
+    new Date().toISOString(),
+    userId,
+  );
   return parsed.data.access_token;
 }
 
 /** A working access token for this user's Google account: reuse when fresh,
- * refresh when expired, or null when the user has no Google login. */
+ * refresh — and persist the refresh — when expired, or null when the user has
+ * no Google login. */
 export async function accessTokenFor(db: DatabaseSync, userId: string): Promise<string | null> {
   const tokens = googleTokensFor(db, userId);
   if (!tokens) return null;
   const fresh = tokens.accessToken && tokens.expiresAt && tokens.expiresAt - Date.now() > 60_000;
   if (fresh && tokens.accessToken) return tokens.accessToken;
   if (!tokens.refreshToken) return null;
-  return await refreshGoogleToken(tokens.refreshToken);
+  return await refreshGoogleToken(db, userId, tokens.refreshToken);
 }
 
-/** Both token sources share one checked create/update/restore transport. */
+/** Both token sources share one checked create/update/restore transport.
+ * The account transport moves the portable v2 bundle: a Google-login backup
+ * must never clobber the manual connection's v1 file, which an older build
+ * may still need for its own restore flow. */
 export async function drivePushFor(accessToken: string, payload: string): Promise<string> {
-  return (await uploadBundle(accessToken, payload)).id;
+  return (await uploadBundle(accessToken, payload, BUNDLE_V2_NAME)).id;
 }
 
 export async function drivePullFor(accessToken: string): Promise<string | null> {
-  return downloadBundle(accessToken);
+  return downloadBundle(accessToken, BUNDLE_V2_NAME);
 }
 
 // ── opt-in Drive connect ─────────────────────────────────────────────────

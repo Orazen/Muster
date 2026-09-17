@@ -77,8 +77,8 @@ const ACCOUNT_DRIVE_OFF = {
   error: "Account-linked Google Drive backup is unavailable. Use a Drive connection configured on this computer.",
 };
 
-function payloadOf(body: unknown): string {
-  return isText((body as { payload?: unknown } | null)?.payload) ? (body as { payload: string }).payload : "";
+function payloadOf(body: any): string {
+  return isText(body?.payload) ? body.payload : "";
 }
 
 // ── Portable workspace backup v2 (server/workspace-bundle-v2.ts) ───────────
@@ -270,7 +270,7 @@ const routes: BackupRoute[] = [
     match: (method, path) => path === "/api/workspace/v2/export" && method === "POST",
     handle: async (req, res, ctx) => {
       const body = await readBody(req);
-      const passphrase = isText((body as { passphrase?: unknown } | null)?.passphrase) ? (body as { passphrase: string }).passphrase : "";
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
       if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
       try {
         const payload = bundleV2.buildPayloadV2({ dataDir: ctx.dataDir(), appVersion: ctx.appVersion() });
@@ -290,7 +290,7 @@ const routes: BackupRoute[] = [
     match: (method, path) => path === "/api/workspace/v2/verify" && method === "POST",
     handle: async (req, res) => {
       const body = await readBody(req);
-      const passphrase = isText((body as { passphrase?: unknown } | null)?.passphrase) ? (body as { passphrase: string }).passphrase : "";
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
       const payload = payloadOf(body);
       if (!payload) return json(res, 400, { error: "payload is required" });
       const result = bundleV2.verifyBundleV2(Buffer.from(payload, "utf8"), { passphrase });
@@ -301,7 +301,7 @@ const routes: BackupRoute[] = [
     match: (method, path) => path === "/api/workspace/v2/restore" && method === "POST",
     handle: async (req, res, ctx) => {
       const body = await readBody(req);
-      const passphrase = isText((body as { passphrase?: unknown } | null)?.passphrase) ? (body as { passphrase: string }).passphrase : "";
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
       const payload = payloadOf(body);
       if (!payload) return json(res, 400, { error: "payload is required" });
       if (body?.confirm !== true) return json(res, 400, { error: "restoring replaces the current fleet — send confirm: true to proceed" });
@@ -317,7 +317,7 @@ const routes: BackupRoute[] = [
       // before any body parsing, exactly like the other account routes.
       if (!ctx.requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
       const body = await readBody(req);
-      const passphrase = isText((body as { passphrase?: unknown } | null)?.passphrase) ? (body as { passphrase: string }).passphrase : "";
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
       if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
       const accessToken = await accountDrive.accessTokenFor(getDb(), ctx.requestUserId);
       if (!accessToken) {
@@ -357,7 +357,7 @@ const routes: BackupRoute[] = [
     match: (method, path) => path === "/api/workspace/v2/drive/push" && method === "POST",
     handle: async (req, res, ctx) => {
       const body = await readBody(req);
-      const passphrase = isText((body as { passphrase?: unknown } | null)?.passphrase) ? (body as { passphrase: string }).passphrase : "";
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
       if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
       const refreshToken = ctx.config().driveSync?.refreshToken;
       if (!refreshToken) return json(res, 400, { error: "Google Drive is not connected yet" });
@@ -377,7 +377,7 @@ const routes: BackupRoute[] = [
     match: (method, path) => path === "/api/workspace/v2/drive/pull" && method === "POST",
     handle: async (req, res, ctx) => {
       const body = await readBody(req);
-      const passphrase = isText((body as { passphrase?: unknown } | null)?.passphrase) ? (body as { passphrase: string }).passphrase : "";
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
       if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
       const cfg = ctx.config();
       const refreshToken = cfg.driveSync?.refreshToken;

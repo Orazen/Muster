@@ -4613,8 +4613,22 @@ let requestUserEmail = "";
     // sat: inside the session gate, above the multi-tenant guard; the table
     // itself keeps capability ahead of the hosted wall. First match wins;
     // false means the family does not claim the request.
+    //
+    // The account routes are account-scoped, so the family needs the caller's
+    // identity even on a local install, where the gate above never resolves
+    // one (loopback keeps its implicit trust). Resolving the session here is
+    // read-only — it grants nothing: the gate above stays 401-only-under-
+    // SELF_HOSTED, the multi-tenant guard below stays session-gated, and a
+    // request without a session keeps the family's contained 501s. Hosted
+    // installs are unaffected: SELF_HOSTED short-circuits the condition, so
+    // the session is still resolved exactly once, by the gate above.
+    let backupUserId: string | null = requestUserId ?? null;
+    if (!SELF_HOSTED && path.startsWith("/api/workspace/") && !backupUserId) {
+      const session = await getSession(req).catch(() => null);
+      backupUserId = session?.userId ?? null;
+    }
     if (
-      await handleWorkspaceBackupRoute(req, res, method, path, requestUserId ?? null, {
+      await handleWorkspaceBackupRoute(req, res, method, path, backupUserId, {
         config: () => cfg,
         appVersion,
         dataDir: () => DATA_DIR,

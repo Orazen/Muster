@@ -12,7 +12,7 @@ import { z } from "zod";
 const modeSchema = z.enum(["ok", "refresh-error", "list-error", "upload-error", "download-error", "corrupt-download", "hold-download"]);
 export type DriveFixtureMode = z.infer<typeof modeSchema>;
 const settingsSchema = z.object({ directory: z.string(), refreshToken: z.string(), clientId: z.string(), clientSecret: z.string(), accessToken: z.string() });
-const entrySchema = z.object({ operation: z.enum(["refresh", "list", "upload", "download"]), mode: modeSchema, credentialsMatch: z.boolean() });
+const entrySchema = z.object({ operation: z.enum(["refresh", "list", "upload", "download", "exchange"]), mode: modeSchema, credentialsMatch: z.boolean() });
 const fixtureFileId = "owned-workspace-file";
 
 /** Its credential values are synthetic and must remain in owned fixture files. */
@@ -28,6 +28,7 @@ export function createWorkspaceDriveFixture(directory: string) {
     preloadPath: fileURLToPath(import.meta.url),
     env: { MUSTER_DRIVE_FIXTURE: settingsPath, GOOGLE_CLIENT_ID: settings.clientId, GOOGLE_CLIENT_SECRET: settings.clientSecret },
     refreshToken: settings.refreshToken,
+    accessToken: settings.accessToken,
     payloadPath: join(directory, "uploaded-bundle.txt"),
     networkLog: join(directory, "outbound-attempts.txt"),
     heldDownloadPath: join(directory, "download-held"),
@@ -58,6 +59,16 @@ function installTransport(settingsPath: string): void {
     const mode = currentMode();
     if (request.url === "https://oauth2.googleapis.com/token" && request.method === "POST") {
       const body = new URLSearchParams(await request.text());
+      if (body.get("grant_type") === "authorization_code") {
+        // Consent-code exchange for the opt-in Drive connect. Same credential
+        // boundary as refresh: client id/secret must match the captured ones
+        // and the redirect_uri must be this deployment's own callback path.
+        record("exchange", mode, body.size === 5 && body.get("client_id") === settings.clientId
+          && body.get("client_secret") === settings.clientSecret && body.get("grant_type") === "authorization_code"
+          && body.get("redirect_uri")?.includes("/api/workspace/google/callback") === true);
+        return mode === "refresh-error" ? json('{"error":"fixture exchange refused"}', 503)
+          : json(JSON.stringify({ access_token: settings.accessToken, refresh_token: settings.refreshToken, expires_in: 3600 }));
+      }
       record("refresh", mode, body.size === 4 && body.get("refresh_token") === settings.refreshToken
         && body.get("client_id") === settings.clientId && body.get("client_secret") === settings.clientSecret
         && body.get("grant_type") === "refresh_token");
@@ -66,13 +77,15 @@ function installTransport(settingsPath: string): void {
     if (url.origin !== "https://www.googleapis.com") return blocked();
     const authorized = request.headers.get("authorization") === `Bearer ${settings.accessToken}`;
     if (url.pathname === "/drive/v3/files" && request.method === "GET") {
-      if (url.searchParams.get("spaces") !== "appDataFolder" || !url.searchParams.get("q")?.includes("muster-workspace.enc")) return blocked();
+      if (url.searchParams.get("spaces") !== "appDataFolder" || !(url.searchParams.get("q")?.includes("muster-workspace") ?? false)) return blocked();
+      const v2 = url.searchParams.get("q")?.includes("muster-workspace-v2.enc") === true;
       record("list", mode, authorized);
       return mode === "list-error" ? json('{"error":"fixture list refused"}', 503)
-        : json(JSON.stringify({ files: existsSync(owned("uploaded-bundle.txt")) ? [{ id: fixtureFileId }] : [] }));
+        : json(JSON.stringify({ files: existsSync(owned(v2 ? "uploaded-bundle-v2.txt" : "uploaded-bundle.txt")) ? [{ id: fixtureFileId }] : [] }));
     }
-    const existing = url.pathname === `/upload/drive/v3/files/${fixtureFileId}`;
-    if ((existing && request.method === "PATCH") || (url.pathname === "/upload/drive/v3/files" && request.method === "POST")) {
+    const v2Name = "muster-workspace-v2.enc";
+    const existing = url.pathname === `/upload/drive/v3/files/${fixtureFileId}` && request.method === "PATCH";
+    if (existing || (url.pathname === "/upload/drive/v3/files" && request.method === "POST")) {
       if (url.searchParams.get("uploadType") !== "multipart" || url.searchParams.get("fields") !== "id") return blocked();
       record("upload", mode, authorized);
       if (mode === "upload-error") return json('{"error":"fixture upload refused"}', 503);
@@ -82,12 +95,19 @@ function installTransport(settingsPath: string): void {
       const metadataPart = parts.find((part) => part.includes("Content-Type: application/json"));
       const payloadPart = parts.find((part) => part.startsWith("\r\nContent-Type: application/octet-stream\r\n\r\n"));
       if (!metadataPart || !payloadPart) throw new Error("Fixture upload has no metadata or encrypted payload");
-      const metadata = z.object({ name: z.literal("muster-workspace.enc"), parents: z.array(z.literal("appDataFolder")).optional() })
+      const metadata = z.object({ name: z.enum(["muster-workspace.enc", v2Name]), parents: z.array(z.literal("appDataFolder")).optional() })
         .parse(JSON.parse(metadataPart.slice(metadataPart.indexOf("\r\n\r\n") + 4).trim()));
       if (!existing && metadata.parents?.[0] !== "appDataFolder") throw new Error("Fixture upload is not appDataFolder scoped");
+      const v2 = metadata.name === v2Name;
       const payload = payloadPart.slice("\r\nContent-Type: application/octet-stream\r\n\r\n".length, -2);
-      if (!payload.startsWith("muster-workspace-bundle:1:")) throw new Error("Fixture received an unencrypted workspace");
-      writeFileSync(owned("uploaded-bundle.txt"), payload, { mode: 0o600 });
+      // The v1 bundle is the colon-string form; the v2 bundle is a JSON
+      // envelope whose kdf/cipher fields carry the encryption. Either way the
+      // fixture must refuse raw plaintext workspace bytes.
+      const v1Envelope = payload.startsWith("muster-workspace-bundle:1:");
+      const v2Envelope = payload.startsWith(`{"magic":"muster-workspace-bundle","schema":`)
+        && payload.includes('"kdf"') && payload.includes('"cipher"');
+      if (!v1Envelope && !v2Envelope) throw new Error(`Fixture received an unencrypted workspace (head: ${payload.slice(0, 40).replace(/[^\x20-\x7e]/g, "?")})`);
+      writeFileSync(owned(v2 ? "uploaded-bundle-v2.txt" : "uploaded-bundle.txt"), payload, { mode: 0o600 });
       return json(JSON.stringify({ id: fixtureFileId }));
     }
     if (url.pathname === `/drive/v3/files/${fixtureFileId}` && url.search === "?alt=media" && request.method === "GET") {
@@ -105,7 +125,10 @@ function installTransport(settingsPath: string): void {
           }
         } finally { rmSync(owned("download-held"), { force: true }); }
       }
-      return new Response(readFileSync(owned("uploaded-bundle.txt"), "utf8"));
+      // The two bundle names share one file id, so the stored query decides
+      // which payload to hand back.
+      const storedV2 = existsSync(owned("uploaded-bundle-v2.txt"));
+      return new Response(readFileSync(owned(storedV2 ? "uploaded-bundle-v2.txt" : "uploaded-bundle.txt"), "utf8"));
     }
     return blocked();
   };

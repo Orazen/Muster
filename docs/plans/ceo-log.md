@@ -5582,3 +5582,18 @@ Real defects found and fixed while making it green:
 - **New acceptance (98776d6):** pairing e2e gains the carried-code browser proof — `/pair#CODE` survives the auth-gate bounce, displays with the desktop handoff instruction, and the code is still redeemable afterwards (display does not consume).
 
 Receipts: e2e **22 passed**; unit **281 files / 4235 passed / 0 failed**; both typechecks exit 0; oxlint 0/0. Pushed to origin/main.
+
+## Loop105 — the account-Drive happy path is pinned, and it took three real fixes to make it true (17 September 2026)
+
+The acceptance suite (server/account-drive-roundtrip.test.ts, 8 tests over a real booted server with the owned Drive fixture) is green, and building it surfaced defects nobody could have seen without exercising the round trip:
+
+- **Seam (product):** requestUserId was resolved only under SELF_HOSTED, where the family is 403-walled - so accountDrive.available could never be true in ANY configuration. The backup family now resolves the session on local installs too; multi-tenancy untouched. Probe-proven end to end: anonymous inert, authed advertises, connect, callback 302, tokens on the account row, push 200, pull 200, staged canary byte-identical to source.
+- **Transport (product):** refreshed access tokens were discarded - every operation paid Google a fresh grant. Refreshes now persist accessToken + expiry; the suite pins reuse-when-fresh (no refresh on push) and expired -> exactly one refresh -> persisted.
+- **Fixture:** the authorization_code exchange check demanded 4 params; a legitimate exchange carries 5. The owned fixture was refusing the CORRECT exchange, and pushes silently fell back to refresh grants. Fixed to body.size === 5.
+- **Lint debt (self-caught):** 15 anti-slop errors had shipped merged inside PR #8's extraction (SAFETY comments left behind in index.ts; cast-style narrowing instead of the house isText pattern). Restored to house style; the branch-tip 'lint 0/0' claim that missed it was a tail -1 misread. Lesson recorded: the 'Found N' line is the verdict, not the 'Finished in' line.
+
+Receipts at the branch tip: focused suite 8/8; oxlint 0/0; both typechecks exit 0. Full unit + e2e + PR/merge: this loop's delivery step.
+
+## Loop106 — the blue selection is calm (17 September 2026)
+
+Owner-reported: dragging through text painted 45% of the brand accent over dark panels. The global ::selection now uses the raised-hover surface tone (skin-correct by construction), html declares color-scheme: dark (native widgets stop rendering light), and the mobile tap-flash is transparent. Verified in the live preview by real double-click selection: computed style rgb(61,61,61)/80%, zero blue, console clean. PR #9 merged (119001a) with checks platform-refused per the PR-#8 policy; merge comment states the local evidence.
