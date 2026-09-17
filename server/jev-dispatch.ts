@@ -136,7 +136,13 @@ export function scoreCandidate(task: string, candidate: JevCandidate): Candidate
 export function recommendTeam(
   task: string,
   candidates: JevCandidate[],
-  options?: { maxPicks?: number },
+  options?: {
+    maxPicks?: number;
+    /** Workspace-brain facts (owner-filtered upstream). When present, each
+     * candidate also earns relevance from facts citing that bot's name as
+     * their source — institutional memory, not just profile keywords. */
+    brainFacts?: Array<{ text: string; source: string }>;
+  },
 ): JevDispatch {
   const brief = task.trim();
   if (!brief || candidates.length === 0) {
@@ -148,8 +154,36 @@ export function recommendTeam(
   }
   const pool = candidates.slice(0, MAX_CANDIDATES);
   const complexity = taskComplexity(brief);
+  // Institutional-memory bonus: a fact the brain recorded FROM a bot (its
+  // name in the source field) whose text overlaps the task adds +2 per
+  // fact, capped at two facts (+4) so profile keywords always outrank a
+  // volume of citations — memory refines the ranking, never buys it.
+  const taskWords = new Set(taskTokens(brief));
+  const factBonus = new Map<string, { n: number; example: string }>();
+  for (const fact of options?.brainFacts ?? []) {
+    const overlap = taskTokens(fact.text).filter((w) => taskWords.has(w)).length;
+    if (overlap === 0) continue;
+    for (const c of pool) {
+      if (!fact.source.toLowerCase().includes(c.name.toLowerCase())) continue;
+      const cur = factBonus.get(c.id);
+      if (cur) {
+        if (cur.n < 2) cur.n += 1;
+      } else {
+        factBonus.set(c.id, { n: 1, example: fact.text.slice(0, 80) });
+      }
+    }
+  }
   const scored = pool
-    .map((c) => scoreCandidate(brief, c))
+    .map((c) => {
+      const base = scoreCandidate(brief, c);
+      const bonus = factBonus.get(c.id);
+      return {
+        candidate: c,
+        relevance: base.relevance + (bonus ? bonus.n * 2 : 0),
+        matched: base.matched,
+        brainExample: bonus?.example,
+      };
+    })
     .sort((a, b) =>
       b.relevance - a.relevance
       || Number(a.candidate.busy ?? false) - Number(b.candidate.busy ?? false)
@@ -162,9 +196,11 @@ export function recommendTeam(
     const pick: TeamPick = {
       botId: s.candidate.id,
       name: s.candidate.name,
-      reason: s.matched.length
-        ? `matched on ${s.matched.slice(0, 4).join(", ")} (${s.candidate.busy ? "busy now" : "available"})`
-        : `${s.candidate.title ?? "general assistant"} (${s.candidate.busy ? "busy now" : "available"})`,
+      reason: s.brainExample
+        ? `workspace brain cites their work: "${s.brainExample}" (${s.candidate.busy ? "busy now" : "available"})`
+        : s.matched.length
+          ? `matched on ${s.matched.slice(0, 4).join(", ")} (${s.candidate.busy ? "busy now" : "available"})`
+          : `${s.candidate.title ?? "general assistant"} (${s.candidate.busy ? "busy now" : "available"})`,
     };
     if (s.candidate.model !== undefined) pick.model = s.candidate.model;
     const fit = fitNote(complexity, s.candidate.model);

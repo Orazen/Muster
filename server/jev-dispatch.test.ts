@@ -111,4 +111,54 @@ describe("recommendTeam", () => {
     const d = recommendTeam("login broken", many);
     expect(d.handleSelf).toBe(false);
   });
+
+  it("boosts a bot the workspace brain cites for this exact work", () => {
+    // Without brain facts, the calendar bot has no overlap — nobody credible.
+    const candidates = [
+      bot({ id: "gen", name: "Helper", title: "calendar scheduling" }),
+      bot({ id: "db", name: "Data Bot", title: "database pipelines" }),
+    ];
+    const plain = recommendTeam("database migration review", candidates);
+    expect(plain.picks[0].botId).toBe("db"); // weak profile match only
+    // With brain facts recording Helper doing database work, it overtakes
+    // on institutional memory: brain-cited evidence outranks weak keywords.
+    const d = recommendTeam("database migration review", candidates, {
+      brainFacts: [
+        { text: "database migration review for the billing service", source: "Helper standup 2026-09-10" },
+        { text: "database migration runbook written", source: "Helper" },
+      ],
+    });
+    expect(d.picks[0].botId).toBe("gen");
+    expect(d.picks[0].reason).toContain("workspace brain cites");
+  });
+
+  it("ignores brain facts that name no candidate or share no words", () => {
+    const candidates = [bot({ id: "a", name: "Authy", title: "login security" })];
+    const d = recommendTeam("login broken", candidates, {
+      brainFacts: [
+        { text: "completely unrelated gardening notes about roses", source: "Authy" },
+        { text: "login security overhaul done", source: "Somebody Else entirely" },
+      ],
+    });
+    expect(d.picks[0].botId).toBe("a");
+    expect(d.picks[0].reason).not.toContain("workspace brain cites");
+  });
+
+  it("caps the brain bonus so one prolific bot cannot buy the top slot", () => {
+    // Same title keyword (security=3), but Spec also owns login+security in
+    // its description and name: base 7. Spam matches only the title (3) and
+    // brings 12 brain citations — capped at +4 → 7. The tie falls to the
+    // profile-stronger bot, so citations cannot buy the top slot.
+    const candidates = [
+      bot({ id: "spec", name: "Login Spec", title: "security", description: "owns login and security for the platform" }),
+      bot({ id: "spam", name: "Spam", title: "security", description: "misc notes" }),
+    ];
+    const facts = Array.from({ length: 12 }, (_, i) => ({
+      text: "login work item",
+      source: `Spam log ${i}`,
+    }));
+    const d = recommendTeam("login security", candidates, { brainFacts: facts });
+    expect(d.picks[0].botId).toBe("spec");
+    expect(d.picks[0].reason).not.toContain("workspace brain cites");
+  });
 });

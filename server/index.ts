@@ -4776,9 +4776,19 @@ let requestUserEmail = "";
               id: bot.id, name: bot.name, model: bot.modelSelection.model || undefined,
               busy: !!bot.busy, title: bot.title || undefined, description: bot.description || undefined,
             }));
+          // Institutional memory: facts the caller's own brain slice holds
+          // about the roster bias the ranking — gbrain's whole point. Only
+          // the calling peer's owner-scope is consulted, never another
+          // account's.
+          const roster = store.bots.filter((bot) => peerTarget(lease, bot.id));
+          const brainFacts = workspaceBrain()
+            .query(task, lease.ownerId, { limit: 24 }).hits
+            .map((h) => ({ text: h.fact.text, source: h.fact.source }))
+            .filter((f) => roster.some((bot) => f.source.toLowerCase().includes(bot.name.toLowerCase())));
           const maxPicksRaw = Number(body.maxPicks);
           const dispatch = recommendTeam(task, candidates, {
             maxPicks: Number.isInteger(maxPicksRaw) ? maxPicksRaw : undefined,
+            brainFacts,
           });
           return json(res, 200, { dispatch });
         }
