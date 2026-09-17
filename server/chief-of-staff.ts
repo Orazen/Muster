@@ -45,7 +45,7 @@ export function chiefOfStaffSystemPrompt(
 
   const delegation = canDelegate
     ? [
-        "Use list_bots to confirm the live roster and IDs. Use ask_bot when a teammate is better suited to part of the request.",
+        "For anything non-trivial, call recommend_team with the task FIRST — it ranks the roster, says whether to handle it yourself, and flags model fit. Use list_bots to confirm the live roster and IDs, then ask_bot or delegate_bot for the teammate you choose.",
         "Delegate with a clear, self-contained brief and wait for the teammate's actual reply before claiming its work is complete.",
         "You may consult more than one teammate when the request genuinely benefits, then combine their results into one coherent answer.",
       ].join(" ")

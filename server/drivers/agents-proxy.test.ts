@@ -122,11 +122,11 @@ afterAll(async () => {
 });
 
 describe("agents-proxy MCP surface", () => {
-  it("answers the MCP handshake and lists all three tools", async () => {
+  it("answers the MCP handshake and lists all four tools", async () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(["list_bots", "ask_bot", "delegate_bot"]);
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(["list_bots", "ask_bot", "recommend_team", "delegate_bot"]);
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {

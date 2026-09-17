@@ -51,6 +51,19 @@ const TOOLS: JsonObject[] = [
     },
   },
   {
+    name: "recommend_team",
+    description:
+      "Rank your teammates for a task BEFORE messaging anyone: returns the best-fit bots (with a one-line reason and a model-fit note) plus whether you should just handle it yourself. Cheap and read-only — call this when the request could go to several people and you want the right one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "The task or request to rank teammates against, in one or two sentences." },
+        max_picks: { type: "number", description: "How many candidates to return (1-3, default 2)." },
+      },
+      required: ["task"],
+    },
+  },
+  {
     name: "delegate_bot",
     description:
       "Hand a task to another bot ASYNCHRONOUSLY: returns immediately and the peer runs after your current turn finishes. Use this when you want to keep working or hand off a long-running subtask without waiting. The user sees the peer's reply as its own turn; you do NOT receive the reply inline.",
@@ -130,6 +143,26 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     if (r.busy) return { text: `That bot is busy right now — try again after it finishes.` };
     if (r.error) return { text: `Couldn't reach that bot: ${r.error}`, isError: true };
     return { text: `${r.botName ?? "Bot"} replied:\n${r.text ?? "(no reply)"}` };
+  }
+  if (name === "recommend_team") {
+    const task = String(args.task ?? "").trim();
+    if (!task) return { text: "recommend_team needs a task to rank against.", isError: true };
+    const maxPicks = Number(args.max_picks);
+    const payload: JsonObject = { fromBotId: BOT_ID, task };
+    if (Number.isInteger(maxPicks)) payload.maxPicks = maxPicks;
+    const r = await api(`/api/internal/recommend-team`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    if (r.error) return { text: `Couldn't rank the team: ${r.error}`, isError: true };
+    // SAFETY: the harness dispatch envelope is server-authored; shape is
+    // pinned by server/jev-dispatch.test.ts, absence falls back to honest text.
+    const d = r.dispatch as { handleSelf?: boolean; picks?: Array<{ botId: string; name: string; reason: string; model?: string; modelFit?: string }>; advisory?: string } | undefined;
+    if (!d) return { text: "No ranking available — use list_bots and decide yourself.", isError: true };
+    if (d.handleSelf || !d.picks?.length) return { text: d.advisory ?? "No teammate looks like a better fit — handle it yourself." };
+    const lines = d.picks.map((p, i) =>
+      `${i + 1}. ${p.name} [id: ${p.botId}]${p.model ? ` — ${p.model}` : ""}\n   why: ${p.reason}${p.modelFit ? `\n   fit: ${p.modelFit}` : ""}`);
+    return { text: `${lines.join("\n")}\n${d.advisory ?? ""}` };
   }
   if (name === "delegate_bot") {
     const toBotId = String(args.bot_id ?? "").trim();
