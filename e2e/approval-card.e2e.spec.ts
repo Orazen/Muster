@@ -41,7 +41,9 @@ for (const decision of ["allow", "deny"] as const) {
     await expect(replyRow.getByText(reply, { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Allow once", exact: true })).toHaveCount(0);
     await expect(page.getByText("Waiting for your answer below", { exact: true })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Fleet status: All agents idle", exact: true })).toBeVisible();
+    // Turn fully ended: the composer is free again. (The fleet orb was
+    // unmounted by owner direction 2026-09-15, so there is no idle pill.)
+    await expect(composer).toBeEnabled();
     if (decision === "deny") await expect(page.getByText("hello from fake acp", { exact: true })).toHaveCount(0);
 
     // Pin the actual ACP choice as well as its visible result. A fixture

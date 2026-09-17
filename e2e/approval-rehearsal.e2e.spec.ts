@@ -27,7 +27,7 @@ test("approval transcript retains the original rehearsal and previous-run eviden
   await expect(firstSummary).toContainText("0/2 tool steps matched in order; 0 completed runs matched the full sequence (0 reviewed)");
   await page.getByRole("button", { name: "Allow once", exact: true }).click();
   await expect(first.getByText("Allowed", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Fleet status: All agents idle", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: /^Message / })).toBeEnabled();
   await page.reload();
   await expect(firstSummary).toContainText("(0 reviewed)");
 
@@ -44,7 +44,7 @@ test("approval transcript retains the original rehearsal and previous-run eviden
   await expect(evidence).toHaveText(snapshot!);
   await page.getByRole("button", { name: "Deny", exact: true }).click();
   await expect(second.getByText("Denied", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Fleet status: All agents idle", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: /^Message / })).toBeEnabled();
   await expect(evidence).toHaveText(snapshot!);
   await page.reload();
   await expect(second.getByText("Denied", { exact: true })).toBeVisible();

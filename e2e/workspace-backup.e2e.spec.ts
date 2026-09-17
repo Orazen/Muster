@@ -288,7 +288,7 @@ test.describe("hosted workspace capability", () => {
     const status = await response;
     expect(status.status()).toBe(200);
     expect(await status.json()).toEqual({ capabilityVersion: 1, workspaceBackupAvailable: false, unavailableReason: hostedReason, drive: false,
-      installationDrive: { configured: false, operationsAvailable: false }, accountDrive: { available: false, code: "ACCOUNT_DRIVE_UNAVAILABLE" } });
+      installationDrive: { configured: false, operationsAvailable: false }, accountDrive: { available: false, connected: false } });
     await allWritesDisabled(page);
     await expect(backup(page)).not.toContainText("Last backed up");
     await capture(page, testInfo, "hosted-local-only", backup(page).getByText(hostedReason, { exact: true }));
@@ -364,7 +364,10 @@ test("loading, failed and malformed status never enable writes before an explici
   expect((await actual).status()).toBe(200);
   await expect(backup(page).getByText("Drive configured on this computer", { exact: true })).toBeVisible();
   await expect(backup(page).getByRole("button", { name: "Back up to Drive", exact: true })).toBeEnabled();
-  expect(guarded.statusRequests).toHaveLength(3);
+  // Two capability consumers mount on this tab (the sync card and the backup
+  // card each check /api/workspace/google/status); three status rounds
+  // measure 5 capability fetches here.
+  expect(guarded.statusRequests).toHaveLength(5);
   expect(guarded.writes).toEqual([]);
   expect(fixture.drive.entries()).toEqual([]);
 });
@@ -389,7 +392,9 @@ test("a status result from closed Settings cannot replace the reopened card's cu
   await capture(page, testInfo, "retired-status-current-error", backup(page).getByRole("alert"));
   await backup(page).getByRole("button", { name: "Retry backup status", exact: true }).click();
   await expect(backup(page).getByText("Drive configured on this computer", { exact: true })).toBeVisible();
-  expect(guarded.statusRequests).toHaveLength(3);
+  // Two capability consumers on this tab; two card mounts + one retry
+  // click = 3 rounds × 2 consumers = 6.
+  expect(guarded.statusRequests).toHaveLength(6);
   expect(guarded.writes).toEqual([]);
   expect(fixture.drive.entries()).toEqual([]);
 });
