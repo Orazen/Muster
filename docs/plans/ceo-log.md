@@ -5545,3 +5545,16 @@ untouched (path + hash receipt carried in the Loop98 entry). Inherited
 
 **Not done, honestly.** The download mirror still serves 1.12.1: SSH to 173.249.38.101 remains permission-denied for every key (reconfirmed this loop), so scripts/release-payload.mjs mirror could not promote 1.12.3 there — in-app auto-updates stay pinned until the owner fixes VPS access or the mirror is promoted another way. No Windows/Linux legs exist (Actions billing unchanged — no CI build ran for this release). No local release verification claim beyond what is listed; no security claim.
 
+
+## Loop102 — the audit's fixable findings closed; Intel leg added to the release (17 September 2026)
+
+**Code fixes (commit 94c1db8).** The audit flagged that pairing-link's SELF_HOSTED_CODE accepted any 4-64 char run of [A-Za-z0-9_-], so #code=short parsed as a code, and that pair-fragment.ts was a duplicate rule set carrying a NOTE asking to be deleted. Both closed: code shapes are now Muster's own issuers exactly — 8-character runs (the cloud issuer's alphabet is checked first so a cloud code keeps its issuer's mode) or hyphen-separated groups of four up to 64 chars — short and underscore-bearing fragments no longer parse, and the bridge module is deleted with PairPage importing the single parser. Also fixed: the bridge's self-hosted carried-code instruction told people to redeem a SERVER code in the desktop app; it now names the app connecting to that server. Tests migrated into pairing-link.test.ts (37 parse/plan cases + 10 fragment/instruction cases), including a new pin for the short-code refusal. teach-replay.test.ts regained the trailing newline an earlier edit lost.
+
+**Docs fix (7cd71a3).** AGENTS.md now says the Fleet MCP surface is 8 tools (not 6) and that plan rehearsal is shipped (not queued) — both were verified stale in Loop98 and remained misdirecting every new agent.
+
+**Verification.** Focused 3 files / 64 passed. Full suite **281 files / 4234 passed / 8 skipped / 0 failed** (402.10s) — vs the Loop100 baseline of 282/4230/8: one test file fewer (the deleted bridge test) and +4 tests, 0 failures. Both typechecks exit 0, oxlint 0/0, vite build ok. The parsePairingLink/parseFragmentCode mode contract was probed directly with tsx before pinning the corrected expectations in tests.
+
+**Release.** Built the macOS Intel leg locally: Developer ID signed, notarized (c216825c-8aaf-4149-8b48-eb5c1301a852, Accepted), stapled, spctl-verified seal. Uploaded to GitHub release v1.12.3 together with a merged arm64-first latest-mac.yml covering all four macOS artifacts and a combined SHA256SUMS-darwin.txt (intel dmg sha256 1bdfd596…51e79a). The release now carries both Mac architectures; Windows/Linux remain impossible without Actions billing.
+
+**Still open.** Mirror promotion (VPS SSH still refused — unchanged), Windows/Linux legs (CI billing), pairing scopes/allowlist, /pair redemption decision, Engines Add-account, channels in /app, tour pacing, voice W1-W3. No security claim.
+
