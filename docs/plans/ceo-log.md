@@ -5615,3 +5615,15 @@ Shipped: server/jev-dispatch.ts (pure engine: weighted overlap title x3 / name x
 Receipts at the merged tip (903cfe8): unit 285 files / 4273 passed / 8 skipped / 0 failed; e2e 22/22; both typechecks exit 0; oxlint 0/0. PR #12 merged with checks platform-refused per the PR-#8 policy (4s jobs, zero steps, no logs - honest re-run reproduced it; merge comment states the local evidence).
 
 Honest calls recorded in the consolidated report 8b: the sslip.io crypto-trading endpoint was NOT wired (unaudited personal deploy - would break the trust model); vocaleo (agent-first calling API) is the true-calling track's cleanest implementation; rene.co contributes bots-as-contacts + assistant-to-assistant negotiation as named future slices.
+
+## Loop109 — the Muster workspace brain (17 September 2026)
+
+Owner ask: study and integrate garrytan/gbrain plus 12 sibling repos (ECC, gstack, ponytail, prime-agent, buzz/buzz-app, supermemory, goose, celesto, openbot, grokbot, alphaclaw). All ground-truthed from source before any code; the study map is in the consolidated report 8d.
+
+Shipped the brain - gbrain's load-bearing ideas, none of its operational weight: explicit facts with mandatory provenance, correction chains (supersedes), withdrawal that preserves history, zero-LLM entity extraction, typed edges built on read, keyword retrieval with honest gap analysis, atomic persistence, per-user isolation. Harness routes /api/brain* owner-scoped like every record; Fleet MCP gains brain_write + brain_query (8 to 10 tools) so CLI-paired agents share the same brain.
+
+The live harness test caught a real bug before shipping: on local installs the session was never resolved, so facts leaked across accounts - fixed through the same read-only seam the workspace-backup family uses, with a two-account isolation test over the real booted server.
+
+Receipts at the merged tip (3a49b05): unit 287 files / 4282 passed / 8 skipped / 0 failed; e2e 22/22; both typechecks exit 0; oxlint 0/0. PR #13 merged with checks platform-refused per the PR-#8 policy (zero executed steps, honest re-run reproduced; merge comment states the local evidence).
+
+Deliberately not taken: the 24/7 enrichment daemon, semantic vectors, hosted sync - the semantic rung stays a later behind-a-connector decision (supermemory is the candidate).
