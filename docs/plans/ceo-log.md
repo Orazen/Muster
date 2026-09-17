@@ -5597,3 +5597,11 @@ Receipts at the branch tip: focused suite 8/8; oxlint 0/0; both typechecks exit 
 ## Loop106 — the blue selection is calm (17 September 2026)
 
 Owner-reported: dragging through text painted 45% of the brand accent over dark panels. The global ::selection now uses the raised-hover surface tone (skin-correct by construction), html declares color-scheme: dark (native widgets stop rendering light), and the mobile tap-flash is transparent. Verified in the live preview by real double-click selection: computed style rgb(61,61,61)/80%, zero blue, console clean. PR #9 merged (119001a) with checks platform-refused per the PR-#8 policy; merge comment states the local evidence.
+
+## Loop107 — the Muster Connector: own-branded connected apps via OpenConnector (17 September 2026)
+
+Owner ask: make the OpenConnector gateway (oomol-lab/open-connector, 5.8k stars) Muster's own branded connector everywhere. server/openconnector.ts implements the runtime contract pinned from upstream source (Bearer token, {success,data} envelope, /v1/providers, /v1/apps/authenticated, /v1/connections/{service}/connect, /v1/actions/{id}, /mcp with session forwarding). It wins backend priority when configured; both Composio paths remain untouched fallbacks. Settings gains the write-only runtime URL/token form; PluginsPanel names the backend honestly.
+
+Live probe over the real routes (stub runtime + real server): 5/5 - catalog muster-connector mode, branded cards, batched status, authorize link, config reports configured without echoing the token. Full gates at the tip: unit 283 files / 4250 passed / 0 failed; e2e 22/22; both typechecks; full-tree oxlint 0/0 (first time this session - the 15 anti-slop errors from the PR #8 extraction were healed on this lineage, and two new boundary casts carry proper SAFETY justifications). A real bug fixed on the way: spreading a Headers instance yields {} - header merges now go through the Headers API.
+
+Research folded into the consolidated report: cumora (agent-team coordination: claims + stale-reply HOLD - the next fleet differentiator to study), Memoh (per-agent always-on computers + first-class memory - validates Muster's per-bot computers; memory profiles are the take), OpenConnector (shipped here). PR #11 merged with checks platform-refused per policy.
