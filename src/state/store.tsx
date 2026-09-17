@@ -279,6 +279,8 @@ export function messageVersions(bot: Bot, message: Message): Message[] {
 export interface ConfigStatus {
   xai?: { configured: boolean };
   composio: { configured: boolean; mode?: "managed" | "self-hosted" | "unavailable" };
+  /** The Muster Connector (self-hosted OpenConnector runtime). */
+  openConnector?: { configured: boolean };
   box: { configured: boolean };
   opensandbox?: { configured: boolean };
   opencodeGo?: { configured: boolean };

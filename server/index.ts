@@ -247,6 +247,7 @@ import {
   applyPendingRestore,
 } from "./restore-apply.ts";
 import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
+import * as openconnector from "./openconnector.ts";
 import { isText, json, readBody } from "./http-helpers.ts";
 import * as driveSync from "./drive-sync.ts";
 import * as telegramSync from "./telegram-sync.ts";
@@ -395,12 +396,21 @@ function agentsIntegration(lease: PeerLease, token: string) {
 }
 
 function connectedAppsIntegration(botId: string, threadId: string) {
-  return composio.mcpIntegration(cfg, {
+  const context = {
     harnessUrl: `http://127.0.0.1:${PORT}`,
     commsToken: CONNECTOR_TOKEN,
     botId,
     threadId,
-  });
+  };
+  // Both backends spawn the same loopback bridge; only the upstream differs
+  // (resolved inside the harness relay by the same priority as the routes).
+  return composio.mcpIntegration(cfg, context);
+}
+
+/** Curated slugs for the Muster Connector's default status view — the same
+ * roster the Composio path curates, so the UI's pinned cards behave. */
+function connectorCuratedSlugs(): string[] {
+  return composio.CURATED_SLUGS;
 }
 
 /** Run a turn on `targetBotId` and resolve with its assistant text — the
@@ -3468,6 +3478,7 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
       configured: vaultFlags ? Boolean(vaultFlags["composio"]?.configured) : composio.configured(cfg),
       mode: vaultFlags ? "direct" : composio.connectionMode(cfg),
     },
+    openConnector: { configured: openconnector.configured(cfg) },
     opencodeGo: { configured: vaultFlags ? Boolean(vaultFlags["opencodeZen"]?.configured) : Boolean(cfg.opencodeGo?.apiKey) },
     musterCloud: { configured: musterCloudEnabled(cfg), url: cfg.musterCloud?.url ?? "" },
     // hi.new agent-mail: the handle is a setting (shown), the token is a
@@ -4826,13 +4837,14 @@ let requestUserEmail = "";
       if (!authorizedConnector(req.headers.authorization)) return json(res, 401, { error: "unauthorized" });
       if (method === "POST" && path === "/api/internal/connectors/mcp") {
         const body = await readBody(req);
-        const upstream = await composio.relayMcp(
-          cfg,
-          body,
-          Array.isArray(req.headers["mcp-session-id"])
-            ? req.headers["mcp-session-id"][0]
-            : req.headers["mcp-session-id"],
-        );
+        const sessionId = Array.isArray(req.headers["mcp-session-id"])
+          ? req.headers["mcp-session-id"][0]
+          : req.headers["mcp-session-id"];
+        // Same priority as the browser routes: the Muster Connector runtime
+        // when configured, the Composio session/broker otherwise.
+        const upstream = openconnector.configured(cfg)
+          ? await openconnector.relayMcp(cfg, body, sessionId)
+          : await composio.relayMcp(cfg, body, sessionId);
         const headers = upstream.transportSessionId
           ? {
               "content-type": upstream.contentType,
@@ -8157,13 +8169,24 @@ let requestUserEmail = "";
       }
     }
 
-    // ── connectors (Composio) ──
+    // ── connectors (the Muster Connector over OpenConnector, or Composio) ──
+    // The Muster Connector wins when its runtime is configured: it is the
+    // own-branded backend; Composio (managed broker or self-hosted key)
+    // remains the fallback so no existing setup changes behavior.
     if (method === "GET" && path === "/api/connectors/catalog") {
+      if (openconnector.configured(cfg)) {
+        const { cards, source } = await openconnector.listToolkits(cfg);
+        return json(res, 200, { configured: true, mode: "muster-connector", source, cards });
+      }
       const { cards, source } = await composio.listToolkits(cfg);
       return json(res, 200, { configured: composio.configured(cfg), mode: composio.connectionMode(cfg), source, cards });
     }
     if (method === "GET" && path === "/api/connectors") {
       const services = (url.searchParams.get("services") ?? "").split(",").filter(Boolean);
+      if (openconnector.configured(cfg)) {
+        const status = await openconnector.connectionStatus(cfg, services.length ? services : connectorCuratedSlugs());
+        return json(res, 200, { configured: true, services: status });
+      }
       if (!composio.configured(cfg)) {
         return json(res, 200, { configured: false, services: {} });
       }
@@ -8171,9 +8194,17 @@ let requestUserEmail = "";
       return json(res, 200, { configured: true, services: status });
     }
     m = path.match(/^\/api\/connectors\/([\w-]+)\/authorize$/);
-    if (m && method === "POST") return json(res, 200, await composio.authorizeService(cfg, m[1]));
+    if (m && method === "POST") {
+      return json(res, 200, openconnector.configured(cfg)
+        ? await openconnector.authorizeService(cfg, m[1])
+        : await composio.authorizeService(cfg, m[1]));
+    }
     m = path.match(/^\/api\/connectors\/([\w-]+)$/);
-    if (m && method === "DELETE") return json(res, 200, await composio.removeService(cfg, m[1]));
+    if (m && method === "DELETE") {
+      return json(res, 200, openconnector.configured(cfg)
+        ? await openconnector.removeService(cfg, m[1])
+        : await composio.removeService(cfg, m[1]));
+    }
 
     // Inline connection cards are bound to both the bot and the exact task
     // or room thread that created them. The browser auth URL is returned
