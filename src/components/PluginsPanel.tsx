@@ -64,7 +64,7 @@ export function PluginsPanel() {
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
   const [source, setSource] = useState<"api" | "curated">("curated");
   const [configured, setConfigured] = useState(true);
-  const [mode, setMode] = useState<"managed" | "self-hosted" | "unavailable">("unavailable");
+  const [mode, setMode] = useState<"managed" | "self-hosted" | "muster-connector" | "unavailable">("unavailable");
   const [status, setStatus] = useState<Record<string, ConnectorStatus>>({});
   const [pendingUrls, setPendingUrls] = useState<Record<string, string>>({});
   const [busySlug, setBusySlug] = useState<string | null>(null);
@@ -335,6 +335,21 @@ export function PluginsPanel() {
               Update your Composio key
             </button>{" "}
             for the full catalog.
+          </div>
+        )}
+        {configured && mode === "muster-connector" && (
+          <div className="mx-6 mb-1 text-[12px] text-ink-secondary sm:mx-8">
+            Powered by the Muster Connector — your own OpenConnector runtime.{" "}
+            <button
+              className="underline underline-offset-2 hover:text-ink"
+              onClick={() => {
+                close();
+                dispatch({ type: "toggleAppSettings", open: true });
+              }}
+            >
+              Manage the runtime
+            </button>{" "}
+            in settings.
           </div>
         )}
         {error && <div role="alert" className="mx-6 mt-2 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger sm:mx-8">{error}</div>}

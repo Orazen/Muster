@@ -552,6 +552,13 @@ export function SettingsModal() {
   // current section is filtered out, jump to the first match so the right
   // pane never shows a section the list no longer offers.
   const [query, setQuery] = useState("");
+  // Muster Connector runtime fields: write-only — GET /api/config reports
+  // configured, never the values, so the inputs start empty by design.
+  const [openConnectorUrl, setOpenConnectorUrl] = useState("");
+  const [openConnectorToken, setOpenConnectorToken] = useState("");
+  const [openConnectorBusy, setConnectorBusy] = useState(false);
+  const [connectorSaved, setConnectorSaved] = useState(false);
+  const [connectorError, setConnectorError] = useState<string | null>(null);
   const q = query.trim().toLowerCase();
   const visibleSections = sections.filter((entry) => sectionMatches(entry, q));
   useEffect(() => {
@@ -753,7 +760,11 @@ export function SettingsModal() {
                 subtitle="Connected apps work automatically in the installed app. Other optional service keys stay on this computer."
               >
                 <div className="flex flex-col gap-4">
-                  {state.config?.composio.mode === "managed" ? (
+                  {state.config?.openConnector?.configured ? (
+                    <div className="rounded-lg border border-success/25 bg-success/10 px-3 py-2 text-[13px] text-success">
+                      Muster Connector runtime is ready — your own connected-apps backend
+                    </div>
+                  ) : state.config?.composio.mode === "managed" ? (
                     <div className="rounded-lg border border-success/25 bg-success/10 px-3 py-2 text-[13px] text-success">
                       Connected apps service is ready
                     </div>
@@ -765,7 +776,56 @@ export function SettingsModal() {
                   <WorkspaceSyncCard />
                   <PortableBackupCard />
                   <details className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
-                    <summary className="cursor-pointer text-[13px] text-ink-secondary">Self-host connected apps</summary>
+                    <summary className="cursor-pointer text-[13px] text-ink-secondary">Muster Connector — your own connected-apps runtime</summary>
+                    <div className="mt-3 flex flex-col gap-3">
+                      <p className="text-[12px] text-ink-secondary">
+                        Point Muster at a self-hosted OpenConnector runtime and every connected app — catalog, OAuth, actions and agent tools — runs through your own branding and your own infrastructure.
+                      </p>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[12px] text-ink-secondary">Runtime URL</span>
+                        <input
+                          value={openConnectorUrl}
+                          onChange={(event) => setOpenConnectorUrl(event.target.value)}
+                          placeholder="https://connector.example.com"
+                          className="rounded-md border border-hairline bg-app px-2.5 py-1.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[12px] text-ink-secondary">Runtime token</span>
+                        <input
+                          type="password"
+                          value={openConnectorToken}
+                          onChange={(event) => setOpenConnectorToken(event.target.value)}
+                          placeholder="Runtime token from your OpenConnector install"
+                          className="rounded-md border border-hairline bg-app px-2.5 py-1.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
+                        />
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="rounded-md bg-raised px-2.5 py-1.5 text-[12px] font-medium text-ink hover:bg-raised-hover disabled:opacity-50"
+                          disabled={openConnectorBusy}
+                          onClick={() => {
+                            setConnectorError(null);
+                            setConnectorSaved(false);
+                            setConnectorBusy(true);
+                            const payload: Record<string, string> = {};
+                            if (openConnectorUrl.trim()) payload.url = openConnectorUrl.trim();
+                            if (openConnectorToken.trim()) payload.token = openConnectorToken.trim();
+                            api("/api/config", { method: "POST", body: JSON.stringify({ openConnector: payload }) })
+                              .then(() => setConnectorSaved(true))
+                              .catch((e: Error) => setConnectorError(e instanceof Error ? e.message : String(e)))
+                              .finally(() => setConnectorBusy(false));
+                          }}
+                        >
+                          {openConnectorBusy ? "Saving…" : "Save runtime"}
+                        </button>
+                        {connectorSaved && <span className="text-[12px] text-success">Saved. The catalog now comes from your runtime.</span>}
+                        {connectorError && <span role="alert" className="text-[12px] text-danger">{connectorError}</span>}
+                      </div>
+                    </div>
+                  </details>
+                  <details className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
+                    <summary className="cursor-pointer text-[13px] text-ink-secondary">Self-host connected apps (Composio)</summary>
                     <div className="mt-3">
                       <ApiKeyRow section="composio" />
                     </div>

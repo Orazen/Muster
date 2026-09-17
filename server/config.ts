@@ -45,6 +45,7 @@ const appConfigSchema = z.object({
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
+  openConnector: z.object({ url: optionalText, token: optionalText }).optional(),
   box: z.object({ token: optionalText }).optional(),
   /** hi.new agent-mail token (server/hi-new-proxy.ts). Persisted write-only:
    * GET /api/config reports `configured`, never the value. */
@@ -115,6 +116,10 @@ const jsonObjectSchema = z.record(z.string(), z.json());
 export interface AppConfig {
   xai?: { key?: string; url?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
+  /** The Muster Connector runtime (server/openconnector.ts): a self-hosted
+   * OpenConnector base URL + runtime token. Write-only: GET /api/config
+   * reports configured, never the value. */
+  openConnector?: { url?: string; token?: string };
   box?: { token?: string };
   /** hi.new agent-mail (server/hi-new-proxy.ts): owner-stored bearer token
    * and the handle it belongs to. Token never leaves the server. */
