@@ -205,3 +205,11 @@ changed. Full254/3862/8 and browser 3/3 acceptance remain local fixture evidence
 
 
 **Loop86 (13 September):** installation Drive success timestamps and duplicate Telegram stamp corrected. Its full-suite run was256 files/3872 passed/8 skipped, superseded by the **258 files / 3899 passed / 8 skipped** baseline stamped above at revision `22a7011` plus the uncommitted build-identity slice; final affected suites2 files/141 passed and server typecheck pass. See the latest ledger entry for review timing and limits. muster.today sign-in rendered; GET availability3/3. Backend rollout, native release and actual Google consent remain unverified. Existing layout and paused automation preserved.
+
+## Structure note — server route-table pattern (17 September, branch refactor/server-route-table)
+
+The workspace/v2 + account-Drive backup family no longer lives inline in server/index.ts. It is extracted to server/workspace-backup-routes.ts behind an ordered route table: each entry has a match(method, path, ctx) predicate and a handle(req, res, ctx) handler; handlers receive a BackupRequestContext (requestUserId, live config, appVersion, dataDir) and index.ts owns session resolution and per-request state. Shared HTTP plumbing (json, isText, readBody) moved to server/http-helpers.ts — route modules import the one definition.
+
+The registration point is order-sensitive and documented in the module header: inside the session gate, above the multi-tenant guard, with capability advertisement ahead of the hosted installation wall inside the table. First match wins; the handler returns false when the family does not claim the request, and index.ts proceeds unchanged.
+
+Extracting the next family is mechanical: write the module with its own ordered table, register it at its exact current position with the same one-call pattern, run the gate. Committed as b61c771 on refactor/server-route-table; main untouched so the delivery pass can open the PR.

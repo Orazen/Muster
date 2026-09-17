@@ -3,7 +3,7 @@ import { createBuildDiagnostics } from "./build-identity.ts";
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
+import { readFileSync, statSync, unlinkSync } from "node:fs";
 import { writeFileAtomic } from "./atomic.ts";
 import { createServer, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
@@ -123,7 +123,7 @@ import { LivenessReaper } from "./liveness.ts";
 import type { WatchedTurn } from "./turn-watchdog.ts";
 import { buildModelContext } from "./model-context.ts";
 import { buildNotification, type Notification } from "./notify.ts";
-import { isEffortLevel, type RequestOutcome, type RuntimeEvent, type WorkspaceBackupCapability } from "./contracts.ts";
+import { isEffortLevel, type RequestOutcome, type RuntimeEvent } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
@@ -243,18 +243,11 @@ import {
 } from "./workspace-files.ts";
 import * as browserPanel from "./browser-panel.ts";
 import * as workspaceBundle from "./workspace-bundle.ts";
-import * as accountDrive from "./account-drive.ts";
-import * as bundleV2 from "./workspace-bundle-v2.ts";
 import {
   applyPendingRestore,
-  clearPendingRestore,
-  PENDING_RESTORE_FORMAT,
-  readLastReceipt,
-  readPendingRestore,
-  stagingPathFor,
-  writePendingRestore,
-  type PendingRestore,
 } from "./restore-apply.ts";
+import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
+import { isText, json, readBody } from "./http-helpers.ts";
 import * as driveSync from "./drive-sync.ts";
 import * as telegramSync from "./telegram-sync.ts";
 import * as syncState from "./sync-state.ts";
@@ -778,7 +771,6 @@ function pageSize(raw: string | null): number | null | undefined {
 }
 
 /** True only for primitive strings — what JSON decoding yields for text fields. */
-const isText = <T>(value: T): value is T & string => String(value) === value;
 
 /** True only for primitive booleans — what JSON decoding yields for flags. */
 const isFlag = <T>(value: T): value is T & boolean => value === true || value === false;
@@ -3860,11 +3852,6 @@ function botsDirectoryPage(teams: Array<{ slug?: string; name?: string; descript
 }
 
 
-function json<B>(res: ServerResponse, status: number, body: B) {
-  const data = JSON.stringify(body);
-  res.writeHead(status, { "content-type": "application/json" });
-  res.end(data);
-}
 
 /**
  * Read the body as raw text, without parsing.
@@ -3936,46 +3923,6 @@ function readRawBytes(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
   });
 }
 
-function readBody(req: IncomingMessage): Promise<any> {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    let bytes = 0;
-    let done = false;
-    const fail = (status: number, msg: string) => {
-      if (done) return;
-      done = true;
-      const err = Object.assign(new Error(msg), { status });
-      reject(err);
-    };
-    req.on("data", (c) => {
-      if (done) return;
-      bytes += Buffer.isBuffer(c) ? c.length : Buffer.byteLength(c);
-      if (bytes > 1_000_000) {
-        // Stop retaining attacker-controlled bytes and stop draining: pause
-        // the stream just long enough for the caller's 413 to flush, then
-        // destroy so an unauthenticated peer can't stream forever on a
-        // rejected body (mirrors companion/src/proxy.ts, which destroys
-        // outright).
-        req.pause();
-        setTimeout(() => req.destroy(), 1_000).unref();
-        return fail(413, "body too large");
-      }
-      data += c;
-    });
-    req.on("end", () => {
-      if (done) return;
-      let body: any;
-      try {
-        body = data ? JSON.parse(data) : {};
-      } catch {
-        return fail(400, "invalid JSON body");
-      }
-      done = true;
-      resolve(body);
-    });
-    req.on("error", (e) => fail(400, e instanceof Error ? e.message : String(e)));
-  });
-}
 
 /** Best-effort client identity for rate-limit buckets. Behind the cloud
  * reverse proxy every socket peers as the proxy's IP, so a socket-keyed
@@ -4659,90 +4606,21 @@ let requestUserEmail = "";
       requestUserEmail = sessAcct?.user?.email ?? "";
     }
 
-    // This exact read-only response is the sole hosted workspace exception.
-    // Hosted status does not read installation connections, account tokens or
-    // backup stamps. Local readiness uses only the existing operator transport.
-    if (path === "/api/workspace/google/status" && method === "GET") {
-      const installationDriveReady = !SELF_HOSTED
-        && Boolean(cfg.driveSync?.refreshToken?.trim()) && driveSync.driveOAuthConfigured();
-      // The account-linked transport exists only for a signed-in user on a
-      // non-hosted install: no session means no account row, so there is
-      // nothing to advertise — the routes below stay contained 501s. Hosted
-      // keeps it off: one shared store must not export per-user workspaces
-      // through a personal Drive.
-      let accountDriveReady = false;
-      let accountDriveConnected = false;
-      if (!SELF_HOSTED && requestUserId) {
-        const tokens = accountDrive.googleTokensFor(getDb(), requestUserId);
-        accountDriveConnected = Boolean(tokens?.refreshToken);
-        accountDriveReady = true;
-      }
-      const capability: WorkspaceBackupCapability = {
-        capabilityVersion: 1,
-        workspaceBackupAvailable: !SELF_HOSTED,
-        unavailableReason: SELF_HOSTED ? "Workspace backups are available on local desktop installs only for now." : null,
-        drive: false,
-        installationDrive: { configured: installationDriveReady, operationsAvailable: installationDriveReady },
-        accountDrive: { available: accountDriveReady, connected: accountDriveConnected },
-      };
-      return json(res, 200, capability);
-    }
-
-    // Workspace bundles and the Vault belong to the whole installation,
-    // not one account. Deny both families before handlers parse bodies or
-    // open local files; even the primary hosted account must not export
-    // other users' data through the installation's storage connection.
-    const installationBackup = path === "/api/workspace" || path.startsWith("/api/workspace/")
-      || path === "/api/vault" || path.startsWith("/api/vault/");
-    if (SELF_HOSTED && installationBackup) {
-      return json(res, 403, {
-        code: "WORKSPACE_BACKUP_UNAVAILABLE",
-        error: "Workspace backups are available on local desktop installs only for now.",
-      });
-    }
-
-    // Account-linked Google Drive backup: the signed-in user's own Google
-    // account, one drive.appdata grant, ciphertext-only transport. A request
-    // without a session keeps the historical contained 501 — no session means
-    // no account row, so no consent URL, state, or token exchange may run.
-    // Hosted never reaches here: the installation-backup wall above returns
-    // 403 first. The callback additionally requires the state's bound user to
-    // equal the session's user, so one account cannot consume another's
-    // consent redirect.
-    const ACCOUNT_DRIVE_OFF = {
-      code: "ACCOUNT_DRIVE_UNAVAILABLE",
-      error: "Account-linked Google Drive backup is unavailable. Use a Drive connection configured on this computer.",
-    };
-    if (method === "GET" && path === "/api/workspace/google/connect") {
-      if (!requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
-      try {
-        const host = req.headers.host ?? "127.0.0.1:8799";
-        const proto = forwardedProtoOf(req);
-        const origin = `${proto === "https" || !host.startsWith("127.0.0.1") && !host.startsWith("localhost") ? "https" : "http"}://${host}`;
-        const url = accountDrive.googleDriveAuthUrl(origin, accountDrive.signDriveState(requestUserId));
-        return json(res, 200, { url });
-      } catch (e) {
-        return json(res, 501, { code: "ACCOUNT_DRIVE_UNAVAILABLE", error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    if (method === "GET" && path === "/api/workspace/google/callback") {
-      if (!requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
-      const query = new URL(req.url ?? "/", "http://localhost").searchParams;
-      const state = query.get("state") ?? "";
-      const code = query.get("code") ?? "";
-      const stateUser = accountDrive.verifyDriveState(state);
-      if (!stateUser || stateUser !== requestUserId || !code) {
-        return res.writeHead(302, { location: "/app?drive=connect-failed" }).end();
-      }
-      try {
-        const host = req.headers.host ?? "127.0.0.1:8799";
-        const proto = forwardedProtoOf(req);
-        const origin = `${proto === "https" || !host.startsWith("127.0.0.1") && !host.startsWith("localhost") ? "https" : "http"}://${host}`;
-        const connected = await accountDrive.connectDriveFor(getDb(), requestUserId, code, origin);
-        return res.writeHead(302, { location: `/app?drive=${connected ? "connected" : "connect-failed"}` }).end();
-      } catch {
-        return res.writeHead(302, { location: "/app?drive=connect-failed" }).end();
-      }
+    // ── workspace-backup family (server/workspace-backup-routes.ts) ────
+    // Capability advertisement, the hosted installation wall, account-linked
+    // Drive connect/callback and the v2 bundles live behind an ordered route
+    // table there. This registration sits exactly where the inline family
+    // sat: inside the session gate, above the multi-tenant guard; the table
+    // itself keeps capability ahead of the hosted wall. First match wins;
+    // false means the family does not claim the request.
+    if (
+      await handleWorkspaceBackupRoute(req, res, method, path, requestUserId ?? null, {
+        config: () => cfg,
+        appVersion,
+        dataDir: () => DATA_DIR,
+      })
+    ) {
+      return;
     }
 
     // ── multi-tenant guard (SELF_HOSTED only) ──────────────────────────
@@ -7909,250 +7787,6 @@ let requestUserEmail = "";
         broadcast({ kind: "hello" });
         syncState.stampSync("local", "pull", "telegram");
         return json(res, 200, { restored: result });
-      } catch (e) {
-        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-
-    // ── Portable workspace backup v2 (server/workspace-bundle-v2.ts) ────
-    // Passphrase-only, everything-included bundles: bots, groups, memory,
-    // transcripts, routines, goals, approval history, the social graph.
-    // Restores stage while the server runs and COMMIT AT BOOT
-    // (server/restore-apply.ts) — the live Store never races the swap. The
-    // whole /api/workspace/ family is already denied on hosted installs at
-    // the choke point above; these routes are desktop/local by inheritance.
-    interface StageOkBody {
-      staged: true;
-      restartRequired: true;
-      counts: bundleV2.StagedCounts | null;
-      reconsentRequired: bundleV2.ReconsentEntry[];
-      summary: bundleV2.BundleSummary | null;
-    }
-    interface StageErrBody {
-      status?: string;
-      error: string;
-      blocked?: bundleV2.RestoreBlocked[];
-    }
-    const stageV2Restore = (
-      passphrase: string,
-      payloadText: string,
-      source: string,
-    ): { ok: true; body: StageOkBody } | { ok: false; status: number; body: StageErrBody } => {
-      const bytes = Buffer.from(payloadText, "utf8");
-      const decrypt = bundleV2.decryptBundleV2(bytes, { passphrase });
-      if (decrypt.status !== "ok" || decrypt.payload === undefined) {
-        const v1Hint = payloadText.startsWith("muster-workspace-bundle:")
-          ? " — that is a v1 bundle; restore it with the original v1 flow on the same installation"
-          : "";
-        return { ok: false, status: 400, body: { status: decrypt.status, error: `${decrypt.error ?? "the bundle could not be decrypted"}${v1Hint}` } };
-      }
-      const verify = bundleV2.verifyBundleV2(bytes, { passphrase });
-      if (verify.status !== "ok") {
-        return { ok: false, status: 400, body: { status: verify.status, error: `the bundle did not verify: ${verify.status}` } };
-      }
-      // ids are KEPT (remapIds: false): the commit replaces the covered files
-      // wholesale, so there is nothing to merge with — and routines, goals,
-      // decisions and social rows all reference bots by id.
-      const staged = bundleV2.stageRestoreV2(decrypt.payload, {
-        stagingDir: stagingPathFor(DATA_DIR),
-        remapIds: false,
-      });
-      if (staged.status !== "staged") {
-        return { ok: false, status: 400, body: { status: staged.status, error: staged.error ?? "the restore was refused", blocked: staged.blocked } };
-      }
-      try {
-        const pending: PendingRestore = {
-          version: 1,
-          format: PENDING_RESTORE_FORMAT,
-          stagingDir: staged.stagingDir,
-          createdAt: Date.now(),
-          source,
-          reconsentRequired: staged.reconsentRequired,
-        };
-        if (staged.counts !== undefined) pending.counts = staged.counts;
-        writePendingRestore(DATA_DIR, pending);
-      } catch (e) {
-        return { ok: false, status: 409, body: { error: e instanceof Error ? e.message : String(e) } };
-      }
-      return {
-        ok: true,
-        body: {
-          staged: true,
-          restartRequired: true,
-          counts: staged.counts ?? null,
-          reconsentRequired: staged.reconsentRequired,
-          summary: verify.summary ?? null,
-        },
-      };
-    };
-
-    if (path === "/api/workspace/v2/status" && (method === "GET" || method === "POST")) {
-      const pending = readPendingRestore(DATA_DIR);
-      const receipt = readLastReceipt(DATA_DIR);
-      // the staging path is server-local bookkeeping — the UI never needs it
-      const pendingView: { createdAt: number; source: string; reconsentRequired: unknown[]; counts?: unknown } | null =
-        pending ? { createdAt: pending.createdAt, source: pending.source, reconsentRequired: pending.reconsentRequired } : null;
-      if (pending && pendingView) pendingView.counts = pending.counts;
-      const receiptView: { appliedAt: number; status: string; createdAt: number; source: string; reconsentRequired: unknown[]; error?: string; blocked?: { path: string; detail: string }[] } | null =
-        receipt ? { appliedAt: receipt.appliedAt, status: receipt.status, createdAt: receipt.createdAt, source: receipt.source, reconsentRequired: receipt.reconsentRequired } : null;
-      if (receipt && receiptView) {
-        receiptView.error = receipt.error;
-        receiptView.blocked = receipt.blocked;
-      }
-      return json(res, 200, { pending: pendingView, receipt: receiptView });
-    }
-    if (path === "/api/workspace/v2/export" && method === "POST") {
-      const body = await readBody(req);
-      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
-      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      try {
-        const payload = bundleV2.buildPayloadV2({ dataDir: DATA_DIR, appVersion: appVersion() });
-        const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
-        return json(res, 200, {
-          payload: bytes.toString("utf8"),
-          counts: payload.counts,
-          skipped: payload.skipped ?? [],
-          skippedTruncated: payload.skippedTruncated === true,
-        });
-      } catch (e) {
-        return json(res, 500, { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    if (path === "/api/workspace/v2/verify" && method === "POST") {
-      const body = await readBody(req);
-      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
-      const payload = isText(body?.payload) ? body.payload : "";
-      if (!payload) return json(res, 400, { error: "payload is required" });
-      const result = bundleV2.verifyBundleV2(Buffer.from(payload, "utf8"), { passphrase });
-      return json(res, 200, result);
-    }
-    if (path === "/api/workspace/v2/restore" && method === "POST") {
-      const body = await readBody(req);
-      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
-      const payload = isText(body?.payload) ? body.payload : "";
-      if (!payload) return json(res, 400, { error: "payload is required" });
-      if (body?.confirm !== true) return json(res, 400, { error: "restoring replaces the current fleet — send confirm: true to proceed" });
-      const out = stageV2Restore(passphrase, payload, "file");
-      return json(res, out.ok ? 200 : out.status, out.body);
-    }
-    if (method === "POST" && (path === "/api/workspace/google/push" || path === "/api/workspace/google/pull")) {
-      // Session-bound: the push/pull transport moves this user's own bundle
-      // through their own Drive grant. No session → contained 501, checked
-      // before any body parsing, exactly like the other account routes.
-      if (!requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
-      const body = await readBody(req);
-      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
-      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      const accessToken = await accountDrive.accessTokenFor(getDb(), requestUserId);
-      if (!accessToken) {
-        return json(res, 400, { error: "your Google account is not connected to Drive yet — connect it in Settings first" });
-      }
-      try {
-        if (path === "/api/workspace/google/push") {
-          const payload = bundleV2.buildPayloadV2({ dataDir: DATA_DIR, appVersion: appVersion() });
-          const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
-          const fileId = await accountDrive.drivePushFor(accessToken, bytes.toString("utf8"));
-          syncState.stampSync("local", "push", "google-account");
-          return json(res, 200, { uploaded: fileId, counts: payload.counts, skipped: payload.skipped ?? [] });
-        }
-        const payloadText = await accountDrive.drivePullFor(accessToken);
-        if (!payloadText) return json(res, 404, { error: "no portable backup exists in your Google Drive yet — push from the other device first" });
-        const out = stageV2Restore(passphrase, payloadText, "google-account");
-        if (out.ok) syncState.stampSync("local", "pull", "google-account");
-        return json(res, out.ok ? 200 : out.status, out.body);
-      } catch (e) {
-        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    if (path === "/api/workspace/v2/restore/discard" && method === "POST") {
-      clearPendingRestore(DATA_DIR);
-      try {
-        rmSync(stagingPathFor(DATA_DIR), { recursive: true, force: true });
-      } catch {
-        /* staging may already be gone */
-      }
-      return json(res, 200, { discarded: true });
-    }
-    if (path === "/api/workspace/v2/drive/push" && method === "POST") {
-      const body = await readBody(req);
-      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
-      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      const refreshToken = cfg.driveSync?.refreshToken;
-      if (!refreshToken) return json(res, 400, { error: "Google Drive is not connected yet" });
-      try {
-        const token = await driveSync.refreshDriveToken(refreshToken);
-        const payload = bundleV2.buildPayloadV2({ dataDir: DATA_DIR, appVersion: appVersion() });
-        const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
-        const uploaded = await driveSync.uploadBundle(token.accessToken, bytes.toString("utf8"), driveSync.BUNDLE_V2_NAME);
-        syncState.stampSync("local", "push", "google-drive");
-        return json(res, 200, { uploaded: uploaded.id, counts: payload.counts, skipped: payload.skipped ?? [] });
-      } catch (e) {
-        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    if (path === "/api/workspace/v2/drive/pull" && method === "POST") {
-      const body = await readBody(req);
-      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
-      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      const refreshToken = cfg.driveSync?.refreshToken;
-      if (!refreshToken) return json(res, 400, { error: "Google Drive is not connected yet" });
-      try {
-        const token = await driveSync.refreshDriveToken(refreshToken);
-        const payload = await driveSync.downloadBundle(token.accessToken, driveSync.BUNDLE_V2_NAME);
-        if (cfg.driveSync?.refreshToken !== refreshToken) {
-          return json(res, 409, { error: "Google Drive connection changed during download — check the connection and try again." });
-        }
-        if (!payload) return json(res, 404, { error: "no portable backup exists in Drive yet — push from the other device first" });
-        const out = stageV2Restore(passphrase, payload, "google-drive");
-        if (out.ok) syncState.stampSync("local", "pull", "google-drive");
-        return json(res, out.ok ? 200 : out.status, out.body);
-      } catch (e) {
-        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    if (path === "/api/workspace/v2/telegram/push" && method === "POST") {
-      const body = await readBody(req);
-      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
-      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      const botToken = cfg.telegramSync?.botToken;
-      const chatId = cfg.telegramSync?.chatId;
-      if (!botToken || !chatId) return json(res, 400, { error: "Telegram is not connected yet — paste a @BotFather token and connect first" });
-      try {
-        const payload = bundleV2.buildPayloadV2({ dataDir: DATA_DIR, appVersion: appVersion() });
-        const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
-        const fileId = await telegramSync.pushBundle(botToken, chatId, bytes.toString("utf8"), driveSync.BUNDLE_V2_NAME);
-        if (!telegramSync.telegramConnectionMatches(cfg.telegramSync, botToken, chatId)) {
-          return json(res, 409, { error: "Telegram connection changed during upload — the file was sent but not recorded." });
-        }
-        saveConfig({ telegramSync: { lastFileIdV2: fileId } });
-        Object.assign(cfg, loadConfig());
-        syncState.stampSync("local", "push", "telegram");
-        return json(res, 200, { fileId, counts: payload.counts, skipped: payload.skipped ?? [] });
-      } catch (e) {
-        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    if (path === "/api/workspace/v2/telegram/pull" && method === "POST") {
-      const body = await readBody(req);
-      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
-      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      const botToken = cfg.telegramSync?.botToken;
-      const chatId = cfg.telegramSync?.chatId ?? null;
-      if (!botToken) return json(res, 400, { error: "Telegram is not connected yet — paste a @BotFather token and connect first" });
-      try {
-        // the v2 file_id recorded at push time first; then the newest document
-        // in the chat (covers a fresh install where the owner forwarded the
-        // file). A v1 document surfaces as an honest "that is a v1 bundle".
-        let fileId = cfg.telegramSync?.lastFileIdV2 ?? "";
-        if (!fileId) fileId = (await telegramSync.resolveLatestFileId(botToken, chatId)) ?? "";
-        if (!fileId) return json(res, 404, { error: "no portable backup in the Telegram chat yet — push from the other device first" });
-        const payload = await telegramSync.downloadBundle(botToken, fileId);
-        if (!telegramSync.telegramRestoreConnectionMatches(cfg.telegramSync, botToken, chatId)) {
-          return json(res, 409, { error: "Telegram connection changed during download — check the connection and try again." });
-        }
-        const out = stageV2Restore(passphrase, payload, "telegram");
-        if (out.ok) syncState.stampSync("local", "pull", "telegram");
-        return json(res, out.ok ? 200 : out.status, out.body);
       } catch (e) {
         return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
       }
