@@ -119,7 +119,7 @@ describe("loadFleetConfig", () => {
 });
 
 describe("protocol", () => {
-  it("answers initialize and lists the eight bounded tools", async () => {
+  it("answers initialize and lists the ten bounded tools", async () => {
     const { call } = session();
     const init = await call("initialize", { capabilities: {} });
     expect(init.result?.protocolVersion).toBe("2024-11-05");
@@ -134,6 +134,8 @@ describe("protocol", () => {
       "read_memory",
       "get_approval_history",
       "get_why_journal",
+      "brain_write",
+      "brain_query",
       "get_scorecard",
     ]);
   });
@@ -156,7 +158,7 @@ describe("protocol", () => {
     const { call } = session();
     const reply = await call("tools/list", {}, id);
     expect(reply.id).toBe(id);
-    expect(z.array(z.json()).parse(reply.result?.tools)).toHaveLength(8);
+    expect(z.array(z.json()).parse(reply.result?.tools)).toHaveLength(10);
   });
 
   it.each([

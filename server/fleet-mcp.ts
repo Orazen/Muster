@@ -71,6 +71,16 @@ const auditSchema = z.object({
 const botArgsSchema = z.object({ botId: z.string().min(1) }).strict();
 const receiptArgsSchema = botArgsSchema.extend({ threadId: z.string().min(1) });
 const waitArgsSchema = botArgsSchema.extend({ timeoutSeconds: z.number().finite().optional() });
+const brainWriteSchema = z.object({
+  text: z.string().min(1),
+  source: z.string().min(1),
+  kind: z.enum(["person", "company", "project", "decision", "note"]).optional(),
+  supersedes: z.string().optional(),
+}).strict();
+const brainQuerySchema = z.object({
+  text: z.string().min(1),
+  limit: z.number().int().min(1).max(50).optional(),
+}).strict();
 type FleetBot = z.infer<typeof botSchema>;
 type FleetMessage = z.infer<typeof messageSchema>;
 type Outcome = "settled" | "needs-user" | "failed" | "stalled" | "working";
@@ -89,7 +99,9 @@ interface ConversationOutcome {
   outcome: Outcome; reply?: string; needsUser?: PendingAsk; threadId?: string; hint?: string;
 }
 type FleetToolResult = { bots: BotSummary[]; count: number } | SentTask | ConversationOutcome
-  | z.infer<typeof receiptSchema> | z.infer<typeof auditSchema> | { memory: string } | WhyEvidence | ScorecardEvidence;
+  | z.infer<typeof receiptSchema> | z.infer<typeof auditSchema> | { memory: string } | WhyEvidence | ScorecardEvidence
+  | { written: boolean; fact?: { id: string; text: string; kind: string; source: string } }
+  | { hits: Array<{ fact: { id: string; text: string; kind: string; source: string }; matched: string[]; score: number }>; gaps: string[]; unknownEntities: string[] };
 
 interface ToolDef {
   name: string;
@@ -398,6 +410,67 @@ const TOOLS: ToolDef[] = [
       const query = parseEvidenceQuery(args);
       const data = await harness(loadFleetConfig(), `/api/bots/${encodeURIComponent(query.botId)}/why?limit=${query.limit}`, jsonObjectSchema, { method: "GET" });
       return parseWhyEvidence(data, query);
+    },
+  },
+  {
+    name: "brain_write",
+    description:
+      "Record one explicit fact into the Muster workspace brain — with its source (provenance). Facts survive across tasks and are visible to the whole fleet. Use for durable knowledge: people, companies, decisions, preferences. Do NOT write transient task state here.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "The fact, one self-contained sentence." },
+        source: { type: "string", description: "Where this came from, e.g. 'standup 2026-09-17' or 'user reply'." },
+        kind: { type: "string", enum: ["person", "company", "project", "decision", "note"], description: "Optional; inferred when omitted." },
+        supersedes: { type: "string", description: "Fact id this corrects — the old fact stays for provenance but stops answering queries." },
+      },
+      required: ["text", "source"],
+      additionalProperties: false,
+    },
+    async run(args) {
+      const input = brainWriteSchema.parse(args);
+      const cfg = loadFleetConfig();
+      const payload: JsonObject = { text: input.text, source: input.source, origin: "fleet-mcp" };
+      if (input.kind) payload.kind = input.kind;
+      if (input.supersedes) payload.supersedes = input.supersedes;
+      const data = await harness(cfg, "/api/brain/facts", jsonObjectSchema, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      // SAFETY: the fact envelope is the harness's own route; shape pinned
+      // by server/workspace-brain.test.ts, absence degrades to written:true.
+      const fact = data.fact as { id: string; text: string; kind: string; source: string } | undefined;
+      const reply = { written: true, fact };
+      if (!fact) delete reply.fact;
+      return reply;
+    },
+  },
+  {
+    name: "brain_query",
+    description:
+      "Search the Muster workspace brain for durable facts — people, companies, decisions, project history — with matched-evidence citations and an honest gap analysis (what the brain does NOT know yet). Answers come from facts the fleet recorded, not guesses.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "The question or topic to search for." },
+        limit: { type: "integer", minimum: 1, maximum: 50, description: "Max hits. Default 8." },
+      },
+      required: ["text"],
+      additionalProperties: false,
+    },
+    async run(args) {
+      const input = brainQuerySchema.parse(args);
+      const cfg = loadFleetConfig();
+      const payload: JsonObject = { text: input.text };
+      if (input.limit) payload.limit = input.limit;
+      const data = await harness(cfg, "/api/brain/query", jsonObjectSchema, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      // SAFETY: the /api/brain/query envelope is the harness's own route,
+      // shape pinned by server/workspace-brain.test.ts.
+      const result = data.result as { hits: Array<{ fact: { id: string; text: string; kind: string; source: string }; matched: string[]; score: number }>; gaps: string[]; unknownEntities: string[] };
+      return result;
     },
   },
   {

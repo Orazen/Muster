@@ -331,6 +331,51 @@ re-appearing in every audit.
 
 ---
 
+## 8d. The 13-repo study (17 Sep 2026, third pass) — and what shipped from it
+
+All 13 repos the owner linked were ground-truthed from GitHub metadata and
+READMEs before any code was written. Stars are as-of-today, not historical:
+
+| Repo | Stars | What it is | The take for Muster |
+|---|---|---|---|
+| `garrytan/gbrain` | 30.0k | Explicit facts with provenance + corrections/withdrawal + zero-LLM entity graph + gap-aware synthesis; "155,795 pages, 66 cron jobs" | **SHIPPED as the workspace brain (Loop109).** Start keyless (keyword, no vectors), withdrawal never deletion, owner-scoped slices ("you only see what you're allowed to see") |
+| `affaan-m/ECC` | 260.9k | Agent-harness OS: skills, instincts, memory, security | Validates rehearsal/evidence direction; skills-library shape worth a later slice |
+| `garrytan/gstack` | 133.4k | 23 opinionated Claude-Code tools acting as CEO/Designer/EM/QA | Maps 1:1 onto Muster's bot teams — the roles-as-bots framing Muster already has |
+| `DietrichGebert/ponytail` | 141.0k | "The best code is the code you never wrote" — laziness discipline for agents | An instillable house rule for Muster bots; candidate Chief-of-Staff prompt line |
+| `PrimeIntellect-ai/prime-agent` | 21.0k | Self-improving RLM agent for long-running tasks | Recursion/self-improvement pattern; Muster's depth cap is deliberately stricter |
+| `block/buzz` | 33.6k | Nostr-relay workspace: every human/agent action is one signed event log | The unified-audit-trail idea — Muster's why-journal + approval history already approximate it |
+| `block/buzz-app` | — | The Buzz client app | Same event-log take; UI reference for mixed human/agent rooms |
+| `supermemoryai/supermemory` | 29.9k | #1-benchmarked memory engine, self-hostable, ~50ms profiles | The semantic-search rung above the brain's keyword start; candidate connector |
+| `aaif-goose/goose` | 54.4k | Extensible open agent beyond code | Extension-model reference |
+| `CelestoAI/celesto` | 940 | "Secure and persistent computer for AI agents" | Direct validation of Muster's per-bot cloud computers |
+| `matjazonline/openbot` | 1 | Team of agents w/ per-agent email + shared org memory + BYOK | Per-agent *email identity* — a named future slice (agent-mail social track) |
+| `goim01/grokbot` | 0 | Personal Discord bot on xAI | Small; channel-integration reference only |
+| `garrytan/alphaclaw` | 168 | Setup harness: deploy OpenClaw in minutes, stays running for months | The onboarding/ops runbook take for Muster desktop self-hosting |
+
+**What shipped this pass:** the **Muster workspace brain** — gbrain's
+load-bearing ideas, none of its operational weight:
+
+- `server/workspace-brain.ts` — explicit facts with mandatory provenance,
+  correction chains (`supersedes`), withdrawal that preserves history,
+  zero-LLM entity extraction (names/emails/@handles), typed edges built on
+  read so the graph can never disagree with the record, keyword retrieval
+  with **gap analysis** ("no facts mention X yet"), atomic-file persistence,
+  10k-fact cap, per-user isolation enforced structurally.
+- Harness routes `/api/brain` (stats), `/api/brain/query`, `/api/brain/facts`,
+  `/api/brain/facts/:id/withdraw` — owner-scoped like every record. The live
+  harness test **caught and fixed a real isolation bug**: on local installs
+  the session was never resolved, so facts leaked across accounts; the brain
+  now resolves the owner through the same read-only seam the backup family
+  uses.
+- Fleet MCP gains `brain_write` + `brain_query` — CLI-paired external agents
+  share the same brain, with provenance `fleet-mcp`.
+
+Deliberately not taken: the 24/7 enrichment daemon, semantic vectors, and
+hosted sync — that's supermemory's/elastic's territory later, behind a
+connector, not baked into the core.
+
+---
+
 *Everything above reflects re-verified state as of 17 Sep 2026. Claims marked
 "proven" carry the command or test that proved them; everything else is named
 open. The GLM research set remains a dated snapshot — do not cite it as status.*
