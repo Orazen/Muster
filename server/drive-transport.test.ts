@@ -12,9 +12,12 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe.each([
-  { name: "manual Drive connection", push: async (payload: string) => (await uploadBundle("test-access", payload)).id, pull: () => downloadBundle("test-access") },
-  { name: "Google account connection", push: (payload: string) => drivePushFor("test-access", payload), pull: () => drivePullFor("test-access") },
-])("$name", ({ push, pull }) => {
+  { name: "manual Drive connection", push: async (payload: string) => (await uploadBundle("test-access", payload)).id, pull: () => downloadBundle("test-access"), file: "muster-workspace.enc" },
+  // The account transport moves the v2 bundle under its own name: a
+  // Google-login backup must never clobber the manual connection's v1
+  // file, which an older build may still need for its own restore flow.
+  { name: "Google account connection", push: (payload: string) => drivePushFor("test-access", payload), pull: () => drivePullFor("test-access"), file: "muster-workspace-v2.enc" },
+])("$name", ({ push, pull, file }) => {
   it("creates only after a complete empty search and includes the app folder", async () => {
     fetchMock.mockResolvedValueOnce(Response.json({ files: [] }));
     fetchMock.mockResolvedValueOnce(Response.json({ id: "created-file" }));
@@ -25,7 +28,7 @@ describe.each([
     expect(init?.method).toBe("POST");
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-access");
     const body = z.string().parse(init?.body);
-    expect(body).toContain('{"name":"muster-workspace.enc","parents":["appDataFolder"]}');
+    expect(body).toContain(`{"name":"${file}","parents":["appDataFolder"]}`);
     expect(body).toContain("encrypted-payload");
     expect(new Headers(init?.headers).get("content-type")).toMatch(/^multipart\/related; boundary=muster-[a-f0-9]{16}$/);
   });
@@ -37,11 +40,11 @@ describe.each([
     const query = new URL(String(fetchMock.mock.calls[0][0])).searchParams;
     expect(query.get("orderBy")).toBe("modifiedTime desc");
     expect(query.get("spaces")).toBe("appDataFolder");
-    expect(query.get("q")).toBe("name = 'muster-workspace.enc' and trashed = false");
+    expect(query.get("q")).toBe(`name = '${file}' and trashed = false`);
     const [url, init] = fetchMock.mock.calls[1];
     expect(String(url)).toContain("/files/newest?uploadType=multipart");
     expect(init?.method).toBe("PATCH");
-    expect(z.string().parse(init?.body)).toContain('{"name":"muster-workspace.enc"}');
+    expect(z.string().parse(init?.body)).toContain(`{"name":"${file}"}`);
     expect(z.string().parse(init?.body)).not.toContain("parents");
   });
 
