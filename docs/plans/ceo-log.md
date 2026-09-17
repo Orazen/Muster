@@ -5627,3 +5627,13 @@ The live harness test caught a real bug before shipping: on local installs the s
 Receipts at the merged tip (3a49b05): unit 287 files / 4282 passed / 8 skipped / 0 failed; e2e 22/22; both typechecks exit 0; oxlint 0/0. PR #13 merged with checks platform-refused per the PR-#8 policy (zero executed steps, honest re-run reproduced; merge comment states the local evidence).
 
 Deliberately not taken: the 24/7 enrichment daemon, semantic vectors, hosted sync - the semantic rung stays a later behind-a-connector decision (supermemory is the candidate).
+
+## Loop110 — brain-backed dispatch: recommend_team now uses institutional memory (17 September 2026)
+
+Owner ask: make the Jev-style recommend_team engine use the workspace brain's institutional memory, not just profile keywords. The brain stores explicit facts with mandatory provenance; the Chief of Staff should rank teammates using facts that cite their work.
+
+Shipped: server/jev-dispatch.ts now accepts owner-filtered brain facts and awards a capped +2 per fact (max +4) when a fact's source names a candidate and its text overlaps the task. server/index.ts queries brain facts in the same peer-lease scope as the roster, so only the caller's own workspace facts can bias ranking. server/brain-dispatch-harness.test.ts proves the full chain over a real booted server: the same candidate is out-ranked by memory evidence, and the cap prevents a prolific bot from buying the top slot.
+
+Receipts at the merged tip (15320bf): unit **287 files / 4287 passed / 8 skipped / 0 failed**; focused brain slice 19/19; both typechecks exit 0; oxlint **0 warnings / 0 errors**. No e2e run for this slice (server-only harness).
+
+**Deliberately not taken:** semantic vectors, 24/7 enrichment daemon, hosted sync - the semantic rung stays a later behind-a-connector decision (supermemory is the candidate).
