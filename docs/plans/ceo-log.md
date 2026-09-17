@@ -5570,3 +5570,15 @@ untouched (path + hash receipt carried in the Loop98 entry). Inherited
 **Competitive refresh (docs/research/vellum-omb-refresh-2026-09-17.md, this commit).** OMB shipped 13 releases in the week to v0.1.83 (coordination ergonomics, routines deferral, VPS unattended runs, Android threads); Vellum's default branch moved the morning of this note (inline integration connect, memory v3 capture, desktop frame-time discipline). The Drive slice is a genuine differentiator today; cadence and guided-first-run remain the open fronts. Method: public API/source only, 0 competitor runtime checks, no security claim.
 
 **Still open.** Browser/Playwright acceptance of the Drive connect flow (needs live OAuth config to exercise end to end), mirror promotion (VPS SSH still owner-blocked), Windows/Linux legs (CI billing), and the standing feature backlog (channels in /app, Engines Add-account, guided first run, tour pacing, voice W1-W3). Inherited preservation set untouched: docs/research/glm/ + www/templates.html.
+
+## Loop104 — the e2e suite runs on this machine for the first time, and it is green (17 September 2026)
+
+Playwright's Chromium had never been downloaded here, so every e2e claim in earlier loops was unverified on this hardware. After installing the browser: the pairing spec failed 4/5 and the backup/approval specs carried 6 more inherited red — none caused by recent commits (verified by running the spec at `07c6c42`, before the Drive slice).
+
+Real defects found and fixed while making it green:
+
+- **Product (b686c61):** `PortableBackupCard` fetched `/api/workspace/v2/status` on every mount — including hosted installs where the SELF_HOSTED wall 403s it, a guaranteed console error — and sent an empty-string body, which the request helper upgrades to a POST, making a status read write-shaped. Status now reads via GET and only when capability confirms backup is available.
+- **Spec truth (98776d6):** the approval specs waited for a FleetOrb idle pill that was deliberately unmounted 2026-09-15 (recorded in App.tsx); the same turn-ended assurance is now the re-enabled composer. The backup spec was updated to the shipped capability shape and to the measured capability-fetch counts (two consumers mount on that tab: 5 and 6 fetches).
+- **New acceptance (98776d6):** pairing e2e gains the carried-code browser proof — `/pair#CODE` survives the auth-gate bounce, displays with the desktop handoff instruction, and the code is still redeemable afterwards (display does not consume).
+
+Receipts: e2e **22 passed**; unit **281 files / 4235 passed / 0 failed**; both typechecks exit 0; oxlint 0/0. Pushed to origin/main.
