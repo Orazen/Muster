@@ -58,10 +58,14 @@ const runtimeFailureSchema = z.object({ message: z.string().optional() });
 /** Unwrap the runtime envelope. Failures surface the runtime's message. */
 async function envelope<T>(res: Response, fallback: string): Promise<T> {
   const raw = await res.text().catch(() => "");
-  // SAFETY: JSON.parse of arbitrary runtime bytes IS the boundary; the
-  // result is held at JsonValue and every read below goes through zod.
-  // SAFETY: the parse-to-JsonValue cast records the boundary contract.
-  const body: JsonValue = (() => { try { return raw ? JSON.parse(raw) as JsonValue : null; } catch { return null; } })();
+  const parseBody = (): JsonValue | null => {
+    try {
+      // SAFETY: JSON.parse of arbitrary runtime bytes IS the boundary; the
+      // result is held at JsonValue and every read below goes through zod.
+      return raw ? (JSON.parse(raw) as JsonValue) : null;
+    } catch { return null; }
+  };
+  const body = parseBody();
   if (!res.ok) {
     const failure = runtimeFailureSchema.catch({}).parse(body).message ?? raw.trim().slice(0, 300);
     throw new Error(`${fallback}${failure ? `: ${failure}` : ` (HTTP ${res.status})`}`);

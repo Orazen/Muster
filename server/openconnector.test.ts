@@ -23,11 +23,13 @@ const ok = (data: JsonValue) => new Response(JSON.stringify({ success: true, mes
 
 describe("Muster Connector (OpenConnector runtime)", () => {
   it("is unconfigured without url+token and refuses non-HTTPS remote runtimes", () => {
-    // SAFETY: the transport reads only cfg.openConnector; the casts build
-    // that one slice for the negative cases instead of a whole fixture.
-    // SAFETY: the second cast carries the non-HTTPS url the guard rejects.
-    expect(configured({} as AppConfig)).toBe(false);
-    expect(() => configured({ openConnector: { url: "http://connector.example.com", token: "t" } } as AppConfig)).toThrow(/HTTPS/);
+    // SAFETY: the transport reads only cfg.openConnector, so a one-slice
+    // object literal satisfies the AppConfig parameter for negative cases.
+    const empty = {} as AppConfig;
+    expect(configured(empty)).toBe(false);
+    // SAFETY: this slice carries the non-HTTPS url the guard must reject.
+    const insecure = { openConnector: { url: "http://connector.example.com", token: "t" } } as AppConfig;
+    expect(() => configured(insecure)).toThrow(/HTTPS/);
     expect(configured(cfg())).toBe(true);
   });
 
