@@ -399,7 +399,10 @@ export interface WorkspaceBackupCapability {
   /** Legacy account-linked flag stays false while that flow is contained. */
   drive: false;
   installationDrive: { configured: boolean; operationsAvailable: boolean };
-  accountDrive: { available: false; code: "ACCOUNT_DRIVE_UNAVAILABLE" };
+  /** The signed-in user's own Google Drive (drive.appdata on their account
+   * row). Available on local installs for any signed-in user; `connected`
+   * says a Drive refresh token is already stored. Hosted keeps it off. */
+  accountDrive: { available: boolean; connected: boolean };
 }
 
 let eventCounter = 0;

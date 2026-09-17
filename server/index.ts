@@ -243,6 +243,7 @@ import {
 } from "./workspace-files.ts";
 import * as browserPanel from "./browser-panel.ts";
 import * as workspaceBundle from "./workspace-bundle.ts";
+import * as accountDrive from "./account-drive.ts";
 import * as bundleV2 from "./workspace-bundle-v2.ts";
 import {
   applyPendingRestore,
@@ -4664,13 +4665,25 @@ let requestUserEmail = "";
     if (path === "/api/workspace/google/status" && method === "GET") {
       const installationDriveReady = !SELF_HOSTED
         && Boolean(cfg.driveSync?.refreshToken?.trim()) && driveSync.driveOAuthConfigured();
+      // The account-linked transport exists only for a signed-in user on a
+      // non-hosted install: no session means no account row, so there is
+      // nothing to advertise — the routes below stay contained 501s. Hosted
+      // keeps it off: one shared store must not export per-user workspaces
+      // through a personal Drive.
+      let accountDriveReady = false;
+      let accountDriveConnected = false;
+      if (!SELF_HOSTED && requestUserId) {
+        const tokens = accountDrive.googleTokensFor(getDb(), requestUserId);
+        accountDriveConnected = Boolean(tokens?.refreshToken);
+        accountDriveReady = true;
+      }
       const capability: WorkspaceBackupCapability = {
         capabilityVersion: 1,
         workspaceBackupAvailable: !SELF_HOSTED,
         unavailableReason: SELF_HOSTED ? "Workspace backups are available on local desktop installs only for now." : null,
         drive: false,
         installationDrive: { configured: installationDriveReady, operationsAvailable: installationDriveReady },
-        accountDrive: { available: false, code: "ACCOUNT_DRIVE_UNAVAILABLE" },
+        accountDrive: { available: accountDriveReady, connected: accountDriveConnected },
       };
       return json(res, 200, capability);
     }
@@ -4688,16 +4701,48 @@ let requestUserEmail = "";
       });
     }
 
-    // Account-linked backup has no verified subject/scope/token continuity
-    // or single-use callback intent yet. Retire these routes before reading
-    // bodies, creating state, exchanging tokens or touching backup contents.
-    // The separately configured installation Drive routes remain supported.
-    if ((method === "GET" && (path === "/api/workspace/google/connect" || path === "/api/workspace/google/callback"))
-      || (method === "POST" && (path === "/api/workspace/google/push" || path === "/api/workspace/google/pull"))) {
-      return json(res, 501, {
-        code: "ACCOUNT_DRIVE_UNAVAILABLE",
-        error: "Account-linked Google Drive backup is unavailable. Use a Drive connection configured on this computer.",
-      });
+    // Account-linked Google Drive backup: the signed-in user's own Google
+    // account, one drive.appdata grant, ciphertext-only transport. A request
+    // without a session keeps the historical contained 501 — no session means
+    // no account row, so no consent URL, state, or token exchange may run.
+    // Hosted never reaches here: the installation-backup wall above returns
+    // 403 first. The callback additionally requires the state's bound user to
+    // equal the session's user, so one account cannot consume another's
+    // consent redirect.
+    const ACCOUNT_DRIVE_OFF = {
+      code: "ACCOUNT_DRIVE_UNAVAILABLE",
+      error: "Account-linked Google Drive backup is unavailable. Use a Drive connection configured on this computer.",
+    };
+    if (method === "GET" && path === "/api/workspace/google/connect") {
+      if (!requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
+      try {
+        const host = req.headers.host ?? "127.0.0.1:8799";
+        const proto = forwardedProtoOf(req);
+        const origin = `${proto === "https" || !host.startsWith("127.0.0.1") && !host.startsWith("localhost") ? "https" : "http"}://${host}`;
+        const url = accountDrive.googleDriveAuthUrl(origin, accountDrive.signDriveState(requestUserId));
+        return json(res, 200, { url });
+      } catch (e) {
+        return json(res, 501, { code: "ACCOUNT_DRIVE_UNAVAILABLE", error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (method === "GET" && path === "/api/workspace/google/callback") {
+      if (!requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
+      const query = new URL(req.url ?? "/", "http://localhost").searchParams;
+      const state = query.get("state") ?? "";
+      const code = query.get("code") ?? "";
+      const stateUser = accountDrive.verifyDriveState(state);
+      if (!stateUser || stateUser !== requestUserId || !code) {
+        return res.writeHead(302, { location: "/app?drive=connect-failed" }).end();
+      }
+      try {
+        const host = req.headers.host ?? "127.0.0.1:8799";
+        const proto = forwardedProtoOf(req);
+        const origin = `${proto === "https" || !host.startsWith("127.0.0.1") && !host.startsWith("localhost") ? "https" : "http"}://${host}`;
+        const connected = await accountDrive.connectDriveFor(getDb(), requestUserId, code, origin);
+        return res.writeHead(302, { location: `/app?drive=${connected ? "connected" : "connect-failed"}` }).end();
+      } catch {
+        return res.writeHead(302, { location: "/app?drive=connect-failed" }).end();
+      }
     }
 
     // ── multi-tenant guard (SELF_HOSTED only) ──────────────────────────
@@ -7989,6 +8034,35 @@ let requestUserEmail = "";
       if (body?.confirm !== true) return json(res, 400, { error: "restoring replaces the current fleet — send confirm: true to proceed" });
       const out = stageV2Restore(passphrase, payload, "file");
       return json(res, out.ok ? 200 : out.status, out.body);
+    }
+    if (method === "POST" && (path === "/api/workspace/google/push" || path === "/api/workspace/google/pull")) {
+      // Session-bound: the push/pull transport moves this user's own bundle
+      // through their own Drive grant. No session → contained 501, checked
+      // before any body parsing, exactly like the other account routes.
+      if (!requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const accessToken = await accountDrive.accessTokenFor(getDb(), requestUserId);
+      if (!accessToken) {
+        return json(res, 400, { error: "your Google account is not connected to Drive yet — connect it in Settings first" });
+      }
+      try {
+        if (path === "/api/workspace/google/push") {
+          const payload = bundleV2.buildPayloadV2({ dataDir: DATA_DIR, appVersion: appVersion() });
+          const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
+          const fileId = await accountDrive.drivePushFor(accessToken, bytes.toString("utf8"));
+          syncState.stampSync("local", "push", "google-account");
+          return json(res, 200, { uploaded: fileId, counts: payload.counts, skipped: payload.skipped ?? [] });
+        }
+        const payloadText = await accountDrive.drivePullFor(accessToken);
+        if (!payloadText) return json(res, 404, { error: "no portable backup exists in your Google Drive yet — push from the other device first" });
+        const out = stageV2Restore(passphrase, payloadText, "google-account");
+        if (out.ok) syncState.stampSync("local", "pull", "google-account");
+        return json(res, out.ok ? 200 : out.status, out.body);
+      } catch (e) {
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
     }
     if (path === "/api/workspace/v2/restore/discard" && method === "POST") {
       clearPendingRestore(DATA_DIR);

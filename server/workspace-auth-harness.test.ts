@@ -36,7 +36,7 @@ const capability = (hosted: boolean, ready = false) => ({
   capabilityVersion: 1, workspaceBackupAvailable: !hosted,
   unavailableReason: hosted ? UNAVAILABLE.error : null, drive: false,
   installationDrive: { configured: ready, operationsAvailable: ready },
-  accountDrive: { available: false, code: "ACCOUNT_DRIVE_UNAVAILABLE" },
+  accountDrive: { available: false, connected: false },
 });
 
 type DriveConfiguration = "ready" | "missing-token" | "blank-token" | "missing-id" | "blank-id" | "missing-secret" | "blank-secret" | "padded-client";
@@ -156,8 +156,8 @@ describe.skipIf(process.platform === "win32")("configured local Drive over actua
   it.each(ACCOUNT_DRIVE_ROUTES)("does not substitute installation credentials for configured-local account $method $path", async ({ method, path }) => {
     const before = state();
     const offset = local.transport.entries().length;
-    // Callback parameters only look like input; they are not a signed intent
-    // and must not be parsed or exchanged by these retired account routes.
+    // Callback parameters only look like input; with no session they never
+    // reach the signed-intent check, the consent exchange or any transport.
     const response = await request(local, path, method, method === "POST" ? JSON.stringify({ passphrase, payload: "owned-unused-payload" }) : undefined);
     expect({ status: response.status, body: await response.json() }).toEqual({ status: 501, body: ACCOUNT_DRIVE_UNAVAILABLE });
     expect(state()).toEqual(before);

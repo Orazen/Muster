@@ -8,7 +8,7 @@
 // Restores stage while Muster runs and apply at the next launch — the
 // server replaces the whole covered set atomically at boot, with a safety
 // copy of what was there before.
-import { Download, HardDriveDownload, Loader2, RotateCcw, Send, ShieldCheck, Upload, X } from "lucide-react";
+import { CloudUpload, Download, HardDriveDownload, Loader2, RotateCcw, Send, ShieldCheck, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 
@@ -61,6 +61,9 @@ const v2StatusReply = z.object({
   }).nullable(),
 });
 
+const connectUrlReply = z.object({ url: z.string().url() });
+const uploadedReply = z.object({ uploaded: z.string().min(1), counts: countsSchema.nullable().optional() });
+
 type Step =
   | { kind: "idle" }
   | { kind: "busy"; label: string }
@@ -75,6 +78,7 @@ export function PortableBackupCard() {
   const [passphrase, setPassphrase] = useState("");
   const [step, setStep] = useState<Step>({ kind: "idle" });
   const [ready, setReady] = useState(false);
+  const [accountDrive, setAccountDrive] = useState<{ available: boolean; connected: boolean } | null>(null);
   const [status, setStatus] = useState<z.infer<typeof v2StatusReply> | null>(null);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -102,7 +106,10 @@ export function PortableBackupCard() {
       if (!request) return;
       try {
         const cap = await readWorkspaceCapability(request);
-        if (cap) request.commit(() => setReady(cap.workspaceBackupAvailable));
+        if (cap) request.commit(() => {
+          setReady(cap.workspaceBackupAvailable);
+          setAccountDrive(cap.accountDrive);
+        });
       } catch {
         /* fail closed: no card actions until capability is confirmed */
       } finally {
@@ -189,6 +196,32 @@ export function PortableBackupCard() {
     run("Pulling the bundle from Drive…", async (request) => {
       needPassphrase();
       const data = await readWorkspaceReply(request, "/api/workspace/v2/drive/pull", JSON.stringify({ passphrase }), v2StageReply);
+      if (!data) return null;
+      return stageResult(data);
+    });
+
+  // The signed-in user's own Google account: one drive.appdata consent, the
+  // refresh token stored on their account row, ciphertext-only transport.
+  const connectGoogle = () =>
+    run("Opening Google's consent page…", async (request) => {
+      const data = await readWorkspaceReply(request, "/api/workspace/google/connect", "", connectUrlReply);
+      if (!data) return null;
+      window.location.href = data.url;
+      return null;
+    });
+
+  const accountPush = () =>
+    run("Sending your full backup to your Google Drive…", async (request) => {
+      needPassphrase();
+      const data = await readWorkspaceReply(request, "/api/workspace/google/push", JSON.stringify({ passphrase }), uploadedReply);
+      if (!data) return null;
+      return `Your Drive holds it now: ${data.counts?.threads ?? "?"} threads, ${data.counts?.messages ?? "?"} messages.`;
+    });
+
+  const accountPull = () =>
+    run("Pulling the bundle from your Google Drive…", async (request) => {
+      needPassphrase();
+      const data = await readWorkspaceReply(request, "/api/workspace/google/pull", JSON.stringify({ passphrase }), v2StageReply);
       if (!data) return null;
       return stageResult(data);
     });
@@ -294,6 +327,22 @@ export function PortableBackupCard() {
         <button type="button" disabled={busy} onClick={() => void drivePull()} className={accent}>
           <HardDriveDownload size={13} /> Restore from Drive
         </button>
+        {accountDrive?.available && (
+          accountDrive.connected ? (
+            <>
+              <button type="button" disabled={busy} onClick={() => void accountPush()} className={accent}>
+                <CloudUpload size={13} /> My Google Drive
+              </button>
+              <button type="button" disabled={busy} onClick={() => void accountPull()} className={accent}>
+                <HardDriveDownload size={13} /> Restore from my Drive
+              </button>
+            </>
+          ) : (
+            <button type="button" disabled={busy} onClick={() => void connectGoogle()} className={accent} title="Grant your Google account's private app folder for portable backups">
+              <CloudUpload size={13} /> Connect my Google Drive
+            </button>
+          )
+        )}
         <button type="button" disabled={busy} onClick={() => void telegramPush()} className={accent}>
           <Send size={13} /> Telegram
         </button>

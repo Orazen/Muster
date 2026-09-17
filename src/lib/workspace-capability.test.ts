@@ -9,13 +9,14 @@ const local: WorkspaceBackupCapability = {
   unavailableReason: null,
   drive: false,
   installationDrive: { configured: true, operationsAvailable: true },
-  accountDrive: { available: false, code: "ACCOUNT_DRIVE_UNAVAILABLE" },
+  accountDrive: { available: true, connected: false },
 };
 const hosted: WorkspaceBackupCapability = {
   ...local,
   workspaceBackupAvailable: false,
   unavailableReason: "Workspace backups are only available on a local installation.",
   installationDrive: { configured: false, operationsAvailable: false },
+  accountDrive: { available: false, connected: false },
 };
 
 function scope() {
@@ -60,8 +61,9 @@ describe("workspace capability contract", () => {
     ["blank hosted explanation", { ...hosted, unavailableReason: " \n" }],
     ["hosted configured drive", { ...hosted, installationDrive: local.installationDrive }],
     ["local rejection reason", { ...local, unavailableReason: "Unavailable" }],
-    ["account grant inference", { ...local, accountDrive: { available: true, code: "ACCOUNT_DRIVE_UNAVAILABLE" } }],
-    ["unknown account code", { ...local, accountDrive: { available: false, code: "OTHER" } }],
+    ["account grant inference", { ...local, accountDrive: { available: true } }],
+    ["account code shape", { ...local, accountDrive: { available: true, connected: false, code: "ACCOUNT_DRIVE_UNAVAILABLE" } }],
+    ["account availability string", { ...local, accountDrive: { available: "yes", connected: false } }],
     ["old stamp", { ...local, lastPush: { at: 1 } }],
     ["unexpected nested field", { ...local, installationDrive: { ...local.installationDrive, connected: true } }],
     ["null", null],

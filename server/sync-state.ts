@@ -9,7 +9,7 @@ import { DATA_DIR } from "./config.ts";
 
 export interface SyncStamp {
   at: number;
-  channel: "google-drive" | "telegram";
+  channel: "google-drive" | "google-account" | "telegram";
 }
 
 export interface SyncState {

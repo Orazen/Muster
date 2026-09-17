@@ -7,7 +7,7 @@ export const workspaceCapabilitySchema = z.object({
   unavailableReason: z.string().refine((value) => value.trim().length > 0).nullable(),
   drive: z.literal(false),
   installationDrive: z.object({ configured: z.boolean(), operationsAvailable: z.boolean() }).strict(),
-  accountDrive: z.object({ available: z.literal(false), code: z.literal("ACCOUNT_DRIVE_UNAVAILABLE") }).strict(),
+  accountDrive: z.object({ available: z.boolean(), connected: z.boolean() }).strict(),
 }).strict().refine((value) => (
   value.workspaceBackupAvailable
     ? value.unavailableReason === null && value.installationDrive.configured === value.installationDrive.operationsAvailable
