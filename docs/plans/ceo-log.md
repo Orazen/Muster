@@ -5605,3 +5605,13 @@ Owner ask: make the OpenConnector gateway (oomol-lab/open-connector, 5.8k stars)
 Live probe over the real routes (stub runtime + real server): 5/5 - catalog muster-connector mode, branded cards, batched status, authorize link, config reports configured without echoing the token. Full gates at the tip: unit 283 files / 4250 passed / 0 failed; e2e 22/22; both typechecks; full-tree oxlint 0/0 (first time this session - the 15 anti-slop errors from the PR #8 extraction were healed on this lineage, and two new boundary casts carry proper SAFETY justifications). A real bug fixed on the way: spreading a Headers instance yields {} - header merges now go through the Headers API.
 
 Research folded into the consolidated report: cumora (agent-team coordination: claims + stale-reply HOLD - the next fleet differentiator to study), Memoh (per-agent always-on computers + first-class memory - validates Muster's per-bot computers; memory profiles are the take), OpenConnector (shipped here). PR #11 merged with checks platform-refused per policy.
+
+## Loop108 — Jev-style recommend_team: the Chief of Staff now ranks the bench (17 September 2026)
+
+Owner ask: integrate the TypeSafe Jev stack (openjev, jev-review, jev-mcp, jev-ultrafast) so bots get a chief-of-staff decision engine. All four repos ground-truthed before building; the shared pattern is software-enumerated candidates with unique ids, deterministic explainable ranking, and the model only choosing (openjev: "no answer sentence, JSON repair, or decoding loop").
+
+Shipped: server/jev-dispatch.ts (pure engine: weighted overlap title x3 / name x2 / description x1, busy tie-break, complexity read, model-fit ADVISORY - bots keep their own models, nothing overridden); recommend_team MCP tool in agents-proxy served by loopback-only /api/internal/recommend-team under the same peer-lease auth as its siblings; chief-of-staff prompt teaches rank-first discipline; fake-acp-cli recommend-peer mode proves the whole chain over the real booted server (recommend_team ranked the auth specialist, ask_bot ran its depth-1 turn, reply folded back).
+
+Receipts at the merged tip (903cfe8): unit 285 files / 4273 passed / 8 skipped / 0 failed; e2e 22/22; both typechecks exit 0; oxlint 0/0. PR #12 merged with checks platform-refused per the PR-#8 policy (4s jobs, zero steps, no logs - honest re-run reproduced it; merge comment states the local evidence).
+
+Honest calls recorded in the consolidated report 8b: the sslip.io crypto-trading endpoint was NOT wired (unaudited personal deploy - would break the trust model); vocaleo (agent-first calling API) is the true-calling track's cleanest implementation; rene.co contributes bots-as-contacts + assistant-to-assistant negotiation as named future slices.
