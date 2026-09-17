@@ -256,7 +256,62 @@ personal encrypted Drive continuum in one product.
 
 ---
 
-## 8. The plan going forward (parallel tracks)
+## 8b. The Jev stack study + what shipped from it (17 Sep 2026, second pass)
+
+The owner asked for four TypeSafe-Jev repos to be studied and their idea folded
+into Muster. All four were ground-truthed from source/READMEs, not headlines:
+
+| Repo | What it actually is | The pattern Muster takes |
+|---|---|---|
+| `jkudish/jev-mcp` (114★) | MCP server exposing Jev decisions as tools; source shows pure helpers: `sanitizeId`, `ensureUniqueIds`, `MAX_CANDIDATES = 250` | Pure, unit-testable decision core + indexed candidates |
+| `NiazMorshed2007/jev-review` (36★) | ONE focused MCP tool (`jev_review`), local-first, no hosted backend | One tool per decision surface, no tool sprawl |
+| `browser-use/jev-ultrafast` (830★) | Browser agent where a decision model picks operation+element from an indexed table; a small LLM writes text only for `TYPE_TEXT` | Candidates enumerated by software; model only chooses |
+| `TheoLeeCJ/openjev` (288★) | Open reproduction of Jev's *interface pattern*: reads typed option probabilities directly from a 4B model — "no answer sentence, JSON repair, or decoding loop" | Deterministic, explainable ranking — never parse prose back into an `if` |
+
+**What shipped (feat/jev-dispatch):** `recommend_team` — Muster's Chief of
+Staff now ranks the roster before delegating, exactly the Jev decision shape.
+See the commit message for the full gate table. The@typesafeai framing —
+"Jev reads the task, wakes the right teammates off the bench, gives each one
+the right model" — is honored honestly: Muster ranks and wakes teammates, and
+*advises* on model fit, but never overrides a bot's own model.
+
+**Deliberately not shipped:** the crypto/technical-analysis trading service
+the owner pasted (`62-238-89-95.sslip.io`, an unverified personal deploy with
+an "ask me for an API key" gate) — wiring an unaudited third-party endpoint
+into Muster's bot fabric would violate the trust model every other slice
+upholds. If the owner wants market intelligence, the right shape is a Muster
+connector to a named provider, not a hard-coded personal server.
+
+**Other targets from this request:**
+
+- **vocaleo.co/llms.txt** — an agent-first phone-call API (one call → one
+  structured result; "the customer is the agent"). This is the *true-calling*
+  half of the voice track (walkie = push-to-talk as today; calling = place a
+  call, wait, return facts). A Muster connector to Vocaleo is the cleanest
+  calling implementation seen so far — queued in Track C.
+- **rene.co** — "multiplayer personal superintelligence"; the two ideas worth
+  stealing: bots reachable **as phone contacts** ("text Rene now"), and
+  **assistant-to-assistant negotiation** ("Alex's Rene and I found a night you
+  are both free") — Muster's chief/delegation fabric is the right substrate;
+  a cross-workspace negotiation handshake is a named future slice.
+- **vellum.ai/assistant/identity** — a branded assistant surface (identity,
+  not persona), plus a CSP `frame-src` discipline note in the page source.
+  Muster's Flower mascot already owns identity; the take is a coherent
+  "meet Muster" identity page across web/desktop/mobile, not a rebrand.
+
+## 8c. Strategy: why a Muster user stops using OpenMausBot
+
+OpenMausBot is a strong single-bot chat app. Muster's compounding differences,
+all shipped and verified this session: a workspace **team** of bots with a
+Chief of Staff that now ranks and routes (Jev-style), plan rehearsal +
+approval evidence before actions run, memory history/rollback, per-bot cloud
+computers, the connected-apps marketplace (now also own-branded via the Muster
+Connector), encrypted Drive backup/restore of every workspace, and the
+webapp/desktop/mobile/watch surface spread with distinct UIs per device. The
+moat sequence stays: rehearsal + evidence + personal encrypted Drive continuum
+— no competitor has all three.
+
+---
 
 **Track A — finish + ship (this pass):** deliver the account-Drive slice
 (section 4.7: full gate, PR, merge per policy), then the blue-selection UI fix

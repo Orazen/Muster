@@ -37,6 +37,7 @@ import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from 
 import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER, type WhyEntry } from "./why-journal.ts";
 import { clearOnboardingStatus, readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
 import { SeedAnswerDispatcher, seedAnswerInputSchema, seedStartInputSchema, seedStatusInputSchema } from "./seed-answer-dispatch.ts";
+import { recommendTeam, type JevCandidate } from "./jev-dispatch.ts";
 import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-signing.ts";
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
@@ -4742,7 +4743,8 @@ let requestUserEmail = "";
       }
       const peerOperation = method === "GET" && path === "/api/internal/agents" ? "list_bots"
         : method === "POST" && path === "/api/internal/ask-bot" ? "ask_bot"
-        : method === "POST" && path === "/api/internal/delegate-bot" ? "delegate_bot" : undefined;
+        : method === "POST" && path === "/api/internal/delegate-bot" ? "delegate_bot"
+        : method === "POST" && path === "/api/internal/recommend-team" ? "recommend_team" : undefined;
       if (peerOperation) {
         const lease = peerCapabilities.resolve(req.headers.authorization);
         if (!lease || !peerLeaseValid(lease)) return json(res, 401, { error: "unauthorized" });
@@ -4755,6 +4757,29 @@ let requestUserEmail = "";
             title: bot.title || undefined, description: bot.description || undefined,
           }));
           return json(res, 200, { bots });
+        }
+        if (peerOperation === "recommend_team") {
+          // Jev-style dispatch: rank the visible roster for the posted task
+          // and return indexed, evidence-citing picks. Read-only — the model
+          // stays free to choose, and no bot config is ever touched here.
+          const body = await readBody(req);
+          if (!peerLeaseValid(lease)) return json(res, 401, { error: "unauthorized" });
+          if (body.fromBotId !== undefined && body.fromBotId !== lease.botId) {
+            return json(res, 403, { error: "caller identity mismatch" });
+          }
+          const task = isText(body.task) ? body.task.trim() : "";
+          if (!task) return json(res, 400, { error: "task required" });
+          const candidates: JevCandidate[] = store.bots
+            .filter((bot) => peerTarget(lease, bot.id))
+            .map((bot) => ({
+              id: bot.id, name: bot.name, model: bot.modelSelection.model || undefined,
+              busy: !!bot.busy, title: bot.title || undefined, description: bot.description || undefined,
+            }));
+          const maxPicksRaw = Number(body.maxPicks);
+          const dispatch = recommendTeam(task, candidates, {
+            maxPicks: Number.isInteger(maxPicksRaw) ? maxPicksRaw : undefined,
+          });
+          return json(res, 200, { dispatch });
         }
         const body = await readBody(req);
         // Reading a streamed request is itself an await: the turn may have

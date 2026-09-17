@@ -144,6 +144,13 @@ describe("comms e2e (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "delegate-peer" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
+          // the Jev dispatch fleet: A ranks the roster with recommend_team
+          // (the decision engine) and then asks the top pick via ask_bot.
+          askerRecommend: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "recommend-peer" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
           // a peer whose agent crashes at initialize — the delegated turn
           // ends with ok=false, so the channel must show a failed terminal
           // chip, not silence.
@@ -276,6 +283,54 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(helperBot.busy).toBeFalsy();
     },
     // 25s internal poll + fleet setup needs load headroom
+    120_000,
+  );
+
+  // ── Jev-style dispatch (recommend_team → ask_bot) ───────────────────
+  // A's fake CLI uses FAKE_ACP_MODE=recommend-peer: it ranks the roster
+  // with recommend_team (which hits /api/internal/recommend-team — the
+  // pure decision engine over the real endpoint) and then ask_bots the
+  // top pick. Proves the whole chain: proxy → harness → engine → peer
+  // turn → fold-back, plus that the ranking text names the specialist.
+  it(
+    "ranks the roster with recommend_team and asks the top pick",
+    async () => {
+      const seeded = (await api("GET", "/api/bots")).body.bots[0];
+      await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
+      const selection = { instanceId: "grok", model: "fake-model" };
+      const authy = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${authy.id}`, {
+        name: "Authy — authentication and login security",
+        modelSelection: selection,
+      });
+      const asker = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${asker.id}`, { name: "Router", modelSelection: { instanceId: "askerRecommend", model: "fake-model" } });
+
+      const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "who should review our login flow?" });
+      expect(send.status).toBe(202);
+
+      const deadline = Date.now() + 25_000;
+      let routerBot: any;
+      for (;;) {
+        routerBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
+        const settled = routerBot.messages.some(
+          (m: any) => m.kind === "text" && m.role === "bot" && m.text?.includes("recommended says:"),
+        );
+        if (settled && !routerBot.busy) break;
+        if (Date.now() > deadline) {
+          throw new Error(
+            `Router never folded the recommendation. messages: ${JSON.stringify(routerBot.messages.slice(-6))}\nstderr: ${stderr.slice(-2000)}`,
+          );
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      const reply = routerBot.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
+      // the full name embeds the title: proof the engine ranked the AUTH
+      // specialist first and the proxy asked THAT bot, not a generic one
+      expect(reply.text).toContain("Authy — authentication and login security replied:");
+      expect(reply.text).toContain("hello from fake acp");
+    },
     120_000,
   );
 

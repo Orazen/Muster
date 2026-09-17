@@ -49,13 +49,14 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(prompt).toContain("Patch — Engineer (working right now)");
     expect(prompt).not.toContain("Secret");
     expect(prompt).not.toContain("Atlas —");
-    expect(prompt).toContain("Use ask_bot");
+    expect(prompt).toContain("recommend_team");
+    expect(prompt).toContain("ask_bot or delegate_bot");
   });
 
   it("does not promise delegation when the engine cannot mount agent tools", () => {
     const prompt = chiefOfStaffSystemPrompt("chief", bots, false);
 
     expect(prompt).toContain("cannot contact teammates");
-    expect(prompt).not.toContain("Use ask_bot");
+    expect(prompt).not.toContain("recommend_team");
   });
 });

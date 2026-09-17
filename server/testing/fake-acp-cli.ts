@@ -388,6 +388,30 @@ function handle(msg: any) {
           });
         return;
       }
+      if (mode === "recommend-peer" && agentsMcp) {
+        // Jev dispatch e2e: rank the roster with recommend_team, then ask the
+        // top pick — proves the decision engine through the real proxy →
+        // harness → endpoint chain, with the fold-back assertion in comms.
+        void driveMcp(agentsMcp, [
+          {
+            name: "recommend_team",
+            args: () => ({ task: "our login page needs an authentication review" }),
+          },
+          {
+            name: "ask_bot",
+            args: (list) => ({ bot_id: /id: ([\w-]+)/.exec(list)?.[1] ?? "", message: "review the login flow" }),
+          },
+        ])
+          .then((reply) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `recommended says: ${reply}` } } } });
+            complete();
+          })
+          .catch((e: Error) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `recommend error: ${e.message}` } } } });
+            complete();
+          });
+        return;
+      }
       if (mode === "echo-gated") {
         // echoing the WHOLE prompt (system + turn text) lets a test assert
         // both what a drained turn was sent and what it was NOT sent (e.g.
