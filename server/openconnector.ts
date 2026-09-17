@@ -60,6 +60,7 @@ async function envelope<T>(res: Response, fallback: string): Promise<T> {
   const raw = await res.text().catch(() => "");
   // SAFETY: JSON.parse of arbitrary runtime bytes IS the boundary; the
   // result is held at JsonValue and every read below goes through zod.
+  // SAFETY: the parse-to-JsonValue cast records the boundary contract.
   const body: JsonValue = (() => { try { return raw ? JSON.parse(raw) as JsonValue : null; } catch { return null; } })();
   if (!res.ok) {
     const failure = runtimeFailureSchema.catch({}).parse(body).message ?? raw.trim().slice(0, 300);
