@@ -179,6 +179,14 @@ body,
   height: 100%;
 }
 
+/* The app is dark through and through: native widgets, scrollbars and form
+   controls render dark instead of blinding white, and the browser stops
+   painting the raw blue tap-flash on mobile touches. */
+html {
+  color-scheme: dark;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   background-color: var(--color-app);
   color: var(--color-ink);
@@ -208,8 +216,11 @@ body {
   outline-offset: -2px;
 }
 
+/* Selection: a calm raised-surface wash, NOT the brand accent. 45% bright
+   blue over dark panels made every drag-select feel like an intrusion; the
+   raised hover tone reads as "the text is in hand" without shouting. */
 ::selection {
-  background: color-mix(in oklab, var(--color-accent) 45%, transparent);
+  background: color-mix(in oklab, var(--color-raised-hover) 80%, transparent);
   color: var(--color-ink);
 }
 
