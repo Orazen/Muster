@@ -104,7 +104,7 @@ export async function workspaceResponse(
   return response;
 }
 
-export async function readWorkspaceReply<T>(request: WorkspaceRequest, path: string, body: string, schema: z.ZodType<T>, fetcher: typeof fetch = fetch): Promise<T | null> {
+export async function readWorkspaceReply<T>(request: WorkspaceRequest, path: string, body: string | undefined, schema: z.ZodType<T>, fetcher: typeof fetch = fetch): Promise<T | null> {
   const response = await workspaceResponse(request, path, body, fetcher);
   if (!response) return null;
   const result = schema.safeParse(await response.json());

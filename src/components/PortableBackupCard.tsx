@@ -90,7 +90,7 @@ export function PortableBackupCard() {
     const request = requests.beginStatus();
     if (!request) return;
     try {
-      const value = await readWorkspaceReply(request, "/api/workspace/v2/status", "", v2StatusReply);
+      const value = await readWorkspaceReply(request, "/api/workspace/v2/status", undefined, v2StatusReply);
       if (value) request.commit(() => setStatus(value));
     } catch {
       /* status is advisory — the action buttons carry the real errors */
@@ -110,12 +110,15 @@ export function PortableBackupCard() {
           setReady(cap.workspaceBackupAvailable);
           setAccountDrive(cap.accountDrive);
         });
+        // Backup is unavailable here (hosted) — never probe deeper: the
+        // v2 status route is local-install-only, so a request to it can
+        // only produce a confusing 403 console error.
+        if (cap?.workspaceBackupAvailable) void refreshStatus();
       } catch {
         /* fail closed: no card actions until capability is confirmed */
       } finally {
         request.finish();
       }
-      void refreshStatus();
     })();
     return () => {
       requests.dispose();
