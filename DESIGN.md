@@ -717,6 +717,92 @@ caption word-cursor (9b7d30c), W1 room-call parity (8ba3970), W5 session
 controls (c0e0064). W4 barge-in remains plan-only pending real-device
 testing.
 
+## 41. GLM research fold: the self‑improvement path (2026‑09‑17)
+
+The GLM research pass (`docs/research/glm/01–07`) answers one question with
+sources: what is the honest path from Muster‑as‑shipped to a system that
+improves itself, and where does that sit relative to the AGI/ASI frontier?
+
+**Autonomy level (doc 01).** Muster is a **L2‑on‑the‑ladder autonomy harness
+carrying Level‑1‑Emerging models**. The fleet operates between Consultant and
+Collaborator, and every promotion from Consultant to Collaborator is an
+explicit human‑signed OptionCard event — the autonomy gate no competitor owns.
+Capability: whatever BYOK brings. Autonomy: Tool → Consultant → Collaborator
+(today, gated) → Expert → Agent. **The approval moment is the product.**
+
+**Two compounding loops (doc 04).**
+
+| Loop | Owner | Mechanism |
+|---|---|---|
+| **A — model layer** | No one (BYOK) | Weights, RL, compute, datacenter scale‑up. Muster rides whatever it produces at zero platform cost. |
+| **B — harness layer** | Muster | Tasks → signed receipts → eval data → fitness‑function‑strengthened proposals → approval‑gated upgrades → fleet's next run is better. |
+
+Loop B is genuinely compounding, and it is deliberately **rate‑limited by
+human judgment** — a harness‑layer singularity would never be fast, and that is
+a feature: it is the corrigibility guarantee.
+
+**Evidence pillars (doc 02).** AlphaEvolve proves automated algorithm discovery
+works *where a clean objective evaluator exists* — Muster's scorecards and
+`muster eval` are that precondition in primitive form. ShinkaEvolve proves
+sample efficiency (26‑circle packing in 150 evals) — self‑improvement does not
+require AlphaEvolve‑scale compute, only a cheap reliable evaluator and
+diversity pressure. Darwin Gödel Machine proves empirical self‑modification
+needs sandbox + human oversight as external precautions — Muster's approval
+pipeline is structurally that pair, but only worth anything if what the bot
+modifies is *replayable and testable*. METR's horizon doubling means the
+binding constraint on Muster tasks stops being model capability and becomes
+**approval friction and evidence capacity** — Muster should want that
+crossover inside its walls.
+
+**Safety architecture (doc 04, mapped to the research vocabulary).**
+Corrigibility (approval cards) ✔ shipped; audit trail (HMAC receipts) ✔
+shipped; capability clamps (bounded fleet MCP) ✔ shipped; measurable
+objectives (routine scorecards) ✔ shipped, gap: no per‑role benchmark;
+transparency (why‑journal, plan rehearsal) ✔ shipped at v1; persona‑drift
+control (memory history + rollback) **designed, not built — a real gap**;
+sandboxed exploration of self‑modification (per‑bot VMs + approval‑gated
+proposals) **designed**.
+
+**Real threat model (Muster‑specific, named).** Eval gaming — a bot shaping
+its own scorecard checks. Always‑allow creep — approval fatigue breeding
+blanket permissions (rule: any action class that is irreversible, external, or
+touches another human gets no blanket mode). Approval laundering — routing a
+consequential ask through a channel that auto‑allows (receipt delegation's
+frozen‑snapshot design is the structural defense). Memory self‑rewrite — a bot
+editing its own MEMORY.md/SOUL.md to remove guardrails (memory history + rollback
+is the prerequisite control; until it ships, no self‑proposal may touch
+memory). Receipt forgery / key compromise — the audit trail is only as strong
+as the signing key.
+
+**Falsifiable milestones (doc 04).** M1 — self‑measured routine (a bot's own
+proposed check passes on 3 consecutive live runs). M2 — evidence‑carried
+persona change (before/after eval deltas computed on that bot's own receipts).
+M3 — certify‑then‑commit live (approval card shows "this plan matches N
+recorded steps" from true playback). M4 — unattended eval gate (a weekly pass
+against live receipts whose failure demonstrably blocks an autonomy
+promotion). M1–M4 are the first four rungs of Loop B made falsifiable.
+
+**What shipped this session (Loops 104–110).** The route‑table extraction
+(PR #8), the calm selection (PR #9), the account‑Drive round trip (PR 10),
+the Muster Connector (PR 11), Jev‑style `recommend_team` (PR 12), the
+workspace brain (PR 13), and brain‑backed dispatch (Loop 110). Verified at the
+merged tip: unit 287 files / 4287 passed / 8 skipped / 0 failed; e2e 22/22;
+both typechecks exit 0; oxlint 0/0.
+
+**Remaining openly‑ranked work.** (1) automated per‑role benchmark (L1's
+named gap — highest‑leverage internal gap); (2) memory history + rollback (L5
+prerequisite); (3) skills‑creation API (largest server‑side gap); (4) voice
+W4–W5 and auth A3–A4; (5) agent social ecosystem S5–S10; (6) GAIA phases
+G2–G5; (7) full Mimosa security re‑run (blocked — no security claims); (8)
+OpenMausBot parity slices already ranked.
+
+**Non‑claims.** Nothing here claims Muster contributes to model‑layer AGI
+research — it does not, and BYOK means it never needs to. Nothing here claims
+alignment is solved, or that shipped guardrails would withstand a deliberately
+adversarial frontier model. The singularity is treated as a hypothesis with
+partial existence proofs, not a plan of record. The security posture of the
+project is not attested here; the Mimosa re‑run remains owed and blocked.
+
 ---
 
 *Mermaid diagrams: §2 system, §10 sync, §12 restore. This document is

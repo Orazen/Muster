@@ -7,6 +7,8 @@
 
 [Open Muster](https://muster.orazen.online/app) · [Desktop downloads](https://muster.orazen.online/download.html) · [Product docs](https://muster.orazen.online/docs)
 
+<img src="docs/screenshots/app-chat.png" alt="Muster workspace: a conversation with a named AI teammate streaming a reply" width="820">
+
 </div>
 
 Muster brings named AI teammates, conversations, tools and human decisions into one workspace.
@@ -16,11 +18,24 @@ This is Muster's **private product repository**, maintained by Tharun Ramagiri a
 It contains the desktop application, server, web interface, CLI and companion clients.
 Repository access is for authorized development and operation of Muster.
 
+## The product, in screenshots
+
+All images below are real repository-owned captures (`docs/screenshots/`); none are mockups or stock media.
+
+| Muster OS desktop shell | Human approval moment |
+|---|---|
+| <img src="docs/screenshots/os-desktop.png" alt="Muster OS desktop surface" width="480"> | <img src="docs/screenshots/approval-card.png" alt="An OptionCard approval waiting on a human decision" width="480"> |
+
+| Connected apps | Per-bot model choice | Bot settings | Computer surface | iOS companion |
+|---|---|---|---|---|
+| <img src="docs/screenshots/marketplace.png" alt="Connected apps marketplace" width="190"> | <img src="docs/screenshots/model-picker.png" alt="Per-bot model picker" width="190"> | <img src="docs/screenshots/bot-settings.png" alt="Bot configuration panel" width="190"> | <img src="docs/screenshots/computer-panel.png" alt="Bot computer-use panel" width="190"> | <img src="docs/screenshots/iphone-roster.png" alt="MusterMobile roster on iPhone" width="190"> |
+
 ## Product surfaces
 
 - **Teammates and conversations:** bot profiles, memory, task threads, rooms and streamed replies.
 - **Tools and decisions:** engine drivers, connected tools, computer integrations, permission cards and questions. Available controls depend on the engine and configured services.
 - **Work over time:** routines, goals, execution journals and task receipts. These provide workflow controls and records, not guarantees of successful autonomous work.
+- **Workspace brain:** explicit facts with mandatory provenance, correction chains, withdrawal that preserves history, and keyword retrieval with gap analysis; institutional memory can bias the Chief-of-Staff's team ranking (capped, explainable).
 - **Onboarding:** seven stages led by the Flower mascot, account-scoped drafts and explicit first-task recovery. Saved welcome answers have their own durable recording and dispatch contract.
 - **Companions:** iOS, Apple Watch and Android clients connect to the desktop companion service for supported conversation and decision actions.
 
@@ -34,14 +49,14 @@ External services can have their own charges and data handling. A local desktop 
 | Welcome answers | Recording, status and explicit recovery paths; see [the contract](docs/seed-answers.md). | Engine-specific real task outcomes and release acceptance. |
 | Conversation recovery | Required missing ancestors are persisted with a later durable descendant or selected branch. | Already-lost unsaved memory, failed patches to existing durable rows, and complete backup. |
 | Native companions | Focused core and owned simulator/emulator scenarios are documented in the native runbooks. | Physical-device coverage, distribution/signing, and the pending Watch composer runtime gate. |
-| Workspace backup | Manual, partial, installation-wide export/restore; configured installation Drive operations are capability-gated. | Account Drive backup, automatic cross-device sync and portable full restore. |
+| Workspace backup | Manual, partial and installation-wide export/restore; capability-gated account-Drive connect, push and pull proven over a real booted server (`server/account-drive-roundtrip.test.ts`). | Portable full restore across installs and automatic cross-device sync. |
 
 The current backup excludes conversation history and provider connections. Recovery requires the original installation secret as well as the passphrase; a Google sign-in is not a desktop backup connection.
 Read [the backup contract and remaining gates](docs/plans/portable-backup-contract-2026-09-12.md) before changing recovery behavior.
 
-Verification is recorded per source revision and scenario. A passing local check is not proof that a new desktop or mobile release has shipped.
-See [the engineering ledger](docs/plans/ceo-log.md) for actual counts, retained failures and acceptance limits.
-The [private-product and bot-network roadmap](docs/plans/private-product-network-direction-2026-09-12.md) describes proposed work separately from implemented capabilities.
+Verification is recorded per source revision and scenario; [the current-state snapshot](docs/plans/current-state.md) is the status of record and [the engineering ledger](docs/plans/ceo-log.md) holds actual counts, retained failures and acceptance limits.
+A passing local check is not proof that a new desktop or mobile release has shipped.
+The [private-product and bot-network roadmap](docs/plans/private-product-network-direction-2026-09-12.md) describes proposed work separately from implemented capabilities, and [the remaining-work plan](docs/plans/remaining-work-plan-2026-09-16.md) separates verified, acceptance-only, blocked and proposed items.
 
 ## Architecture
 
@@ -52,6 +67,8 @@ The server owns the fleet, provider processes, persistence and dispatch. Clients
 | React web interface and Muster OS | [src/](src/) |
 | HTTP/SSE API and wire contracts | [server/index.ts](server/index.ts), [server/contracts.ts](server/contracts.ts) |
 | Fleet state, transcripts and engine adapters | [server/store.ts](server/store.ts), [server/message-db.ts](server/message-db.ts), [server/drivers/](server/drivers/) |
+| Evaluation: fleet playbooks and per-role benchmarks | [server/fleet-eval.ts](server/fleet-eval.ts), [server/role-eval.ts](server/role-eval.ts) |
+| Workspace brain and Chief-of-Staff dispatch | [server/workspace-brain.ts](server/workspace-brain.ts), [server/jev-dispatch.ts](server/jev-dispatch.ts) |
 | Electron main process and preload | [electron/](electron/) |
 | Companion service and clients | [companion/](companion/), [ios/](ios/), [android-companion/](android-companion/) |
 | CLI and product documentation site | [cli/muster.mjs](cli/muster.mjs), [www/](www/) |
@@ -89,7 +106,8 @@ pnpm check:electron
 
 `pnpm test` runs the root Vitest suite, broker tests, updater tests and the standalone packaged-server smoke gate.
 For a focused server change, use `pnpm exec vitest run server/<file>.test.ts` before the full gate.
-Browser acceptance uses `pnpm test:e2e` with the documented owned fixtures; native acceptance has separate toolchains and cleanup requirements.
+Browser acceptance uses `pnpm test:e2e` with the documented owned fixtures (`e2e/`); rebuild with `pnpm build` first or the browser tests exercise a stale bundle. Native acceptance has separate toolchains and cleanup requirements.
+Per-role benchmark grading runs offline via `muster bench capture.json scorecard.json` (see [server/role-eval.ts](server/role-eval.ts)); the capture is evidence from a live or simulated run, grading is pure.
 
 - [Desktop and CLI publication contract](docs/release-mirror.md)
 - [Release workflow](.github/workflows/release.yml) and [CI workflow](.github/workflows/ci.yml)

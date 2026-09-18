@@ -6,6 +6,10 @@ status; the latest owner request takes precedence over this file.
 **Owner priority:** keep the existing web layout, Flower mascot, /app and /os
 shells, choices and sessions stable. Read [the stability contract](../guides/web-app-stability.md).
 
+**Loop111 (17 September 2026):** continuation audit — the inherited Drive-connect slice (GET-shaped connect in PortableBackupCard, consent-redirect e2e with an owned Google consent stub, plan §7, DESIGN §41) verified through the full gate and committed; e2e is now **23/23** (new consent-redirect acceptance). README rewritten around the real `docs/screenshots/` captures (was embedding zero images; `iphone-roster.png` added as a copy of the iOS App Store roster shot) and its backup-boundary row corrected to the shipped account-Drive truth. The drive-by priority list was corrected in remaining-work-plan §7: the per-role benchmark grader (`server/role-eval.ts`) and `muster bench` CLI ship today — the missing piece is the automated capture harness and product/CI wiring, not the whole benchmark.
+
+Receipts: unit **287 files / 4287 passed / 8 skipped / 0 failed**; e2e **23/23**; both typechecks exit 0; oxlint **0/0** (806 files).
+
 **Loop110 (17 September 2026):** brain-backed dispatch — the Jev-style recommend_team engine now uses the workspace brain's institutional memory to bias ranking. server/jev-dispatch.ts accepts owner-filtered brain facts and awards a capped +2 per fact (max +4) when a fact's source names a candidate and its text overlaps the task. server/index.ts queries brain facts in the same peer-lease scope as the roster. server/brain-dispatch-harness.test.ts proves the full chain over a real booted server: the same candidate is out-ranked by memory evidence, and the cap prevents a prolific bot from buying the top slot.
 
 Receipts: unit **287 files / 4287 passed / 8 skipped / 0 failed**; focused brain slice 19/19; both typechecks exit 0; oxlint **0 warnings / 0 errors**.
@@ -39,11 +43,11 @@ Receipts: focused pairing-link + workspaces tests 28/28; full 281 files / 4218 p
 **Inherited, preserved and deliberately NOT committed** (hashes byte-identical to preservation receipts):
 `docs/research/glm/{01..05,README}.md` and `www/templates.html` (`aa2ba679…2f09c60`), plus the uncommitted **M** `src/state/teach-replay.ts` + `.test.ts` from a later session (focused suite 20/20). Treat `docs/research/glm/` as a dated snapshot, not as status.
 
-**Published source:** cd72661 (main). Loop110 adds brain-backed dispatch; Loop109 the workspace brain; Loop108 Jev recommend_team; Loop107 Muster Connector; Loop106 selection fix; Loop105 account-Drive round trip; Loop104 e2e green; Loop98 client-role pairing.
+**Published source:** the Loop111 commit on main. Loop111 adds the README screenshot gallery, the corrected continuation plan (§7) and the committed Drive-connect acceptance; Loop110 brain-backed dispatch; Loop109 the workspace brain; Loop108 Jev recommend_team; Loop107 Muster Connector; Loop106 selection fix; Loop105 account-Drive round trip; Loop104 e2e green; Loop98 client-role pairing.
 
 **Deployment wiring:** registered push hook 669688357 returned 404; Actions billing-rejected. Another path delivered static fixes to production. Do not invent URLs or equate failed hook with no rollout. Authenticated Dokploy access remains owner-blocked. Keep existing automation paused.
 
-**Next:** browser/Playwright acceptance of the Drive connect flow (needs live OAuth config), mirror promotion (VPS SSH owner-blocked), Windows/Linux legs (CI billing), standing feature backlog (channels in /app, Engines Add-account, guided first run, tour pacing, voice W1–W3).
+**Next:** automated per-role benchmark harness (boot a fleet, capture real runs, trend scorecards — the grader and CLI already ship; see remaining-work-plan §7 item 1), memory history + rollback UI (prereq for any self-proposal touching memory), skills-creation API (largest server gap), browser-side pairing redeem on the existing `/api/pair/claim` route, voice W4 barge-in (needs real-device testing), OpenMausBot parity items (channels in /app, Engines Add-account, tour pacing), mirror promotion (VPS SSH owner-blocked), Windows/Linux legs (CI billing), TestFlight review, full Mimosa re-run before any security claim.
 
 ## Structure note — server route-table pattern
 

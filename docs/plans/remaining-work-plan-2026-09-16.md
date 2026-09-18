@@ -221,3 +221,72 @@ recursive; and the Ukrainian table still leaks English
 This addendum reflects reading OMB's shipped strings and the Muster tree,
 not exercising OMB's pairing or account-add flows end to end, and not a
 re-verification of the "eleven engines" documentation claim.
+
+## 7. Continuation status (verified 2026-09-17, read before assigning slices)
+
+Status categories: **verified** = source + test evidence on this machine;
+**acceptance-only** = real artifact exists, browser/device acceptance open;
+**blocked** = external gate only the owner can clear; **proposed** = designed,
+not built. Every claim below was re-checked against the current tree on
+17 September 2026 before writing; file:line anchors are from that revision and
+may shift as work lands.
+
+### Ranked work items (corrected, source-checked)
+
+1. **Per-role automated benchmark — grading shipped, harness missing.**
+   `server/role-eval.ts:1` is the pure offline grader (roles assistant /
+   coordinator / specialist × scenario kinds, required benchmarks per role at
+   `server/role-eval.ts:64`, scenario table `ROLE_BENCHMARKS` at
+   `server/role-eval.ts:74`), exposed as `muster bench capture.json
+   scorecard.json` (`cli/muster.mjs:864`). **Missing for the L1 gap to close:**
+   an automated harness that boots a fleet, captures real runs to the capture
+   schema, and records trended scorecards — no product or CI wiring exists
+   today (`grep -rn role-eval` outside its own test, the CLI and the bundler
+   returns nothing else). Highest leverage; smallest first slice is a fixture
+   capture + a `server/role-eval-harness.test.ts` over a real booted server.
+2. **Memory history + rollback.** The brain stores correction chains and
+   withdrawal that preserves history (`server/workspace-brain.ts`), but there
+   is no UI/CLI surface to browse a fact's history or roll one back; any
+   self-proposal slice that touches memory needs this first. Proposed.
+3. **Skills-creation API.** No `server/skills*` surface exists; the largest
+   server gap. Proposed — design behind the same owner-scoped route-table
+   pattern as the workspace/backup family.
+4. **Voice W4 barge-in / W5 session + auth A3–A4.** DESIGN.md records W1
+   parity, W5 session controls and the caption/word-cursor work as shipped
+   (DESIGN.md §40); W4 barge-in remains plan-only pending real-device testing;
+   A3–A4 are proposed.
+5. **Agent social S5–S10, GAIA G2–G5.** Proposed tracks in the agent-social
+   and GAIA plans (`docs/plans/agent-social-ecosystem-plan-2026-09-14.md`).
+6. **OpenMausBot parity items.** Channels UI inside /app: not started.
+   Engines **Add account**: the readiness-grouped list ships
+   (`src/components/EnginesSettings.tsx:28` reads `isReady` off the driver
+   snapshot) but no add-account flow exists — see the OMB teardown above.
+   Guided first run / tour pacing: onboarding ships seven mascot-led stages;
+   pacing is acceptance-only.
+7. **Pairing redeem in the browser.** `/pair#CODE` carry-and-display is
+   verified with browser acceptance (Loop104, current-state.md:31); redeem is
+   still desktop/CLI only (`cli/muster.mjs:139` prints the code;
+   `cli/muster.mjs:637` redeems via `/api/pair/claim`). The `/api/pair/claim`
+   route exists server-side; a signed-in web redemption surface is proposed.
+8. **Release legs (blocked, owner gates).** Windows/Linux 1.12.3: Actions
+   billing. macOS signing/notarization: `APPLE_CERTIFICATE` (Developer ID)
+   secret. Mirror promotion: VPS SSH to 173.249.38.101. TestFlight: awaiting
+   Apple review. Full Mimosa re-run: required before any security claim.
+   Local 1.12.3 CLI bundle verified to exist (`release/muster-cli.mjs`); no
+   notarized DMG claim is made.
+
+### Evidence for this continuation loop (2026-09-17)
+
+Pending diff at loop start, now gate-verified and committed on this loop:
+`src/components/PortableBackupCard.tsx` (connect reads are GET-shaped so the
+signed-consent URL route is reachable), `e2e/workspace-backup.e2e.spec.ts`
+(new consent-redirect acceptance with an owned Google consent stub),
+`docs/plans/remaining-work-plan-2026-09-16.md` (this §7), `DESIGN.md`
+(§41 GLM synthesis annex). Receipts: both typechecks exit 0; oxlint 0/0
+(806 files); unit **287 files / 4287 passed / 8 skipped / 0 failed**; e2e
+**23/23** (previous suite was 22; this loop's new consent-redirect
+acceptance is the +1). `docs/screenshots/iphone-roster.png` added as a
+copy of `ios/AppStore/screenshots/iPhone-6.9-roster.png` for README
+embedding. Untracked snapshots (`docs/research/glm/*`, `www/templates.html`,
+`marketing-video/`, `.freebuff/`, `.zcode/`) preserved byte-identical and
+deliberately not committed.
