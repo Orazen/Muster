@@ -589,10 +589,34 @@ describe("startContainerRuntime", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("verifies the daemon after a clean start and fails honestly when it never answers", async () => {
+  it("keeps probing while a cold API forwarder warms up instead of failing once", async () => {
+    // The second field bug: right after machine start, the first `podman
+    // info` can lose the race with the gvproxy/SSH forwarder. The daemon is
+    // UP — the user's own terminal proves it — so one failed probe must not
+    // read as "not answering yet". Probes continue until the window closes.
+    let probes = 0;
+    const warming: CommandRunner = async () => {
+      probes += 1;
+      if (probes < 3) throw new Error("cannot connect");
+      return { stdout: "6.1.2\n" };
+    };
     await expect(
-      startContainerRuntime("podman", "darwin", daemonDown, async () => undefined),
+      startContainerRuntime("podman", "darwin", warming, async () => undefined),
+    ).resolves.toBeUndefined();
+    expect(probes).toBe(3);
+  });
+
+  it("verifies the daemon after a clean start and fails honestly when it never answers", async () => {
+    let probes = 0;
+    const neverUp: CommandRunner = async () => {
+      probes += 1;
+      throw new Error("cannot connect");
+    };
+    await expect(
+      startContainerRuntime("podman", "darwin", neverUp, async () => undefined),
     ).rejects.toThrow(/not answering yet/);
+    // The window is bounded, not infinite: 10 attempts.
+    expect(probes).toBe(10);
   });
 
   it("still surfaces real start failures when the daemon is down", async () => {

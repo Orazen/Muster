@@ -491,6 +491,62 @@ ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
   return true;
 });
 
+// Desktop Google sign-in handoff. The cloud bounce lands on
+// http://127.0.0.1:<port>/oauth/finish#code=… — a loopback URL only the
+// Muster server can serve, and the session cookie it sets must land in the
+// APP's cookie jar (defaultSession), not the system browser's. Opening the
+// flow in Safari/Chrome signed the user in there while the app polled its
+// own jar forever: the browser proudly said "Signed in as …" and the app
+// never noticed. So the auth start URL opens a small in-app window (same
+// session as the app → same jar), the cloud's redirect loads locally, the
+// finish page's exchange sets the cookie where the renderer's get-session
+// poll can see it, and the window closes itself. Any other external URL
+// keeps the old system-browser behavior.
+let handoffWindow = null;
+function openHandoffWindow(startUrl) {
+  handoffWindow?.close();
+  handoffWindow = new BrowserWindow({
+    width: 520,
+    height: 680,
+    show: false,
+    autoHideMenuBar: true,
+    title: "Sign in to Muster",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  handoffWindow.once("ready-to-show", () => handoffWindow?.show());
+  handoffWindow.on("closed", () => {
+    handoffWindow = null;
+  });
+  // Any navigation away from the cloud identity surface ends the handoff —
+  // the finish page closes its own window after the exchange.
+  handoffWindow.webContents.on("will-navigate", (_event, target) => {
+    if (!target.startsWith(startUrl)) handoffWindow?.close();
+  });
+  void handoffWindow.loadURL(startUrl);
+}
+
+ipcMain.handle("desktop:open-auth-handoff", async (_event, rawUrl) => {
+  if (asText(rawUrl) === null) throw new Error("A web address is required");
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error("That web address is invalid");
+  }
+  // The handoff window is only for the cloud sign-in start. It must never
+  // load arbitrary content with app-session cookies attached.
+  const allowed = new URL(String(process.env.OMB_PAIR_CLOUD_URL || "https://muster.today"));
+  if (url.protocol !== "https:" || url.host !== allowed.host) {
+    throw new Error("Only the configured cloud sign-in page can open here");
+  }
+  openHandoffWindow(url.toString());
+  return true;
+});
+
 // Windows paints its caption buttons from the native titleBarOverlay, which
 // cannot read CSS variables — so the renderer pushes the active skin's
 // colors across the bridge whenever the skin changes (src/lib/skins.ts).

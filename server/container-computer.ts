@@ -1192,7 +1192,9 @@ export function setupCommands(
     runtime === "container"
       ? "container system start"
       : runtime === "podman" && platform !== "linux"
-        ? "podman machine init; podman machine start"
+        ? platform === "darwin"
+          ? "podman machine init 2>/dev/null; podman machine start; podman info --format '{{.ServerVersion}}'"
+          : "podman machine init; podman machine start; podman info"
         : runtime === "docker" && platform === "darwin"
           ? "colima start || open -a Docker"
           : runtime === "docker" && platform === "linux"
@@ -1272,13 +1274,26 @@ export async function startContainerRuntime(
     // generous timeout the image-prepare and container actions already use.
     await shellRun("/bin/sh", ["-c", cmd], { timeout: 2 * 60_000, env: { ...process.env, PATH: augmentedPath() } });
   });
-  const daemonAnswers = async () => {
+  const probeOnce = async () => {
     try {
       await runner(runtime, runtime === "container" ? ["system", "status"] : ["info", "--format", "{{.ServerVersion}}"], 20_000);
       return true;
     } catch {
       return false;
     }
+  };
+  /** The daemon probe is a window, not a coin flip: a just-started podman
+   * machine opens its API forwarder asynchronously (first contact does a
+   * gvproxy/SSH handshake), so a single immediate `podman info` can fail
+   * while the machine is perfectly healthy seconds later — the field bug
+   * where a running podman still read as "not answering yet". Probe until
+   * the window closes; every caller below benefits. */
+  const daemonAnswers = async (attempts = 10, gapMs = 1_500) => {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, gapMs));
+      if (await probeOnce()) return true;
+    }
+    return false;
   };
   try {
     await runShell(command);

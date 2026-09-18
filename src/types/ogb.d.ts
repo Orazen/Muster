@@ -65,6 +65,11 @@ declare global {
       openInstallTerminal?(command: string): Promise<boolean>;
       /** Opens an http(s) link in the user's default browser. */
       openExternal?(url: string): Promise<boolean>;
+      /** Opens the cloud sign-in start page in a small in-app window that
+       * shares the app's cookie session, so the /oauth/finish handoff sets
+       * its session cookie where the app can see it. Falls back to
+       * openExternal in older shells or the web build. */
+      openAuthHandoff?(url: string): Promise<boolean>;
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;
       /** Save a provider credential through Electron's OS-backed store. */

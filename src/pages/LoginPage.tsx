@@ -188,7 +188,13 @@ export function LoginPage() {
               if (desktopOAuthHandoff) {
               const cloud = (capabilities.pairingCloudUrl ?? "https://muster.today").replace(/\/$/, "");
               const url = `${cloud}/desktop-auth/start?redirect=${encodeURIComponent(window.location.origin)}&next=${encodeURIComponent(next)}`;
-                if (window.ogb?.openExternal) window.ogb.openExternal(url);
+                // The handoff window (Electron) shares the app's cookie jar, so
+                // /oauth/finish sets its session cookie where the get-session
+                // poll below can see it. The system browser would sign the
+                // BROWSER in and leave the app polling forever. Web builds
+                // keep the plain new-tab behavior.
+                if (window.ogb?.openAuthHandoff) await window.ogb.openAuthHandoff(url);
+                else if (window.ogb?.openExternal) await window.ogb.openExternal(url);
                 else window.open(url, "_blank", "noopener");
                 setOauthWaiting(true);
                 return;
