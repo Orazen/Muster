@@ -1,0 +1,58 @@
+/* FlowerCharacter — the wrapper's own motion layer. The avatar inside keeps
+ * its FlowerBot CSS; this file adds only the wrapper-level antics and the
+ * status/override affordances the character system owns. */
+
+/* Idle antic: a small stretch-and-look fidget, driven by data-antic toggled
+ * by the wrapper's randomized timer. Wrapper-level so the pose face inside
+ * never fights the transform. */
+.flower-character[data-antic="true"] .bot-host {
+  animation: flower-character-stretch 900ms ease-in-out;
+  transform-box: view-box;
+  transform-origin: 50% 78%;
+}
+
+@keyframes flower-character-stretch {
+  0%, 100% { transform: scale(1, 1) rotate(0deg); }
+  35% { transform: scale(0.97, 1.05) rotate(-3deg); }
+  65% { transform: scale(1.02, 0.98) rotate(2deg); }
+}
+
+/* A dizzy character sways — the wrapper rocks gently while the override
+ * holds (the pose face shows the unsure eyes underneath). */
+.flower-character[data-override="dizzy"] .bot-host {
+  animation: flower-character-dizzy 1.6s ease-in-out infinite;
+}
+
+@keyframes flower-character-dizzy {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-7deg); }
+  75% { transform: rotate(7deg); }
+}
+
+/* A stunned character recoils once — the poke squash already plays via
+ * .bot-host:active; the slap adds a sharper beat. */
+.flower-character[data-override="slapped"] .bot-host {
+  animation: flower-character-recoil 420ms ease-out;
+}
+
+@keyframes flower-character-recoil {
+  0% { transform: translateX(0); }
+  30% { transform: translateX(4px) rotate(5deg); }
+  60% { transform: translateX(-2px) rotate(-2deg); }
+  100% { transform: translateX(0) rotate(0deg); }
+}
+
+/* Calm mode and reduced motion: the character stands still. The inner
+ * FlowerBot reduced-motion blanket already kills its own layers; these
+ * stop the wrapper-level ones too. */
+.flower-character[data-calm="true"] .bot-host,
+.flower-character[data-calm="true"] .bot-host * {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flower-character .bot-host,
+  .flower-character .bot-host * {
+    animation: none !important;
+  }
+}

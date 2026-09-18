@@ -50,6 +50,7 @@ import {
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
 import { AgentAvatar } from "./Avatar";
+import { FlowerCharacter } from "./FlowerCharacter";
 import { stateForBot } from "@/lib/mascot";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { canRegenerateSavedTurn } from "@/lib/seed-turn-retry";
@@ -789,7 +790,13 @@ const MessagesList = memo(function MessagesList({
     <>
       {messages.length === 0 && !bot.busy && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
-          <AgentAvatar character={bot.character} color={bot.color} state="idle" size={64} motion="none" motionKey={0} />
+          <FlowerCharacter
+            character={bot.character ?? "flower"}
+            color={bot.color}
+            state="idle"
+            size={64}
+            label={bot.name}
+          />
           <RenameTitle
             value={bot.name}
             onCommit={(name) => dispatch({ type: "updateBot", botId: bot.id, patch: { name } })}

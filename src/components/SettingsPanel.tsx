@@ -2,6 +2,8 @@ import { ChevronDown, ChevronLeft, Crown, FolderOpen, Globe, MousePointerClick, 
 import { useEffect, useState } from "react";
 import { api, useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "./Avatar";
+import { setCalmMascot, useCalmMascot } from "@/lib/mascot/calm";
+import { FlowerCharacter } from "./FlowerCharacter";
 import {
   AGENT_CHARACTERS,
   PICKABLE_STATES,
@@ -584,6 +586,7 @@ function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
 
 export function SettingsPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
+  const calmMascot = useCalmMascot();
   const [voices, setVoices] = useState<Array<{ id: string; label: string; description?: string }>>([]);
   const [voicesLoading, setVoicesLoading] = useState(false);
   const patch = (
@@ -658,13 +661,15 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 
       <div className="flex-1 overflow-y-auto px-5 pb-5">
         <div className="flex justify-center py-5">
-          <AgentAvatar
+          <FlowerCharacter
+            character={bot.character ?? "star"}
             color={bot.color}
-            character={bot.character}
             state={activeState}
             size={112}
             motion={mascotMotion?.kind ?? "none"}
             motionKey={mascotMotion?.nonce ?? 0}
+            label={bot.name}
+            calm={calmMascot}
           />
         </div>
 
@@ -707,6 +712,34 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                     />
                   </button>
                 ))}
+              </div>
+
+              <div className="mt-4 flex items-center justify-between">
+                <div>
+                  <div className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+                    Calm mascot
+                  </div>
+                  <p className="mt-0.5 text-[12px] text-ink-secondary">
+                    The mascot keeps its honest status faces but never plays: no pokes, no antics.
+                  </p>
+                </div>
+                <button
+                  role="switch"
+                  aria-checked={calmMascot}
+                  aria-label="Calm mascot"
+                  onClick={() => setCalmMascot(!calmMascot)}
+                  className={cn(
+                    "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors",
+                    calmMascot ? "bg-accent" : "bg-raised",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "absolute top-[3px] size-5 rounded-full bg-white transition-all",
+                      calmMascot ? "left-[21px]" : "left-[3px]",
+                    )}
+                  />
+                </button>
               </div>
 
               <div className="mb-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
