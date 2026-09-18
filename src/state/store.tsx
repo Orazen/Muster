@@ -303,6 +303,9 @@ export interface ConfigStatus {
   channels?: { turnCapMinutes: number };
   /** BYO VPS computer; the alias is a setting, credentials stay in ssh(1). */
   vps?: { sshAlias: string };
+  /** Storage-sovereignty gate (decision 14): required on hosted deployments,
+   * satisfied once the user's own Drive (or install Telegram) is connected. */
+  storageGate?: { required: boolean; satisfied: boolean };
 }
 
 /** How an engine gets installed — declared by its driver, mirrors

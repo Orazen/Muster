@@ -12,6 +12,7 @@ import { z } from "zod";
 import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { seedConnectedGoogleRow } from "./testing/storage-gate.ts";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const userSchema = z.object({ id: z.string() });
@@ -171,6 +172,9 @@ async function establishIdentity(fixture: Fixture): Promise<Identity> {
   expect(current.user.id).toBe(user.id);
   expect(current.session.userId).toBe(user.id);
   expect(Date.parse(current.session.expiresAt)).toBeGreaterThan(Date.now());
+  // An existing hosted user: the storage-sovereignty gate is open (a local
+  // fixture ignores the row).
+  seedConnectedGoogleRow(fixture.data, user.id);
   const created = await request(fixture, "/api/bots", cookie, { name: `Persisted ${randomBytes(6).toString("hex")}` });
   expect(created.status).toBe(201);
   const { bot } = z.object({ bot: botSchema }).parse(await created.json());

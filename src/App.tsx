@@ -19,6 +19,8 @@ const SettingsModal = lazy(() => import("@/components/SettingsModal").then((m) =
 const RoutinesPage = lazy(() => import("@/components/RoutinesPage").then((m) => ({ default: m.RoutinesPage })));
 const SocialView = lazy(() => import("@/components/SocialView").then((m) => ({ default: m.SocialView })));
 const Onboarding = lazy(() => import("@/components/Onboarding").then((m) => ({ default: m.Onboarding })));
+const StorageGate = lazy(() => import("@/components/StorageGate").then((m) => ({ default: m.StorageGate })));
+const TeamTemplates = lazy(() => import("@/components/TeamTemplates").then((m) => ({ default: m.TeamTemplates })));
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { NoEngines } from "@/components/NoEngines";
@@ -275,6 +277,11 @@ function Shell() {
         />
         </Suspense>
       )}
+      {/* Storage sovereignty (decision 14): on hosted, the Drive connect step
+          gates the workspace and the template hire is the empty-roster moment.
+          Local desktop renders neither (gate.required is false there). */}
+      <Suspense fallback={null}><StorageGate /></Suspense>
+      <Suspense fallback={null}><TeamTemplates /></Suspense>
       </div>
       {/* The floating fleet orb is retired (owner direction 2026-09-15):
           presence lives on the roster rows that carry it — the benchmark's

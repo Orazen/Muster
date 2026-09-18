@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
+import { seedConnectedGoogleRow } from "./testing/storage-gate.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import type { JsonValue } from "./schema.ts";
@@ -102,6 +103,8 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
     const header = response.headers.getSetCookie().find((value) => value.startsWith("better-auth.session_token="));
     if (!header) throw new Error("Owned signup did not return a session");
     const account: Account = { id: user.id, cookie: header.split(";")[0], bots: [] };
+    // An existing hosted user: the storage-sovereignty gate is open.
+    seedConnectedGoogleRow(hosted.data, user.id);
     account.bots.push(await createBot(hosted, `${name}-one`, account), await createBot(hosted, `${name}-two`, account));
     return account;
   }

@@ -115,6 +115,21 @@ const test = base.extend<{ deployment: "local" | "hosted"; fixture: OwnedFixture
       });
       expect(signup.status).toBe(200);
       sessionSchema.parse(await signup.json());
+      if (deployment === "hosted") {
+        // Storage sovereignty (decision 14): a hosted user's workspace opens
+        // only behind their own Drive connection. These specs exercise the
+        // backup surfaces as an EXISTING connected user, so seed the token row
+        // the real consent flow would have written — with the fixture's
+        // refresh token, so transport credential checks stay exact.
+        const db = new DatabaseSync(join(dataDirectory, "auth.db"));
+        try {
+          // SAFETY: better-auth schema: user.id TEXT PRIMARY KEY, read by email.
+          const user = db.prepare(`SELECT "id" FROM "user" WHERE "email" = ?`).get(email) as { id: string };
+          const now = new Date().toISOString();
+          db.prepare(`INSERT INTO account (id,accountId,providerId,userId,accessToken,refreshToken,scope,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)`)
+            .run(randomBytes(16).toString("hex"), randomBytes(16).toString("hex"), "google", user.id, null, drive.refreshToken, "", now, now);
+        } finally { db.close(); }
+      }
       await use({ url, directory, email, password, drive });
     } finally {
       stopping = true;
@@ -288,15 +303,18 @@ async function capture(page: Page, testInfo: TestInfo, label: string, target: Lo
 
 test.describe("hosted workspace capability", () => {
   test.use({ deployment: "hosted" });
-  test("explains local-only backup without exposing a connect or write path", async ({ fixture, guarded }, testInfo) => {
+  test("offers the user's own Drive connect while the installation bundles stay desktop-only", async ({ fixture, guarded }, testInfo) => {
     const { page } = guarded;
     await signIn(page, fixture);
     const response = page.waitForResponse((r) => r.url() === fixture.url + statusPath && r.request().method() === "GET");
     await openBackup(page);
     const status = await response;
     expect(status.status()).toBe(200);
+    // Storage sovereignty (decision 14): a hosted session may connect its OWN
+    // Drive — the connect is account-scoped and moves no workspace data. The
+    // installation bundles and transports stay desktop-only behind the wall.
     expect(await status.json()).toEqual({ capabilityVersion: 1, workspaceBackupAvailable: false, unavailableReason: hostedReason, drive: false,
-      installationDrive: { configured: false, operationsAvailable: false }, accountDrive: { available: false, connected: false } });
+      installationDrive: { configured: false, operationsAvailable: false }, accountDrive: { available: true, connected: true } });
     await allWritesDisabled(page);
     await expect(backup(page)).not.toContainText("Last backed up");
     await capture(page, testInfo, "hosted-local-only", backup(page).getByText(hostedReason, { exact: true }));
@@ -309,17 +327,15 @@ test("connect my Google Drive issues a consent redirect from a real button click
   const { page } = guarded;
   await signIn(page, fixture);
   // The connect affordance renders only for a signed-in user with a Google
-  // login row that has no Drive grant yet. Seed exactly that shape through
-  // the real database; the fixture client pair satisfies the route's
-  // configured-OAuth guard.
+  // login row that has no Drive grant yet. The hosted fixture seeds the row
+  // CONNECTED (the storage-sovereignty default for existing users), so reach
+  // the no-grant shape by revoking the grant through the real database; the
+  // fixture client pair satisfies the route's configured-OAuth guard.
   const db = new DatabaseSync(join(fixture.directory, "data", "auth.db"));
   try {
     // SAFETY: auth schema creates user.id as TEXT PRIMARY KEY; seeded via real sign-up above.
     const user = db.prepare(`SELECT "id" FROM "user" WHERE "email" = ?`).get(fixture.email) as { id: string };
-    const now = new Date().toISOString();
-    db.prepare(`INSERT INTO account (id,accountId,providerId,userId,accessToken,refreshToken,scope,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)`)
-      .run(randomBytes(16).toString("hex"), randomBytes(16).toString("hex"), "google", user.id,
-        null, null, "openid email profile", now, now);
+    db.prepare(`UPDATE "account" SET "accessToken" = NULL, "refreshToken" = NULL WHERE "userId" = ? AND "providerId" = 'google'`).run(user.id);
   } finally { db.close(); }
 
   await openBackup(page);

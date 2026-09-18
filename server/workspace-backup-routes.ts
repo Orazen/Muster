@@ -11,9 +11,19 @@
 //   2. capability advertisement (`/api/workspace/google/status`) must answer
 //      BEFORE the installation wall — it is the sole hosted workspace
 //      exception, and the wall would 403 it otherwise.
-//   3. the installation wall must run before ANY family handler parses a
-//      body or opens local files.
-//   4. nothing before the family's registration in index.ts may match a
+//   3. the account connect/callback entries must sit BEFORE the wall: since
+//      the storage-sovereignty direction (docs/plans/cloud-relay-strategy-
+//      2026-09-18.md decision 14), a hosted user connects their OWN Google
+//      Drive during onboarding. Connect moves no workspace data — it stores
+//      only the user's own OAuth tokens in their per-user account row — so
+//      it is safe above the wall. The callback still requires the state's
+//      bound user to equal the session user.
+//   4. the installation wall must run before ANY remaining family handler
+//      parses a body or opens local files: the v2 bundles and installation
+//      Drive push/pull are installation-scoped (buildPayloadV2 reads the
+//      whole data directory) and stay desktop-only until a per-user bundle
+//      builder exists.
+//   5. nothing before the family's registration in index.ts may match a
 //      family path (verified: every matcher above the registration point is
 //      an exact path outside `/api/workspace` + `/api/vault`).
 //
@@ -171,14 +181,16 @@ const routes: BackupRoute[] = [
       const cfg = ctx.config();
       const installationDriveReady = !SELF_HOSTED
         && Boolean(cfg.driveSync?.refreshToken?.trim()) && driveSync.driveOAuthConfigured();
-      // The account-linked transport exists only for a signed-in user on a
-      // non-hosted install: no session means no account row, so there is
-      // nothing to advertise — the routes below stay contained 501s. Hosted
-      // keeps it off: one shared store must not export per-user workspaces
-      // through a personal Drive.
+      // The account-linked transport exists for a signed-in user. On a local
+      // install it has always been available; on hosted it is the
+      // storage-sovereignty connect (decision 14): the user's own Drive
+      // becomes their storage home, so the capability advertises availability
+      // whenever a session exists. `connected` reports the per-user token row.
+      // The push/pull transports stay behind the installation wall below
+      // until a per-user bundle builder exists.
       let accountDriveReady = false;
       let accountDriveConnected = false;
-      if (!SELF_HOSTED && ctx.requestUserId) {
+      if (ctx.requestUserId) {
         const tokens = accountDrive.googleTokensFor(getDb(), ctx.requestUserId);
         accountDriveConnected = Boolean(tokens?.refreshToken);
         accountDriveReady = true;
@@ -195,27 +207,13 @@ const routes: BackupRoute[] = [
     },
   },
   {
-    // Workspace bundles and the Vault belong to the whole installation,
-    // not one account. Deny both families before handlers parse bodies or
-    // open local files; even the primary hosted account must not export
-    // other users' data through the installation's storage connection.
-    match: (_method, path) => SELF_HOSTED
-      && (path === "/api/workspace" || path.startsWith("/api/workspace/")
-        || path === "/api/vault" || path.startsWith("/api/vault/")),
-    handle: (_req, res) => json(res, 403, {
-      code: "WORKSPACE_BACKUP_UNAVAILABLE",
-      error: "Workspace backups are available on local desktop installs only for now.",
-    }),
-  },
-  {
-    // Account-linked Google Drive backup: the signed-in user's own Google
-    // account, one drive.appdata grant, ciphertext-only transport. A request
-    // without a session keeps the historical contained 501 — no session means
-    // no account row, so no consent URL, state, or token exchange may run.
-    // Hosted never reaches here: the wall above returns 403 first. The
-    // callback additionally requires the state's bound user to equal the
-    // session's user, so one account cannot consume another's consent
-    // redirect.
+    // Account-linked Google Drive connect: the signed-in user's own Google
+    // account, one drive.appdata grant. Moves NO workspace data — it stores
+    // only the user's own OAuth tokens in their per-user account row — which
+    // is why it sits above the installation wall and is available on hosted
+    // (storage-sovereignty onboarding, decision 14). A request without a
+    // session keeps the historical contained 501 — no session means no
+    // account row, so no consent URL, state, or token exchange may run.
     match: (method, path) => method === "GET" && path === "/api/workspace/google/connect",
     handle: (req, res, ctx) => {
       if (!ctx.requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
@@ -228,6 +226,9 @@ const routes: BackupRoute[] = [
     },
   },
   {
+    // The callback additionally requires the state's bound user to equal the
+    // session's user, so one account cannot consume another's consent
+    // redirect.
     match: (method, path) => method === "GET" && path === "/api/workspace/google/callback",
     handle: (req, res, ctx) => {
       if (!ctx.requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
@@ -247,6 +248,23 @@ const routes: BackupRoute[] = [
         }
       })();
     },
+  },
+  {
+    // Installation-scoped workspace storage: the v2 bundles and the Vault
+    // belong to the whole installation, not one account — buildPayloadV2
+    // reads the ENTIRE data directory, so on a shared host it would carry
+    // other users' workspaces. Deny before any handler parses a body or
+    // opens local files; even the primary hosted account must not export
+    // shared data through a personal connection. The per-user account
+    // push/pull entries below stay behind this wall on hosted until a
+    // per-user bundle builder exists.
+    match: (_method, path) => SELF_HOSTED
+      && (path === "/api/workspace" || path.startsWith("/api/workspace/")
+        || path === "/api/vault" || path.startsWith("/api/vault/")),
+    handle: (_req, res) => json(res, 403, {
+      code: "WORKSPACE_BACKUP_UNAVAILABLE",
+      error: "Workspace backups are available on local desktop installs only for now.",
+    }),
   },
   {
     match: (method, path) => path === "/api/workspace/v2/status" && (method === "GET" || method === "POST"),

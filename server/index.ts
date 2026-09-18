@@ -252,6 +252,7 @@ import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
 import * as openconnector from "./openconnector.ts";
 import { isText, json, readBody } from "./http-helpers.ts";
 import * as driveSync from "./drive-sync.ts";
+import * as accountDrive from "./account-drive.ts";
 import * as telegramSync from "./telegram-sync.ts";
 import * as syncState from "./sync-state.ts";
 import { readCuaConnection } from "./local-computer.ts";
@@ -672,7 +673,12 @@ async function attemptProviderFallback(threadId: string, errorMessage: string): 
     // fallback must never become a second failure surface
   }
 }
-store.seedIfEmpty();
+// First-run seed: desktop installs open with one friendly bot. A hosted
+// deployment with open signups seeds NOTHING — its first user signs up,
+// connects their own storage (decision 14), and hires their team from
+// templates (decision 13); a seeded bot would steal that moment and pretend
+// the workspace was already usable.
+if (!SELF_HOSTED || process.env.OMB_ALLOW_SIGNUPS !== "true") store.seedIfEmpty();
 // Per-user vault engines register at boot so saved keys are live on any
 // device the account signs in from — configured once, everywhere.
 // Awaited, not fire-and-forget: an early /api/instances or first turn must
@@ -3431,6 +3437,27 @@ function appVersion(): string {
   }
 }
 
+interface StorageGateState {
+  required: boolean;
+  satisfied: boolean;
+}
+
+/** The storage-sovereignty gate (docs/plans/cloud-relay-strategy-2026-09-18.md
+ * decision 14): a hosted user connects their own Google Drive — or, where the
+ * install-level Telegram sync is configured — before their workspace is
+ * usable. Desktop/local installs are unaffected: their storage is the machine
+ * they run on. `required` is honest about availability: it is true only where
+ * a per-user storage connection can actually be made, so enforcement lights
+ * up with the capability instead of locking users out of a gate nothing
+ * satisfies. */
+function storageGateFor(userId: string | null | undefined): StorageGateState {
+  if (!SELF_HOSTED || !userId) return { required: false, satisfied: true };
+  const tokens = accountDrive.googleTokensFor(getDb(), userId);
+  const driveConnected = Boolean(tokens?.refreshToken);
+  const telegramConfigured = Boolean(cfg.telegramSync?.botToken?.trim() && cfg.telegramSync?.chatId);
+  return { required: true, satisfied: driveConnected || telegramConfigured };
+}
+
 function configStatus(userId?: string, userName?: string, userEmail?: string) {
   // Per-user scoping: non-operators read their own vault flags and their own
   // auth profile. The operator (first account / desktop user) keeps global
@@ -3498,6 +3525,8 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
     tts: tts.describeVoice(cfg),
     // not a secret — the sidebar shows it
     profile,
+    // storage-sovereignty gate: the onboarding UI reads required/satisfied
+    storageGate: storageGateFor(userId),
     // desktop isolation is a setting, not a secret; the Local VM panel reads it
     localVm: { mode: localVmMode(cfg), maxInstances: localVmMaxInstances(cfg) },
     // same for the channel turn cap; the General panel's minutes input reads it
@@ -6520,6 +6549,16 @@ let requestUserEmail = "";
       return json(res, 200, { message: patched });
     }
     if (method === "POST" && path === "/api/bots") {
+      // Storage-sovereignty gate (decision 14): a hosted user connects their
+      // own Drive before their workspace grows. No bots can be created until
+      // the gate is satisfied.
+      const gate = storageGateFor(requestUserId);
+      if (gate.required && !gate.satisfied) {
+        return json(res, 403, {
+          error: "connect your own Google Drive (Settings → Storage) before hiring teammates",
+          code: "STORAGE_GATE_REQUIRED",
+        });
+      }
       // Tier gate: Free caps the roster at 2 bots (trial and licenses lift it).
       if (!canAddBot(store.bots.length, tierState().tier)) {
         return json(res, 402, {
@@ -6931,6 +6970,15 @@ let requestUserEmail = "";
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages$/);
     if (m && method === "POST") {
+      // Same storage-sovereignty gate as bot creation: on hosted, work does
+      // not start until the user's own storage is connected.
+      const sendGate = storageGateFor(requestUserId);
+      if (sendGate.required && !sendGate.satisfied) {
+        return json(res, 403, {
+          error: "connect your own Google Drive (Settings → Storage) before starting work",
+          code: "STORAGE_GATE_REQUIRED",
+        });
+      }
       const body = await readBody(req);
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });

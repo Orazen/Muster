@@ -12,6 +12,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { z } from "zod";
 import type { JsonObject } from "./schema.ts";
 import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
+import { seedConnectedGoogleRow } from "./testing/storage-gate.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
@@ -134,6 +135,11 @@ describe.skipIf(process.platform === "win32")("peer capabilities from actual off
     const header = signed.headers.getSetCookie().find((value) => value.startsWith("better-auth.session_token="));
     if (!header) throw new Error("No owned primary session");
     cookie = header.split(";")[0];
+    // SAFETY: the sign-up endpoint answers {user:{id}}; emptiness is asserted.
+    const primaryUserId = ((await signed.json()) as { user?: { id?: string } }).user?.id ?? "";
+    expect(primaryUserId).not.toBe("");
+    // An existing hosted user: the storage-sovereignty gate is open.
+    seedConnectedGoogleRow(data, primaryUserId);
     caller = await create("Capability caller", "held"); helper = await create("Allowed helper", "happy");
     alternateThread = caller.threadId;
     const task = await api(`/api/bots/${caller.id}/tasks`, "POST", { title: "Current owned task" });

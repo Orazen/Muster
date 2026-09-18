@@ -744,19 +744,54 @@ Socket.prototype.connect = blocked;
     it(`returns the exact read-only hosted capability to ${role}`, async () => {
       const before = accountState(shared.dataDirectory);
       const response = await request(shared, "/api/workspace/google/status", "GET", undefined, (role === "primary" ? primary : secondary).cookie);
-      expect({ status: response.status, body: await response.json() }).toEqual({ status: 200, body: capability(true) });
+      // Storage sovereignty (decision 14): a hosted session can connect its
+      // OWN Drive, so the capability advertises accountDrive available. This
+      // fixture seeds a connected token row for each account, so connected
+      // reads true. The installation transports stay unavailable behind the
+      // wall.
+      expect({ status: response.status, body: await response.json() }).toEqual({
+        status: 200,
+        body: { ...capability(true), accountDrive: { available: true, connected: true } },
+      });
       expect(accountState(shared.dataDirectory)).toEqual(before);
       expect(readFileSync(join(shared.dataDirectory, "config.json"), "utf8")).toBe(sharedConfig);
       expect(readFileSync(join(shared.dataDirectory, "memory", "canary.md"), "utf8")).toBe(memoryCanary);
       expect(existsSync(shared.networkLog)).toBe(false);
     });
-    it.each(ACCOUNT_DRIVE_ROUTES)(`still denies ${role} account transport $method $path`, async ({ method, path }) => {
+    it(`offers ${role} the hosted Drive connect without touching any token state`, async () => {
       const before = accountState(shared.dataDirectory);
-      const response = await request(shared, path, method, method === "POST" ? '{"passphrase":"fixture-passphrase"}' : undefined, (role === "primary" ? primary : secondary).cookie);
-      expect({ status: response.status, body: await response.json() }).toEqual({ status: 403, body: UNAVAILABLE });
+      const response = await request(shared, "/api/workspace/google/connect", "GET", undefined, (role === "primary" ? primary : secondary).cookie);
+      expect(response.status).toBe(200);
+      const { url } = z.object({ url: z.string() }).parse(await response.json());
+      expect(url).toContain("accounts.google.com");
+      expect(url).toContain("drive.appdata");
       expect(accountState(shared.dataDirectory)).toEqual(before);
       expect(existsSync(shared.networkLog)).toBe(false);
     });
+    it.each([
+      { method: "GET", path: "/api/workspace/google/callback?code=owned-unused-code&state=owned-unused-state" },
+    ])(`answers ${role} $method $path with a redirect that carries no state change`, async ({ method, path }) => {
+      // The state is not one this server signed, so the callback refuses the
+      // exchange and answers with a redirect — fetch in `error` redirect mode
+      // is the proof a redirect was served, and the seeded token rows must be
+      // byte-identical afterwards. The outbound block guarantees no real
+      // Google call is even attempted.
+      const before = accountState(shared.dataDirectory);
+      await expect(fetch(`${shared.url}${path}`, {
+        method, redirect: "error", signal: AbortSignal.timeout(10_000),
+        headers: { origin: shared.url, cookie: (role === "primary" ? primary : secondary).cookie },
+      })).rejects.toThrow();
+      expect(accountState(shared.dataDirectory)).toEqual(before);
+      expect(existsSync(shared.networkLog)).toBe(false);
+    });
+    it.each(ACCOUNT_DRIVE_ROUTES.filter((r) => r.path.startsWith("/api/workspace/google/push") || r.path.startsWith("/api/workspace/google/pull")))(
+      `still denies ${role} account transport $method $path`, async ({ method, path }) => {
+        const before = accountState(shared.dataDirectory);
+        const response = await request(shared, path, method, method === "POST" ? '{"passphrase":"fixture-passphrase"}' : undefined, (role === "primary" ? primary : secondary).cookie);
+        expect({ status: response.status, body: await response.json() }).toEqual({ status: 403, body: UNAVAILABLE });
+        expect(accountState(shared.dataDirectory)).toEqual(before);
+        expect(existsSync(shared.networkLog)).toBe(false);
+      });
   }
 
   it.each([{ method: "GET", path: "/api/workspace/google/status" }, ...ACCOUNT_DRIVE_ROUTES])("requires hosted authentication for $method $path", async ({ method, path }) => {
