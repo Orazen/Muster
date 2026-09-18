@@ -231,6 +231,18 @@ not built. Every claim below was re-checked against the current tree on
 17 September 2026 before writing; file:line anchors are from that revision and
 may shift as work lands.
 
+> **2026-09-18 addition — mascot character system (owner-directed, planned).**
+> New ranked item **#0** (owner priority, planned in full): the Flower mascot
+> becomes a character — status × expression layers, follow/annoyed/slap/dizzy
+> interactions with an off switch, all four surfaces (web, desktop tray,
+> iOS Live Activity/widget, Watch). Plan:
+> `docs/plans/mascot-character-system-plan-2026-09-18.md` (slices A–G,
+> file-ownership map, acceptance gates). Study:
+> `docs/research/mascot-character-study-2026-09-18.md`. Skill:
+> `skills/mascot/SKILL.md`. Status: **proposed → in progress** as agents
+> claim slices A/B (parallelizable now). All other items below keep their
+> verified/blocked status unchanged.
+
 ### Ranked work items (corrected, source-checked)
 
 1. **Per-role automated benchmark — grading shipped, harness missing.**
