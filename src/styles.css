@@ -814,7 +814,12 @@ body {
 }
 
 /* One Flower guide and one frame persist across all seven setup stages.
-   This is a named region; Settings remains the higher sibling dialog. */
+   This is a named region; Settings remains the higher sibling dialog.
+   Visual language: Apple Setup Assistant — a single centered glass card on
+   a calm dark aurora, mascot on top, one primary action per beat, compact
+   progress dots. (Design references: gaia-ui's MIT onboarding guidance —
+   time-to-value, skip-ability, honest progress — and the GAIA onboarding
+   stage pattern; no noncommercial code or assets are used.) */
 .onboarding-shell {
   position: fixed;
   inset: 0;
@@ -823,68 +828,169 @@ body {
   place-items: center;
   overflow: hidden;
   padding: 24px;
-  background: radial-gradient(ellipse at 24% 30%, color-mix(in srgb, #f08a24 8%, transparent), transparent 65%), var(--color-app);
+  background:
+    radial-gradient(58% 42% at 50% -6%, color-mix(in srgb, #f08a24 16%, transparent), transparent 70%),
+    radial-gradient(40% 34% at 82% 88%, color-mix(in srgb, #2f6bff 12%, transparent), transparent 72%),
+    radial-gradient(46% 40% at 10% 92%, color-mix(in srgb, #9a5cff 9%, transparent), transparent 74%),
+    var(--color-app);
+}
+
+/* The AGI halo: one faint orbital ring behind the card, deliberately
+   quieter than the content. Painted on the shell's own background stack
+   (a pseudo-element ring measured outside the viewport bounds in the
+   wizard's transformed-ancestor state, so it lives here instead). */
+.onboarding-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 24px;
+  background:
+    radial-gradient(24% 24% at 50% 50%, transparent 97%, color-mix(in srgb, #f08a24 10%, transparent) 99.5%),
+    radial-gradient(58% 42% at 50% -6%, color-mix(in srgb, #f08a24 16%, transparent), transparent 70%),
+    radial-gradient(40% 34% at 82% 88%, color-mix(in srgb, #2f6bff 12%, transparent), transparent 72%),
+    radial-gradient(46% 40% at 10% 92%, color-mix(in srgb, #9a5cff 9%, transparent), transparent 74%),
+    var(--color-app);
 }
 
 .onboarding-frame {
-  display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
-  width: min(900px, 100%);
-  height: min(760px, calc(100vh - 48px));
-  height: min(760px, calc(100dvh - 48px));
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  /* The grid cell is the frame's containing block: min-width 0 lets any
+     beat's content shrink instead of pushing the card past the viewport. */
+  width: min(640px, 100%);
+  min-width: 0;
+  height: auto;
+  max-height: min(860px, calc(100vh - 48px));
+  max-height: min(860px, calc(100dvh - 48px));
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--color-hairline) 70%, transparent);
-  border-radius: 24px;
-  background: var(--color-panel);
-  box-shadow: 0 24px 80px #0003;
+  border: 1px solid color-mix(in srgb, var(--color-hairline) 75%, transparent);
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--color-panel) 88%, transparent);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  box-shadow:
+    0 32px 90px #0005,
+    0 2px 8px #0004,
+    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
 }
 
 .onboarding-guide {
+  flex: 0 0 auto;
   min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 28px 24px;
-  border-right: 1px solid color-mix(in srgb, var(--color-hairline) 55%, transparent);
-  background: color-mix(in srgb, #f08a24 5%, var(--color-panel));
-  scrollbar-width: thin;
+  overflow: visible;
+  padding: 36px 36px 0;
+  border-right: 0;
+  background: transparent;
+  text-align: center;
 }
 
-.onboarding-guide-flower { width: 148px; height: 148px; margin: 0 auto 12px; }
+.onboarding-guide-flower {
+  width: 118px;
+  height: 118px;
+  margin: 0 auto 6px;
+  border-radius: 50%;
+  /* the mascot's own halo stage */
+  background: radial-gradient(circle at 50% 42%, color-mix(in srgb, #f08a24 16%, transparent), transparent 68%);
+}
 .onboarding-guide-flower > svg { width: 100%; height: 100%; }
-.onboarding-wordmark { margin: 0; color: #f08a24; font-size: 11px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; }
-.onboarding-guide-title { margin: 8px 0 0; color: var(--color-ink); font-size: 23px; font-weight: 650; line-height: 1.2; letter-spacing: -.035em; }
-.onboarding-guide-note { margin: 10px 0 0; color: var(--color-ink-secondary); font-size: 13px; line-height: 1.6; }
-.onboarding-progress { display: grid; gap: 7px; margin: 28px 0 0; padding: 0; list-style: none; }
-.onboarding-progress-step { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 5px 0; color: var(--color-ink-secondary); font-size: 13px; }
-.onboarding-progress-number { display: grid; place-items: center; flex: 0 0 26px; width: 26px; height: 26px; border: 1px solid var(--color-hairline); border-radius: 50%; font-size: 11px; }
-.onboarding-progress-step[aria-current="step"] { color: var(--color-ink); font-weight: 650; }
-.onboarding-progress-step[aria-current="step"] .onboarding-progress-number { border-color: #f08a24; background: #f08a24; color: #17120c; }
-.onboarding-progress-step[data-complete] .onboarding-progress-number { border-color: transparent; color: #f08a24; background: color-mix(in srgb, #f08a24 12%, transparent); }
+.onboarding-wordmark { margin: 0; color: #f08a24; font-size: 10.5px; font-weight: 700; letter-spacing: .24em; text-transform: uppercase; }
+.onboarding-guide-title { margin: 6px 0 0; color: var(--color-ink); font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -.035em; }
+.onboarding-guide-note { margin: 8px auto 0; max-width: 40ch; color: var(--color-ink-secondary); font-size: 13.5px; line-height: 1.6; }
+
+/* Apple-style progress: a single centered dot strip; the labels stay for
+   screen readers, the stage head's "Step N of 7" carries the visible count. */
+.onboarding-progress {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0 0 22px;
+  list-style: none;
+}
+.onboarding-progress-step {
+  position: relative;
+  display: block;
+  min-width: 0;
+  padding: 0;
+  color: transparent;
+  font-size: 0;
+}
+.onboarding-progress-number {
+  display: block;
+  width: 8px;
+  height: 8px;
+  margin: 0 auto;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-ink) 26%, transparent);
+  font-size: 0;
+  transition: width .24s cubic-bezier(.24, 1, .4, 1), background .24s cubic-bezier(.24, 1, .4, 1);
+}
+.onboarding-progress-step[aria-current="step"] .onboarding-progress-number {
+  width: 26px;
+  background: #f08a24;
+}
+.onboarding-progress-step[data-complete] .onboarding-progress-number {
+  background: color-mix(in srgb, #f08a24 55%, transparent);
+}
+/* Keep the accessible names reachable: the number and label text are
+   visually hidden but still announced. */
+.onboarding-progress-number::before {
+  content: "";
+}
+.onboarding-progress-step { color: transparent; }
+.onboarding-progress-step .onboarding-progress-number { color: transparent; }
+.onboarding-progress-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .onboarding-stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.onboarding-stage-head { flex: 0 0 auto; padding: 28px 32px 20px; border-bottom: 1px solid color-mix(in srgb, var(--color-hairline) 55%, transparent); }
-.onboarding-stage-count { margin: 0; color: var(--color-ink-secondary); font-size: 12px; }
-.onboarding-stage-title { width: fit-content; max-width: 100%; margin: 6px 0 0; color: var(--color-ink); font-size: 24px; font-weight: 650; letter-spacing: -.03em; line-height: 1.25; }
+.onboarding-stage-head { flex: 0 0 auto; padding: 0 36px 4px; border-bottom: 0; text-align: center; }
+.onboarding-stage-count { margin: 0; color: var(--color-ink-secondary); font-size: 11.5px; letter-spacing: .06em; }
+.onboarding-stage-title { width: fit-content; max-width: 100%; margin: 4px auto 0; color: var(--color-ink); font-size: 21px; font-weight: 650; letter-spacing: -.03em; line-height: 1.25; }
 .onboarding-stage-title:focus-visible, .onboarding-error:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 5px; border-radius: 2px; }
-.onboarding-stage-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px 32px 28px; overflow-wrap: anywhere; scrollbar-width: thin; }
+.onboarding-stage-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 36px 30px; overflow-wrap: anywhere; scrollbar-width: thin; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* A glow pulse only — no transform: the flower box must never move or
+     scale while the wizard measures its settled geometry. */
+  .onboarding-guide-flower { animation: guide-halo 5.2s ease-in-out infinite; }
+  @keyframes guide-halo {
+    0%, 100% { filter: drop-shadow(0 0 0 color-mix(in srgb, #f08a24 0%, transparent)); }
+    50% { filter: drop-shadow(0 6px 24px color-mix(in srgb, #f08a24 22%, transparent)); }
+  }
+}
 
 @media (max-width: 680px) {
   .onboarding-shell { padding: 8px; }
-  .onboarding-frame { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); height: calc(100vh - 16px); height: calc(100dvh - 16px); border-radius: 18px; }
-  .onboarding-guide { overflow: visible; padding: 12px 16px; border-right: 0; border-bottom: 1px solid color-mix(in srgb, var(--color-hairline) 55%, transparent); }
-  .onboarding-guide-intro { display: flex; align-items: center; gap: 12px; }
+  /* Full-bleed sheet at phone widths — the Apple mobile-setup pattern.
+     width:100% + min-width:0 means no beat's min-content can push the
+     frame past the viewport edge, whatever the restored draft contains. */
+  .onboarding-frame { width: 100%; min-width: 0; height: calc(100vh - 16px); height: calc(100dvh - 16px); border-radius: 20px; }
+  .onboarding-guide { overflow: visible; padding: 16px 16px 0; }
+  .onboarding-guide-intro { display: flex; align-items: center; gap: 12px; text-align: left; }
   .onboarding-guide-flower { flex: 0 0 52px; width: 52px; height: 52px; margin: 0; }
-  .onboarding-guide-copy { min-width: 0; }
+  .onboarding-guide-copy { min-width: 0; text-align: left; }
   .onboarding-wordmark { font-size: 10px; }
   .onboarding-guide-title { margin-top: 4px; font-size: 18px; }
   .onboarding-guide-note { display: none; }
-  .onboarding-progress { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
-  .onboarding-progress-step { justify-content: center; padding: 0; }
-  .onboarding-progress-label { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .onboarding-stage-head { padding: 16px 20px 14px; }
-  .onboarding-stage-title { font-size: 21px; }
-  .onboarding-stage-scroll { padding: 20px 20px 24px; }
+  .onboarding-progress { padding-bottom: 12px; }
+  .onboarding-stage-head { padding: 0 20px 4px; }
+  .onboarding-stage-title { font-size: 19px; }
+  .onboarding-stage-scroll { padding: 8px 20px 24px; }
 }
 
 /* Tour panels swap in place with a soft slide — same grammar as
