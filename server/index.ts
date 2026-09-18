@@ -4046,7 +4046,11 @@ function isAllowedHost(host: string | undefined): boolean {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const path = url.pathname;
-  const method = req.method ?? "GET";
+  // HEAD rides every GET branch: monitors, CDNs and updater probes send HEAD,
+  // and Node strips the response body automatically, so normalizing here makes
+  // every GET route answer HEAD with identical status + headers. POST/PUT/
+  // DELETE branches never see this value, so no unsafe route is widened.
+  const method = req.method === "HEAD" ? "GET" : req.method ?? "GET";
   /** scratch for route matches, shared by every `path.match` below */
   let m: RegExpMatchArray | null = null;
   /** the signed-in user for this request, once the auth gate resolves it;

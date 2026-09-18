@@ -245,17 +245,20 @@ may shift as work lands.
 
 ### Ranked work items (corrected, source-checked)
 
-1. **Per-role automated benchmark — grading shipped, harness missing.**
+1. **Per-role automated benchmark — capture harness now exists (2026-09-18, verified).**
    `server/role-eval.ts:1` is the pure offline grader (roles assistant /
    coordinator / specialist × scenario kinds, required benchmarks per role at
    `server/role-eval.ts:64`, scenario table `ROLE_BENCHMARKS` at
    `server/role-eval.ts:74`), exposed as `muster bench capture.json
-   scorecard.json` (`cli/muster.mjs:864`). **Missing for the L1 gap to close:**
-   an automated harness that boots a fleet, captures real runs to the capture
-   schema, and records trended scorecards — no product or CI wiring exists
-   today (`grep -rn role-eval` outside its own test, the CLI and the bundler
-   returns nothing else). Highest leverage; smallest first slice is a fixture
-   capture + a `server/role-eval-harness.test.ts` over a real booted server.
+   scorecard.json` (`cli/muster.mjs:864`). The missing capture half now ships
+   as `server/role-eval-harness.test.ts`: an owned live harness (fake-ACP
+   `auto` instance in fullAuto for working scenarios, `ask` instance so the
+   escalation benchmark exercises the real card → respond → audit path) that
+   runs all six required benchmarks as real settled turns, captures them in
+   the role-eval schema and grades a passing scorecard through the shipped
+   grader — deterministic across three consecutive runs. **Still open:**
+   scheduled/CI wiring and scorecard trending (the pipeline exists; nothing
+   runs it on a schedule yet).
 2. **Memory history + rollback.** The brain stores correction chains and
    withdrawal that preserves history (`server/workspace-brain.ts`), but there
    is no UI/CLI surface to browse a fact's history or roll one back; any

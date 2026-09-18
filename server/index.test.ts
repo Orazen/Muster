@@ -200,6 +200,18 @@ describe("harness HTTP API", () => {
     expect(unknownApi.body.error).toContain("/api/not-a-real-route");
   });
 
+  it("answers HEAD with the GET route's status and headers, body suppressed", async () => {
+    // Monitors and CDNs probe with HEAD; the server normalizes HEAD→GET so
+    // every GET route answers it. Node strips the response body for HEAD.
+    for (const path of ["/", "/app", "/assets/smoke.css"]) {
+      const res = await fetch(`${BASE}${path}`, { method: "HEAD" });
+      expect(res.status, path).toBe(200);
+      expect(res.body, path).toBe(null); // undici guarantees no body on HEAD
+    }
+    const head404 = await fetch(`${BASE}/assets/missing.css`, { method: "HEAD" });
+    expect(head404.status).toBe(404);
+  });
+
   it("rejects malformed and oversized JSON bodies without hanging", async () => {
     const malformed = await fetch(`${BASE}/api/config`, {
       method: "PUT",
