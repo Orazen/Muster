@@ -22,6 +22,10 @@ const receipt = z.object({
   tokensIn: count, tokensOut: count, costUsd: z.number().nonnegative().nullable(),
   result: z.enum(["done", "no-reply"]), summary: z.string().max(16000),
 });
+export type TaskReceipt = z.infer<typeof receipt>;
+/** The task-receipt shape, exported so capture harnesses parse the same
+ * wire body the grader consumes — one schema owner, no drift. */
+export const taskReceipt = receipt;
 export const roleNames = ["assistant", "coordinator", "specialist"] as const;
 export type RoleName = (typeof roleNames)[number];
 export const scenarioKinds = ["direct-answer", "grounded-answer", "delegation", "escalation"] as const;
