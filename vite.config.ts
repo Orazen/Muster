@@ -14,6 +14,16 @@ const backend = devBackendPreview({
 
 export default defineConfig({
   plugins: [backend.plugin, react(), tailwindcss(), webBuildIdentityPlugin()],
+  build: {
+    rollupOptions: {
+      input: {
+        // The tray companion window: a second tiny entry so the desktop tray
+        // loads a 2-3KB page instead of the whole app bundle.
+        main: "index.html",
+        tray: "tray.html",
+      },
+    },
+  },
   test: {
     environment: "node",
     include: [

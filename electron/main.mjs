@@ -1,7 +1,7 @@
 // Configure an explicitly selected profile before any dependency captures
 // Electron paths or creates credentials, logs, sockets or child processes.
 import { desktopProfile } from "./profile-paths.mjs";
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, safeStorage, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, MenuItem, safeStorage, session, shell, systemPreferences, utilityProcess } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,70 @@ const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 const DEFAULT_COMPOSIO_BROKER_URL = "https://muster-composio.orazen.workers.dev";
 let SERVER_PORT = 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
+
+// The tray companion (the mascot's desktop home): a small always-on-top
+// window rendering the same flower character from the built tray.html.
+// It is its own surface — it never modifies the app window, and its poll
+// pauses whenever it is hidden. Tray state lives in dev in the vite dev
+// server (tray.html at DEV_URL) and in the package in the built UI dir.
+let trayWindow = null;
+function trayUrl() {
+  if (app.isPackaged) return `http://127.0.0.1:${SERVER_PORT}/tray.html`;
+  return `${DEV_URL}/tray.html`;
+}
+function toggleTrayWindow() {
+  if (trayWindow && !trayWindow.isDestroyed()) {
+    if (trayWindow.isVisible()) {
+      trayWindow.hide();
+      return;
+    }
+    trayWindow.show();
+    trayWindow.focus();
+    return;
+  }
+  trayWindow = new BrowserWindow({
+    width: 280,
+    height: 300,
+    minWidth: 240,
+    minHeight: 240,
+    show: false,
+    icon: APP_ICON,
+    backgroundColor: "#070707",
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    autoHideMenuBar: true,
+    resizable: true,
+    fullscreenable: false,
+    webPreferences: {
+      contextIsolation: true,
+      preload: path.join(__dirname, "preload.cjs"),
+    },
+  });
+  trayWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+  trayWindow.once("ready-to-show", () => trayWindow?.show());
+  trayWindow.on("closed", () => {
+    trayWindow = null;
+  });
+  trayWindow.loadURL(trayUrl()).catch(() => {
+    // The embedded server may still be starting; the menu item can retry.
+    trayWindow?.close();
+  });
+}
+function registerTrayIpc() {
+  ipcMain.handle("tray:toggle", () => {
+    toggleTrayWindow();
+  });
+  // The tray page asks the main process to reveal a bot in the main window.
+  ipcMain.handle("tray:focus-app", () => {
+    const win = BrowserWindow.getAllWindows().find((candidate) => candidate !== trayWindow && !candidate.isDestroyed());
+    if (!win) return;
+    win.show();
+    win.focus();
+  });
+}
 
 // GNOME groups the window with its installed desktop entry only when both
 // identities match. This must run before Electron becomes ready.
@@ -589,6 +653,21 @@ app.whenReady().then(async () => {
     }
   });
   registerUpdaterIpc();
+  registerTrayIpc();
+  // View menu gains the tray companion toggle (all platforms). A hidden
+  // tray window is reachable again from here even after it was closed.
+  const menu = Menu.getApplicationMenu();
+  if (menu) {
+    const viewItem = menu.getMenuItemById("view") ?? menu.items.find((item) => item.label === "View");
+    if (viewItem?.submenu) {
+      viewItem.submenu.append(new MenuItem({
+        label: "Mascot Companion",
+        accelerator: "CommandOrControl+Shift+M",
+        click: () => toggleTrayWindow(),
+      }));
+      Menu.setApplicationMenu(menu);
+    }
+  }
   // The driver and its permission prompts start only after the explicit
   // Enable for this session action in the bot's Computer panel.
   if (app.isPackaged) serverReady = await startServerPackaged();

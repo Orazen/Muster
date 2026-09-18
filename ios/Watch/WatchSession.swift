@@ -33,7 +33,10 @@ final class WatchSession: ObservableObject {
     }
 
     @Published private(set) var state = CompanionState() {
-        didSet { approvalCoordinator.reconcile() }
+        didSet {
+            approvalCoordinator.reconcile()
+            hapticOnFleetChange()
+        }
     }
     @Published private(set) var approvalSessionId = UUID()
     @Published private(set) var approvalActions: [ApprovalActionKey: ApprovalActionState] = [:]
@@ -43,6 +46,34 @@ final class WatchSession: ObservableObject {
     }
     /// Transient, user-facing failures from an action they just took.
     @Published var actionError: String?
+
+    /// Haptic on fleet state transitions (musterwatch plan §3.1): a wrist
+    /// should feel the fleet change while the mascot shows it. Only real
+    /// transitions fire — not every transcript delta — and .success/.failure
+    /// haptics stay owned by the approval coordinator.
+    private var lastHapticMood: FleetMood?
+    private func hapticOnFleetChange() {
+        var isOffline = false
+        if case .offline = status { isOffline = true }
+        let mood = FleetMood.from(
+            isOffline: isOffline,
+            approvals: state.pendingApprovals.count,
+            working: state.bots.filter { $0.busy == true }.count,
+            unread: state.bots.filter(\.unread).count + state.rooms.filter(\.unread).count
+        )
+        defer { lastHapticMood = mood }
+        guard let previous = lastHapticMood, previous != mood else { return }
+        switch mood {
+        case .needsYou:
+            WKInterfaceDevice.current().play(.notification)
+        case .working:
+            WKInterfaceDevice.current().play(.start)
+        case .unread:
+            WKInterfaceDevice.current().play(.notification)
+        case .idle, .offline:
+            break
+        }
+    }
 
     /// The fleet as one face. Precedence lives in `FleetMood` so the header
     /// and any future surface cannot disagree about what matters most.

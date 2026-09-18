@@ -31,7 +31,13 @@ final class Session: ObservableObject {
     }
 
     @Published private(set) var state = CompanionState() {
-        didSet { stateRevision &+= 1; seedCoordinator.reconcile(); composerCoordinator.reconcile(); approvalCoordinator.reconcile() }
+        didSet {
+            stateRevision &+= 1
+            seedCoordinator.reconcile()
+            composerCoordinator.reconcile()
+            approvalCoordinator.reconcile()
+            publishFleetSnapshot()
+        }
     }
     private var stateRevision: UInt64 = 0
     @Published private(set) var seedSessionId = UUID()
@@ -97,6 +103,28 @@ final class Session: ObservableObject {
     private var restorePending = false
 
     private static let connectionKey = "companion.connection"
+
+    // MARK: - Fleet snapshot (widget / Live Activity)
+
+    /// Publish the mascot's external surfaces after every state change.
+    /// Content-throttled: only a real change writes to the shared group.
+    private func publishFleetSnapshot() {
+        var isOffline = false
+        if case .offline = status { isOffline = true }
+        if case .unpaired = status { isOffline = true }
+        let mood = FleetMood.from(
+            isOffline: isOffline,
+            approvals: state.pendingApprovals.count,
+            working: state.bots.filter { $0.busy == true }.count,
+            unread: state.bots.filter(\.unread).count + state.rooms.filter(\.unread).count
+        )
+        let snapshot = fleetSnapshot(state: state, mood: mood)
+        if let current = FleetSnapshotStore.read(),
+           current.bots == snapshot.bots, current.moodState == snapshot.moodState {
+            return
+        }
+        FleetSnapshotStore.publish(snapshot)
+    }
 
     // MARK: - Pairing
 

@@ -5,6 +5,9 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("ogb", {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
   platform: process.platform,
+  /** Tray companion: toggle the mascot window, or jump to the main app. */
+  trayToggle: () => ipcRenderer.invoke("tray:toggle"),
+  trayFocusApp: () => ipcRenderer.invoke("tray:focus-app"),
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
   /** Enable host computer control for this app session after a user action. */
   enableComputerAccess: () => ipcRenderer.invoke("cua:enable"),

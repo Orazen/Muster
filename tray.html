@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Muster</title>
+    <style>
+      /* The tray companion is its own tiny surface: no framework, no router,
+       * just the flower and the fleet's lines. It renders the SAME flower
+       * path and pose rules as the web app (pose data mirrors
+       * src/lib/musterbot/flower.ts channels, subset used here). */
+      :root {
+        color-scheme: dark;
+        --ink: #fcfcfc;
+        --ink-2: rgba(252, 252, 252, 0.62);
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        background: rgba(7, 7, 7, 0.96);
+        color: var(--ink);
+        font: 13px -apple-system, system-ui, sans-serif;
+        -webkit-user-select: none;
+        user-select: none;
+        overflow: hidden;
+      }
+      #flower { width: 56px; height: 56px; }
+      #flower .flower-body, #flower .flower-eye { transition: transform 300ms ease-in-out; }
+      @media (prefers-reduced-motion: reduce) {
+        #flower .flower-body, #flower .flower-eye { transition: none !important; }
+        #flower.breathe { animation: none !important; }
+      }
+      #flower.breathe { animation: breathe 2.8s ease-in-out infinite; }
+      @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+      #status { font-weight: 600; font-size: 13px; letter-spacing: 0.01em; }
+      #lines { display: flex; flex-direction: column; gap: 3px; align-items: center; max-width: 240px; }
+      .line { color: var(--ink-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+      .line:focus { outline: none; }
+      #quiet { color: var(--ink-2); font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <svg id="flower" viewBox="-112 -112 224 224" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <g class="flower-body" transform-origin="0 0">
+        <path id="flower-path" fill="#f08a24" d=""/>
+        <g transform="translate(-15 -2) rotate(-4)"><rect class="flower-eye" x="-10.5" y="-22" width="21" height="44" rx="10.5" fill="#f9f9f9" transform-origin="-10.5 -22" transform="translate(0px, 0px) rotate(0deg) scale(1, 1)"/></g>
+        <g transform="translate(38 -6) rotate(-4)"><rect class="flower-eye" x="-10.5" y="-22" width="21" height="44" rx="10.5" fill="#f9f9f9" transform-origin="-10.5 -22" transform="translate(0px, 0px) rotate(0deg) scale(1, 1)"/></g>
+      </g>
+    </svg>
+    <div id="status" role="status" aria-live="polite"></div>
+    <div id="lines"></div>
+    <div id="quiet" hidden>Open Muster to meet your team.</div>
+    <script type="module" src="/src/tray-main.ts"></script>
+  </body>
+</html>

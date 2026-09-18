@@ -40,6 +40,10 @@ targets:
         # dependency to watchOS so the watch builds with its own SDK and the
         # Embed Watch Content phase copies the finished bundle.
         platformFilter: watchos
+      # The mascot's home-screen home. The extension embeds in the app like
+      # the watch does, and reads the fleet snapshot from the shared group.
+      - target: MusterFleetWidget
+        embed: true
     entitlements:
       path: App/MusterCompanion.entitlements
       properties:
@@ -48,6 +52,12 @@ targets:
         # iOS silently downgrades every one of them to .active — the code
         # reads right and the phone stays quiet at lock screen.
         com.apple.developer.usernotifications.time-sensitive: true
+        # The widget extension reads the fleet snapshot through this group
+        # (FleetSnapshotStore). Free provisioning creates the group only for
+        # explicit team ids; a personal-team build must create it once in
+        # the developer portal or the widget shows its placeholder.
+        com.apple.security.application-groups:
+          - group.com.muster.companion
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion
@@ -240,6 +250,36 @@ targets:
         SWIFT_VERSION: "5.9"
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: MusterCompanion
+
+  # The mascot outside the app: a home-screen widget (small + medium) that
+  # renders the fleet snapshot the app publishes to the shared app group.
+  # No in-extension networking: the widget is a renderer, the app is the
+  # source of truth — one character, one voice, no second transport.
+  MusterFleetWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: App/FleetWidget.swift
+    dependencies:
+      - package: CompanionCore
+        product: CompanionCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion.fleetwidget
+        DEVELOPMENT_TEAM: 7375K23WFU
+        CODE_SIGN_STYLE: Automatic
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "5"
+        SWIFT_VERSION: "5.9"
+        SKIP_INSTALL: YES
+    info:
+      path: App/FleetWidgetInfo.plist
+      properties:
+        CFBundleDisplayName: Muster mascot
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
 
 schemes:
   # The app's own scheme. Without it there is no way to archive MusterCompanion
