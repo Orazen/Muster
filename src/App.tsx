@@ -1,23 +1,26 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, lazy, useEffect, useRef, useState, type ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Menu } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
-import { SettingsPanel } from "@/components/SettingsPanel";
-import { PluginsPanel } from "@/components/PluginsPanel";
-import { ComputerPanel } from "@/components/ComputerPanel";
-import { BrowserPanel } from "@/components/BrowserPanel";
-// FleetOrb is no longer mounted anywhere (owner direction 2026-09-15):
-// presence now lives on the roster rows and their threads. The component
-// and its CSS stay in the tree for reuse; nothing imports them.
-import { InspectorPanel } from "@/components/InspectorPanel";
-import { SettingsModal } from "@/components/SettingsModal";
+// On-demand surfaces are lazy chunks: they are conditional overlays or
+// secondary views, so their code (and the heavier vendor code only they
+// pull) leaves the boot bundle and loads on first open. The boot surface —
+// Sidebar, ChatView, GroupView, auth — stays eager so /app paints exactly
+// as before. First-open cost is one local fetch, masked by the fallback.
+const SettingsPanel = lazy(() => import("@/components/SettingsPanel").then((m) => ({ default: m.SettingsPanel })));
+const PluginsPanel = lazy(() => import("@/components/PluginsPanel").then((m) => ({ default: m.PluginsPanel })));
+const ComputerPanel = lazy(() => import("@/components/ComputerPanel").then((m) => ({ default: m.ComputerPanel })));
+const BrowserPanel = lazy(() => import("@/components/BrowserPanel").then((m) => ({ default: m.BrowserPanel })));
+const InspectorPanel = lazy(() => import("@/components/InspectorPanel").then((m) => ({ default: m.InspectorPanel })));
+const SettingsModal = lazy(() => import("@/components/SettingsModal").then((m) => ({ default: m.SettingsModal })));
+const RoutinesPage = lazy(() => import("@/components/RoutinesPage").then((m) => ({ default: m.RoutinesPage })));
+const SocialView = lazy(() => import("@/components/SocialView").then((m) => ({ default: m.SocialView })));
+const Onboarding = lazy(() => import("@/components/Onboarding").then((m) => ({ default: m.Onboarding })));
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
-import { RoutinesPage } from "@/components/RoutinesPage";
-import { SocialView } from "@/components/SocialView";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ShortcutsSheet } from "@/components/ShortcutsSheet";
@@ -30,7 +33,6 @@ import { ProjectScout } from "@/components/ProjectScout";
 import { SignupPage } from "@/pages/SignupPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
-import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, serverGateDone } from "@/lib/analytics";
 import { installGazeTracking } from "@/lib/musterbot/gaze";
 import { PairPage } from "@/pages/PairPage";
@@ -193,12 +195,12 @@ function Shell() {
         }}
       />
       {state.activeView === "routines" ? (
-        <RoutinesPage />
+        <Suspense fallback={null}><RoutinesPage /></Suspense>
       ) : state.activeView === "social" ? (
         /* Social works without engines on purpose: profiles and friendships
            are identity, not inference — a hosted account with no BYOK key can
            still introduce its teammates. */
-        <SocialView />
+        <Suspense fallback={null}><SocialView /></Suspense>
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (
@@ -254,22 +256,24 @@ function Shell() {
           </span>
         </main>
       )}
-      {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
-      {state.computerOpen && bot && <ComputerPanel bot={bot} />}
-      {state.browserPanelOpen && bot && <BrowserPanel bot={bot} onClose={() => dispatch({ type: "toggleBrowserPanel", open: false })} />}
-      {state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
-      {state.appSettingsOpen && <SettingsModal />}
-      {state.pluginsOpen && <PluginsPanel />}
+      {state.settingsOpen && bot && <Suspense fallback={null}><SettingsPanel bot={bot} /></Suspense>}
+      {state.computerOpen && bot && <Suspense fallback={null}><ComputerPanel bot={bot} /></Suspense>}
+      {state.browserPanelOpen && bot && <Suspense fallback={null}><BrowserPanel bot={bot} onClose={() => dispatch({ type: "toggleBrowserPanel", open: false })} /></Suspense>}
+      {state.inspectorOpen && bot && <Suspense fallback={null}><InspectorPanel bot={bot} /></Suspense>}
+      {state.appSettingsOpen && <Suspense fallback={null}><SettingsModal /></Suspense>}
+      {state.pluginsOpen && <Suspense fallback={null}><PluginsPanel /></Suspense>}
       <CommandPalette />
       <ShortcutsSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <NotificationStack />
       {gateDecision === "show" && firstRun && (
+        <Suspense fallback={null}>
         <Onboarding
           onDone={() => {
             setFirstRun(false);
             setGateDecision("hide");
           }}
         />
+        </Suspense>
       )}
       </div>
       {/* The floating fleet orb is retired (owner direction 2026-09-15):
@@ -310,13 +314,13 @@ export default function App() {
         <Routes>
           <Route path="/" element={<RootRoute />} />
           <Route path="/sign-in" element={<LoginPage />} />
-          <Route path="/sign-up" element={<SignupPage />} />
-          <Route path="/pair" element={<AuthGate><PairPage /></AuthGate>} />
-          <Route path="/claim" element={<ClaimPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/sign-up" element={<Suspense fallback={null}><SignupPage /></Suspense>} />
+          <Route path="/pair" element={<AuthGate><Suspense fallback={null}><PairPage /></Suspense></AuthGate>} />
+          <Route path="/claim" element={<Suspense fallback={null}><ClaimPage /></Suspense>} />
+          <Route path="/forgot-password" element={<Suspense fallback={null}><ForgotPasswordPage /></Suspense>} />
+          <Route path="/reset-password" element={<Suspense fallback={null}><ResetPasswordPage /></Suspense>} />
           <Route path="/app/*" element={<AuthGate><AppShell /></AuthGate>} />
-          <Route path="/os" element={<AuthGate><AccountStore readSelectedMessages={false}><DesktopShell /></AccountStore></AuthGate>} />
+          <Route path="/os" element={<AuthGate><AccountStore readSelectedMessages={false}><Suspense fallback={null}><DesktopShell /></Suspense></AccountStore></AuthGate>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

@@ -256,7 +256,8 @@ may shift as work lands.
    escalation benchmark exercises the real card → respond → audit path) that
    runs all six required benchmarks as real settled turns, captures them in
    the role-eval schema and grades a passing scorecard through the shipped
-   grader — deterministic across three consecutive runs. **Still open:**
+   grader — deterministic across three consecutive runs. **2026-09-18
+   (Loop118):** runnable on demand as `pnpm bench:roles`. **Still open:**
    scheduled/CI wiring and scorecard trending (the pipeline exists; nothing
    runs it on a schedule yet).
 2. **Memory history + rollback.** The brain stores correction chains and

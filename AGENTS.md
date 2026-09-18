@@ -5,6 +5,9 @@
 Read [current state](docs/plans/current-state.md),
 [the web app stability contract](docs/guides/web-app-stability.md), and the
 **latest entry at the end** of the handoff ledger before historical roadmaps.
+**New agent? Start with the 5-minute orientation hub:**
+[docs/AGENT-ORIENTATION.md](docs/AGENT-ORIENTATION.md) — doc map, ranked work
+list, verification gate, parallel-agent etiquette, owner gates.
 Preserve the current layout, mascot, route shells, saved choices and user sessions.
 Audits should fix reproduced defects; do not use them to redesign the app again.
 Use isolated data, explicit ports and owned browser contexts. Never point a
