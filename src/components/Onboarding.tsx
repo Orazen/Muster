@@ -16,13 +16,14 @@ import {
   BellRing,
   Lock,
 } from "lucide-react";
-import { FlowerBot } from "@/lib/musterbot";
+import { FlowerCharacter } from "@/components/FlowerCharacter";
+import { speaker } from "@/lib/tts";
 import { AgentAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, consumeTourReplay, track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
 import { ProviderMark } from "./ProviderIcons";
-import { AGENT_CHARACTERS, AGENT_COLORS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor } from "@/lib/mascot";
+import { AGENT_CHARACTERS, AGENT_COLORS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor, type AgentState } from "@/lib/mascot";
 import { api, useStore, type Bot } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import type { InstanceInfo } from "@/state/store";
@@ -45,6 +46,21 @@ import {
 type InstanceRow = InstanceInfo;
 
 const STEP_LABELS = ONBOARDING_STEPS.map((step) => step.label);
+
+/** The guide's expression per beat — the mascot as a single guide through the
+ * whole wizard (the OMB welcome-flow pattern). Faces come from the shipped
+ * character vocabulary; the narrated line mirrors the step's job in first
+ * person, so the guide always tells the truth about where you are. Dense
+ * array indexed by step, like stepContent — steps are 0..6 by construction. */
+const GUIDE_BEATS: ReadonlyArray<{ state: AgentState; line: string }> = [
+  { state: "happy", line: "Hi! I'll set your team up in a minute." },
+  { state: "thinking", line: "Here's what your bots can do." },
+  { state: "working", line: "Checking which engines are installed…" },
+  { state: "notifying", line: "Your team can reach you anywhere." },
+  { state: "curious", line: "Let's shape your first teammate." },
+  { state: "listening", line: "Let's check your voice setup." },
+  { state: "celebrate", line: "All set — they're ready to work!" },
+];
 
 function StatusRow({
   ok,
@@ -269,6 +285,90 @@ const PHONE_POINTS = [
   { icon: Lock, title: "Private by default", detail: "Only devices you approve can connect to your Muster." },
 ];
 
+/** Live microphone test for the voice-setup beat: getUserMedia once, an
+ * AnalyserNode level read in a rAF loop, and honest cleanup on stop/unmount.
+ * `onActive` lifts "sound is coming through" to the guide mascot, which swaps
+ * to its dictating face while you speak. */
+function VoiceTest({ onActive }: { onActive: (active: boolean) => void }) {
+  const [testing, setTesting] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
+
+  const stop = () => {
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+    setTesting(false);
+    setLevel(0);
+    onActive(false);
+  };
+
+  useEffect(() => () => cleanupRef.current?.(), []);
+
+  const start = async () => {
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const ctx = new AudioContext();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      let raf = 0;
+      const tick = () => {
+        analyser.getByteFrequencyData(data);
+        let sum = 0;
+        for (const v of data) sum += v * v;
+        const rms = Math.sqrt(sum / data.length) / 255;
+        setLevel(Math.min(1, rms * 4));
+        raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+      cleanupRef.current = () => {
+        cancelAnimationFrame(raf);
+        for (const track of stream.getTracks()) track.stop();
+        void ctx.close();
+        onActive(false);
+      };
+      setTesting(true);
+      onActive(true);
+    } catch {
+      setError("The browser blocked the microphone — allow it and try again.");
+    }
+  };
+
+  return (
+    <div className="rounded-xl bg-card p-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <Mic size={18} className="mt-0.5 shrink-0 text-ink-secondary" />
+          <div>
+            <div className="text-[14px] font-medium text-ink">Try your microphone</div>
+            <div className="mt-0.5 text-[12.5px] text-ink-secondary">
+              {testing ? "Say something — the bar follows your voice." : "A five-second check that your voice reaches your bots."}
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={() => (testing ? stop() : void start())}
+          className="shrink-0 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
+        >
+          {testing ? "Stop" : "Test"}
+        </button>
+      </div>
+      {testing && (
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-inset" aria-hidden="true">
+          <div
+            className="h-full rounded-full bg-accent transition-[width] duration-75"
+            style={{ width: `${Math.round(8 + level * 92)}%` }}
+          />
+        </div>
+      )}
+      {error && <p role="alert" className="mt-2 text-[12.5px] text-ink">{error}</p>}
+    </div>
+  );
+}
+
 export function Onboarding({ onDone }: { onDone: () => void }) {
   const { capabilities } = useDesktopCapabilities();
   const { state, dispatch } = useStore();
@@ -323,6 +423,9 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   // Browser mic permission (web only — desktop uses the OS TCC flow below).
   const [webMic, setWebMic] = useState<"prompt" | "granted" | "denied" | "unsupported">("prompt");
   const isDesktop = Boolean(window.ogb);
+  // The voice-setup beat: while the live mic test hears you, the guide
+  // mascot swaps to its dictating face.
+  const [micTesting, setMicTesting] = useState(false);
 
   // Existing users skip silently: decide only once the store has connected,
   // so a slow SSE doesn't flash the wizard over a populated roster. A fresh
@@ -1096,6 +1199,32 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               helper misattribution, periodic re-prompts) — the OS flow
               triggers on the first real capture in the Computer panel,
               which is the moment the user has context for the dialog. */}
+          {/* Voice control setup: the live mic check (guide mascot reacts),
+              and a spoken sample when a voice is already configured. */}
+          <VoiceTest onActive={setMicTesting} />
+          {state.config?.tts?.ready && (
+            <div className="rounded-xl bg-card p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <Mic size={18} className="mt-0.5 shrink-0 text-ink-secondary" />
+                  <div>
+                    <div className="text-[14px] font-medium text-ink">Hear your team speak</div>
+                    <div className="mt-0.5 text-[12.5px] text-ink-secondary">
+                      Your voice is configured — teammates can read replies aloud.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={() =>
+                    void speaker.speak("Hi! I'm your Muster teammate. Give me a task, and I'll ask before anything risky.")
+                  }
+                  className="shrink-0 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
+                >
+                  Play sample
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="mt-5 flex gap-3">
           <button
@@ -1215,13 +1344,25 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       <div className="onboarding-frame">
         <aside className="onboarding-guide" aria-label="Your setup guide">
           <div className="onboarding-guide-intro">
-            <div className="onboarding-guide-flower" aria-hidden="true">
-              <FlowerBot size={148} state={setupError ? "thinking" : creating ? "working" : step === 6 ? "happy" : "idle"} spin={false} />
+            <div className="onboarding-guide-flower" aria-hidden="false">
+              {/* The living guide: the interactive character with a per-beat
+                  face and first-person line. Poke it — it stays honest about
+                  which setup step you are on while it reacts. */}
+              <FlowerCharacter
+                color={botColor}
+                size={112}
+                state={micTesting ? "dictating" : setupError ? "thinking" : creating ? "working" : (GUIDE_BEATS[step]?.state ?? "idle")}
+                status={creating ? "working" : "idle"}
+                task={micTesting ? "Listening…" : undefined}
+                withLabel={true}
+                focusable={false}
+                label={`Your setup guide — ${GUIDE_BEATS[step]?.line ?? ""} (poke to wave)`}
+              />
             </div>
             <div className="onboarding-guide-copy">
               <p className="onboarding-wordmark">Muster</p>
               <h2 id="onboarding-title" className="onboarding-guide-title">Set up Muster</h2>
-              <p className="onboarding-guide-note">Meet your teammate. Choose how you work.</p>
+              <p className="onboarding-guide-note">{GUIDE_BEATS[step]?.line ?? "Meet your teammate. Choose how you work."}</p>
             </div>
           </div>
           <ol className="onboarding-progress" aria-label="Setup progress">
@@ -1267,8 +1408,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               </div>
             )}
             {/* Preserve the hard swap: the old exit-animation handshake could
-                leave stale content mounted beneath the next step's label. */}
-            <fieldset key={step} disabled={creating} className="wizard-step m-0 min-w-0 border-0 p-0">
+                leave stale content mounted beneath the next step's label. The
+                keyed remount doubles as the beat morph — each step's card
+                rises in (CSS, reduced-motion guarded). */}
+            <fieldset key={step} disabled={creating} className="wizard-step onboard-beat m-0 min-w-0 border-0 p-0">
               {stepContent[step]}
             </fieldset>
             {step === 2 && (

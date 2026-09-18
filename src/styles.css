@@ -901,3 +901,22 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .tour-panel { animation: none; }
 }
+
+/* Onboarding beat morph: each wizard step's card rises in as it mounts (the
+   keyed remount is the trigger). One easing, short — the OMB welcome-flow
+   feel without holding the user up. */
+@keyframes onboard-beat-in {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.onboard-beat {
+  /* `backwards`, not `both`: after the beat settles the element must return
+     to unstyled (transform none) — a pinned contrast-evidence check asserts
+     the settled step carries no transform. */
+  animation: onboard-beat-in 0.24s cubic-bezier(0.24, 1, 0.4, 1) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboard-beat { animation: none; }
+}

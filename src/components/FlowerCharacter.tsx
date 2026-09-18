@@ -46,6 +46,10 @@ interface FlowerCharacterProps {
   motionKey?: number;
   /** Renders the narrated line under the face when true (collapsed surfaces). */
   withLabel?: boolean;
+  /** Keyboard-focusable (default). Decorative-guide callers set false so the
+   * character keeps pointer play without entering the tab order ahead of a
+   * surface's own first field (the onboarding wizard's focus contract). */
+  focusable?: boolean;
   /** Called on poke/slap for callers that want receipts (tests, telemetry-free logs). */
   onReact?: (reaction: "poked" | "slapped" | "annoyed" | "dizzy") => void;
 }
@@ -67,6 +71,7 @@ export function FlowerCharacter({
   motion = "none",
   motionKey = 0,
   withLabel = false,
+  focusable = true,
   onReact,
 }: FlowerCharacterProps) {
   const [interaction, setInteraction] = useState<InteractionState>(INITIAL_INTERACTION);
@@ -179,6 +184,7 @@ export function FlowerCharacter({
     >
       <button
         type="button"
+        tabIndex={focusable ? 0 : -1}
         aria-label={label ? `${label} — poke to say hi, shift-click to slap` : "Mascot"}
         className="bot-host cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-accent"
         onPointerDown={(event) => {
