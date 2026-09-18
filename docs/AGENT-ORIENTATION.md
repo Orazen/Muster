@@ -47,6 +47,7 @@ so you never repeat work.
 
 | Question | Doc |
 |---|---|
+| **What is the product direction? (owner-locked 2026-09-18: cloud-relay flagship, BYOK free forever, Drive/Telegram-only storage)** | `docs/plans/cloud-relay-strategy-2026-09-18.md` |
 | What is the mascot character system? (slices, contracts, ownership) | `docs/plans/mascot-character-system-plan-2026-09-18.md` |
 | How should agents behave on this codebase? (per-slice rules) | `skills/mascot/SKILL.md`, this file |
 | Where did the mascot references come from? (Novra GrokBot, botato, LaoA…) | `docs/research/mascot-character-study-2026-09-18.md` |
