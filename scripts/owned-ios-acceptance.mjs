@@ -246,7 +246,13 @@ async function main() {
         "-configuration", CONFIGURATION,
         "-destination", `platform=iOS Simulator,name=${DEVICE}`,
         "-derivedDataPath", dd,
-        "CODE_SIGNING_ALLOWED=NO",
+        // Signing is REQUIRED here, not cosmetic: the app declares
+        // entitlements (app group + time-sensitive notifications since the
+        // widget slice), and an unsigned simulator build makes the keychain
+        // refuse every SecItemAdd with errSecMissingEntitlement — pairing
+        // then dies with "A required entitlement isn't present". Automatic
+        // signing with the project's team signs simulator builds locally.
+        // CODE_SIGNING_ALLOWED=NO here is what broke the rig after f889c54.
       ],
       { timeoutMs: 600_000 },
     );
