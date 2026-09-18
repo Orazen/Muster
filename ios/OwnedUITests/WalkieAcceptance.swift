@@ -15,11 +15,16 @@ import XCTest
 final class WalkieAcceptance: XCTestCase {
     let app = XCUIApplication(bundleIdentifier: "com.muster.companion")
 
-    /// The word the bot is asked to echo — the reply marker. The user's own
-    /// message contains it too, so it only counts once the headline has
-    /// left "working": while the bot works, the quote is the echo of what
-    /// you said, not its answer.
-    static let marker = "lighthouse"
+    /// The reply marker. With the rig's fake ACP engine (scripts/
+    /// owned-ios-acceptance.mjs boots `server/testing/fake-acp-cli.ts`), the
+    /// turn settles almost instantly and its reply text is deterministic:
+    /// "hello from fake acp". The old marker was the word in the *user's*
+    /// message ("lighthouse"), which assumed a visible working-echo window —
+    /// true only for a slow real model. With a fast engine the first quote
+    /// the panel ever shows IS the answer, so an echo assertion can never
+    /// pass. What the panel must prove is that it follows the thread from
+    /// sent → answered → ready, whatever the engine's latency.
+    static let marker = "hello from fake acp"
 
     func capture(_ name: String) {
         let picture = XCTAttachment(screenshot: app.screenshot())
@@ -53,55 +58,80 @@ final class WalkieAcceptance: XCTestCase {
         )
         capture("walkie-panel")
 
-        // Voice toggles and the label follows.
+        // Voice toggles and the label follows. The live turn below runs with
+        // voice OFF: TTS is on by default, a headless simulator may never
+        // finish an utterance, and "\(botName) is speaking" would pin the
+        // headline past any settle window. Restored after the settle proof.
         app.buttons["walkie-voice"].tap()
         XCTAssertTrue(app.staticTexts["Voice off"].waitForExistence(timeout: 3), "voice-off label missing")
         capture("walkie-voice-off")
-        app.buttons["walkie-voice"].tap()
-        XCTAssertTrue(app.staticTexts["Voice on"].waitForExistence(timeout: 3), "voice-on label missing")
 
         // Replay is dead until something has been spoken.
         XCTAssertFalse(app.buttons["walkie-replay"].isEnabled, "Replay enabled with nothing to replay")
 
         // Open chat hands off to the real transcript, and back returns here.
+        // The turn starts streaming the moment the message lands, and the
+        // streaming re-renders saturate the app's main thread — so settle
+        // briefly and retry the back navigation instead of issuing one query
+        // into the busiest moment ("main thread busy for 30s").
         app.buttons["walkie-open-chat"].tap()
         let composer = app.textFields["composer-field"]
         XCTAssertTrue(composer.waitForExistence(timeout: 5), "chat did not open from Walkie")
         composer.tap()
-        composer.typeText("Reply with exactly one word: \(Self.marker)")
+        composer.typeText("Reply with exactly one word: lighthouse")
         app.buttons["composer-send"].tap()
-        app.buttons["chat-back"].tap()
+        sleep(3)
+        var back = false
+        for _ in 0..<8 where !back {
+            let chatBack = app.buttons["chat-back"]
+            if chatBack.waitForExistence(timeout: 3) {
+                chatBack.tap()
+                back = app.otherElements["walkie-status"].waitForExistence(timeout: 4)
+                    || app.buttons["walkie-open"].waitForExistence(timeout: 2)
+            }
+        }
+        XCTAssertTrue(back, "never returned from chat to the Walkie panel")
 
         // The panel follows the live thread. Two model-independent proofs
-        // that the quote tracks the transcript: while the bot works, the
-        // quote echoes the message just sent (the marker is in *our* text,
-        // not the model's answer, so this holds whatever the provider's
-        // auth state is), and once the turn settles the headline returns to
-        // the bot. The reply's own words are captured for the eye, not
-        // asserted, because a healthy model and an out-of-credits one
-        // should not decide whether the panel works.
+        // that the quote tracks the transcript: the fake rig engine answers
+        // "hello from fake acp" (Self.marker), so the quote must show the
+        // bot's actual reply, and once the turn settles the headline returns
+        // to "\(botName) is ready". With a slow real model the same poll
+        // would simply watch a working quote first — the panel logic is
+        // identical either way.
+        // Poll gently via stable identifiers (WalkieView "walkie-headline" /
+        // "walkie-quote"): every query lands on an app whose main thread is
+        // folding streamed patches, and indexed/predicate queries starve —
+        // identifier subscripts answer. A 1s cadence is enough to see the
+        // answer and the settle without starving either side.
         let deadline = Date().addingTimeInterval(150)
-        var sawEcho = false
+        var sawAnswer = false
         var settled = false
         while Date() < deadline {
-            let texts = status.staticTexts
-            let headline = texts.count > 0 ? texts.element(boundBy: 0).label : ""
-            let quote = texts.count > 1 ? texts.element(boundBy: 1).label : ""
-            if quote.localizedCaseInsensitiveContains(Self.marker) {
-                if !sawEcho {
-                    sawEcho = true
-                    capture("walkie-working")
+            let quote = app.staticTexts["walkie-quote"]
+            let headline = app.staticTexts["walkie-headline"]
+            let quoteText = quote.exists ? quote.label : ""
+            let headlineText = headline.exists ? headline.label : ""
+            if quoteText.localizedCaseInsensitiveContains(Self.marker) {
+                if !sawAnswer {
+                    sawAnswer = true
+                    capture("walkie-answered")
                 }
             }
-            if sawEcho, headline.contains(botName), headline.contains("is ready") {
+            if sawAnswer, headlineText.contains(botName), headlineText.contains("is ready") {
                 settled = true
                 break
             }
-            usleep(250_000)
+            usleep(1_000_000)
         }
-        XCTAssertTrue(sawEcho, "the panel never echoed the sent message into the quote")
+        XCTAssertTrue(sawAnswer, "the panel never showed the reply in the quote")
         XCTAssertTrue(settled, "the panel never returned to ready after the turn settled")
         capture("walkie-answered")
+
+        // Voice back on: the label flips and the turn replay path the voice
+        // toggle gates is exercised with the real answer in hand.
+        app.buttons["walkie-voice"].tap()
+        XCTAssertTrue(app.staticTexts["Voice on"].waitForExistence(timeout: 3), "voice-on label missing")
 
         app.buttons["walkie-close"].tap()
         XCTAssertTrue(app.textFields["Search chats"].waitForExistence(timeout: 5), "close did not return to the roster")

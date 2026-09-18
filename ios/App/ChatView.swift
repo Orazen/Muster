@@ -228,6 +228,9 @@ struct ChatView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(accessibilitySummary)
                 .accessibilityHint(isBotChat ? "Opens the task list" : "")
+                // Stable UI-test hook for the capsule (VoiceOver text is
+                // contextual, so tests match this instead of the label).
+                .accessibilityIdentifier("chat-header-capsule")
             }
             .bareToolbarBackground()
             if case let .bot(bot) = current {

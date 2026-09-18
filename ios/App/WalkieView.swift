@@ -251,6 +251,9 @@ struct WalkieView: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Color.secondary)
                     .lineLimit(1)
+                    // Stable UI-test hook: the status card's own thread state,
+                    // readable without indexed/predicate queries.
+                    .accessibilityIdentifier("walkie-headline")
                 Spacer()
             }
             if let quote {
@@ -260,6 +263,8 @@ struct WalkieView: View {
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // Stable UI-test hook: the quote the panel reads aloud.
+                    .accessibilityIdentifier("walkie-quote")
             }
         }
         .padding(16)

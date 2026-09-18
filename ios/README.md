@@ -175,6 +175,48 @@ contract, which is the only storage surface the phone should know.
 Commit the diff — a change there is a change to the contract, and reviewing it
 is the point.
 
+## Owned UI acceptance rig
+
+The three end-to-end acceptance tests in `OwnedUITests/` (pair → identity tour
+→ Walkie turn) are rig-dependent: each one redeems a real pairing invite
+against a live harness, so they cannot pass from `xcodebuild test` alone.
+`scripts/owned-ios-acceptance.mjs` (repo root) drives the whole thing:
+
+```sh
+xcodegen generate && xcodebuild build-for-testing -project MusterCompanion.xcodeproj \
+  -scheme MusterOwnedAcceptance -configuration Release \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -derivedDataPath /tmp/muster-ios-rig-dd
+node scripts/owned-ios-acceptance.mjs --device "iPhone 17 Pro" \
+  --skip-build --derived-data /tmp/muster-ios-rig-dd
+```
+
+It boots a desktop-mode harness and companion sidecar on probed free ports
+against a throwaway `HOME`/`OMB_DATA_DIR` (never the user's ports or data),
+creates Mimi with the in-repo fake ACP engine, pre-boots and pre-installs the
+apps so the two-minute pairing window is not spent on first-boot, mints a
+deep-link invite, and runs the three tests as separate `test-without-building`
+invocations with `--keep`-able result bundles for evidence.
+
+Two things that took real debugging, recorded so the next person does not
+relearn them:
+
+- **Build with default signing.** `CODE_SIGNING_ALLOWED=NO` produces an ad-hoc
+  app with no application-identifier entitlement; the simulator keychain then
+  refuses `SecItemAdd` (-34018, "A required entitlement isn't present") after
+  the server has already redeemed the token, so pairing appears to fail at the
+  very last step.
+- **Config lives in `OMB_DATA_DIR`, not `HOME`.** `server/config.ts` reads
+  `config.json` only from the data dir; instances written to `$HOME/.muster`
+  while `OMB_DATA_DIR` points elsewhere simply do not load, and every bot
+  shows "Not logged in".
+
+The tests were also hardened against Xcode 26.6 UI-test snapshot starvation:
+app-side stable identifiers (`chat-header-capsule`, `walkie-answer-quote`,
+`walkie-answer-headline`) queried via `descendants(matching: .any)` subscripts
+with fresh-query retries, and the Walkie turn runs with TTS off so a headless
+simulator's never-ending utterance cannot pin the status headline.
+
 ## What the phone may and may not do
 
 Enforced by the default-deny policy in `companion/src/routes.ts`, and mirrored

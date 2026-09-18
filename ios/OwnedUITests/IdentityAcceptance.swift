@@ -58,30 +58,38 @@ final class IdentityAcceptance: XCTestCase {
         capture("tour-roster")
 
         // The header capsule is one accessibility element (children ignored,
-        // so VoiceOver reads who + task as one). SwiftUI exposes the Button
-        // itself with the flattened child label ("Name, task title") under a
-        // wrapper that carries the fuller spoken summary — match THAT shape:
-        // it begins with the bot's name, which also rules out the computer
-        // toolbar button ("Watch <name>'s computer").
-        let header = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", botName, taskTitle)
-        ).firstMatch
-        // a static-text tap inside a NavigationLink is occasionally eaten —
-        // retry until the header proves the chat is open
+        // so VoiceOver reads who + task as one). Match it by its stable
+        // identifier (ChatView "chat-header-capsule") — and by ANY element
+        // type: .accessibilityElement(children: .ignore) exposes the
+        // identifier on an Other that wraps the Button, so a buttons[...]
+        // subscript never matches it (the walkie-hold query in WalkieAcceptance
+        // already uses this descendants pattern for the same reason).
+        let headerQuery = { self.app.descendants(matching: .any)["chat-header-capsule"].firstMatch }
         var navigated = false
-        for _ in 0..<3 where !navigated {
+        for _ in 0..<4 where !navigated {
             row.tap()
-            navigated = header.waitForExistence(timeout: 6)
+            navigated = headerQuery().waitForExistence(timeout: 8)
+            if !navigated { app.swipeDown(velocity: .fast) }
         }
         XCTAssertTrue(navigated, "chat never opened")
+        // Tap through a FRESH query with its own retries — a resolved element
+        // from before a re-render can tap at stale coordinates. The loop both
+        // opens the task sheet (the full-context reveal) and captures the
+        // truncated header label before the tap.
+        var headerTapped = false
+        var headerLabel = ""
+        for _ in 0..<3 where !headerTapped {
+            let header = headerQuery()
+            guard header.waitForExistence(timeout: 4) else { continue }
+            headerLabel = header.label
+            header.tap()
+            headerTapped = app.navigationBars["\(botName)’s tasks"].waitForExistence(timeout: 6)
+        }
+        XCTAssertTrue(headerTapped, "task sheet never opened")
         if !taskTitle.isEmpty {
-            XCTAssertTrue(header.label.contains(taskTitle), "header label does not carry the task title: \(header.label)")
+            XCTAssertTrue(headerLabel.contains(taskTitle), "header label does not carry the task title: \(headerLabel)")
         }
         capture("tour-chat-header")
-
-        // full-context reveal: the truncated label opens the full task list
-        header.tap()
-        XCTAssertTrue(app.navigationBars["\(botName)’s tasks"].waitForExistence(timeout: 10), "task sheet never opened")
         capture("tour-task-sheet")
 
         // Dynamic Type: the same roster under accessibility-sized text.
