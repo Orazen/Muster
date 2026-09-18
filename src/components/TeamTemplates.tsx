@@ -65,10 +65,16 @@ export function TeamTemplates() {
   });
 
   // Shown only on a gated (hosted) deployment whose gate just opened and
-  // whose roster is still empty — the "hire in 60 seconds" moment.
+  // whose roster is still empty — and only when the conversational
+  // onboarding has finished (the chat is the first-run hire; this card is
+  // its fallback if the chat was dismissed without hiring).
+  const chatDone = (() => {
+    try { return window.localStorage.getItem("muster.onboarding-chat.done") === "1"; } catch { return false; }
+  })();
   const shown = state.config?.storageGate?.required === true
     && state.config.storageGate.satisfied
     && state.bots.length === 0
+    && chatDone
     && !dismissed;
 
   // The SSE/bots hydration may land after this mounts; re-read the flag so a

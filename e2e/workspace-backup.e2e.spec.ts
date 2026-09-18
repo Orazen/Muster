@@ -247,9 +247,22 @@ async function signIn(page: Page, fixture: OwnedFixture) {
   const session = await page.context().request.get(`${fixture.url}/api/auth/get-session`, { maxRedirects: 0 });
   expect(session.status()).toBe(200);
   expect(sessionSchema.parse(await session.json()).user.email).toBe(fixture.email);
-  await expect(page.getByRole("region", { name: "Set up Muster", exact: true })).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("region", { name: "Set up Muster", exact: true })).toHaveCount(0);
+  // Desktop first-run mounts the classic wizard; a hosted first-run mounts
+  // the conversational onboarding instead. These specs exercise an EXISTING
+  // user, so dismiss whichever mounted (Escape for the wizard; the chat and
+  // template overlays carry localStorage done-flags and a remount).
+  const wizard = page.getByRole("region", { name: "Set up Muster", exact: true });
+  if (await wizard.count()) {
+    await page.keyboard.press("Escape");
+    await expect(wizard).toHaveCount(0);
+  } else {
+    await page.evaluate(() => {
+      localStorage.setItem("muster.onboarding-chat.done", "1");
+      localStorage.setItem("muster.team-templates.dismissed", "1");
+    });
+    await page.reload();
+    await expect(page).toHaveURL(`${fixture.url}/app`);
+  }
 }
 
 async function openBackup(page: Page) {
@@ -306,6 +319,7 @@ test.describe("hosted workspace capability", () => {
   test("offers the user's own Drive connect while the installation bundles stay desktop-only", async ({ fixture, guarded }, testInfo) => {
     const { page } = guarded;
     await signIn(page, fixture);
+    await page.setViewportSize(shortViewport);
     const response = page.waitForResponse((r) => r.url() === fixture.url + statusPath && r.request().method() === "GET");
     await openBackup(page);
     const status = await response;

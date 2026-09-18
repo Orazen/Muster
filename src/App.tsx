@@ -21,6 +21,7 @@ const SocialView = lazy(() => import("@/components/SocialView").then((m) => ({ d
 const Onboarding = lazy(() => import("@/components/Onboarding").then((m) => ({ default: m.Onboarding })));
 const StorageGate = lazy(() => import("@/components/StorageGate").then((m) => ({ default: m.StorageGate })));
 const TeamTemplates = lazy(() => import("@/components/TeamTemplates").then((m) => ({ default: m.TeamTemplates })));
+const OnboardingChat = lazy(() => import("@/components/OnboardingChat").then((m) => ({ default: m.OnboardingChat })));
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { NoEngines } from "@/components/NoEngines";
@@ -267,7 +268,10 @@ function Shell() {
       <CommandPalette />
       <ShortcutsSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <NotificationStack />
-      {gateDecision === "show" && firstRun && (
+      {/* On hosted, the conversational onboarding replaces the classic wizard:
+          the assistant chats the user through role → pains → crew hire. The
+          wizard remains the desktop/local first-run. */}
+      {gateDecision === "show" && firstRun && state.config?.storageGate?.required !== true && (
         <Suspense fallback={null}>
         <Onboarding
           onDone={() => {
@@ -278,10 +282,12 @@ function Shell() {
         </Suspense>
       )}
       {/* Storage sovereignty (decision 14): on hosted, the Drive connect step
-          gates the workspace and the template hire is the empty-roster moment.
-          Local desktop renders neither (gate.required is false there). */}
+          gates the workspace and the conversational hire is the empty-roster
+          moment. Local desktop renders none of these (gate.required is false
+          there). */}
       <Suspense fallback={null}><StorageGate /></Suspense>
       <Suspense fallback={null}><TeamTemplates /></Suspense>
+      <Suspense fallback={null}><OnboardingChat /></Suspense>
       </div>
       {/* The floating fleet orb is retired (owner direction 2026-09-15):
           presence lives on the roster rows that carry it — the benchmark's

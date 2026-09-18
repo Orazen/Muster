@@ -1,0 +1,159 @@
+/* The conversational onboarding: full-screen ambient aurora (Muster orange on
+   dark — our own take, not a clone of any palette), one centered chat
+   column, assistant bubbles carry the Flower, user picks become their own
+   accent bubbles, and older messages blur with depth. */
+
+.onboarding-chat {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  overflow: hidden;
+  background:
+    radial-gradient(90% 70% at 50% 118%, color-mix(in srgb, #f08a24 20%, transparent), transparent 62%),
+    radial-gradient(50% 40% at 88% -10%, color-mix(in srgb, #2f6bff 10%, transparent), transparent 70%),
+    var(--color-app);
+}
+
+.onboarding-chat-progress {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  z-index: 2;
+}
+.onboarding-chat-progress .seg {
+  width: 84px;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-ink) 16%, transparent);
+}
+.onboarding-chat-progress .seg.on { background: var(--color-accent); }
+
+.onboarding-chat-scroll {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.onboarding-chat-column {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 56px 20px 90px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-row { display: flex; align-items: flex-end; gap: 9px; }
+.chat-row.assistant { justify-content: flex-start; }
+.chat-row.user { justify-content: flex-end; }
+.chat-row.options { flex-direction: column; align-items: stretch; gap: 9px; margin-top: 4px; }
+
+.bubble {
+  max-width: 78%;
+  padding: 11px 15px;
+  border-radius: 20px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-panel) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-hairline) 60%, transparent);
+}
+.chat-row.assistant > .bubble { border-bottom-left-radius: 6px; }
+.bubble.user {
+  margin-left: auto;
+  background: var(--color-accent);
+  border: 0;
+  color: #fff;
+  border-bottom-right-radius: 6px;
+}
+.bubble.question { max-width: 100%; font-weight: 550; }
+.user-avatar {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-raised);
+  border: 1px solid var(--color-hairline);
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--color-ink);
+}
+
+/* Depth: older assistant bubbles fade the further back they sit. The last
+   few stay crisp; everything before them washes out. */
+.chat-row { position: relative; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-hairline) 80%, transparent);
+  background: color-mix(in srgb, var(--color-panel) 80%, transparent);
+  color: var(--color-ink);
+  font-size: 13.5px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: transform .16s cubic-bezier(.24, 1, .4, 1), border-color .16s ease, background .16s ease;
+}
+.chip:hover { transform: translateY(-1px); border-color: color-mix(in srgb, #f08a24 55%, transparent); }
+.chip.selected { border-color: #f08a24; background: color-mix(in srgb, #f08a24 16%, var(--color-panel)); }
+.chip.tone-0 { color: #ffb259; } .chip.tone-1 { color: #7dd3fc; }
+.chip.tone-2 { color: #a7f3d0; } .chip.tone-3 { color: #f0abfc; }
+.chip.tone-4 { color: #fde68a; } .chip.tone-5 { color: #c7d2fe; }
+.chip.selected { color: var(--color-ink); }
+
+.chat-meta { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.chat-meta .left { font-size: 12px; color: var(--color-ink-secondary); }
+.continue-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 0;
+  background: color-mix(in srgb, var(--color-accent) 88%, #fff 4%);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform .16s cubic-bezier(.24, 1, .4, 1), filter .16s ease;
+}
+.continue-pill:hover { transform: translateY(-1px); filter: brightness(1.08); }
+.continue-pill:disabled { opacity: 60%; cursor: default; transform: none; }
+
+.chat-error {
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, #ff5c5c 12%, transparent);
+  color: var(--color-ink);
+  font-size: 12.5px;
+}
+
+.restart {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  z-index: 2;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-hairline) 70%, transparent);
+  background: color-mix(in srgb, var(--color-panel) 70%, transparent);
+  color: var(--color-ink-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.restart:hover { color: var(--color-ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .chip, .continue-pill { transition: none; }
+}
