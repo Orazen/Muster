@@ -205,9 +205,12 @@ export function PortableBackupCard() {
 
   // The signed-in user's own Google account: one drive.appdata consent, the
   // refresh token stored on their account row, ciphertext-only transport.
+  // The connect route reads state only (it issues a signed consent URL), so
+  // this is a GET — a POST here never reaches the route (404 from the
+  // session gate's family matcher) and the card would report a dead end.
   const connectGoogle = () =>
     run("Opening Google's consent page…", async (request) => {
-      const data = await readWorkspaceReply(request, "/api/workspace/google/connect", "", connectUrlReply);
+      const data = await readWorkspaceReply(request, "/api/workspace/google/connect", undefined, connectUrlReply);
       if (!data) return null;
       window.location.href = data.url;
       return null;

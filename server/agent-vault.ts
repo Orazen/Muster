@@ -50,8 +50,8 @@ export function checkBudget(
     return {
       ok: false,
       reason:
-        `Token budget reached — this bot has spent ${spent.toLocaleString()} of its ${budget.toLocaleString()}-token cap` +
-        (over > 0 ? ` (${over.toLocaleString()} over)` : "") +
+        `Token budget reached — this bot has spent ${spent.toLocaleString("en-US")} of its ${budget.toLocaleString("en-US")}-token cap` +
+        (over > 0 ? ` (${over.toLocaleString("en-US")} over)` : "") +
         ". Raise or clear the cap in the bot's settings to continue.",
     };
   }

@@ -26,7 +26,7 @@ export interface BotPersonaFields {
 export function exportSoulMd(bot: BotPersonaFields): string {
   const guardrails = [
     `- auto-approve: ${bot.autoApprove ? "on" : "off"}`,
-    `- token budget: ${bot.tokenBudget == null ? "none" : bot.tokenBudget.toLocaleString()} tokens`,
+    `- token budget: ${bot.tokenBudget == null ? "none" : bot.tokenBudget.toLocaleString("en-US")} tokens`,
     `- daily USD cap: ${bot.dailyUsdCap == null ? "none" : "$" + bot.dailyUsdCap.toFixed(2)}`,
     `- browser tools: ${bot.browser ? "enabled" : "disabled"}`,
   ];

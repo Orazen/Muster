@@ -3,6 +3,7 @@
  * write response, session, OAuth grant or portable restore is fabricated. */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { existsSync, readFileSync } from "node:fs";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { connect } from "node:net";
@@ -149,8 +150,15 @@ const test = base.extend<{ deployment: "local" | "hosted"; fixture: OwnedFixture
       const request = route.request();
       const url = new URL(request.url());
       if (url.origin !== fixture.url) {
-        errors.push(`Unexpected browser request: ${url.origin}${url.pathname}`);
-        await route.abort("blockedbyclient");
+        // The consent redirect must complete without leaving the machine: a
+        // stub page stands in for Google's consent screen. Any other origin
+        // is an unexpected browser request.
+        if (url.origin.endsWith("accounts.google.com")) {
+          await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>Owned consent stub</title>" });
+        } else {
+          errors.push(`Unexpected browser request: ${url.origin}${url.pathname}`);
+          await route.abort("blockedbyclient");
+        }
         return;
       }
       if (url.pathname === statusPath && !url.search && request.method() === "GET") {
@@ -295,6 +303,37 @@ test.describe("hosted workspace capability", () => {
     expect(guarded.writes).toEqual([]);
     expect(fixture.drive.entries()).toEqual([]);
   });
+});
+
+test("connect my Google Drive issues a consent redirect from a real button click", async ({ fixture, guarded }) => {
+  const { page } = guarded;
+  await signIn(page, fixture);
+  // The connect affordance renders only for a signed-in user with a Google
+  // login row that has no Drive grant yet. Seed exactly that shape through
+  // the real database; the fixture client pair satisfies the route's
+  // configured-OAuth guard.
+  const db = new DatabaseSync(join(fixture.directory, "data", "auth.db"));
+  try {
+    // SAFETY: auth schema creates user.id as TEXT PRIMARY KEY; seeded via real sign-up above.
+    const user = db.prepare(`SELECT "id" FROM "user" WHERE "email" = ?`).get(fixture.email) as { id: string };
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO account (id,accountId,providerId,userId,accessToken,refreshToken,scope,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(randomBytes(16).toString("hex"), randomBytes(16).toString("hex"), "google", user.id,
+        null, null, "openid email profile", now, now);
+  } finally { db.close(); }
+
+  await openBackup(page);
+  const portable = page.getByRole("region", { name: "Full portable backup", exact: true });
+  const connect = portable.getByRole("button", { name: "Connect my Google Drive", exact: true });
+  await expect(connect).toBeEnabled();
+  expect(guarded.writes).toEqual([]);
+  const connected = page.waitForResponse((r) => r.url() === fixture.url + "/api/workspace/google/connect" && r.request().method() === "GET");
+  const consentPage = page.waitForURL(/accounts\.google\.com\/o\/oauth2/);
+  await connect.click();
+  expect((await connected).status()).toBe(200);
+  await consentPage;
+  expect(guarded.writes).toEqual(["GET /api/workspace/google/connect"]);
+  expect(fixture.drive.entries()).toEqual([]);
 });
 
 test("configured local backup reports transport failure, then explicitly retries the real installation route", async ({ fixture, guarded }, testInfo) => {
