@@ -23,8 +23,11 @@ export function OnboardingChat() {
   const [dismissed] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const gate = state.config?.storageGate;
-  const shown = gate?.required === true && gate.satisfied && !state.bots.length && !dismissed && !hired;
+  // The conversational first-run: any signup whose roster is empty greets in
+  // chat. On hosted fresh installs that is every signup (decision 13 + 14);
+  // on desktop the seed bot keeps the classic wizard as the first-run — the
+  // stability contract holds, and this condition stays honest about it.
+  const shown = !state.bots.length && !dismissed && !hired;
 
   const beat = beatAt(step);
   const userName = state.config?.profile?.name?.split(" ")[0] ?? "there";
