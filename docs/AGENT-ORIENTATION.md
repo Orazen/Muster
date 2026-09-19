@@ -142,20 +142,18 @@ electron/preload.cjs`. iOS/Watch: `cd ios && swift test`, then
 `main` carries a branch ruleset (`main-protected`, active):
 
 - **Blocked for everyone:** force-pushes and branch deletion.
-- **Required checks:** `lint`, `typecheck`, `test`, `build` must pass for
-  PR merges. `github-actions[bot]` pushes are exempt from the
-  required-checks gate by GitHub's GITHUB_TOKEN rule, and the repo owner
-  bypasses everything — direct agent pushes to main keep working, but
-  they are YOUR responsibility to gate-verify first (Section 5), exactly
-  as before. The ruleset is the PR safety net, not a substitute for the
-  local gate.
-- **Why required checks are bypass-exempt for the bot:** the autodeploy
-  chain (workflow bumps `.deploy-trigger` → bot commit → Dokploy
-  webhook) must never be blocked. On 2026-09-19 a classic
-  required-checks policy silently broke that chain (GH006 push
-  rejection, autodeploy failure) — reverted within minutes and replaced
-  by this ruleset. If you touch branch protection, **prove the bot
-  chain with a real push cycle before claiming done**.
+- **Required checks are deliberately NOT set, and must stay unset:** the
+  autodeploy chain (workflow bumps `.deploy-trigger` → `github-actions[bot]`
+  commit → Dokploy webhook) is the *only* deploy mechanism — Dokploy rejects
+  external webhook calls, so the trigger-file commit cannot be replaced with
+  anything else. On 2026-09-19 both a classic required-checks policy and a
+  branch ruleset with required checks broke that chain (GH006/GH013 push
+  rejections, autodeploy failures) because the bot cannot satisfy push-time
+  required checks on a user-owned repo, and repo-level rulesets cannot grant
+  the `Integration` bypass that would exempt it. CI still runs on every push
+  and PR (lint/typecheck/test/build) and is the quality signal — it is just
+  not push-enforcing. **If you ever re-add required checks, prove the bot
+  chain with a real push cycle first or you will silently break deploys.**
 - Historical red check-rollups on merged PRs #8–#13 are stale Sept-17
   branch-head checks under the old platform-refused policy — do not
   "fix" them; judge main's CI runs only.
