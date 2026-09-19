@@ -30,6 +30,7 @@ import type { InstanceInfo } from "@/state/store";
 import { createOnboardingFinishSession } from "@/state/onboarding-finish";
 import {
   clearOnboardingDraft,
+  FIRST_TASK_TEMPLATES,
   ONBOARDING_STEPS,
   readOnboardingDraft,
   resolveInitialTaskDraft,
@@ -177,6 +178,7 @@ function personalityAbout(a: Axes): string {
 /* ── First-task suggestions ── */
 
 const SUGGESTIONS = [
+  { title: "Plan my day", prompt: FIRST_TASK_TEMPLATES["plan-my-day"] },
   { title: "Get on top of my week", prompt: "Help me get on top of my week — ask what's on my plate and figure out what to prioritize." },
   { title: "Brief me on my field", prompt: "Put together a quick brief on what's new in my field right now." },
   { title: "Draft from rough notes", prompt: "I'll paste some rough notes — turn them into a polished first draft." },

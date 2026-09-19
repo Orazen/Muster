@@ -10,8 +10,10 @@
 // sets them); no credential literals, ever.
 
 import type { AgentColor } from "./mascot";
+import { DAILY_PLANNING_TASK, PERSONAL_ASSISTANT_ROLE } from "./daily-planning";
 
 export type TemplateCategory =
+  | "PERSONAL"
   | "ORCHESTRATION"
   | "IMPLEMENTATION"
   | "VERIFICATION"
@@ -63,6 +65,23 @@ export function soulMdFor(t: AgentTemplate): string {
 }
 
 export const AGENT_TEMPLATES: readonly AgentTemplate[] = [
+  {
+    id: "personal-assistant",
+    name: "Daylight",
+    title: "Personal assistant",
+    category: "PERSONAL",
+    tagline: "Organize your day: calendar overview, three priorities, and suggested time blocks.",
+    role: PERSONAL_ASSISTANT_ROLE,
+    skills: ["daily planning", "calendar overview", "priorities", "time-block suggestions"],
+    bestWith: ["researcher", "writer"],
+    sources: ["your calendar, after you connect it", "goals and schedules you choose to share"],
+    firstTask: DAILY_PLANNING_TASK,
+    color: "orange",
+    character: "flower",
+    setupNote: "Needs a working model and calendar connection for live events. You can share your schedule instead. Changes require your approval.",
+    reason: "Start with one assistant for everyday work; review the plan before anything changes.",
+    provenance: "Muster-authored personal-assistant beta persona, September 2026",
+  },
   {
     id: "chief-of-staff",
     name: "Compass",

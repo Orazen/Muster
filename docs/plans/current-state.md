@@ -8,8 +8,20 @@ BYOK, free beta. Public expansion requires passing core flows and five testers
 completing daily planning on three separate days each. This is a decision record,
 not a new implementation or verification claim.
 
-Updated 19 September 2026 (Loop130). This snapshot takes precedence over historical roadmap
+Updated 19 September 2026 (Loop131). This snapshot takes precedence over historical roadmap
 status; the latest owner request takes precedence over this file.
+
+**Loop131:** added the Daylight personal-assistant template and an explicit
+Plan my day first-task draft. Reproduced and fixed Agent Hub clipping off-screen
+at 320px by portalling the dialog outside the translated sidebar. Owned browser
+coverage verifies one hire, preserved unsent draft after reload, no auto-approval
+grant, and one explicit send. Full **298 files / 4347 passed / 8 skipped**,
+browser **30/30**, focused **61/61**, build/types/lint pass. Initial full run had
+four process/startup failures under heavy host load; unchanged focused rerun
+**49/49** and full rerun passed. See CEO log for all receipts. No real-calendar,
+Watch calling, native release or production rollout claim. Next: reproduce and
+close hosted connector ownership gaps before account-scoped Calendar reads;
+[acceptance matrix](beta-acceptance-matrix-2026-09-19.md) records the source audit.
 
 **Loop130:** fixed OpenConnector-only bot dispatch and connection cards that
 incorrectly required Composio. Shared backend selection now mounts tools and

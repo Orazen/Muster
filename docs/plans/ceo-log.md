@@ -5950,3 +5950,44 @@ acceptance are not established by the owned fixture. Production remains GET-only
 Next: a user-visible daily-planning entry using the connected calendar, with
 explicit date/timezone, complete event coverage and honest missing-access states;
 then verify the real account and Watch call journey against the beta matrix.
+
+## Loop131 — personal-assistant entry and mobile hiring fix
+
+Existing Agent Hub and onboarding lack the accepted everyday-assistant entry.
+Scope: shared daily-planning persona/task text, Agent Hub template, allowlisted
+onboarding first-task suggestion, and owned browser acceptance at 320px. No
+calendar writes, credential setup, model policy guarantees or real-event claims.
+Files: src/lib/daily-planning.ts, agent-templates.ts, src/state/onboarding-draft.ts,
+src/components/Onboarding.tsx, e2e/personal-assistant.e2e.spec.ts and loop docs.
+
+Loop131 reproduction: the 320px browser screenshot shows Agent Hub clipped
+off-screen by the translated sidebar containing block. Extend file ownership
+to src/components/Sidebar.tsx for the existing createPortal pattern; add dialog
+geometry assertions. No visual redesign.
+
+Loop131 verification checkpoint: focused template/draft unit checks **61/61**;
+fresh app/server build and project/server/e2e typechecks pass; full oxlint and
+diff whitespace checks pass; full owned browser suite **30/30** (4.5m). The new
+case verifies 320px dialog bounds, one hire, conservative approval default,
+exact draft persistence across reload, no automatic send, and one explicit
+send through a fake model. Screenshots are in ignored .omb-scratch/loop131.
+Real calendar access and planning quality are not established by that fixture.
+
+Initial full unit run: **296 files passed / 2 failed; 4343 tests passed /
+8 skipped / 4 failed**, 1017.47s. Organization migration had three 15-second
+server-startup failures; release-mirror expected helper exit 1 but got null.
+Host load rose above 200. Two confirmed disposable organization-test children eventually
+started after timeout and were stopped; user services were untouched. Preserve
+/tmp/muster-loop131-unit.log for diagnosis. The unchanged two-file rerun passed
+**49/49** in 20.35s. Final full rerun: **298 files / 4347 passed / 8 skipped /
+0 failed**, 512.45s, recorded at /tmp/muster-loop131-unit-final.log. No source or
+timeout changes were made between unit runs. Baseline counts are unchanged;
+browser coverage increases from 29 to 30. No production or native rollout claimed.
+
+Next prerequisite from the read-only calendar audit: reproduce and close hosted
+non-owner access to installation-wide connector credentials across direct/group
+tools, browser actions, internal relay and queued card resumes. Then add a
+separate account-scoped read-only Calendar grant and complete day reader,
+preserving Drive credentials. Details and evidence boundaries are in the beta
+acceptance matrix. Persona instructions do not establish provider isolation or
+calendar-planning correctness.

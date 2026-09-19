@@ -9,7 +9,7 @@ This is an evidence checklist, not a declaration of production readiness.
 |---|---|---|
 | Sign-up, sign-in, onboarding, return visit | Loop126–128 owned browser suite; completion/connect fixes | Real Google consent on installed app and web; current release, session persistence and error recovery |
 | Owner claim link | New owned Chromium tests: session identity, one redemption, fragment removal, replay rejection, malformed input; cloud code namespace rejection | Native/phone browser on intended served artifact; do not conflate claim with cloud or companion pairing |
-| Calendar-backed Plan my day | Product direction accepted; no acceptance receipt in this slice | Real selected calendar yields overview, three priorities and suggested blocks; timezone/empty calendar/offline/auth-expired cases; no calendar writes without approval |
+| Calendar-backed Plan my day | Loop131 adds personal-assistant hiring and reviewable first-task draft; no real-calendar result receipt yet | Real selected calendar yields overview, three priorities and suggested blocks; timezone/empty calendar/offline/auth-expired cases; no calendar writes without approval |
 | Watch calling | Native builds and prior walkie fixture receipts; not proof of true calling | Ring/accept/end, planning result, interruption/backgrounding and failed/reconnected transport on hardware |
 | Optional connections | Loop130 reproduces and fixes runtime-only tool mounting and calendar-card backend selection; owned runtime fixture, not real consent | Calendar, email, files, Telegram, browser, tasks/notes: connect, cancel, revoke, unavailable and least-required permissions; do not require all to onboard |
 | Memory permissions and action approvals | Existing approval tests; owner defaults recorded | Verify memory controls and draft-first defaults across surfaces; allow/deny reaches intended task exactly once |
@@ -29,7 +29,7 @@ This is an evidence checklist, not a declaration of production readiness.
 | Linux | Inherited release gate: Actions billing | Distribution/desktop environment, artifact/install, execution, auth/pairing, updates |
 | iPhone | Swift/core tests, simulator pairing/walkie history | Device + OS + TestFlight/build, real pairing/auth, planning/calling/recovery |
 | Android | No fresh evidence in this slice | Device + OS + artifact/build, pairing, planning, permissions, reconnect |
-| Apple Watch | Build and simulator evidence; no true-call acceptance here | Watch + watchOS + paired phone/build, calls and approvals on hardware |
+| Apple Watch | Build/simulator evidence; inspected WatchVoice is manual reply TTS, not a ring/accept call implementation | Watch + watchOS + paired phone/build, calls and approvals on hardware |
 
 Device parity means a coherent supported experience, not identical execution
 capabilities. Unsupported actions must show a clear handoff or queue state.
@@ -59,3 +59,29 @@ Connector tool availability is only a prerequisite: it does not prove the
 connected account is the intended beta user's calendar, that a model chose the
 correct read action, or that suggested blocks respect busy/all-day events.
 Verify those through a real account and bounded fixtures in the next slice.
+
+## Calendar ownership prerequisite (Loop131 source audit)
+
+The generic connector currently selects installation-wide credentials:
+`server/openconnector.ts` uses one configured runtime URL/token,
+`server/composio.ts` uses the configured user/session, and connector routes/MCP
+relay in `server/index.ts` pass global configuration. That is usable in a
+single-owner installation; it is not evidence of hosted per-account Calendar
+isolation. Before beta use, reproduce and close any non-owner access to that
+installation connection, then implement the account-scoped Calendar journey.
+
+Use the session-bound route-family pattern in `workspace-backup-routes.ts` for
+status/connect/callback/day-read, with separate Calendar grant storage and
+purpose-bound, single-use OAuth state. Basic Google sign-in does not grant
+Calendar access. Do not overwrite login or Drive credentials: the existing
+`account-drive.ts` exchange writes the shared Google account row, so its storage
+semantics must not be copied for Calendar. Verify returned Google identity and
+granted scopes before persisting a grant.
+
+Next visible result: choose a calendar, date and timezone, review its complete
+read-only agenda, then explicitly prepare a planning task from that evidence.
+Tests must cover two-account separation, Drive preservation, revoked/missing
+permissions, malformed/partial responses, pagination, recurrence, DST and all-day
+events, plus no write calls or automatic submission. Follow with deterministic
+free-slot checks and grounded priorities; persona text alone is insufficient.
+This is a source-audit finding and implementation plan, not provider acceptance.

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DAILY_PLANNING_TASK } from "@/lib/daily-planning";
 
 /* Onboarding draft persistence — the wizard is component state, so a reload
  * or the sign-in round trip (AuthGate bounces to /sign-in and back in the
@@ -58,6 +59,7 @@ export interface OnboardingStorage {
  * chips so a deep link lands on the same copy the wizard offers. Unknown IDs
  * resolve to "" and are ignored. */
 export const FIRST_TASK_TEMPLATES = {
+  "plan-my-day": DAILY_PLANNING_TASK,
   "weekly-priorities":
     "Help me get on top of my week — ask what's on my plate and figure out what to prioritize.",
   "field-brief": "Put together a quick brief on what's new in my field right now.",

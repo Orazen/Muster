@@ -1517,7 +1517,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           }}
         />
       )}
-      {templatesOpen && <TemplatesModal onClose={() => setTemplatesOpen(false)} />}
+      {templatesOpen && createPortal(<TemplatesModal onClose={() => setTemplatesOpen(false)} />, document.body)}
       {teamFeedback &&
         createPortal(
           <div
