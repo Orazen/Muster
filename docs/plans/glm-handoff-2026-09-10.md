@@ -3401,3 +3401,17 @@ desktop owned-backend exit recovery, followed by remaining Watchcall foundation.
 Final corrected native helper: TEST BUILD SUCCEEDED (exit 0). Simulator inventory
 preserved: 0 extra, 0 missing, 0 original state changes; owned processes exited.
 Full failure evidence retained in .omb-scratch/verification/loop137-native.
+
+### Loop138 — desktop recovery and normal Quit
+
+Current-source recovery now preserves the loaded renderer/draft, retries only its
+owned original port, and blocks renderer reconnects until backend identity is
+verified. Failed document loads get a local recovery page. Normal Quit no longer
+re-enters native quit from the cleanup microtask; real owned desktop exit0 verified.
+See docs/audits/desktop-recovery-2026-09-19.md for GUI/version/failure evidence.
+
+Fresh gates: **309files/4556passed/8skipped/0failed**, lifecycle **14/14**, updater
+**14/14**, types/syntax/lint pass. Actual same-account/bot/origin/draft retention
+verified; foreign listener saw **0 renderer requests** after the fix. This is source
+work, not an installed update or production deployment. Remaining beta gates are
+unchanged; next continue Watch foreground calling and native acceptance.

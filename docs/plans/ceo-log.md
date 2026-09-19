@@ -6353,3 +6353,27 @@ desktop owned-backend exit recovery, followed by remaining Watchcall foundation.
 Final corrected native helper: TEST BUILD SUCCEEDED (exit 0). Simulator inventory
 preserved: 0 extra, 0 missing, 0 original state changes; owned processes exited.
 Full failure evidence retained in .omb-scratch/verification/loop137-native.
+
+## Loop138 started — desktop backend recovery
+
+Previous turn made verified progress (aa8433c audit/harness repairs). Pulled
+trigger-only d68e4e9. Reproduced prior installed blank-window/backend-exit gap
+is the next slice. Parent owns Electron main integration, cycle receipts and
+real isolated desktop acceptance. Lifecycle agent owns the new coordinator and
+its Node tests; audit agent prepares only an ignored owned package/profile for
+acceptance. User-installed app, services and unrelated files remain untouched.
+Recovery preserves a loaded renderer, offers explicit same-origin retry, checks
+owned child identity and rejects stale/quit races. No task replay or storage reset.
+
+Loop138 result: implemented owned backend lifecycle, explicit same-port recovery,
+local recovery document, stale-navigation/quit guards and renderer request fencing.
+Actual isolated Electron GUI retained account/bot/origin/exact unsent draft across
+retry and failed-document recovery. Foreign listener received only one main health
+probe, zero renderer requests/no cookies after a reproduced pre-fix gap. Normal
+Quit also reproduced the original dead-backend/live-window symptom; deferring the
+second quit until the next event-loop turn fixed it, with final process exit 0.
+
+Gates: Vitest309files/4556passed/8skipped/0failed (488.05s); lifecycle14/14 plus
+updater14/14; both types, Electron syntax and lint pass. Detailed receipts and
+failure history: docs/audits/desktop-recovery-2026-09-19.md. No installed app or
+production rollout claim; native/Google/recovery/tester-day gates remain open.

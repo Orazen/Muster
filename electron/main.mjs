@@ -11,6 +11,7 @@ import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
 import capabilitiesModule from "./capabilities.cjs";
+import { createServerLifecycle } from "./server-lifecycle.mjs";
 
 const { desktopCapabilities } = capabilitiesModule;
 
@@ -96,7 +97,6 @@ if (process.platform === "linux") app.setDesktopName("com.muster.app.desktop");
 // A stray server on the default port must not brick the app — fall back to
 // alternate ports until one binds AND identifies as ours (the probe checks
 // our API shape, not just a 200).
-let serverProc = null;
 let serverReady = true;
 let secureCredentials = {};
 
@@ -243,7 +243,8 @@ function slog(line) {
   }
 }
 
-async function startServerOn(port) {
+async function startServerOn(port, onExit, signal) {
+  if (signal.aborted) return null;
   const entry = path.join(process.resourcesPath, "server", "index.js");
   slog(`fork ${entry} port=${port}`);
   const childEnv = {
@@ -275,22 +276,27 @@ async function startServerOn(port) {
   proc.stdout?.on("data", (d) => slog(`[out] ${String(d).trimEnd()}`));
   proc.stderr?.on("data", (d) => slog(`[err] ${String(d).trimEnd()}`));
   proc.once("spawn", () => slog(`spawned pid=${proc.pid}`));
+  const abort = () => { try { proc.kill(); } catch {} };
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
   let exited = false;
   proc.once("exit", (code) => {
+    signal.removeEventListener("abort", abort);
     exited = true;
     slog(`exited code=${code}`);
+    onExit(code);
   });
   // wait for the port to answer (fresh machine: first boot writes data dirs).
   // Identity check is by PID: a dev harness server has the same API shape,
   // so only the child we actually forked (matching pid + static serving)
   // counts as ours.
   for (let i = 0; i < 40; i++) {
-    if (exited) return null;
+    if (exited || signal.aborted) return null;
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/health`);
+      const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1000) });
       if (res.ok) {
         const body = await res.json().catch(() => null);
-        if (body?.app === "muster" && body.pid === proc.pid && body.static) return proc;
+        if (!exited && !signal.aborted && body?.app === "muster" && body.pid === proc.pid && body.static) return proc;
         break; // someone else owns this port — try the next one
       }
     } catch {
@@ -304,28 +310,84 @@ async function startServerOn(port) {
   return null;
 }
 
-async function startServerPackaged() {
-  // two passes: a quit-and-reopen relaunch can race the dying instance's
-  // server during teardown — one settle-and-retry covers it
-  for (let attempt = 0; attempt < 2; attempt++) {
-    for (const port of [8799, 18799, 28799]) {
-      const proc = await startServerOn(port);
-      if (proc) {
-        serverProc = proc;
-        SERVER_PORT = port;
-        return true;
-      }
-    }
-    await new Promise((r) => setTimeout(r, 2500));
-  }
-  return false;
+// Keep the renderer alive after a backend exit: its unsent draft is still in
+// memory. Only a failed main-document navigation gets the local recovery page.
+const recoveryViews = new Map();
+let recoveryPrompt = null;
+let recoveryMenuItem = null;
+const serverLifecycle = createServerLifecycle({
+  start: startServerOn,
+  stop: (child) => { try { child.kill(); } catch {} },
+  onState(state) {
+    serverReady = state.phase === "running";
+    if (state.port !== null) SERVER_PORT = state.port;
+    if (recoveryMenuItem) recoveryMenuItem.enabled = state.phase === "stopped" ||
+      (state.phase === "running" && [...recoveryViews.values()].some((view) => view.failed));
+    if (state.phase === "stopped") void offerServerRecovery();
+  },
+});
+
+const ERROR_PAGE = "data:text/html;charset=utf-8," + encodeURIComponent(
+  `<body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#070707;color:#fcfcfc;font:15px -apple-system,system-ui"><main style="max-width:380px;padding:24px;text-align:center"><h2>Muster’s local server is unavailable</h2><p style="line-height:1.6;color:#b5b5b5">Use Retry in the recovery dialog, or Reconnect local server in the View menu. Reconnecting does not resend your tasks.</p></main></body>`,
+);
+
+function ownServerUrl(value) {
+  try { return new URL(value).origin === `http://127.0.0.1:${SERVER_PORT}`; }
+  catch { return false; }
 }
 
-const ERROR_PAGE =
-  "data:text/html;charset=utf-8," +
-  encodeURIComponent(
-    `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#070707;color:#fcfcfc;font:15px -apple-system,system-ui"><div style="text-align:center;max-width:360px"><div style="font-size:40px">🐭</div><h2 style="font-weight:600;margin:12px 0 6px">Couldn't start the bot server</h2><p style="color:#fcfcfc99;line-height:1.5">Something else is using its ports. Quit and reopen Muster — if it keeps happening, restart your computer.</p></div></body>`,
-  );
+async function retryLocalServer() {
+  const phase = serverLifecycle.snapshot().phase;
+  if (phase === "stopped") await serverLifecycle.retry();
+  if (serverLifecycle.snapshot().phase !== "running") return;
+  for (const [contents, view] of recoveryViews) {
+    if (serverLifecycle.snapshot().phase !== "running") return;
+    if (contents.isDestroyed() || !view.failed) continue;
+    // A loaded application reconnects its own streams without a reload. Only
+    // replace our recovery document; never disturb a later OAuth/navigation.
+    if (contents.getURL() !== ERROR_PAGE) continue;
+    view.failed = false;
+    await contents.loadURL(ownServerUrl(view.url) ? view.url : `http://127.0.0.1:${SERVER_PORT}/app`)
+      .catch((error) => slog(`main navigation failed: ${error?.message ?? error}`));
+  }
+  if (recoveryMenuItem) recoveryMenuItem.enabled = [...recoveryViews.values()].some((view) => view.failed);
+}
+
+function needsServerRecovery() {
+  const phase = serverLifecycle.snapshot().phase;
+  return phase === "stopped" || (phase === "running" && [...recoveryViews.values()].some((view) => view.failed));
+}
+
+async function offerServerRecovery() {
+  if (recoveryPrompt || !needsServerRecovery()) return;
+  const view = [...recoveryViews.values()].find((entry) => !entry.win.isDestroyed());
+  if (!view) return;
+  const generation = serverLifecycle.snapshot().generation;
+  recoveryPrompt = dialog.showMessageBox(view.win, {
+    type: "warning", title: "Muster’s local server is unavailable",
+    message: "Reconnect to your local workspace?",
+    detail: "Your open conversation stays in place. Retry starts Muster’s server on the same address and does not resend any task. If another process is using that address, it will be left alone.",
+    buttons: ["Retry", "Later"], defaultId: 0, cancelId: 1,
+  });
+  let result;
+  try { result = await recoveryPrompt; }
+  catch (error) { slog(`recovery dialog failed: ${error?.message ?? error}`); }
+  finally { recoveryPrompt = null; }
+  const state = serverLifecycle.snapshot();
+  if (result?.response === 0 && needsServerRecovery() && state.generation === generation) {
+    await retryLocalServer();
+    if (needsServerRecovery()) void offerServerRecovery();
+  }
+}
+
+function showServerRecoveryDocument(contents) {
+  const view = recoveryViews.get(contents);
+  if (!view || contents.isDestroyed() || serverLifecycle.snapshot().phase === "quitting") return;
+  view.failed = true;
+  if (recoveryMenuItem) recoveryMenuItem.enabled = needsServerRecovery();
+  if (contents.getURL() !== ERROR_PAGE) void contents.loadURL(ERROR_PAGE).catch((error) => slog(`recovery page failed: ${error?.message ?? error}`));
+  if (needsServerRecovery()) void offerServerRecovery();
+}
 
 const appContents = new Set();
 
@@ -361,6 +423,27 @@ function createWindow() {
 
   const contents = win.webContents;
   appContents.add(contents);
+  if (app.isPackaged) {
+    const view = { win, url: `http://127.0.0.1:${SERVER_PORT}/app`, pendingUrl: null, failed: !serverReady };
+    recoveryViews.set(contents, view);
+    contents.once("destroyed", () => recoveryViews.delete(contents));
+    const remember = (_event, url) => { if (ownServerUrl(url)) view.url = url; };
+    contents.on("did-start-navigation", (_event, url, _inPlace, isMainFrame) => {
+      if (isMainFrame) view.pendingUrl = url;
+    });
+    contents.on("did-navigate", (event, url) => {
+      view.pendingUrl = null;
+      remember(event, url);
+      if (ownServerUrl(url)) {
+        view.failed = false;
+        if (recoveryMenuItem) recoveryMenuItem.enabled = needsServerRecovery();
+      }
+    });
+    contents.on("did-navigate-in-page", remember);
+    contents.on("did-fail-load", (_event, code, _description, url, isMainFrame) => {
+      if (isMainFrame && code !== -3 && view.pendingUrl === url && ownServerUrl(url)) showServerRecoveryDocument(contents);
+    });
+  }
   contents.once("destroyed", () => appContents.delete(contents));
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -416,7 +499,9 @@ function createWindow() {
   }
 
   if (app.isPackaged) {
-    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : ERROR_PAGE);
+    void win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : ERROR_PAGE)
+      .catch((error) => slog(`main navigation failed: ${error?.message ?? error}`));
+    if (!serverReady) void offerServerRecovery();
   } else {
     win.loadURL(DEV_URL);
   }
@@ -716,6 +801,13 @@ app.whenReady().then(async () => {
   if (menu) {
     const viewItem = menu.getMenuItemById("view") ?? menu.items.find((item) => item.label === "View");
     if (viewItem?.submenu) {
+      if (app.isPackaged) {
+        recoveryMenuItem = new MenuItem({
+          label: "Reconnect local server", enabled: false,
+          click: () => { void retryLocalServer().then(() => offerServerRecovery()); },
+        });
+        viewItem.submenu.append(recoveryMenuItem);
+      }
       viewItem.submenu.append(new MenuItem({
         label: "Mascot Companion",
         accelerator: "CommandOrControl+Shift+M",
@@ -726,7 +818,18 @@ app.whenReady().then(async () => {
   }
   // The driver and its permission prompts start only after the explicit
   // Enable for this session action in the bot's Computer panel.
-  if (app.isPackaged) serverReady = await startServerPackaged();
+  if (app.isPackaged) {
+    // A stopped server releases its port. Until our new child proves its
+    // identity, renderer reconnects must not send session headers or accept
+    // responses from an unrelated process that happens to bind that address.
+    session.defaultSession.webRequest.onBeforeSendHeaders({
+      urls: [8799, 18799, 28799].map((port) => `http://127.0.0.1:${port}/*`),
+    }, (details, callback) => {
+      callback({ cancel: !serverLifecycle.allowsRequest(details.url) });
+    });
+    await serverLifecycle.start([8799, 18799, 28799, 8799, 18799, 28799]);
+  }
+  if (serverLifecycle.snapshot().phase === "quitting") return;
   const win = createWindow();
   // Revive a companion that was on last time, once the window exists to report
   // a failure in and SERVER_PORT has settled. Fire-and-forget: a companion
@@ -749,12 +852,14 @@ app.on("window-all-closed", () => {
 // Cap the defer so a wedged daemon cannot keep the app alive forever.
 const CUA_STOP_TIMEOUT_MS = 2500;
 let cuaCleanedUp = false;
+let quitCleanupStarted = false;
 app.on("before-quit", (e) => {
-  if (cuaCleanedUp) return;
+  if (cuaCleanedUp) { slog("desktop shutdown final quit accepted"); return; }
   e.preventDefault();
-  try {
-    serverProc?.kill();
-  } catch {}
+  if (quitCleanupStarted) return;
+  quitCleanupStarted = true;
+  slog("desktop shutdown cleanup started");
+  serverLifecycle.quit();
   // the sidecar holds a socket that is reachable from off this machine —
   // it should not outlive the window by even a moment
   void stopCompanion();
@@ -767,6 +872,9 @@ app.on("before-quit", (e) => {
   ]);
   cleanup.then(() => {
     cuaCleanedUp = true;
-    app.quit();
+    slog("desktop shutdown cleanup completed");
+    // A synchronously settled cleanup must not re-enter the native quit
+    // request from its before-quit microtask. Resume on the next event turn.
+    setImmediate(() => { slog("desktop shutdown resuming quit"); app.quit(); });
   });
 });
