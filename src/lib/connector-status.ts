@@ -17,4 +17,3 @@ export function mergeCurrentConnectorStatus(
   }
   return next;
 }
-
