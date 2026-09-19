@@ -1,7 +1,5 @@
-// HTTP-level test for the sign-up stopgap: server-side state (config, bots,
-// threads) has no per-user isolation yet, so new sign-ups are closed by
-// default until real multi-tenancy exists — see the gate in index.ts, right
-// before the generic /api/auth/ dispatch.
+// HTTP-level coverage for open-by-default sign-up and the operator
+// closure/allowlist gate before the generic /api/auth/ dispatch.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,6 +7,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { freePortBlock } from "./testing/ports.ts";
+import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -18,20 +18,21 @@ async function bootServer(extraEnv: Record<string, string>): Promise<{
   home: string;
   stop: () => Promise<void>;
 }> {
-  const port = 19800 + Math.floor(Math.random() * 5000);
+  const port = await freePortBlock([0, 1000], 19800, 5000);
   const base = `http://127.0.0.1:${port}`;
   const home = mkdtempSync(join(tmpdir(), "muster-signup-gate-"));
   mkdirSync(join(home, ".muster"), { recursive: true });
 
-  // Undefined entries are dropped when the child environment is built, so
-  // PATH is inherited only when the host defines it.
   const env = {
-    PATH: process.env.PATH,
-    HOME: home,
-    USERPROFILE: home,
-    OMB_PORT: String(port),
-    OMB_WEBHOOK_PORT: String(port + 1000),
-    BETTER_AUTH_SECRET: "test-secret-at-least-32-chars-long-ok",
+    ...pairingServerEnvironment({
+      home,
+      dataDirectory: join(home, ".muster"),
+      companionDirectory: join(home, "companion"),
+      staticDir: join(home, "ui"),
+      port,
+      webhookPort: port + 1000,
+      secret: "test-secret-at-least-32-chars-long-ok",
+    }),
     ...extraEnv,
   };
 
@@ -41,28 +42,22 @@ async function bootServer(extraEnv: Record<string, string>): Promise<{
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  const deadline = Date.now() + 15_000;
-  for (;;) {
-    try {
-      const res = await fetch(`${base}/api/health`);
-      if (res.ok) break;
-    } catch {
-      /* not up yet */
-    }
-    if (Date.now() > deadline) throw new Error("server did not come up");
-    await new Promise((r) => setTimeout(r, 100));
+  const stop = async () => {
+    await waitForExit(child, { signal: "SIGTERM" });
+    await removeTempDir(home);
+  };
+  try {
+    // Keep the existing 15s budget, but require this child's listener and
+    // include its bounded output if startup fails rather than hiding the cause.
+    await waitForOwnedServer(child, base, { timeoutMs: 15_000 });
+    child.stdout?.resume();
+    child.stderr?.resume();
+  } catch (error) {
+    await stop();
+    throw error;
   }
 
-  return {
-    child,
-    base,
-    home,
-    stop: async () => {
-      child.kill();
-      await waitForExit(child);
-      removeTempDir(home);
-    },
-  };
+  return { child, base, home, stop };
 }
 
 describe("sign-up gate", () => {

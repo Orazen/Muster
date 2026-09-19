@@ -22,8 +22,8 @@
 // gates proxied requests behind a web session the sidecar does not carry
 // (root-caused in Loop 58) — the desktop-mode harness is the rig.
 //
-// Pairing windows expire after two minutes, so the deep link is minted only
-// after the test build exists and is consumed immediately by phase 1.
+// Pairing windows expire after two minutes. The running UI test mints its
+// invitation after app launch, immediately before opening the deep link.
 import { execFileSync, execSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { mkdtempSync, readdirSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
@@ -228,6 +228,8 @@ async function main() {
     const boot = await run("xcrun", ["simctl", "boot", sim.udid]);
     if (boot.code !== 0 && !boot.out.includes("already booted")) throw new Error(`could not boot ${sim.name}: ${boot.out}`);
   }
+  const ready = await run("xcrun", ["simctl", "bootstatus", sim.udid, "-b"], { timeoutMs: 180_000 });
+  if (ready.code !== 0) throw new Error(`owned simulator did not become ready: ${ready.out}`);
   // A previously paired app state would make the invite honestly refused —
   // the pairing test must start from a clean install of OUR app.
   await run("xcrun", ["simctl", "uninstall", sim.udid, "com.muster.companion"]);
@@ -244,7 +246,7 @@ async function main() {
         "-project", join(ROOT, "ios", "MusterCompanion.xcodeproj"),
         "-scheme", "MusterOwnedAcceptance",
         "-configuration", CONFIGURATION,
-        "-destination", `platform=iOS Simulator,name=${DEVICE}`,
+        "-destination", `platform=iOS Simulator,id=${sim.udid}`,
         "-derivedDataPath", dd,
         // Signing is REQUIRED here, not cosmetic: the app declares
         // entitlements (app group + time-sensitive notifications since the
@@ -280,18 +282,12 @@ async function main() {
     await run("xcrun", ["simctl", "privacy", sim.udid, "grant", service, "com.muster.companion"]);
   }
 
-  // ── mint the invite and run phase 1 immediately (two-minute window) ──────
-  const opened = await json(`${CONTROL}/pairing`, { method: "POST" });
-  const { code, token } = opened.body;
-  if (!token) throw new Error(`could not open a pairing window: ${JSON.stringify(opened.body)}`);
-  const pairUrl =
-    `muster://pair?address=${encodeURIComponent(COMPANION)}` +
-    `&token=${encodeURIComponent(token)}&name=${encodeURIComponent("Owned Rig")}`;
-  console.log(JSON.stringify({ scope: "ios-acceptance-rig", phase: "invite", code, sidecar: COMPANION }));
-
-  const dest = ["-destination", `platform=iOS Simulator,name=${OWNED_DEVICE || DEVICE}`];
+  // The running XCTest mints its invitation after app launch. Cold runner
+  // startup must never consume the sidecar's two-minute pairing window.
+  const dest = ["-destination", `platform=iOS Simulator,id=${sim.udid}`];
   const common = [
     "test-without-building",
+    "-parallel-testing-enabled", "NO",
     "-configuration", CONFIGURATION,
     "-project", join(ROOT, "ios", "MusterCompanion.xcodeproj"),
     "-scheme", "MusterOwnedAcceptance",
@@ -303,7 +299,8 @@ async function main() {
   // build settings and never reach the test process.
   const testEnv = {
     ...process.env,
-    TEST_RUNNER_MUSTER58_PAIR_URL: pairUrl,
+    TEST_RUNNER_MUSTER58_CONTROL_URL: CONTROL,
+    TEST_RUNNER_MUSTER58_COMPANION_URL: COMPANION,
     TEST_RUNNER_MUSTER58_BOT_NAME: BOT_NAME,
   };
 
@@ -351,6 +348,7 @@ async function main() {
       // surface the failing lines so the transcript carries the evidence
       const lines = t.out.split("\n").filter((l) => /error:|failed \(|Test Suite .* failed/.test(l));
       console.log(lines.slice(0, 20).join("\n"));
+      break; // identity and Walkie depend on successful pairing and navigation
     }
   }
 

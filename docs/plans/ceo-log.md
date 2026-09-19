@@ -6293,3 +6293,63 @@ Loop136 source pushed as 458cc72. Post-push GET at 18:26 UTC still reports backe
 Final staged review found one extra EOF blank line in the new pure helper;
 removed in the receipt follow-up. Documentation/whitespace only after the full
 4556-pass gate; no executable behavior changed or extra test run claimed.
+
+## Loop137 started — foreground call protocol foundation
+
+Prior goal turn made verified progress: Loop136 pushed458cc72/9820f11. Pulled
+29c395f (trigger only). Read-only Watch audit confirmed missing call signaling.
+Contract: watch-call-protocol-2026-09-19.md. Parent owns index integration,
+companion routes/proxy and corresponding tests, and cycle docs. Proposed delegation covers server call registry/routes/tests and native core
+protocol/client/coordinator/tests; no call implementation was started. No Watch UI calling or background execution claim in this
+foundation; those remain required next work in the unchanged beta goal.
+
+Owner redirected Loop137 to cross-platform acceptance before call implementation.
+Native simulator, desktop runtime and GitHub read-only audits now run separately;
+parent owns web acceptance and cycle receipts. The call contract remains a draft.
+
+### Loop137 acceptance audit and harness repairs
+
+Owner requested desktop/web/iPhone/Watch/GitHub verification before new features.
+Full evidence and queued desktop recovery design are in
+`docs/audits/cross-platform-2026-09-19.md`. Current source, installed 1.12.3
+(source7bb7c0e dirty) and served production artifacts are distinct.
+
+Reproduced and repaired: Swift follow-up response raced a10ms test deadline;
+signup harness booted on unchecked ports and leaked its child on a15s startup
+failure; Xcode Cloud expected an uncommitted generated project; native acceptance
+minted its two-minute invite before Xcode runner startup consumed that window.
+No product expiry, auth assertion or startup deadline was relaxed. Native rig now
+mints from the running test, waits for boot readiness, targets its exact owned
+UDID, disables parallel simulator selection and stops dependent phases on failure.
+Post-clone generation pins XcodeGen2.46.0 with archive SHA verification.
+
+Failures retained: first Swift355/356; first full unit4555pass/1fail/8skip
+(309files,845.19s, signup readiness timeout); first native runner install failure;
+second native roster assertion failure with screenshot-confirmed expired invite.
+The orphan signup server was identified by its test HOME/ports and cleaned only
+after identity verification. No user server/session or demo8845 was restarted.
+Fresh receipts so far: Swift356/356, signup5/5, browser39/39(9.6m), Electron syntax
+8files, updater14/14, old installed-package smoke14/14, both typechecks/lint pass.
+Full unit rerun and corrected native rig final receipts follow below.
+
+GitHub latest code CI35461205899 passed. Dependabot0open; historical secret alert
+1open/validityunknown; no code-scanning analysis. Full Mimosa remains outstanding.
+Production still returns old build identities despite accepted deployment triggers.
+Installed desktop initially showed a dead-backend blank screen; later app restored
+without this audit restarting it, and user pairing activity was left untouched.
+
+Fresh full unit final:309files/4556passed/8skipped/0failed,689.64s,
+/tmp/muster-loop137-unit-final.log. Baseline unchanged. Native rig verification
+then exposed its helper expecting200 instead of actual201; corrected without
+changing product response or expiry. Final native verification remains pending.
+
+Native final receipt: Watch/Companion/Widget builds pass; owned Watch launches
+to pairing UI. iPhone fullinteraction notpassed: after expiry/helper corrections,
+finalrun hit180s CoreSimulatorboot migration bound beforetests. Ownedservices and
+simulators cleaned; no furtherblindretry. Syntax/touchedlint pass. Keep iPhone
+acceptance and realhardware/Google/recovery gates open; next product slice is
+desktop owned-backend exit recovery, followed by remaining Watchcall foundation.
+
+Final corrected native helper: TEST BUILD SUCCEEDED (exit 0). Simulator inventory
+preserved: 0 extra, 0 missing, 0 original state changes; owned processes exited.
+Full failure evidence retained in .omb-scratch/verification/loop137-native.

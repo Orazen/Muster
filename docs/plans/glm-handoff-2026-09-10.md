@@ -3367,3 +3367,37 @@ capable-device selection and durable queue remain separate subsequent work.
 Real Google/device/recovery acceptance, funded allowance accounting and cost
 choices, production rollout and five-testers/three-days gate remain open.
 Existing automation stays paused; unrelated untracked content remains untouched.
+
+### Loop137 — owner-requested cross-platform acceptance audit
+
+Astra paused new Watch call implementation to inspect installed desktop,
+production web, owned iPhone/Watch simulators and GitHub. Full version-specific
+receipt: `docs/audits/cross-platform-2026-09-19.md`.
+
+Fresh final unit gate: **309files/4556passed/8skipped/0failed**,689.64s. Browser
+**39/39**; Swift **356/356**; both types and lint pass; Electron syntax8files,
+updater14/14, existing ARM64 package smoke14/14. Initial failures and fixes are
+retained in CEO log. Signup test now probes/owns both ports and cleans failed
+startup; Swift test prepares its follow-up response before its short deadline;
+Xcode Cloud generates its project with pinned/checksummed XcodeGen post-clone.
+Native rig fixes expiry during test-runner startup by minting from the running
+test, without extending product expiry. Final native UI receipt follows.
+
+Installed app is older7bb7c0e dirty artifact, initially blank with exited backend,
+later restored without audit restart. Current source lacks unexpected-backend-exit
+recovery: next desktop slice is specified in the audit. Production remains old
+backend7632065f/web453b2f23 despite accepted triggers; no deploymentclaim.
+GitHub CI35461205899 passed; Dependabot0open, historical secret1open/unknown,
+code scanning absent. No security claim; Mimosa remains pending. Existing
+user pairing/session and demo8845 preserved. Automation stays paused.
+
+Native final receipt: Watch/Companion/Widget builds pass; owned Watch launches
+to pairing UI. iPhone fullinteraction notpassed: after expiry/helper corrections,
+finalrun hit180s CoreSimulatorboot migration bound beforetests. Ownedservices and
+simulators cleaned; no furtherblindretry. Syntax/touchedlint pass. Keep iPhone
+acceptance and realhardware/Google/recovery gates open; next product slice is
+desktop owned-backend exit recovery, followed by remaining Watchcall foundation.
+
+Final corrected native helper: TEST BUILD SUCCEEDED (exit 0). Simulator inventory
+preserved: 0 extra, 0 missing, 0 original state changes; owned processes exited.
+Full failure evidence retained in .omb-scratch/verification/loop137-native.

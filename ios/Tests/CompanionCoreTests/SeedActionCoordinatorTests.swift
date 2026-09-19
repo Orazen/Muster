@@ -20,9 +20,17 @@ private actor HeldSeedTransport: SeedCardTransport {
     struct Call: Equatable { var kind: String; var bot: String; var card: String; var thread: String; var text: String?; var attempt: Int? }
     private(set) var calls: [Call] = []
     private var pending: [Int: CheckedContinuation<SeedCardResult, Error>] = [:]
+    private var nextResult: SeedCardResult?
+    func respondToNextCall(_ result: SeedCardResult) { nextResult = result }
     private func hold(_ call: Call) async throws -> SeedCardResult {
         try await withCheckedThrowingContinuation { continuation in
-            let index = calls.count; calls.append(call); pending[index] = continuation
+            let index = calls.count; calls.append(call)
+            if let result = nextResult {
+                nextResult = nil
+                continuation.resume(returning: result)
+            } else {
+                pending[index] = continuation
+            }
         }
     }
     func answerSeedCard(botId: String, cardId: String, threadId: String, answer: String) async throws -> SeedCardResult {
@@ -241,8 +249,12 @@ final class SeedActionCoordinatorTests: XCTestCase {
         let calls = await h.transport.calls; XCTAssertEqual(calls.count, 1)
         await h.transport.resolve(coordinatorResult()); await h.waitForClose()
         XCTAssertNil(h.saved?.answered)
-        let checking = h.act(.check); await h.waitForCalls(2)
-        await h.transport.resolve(1, coordinatorResult(status: .started)); await checking.value
+        // Only the first request is supposed to time out. Prepare the status
+        // response before dispatch so the test does not race a second 10ms
+        // deadline while polling and scheduling the transport resolution.
+        await h.transport.respondToNextCall(coordinatorResult(status: .started))
+        let checking = h.act(.check); await checking.value
+        let finalCalls = await h.transport.calls; XCTAssertEqual(finalCalls.count, 2)
         XCTAssertEqual(h.saved?.seedAnswer?.status, .started)
     }
 

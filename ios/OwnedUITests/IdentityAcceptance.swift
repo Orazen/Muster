@@ -2,9 +2,17 @@
 // header's task label. Two tests, meant to run as two separate invocations:
 // the first pairs the app against a scratch rig (deep link + one confirm
 // tap), the second tours what this slice changed and captures screenshots
-// as attachments. Environment (set on the xctestrun): MUSTER58_PAIR_URL,
-// MUSTER58_BOT_NAME, MUSTER58_TASK_TITLE.
+// as attachments. Owned-rig environment: MUSTER58_CONTROL_URL and
+// MUSTER58_COMPANION_URL (IPv4 loopback origins), MUSTER58_BOT_NAME,
+// MUSTER58_TASK_TITLE. MUSTER58_PAIR_URL remains a direct-invite fallback.
 import XCTest
+
+private final class OwnedRigRedirectPolicy: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
 
 @MainActor
 final class IdentityAcceptance: XCTestCase {
@@ -17,10 +25,47 @@ final class IdentityAcceptance: XCTestCase {
         add(picture)
     }
 
-    func testPairAcceptsInvite() throws {
+    private func pairingURL() async throws -> URL {
         let env = ProcessInfo.processInfo.environment
-        let url = try XCTUnwrap(URL(string: try XCTUnwrap(env["MUSTER58_PAIR_URL"])), "pair URL missing")
+        guard let controlValue = env["MUSTER58_CONTROL_URL"] else {
+            return try XCTUnwrap(URL(string: try XCTUnwrap(env["MUSTER58_PAIR_URL"])), "pair URL missing")
+        }
+        func ownedOrigin(_ value: String) throws -> URL {
+            let url = try XCTUnwrap(URL(string: value))
+            guard url.scheme == "http", url.host == "127.0.0.1", let port = url.port, (1...65535).contains(port),
+                  url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
+                  url.path.isEmpty || url.path == "/" else {
+                throw NSError(domain: "OwnedRig", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected an owned IPv4 loopback origin"])
+            }
+            return url
+        }
+        let control = try ownedOrigin(controlValue)
+        let companion = try ownedOrigin(try XCTUnwrap(env["MUSTER58_COMPANION_URL"]))
+        guard control.port != companion.port else { throw NSError(domain: "OwnedRig", code: 2) }
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 10
+        let session = URLSession(configuration: config, delegate: OwnedRigRedirectPolicy(), delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+        var request = URLRequest(url: control.appendingPathComponent("pairing"))
+        request.httpMethod = "POST"
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 201 else {
+            throw NSError(domain: "OwnedRig", code: 3, userInfo: [NSLocalizedDescriptionKey: "Owned pairing control returned HTTP \(status), expected 201"])
+        }
+        struct Invite: Decodable { let token: String }
+        let token = try JSONDecoder().decode(Invite.self, from: data).token
+        guard !token.isEmpty else { throw NSError(domain: "OwnedRig", code: 4) }
+        var invite = URLComponents()
+        invite.scheme = "muster"; invite.host = "pair"
+        invite.queryItems = [URLQueryItem(name: "address", value: companion.absoluteString),
+                             URLQueryItem(name: "token", value: token), URLQueryItem(name: "name", value: "Owned Rig")]
+        return try XCTUnwrap(invite.url)
+    }
+
+    func testPairAcceptsInvite() async throws {
         app.launch()
+        let url = try await pairingURL()
         XCUIDevice.shared.system.open(url)
         // iOS may ask before handing a custom-scheme URL to the app, and on a
         // cold simulator the prompt can land well after the open call. Keep
