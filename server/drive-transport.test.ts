@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { drivePullFor, drivePushFor, googleTokensFor } from "./account-drive.ts";
-import { downloadBundle, findBundleFile, uploadBundle } from "./drive-sync.ts";
+import { downloadBundle, downloadLatestSnapshot, downloadSnapshot, findBundleFile, listSnapshots, uploadBundle, uploadSnapshot } from "./drive-sync.ts";
 
 const fetchMock = vi.fn<typeof fetch>();
 beforeEach(() => {
@@ -203,5 +203,126 @@ describe("Account consent revalidation around Drive requests", () => {
     fetchMock.mockResolvedValue(Response.json({ files: [] }));
     expect(await drivePullFor("test-access")).toBeNull();
     expect(fetchMock.mock.calls[0][1]?.redirect).toBe("error");
+  });
+});
+
+describe("Immutable v2 snapshots (stale-device overwrite defect)", () => {
+  // The legacy v2 transport did findBundleFile -> PATCH onto the single newest
+  // file, so a stale/empty device upload erased the only backup in place.
+  // uploadSnapshot must instead always POST a fresh, uniquely-named file.
+  it("always POSTs a new immutable file and never PATCHes the newest backup", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ id: "snap-1", name: "muster-workspace-v2-1000-ab.enc" }));
+    const { id, name } = await uploadSnapshot("test-access", "encrypted-payload");
+    expect(id).toBe("snap-1");
+    expect(name).toBe("muster-workspace-v2-1000-ab.enc");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name");
+    expect(init?.method).toBe("POST");
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-access");
+    expect(new Headers(init?.headers).get("content-type")).toMatch(/^multipart\/related; boundary=muster-[a-f0-9]{16}$/);
+    const body = z.string().parse(init?.body);
+    expect(body).toMatch(/"name":"muster-workspace-v2-[0-9]+-[0-9a-f]{8}\.enc"/);
+    expect(body).toContain('"parents":["appDataFolder"]');
+    expect(body).toContain("encrypted-payload");
+    expect(init?.method).not.toBe("PATCH");
+  });
+
+  it("creates a distinct file per upload so a stale device cannot clobber a real backup", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ id: "real-backup", name: "muster-workspace-v2-1000-0a.enc" }));
+    const real = await uploadSnapshot("test-access", "real-backup-content");
+    fetchMock.mockResolvedValueOnce(Response.json({ id: "stale-garbage", name: "muster-workspace-v2-2000-0b.enc" }));
+    const stale = await uploadSnapshot("test-access", "stale-garbage-content");
+    expect(real.id).not.toBe(stale.id);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "POST"]);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).not.toContain("PATCH");
+  });
+
+  it("lists snapshots newest-first and is scoped to snapshot names only", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({
+      files: [
+        { id: "s2", name: "muster-workspace-v2-2000-0b.enc", createdTime: "2024-01-02T00:00:00Z", size: "99" },
+        { id: "s1", name: "muster-workspace-v2-1000-0a.enc", createdTime: "2024-01-01T00:00:00Z", size: "9" },
+      ],
+    }));
+    const snapshots = await listSnapshots("test-access");
+    expect(snapshots).toEqual([
+      { id: "s2", name: "muster-workspace-v2-2000-0b.enc", createdTime: "2024-01-02T00:00:00Z", size: "99" },
+      { id: "s1", name: "muster-workspace-v2-1000-0a.enc", createdTime: "2024-01-01T00:00:00Z", size: "9" },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    const query = new URL(String(url)).searchParams;
+    expect(query.get("spaces")).toBe("appDataFolder");
+    expect(query.get("orderBy")).toBe("modifiedTime desc");
+    expect(query.get("q")).toBe("name contains 'muster-workspace-v2-' and trashed = false");
+    expect(query.get("fields")).toBe("files(id,name,createdTime,size),nextPageToken,incompleteSearch");
+    expect(init?.method).toBeUndefined();
+  });
+
+  it("follows page tokens when listing snapshots", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ files: [{ id: "s1", name: "muster-workspace-v2-1000-0a.enc", createdTime: "t1", size: "1" }], nextPageToken: "page-2" }))
+      .mockResolvedValueOnce(Response.json({ files: [{ id: "s2", name: "muster-workspace-v2-2000-0b.enc", createdTime: "t2", size: "2" }] }));
+    const snapshots = await listSnapshots("test-access");
+    expect(snapshots.map((s) => s.id)).toEqual(["s1", "s2"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new URL(String(fetchMock.mock.calls[1][0])).searchParams.get("pageToken")).toBe("page-2");
+  });
+
+  it("rejects an incomplete snapshot search before returning partial results", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ files: [{ id: "s1", name: "muster-workspace-v2-1000-0a.enc", createdTime: "t1", size: "1" }], incompleteSearch: true }));
+    await expect(listSnapshots("test-access")).rejects.toThrow("could not complete");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("downloads a chosen snapshot by id (explicit restore selection)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("restored-payload", { status: 200 }));
+    expect(await downloadSnapshot("test-access", "snap-42")).toBe("restored-payload");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe("https://www.googleapis.com/drive/v3/files/snap-42?alt=media");
+    expect(init?.method).toBeUndefined();
+  });
+
+  it("reports a missing snapshot as not found", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ error: { message: "not found" } }, { status: 404 }));
+    await expect(downloadSnapshot("test-access", "gone")).rejects.toThrow("Snapshot not found");
+  });
+
+  it("downloads the newest snapshot, or null when none exist", async () => {
+    fetchMock
+      .mockResolvedValueOnce(Response.json({ files: [{ id: "newest", name: "muster-workspace-v2-2000-0b.enc", createdTime: "t2", size: "5" }] }))
+      .mockResolvedValueOnce(new Response("newest-payload", { status: 200 }));
+    expect(await downloadLatestSnapshot("test-access")).toBe("newest-payload");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toBe("https://www.googleapis.com/drive/v3/files/newest?alt=media");
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(Response.json({ files: [] }));
+    expect(await downloadLatestSnapshot("test-access")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reproduces the defect fix end-to-end: a stale later upload never hides the real backup from explicit restore", async () => {
+    // Real backup pushes first (older modified time).
+    fetchMock.mockResolvedValueOnce(Response.json({ id: "real-id", name: "muster-workspace-v2-1000-0a.enc" }));
+    await uploadSnapshot("test-access", "real-backup");
+    // Stale/empty device pushes later — must NOT overwrite or delete the real file.
+    fetchMock.mockResolvedValueOnce(Response.json({ id: "stale-id", name: "muster-workspace-v2-2000-0b.enc" }));
+    await uploadSnapshot("test-access", "stale-garbage");
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(["POST", "POST"]);
+    // Listing keeps both; the stale upload sorts first by modified time, but the
+    // real backup is still recoverable via explicit restore by id.
+    fetchMock.mockResolvedValueOnce(Response.json({
+      files: [
+        { id: "stale-id", name: "muster-workspace-v2-2000-0b.enc", createdTime: "2024-01-02T00:00:00Z", size: "5" },
+        { id: "real-id", name: "muster-workspace-v2-1000-0a.enc", createdTime: "2024-01-01T00:00:00Z", size: "5" },
+      ],
+    }));
+    const list = await listSnapshots("test-access");
+    expect(list.map((s) => s.id)).toEqual(["stale-id", "real-id"]);
+    fetchMock.mockResolvedValueOnce(new Response("real-backup"));
+    expect(await downloadSnapshot("test-access", "real-id")).toBe("real-backup");
   });
 });

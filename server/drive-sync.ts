@@ -187,3 +187,127 @@ export async function downloadBundle(accessToken: string, fileName = BUNDLE_NAME
   if (!res.ok) throw new Error(`Drive download failed: HTTP ${res.status}`);
   return await res.text();
 }
+
+/** Immutable v2 backups each live in their own uniquely-named file. The suffix is
+ * the upload's wall-clock time plus a random token so that two devices (or two
+ * pushes from a stale device) can never collide onto the same file id. The dash
+ * after `v2` also keeps these distinct from the legacy single `muster-workspace-v2.enc`
+ * file in any Drive `name contains` query. */
+const SNAPSHOT_PREFIX = "muster-workspace-v2-";
+const SNAPSHOT_SUFFIX = ".enc";
+
+/** A remote v2 snapshot, newest first by modified time. */
+export interface SnapshotInfo {
+  id: string;
+  name: string;
+  createdTime: string;
+  size?: string;
+}
+
+const driveSnapshotUploadSchema = z.object({ id: driveFileIdSchema, name: z.string().min(1) });
+const driveSnapshotListSchema = z.object({
+  files: z.array(z.object({
+    id: driveFileIdSchema,
+    name: z.string().min(1),
+    createdTime: z.string().min(1),
+    size: z.string().optional(),
+  })).default([]),
+  nextPageToken: z.string().min(1).optional(),
+  incompleteSearch: z.boolean().optional(),
+  kind: z.literal("drive#fileList").optional(),
+}).strict();
+
+/** List immutable v2 backup snapshots, newest first. Excludes the legacy single
+ * v2 file because its name lacks the `muster-workspace-v2-` snapshot suffix.
+ * Paginates exactly like the bundle search and surfaces the same guard errors. */
+export async function listSnapshots(
+  accessToken: string,
+  guard: () => Promise<void> = async () => {},
+): Promise<SnapshotInfo[]> {
+  const query = new URLSearchParams({
+    spaces: APPDATA_FOLDER,
+    q: `name contains '${SNAPSHOT_PREFIX}' and trashed = false`,
+    orderBy: "modifiedTime desc",
+    pageSize: "100",
+    fields: "files(id,name,createdTime,size),nextPageToken,incompleteSearch",
+  });
+  const seenPages = new Set<string>();
+  const snapshots: SnapshotInfo[] = [];
+  for (let page = 0; page < 10; page++) {
+    const res = await driveFetch(accessToken, `${LIST_URL}?${query}`, undefined, guard);
+    if (!res.ok) throw new Error(`Drive list failed: HTTP ${res.status}`);
+    const parsed = driveSnapshotListSchema.safeParse(await res.json().catch(() => null));
+    if (!parsed.success) throw new Error("Drive returned an unreadable snapshot list");
+    if (parsed.data.incompleteSearch) throw new Error("Drive could not complete the backup search — try again");
+    for (const f of parsed.data.files) snapshots.push(f);
+    const next = parsed.data.nextPageToken;
+    if (!next) return snapshots;
+    if (seenPages.has(next)) throw new Error("Drive repeated a snapshot page");
+    seenPages.add(next);
+    query.set("pageToken", next);
+  }
+  throw new Error("Drive snapshot search exceeded its page limit — try again");
+}
+
+/** Immutably upload a new v2 workspace snapshot — always creates a fresh file
+ * (POST) and never updates or removes an existing one. A stale or empty device
+ * therefore can never clobber the newest real backup; it merely becomes an
+ * older snapshot that explicit restore selection can ignore. */
+export async function uploadSnapshot(
+  accessToken: string,
+  payload: string,
+  guard: () => Promise<void> = async () => {},
+): Promise<{ id: string; name: string }> {
+  const name = `${SNAPSHOT_PREFIX}${Date.now()}-${randomBytes(4).toString("hex")}${SNAPSHOT_SUFFIX}`;
+  const boundary = `muster-${randomBytes(8).toString("hex")}`;
+  const body = [
+    `--${boundary}`,
+    "Content-Type: application/json; charset=UTF-8",
+    "",
+    JSON.stringify({ name, parents: [APPDATA_FOLDER] }),
+    `--${boundary}`,
+    "Content-Type: application/octet-stream",
+    "",
+    payload,
+    `--${boundary}--`,
+  ].join("\r\n");
+  const res = await driveFetch(
+    accessToken,
+    `${UPLOAD_URL}?uploadType=multipart&fields=id,name`,
+    {
+      method: "POST",
+      headers: { "content-type": `multipart/related; boundary=${boundary}` },
+      body,
+    },
+    guard,
+  );
+  if (!res.ok) throw new Error(`Drive upload failed: HTTP ${res.status}`);
+  const result = driveSnapshotUploadSchema.safeParse(await res.json().catch(() => null));
+  if (!result.success) throw new Error("Drive returned an unreadable upload response");
+  return { id: result.data.id, name: result.data.name };
+}
+
+/** Download a specific snapshot by its Drive file id (explicit restore). */
+export async function downloadSnapshot(
+  accessToken: string,
+  snapshotId: string,
+  guard: () => Promise<void> = async () => {},
+): Promise<string> {
+  const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(snapshotId)}?alt=media`, undefined, guard);
+  if (res.status === 404) throw new Error("Snapshot not found");
+  if (!res.ok) throw new Error(`Drive download failed: HTTP ${res.status}`);
+  return await res.text();
+}
+
+/** Download the most recent snapshot (newest by modified time). Returns null
+ * when no snapshot exists yet. Callers offering an explicit restore selection
+ * should use listSnapshots + downloadSnapshot by chosen id instead. */
+export async function downloadLatestSnapshot(
+  accessToken: string,
+  guard: () => Promise<void> = async () => {},
+): Promise<string | null> {
+  const snapshots = await listSnapshots(accessToken, guard);
+  const latest = snapshots[0];
+  if (!latest) return null;
+  return downloadSnapshot(accessToken, latest.id, guard);
+}
