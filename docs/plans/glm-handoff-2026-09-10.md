@@ -3436,3 +3436,25 @@ open/validity unknown. Production still returned old backend/web identities,
 so deployment is unverified. Next: connect Watch foreground views/session and
 explicit daily planning; real iPhone/Watch/Google/Drive/tester-day gates remain.
 Existing automation remains paused.
+
+### Loop140 — Watch foreground call experience and native acceptance
+
+Added explicit Watch Start/Connect, reviewed text/dictation or planning draft,
+manual reply playback, and context-scoped End. Fixed reproduced duplicate End,
+stale lifecycle cancellation and explicit host404 recovery. Calendar shortcut
+is prompt-only; account-linked calendar evidence remains the next slice.
+
+Gates: **313 files /4632 passed /8 skipped /0failed** (533.07s); Swift
+**376/376** (+6), focused call coordinator18/18; both typechecks and full lint
+passed. Companion/Widget Release simulator builds and signed Watch test build
+passed. Actual owned Watch XCTest **1/1 passed**,89.884s: pair, Start, Connect,
+prepare unsent draft, system keyboard return still Connected, zero messages
+before Send, exactly one message/reply, End confirmed. Host receipts: Start1,
+accept1,messages1,end1. Earlier fixture failures/cancellations are documented
+in docs/audits/watch-foreground-experience-2026-09-19.md, not counted as passes.
+Owned simulator and services cleaned. No real calendar/provider/audio/hardware,
+iPhone interaction, installed update or production rollout claim.
+
+CI/autodeploy for e59b6e9 passed; Dependabot0open; historical Telegram secret
+alert1open/unknown and Mimosa incomplete. Production GET still old backend/web
+identities with null source revisions. Existing automation remains paused.

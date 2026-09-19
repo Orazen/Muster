@@ -679,6 +679,14 @@ struct ChatView: View {
         let context = session.composerContext(for: chat)
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
+                if case let .bot(bot) = chat {
+                    NavigationLink {
+                        WatchCallView(bot: bot)
+                    } label: {
+                        Label("Call", systemImage: "phone.fill")
+                    }
+                    .accessibilityIdentifier("watch-open-call")
+                }
                 if chat.busy {
                     if case let .bot(bot) = chat {
                         Button {

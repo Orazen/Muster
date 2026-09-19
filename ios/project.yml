@@ -251,6 +251,20 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: MusterCompanion
 
+  MusterWatchOwnedUITests:
+    type: bundle.ui-testing
+    platform: watchOS
+    sources:
+      - path: WatchOwnedUITests
+    dependencies:
+      - target: MusterWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion.watchowneduitests
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: MusterWatch
+
   # The mascot outside the app: a home-screen widget (small + medium) that
   # renders the fleet snapshot the app publishes to the shared app group.
   # No in-extension networking: the widget is a renderer, the app is the
@@ -302,4 +316,13 @@ schemes:
     test:
       targets:
         - MusterOwnedUITests
+      gatherCoverageData: false
+  MusterWatchOwnedAcceptance:
+    build:
+      targets:
+        MusterWatch: all
+        MusterWatchOwnedUITests: [test]
+    test:
+      targets:
+        - MusterWatchOwnedUITests
       gatherCoverageData: false

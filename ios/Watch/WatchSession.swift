@@ -21,6 +21,13 @@ import WatchKit
 
 private let log = Logger(subsystem: "com.muster.companion.watch", category: "stream")
 
+struct WatchCallContext: Equatable {
+    let sessionId: UUID
+    let viewId: UUID
+    let botId: String
+    let threadId: String
+}
+
 @MainActor
 final class WatchSession: ObservableObject {
     enum Status: Equatable {
@@ -37,6 +44,9 @@ final class WatchSession: ObservableObject {
             approvalCoordinator.reconcile()
             composerCoordinator.reconcile()
             hapticOnFleetChange()
+            if let target = callTarget, state.bot(target.botId)?.threadId != target.threadId {
+                callCoordinator.endImmediately()
+            }
         }
     }
     @Published private(set) var approvalSessionId = UUID()
@@ -48,6 +58,9 @@ final class WatchSession: ObservableObject {
             if status != .live {
                 approvalCoordinator.connectionChanged()
                 composerCoordinator.connectionChanged()
+                if callTarget != nil {
+                    callCoordinator.endImmediately()
+                }
             }
         }
     }
@@ -103,6 +116,8 @@ final class WatchSession: ObservableObject {
             approvalSessionId = UUID()
             approvalCoordinator.bind(sessionId: approvalSessionId, transport: client)
             composerCoordinator.bind(sessionId: approvalSessionId, transport: client)
+            callTarget = nil
+            callCoordinator.bind(sessionId: approvalSessionId, transport: client)
         }
     }
     private var pairingGeneration = 0
@@ -117,6 +132,55 @@ final class WatchSession: ObservableObject {
         changed: { [weak self] in self?.composerDrafts = $0 },
         unauthorized: { [weak self] in self?.status = .unauthorized }
     )
+    private var callForeground = false
+    private var callTarget: WatchCallContext?
+    private lazy var callCoordinator = ForegroundCallCoordinator(changed: { [weak self] in
+        self?.objectWillChange.send()
+    })
+    var callPhase: ForegroundCallCoordinator.Phase { callCoordinator.phase }
+    var callRecord: ForegroundCallRecord? { callCoordinator.call }
+    var callNotice: String? { callCoordinator.notice }
+    var callPendingRequestId: String? { callCoordinator.pendingRequestId }
+    var callCanDismissUnknown: Bool { callCoordinator.canDismissUnknown }
+    var callEndRequested: Bool { callCoordinator.hasRequestedEnd }
+
+    func makeCallContext(botId: String, threadId: String) -> WatchCallContext {
+        WatchCallContext(sessionId: approvalSessionId, viewId: UUID(), botId: botId, threadId: threadId)
+    }
+    func callMatches(_ context: WatchCallContext) -> Bool {
+        context.sessionId == approvalSessionId && callTarget == context
+    }
+    func beginCall(_ context: WatchCallContext) async {
+        guard context.sessionId == approvalSessionId, callForeground, status == .live,
+              state.bot(context.botId)?.threadId == context.threadId,
+              state.bot(context.botId)?.busy != true, [.idle, .ended].contains(callPhase) else { return }
+        callTarget = context
+        await callCoordinator.begin(botId: context.botId, threadId: context.threadId)
+    }
+    private func callContextAvailable(_ context: WatchCallContext) -> Bool {
+        callMatches(context) && callForeground && status == .live && state.bot(context.botId)?.threadId == context.threadId
+    }
+    func acceptCall(_ context: WatchCallContext) async {
+        guard callContextAvailable(context) else { return }
+        await callCoordinator.accept()
+    }
+    func sendCall(_ text: String, context: WatchCallContext) async {
+        guard callContextAvailable(context) else { return }
+        await callCoordinator.send(text)
+    }
+    func pollCall(_ context: WatchCallContext) async {
+        guard callContextAvailable(context) else { return }
+        await callCoordinator.poll()
+    }
+    func endCallImmediately(_ context: WatchCallContext) {
+        guard callMatches(context) else { return }
+        callCoordinator.endImmediately()
+    }
+    func dismissUnknownCall(_ context: WatchCallContext) {
+        guard callMatches(context) else { return }
+        callCoordinator.dismissUnknownCall()
+    }
+
     private var streamTask: Task<Void, Never>?
     /// Identifies the task currently stored in `streamTask`. A cancelled task
     /// can finish after its replacement starts; its cleanup must not clear
@@ -246,6 +310,8 @@ final class WatchSession: ObservableObject {
     func setForeground(_ active: Bool) {
         approvalCoordinator.setForeground(active)
         composerCoordinator.setForeground(active)
+        callForeground = active
+        callCoordinator.setForegroundImmediately(active)
     }
 
     private func currentStream(_ identity: UUID, _ generation: Int) -> Bool {

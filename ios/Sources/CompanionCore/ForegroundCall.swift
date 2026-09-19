@@ -45,6 +45,9 @@ public final class ForegroundCallCoordinator {
     private var operation = 0
     private var busy = false
     private var endingRequested = false
+    public var hasRequestedEnd: Bool { endingRequested }
+    private var endTask: Task<Void, Never>?
+    public private(set) var canDismissUnknown = false
     private var identity: (bot: String, thread: String, id: String, capability: String)?
     private let changed: @MainActor () -> Void
 
@@ -52,18 +55,36 @@ public final class ForegroundCallCoordinator {
 
     public func bind(sessionId: UUID, transport: (any ForegroundCallTransport)?) {
         // Best-effort cleanup uses the OLD transport and capability only.
-        if let old = identity, let previous = self.transport {
+        if !(endingRequested && busy), let old = identity, let previous = self.transport {
             Task { _ = try? await previous.endCall(botId: old.bot, callId: old.id, capability: old.capability) }
         }
         generation += 1; operation += 1; busy = false
         self.sessionId = sessionId; self.transport = transport
-        identity = nil; call = nil; pendingRequestId = nil; notice = nil; endingRequested = false; phase = .idle
+        identity = nil; call = nil; pendingRequestId = nil; notice = nil; endingRequested = false; endTask = nil; canDismissUnknown = false; phase = .idle
         changed()
     }
 
-    public func setForeground(_ active: Bool) async {
+    /// Synchronous lifecycle fence for scene callbacks; a queued background
+    /// task must never end a replacement call after foregrounding or rebinding.
+    public func setForegroundImmediately(_ active: Bool) {
         foreground = active
-        if !active { await end() }
+        if !active { _ = startEnding() }
+    }
+
+    public func setForeground(_ active: Bool) async {
+        setForegroundImmediately(active)
+        if !active { await endTask?.value }
+    }
+
+    /// A host 404 cannot prove prior work stopped. Explicit local dismissal
+    /// releases the lost capability without recreating or replaying anything.
+    public func dismissUnknownCall() {
+        guard canDismissUnknown, !busy, phase == .uncertain else { return }
+        generation += 1; operation += 1
+        identity = nil; call = nil; pendingRequestId = nil; endTask = nil
+        endingRequested = false; canDismissUnknown = false; phase = .ended
+        notice = "Disconnected locally. Previous work may still be running."
+        changed()
     }
 
     public func begin(botId: String, threadId: String) async {
@@ -98,12 +119,26 @@ public final class ForegroundCallCoordinator {
         await perform { try await transport.readCall(botId: current.bot, callId: current.id, capability: current.capability) }
     }
 
-    public func end() async {
-        guard let current = identity, let transport else { return }
-        // Invalidate a pending begin/accept/send/read before the network await.
+    public func endImmediately() { _ = startEnding() }
+
+    public func end() async { await startEnding()?.value }
+
+    private func startEnding() -> Task<Void, Never>? {
+        if let endTask { return endTask }
+        guard let current = identity, let transport else { return nil }
+        // Invalidate a pending begin/accept/send/read before scheduling work.
         generation += 1; operation += 1; busy = false; endingRequested = true
+        let version = generation
         phase = .ending; notice = nil; changed()
-        await perform(ending: true) { try await transport.endCall(botId: current.bot, callId: current.id, capability: current.capability) }
+        let task = Task { @MainActor in
+            guard self.generation == version else { return }
+            await self.perform(ending: true) {
+                try await transport.endCall(botId: current.bot, callId: current.id, capability: current.capability)
+            }
+            if self.generation == version { self.endTask = nil }
+        }
+        endTask = task
+        return task
     }
 
     private func perform(ending: Bool = false, _ request: () async throws -> ForegroundCallRecord) async {
@@ -132,6 +167,7 @@ public final class ForegroundCallCoordinator {
             if let previous = call, previous.revision == result.revision, previous != result {
                 phase = .uncertain; notice = "The call status changed unexpectedly. Check again or end the call."; return
             }
+            canDismissUnknown = false
             call = result
             switch result.state {
             case .ringing: phase = .ringing
@@ -142,6 +178,7 @@ public final class ForegroundCallCoordinator {
         } catch {
             guard generation == version, operation == op else { return }
             phase = .uncertain
+            if case APIError.status(code: 404, message: _) = error { canDismissUnknown = true }
             notice = ending ? "Couldn't confirm the call ended. The host may still be working. Try End again."
                 : "Couldn't confirm the call status. Check again before sending more work."
         }

@@ -7,16 +7,19 @@ private actor CallFixture: ForegroundCallTransport {
     var record: ForegroundCallRecord?
     var heldAction: String?
     var failureAction: String?
-    private var held: CheckedContinuation<ForegroundCallRecord, Error>?
+    var notFoundAction: String?
+    private var held: [CheckedContinuation<ForegroundCallRecord, Error>] = []
     func hold(_ action: String) { heldAction = action }
     func fail(_ action: String?) { failureAction = action }
-    func resolve(_ result: ForegroundCallRecord) { held?.resume(returning: result); held = nil }
+    func missing(_ action: String?) { notFoundAction = action }
+    func resolve(_ result: ForegroundCallRecord) { let pending = held; held = []; pending.forEach { $0.resume(returning: result) } }
     func replace(_ value: ForegroundCallRecord) { record = value }
     func value() -> ForegroundCallRecord { record! }
     private func run(_ action: String, capability: String, requestId: String? = nil, text: String? = nil) async throws -> ForegroundCallRecord {
         requests.append(.init(action: action, capability: capability, requestId: requestId, text: text))
         if failureAction == action { throw URLError(.networkConnectionLost) }
-        if heldAction == action { return try await withCheckedThrowingContinuation { held = $0 } }
+        if notFoundAction == action { throw APIError.status(code: 404, message: nil) }
+        if heldAction == action { return try await withCheckedThrowingContinuation { held.append($0) } }
         return record!
     }
     func beginCall(botId: String, threadId: String, requestId: String, capability: String) async throws -> ForegroundCallRecord {
@@ -145,6 +148,68 @@ final class ForegroundCallTests: XCTestCase {
         await t.replace(await t.changed(turn: other)); await c.poll(); await c.send("new plan")
         XCTAssertEqual(c.pendingRequestId, pending)
         let calls = await t.requests; XCTAssertEqual(calls.filter { $0.action == "send" }.count, 1)
+    }
+
+    func testConcurrentEndSubmissionsShareOneTransportRequest() async {
+        let (c,t) = await connected(); await t.hold("end")
+        let first = Task { await c.end() }; await t.wait("end")
+        let second = Task { await c.end() }
+        for _ in 0..<100 { await Task.yield() }
+        let calls = await t.requests
+        XCTAssertEqual(calls.filter { $0.action == "end" }.count, 1)
+        await t.resolve(await t.value())
+        await first.value; await second.value
+        XCTAssertEqual(c.phase, .ended)
+    }
+
+    func testMissingHostCallNeedsExplicitLocalDismissalBeforeNewCall() async {
+        let (c,t) = await connected(); await t.missing("read"); await c.poll()
+        XCTAssertEqual(c.phase, .uncertain); XCTAssertTrue(c.canDismissUnknown)
+        await c.begin(botId: "bot", threadId: "thread")
+        let before = await t.requests; XCTAssertEqual(before.filter { $0.action == "begin" }.count, 1)
+        c.dismissUnknownCall()
+        XCTAssertEqual(c.phase, .ended); XCTAssertNil(c.call); XCTAssertNil(c.pendingRequestId)
+        XCTAssertTrue(c.notice!.contains("may still be running"))
+        let dismissed = await t.requests; XCTAssertEqual(dismissed.count, before.count)
+        await c.begin(botId: "bot", threadId: "thread")
+        let after = await t.requests; XCTAssertEqual(after.filter { $0.action == "begin" }.count, 2)
+        XCTAssertNotEqual(after.first?.capability, after.last?.capability)
+    }
+    func testNetworkUncertaintyCannotBeDismissedAsMissingCall() async {
+        let (c,t) = await connected(); await t.fail("read"); await c.poll()
+        XCTAssertFalse(c.canDismissUnknown); c.dismissUnknownCall()
+        XCTAssertEqual(c.phase, .uncertain); XCTAssertNotNil(c.call)
+    }
+    func testForegroundFenceIsImmediateAndCannotEndReboundAccount() async {
+        let (c,t) = await connected()
+        c.setForegroundImmediately(false)
+        XCTAssertEqual(c.phase, .ending)
+        let next = CallFixture(); c.bind(sessionId: UUID(), transport: next)
+        c.setForegroundImmediately(true)
+        await c.begin(botId: "new-bot", threadId: "new-thread")
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(c.phase, .ringing); XCTAssertEqual(c.call?.botId, "new-bot")
+        let calls = await next.requests; XCTAssertEqual(calls.map(\.action), ["begin"])
+        let old = await t.requests; XCTAssertEqual(old.filter { $0.action == "end" }.count, 1)
+    }
+    func testQuickForegroundResumeStillEndsCapturedCallOnce() async {
+        let (c,t) = await connected()
+        c.setForegroundImmediately(false); c.setForegroundImmediately(true)
+        await c.end()
+        XCTAssertEqual(c.phase, .ended)
+        let calls = await t.requests; XCTAssertEqual(calls.filter { $0.action == "end" }.count, 1)
+    }
+
+    func testAccountChangeDoesNotDuplicateAnEndAlreadyOnTheTransport() async {
+        let (c,t) = await connected(); await t.hold("end")
+        c.endImmediately(); await t.wait("end")
+        let receipt = await t.value()
+        c.bind(sessionId: UUID(), transport: CallFixture())
+        for _ in 0..<100 { await Task.yield() }
+        let calls = await t.requests; XCTAssertEqual(calls.filter { $0.action == "end" }.count, 1)
+        await t.resolve(receipt)
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(c.phase, .idle); XCTAssertNil(c.call)
     }
 
 }
