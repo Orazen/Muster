@@ -114,7 +114,7 @@ electron/preload.cjs`. iOS/Watch: `cd ios && swift test`, then
 |---|---|
 | Windows/Linux 1.12.3 release legs | GitHub Actions billing |
 | macOS notarized release leg | `APPLE_CERTIFICATE` (Developer ID) secret |
-| Web mirror promotion of 1.12.3 + HEAD-fix redeploy | VPS SSH `173.249.38.101` + deploy trigger |
+| Web mirror promotion of 1.12.3 + HEAD-fix redeploy | VPS SSH via the repo's `VPS_HOST` secret (address not written in docs) + deploy trigger |
 | TestFlight iOS review | Apple |
 | Full Mimosa security re-run | Owner-directed; no security claims before it |
 | Physical-device widget/Live-Activity acceptance | Needs hardware |

@@ -738,9 +738,13 @@ jobs:
       - name: Deploy to VPS
         env:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          VPS_HOST: ${{ secrets.VPS_HOST || '173.249.38.101' }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
           set -euo pipefail
+          # The deploy target comes only from the VPS_HOST secret — never a
+          # fallback literal — so a missing secret fails loudly instead of
+          # pointing at an address baked into a public repo.
+          test -n "$VPS_HOST" || { echo "::error::VPS_HOST secret is required for mirror deploy"; exit 1; }
           # Recheck remote state immediately before any remote mutation.
           node scripts/release-state.mjs assert-published
           test -s artifacts/mirror-files.txt

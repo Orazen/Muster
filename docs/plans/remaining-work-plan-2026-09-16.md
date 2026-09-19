@@ -59,7 +59,7 @@ These are hard stops, not tasks.
    replaced with a Developer ID `.p12` export, and a new
    `APPLE_SIGNING_IDENTITY` secret set to the full
    `Developer ID Application: THARUN RAMAGIRI (7375K23WFU)` string.
-3. **SSH to `173.249.38.101` is refused for every key on this machine.** The
+3. **SSH to the VPS (`VPS_HOST` secret) is refused for every key on this machine.** The
    mirror promotion step needs working access plus the `VPS_SSH_KEY` secret.
    Read-only probing was stopped rather than guessed at.
 4. **Apple Beta App Review.** Build 1 sits at `WAITING_FOR_BETA_REVIEW`; the
@@ -286,7 +286,7 @@ may shift as work lands.
    route exists server-side; a signed-in web redemption surface is proposed.
 8. **Release legs (blocked, owner gates).** Windows/Linux 1.12.3: Actions
    billing. macOS signing/notarization: `APPLE_CERTIFICATE` (Developer ID)
-   secret. Mirror promotion: VPS SSH to 173.249.38.101. TestFlight: awaiting
+   secret. Mirror promotion: VPS SSH to the host named in the repo's `VPS_HOST` secret. TestFlight: awaiting
    Apple review. Full Mimosa re-run: required before any security claim.
    Local 1.12.3 CLI bundle verified to exist (`release/muster-cli.mjs`); no
    notarized DMG claim is made.
