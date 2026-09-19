@@ -14,7 +14,7 @@
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 
 import { bearerToken, type DeviceAccess } from "./devices.ts";
-import { denyReason, isCloudDesktopJoin } from "./routes.ts";
+import { denyReason, isCloudDesktopJoin, isForegroundCallRoute } from "./routes.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
 /** Decoded JSON, mirroring the harness's schema.ts contract. */
@@ -120,6 +120,7 @@ type ForwardedHeaders = {
   accept: string;
   "content-type"?: string;
   "last-event-id"?: string;
+  "x-muster-call-token"?: string;
 };
 
 const forwardHeaders = (req: IncomingMessage): ForwardedHeaders => {
@@ -130,6 +131,10 @@ const forwardHeaders = (req: IncomingMessage): ForwardedHeaders => {
   // would turn every resume into a full re-hydration, silently.
   const lastEventId = req.headers["last-event-id"];
   if (lastEventId) out["last-event-id"] = String(lastEventId);
+  if (isForegroundCallRoute(req.method ?? "GET", (req.url ?? "/").split("?")[0])) {
+    const callToken = req.headers["x-muster-call-token"];
+    if (!Array.isArray(callToken) && callToken && /^[0-9a-f]{64}$/.test(callToken)) out["x-muster-call-token"] = callToken;
+  }
   return out;
 };
 

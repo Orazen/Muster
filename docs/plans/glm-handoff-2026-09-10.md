@@ -3415,3 +3415,24 @@ Fresh gates: **309files/4556passed/8skipped/0failed**, lifecycle **14/14**, upda
 verified; foreign listener saw **0 renderer requests** after the fix. This is source
 work, not an installed update or production deployment. Remaining beta gates are
 unchanged; next continue Watch foreground calling and native acceptance.
+
+### Loop139 — foreground call foundation
+
+Implemented explicit ring/accept/message/end calls through the normal runner,
+scoped ephemeral capabilities, request idempotency, foreground lease expiry,
+exact-dispatch cancellation, companion full-access gating, and Swift client/
+coordinator. Selected-provider-only calls avoid untracked fallback chains.
+No Watch UI/audio or installed/production delivery claim.
+
+Gates: **313 files /4632 passed /8 skipped /0 failed** (485.90s; previous
+309/4556/8, +76 passing tests); browser **39/39**; real host call harness **3/3**;
+Swift **370/370**; Watch/Companion/Widget simulator builds **3/3**; packaged
+server **14/14**; Electron lifecycle/updater **28/28**; broker **2/2**. Both
+typechecks, full lint, Electron syntax and diff check passed. See
+`docs/audits/foreground-call-foundation-2026-09-19.md` for boundaries and logs.
+
+GitHub CI for f5907bd passed. Dependabot0 open; historical secret alert1 remains
+open/validity unknown. Production still returned old backend/web identities,
+so deployment is unverified. Next: connect Watch foreground views/session and
+explicit daily planning; real iPhone/Watch/Google/Drive/tester-day gates remain.
+Existing automation remains paused.

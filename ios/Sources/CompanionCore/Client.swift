@@ -40,7 +40,7 @@ public enum APIError: Error, LocalizedError, Sendable {
     }
 }
 
-public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport, ApprovalTransport {
+public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport, ApprovalTransport, ForegroundCallTransport {
     public let connection: Connection
     private let token: String?
     private let session: URLSession
@@ -212,6 +212,42 @@ public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport, A
         let (data, response) = try await perform(imageRequest)
         try Self.check(response, data)
         return data
+    }
+
+    // MARK: - Foreground calls
+
+    private struct CallEnvelope: Decodable { let call: ForegroundCallRecord }
+    private func callRequest(_ method: String, botId: String, callId: String? = nil, action: String = "",
+                             capability: String, body: [String: Any]? = nil) throws -> URLRequest {
+        guard !botId.isEmpty, botId.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95 }),
+              callId.map({ UUID(uuidString: $0) != nil }) ?? true,
+              capability.utf8.count == 64, capability.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { throw APIError.badURL }
+        let path = "/api/bots/\(botId)/calls" + (callId.map { "/\($0)" } ?? "") + action
+        var request = try makeRequest(method, path, body: body)
+        request.setValue(capability, forHTTPHeaderField: "X-Muster-Call-Token")
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        return request
+    }
+    public func beginCall(botId: String, threadId: String, requestId: String, capability: String) async throws -> ForegroundCallRecord {
+        guard UUID(uuidString: requestId) != nil, !threadId.isEmpty else { throw APIError.badURL }
+        return try await send(try callRequest("POST", botId: botId, capability: capability,
+            body: ["requestId": requestId, "threadId": threadId]), as: CallEnvelope.self).call
+    }
+    public func readCall(botId: String, callId: String, capability: String) async throws -> ForegroundCallRecord {
+        try await send(try callRequest("GET", botId: botId, callId: callId, capability: capability), as: CallEnvelope.self).call
+    }
+    public func acceptCall(botId: String, callId: String, capability: String) async throws -> ForegroundCallRecord {
+        try await send(try callRequest("POST", botId: botId, callId: callId, action: "/accept", capability: capability, body: [:]), as: CallEnvelope.self).call
+    }
+    public func sendCallMessage(botId: String, callId: String, requestId: String, text: String, capability: String) async throws -> ForegroundCallRecord {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard UUID(uuidString: requestId) != nil, !normalized.isEmpty, normalized.utf16.count <= 8000 else { throw APIError.badURL }
+        return try await send(try callRequest("POST", botId: botId, callId: callId, action: "/messages", capability: capability,
+            body: ["requestId": requestId, "text": normalized]), as: CallEnvelope.self).call
+    }
+    public func endCall(botId: String, callId: String, capability: String) async throws -> ForegroundCallRecord {
+        try await send(try callRequest("POST", botId: botId, callId: callId, action: "/end", capability: capability, body: [:]), as: CallEnvelope.self).call
     }
 
     // MARK: - Doing

@@ -1,3 +1,6 @@
+import { ForegroundCallRegistry, type CallDispatch } from "./foreground-call.ts";
+import { ForegroundCallDispatchTracker } from "./foreground-call-dispatch.ts";
+import { handleForegroundCallRoute } from "./foreground-call-routes.ts";
 import { createBuildDiagnostics } from "./build-identity.ts";
 // Muster server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
@@ -354,6 +357,14 @@ const cfg = loadConfig();
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 await registry.load(instanceConfigs(cfg));
 
+const foregroundCallDispatch = new ForegroundCallDispatchTracker((lease) => peerCapabilities.current(lease));
+const foregroundCalls = new ForegroundCallRegistry({ dispatch: dispatchForegroundCall });
+const foregroundCallSweep = setInterval(() => {
+  void foregroundCalls.sweep();
+  foregroundCallDispatch.sweep();
+}, 5_000);
+foregroundCallSweep.unref();
+
 const bus = new EventBus();
 bus.attach(registry.instances());
 
@@ -368,6 +379,7 @@ const stopCleanupDurability = stopCleanupJournal();
 const stopCleanups = new StopCleanupRegistry(Date.now, 24 * 60 * 60_000, stopCleanupDurability);
 const settledPeerEvents = new WeakSet<RuntimeEvent>();
 bus.subscribe((event) => {
+  foregroundCallDispatch.onEvent(event);
   connectorCapabilities.onEvent(event);
   if (peerCapabilities.onEvent(event)) settledPeerEvents.add(event);
 });
@@ -1971,10 +1983,27 @@ async function finalScreenFrame(botId: string): Promise<Frame | null> {
 }
 
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
+async function dispatchForegroundCall(call: CallDispatch) {
+  const allowed = () => {
+    const bot = store.bot(call.botId);
+    return Boolean(call.isValid() && bot && peerOwnerOf(bot) === call.ownerId && bot.threadId === call.threadId);
+  };
+  if (!allowed()) { call.update({ state: "failed", error: "Conversation is no longer available." }); return; }
+  try {
+    await startTurn(call.botId, call.text, {
+      threadId: call.threadId, foregroundCall: call, peerGuard: allowed,
+      onDispatchError: (_message, uncertain) => call.update({ state: uncertain ? "uncertain" : "failed", error: "Dispatch failed." }),
+    });
+  } catch {
+    call.update({ state: "failed", error: "The message could not start." });
+  }
+}
+
 async function startTurn(
   botId: string,
   text: string,
   opts?: {
+    foregroundCall?: CallDispatch;
     commsDepth?: number;
     userMessage?: Message;
     /** Routines run in detached tasks; pin the destination for the whole turn. */
@@ -2041,6 +2070,7 @@ async function startTurn(
   store.setActivity(bot.id, "working");
   let dispatchLease: PeerLease | undefined;
   let connectorLease: ConnectorLease | undefined;
+  let callProvider: ReturnType<typeof registry.get>;
   /** Pre-dispatch failure: this turn never reached a driver, so release
    * the busy claim before propagating — otherwise the bot is stuck working
    * with no turn running and nothing will ever settle it.
@@ -2051,7 +2081,10 @@ async function startTurn(
    * explicitly typed. */
   const fail: (err: Error) => never = (err) => {
     const current = peerCapabilities.forBot(bot.id);
-    if (dispatchLease) peerCapabilities.revoke(dispatchLease);
+    if (dispatchLease) {
+      foregroundCallDispatch.fail(dispatchLease, false);
+      peerCapabilities.revoke(dispatchLease);
+    }
     if (connectorLease) connectorCapabilities.revoke(connectorLease);
     if (!current || current === dispatchLease) store.setActivity(bot.id, "idle");
     throw err;
@@ -2117,6 +2150,20 @@ async function startTurn(
         fail(cause instanceof Error ? cause : new Error(String(cause)));
       }
     }
+  }
+  if (opts?.foregroundCall) {
+    const call = opts.foregroundCall;
+    foregroundCallDispatch.attach(lease, call);
+    call.update({ messageId: userMessage.id });
+    call.setCancel(async () => {
+      // Capture and revoke only this dispatch before any interruption awaits.
+      // A subsequent task must never be cancelled by an old call capability.
+      if (peerCapabilities.forBot(bot.id) !== lease) return;
+      peerCapabilities.revoke(lease);
+      if (connectorLease) connectorCapabilities.revoke(connectorLease);
+      foregroundCallDispatch.forget(lease);
+      if (callProvider) await callProvider.adapter.interruptTurn(threadId);
+    });
   }
   /** Same release-the-claim contract as fail(), but the refusal is also
    * written into the thread as an activity entry — visible next to the
@@ -2591,9 +2638,13 @@ async function startTurn(
       if (connectorLease && !connectorLeaseValid(connectorLease)) throw new Error("connected apps are no longer authorized");
       const peerToken = peerCapabilities.activate(lease, instanceId, canUsePeers);
       if (peerToken) integrations.agents = agentsIntegration(lease, peerToken);
-      if (!opts?.connectorContinuation && !opts?.automationSource && !opts?.commsDepth && !opts?.unattended && bot.ownerId && userInstanceOwner(instanceId) === bot.ownerId && threadId === bot.threadId) {
+      if (!opts?.foregroundCall && !opts?.connectorContinuation && !opts?.automationSource && !opts?.commsDepth && !opts?.unattended && bot.ownerId && userInstanceOwner(instanceId) === bot.ownerId && threadId === bot.threadId) {
         providerFallback.begin({ botId: bot.id, threadId, ownerId: bot.ownerId,
           instanceId, model: bot.modelSelection.model, latestUserId: userMessage.id, text });
+      }
+      if (opts?.foregroundCall) {
+        callProvider = instance;
+        foregroundCallDispatch.activate(lease, instanceId);
       }
       driverInvoked = true;
       const dispatched = await instance.adapter.sendTurn({
@@ -2660,6 +2711,7 @@ async function startTurn(
       if (dispatched.turnId && !opts?.fallbackSelection) providerFallback.bindTurn(bot.id, threadId, instanceId, dispatched.turnId);
       peerCapabilities.bindTurn(lease, instanceId, dispatched.turnId);
       if (connectorLease) connectorCapabilities.bindTurn(connectorLease, instanceId, dispatched.turnId);
+      if (opts?.foregroundCall && dispatched.turnId) foregroundCallDispatch.bindTurn(lease, instanceId, dispatched.turnId);
       opts?.onDispatched?.();
       // dispatched: the rewind is spent, and the old cursors are dead
       if (rewound) store.patchBot(bot.id, { rewound: false, resumeCursors: {} });
@@ -2674,6 +2726,7 @@ async function startTurn(
       }
     } catch (e) {
       const currentLease = peerCapabilities.forBot(bot.id);
+      if (opts?.foregroundCall) foregroundCallDispatch.fail(lease, driverInvoked);
       peerCapabilities.revoke(lease);
       if (connectorLease) connectorCapabilities.revoke(connectorLease);
       // A late setup rejection belongs to this lease, never a replacement.
@@ -4845,6 +4898,26 @@ let requestUserEmail = "";
         const g = store.groupByThread?.(m2[1]);
         if ((b && !ownsRecord(b)) || (g && !ownsRecord(g))) return json(res, 404, { error: "no such conversation" });
       }
+    }
+
+    if (/^\/api\/bots\/[\w-]+\/calls(?:\/|$)/.test(path)) {
+      const accountHeaders = new Headers();
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (value !== undefined) accountHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
+      }
+      const remote = req.socket.remoteAddress ?? "";
+      if (await handleForegroundCallRoute(req, res, method, path, {
+        registry: foregroundCalls, origin: requestOrigin(req),
+        allowOriginless: !SELF_HOSTED && (remote === "::1" || remote === "::ffff:127.0.0.1" || remote.startsWith("127.")),
+        authorizeBot: async (botId) => {
+          if (SELF_HOSTED) {
+            const session = await auth.api.getSession({ headers: accountHeaders });
+            if (!session || session.user.id !== requestUserId) return null;
+          }
+          const bot = store.bot(botId);
+          return bot && ownsRecord(bot) ? { ownerId: peerOwnerOf(bot), threadId: bot.threadId } : null;
+        },
+      })) return;
     }
 
     // ── per-account onboarding gate (server/onboarding-gate.ts) ────────

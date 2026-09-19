@@ -50,6 +50,18 @@ export function isCloudDesktopJoin(method: string, path: string): boolean {
   return method === CLOUD_DESKTOP_JOIN_ROUTE.method && CLOUD_DESKTOP_JOIN_ROUTE.path.test(path);
 }
 
+/** Foreground calling is deliberately full-access only, including lease reads. */
+const CALL_UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+const CALL_BASE = "^/api/bots/[\\w-]+/calls";
+const FOREGROUND_CALL_ROUTES: ReadonlyArray<{ method: string; path: RegExp }> = [
+  { method: "POST", path: new RegExp(`${CALL_BASE}$`) },
+  { method: "GET", path: new RegExp(`${CALL_BASE}/${CALL_UUID}$`) },
+  { method: "POST", path: new RegExp(`${CALL_BASE}/${CALL_UUID}/(?:accept|messages|end)$`) },
+];
+export function isForegroundCallRoute(method: string, path: string): boolean {
+  return FOREGROUND_CALL_ROUTES.some(route => route.method === method && route.path.test(path));
+}
+
 /** Every request the iOS app makes, and nothing else.
  *
  * Ids are `[\w-]+`, matching the harness's own route patterns. The paths
@@ -57,6 +69,7 @@ export function isCloudDesktopJoin(method: string, path: string): boolean {
  * fails to match and is denied rather than forwarded — the failure mode of
  * a strict pattern is a closed door, which is the one to have. */
 const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
+  ...FOREGROUND_CALL_ROUTES,
   // liveness — not used by the app, but it is the first thing anyone curls
   // when pairing will not work, and it discloses nothing
   { method: "GET", path: /^\/api\/health$/ },
@@ -122,6 +135,7 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
  * anything that costs a turn.
  */
 const NEW_WORK: ReadonlyArray<{ method: string; path: RegExp }> = [
+  ...FOREGROUND_CALL_ROUTES,
   { method: "POST", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/interrupt$/ },

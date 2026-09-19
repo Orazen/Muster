@@ -4,7 +4,7 @@
 // about the seam between the two. This file is the opposite: a harness stub
 // that can be made to return exactly the pathological body a test needs,
 // which is the only way to reach the failure branches below.
-import { createServer, type Server, type ServerResponse } from "node:http";
+import { createServer, type Server, type ServerResponse, type IncomingHttpHeaders } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createProxyHandler } from "../src/proxy.ts";
@@ -24,6 +24,9 @@ let harness: Server;
 let sidecar: Server;
 let sidecarPort = 0;
 let cloudDesktopAccess = true;
+let deviceAccess: "full" | "approvals" = "full";
+let forwardedHeaders: IncomingHttpHeaders = {};
+let forwardedRequests = 0;
 /** What the stub harness answers with next. Set per test. */
 let respond: (res: ServerResponse) => void = (res) => res.end();
 
@@ -45,13 +48,13 @@ const device = async (path = "/api/bots", method = "GET"): Promise<{ status: num
 };
 
 beforeAll(async () => {
-  harness = createServer((_req, res) => respond(res));
+  harness = createServer((req, res) => { forwardedHeaders = req.headers; forwardedRequests++; respond(res); });
   const harnessPort = await listen(harness);
 
   sidecar = createServer(
     createProxyHandler({
       harnessPort,
-      authenticate: (t) => (t === TOKEN ? { access: "full" as const, cloudDesktopAccess } : null),
+      authenticate: (t) => (t === TOKEN ? { access: deviceAccess, cloudDesktopAccess } : null),
       redeem: () => ({ error: "not used here" }),
       serverName: () => "Test computer",
     }),
@@ -153,5 +156,60 @@ describe("preparing a harness response for a device", () => {
     expect(status).toBe(200);
     expect(JSON.parse(text)).toEqual({ bots: [{ id: "b1" }] });
     expect(text).not.toContain("cursor-value");
+  });
+});
+
+
+describe("foreground call capability forwarding", () => {
+  const call = "/api/bots/b1/calls/00000000-0000-4000-8000-000000000001";
+  const capability = "c".repeat(64);
+  it.each([
+    ["POST", "/api/bots/b1/calls"], ["GET", call], ["POST", `${call}/accept`],
+    ["POST", `${call}/messages`], ["POST", `${call}/end`],
+  ])("forwards the capability only on full-device %s %s", async (method, path) => {
+    respond = res => { res.writeHead(200, { "content-type": "application/json" }); res.end("{}"); };
+    const before = forwardedRequests;
+    const response = await fetch(`http://127.0.0.1:${sidecarPort}${path}`, {
+      method, headers: { authorization: `Bearer ${TOKEN}`, "x-muster-call-token": capability },
+    });
+    expect(response.status).toBe(200); await response.arrayBuffer();
+    expect(forwardedRequests).toBe(before + 1);
+    expect(forwardedHeaders["x-muster-call-token"]).toBe(capability);
+    expect(forwardedHeaders.authorization).toBeUndefined();
+    expect(forwardedHeaders.origin).toBeUndefined();
+  });
+  it("does not forward the call capability on another allowed API", async () => {
+    respond = res => { res.writeHead(200, { "content-type": "application/json" }); res.end("{}"); };
+    const response = await fetch(`http://127.0.0.1:${sidecarPort}/api/bots`, {
+      headers: { authorization: `Bearer ${TOKEN}`, "x-muster-call-token": capability },
+    });
+    expect(response.status).toBe(200); await response.arrayBuffer();
+    expect(forwardedHeaders["x-muster-call-token"]).toBeUndefined();
+  });
+  it.each(["A".repeat(64), "short", `${capability}, ${capability}`])("does not forward malformed or duplicated capabilities", async value => {
+    const response = await fetch(`http://127.0.0.1:${sidecarPort}${call}`, {
+      headers: { authorization: `Bearer ${TOKEN}`, "x-muster-call-token": value },
+    });
+    expect(response.status).toBe(200); await response.arrayBuffer();
+    expect(forwardedHeaders["x-muster-call-token"]).toBeUndefined();
+  });
+  it("refuses all calls from approvals-only devices before contacting the host", async () => {
+    deviceAccess = "approvals";
+    try {
+      const before = forwardedRequests;
+      for (const [method, path] of [["POST", "/api/bots/b1/calls"], ["GET", call], ["POST", `${call}/accept`], ["POST", `${call}/messages`], ["POST", `${call}/end`]]) {
+        const response = await fetch(`http://127.0.0.1:${sidecarPort}${path}`, { method, headers: { authorization: `Bearer ${TOKEN}`, "x-muster-call-token": capability } });
+        expect(response.status).toBe(403); await response.arrayBuffer();
+      }
+      expect(forwardedRequests).toBe(before);
+    } finally { deviceAccess = "full"; }
+  });
+  it("refuses browser and unpaired call requests without touching upstream", async () => {
+    const before = forwardedRequests;
+    for (const headers of [{ authorization: `Bearer ${TOKEN}`, origin: "https://foreign.test" }, { authorization: "Bearer unknown" }]) {
+      const response = await fetch(`http://127.0.0.1:${sidecarPort}${call}`, { headers });
+      expect([401, 403]).toContain(response.status); await response.arrayBuffer();
+    }
+    expect(forwardedRequests).toBe(before);
   });
 });

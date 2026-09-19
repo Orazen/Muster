@@ -1,6 +1,6 @@
 # Foreground Watch call protocol — implementation contract
 
-Loop137 foundation for the accepted Watch calling journey. Existing pairing and
+Loop139 foundation for the accepted Watch calling journey. Existing pairing and
 bot ownership remain authoritative. This does not enable background incoming
 calls, microphone streaming, device selection, or durable offline execution.
 
@@ -21,7 +21,7 @@ that capability. The proxy forwards this header only on the explicit call family
 - POST `/:callId/messages`: `{requestId, text}`; 1–8000 trimmed characters,
   UUID requestId. Connected only; one turn at a time. Duplicate identity and
   same text returns the original receipt; changed text is409. Never resend an
-  uncertain dispatch automatically. Bot must still be on the captured thread
+  uncertain dispatch automatically. Returns202 with a receipt, not a completed-work claim. Bot must still be on the captured thread
   and idle; this path does not enqueue work behind unrelated work.
 - POST `/:callId/end`: `{}`; invalidate before awaiting exact-turn cancellation.
   Repeated end is harmless. Never interrupt a newer turn or another task.
@@ -32,6 +32,9 @@ States: `ringing | connected | ended`; revision integer, expiresAt Unix ms.
 `starting | working | completed | failed | uncertain | cancelled`.
 Call endReason is a readable string when ended. Reply bounded to16000 characters.
 No raw tokens, provider errors or private transport details in wire errors.
+This foundation uses the selected provider only. Automatic provider fallback is
+excluded until a call can track and cancel an entire fallback chain explicitly.
+Ordinary chat retains its existing consent-based fallback behavior.
 
 The in-memory registry retains idempotency receipts/tombstones for a bounded
 period (maximum200 calls). Active lease45 seconds, refreshed by explicit reads;

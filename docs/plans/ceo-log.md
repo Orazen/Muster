@@ -6377,3 +6377,34 @@ Gates: Vitest309files/4556passed/8skipped/0failed (488.05s); lifecycle14/14 plus
 updater14/14; both types, Electron syntax and lint pass. Detailed receipts and
 failure history: docs/audits/desktop-recovery-2026-09-19.md. No installed app or
 production rollout claim; native/Google/recovery/tester-day gates remain open.
+
+## Loop139 started — foreground Watch call foundation
+
+Parent owns normal-turn integration and verification receipts. Registry agent owns
+foreground-call lifecycle and dispatch tracking modules/tests; route agent owns
+call routes and companion allowlist/proxy/tests; native agent owns CompanionCore
+wire client/coordinator/tests. This foundation does not claim Watch UI, background
+audio or hardware acceptance. Calls use the selected provider only: automatic
+provider fallback is excluded so cancellation remains tied to one exact dispatch.
+Existing services and unrelated changes remain untouched.
+
+### Loop139 — foreground call foundation
+
+Implemented explicit ring/accept/message/end calls through the normal runner,
+scoped ephemeral capabilities, request idempotency, foreground lease expiry,
+exact-dispatch cancellation, companion full-access gating, and Swift client/
+coordinator. Selected-provider-only calls avoid untracked fallback chains.
+No Watch UI/audio or installed/production delivery claim.
+
+Gates: **313 files /4632 passed /8 skipped /0 failed** (485.90s; previous
+309/4556/8, +76 passing tests); browser **39/39**; real host call harness **3/3**;
+Swift **370/370**; Watch/Companion/Widget simulator builds **3/3**; packaged
+server **14/14**; Electron lifecycle/updater **28/28**; broker **2/2**. Both
+typechecks, full lint, Electron syntax and diff check passed. See
+`docs/audits/foreground-call-foundation-2026-09-19.md` for boundaries and logs.
+
+GitHub CI for f5907bd passed. Dependabot0 open; historical secret alert1 remains
+open/validity unknown. Production still returned old backend/web identities,
+so deployment is unverified. Next: connect Watch foreground views/session and
+explicit daily planning; real iPhone/Watch/Google/Drive/tester-day gates remain.
+Existing automation remains paused.

@@ -236,3 +236,22 @@ describe("what it may not", () => {
     }
   });
 });
+
+describe("explicit foreground call surface", () => {
+  const call = "/api/bots/bot_123/calls/00000000-0000-4000-8000-000000000001";
+  it.each([
+    ["POST", "/api/bots/bot_123/calls"], ["GET", call],
+    ["POST", `${call}/accept`], ["POST", `${call}/messages`], ["POST", `${call}/end`],
+  ])("permits only full paired devices for %s %s", (method, path) => {
+    expect(ask(method, path, true, "full")).toBeNull();
+    expect(ask(method, path, true, "approvals")?.status).toBe(403);
+    expect(ask(method, path, false, "full")?.status).toBe(401);
+  });
+  it.each([
+    ["GET", "/api/bots/bot_123/calls"], ["DELETE", call], ["PATCH", call],
+    ["GET", `${call}/messages`], ["POST", `${call}/end/again`],
+    ["POST", "/api/bots/bot%2F123/calls"], ["GET", "/api/bots/bot_123/calls/not-uuid"],
+  ])("refuses unlisted call operation %s %s", (method, path) => {
+    expect(ask(method, path, true, "full")?.status).toBe(404);
+  });
+});
