@@ -1,12 +1,12 @@
 // Acceptance for the account-linked Drive round trip over the real routes:
-// connect (signed single-use state → callback → tokens stored only on the
-// existing Google account row) → encrypted v2 push to the user's Drive
+// connect (opaque single-use state → callback → tokens stored only on the
+// separate Drive grant) → encrypted v2 push to the user's Drive
 // appData → pull restoring a byte-identical bundle. Every file is owned; the
 // child preload refuses outbound connections, so "Google" here is the owned
 // synthetic transport while Muster builds, encrypts, decrypts and restores
 // for real.
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 import { createConnection } from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { disconnectDrive } from "./drive-grants.ts";
 import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
@@ -34,6 +36,10 @@ describe.skipIf(process.platform === "win32")("account-linked Google Drive round
   let url = "";
   let cookie = "";
   let userId = "";
+  const email = `drive-${randomBytes(6).toString("hex")}@example.test`;
+  const password = randomBytes(24).toString("base64url");
+  let loginBefore: ReturnType<typeof googleRow>;
+  let successfulState = "";
 
   const api = (path: string, opts: RequestInit = {}) =>
     fetch(`${url}${path}`, { redirect: "error", signal: AbortSignal.timeout(15_000), ...opts });
@@ -46,6 +52,26 @@ describe.skipIf(process.platform === "win32")("account-linked Google Drive round
         | { accessToken: string | null; refreshToken: string | null; accessTokenExpiresAt: string | null }
         | undefined;
     } finally { db.close(); }
+  };
+  const driveRow = () => {
+    const db = new DatabaseSync(join(dataDirectory, "auth.db"));
+    try { return z.object({ accessToken: z.string(), refreshToken: z.string(), expiresAt: z.number(), googleSub: z.string() }).parse(db.prepare("SELECT * FROM drive_grants WHERE userId = ?").get(userId)); }
+    finally { db.close(); }
+  };
+  const consent = async (patch: { googleSub?: string; scope?: string } = {}) => {
+    const response = await api("/api/workspace/google/connect", { headers: { cookie } });
+    expect(response.status).toBe(200);
+    const target = new URL(z.object({ url: z.string() }).parse(await response.json()).url);
+    const state = target.searchParams.get("state") ?? "";
+    const db = new DatabaseSync(join(dataDirectory, "auth.db"));
+    try {
+      const binding = z.object({ nonce: z.string(), codeVerifier: z.string() }).parse(db.prepare("SELECT nonce, codeVerifier FROM drive_oauth_states WHERE userId = ?").get(userId));
+      transport.setConsent({ nonce: binding.nonce, verifier: binding.codeVerifier, ...patch });
+      expect(target.searchParams.get("nonce")).toBe(binding.nonce);
+      expect(target.searchParams.get("code_challenge")).toBe(createHash("sha256").update(binding.codeVerifier).digest("base64url"));
+      expect(target.searchParams.get("code_challenge_method")).toBe("S256");
+    } finally { db.close(); }
+    return { target, state };
   };
   const expectRedirect = async (path: string, sessionCookie: string) => {
     try {
@@ -88,7 +114,7 @@ describe.skipIf(process.platform === "win32")("account-linked Google Drive round
     // keep their loopback trust, so this user is purely account-scoped).
     const signup = await api("/api/auth/sign-up/email", {
       method: "POST", headers: { "content-type": "application/json", origin: url },
-      body: JSON.stringify({ email: `drive-${randomBytes(6).toString("hex")}@example.test`, password: randomBytes(24).toString("base64url"), name: "Owned Drive Round Trip" }),
+      body: JSON.stringify({ email, password, name: "Owned Drive Round Trip" }),
     });
     expect(signup.status).toBe(200);
     cookie = (signup.headers.getSetCookie?.() ?? []).find((c) => c.startsWith("better-auth.session_token="))?.split(";")[0] ?? "";
@@ -98,19 +124,15 @@ describe.skipIf(process.platform === "win32")("account-linked Google Drive round
     userId = ((await signup.json()) as { user?: { id?: string } }).user?.id ?? "";
     expect(userId).not.toBe("");
 
-    // Mirror the Google-login world: the Drive grant attaches to an EXISTING
-    // google account row. Email signup alone has none — that is the product
-    // contract ("Drive connects to an account, it does not create one") — and
-    // the row's refresh token must be the captured fixture's, exactly as the
-    // callback would store it, or the transport's credential boundary refuses
-    // every later grant.
+    // Login identity exists, but its legacy token must not authorize backup.
     const db = new DatabaseSync(join(dataDirectory, "auth.db"));
     try {
       const now = new Date().toISOString();
       db.prepare(`INSERT INTO account (id,accountId,providerId,userId,accessToken,refreshToken,scope,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)`)
-        .run(randomBytes(16).toString("hex"), randomBytes(16).toString("hex"), "google", userId,
+        .run(randomBytes(16).toString("hex"), transport.googleSubject, "google", userId,
           randomBytes(12).toString("hex"), transport.refreshToken, "https://www.googleapis.com/auth/drive.appdata", now, now);
     } finally { db.close(); }
+    loginBefore = googleRow();
   }, 30_000);
 
   afterAll(async () => {
@@ -139,34 +161,23 @@ describe.skipIf(process.platform === "win32")("account-linked Google Drive round
 
     const authed = await api("/api/workspace/google/status", { headers: { cookie } });
     expect(authed.status).toBe(200);
-    // The Google-login row already carries the refresh token (that is what
-    // sign-in grants), so `connected` is honest before the explicit Drive
-    // consent too — `available` is the gate the Drive connect opens.
-    expect(await authed.json()).toMatchObject({ workspaceBackupAvailable: true, accountDrive: { available: true, connected: true } });
+    // Login credentials alone are never a backup permission.
+    expect(await authed.json()).toMatchObject({ workspaceBackupAvailable: true, accountDrive: { available: true, connected: false } });
   });
 
-  it("connect issues state bound to the requesting account and exchanges it for tokens on that row", async () => {
-    const connect = await api("/api/workspace/google/connect", { headers: { cookie } });
-    expect(connect.status).toBe(200);
-    // SAFETY: the connect endpoint answers {url} — asserted by the URL parse
-    // of the same value immediately after.
-    const { url: consent } = (await connect.json()) as { url: string };
-    const parsed = new URL(consent);
-    expect(parsed.origin + parsed.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
-    expect(parsed.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/drive.appdata");
-    expect(parsed.searchParams.get("redirect_uri")).toBe(`${url}/api/workspace/google/callback`);
-    const state = parsed.searchParams.get("state") ?? "";
-    expect(state.split(".")).toHaveLength(3);
-    expect(state.split(".")[0]).toBe(userId);
-    expect(Number(state.split(".")[1])).toBeGreaterThan(Date.now() - 60_000);
-
+  it("connects with PKCE and signed identity into a separate grant without modifying login credentials", async () => {
+    const { target, state } = await consent(); successfulState = state;
+    expect(target.origin + target.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
+    expect(target.searchParams.get("scope")?.split(" ")).toContain("https://www.googleapis.com/auth/drive.appdata");
+    expect(target.searchParams.get("redirect_uri")).toBe(`${url}/api/workspace/google/callback`);
+    expect(state).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(await expectRedirect(`/api/workspace/google/callback?code=owned-consent-code&state=${encodeURIComponent(state)}`, cookie)).toBe(true);
-    // The exchange must replace the row's tokens — not just re-save what the
-    // seed put there — and persist the access token's expiry.
-    const row = googleRow();
-    expect(row?.refreshToken).toBe(transport.refreshToken);
-    expect(row?.accessToken).toBe(transport.accessToken);
-    expect(row?.accessTokenExpiresAt).not.toBeNull();
+    expect(driveRow()).toMatchObject({ refreshToken: transport.refreshToken, accessToken: transport.accessToken, googleSub: transport.googleSubject });
+    expect(driveRow().expiresAt).toBeGreaterThan(Date.now());
+    expect(googleRow()).toEqual(loginBefore);
+    const before = transport.entries().length;
+    await expectRedirect(`/api/workspace/google/callback?code=replay&state=${encodeURIComponent(successfulState)}`, cookie);
+    expect(operationsSince(before)).toEqual([]);
   });
 
   it("refuses a callback without a session: no state check, no exchange, no token write", async () => {
@@ -183,7 +194,7 @@ describe.skipIf(process.platform === "win32")("account-linked Google Drive round
     expect(await expectRedirect(`/api/workspace/google/callback?code=owned-consent-code&state=${encodeURIComponent(forged)}`, cookie)).toBe(true);
     // The signed-intent check fails before any consent exchange can run.
     expect(operationsSince(before)).toEqual([]);
-    expect(googleRow()?.accessToken).toBe(transport.accessToken);
+    expect(googleRow()).toEqual(loginBefore);
   });
 
   it("pushes the encrypted v2 bundle, reusing the token the exchange stored", async () => {
@@ -225,13 +236,14 @@ describe.skipIf(process.platform === "win32")("account-linked Google Drive round
     // this fix every operation re-refreshed and threw the token away.
     const db = new DatabaseSync(join(dataDirectory, "auth.db"));
     try {
-      db.prepare(`UPDATE "account" SET "accessTokenExpiresAt" = '2020-01-01T00:00:00.000Z' WHERE "userId" = ? AND "providerId" = 'google'`).run(userId);
+      db.prepare("UPDATE drive_grants SET expiresAt = 1 WHERE userId = ?").run(userId);
     } finally { db.close(); }
     const offset = transport.entries().length;
     const push = await api("/api/workspace/google/push", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ passphrase }) });
     expect(push.status).toBe(200);
     expect(operationsSince(offset)).toEqual(["refresh", "list", "upload"]);
-    const expiry = new Date(googleRow()?.accessTokenExpiresAt ?? 0).getTime();
+    const expiry = driveRow().expiresAt;
+    expect(googleRow()).toEqual(loginBefore);
     expect(expiry).toBeGreaterThan(Date.now() + 30 * 60_000);
   });
 
@@ -243,4 +255,66 @@ describe.skipIf(process.platform === "win32")("account-linked Google Drive round
     // The previously staged good bundle must be untouched by the failed pull.
     expect(readFileSync(join(`${dataDirectory}.restore-staging`, "memory", "canary.md"), "utf8")).toBe(readFileSync(memoryCanaryFile, "utf8"));
   });
+  it("does not stage a download after its requesting session is revoked", async () => {
+    const signin = await api("/api/auth/sign-in/email", { method: "POST", headers: { "content-type": "application/json", origin: url }, body: JSON.stringify({ email, password }) });
+    expect(signin.status).toBe(200); await signin.arrayBuffer();
+    const temporary = signin.headers.getSetCookie().find(value => value.startsWith("better-auth.session_token="))?.split(";")[0] ?? "";
+    expect(temporary).not.toBe("");
+    const staged = join(`${dataDirectory}.restore-staging`, "memory", "canary.md");
+    // Distinguish the existing staging tree from the downloaded payload:
+    // a forbidden restage would otherwise write identical bytes unnoticed.
+    writeFileSync(staged, "existing-staging-must-survive-revoked-download", { mode: 0o600 });
+    const before = readFileSync(staged, "utf8");
+    transport.setMode("hold-download");
+    const pulling = api("/api/workspace/google/pull", { method: "POST", headers: { "content-type": "application/json", cookie: temporary }, body: JSON.stringify({ passphrase }) });
+    try {
+      await expect.poll(() => existsSync(transport.heldDownloadPath), { timeout: 5000 }).toBe(true);
+      const signout = await api("/api/auth/sign-out", { method: "POST", headers: { "content-type": "application/json", origin: url, cookie: temporary }, body: "{}" });
+      expect(signout.status).toBe(200); await signout.arrayBuffer();
+    } finally { transport.setMode("ok"); }
+    const response = await pulling;
+    expect(response.status).toBe(502); await response.arrayBuffer();
+    expect(readFileSync(staged, "utf8")).toBe(before);
+  });
+
+  it("binds consent to the exact browser session, not just the account", async () => {
+    const { state } = await consent();
+    const signin = await api("/api/auth/sign-in/email", { method: "POST", headers: { "content-type": "application/json", origin: url }, body: JSON.stringify({ email, password }) });
+    expect(signin.status).toBe(200); await signin.arrayBuffer();
+    const second = signin.headers.getSetCookie().find(value => value.startsWith("better-auth.session_token="))?.split(";")[0] ?? "";
+    expect(second).not.toBe(""); expect(second).not.toBe(cookie);
+    const before = transport.entries().length;
+    await expectRedirect(`/api/workspace/google/callback?code=wrong-session&state=${encodeURIComponent(state)}`, second);
+    expect(operationsSince(before)).toEqual([]);
+    await expectRedirect(`/api/workspace/google/callback?code=correct-session&state=${encodeURIComponent(state)}`, cookie);
+    expect(driveRow().googleSub).toBe(transport.googleSubject);
+    expect(googleRow()).toEqual(loginBefore);
+  });
+
+  it.each([
+    { googleSub: "different-google-subject" },
+    { scope: "openid https://www.googleapis.com/auth/calendar.readonly" },
+  ])("rejects verified but unauthorized Google consent %j", async patch => {
+    const { state } = await consent(patch);
+    await expectRedirect(`/api/workspace/google/callback?code=invalid-grant&state=${encodeURIComponent(state)}`, cookie);
+    const status = await api("/api/workspace/google/status", { headers: { cookie } });
+    expect(await status.json()).toMatchObject({ accountDrive: { connected: false } });
+    expect(googleRow()).toEqual(loginBefore);
+  });
+
+  it("does not restore a revoked grant when an in-flight exchange finishes", async () => {
+    const { state } = await consent();
+    transport.setMode("hold-exchange");
+    const callback = expectRedirect(`/api/workspace/google/callback?code=held&state=${encodeURIComponent(state)}`, cookie);
+    try {
+      await expect.poll(() => existsSync(transport.heldExchangePath), { timeout: 5000 }).toBe(true);
+      const db = new DatabaseSync(join(dataDirectory, "auth.db"));
+      try { disconnectDrive(db, userId); } finally { db.close(); }
+    } finally { transport.setMode("ok"); }
+    await callback;
+    const status = await api("/api/workspace/google/status", { headers: { cookie } });
+    expect(await status.json()).toMatchObject({ accountDrive: { connected: false } });
+    expect(googleRow()).toEqual(loginBefore);
+  });
+
 });

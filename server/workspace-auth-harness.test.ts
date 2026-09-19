@@ -746,12 +746,11 @@ Socket.prototype.connect = blocked;
       const response = await request(shared, "/api/workspace/google/status", "GET", undefined, (role === "primary" ? primary : secondary).cookie);
       // Storage sovereignty (decision 14): a hosted session can connect its
       // OWN Drive, so the capability advertises accountDrive available. This
-      // fixture seeds a connected token row for each account, so connected
-      // reads true. The installation transports stay unavailable behind the
-      // wall.
+      // fixture seeds login tokens only; they are not explicit Drive consent.
+      // The installation transports stay unavailable behind the wall.
       expect({ status: response.status, body: await response.json() }).toEqual({
         status: 200,
-        body: { ...capability(true), accountDrive: { available: true, connected: true } },
+        body: { ...capability(true), accountDrive: { available: true, connected: false } },
       });
       expect(accountState(shared.dataDirectory)).toEqual(before);
       expect(readFileSync(join(shared.dataDirectory, "config.json"), "utf8")).toBe(sharedConfig);

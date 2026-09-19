@@ -2,23 +2,27 @@
  * The real server still builds, encrypts, decrypts and restores its bundles.
  * No Google account, network listener or successful product response is faked.
  */
-import { randomBytes } from "node:crypto";
+import { randomBytes, generateKeyPairSync } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { Socket } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { importPKCS8, SignJWT } from "jose";
 
-const modeSchema = z.enum(["ok", "refresh-error", "list-error", "upload-error", "download-error", "corrupt-download", "hold-download"]);
+const modeSchema = z.enum(["ok", "refresh-error", "list-error", "upload-error", "download-error", "corrupt-download", "hold-download", "hold-exchange"]);
 export type DriveFixtureMode = z.infer<typeof modeSchema>;
-const settingsSchema = z.object({ directory: z.string(), refreshToken: z.string(), clientId: z.string(), clientSecret: z.string(), accessToken: z.string() });
+const settingsSchema = z.object({ directory: z.string(), refreshToken: z.string(), clientId: z.string(), clientSecret: z.string(), accessToken: z.string(), googleSubject: z.string(), privateKey: z.string(), jwk: z.record(z.string(), z.unknown()) });
 const entrySchema = z.object({ operation: z.enum(["refresh", "list", "upload", "download", "exchange"]), mode: modeSchema, credentialsMatch: z.boolean() });
+interface FixtureTokenResponse { access_token: string; refresh_token: string; expires_in: number; id_token?: string; scope?: string; token_type?: string }
 const fixtureFileId = "owned-workspace-file";
 
 /** Its credential values are synthetic and must remain in owned fixture files. */
 export function createWorkspaceDriveFixture(directory: string) {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const settings = { directory, refreshToken: randomBytes(24).toString("hex"), clientId: randomBytes(24).toString("hex"), clientSecret: randomBytes(24).toString("hex"), accessToken: randomBytes(24).toString("hex") };
+  const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const signing = { googleSubject: `owned-google-${randomBytes(12).toString("hex")}`, privateKey: keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), jwk: { ...keys.publicKey.export({ format: "jwk" }), kid: "owned-drive-key", use: "sig", alg: "RS256" } };
+  const settings = { ...signing, directory, refreshToken: randomBytes(24).toString("hex"), clientId: randomBytes(24).toString("hex"), clientSecret: randomBytes(24).toString("hex"), accessToken: randomBytes(24).toString("hex") };
   const settingsPath = join(directory, "settings.json");
   const controlPath = join(directory, "control.json");
   const journalPath = join(directory, "transport.jsonl");
@@ -27,11 +31,17 @@ export function createWorkspaceDriveFixture(directory: string) {
   return {
     preloadPath: fileURLToPath(import.meta.url),
     env: { MUSTER_DRIVE_FIXTURE: settingsPath, GOOGLE_CLIENT_ID: settings.clientId, GOOGLE_CLIENT_SECRET: settings.clientSecret },
+    googleSubject: settings.googleSubject,
+    clientId: settings.clientId,
     refreshToken: settings.refreshToken,
     accessToken: settings.accessToken,
     payloadPath: join(directory, "uploaded-bundle.txt"),
     networkLog: join(directory, "outbound-attempts.txt"),
+    heldExchangePath: join(directory, "exchange-held"),
     heldDownloadPath: join(directory, "download-held"),
+    setConsent(consent: { nonce: string; verifier: string; googleSub?: string; scope?: string }) {
+      writeFileSync(join(directory, "consent.json"), JSON.stringify(consent), { mode: 0o600 });
+    },
     setMode(mode: DriveFixtureMode) { writeFileSync(controlPath, JSON.stringify({ mode }), { mode: 0o600 }); },
     entries() {
       return existsSync(journalPath) ? readFileSync(journalPath, "utf8").trim().split("\n").filter(Boolean).map((line) => entrySchema.parse(JSON.parse(line))) : [];
@@ -57,22 +67,45 @@ function installTransport(settingsPath: string): void {
     const request = new Request(input, init);
     const url = new URL(request.url);
     const mode = currentMode();
+    if (request.url === "https://www.googleapis.com/oauth2/v3/certs" && request.method === "GET") return json(JSON.stringify({ keys: [settings.jwk] }));
     if (request.url === "https://oauth2.googleapis.com/token" && request.method === "POST") {
       const body = new URLSearchParams(await request.text());
       if (body.get("grant_type") === "authorization_code") {
         // Consent-code exchange for the opt-in Drive connect. Same credential
         // boundary as refresh: client id/secret must match the captured ones
         // and the redirect_uri must be this deployment's own callback path.
-        record("exchange", mode, body.size === 5 && body.get("client_id") === settings.clientId
+        const consent = existsSync(owned("consent.json")) ? z.object({ nonce: z.string(), verifier: z.string(), googleSub: z.string().optional(), scope: z.string().optional() }).parse(JSON.parse(readFileSync(owned("consent.json"), "utf8"))) : null;
+        record("exchange", mode, body.size === (consent ? 6 : 5) && (!consent || body.get("code_verifier") === consent.verifier) && body.get("client_id") === settings.clientId
           && body.get("client_secret") === settings.clientSecret && body.get("grant_type") === "authorization_code"
           && body.get("redirect_uri")?.includes("/api/workspace/google/callback") === true);
-        return mode === "refresh-error" ? json('{"error":"fixture exchange refused"}', 503)
-          : json(JSON.stringify({ access_token: settings.accessToken, refresh_token: settings.refreshToken, expires_in: 3600 }));
+        if (mode === "hold-exchange") {
+          writeFileSync(owned("exchange-held"), "held", { mode: 0o600 });
+          const deadline = Date.now() + 20_000;
+          try {
+            while (currentMode() === "hold-exchange") {
+              request.signal.throwIfAborted();
+              if (Date.now() >= deadline) throw new Error("Owned exchange hold expired");
+              await new Promise<void>(resolve => setTimeout(resolve, 20));
+            }
+          } finally { rmSync(owned("exchange-held"), { force: true }); }
+        }
+        if (mode === "refresh-error") return json('{"error":"fixture exchange refused"}', 503);
+        const idToken = consent ? await new SignJWT({ nonce: consent.nonce })
+          .setProtectedHeader({ alg: "RS256", kid: "owned-drive-key" }).setIssuer("https://accounts.google.com")
+          .setAudience(settings.clientId).setSubject(consent.googleSub ?? settings.googleSubject).setIssuedAt().setExpirationTime("5m")
+          .sign(await importPKCS8(settings.privateKey, "RS256")) : undefined;
+        const response: FixtureTokenResponse = {
+          access_token: settings.accessToken, refresh_token: settings.refreshToken, expires_in: 3600,
+        };
+        if (consent) { response.id_token = idToken; response.scope = consent.scope ?? "openid https://www.googleapis.com/auth/drive.appdata"; response.token_type = "Bearer"; }
+        return json(JSON.stringify(response));
       }
       record("refresh", mode, body.size === 4 && body.get("refresh_token") === settings.refreshToken
         && body.get("client_id") === settings.clientId && body.get("client_secret") === settings.clientSecret
         && body.get("grant_type") === "refresh_token");
-      return mode === "refresh-error" ? json('{"error":"fixture refresh refused"}', 503) : json(JSON.stringify({ access_token: settings.accessToken, expires_in: 3600 }));
+      if (mode === "refresh-error") return json('{"error":"fixture refresh refused"}', 503);
+      const refreshed = { access_token: settings.accessToken, expires_in: 3600 };
+      return json(JSON.stringify(existsSync(owned("consent.json")) ? { ...refreshed, token_type: "Bearer" } : refreshed));
     }
     if (url.origin !== "https://www.googleapis.com") return blocked();
     const authorized = request.headers.get("authorization") === `Bearer ${settings.accessToken}`;

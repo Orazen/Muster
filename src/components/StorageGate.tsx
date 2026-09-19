@@ -1,10 +1,5 @@
-// The storage-sovereignty gate (docs/plans/cloud-relay-strategy-2026-09-18.md
-// decision 14): on a hosted deployment, a user's team lives in their own
-// Google Drive — the server routes, it does not store. Until the user
-// connects Drive, the server refuses to create bots or start work
-// (STORAGE_GATE_REQUIRED), and this full-screen step explains why and offers
-// the connect. Local desktop installs never see it (required is false there
-// by construction).
+// Hosted setup currently requires explicit Drive consent. This is a connection
+// prerequisite, not evidence of account-scoped backup or automatic cloud sync.
 import { useEffect, useState } from "react";
 import { z } from "zod";
 
@@ -27,7 +22,7 @@ export function StorageGate() {
     const params = new URLSearchParams(window.location.search);
     const drive = params.get("drive");
     if (!drive) return;
-    if (drive === "connect-failed") setError("Google closed the consent window before Muster could finish — try again.");
+    if (drive === "connect-failed") setError("Drive connection was not completed. Use the Google account linked to this sign-in and try again.");
     params.delete("drive");
     const rest = params.toString();
     window.history.replaceState(null, "", `/app${rest ? `?${rest}` : ""}`);
@@ -50,13 +45,12 @@ export function StorageGate() {
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Connect your storage">
-      <div className="glass-shell w-full max-w-md rounded-2xl bg-surface p-7 shadow-2xl">
+      <div className="w-full max-w-md rounded-2xl bg-card p-7 text-ink shadow-2xl">
         <div className="mb-1 text-[11px] font-bold uppercase tracking-[0.3em] text-accent opacity-80">One-time setup</div>
-        <h1 className="text-xl font-semibold text-ink">Your team lives in your own cloud</h1>
+        <h1 className="text-xl font-semibold text-ink">Connect your Google Drive</h1>
         <p className="mt-3 text-[13.5px] leading-relaxed text-ink-secondary">
-          Muster keeps <span className="text-ink">no copy</span> of your chats, memory or files on its servers.
-          Connect your own Google Drive — everything your teammates do is backed up there, encrypted with a
-          passphrase only you know, and restored anywhere you sign in.
+          Allow Muster to use its private folder in your Google Drive. This connects storage;
+          it does not start automatic backups or sync. Your web workspace is still stored on Muster’s server.
         </p>
         <button
           onClick={() => void connect()}
@@ -67,12 +61,11 @@ export function StorageGate() {
           {connecting ? "Opening Google…" : "Connect Google Drive"}
         </button>
         <p className="mt-3 text-[12px] text-ink-secondary">
-          On the desktop app you can also use Telegram (Settings → Connections). The web workspace connects Drive.
+          Full encrypted backup and restore are currently available from the desktop app. Keep your backup passphrase somewhere safe.
         </p>
         {error && <p role="alert" className="mt-3 rounded-lg bg-raised px-3 py-2 text-[12.5px] text-ink">{error}</p>}
         <p className="mt-4 border-t border-hairline pt-3 text-[11.5px] text-ink-secondary">
-          Why? Your team is yours. This install is shared, so your workspace must live behind your own account —
-          not in a shared folder on someone else's disk.
+          Google sign-in and Calendar access do not grant Drive access. Existing connections may need this separate consent again.
         </p>
       </div>
     </div>

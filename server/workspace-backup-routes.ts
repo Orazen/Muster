@@ -15,7 +15,7 @@
 //      the storage-sovereignty direction (docs/plans/cloud-relay-strategy-
 //      2026-09-18.md decision 14), a hosted user connects their OWN Google
 //      Drive during onboarding. Connect moves no workspace data — it stores
-//      only the user's own OAuth tokens in their per-user account row — so
+//      only the user's verified OAuth tokens in a separate per-user Drive grant — so
 //      it is safe above the wall. The callback still requires the state's
 //      bound user to equal the session user.
 //   4. the installation wall must run before ANY remaining family handler
@@ -39,6 +39,7 @@ import type { AppConfig } from "./config.ts";
 import { getDb, forwardedProtoOf, SELF_HOSTED } from "./auth.ts";
 import { json, readBody, isText } from "./http-helpers.ts";
 import * as accountDrive from "./account-drive.ts";
+import { consumeDriveState } from "./drive-grants.ts";
 import * as bundleV2 from "./workspace-bundle-v2.ts";
 import {
   clearPendingRestore,
@@ -61,6 +62,7 @@ export interface BackupRequestContext {
    * the account routes stay contained 501s — that containment is a contract,
    * pinned by server/workspace-auth-harness.test.ts. */
   requestUserId: string | null;
+  session?(): Promise<{ userId: string; sessionId: string } | null>;
   /** Live config access — never a stale snapshot (the Drive-pull route
    * re-reads config mid-request to detect a swapped connection). */
   config(): AppConfig;
@@ -209,44 +211,51 @@ const routes: BackupRoute[] = [
   {
     // Account-linked Google Drive connect: the signed-in user's own Google
     // account, one drive.appdata grant. Moves NO workspace data — it stores
-    // only the user's own OAuth tokens in their per-user account row — which
+    // only the user's verified OAuth tokens in a separate per-user Drive grant — which
     // is why it sits above the installation wall and is available on hosted
     // (storage-sovereignty onboarding, decision 14). A request without a
     // session keeps the historical contained 501 — no session means no
     // account row, so no consent URL, state, or token exchange may run.
     match: (method, path) => method === "GET" && path === "/api/workspace/google/connect",
-    handle: (req, res, ctx) => {
+    handle: async (req, res, ctx) => {
       if (!ctx.requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Referrer-Policy", "no-referrer");
       try {
-        const url = accountDrive.googleDriveAuthUrl(requestOrigin(req), accountDrive.signDriveState(ctx.requestUserId));
+        const binding = await ctx.session?.();
+        if (!binding || binding.userId !== ctx.requestUserId) return json(res, 401, { error: "Sign in again to connect Drive." });
+        const origin = req.headers.origin;
+        if ((origin && origin !== requestOrigin(req)) || req.headers["sec-fetch-site"] === "cross-site") {
+          return json(res, 403, { error: "Open Drive settings in Muster to connect." });
+        }
+        const url = accountDrive.startDriveConsent(getDb(), binding, requestOrigin(req));
         json(res, 200, { url });
-      } catch (e) {
-        json(res, 501, { code: "ACCOUNT_DRIVE_UNAVAILABLE", error: e instanceof Error ? e.message : String(e) });
+      } catch {
+        json(res, 501, ACCOUNT_DRIVE_OFF);
       }
     },
   },
   {
-    // The callback additionally requires the state's bound user to equal the
-    // session's user, so one account cannot consume another's consent
-    // redirect.
     match: (method, path) => method === "GET" && path === "/api/workspace/google/callback",
-    handle: (req, res, ctx) => {
+    handle: async (req, res, ctx) => {
       if (!ctx.requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
-      const query = new URL(req.url ?? "/", "http://localhost").searchParams;
-      const state = query.get("state") ?? "";
-      const code = query.get("code") ?? "";
-      const stateUser = accountDrive.verifyDriveState(state);
-      if (!stateUser || stateUser !== ctx.requestUserId || !code) {
-        return res.writeHead(302, { location: "/app?drive=connect-failed" }).end();
-      }
-      void (async () => {
-        try {
-          const connected = await accountDrive.connectDriveFor(getDb(), ctx.requestUserId!, code, requestOrigin(req));
-          res.writeHead(302, { location: `/app?drive=${connected ? "connected" : "connect-failed"}` }).end();
-        } catch {
-          res.writeHead(302, { location: "/app?drive=connect-failed" }).end();
-        }
-      })();
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      const redirect = (ok: boolean) => { res.writeHead(302, { location: `/app?drive=${ok ? "connected" : "connect-failed"}` }).end(); };
+      try {
+        const binding = await ctx.session?.();
+        if (!binding || binding.userId !== ctx.requestUserId) return redirect(false);
+        const query = new URL(req.url ?? "/", "http://localhost").searchParams;
+        const pending = consumeDriveState(getDb(), { ...binding, state: query.get("state") ?? "" });
+        const code = query.get("code") ?? "";
+        if (!pending || !code || query.has("error")) return redirect(false);
+        const guard = async () => {
+          const current = await ctx.session?.();
+          if (!current || current.userId !== binding.userId || current.sessionId !== binding.sessionId) throw new Error("Drive session changed");
+        };
+        await accountDrive.completeDriveConsent(getDb(), binding, pending, code, requestOrigin(req), guard);
+        redirect(true);
+      } catch { redirect(false); }
     },
   },
   {
@@ -337,19 +346,26 @@ const routes: BackupRoute[] = [
       const body = await readBody(req);
       const passphrase = isText(body?.passphrase) ? body.passphrase : "";
       if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
-      const accessToken = await accountDrive.accessTokenFor(getDb(), ctx.requestUserId);
-      if (!accessToken) {
-        return json(res, 400, { error: "your Google account is not connected to Drive yet — connect it in Settings first" });
-      }
       try {
+        const binding = await ctx.session?.();
+        if (!binding || binding.userId !== ctx.requestUserId) return json(res, 401, { error: "Sign in again to use your Drive backup." });
+        const guard = async () => {
+          const current = await ctx.session?.();
+          if (!current || current.userId !== binding.userId || current.sessionId !== binding.sessionId) throw new Error("Drive session changed");
+        };
+        const access = await accountDrive.accountDriveAccess(getDb(), binding.userId, requestOrigin(req), guard);
+        const accessToken = access.grant.accessToken;
         if (new URL(req.url ?? "/", "http://localhost").pathname === "/api/workspace/google/push") {
           const payload = bundleV2.buildPayloadV2({ dataDir: ctx.dataDir(), appVersion: ctx.appVersion() });
           const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
-          const fileId = await accountDrive.drivePushFor(accessToken, bytes.toString("utf8"));
+          await access.assertCurrent();
+          const fileId = await accountDrive.drivePushFor(accessToken, bytes.toString("utf8"), access.assertCurrent);
+          await access.assertCurrent();
           syncState.stampSync("local", "push", "google-account");
           return json(res, 200, { uploaded: fileId, counts: payload.counts, skipped: payload.skipped ?? [] });
         }
-        const payloadText = await accountDrive.drivePullFor(accessToken);
+        const payloadText = await accountDrive.drivePullFor(accessToken, access.assertCurrent);
+        await access.assertCurrent();
         if (!payloadText) return json(res, 404, { error: "no portable backup exists in your Google Drive yet — push from the other device first" });
         const out = stageV2Restore(passphrase, payloadText, "google-account", ctx.dataDir());
         if (out.ok) syncState.stampSync("local", "pull", "google-account");
@@ -430,6 +446,7 @@ export async function handleWorkspaceBackupRoute(
     config(): AppConfig;
     appVersion(): string;
     dataDir(): string;
+    session?(): Promise<{ userId: string; sessionId: string } | null>;
   },
 ): Promise<boolean> {
   const ctx: BackupRequestContext = { requestUserId, ...env };

@@ -95,21 +95,24 @@ export async function refreshDriveToken(refreshToken: string): Promise<DriveToke
   return { accessToken: data.data.access_token, refreshToken, expiresAt: data.data.expires_in ? Date.now() + data.data.expires_in * 1000 : undefined };
 }
 
-async function driveFetch(accessToken: string, url: string, init?: RequestInit): Promise<Response> {
+async function driveFetch(accessToken: string, url: string, init?: RequestInit, guard: () => Promise<void> = async () => {}): Promise<Response> {
+  await guard();
   const headers = new Headers(init?.headers);
   headers.set("authorization", `Bearer ${accessToken}`);
   const res = await fetch(url, {
     ...init,
     headers,
+    redirect: "error",
     signal: AbortSignal.timeout(60_000),
   });
+  await guard();
   if (res.status === 401) throw new Error("Drive token expired — reconnect Google Drive in Settings");
   return res;
 }
 
 /** Upload (create or overwrite) the workspace bundle in the app folder. */
-export async function uploadBundle(accessToken: string, payload: string, fileName = BUNDLE_NAME): Promise<{ id: string }> {
-  const fileId = await findBundleFile(accessToken, fileName);
+export async function uploadBundle(accessToken: string, payload: string, fileName = BUNDLE_NAME, guard: () => Promise<void> = async () => {}): Promise<{ id: string }> {
+  const fileId = await findBundleFile(accessToken, fileName, guard);
   // Updating content must not try to move the file's parent folder.
   const metadata = JSON.stringify(fileId ? { name: fileName } : { name: fileName, parents: [APPDATA_FOLDER] });
   const boundary = `muster-${randomBytes(8).toString("hex")}`;
@@ -132,6 +135,7 @@ export async function uploadBundle(accessToken: string, payload: string, fileNam
       headers: { "content-type": `multipart/related; boundary=${boundary}` },
       body,
     },
+    guard,
   );
   if (!res.ok) throw new Error(`Drive upload failed: HTTP ${res.status}`);
   const result = driveUploadSchema.safeParse(await res.json().catch(() => null));
@@ -151,14 +155,14 @@ const driveListSchema = z.object({
 }).strict();
 
 /** Find the existing bundle file id, if any. */
-export async function findBundleFile(accessToken: string, fileName = BUNDLE_NAME): Promise<string | null> {
+export async function findBundleFile(accessToken: string, fileName = BUNDLE_NAME, guard: () => Promise<void> = async () => {}): Promise<string | null> {
   const query = new URLSearchParams({
     spaces: APPDATA_FOLDER, q: `name = '${fileName}' and trashed = false`,
     orderBy: "modifiedTime desc", pageSize: "100", fields: "files(id),nextPageToken,incompleteSearch",
   });
   const seenPages = new Set<string>();
   for (let page = 0; page < 10; page++) {
-    const res = await driveFetch(accessToken, `${LIST_URL}?${query}`);
+    const res = await driveFetch(accessToken, `${LIST_URL}?${query}`, undefined, guard);
     if (!res.ok) throw new Error(`Drive list failed: HTTP ${res.status}`);
     const parsed = driveListSchema.safeParse(await res.json().catch(() => null));
     if (!parsed.success) throw new Error("Drive returned an unreadable file list");
@@ -175,10 +179,10 @@ export async function findBundleFile(accessToken: string, fileName = BUNDLE_NAME
 }
 
 /** Download the bundle payload. Returns null when no bundle exists yet. */
-export async function downloadBundle(accessToken: string, fileName = BUNDLE_NAME): Promise<string | null> {
-  const fileId = await findBundleFile(accessToken, fileName);
+export async function downloadBundle(accessToken: string, fileName = BUNDLE_NAME, guard: () => Promise<void> = async () => {}): Promise<string | null> {
+  const fileId = await findBundleFile(accessToken, fileName, guard);
   if (!fileId) return null;
-  const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(fileId)}?alt=media`);
+  const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(fileId)}?alt=media`, undefined, guard);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Drive download failed: HTTP ${res.status}`);
   return await res.text();

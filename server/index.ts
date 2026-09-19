@@ -3623,14 +3623,10 @@ interface StorageGateState {
   satisfied: boolean;
 }
 
-/** The storage-sovereignty gate (docs/plans/cloud-relay-strategy-2026-09-18.md
- * decision 14): a hosted user connects their own Google Drive — or, where the
- * install-level Telegram sync is configured — before their workspace is
- * usable. Desktop/local installs are unaffected: their storage is the machine
- * they run on. `required` is honest about availability: it is true only where
- * a per-user storage connection can actually be made, so enforcement lights
- * up with the capability instead of locking users out of a gate nothing
- * satisfies. */
+/** Hosted setup currently requires an explicit per-user storage connection.
+ * This gate does not implement account-scoped backup or automatic cloud sync;
+ * the hosted installation bundle routes remain unavailable. Local installs
+ * continue to use their own device storage without this prerequisite. */
 function storageGateFor(userId: string | null | undefined): StorageGateState {
   if (!SELF_HOSTED || !userId) return { required: false, satisfied: true };
   const tokens = accountDrive.googleTokensFor(getDb(), userId);
@@ -4882,6 +4878,13 @@ let requestUserEmail = "";
         config: () => cfg,
         appVersion,
         dataDir: () => DATA_DIR,
+        session: async () => {
+          const headers = new Headers();
+          const cookie = z.string().safeParse(req.headers.cookie);
+          if (cookie.success) headers.set("cookie", cookie.data);
+          const current = await auth.api.getSession({ headers }).catch(() => null);
+          return current?.user?.id && current.session?.id ? { userId: current.user.id, sessionId: current.session.id } : null;
+        },
       })
     ) {
       return;

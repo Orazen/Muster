@@ -3,6 +3,7 @@
  * write response, session, OAuth grant or portable restore is fabricated. */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { createDriveState, saveDriveGrant, disconnectDrive, DRIVE_APPDATA_SCOPE } from "../server/drive-grants.ts";
 import { DatabaseSync } from "node:sqlite";
 import { existsSync, readFileSync } from "node:fs";
 import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -125,9 +126,9 @@ const test = base.extend<{ deployment: "local" | "hosted"; fixture: OwnedFixture
         try {
           // SAFETY: better-auth schema: user.id TEXT PRIMARY KEY, read by email.
           const user = db.prepare(`SELECT "id" FROM "user" WHERE "email" = ?`).get(email) as { id: string };
-          const now = new Date().toISOString();
-          db.prepare(`INSERT INTO account (id,accountId,providerId,userId,accessToken,refreshToken,scope,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)`)
-            .run(randomBytes(16).toString("hex"), randomBytes(16).toString("hex"), "google", user.id, null, drive.refreshToken, "", now, now);
+          const pending = createDriveState(db, { userId: user.id, sessionId: "owned-previous-consent" });
+          saveDriveGrant(db, { userId: user.id, googleSub: drive.googleSubject, expectedGeneration: pending.generation,
+            accessToken: drive.accessToken, refreshToken: drive.refreshToken, expiresAt: Date.now() + 3600000, scopes: [DRIVE_APPDATA_SCOPE] });
         } finally { db.close(); }
       }
       await use({ url, directory, email, password, drive });
@@ -316,11 +317,10 @@ async function visibleBounds(locator: Locator) {
   expect(bounds.uncovered).toBe(true);
 }
 
-async function capture(page: Page, testInfo: TestInfo, label: string, target: Locator) {
+async function capture(page: Page, testInfo: TestInfo, label: string, target: Locator, card: Locator = backup(page)) {
   for (const viewport of [shortViewport, wideViewport]) {
     await page.setViewportSize(viewport);
     await visibleBounds(target);
-    const card = backup(page);
     const horizontal = await card.evaluate((node) => ({ left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right, width: innerWidth }));
     expect(horizontal.left).toBeGreaterThanOrEqual(0);
     expect(horizontal.right).toBeLessThanOrEqual(horizontal.width + 1);
@@ -330,6 +330,34 @@ async function capture(page: Page, testInfo: TestInfo, label: string, target: Lo
 
 test.describe("hosted workspace capability", () => {
   test.use({ deployment: "hosted" });
+  test("fresh Drive consent explains actual storage behavior and stays usable at 320px", async ({ fixture, guarded }, testInfo) => {
+    const { page } = guarded;
+    await signIn(page, fixture);
+    const db = new DatabaseSync(join(fixture.directory, "data", "auth.db"));
+    try {
+      const user = z.object({ id: z.string() }).parse(db.prepare("SELECT id FROM user WHERE email = ?").get(fixture.email));
+      disconnectDrive(db, user.id);
+    } finally { db.close(); }
+    await page.setViewportSize(shortViewport);
+    await page.reload();
+    const dialog = page.getByRole("dialog", { name: "Connect your storage", exact: true });
+    await expect(dialog).toContainText("does not start automatic backups or sync");
+    await expect(dialog).toContainText("still stored on Muster’s server");
+    await expect(dialog).not.toContainText("no copy");
+    const surface = await dialog.locator(":scope > div").evaluate(node => getComputedStyle(node).backgroundColor);
+    expect(surface).toMatch(/^rgb\(/); // Opaque theme surface; no app text bleeding through.
+
+    const connect = dialog.getByRole("button", { name: "Connect Google Drive", exact: true });
+    await capture(page, testInfo, "drive-consent-320", connect, dialog);
+    expect(guarded.writes).toEqual([]);
+    await connect.click();
+    await expect(page).toHaveURL(/accounts\.google\.com\/o\/oauth2/);
+    const url = new URL(page.url());
+    expect(url.searchParams.get("scope")).toBe(`openid ${DRIVE_APPDATA_SCOPE}`);
+    expect(url.searchParams.get("state")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(guarded.writes).toEqual(["GET /api/workspace/google/connect"]);
+  });
   test("offers the user's own Drive connect while the installation bundles stay desktop-only", async ({ fixture, guarded }, testInfo) => {
     const { page } = guarded;
     await signIn(page, fixture);
@@ -363,7 +391,7 @@ test("connect my Google Drive issues a consent redirect from a real button click
   try {
     // SAFETY: auth schema creates user.id as TEXT PRIMARY KEY; seeded via real sign-up above.
     const user = db.prepare(`SELECT "id" FROM "user" WHERE "email" = ?`).get(fixture.email) as { id: string };
-    db.prepare(`UPDATE "account" SET "accessToken" = NULL, "refreshToken" = NULL WHERE "userId" = ? AND "providerId" = 'google'`).run(user.id);
+    disconnectDrive(db, user.id);
   } finally { db.close(); }
 
   await openBackup(page);

@@ -3533,3 +3533,64 @@ Real Google consent, wrist audio/physical devices, Drive recovery, allowance and
 15 qualifying tester-days remain open. Production GET still has unchanged build
 identities/null revisions/no attestation; push is not deployment. Release-agent
 changes remain outside this slice. Existing automation remains paused.
+
+### Loop144 handoff requested by owner — IN PROGRESS, NOT COMMITTED
+
+Read `docs/plans/astra-handoff-2026-09-19.md` before continuing. It lists the exact
+owned file manifest, current test handles, prior failures and complete remaining
+beta requirements. Drive consent is implemented but the first full unit run has
+stale shared-fixture failures; fixed consumers passed68/68. Full browser still
+running. Finish verification before commit. Release changes remain the other
+agent's responsibility. Preserve all unrelated untracked work; automation paused.
+
+### Loop144 — isolated Drive consent and truthful storage setup
+
+Fixed reproduced cross-account token mixing: Drive consent now uses separate
+account-owned grants, one-use session-bound state, PKCE, signed Google identity
+and exact scope checks. Login and Calendar credentials remain untouched; legacy
+unverified Drive tokens require reconnect. Session/grant guards run across
+refresh and transport before restore staging. Hosted full backup remains
+unavailable; setup no longer promises automatic sync or no server storage.
+Fixed visually reproduced transparent consent dialog with existing opaque
+surface token;320px and1440px screenshots inspected and saved in the audit.
+
+Final gates: **321 files /4821 passed /8 skipped /0 failed**,508.86s (+4 files,
++87 passing over Loop143); fresh browser **41/41**,4.4m; packaged server **14/14**.
+Build15.00s, project/server/e2e types, full lint and whitespace checks passed.
+Focused store/access21, OAuth50, adapter9, signed-provider roundtrip13, storage
+2; affected hosted-fixture consumers68/68. No native sources changed or new
+native/device acceptance claimed. Owned browser fixtures cleaned up.
+
+First full run failed12tests with56skipped (5filesfailed/316passed), caused by
+old shared fixture seeding login tokens instead of separate Drive grants; fixed
+helper consumers passed68/68 before the fresh full gate. Initial browser40passed/
+1failed used a screenshot helper targeting the wrong panel; fixed focused1/1,
+then full41/41. Visual review additionally found and fixed transparent modal.
+Earlier fixture/lint corrections are retained in the detailed audit.
+
+See docs/audits/drive-consent-isolation-2026-09-19.md and the updated complete
+handoff docs/plans/astra-handoff-2026-09-19.md. Next: preserve immutable Drive
+snapshots and expose explicit recovery selection (stale-device overwrite is
+reproduced, NOT fixed). Real Google/hardware, hosted recovery/sync, allowance
+and tester-day gates remain. Releases belong to the other agent; automation
+stays paused. GitHub0open dependency/secret alerts is not a full security scan.
+
+
+### Owner stop / superseding Loop144 handoff — 19 September 2026
+
+Goal PAUSED at owner's request. Loop144 remains UNCOMMITTED; no product push or
+deployment is claimed. Latest HEAD `e5b62dd` includes another agent's plugin-react
+5.2.0 and Vaultgram lockfile changes. The 321-file/4821-pass/8-skip unit gate,
+41/41 browser and14/14 packaged results above predate this dependency merge.
+Merged full unit session44632 and lint90558 have no collected terminal result;
+build16180 log reports14.12s but exit is not collected. Frozen install passed.
+Full details, exact logs, ownership and remaining beta work are in
+`docs/plans/astra-handoff-2026-09-19.md`, whose opening STOP section supersedes
+older ready-to-commit statements. No new tests or product edits after the stop.
+
+Successor FIRST priority: coordinate with release agent and diagnose GitHub
+Autodeploy35469518670 failure at “Bump .deploy-trigger”, inspect newer CI and
+merged-dependency checks, fix forward without bypassing gates. Other observed
+CI runs succeeded; do not claim every build failed. Release workflows remain
+the other agent's responsibility. Automation stays paused; production receipt,
+real Google/hardware, hosted recovery/sync and15 tester-days remain outstanding.

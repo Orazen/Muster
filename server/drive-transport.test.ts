@@ -1,7 +1,8 @@
+import { createDriveState, saveDriveGrant, disconnectDrive, DRIVE_APPDATA_SCOPE } from "./drive-grants.ts";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { accessTokenFor, drivePullFor, drivePushFor, googleTokensFor } from "./account-drive.ts";
+import { drivePullFor, drivePushFor, googleTokensFor } from "./account-drive.ts";
 import { downloadBundle, findBundleFile, uploadBundle } from "./drive-sync.ts";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -151,46 +152,56 @@ describe("Drive file identifiers", () => {
   });
 });
 
-describe("Google account token selection", () => {
+describe("Explicit account Drive token selection", () => {
   let db: DatabaseSync;
   beforeEach(() => {
     db = new DatabaseSync(":memory:");
-    db.exec(`CREATE TABLE account (userId TEXT, providerId TEXT, accessToken, refreshToken, accessTokenExpiresAt, createdAt INTEGER)`);
+    db.exec(`CREATE TABLE user (id TEXT PRIMARY KEY); INSERT INTO user VALUES ('alice'),('bob');
+      CREATE TABLE account (userId TEXT, providerId TEXT, accessToken TEXT, refreshToken TEXT, accessTokenExpiresAt TEXT, createdAt INTEGER)`);
   });
   afterEach(() => db.close());
-
-  it("selects only this user's latest Google account", () => {
-    const insert = db.prepare("INSERT INTO account VALUES (?, ?, ?, ?, ?, ?)");
-    insert.run("alice", "google", "old", "old-refresh", 1, 1);
-    insert.run("bob", "google", "other-user", "other-refresh", 2, 3);
-    insert.run("alice", "github", "other-provider", null, 3, 4);
-    insert.run("alice", "google", "latest", "latest-refresh", "2026-09-10T12:00:00.000Z", 2);
-    expect(googleTokensFor(db, "alice")).toEqual({ accessToken: "latest", refreshToken: "latest-refresh", expiresAt: Date.parse("2026-09-10T12:00:00.000Z") });
-    expect(googleTokensFor(db, "missing")).toBeNull();
+  const save = (userId = "alice") => {
+    const pending = createDriveState(db, { userId, sessionId: "session" });
+    return saveDriveGrant(db, { userId, googleSub: userId, expectedGeneration: pending.generation,
+      accessToken: "explicit-access", refreshToken: "explicit-refresh", expiresAt: Date.now() + 300000, scopes: [DRIVE_APPDATA_SCOPE] });
+  };
+  it("does not infer Drive consent from a basic Google login", () => {
+    db.prepare("INSERT INTO account VALUES (?, ?, ?, ?, ?, ?)").run("alice", "google", "login-access", "login-refresh", "2099-01-01", 1);
+    expect(googleTokensFor(db, "alice")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
-
-  it("rejects malformed stored token values", () => {
-    db.prepare("INSERT INTO account VALUES (?, ?, ?, ?, ?, ?)").run("alice", "google", new Uint8Array([1, 2]), null, null, 1);
+  it("uses only the selected owner's explicit grant", () => {
+    const grant = save();
+    expect(googleTokensFor(db, "alice")).toEqual({ accessToken: grant.accessToken, refreshToken: grant.refreshToken, expiresAt: grant.expiresAt });
+    expect(googleTokensFor(db, "bob")).toBeNull();
+  });
+  it("refuses malformed stored Drive tokens", () => {
+    save(); db.prepare("UPDATE drive_grants SET scopes = '[]'").run();
     expect(googleTokensFor(db, "alice")).toBeNull();
   });
-
-  it("does not consider an invalid expiry fresh", async () => {
-    db.prepare("INSERT INTO account VALUES (?, ?, ?, ?, ?, ?)").run("alice", "google", "access", null, "not-a-date", 1);
-    expect(googleTokensFor(db, "alice")).toEqual({ accessToken: "access", refreshToken: null, expiresAt: null });
-    expect(await accessTokenFor(db, "alice")).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+  it("does not reuse a superseded consent generation", () => {
+    save(); createDriveState(db, { userId: "alice", sessionId: "replacement" });
+    expect(googleTokensFor(db, "alice")).toBeNull();
   });
-
-  it("uses a fresh access token even if Google did not return a refresh token", async () => {
-    db.prepare("INSERT INTO account VALUES (?, ?, ?, ?, ?, ?)").run("alice", "google", "fresh-access", null, Date.now() + 300_000, 1);
-    expect(await accessTokenFor(db, "alice")).toBe("fresh-access");
-    expect(fetchMock).not.toHaveBeenCalled();
+  it("disconnects without deleting another owner's grant", () => {
+    save(); save("bob"); disconnectDrive(db, "alice");
+    expect(googleTokensFor(db, "alice")).toBeNull();
+    expect(googleTokensFor(db, "bob")).not.toBeNull();
   });
+});
 
-  it("returns no token when the account has no renewable session", async () => {
-    db.prepare("INSERT INTO account VALUES (?, ?, ?, ?, ?, ?)").run("alice", "google", "old-access", null, Date.now() - 1, 1);
-    expect(await accessTokenFor(db, "alice")).toBeNull();
-    expect(await accessTokenFor(db, "missing")).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+
+describe("Account consent revalidation around Drive requests", () => {
+  it("does not upload after consent changes during the list request", async () => {
+    let current = true;
+    fetchMock.mockImplementation(async () => { current = false; return Response.json({ files: [] }); });
+    await expect(drivePushFor("test-access", "encrypted", async () => { if (!current) throw new Error("consent changed"); })).rejects.toThrow("consent changed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]?.method).toBeUndefined();
+  });
+  it("does not follow provider redirects with a credential", async () => {
+    fetchMock.mockResolvedValue(Response.json({ files: [] }));
+    expect(await drivePullFor("test-access")).toBeNull();
+    expect(fetchMock.mock.calls[0][1]?.redirect).toBe("error");
   });
 });

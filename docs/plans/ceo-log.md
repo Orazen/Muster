@@ -6540,3 +6540,113 @@ Real Google consent, wrist audio/physical devices, Drive recovery, allowance and
 15 qualifying tester-days remain open. Production GET still has unchanged build
 identities/null revisions/no attestation; push is not deployment. Release-agent
 changes remain outside this slice. Existing automation remains paused.
+
+### Loop144 — ownership and reproduced Drive consent defect
+
+Root owns account-Drive adapter, backup routes/index registration and transport
+selection tests. Delegate1 owns new Drive grant/access stores and tests; delegate2
+owns new Drive OAuth provider/tests; delegate3 owns synthetic Drive transport
+and account round-trip acceptance. Releases remain with the other agent.
+Reproduction on isolated in-memory SQLite: exchanging synthetic Google B access
+while signed in with Google A left A's subject and refresh token but replaced
+its access token (`loginAccessPreserved:false`, `oldRefreshMixedWithNewAccess:true`).
+Fix: separate verified Drive consent; one-use session-bound state, PKCE, verified
+subject/scope, generation/session rechecks. Never migrate unverifiable legacy
+login tokens. Stale-device snapshot overwrite was also reproduced and is next.
+
+### Loop144 handoff requested by owner — IN PROGRESS, NOT COMMITTED
+
+Read `docs/plans/astra-handoff-2026-09-19.md` before continuing. It lists the exact
+owned file manifest, current test handles, prior failures and complete remaining
+beta requirements. Drive consent is implemented but the first full unit run has
+stale shared-fixture failures; fixed consumers passed68/68. Full browser still
+running. Finish verification before commit. Release changes remain the other
+agent's responsibility. Preserve all unrelated untracked work; automation paused.
+
+### Loop144 — isolated Drive consent and truthful storage setup
+
+Fixed reproduced cross-account token mixing: Drive consent now uses separate
+account-owned grants, one-use session-bound state, PKCE, signed Google identity
+and exact scope checks. Login and Calendar credentials remain untouched; legacy
+unverified Drive tokens require reconnect. Session/grant guards run across
+refresh and transport before restore staging. Hosted full backup remains
+unavailable; setup no longer promises automatic sync or no server storage.
+Fixed visually reproduced transparent consent dialog with existing opaque
+surface token;320px and1440px screenshots inspected and saved in the audit.
+
+Final gates: **321 files /4821 passed /8 skipped /0 failed**,508.86s (+4 files,
++87 passing over Loop143); fresh browser **41/41**,4.4m; packaged server **14/14**.
+Build15.00s, project/server/e2e types, full lint and whitespace checks passed.
+Focused store/access21, OAuth50, adapter9, signed-provider roundtrip13, storage
+2; affected hosted-fixture consumers68/68. No native sources changed or new
+native/device acceptance claimed. Owned browser fixtures cleaned up.
+
+First full run failed12tests with56skipped (5filesfailed/316passed), caused by
+old shared fixture seeding login tokens instead of separate Drive grants; fixed
+helper consumers passed68/68 before the fresh full gate. Initial browser40passed/
+1failed used a screenshot helper targeting the wrong panel; fixed focused1/1,
+then full41/41. Visual review additionally found and fixed transparent modal.
+Earlier fixture/lint corrections are retained in the detailed audit.
+
+See docs/audits/drive-consent-isolation-2026-09-19.md and the updated complete
+handoff docs/plans/astra-handoff-2026-09-19.md. Next: preserve immutable Drive
+snapshots and expose explicit recovery selection (stale-device overwrite is
+reproduced, NOT fixed). Real Google/hardware, hosted recovery/sync, allowance
+and tester-day gates remain. Releases belong to the other agent; automation
+stays paused. GitHub0open dependency/secret alerts is not a full security scan.
+
+
+### Owner stop / superseding Loop144 handoff — 19 September 2026
+
+Goal PAUSED at owner's request. Loop144 remains UNCOMMITTED; no product push or
+deployment is claimed. Latest HEAD `e5b62dd` includes another agent's plugin-react
+5.2.0 and Vaultgram lockfile changes. The 321-file/4821-pass/8-skip unit gate,
+41/41 browser and14/14 packaged results above predate this dependency merge.
+Merged full unit session44632 and lint90558 have no collected terminal result;
+build16180 log reports14.12s but exit is not collected. Frozen install passed.
+Full details, exact logs, ownership and remaining beta work are in
+`docs/plans/astra-handoff-2026-09-19.md`, whose opening STOP section supersedes
+older ready-to-commit statements. No new tests or product edits after the stop.
+
+Successor FIRST priority: coordinate with release agent and diagnose GitHub
+Autodeploy35469518670 failure at “Bump .deploy-trigger”, inspect newer CI and
+merged-dependency checks, fix forward without bypassing gates. Other observed
+CI runs succeeded; do not claim every build failed. Release workflows remain
+the other agent's responsibility. Automation stays paused; production receipt,
+real Google/hardware, hosted recovery/sync and15 tester-days remain outstanding.
+
+## Loop144 merged-tree re-verification — 20 September 2026
+
+Took the existing `main` checkout to `4fe614eb` (3 release-agent dependabot
+merges on top of `e5b62dd`: node-gyp 13.0.2, electron 44.4.1, npm min/patch,
+alongside the plugin-react 5.2.0/Vaultgram lockfile already in HEAD).
+`git pull --rebase --autostash` was linear, no conflicts; the Loop144
+uncommitted working tree re-applied intact.
+
+Re-ran the full gate on the merged dependency tree — all green, identical to
+the pre-merge gate:
+- `npx tsc --noEmit -p tsconfig.server.json` → pass; `npx tsc -b` → pass.
+- `pnpm lint` → 0 warnings / 0 errors (894 files).
+- `npm run build` → built in 15.99s.
+- `vitest run` → 321 files / 4821 passed / 8 skipped / 0 failed (550.50s).
+- `broker:test` 2/2; `test:updater` 14/14; `test:desktop-lifecycle` 14/14;
+  `test:packaged-server` 14/14 (`{"passed":14,…}`).
+- `npx playwright test` → 41/41 (4.1m); cleanup verified (ports closed,
+  root removed, no outbound). E2e artifacts to a separate /tmp dir to preserve
+  the prior 90210 run's artifacts (handoff §9).
+
+Diagnosed (not silenced) the observed CI `test`-job failure — run 35471546869 on
+dependabot branch `2da05fa3` (npm min/patch): `src/state/onboarding-draft.test.ts`
+> "preserves the existing 4000-unit task cap in both formats" AssertionError,
+received 4053 flowers vs expected 4000. That branch is **not** an ancestor of
+`main` (4fe614eb); Loop144 tests are unaffected (vitest run here was 4821/0).
+Reported to the release agent; no workflow or dependency changes made by this
+slice.
+
+Preserved (not killed): demo server on 8845 (server/index.ts PIDs 17532/28008/
+97782) and the release agent's `/tmp/muster-depwork` typecheck (PID 19161).
+Automation stays paused.
+
+Next: commit Loop144 scoped (manifest in astra-handoff §4 + these ledger docs),
+push, GET /api/build-identity, then reproduce the stale-device v2 Drive overwrite
+(reproduced per astra-handoff §4.2, NOT fixed; next slice).

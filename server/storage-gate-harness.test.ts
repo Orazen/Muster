@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { disconnectDrive } from "./drive-grants.ts";
 
 import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
@@ -145,14 +146,14 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
     });
     expect(localBot.status).toBe(201);
 
-    // The real connect flow: a Google account row (Drive grants attach to an
-    // existing row) without tokens, the signed consent URL, the exchange —
+    // The real connect flow pins the existing Google identity, then creates
+    // a separate Drive grant through PKCE and signed identity verification —
     // then the gate opens and the same create succeeds.
     const db = new DatabaseSync(join(hosted.dataDirectory, "auth.db"));
     try {
       const now = new Date().toISOString();
       db.prepare(`INSERT INTO account (id,accountId,providerId,userId,accessToken,refreshToken,scope,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)`)
-        .run(randomBytes(16).toString("hex"), randomBytes(16).toString("hex"), "google", hosted.userId,
+        .run(randomBytes(16).toString("hex"), transport.googleSubject, "google", hosted.userId,
           null, null, "", now, now);
     } finally { db.close(); }
     expect(await gate(hosted)).toEqual({ required: true, satisfied: false });
@@ -162,9 +163,14 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
     const { url: consent } = z.object({ url: z.string() }).parse(await connect.json());
     const parsed = new URL(consent);
     expect(parsed.origin + parsed.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
-    expect(parsed.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/drive.appdata");
+    expect(parsed.searchParams.get("scope")?.split(" ")).toEqual(expect.arrayContaining(["openid", "https://www.googleapis.com/auth/drive.appdata"]));
     const state = parsed.searchParams.get("state") ?? "";
-    expect(state.split(".")[0]).toBe(hosted.userId);
+    expect(state).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const consentDb = new DatabaseSync(join(hosted.dataDirectory, "auth.db"));
+    try {
+      const binding = z.object({ nonce: z.string(), codeVerifier: z.string() }).parse(consentDb.prepare("SELECT nonce, codeVerifier FROM drive_oauth_states WHERE userId = ?").get(hosted.userId));
+      transport.setConsent({ nonce: binding.nonce, verifier: binding.codeVerifier });
+    } finally { consentDb.close(); }
     expect(await expectRedirect(hosted, `/api/workspace/google/callback?code=owned-consent-code&state=${encodeURIComponent(state)}`)).toBe(true);
 
     expect(await gate(hosted)).toEqual({ required: true, satisfied: true });
@@ -189,7 +195,7 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
     // before the gate closed cannot be tasked.
     const db = new DatabaseSync(join(hosted.dataDirectory, "auth.db"));
     try {
-      db.prepare(`UPDATE "account" SET "refreshToken" = NULL WHERE "userId" = ?`).run(hosted.userId);
+      disconnectDrive(db, hosted.userId);
     } finally { db.close(); }
     expect(await gate(hosted)).toEqual({ required: true, satisfied: false });
     const send = await api(hosted, `/api/bots/${createdBotId}/messages`, {
