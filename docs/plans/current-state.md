@@ -1,7 +1,24 @@
 # Current Muster state — read before editing
 
-Updated 19 September 2026 (Loop126). This snapshot takes precedence over historical roadmap
+**Latest owner direction (19 September, strategy interview):**
+[Personal-assistant beta decisions](personal-assistant-beta-decisions-2026-09-19.md)
+supersedes conflicting older strategy: everyone, all-platform small beta,
+Watch calling and Plan my day, Drive-first recovery, capped included AI plus
+BYOK, free beta. Public expansion requires passing core flows and five testers
+completing daily planning on three separate days each. This is a decision record,
+not a new implementation or verification claim.
+
+Updated 19 September 2026 (Loop129). This snapshot takes precedence over historical roadmap
 status; the latest owner request takes precedence over this file.
+
+**Loop129:** beta decision record and [acceptance matrix](beta-acceptance-matrix-2026-09-19.md)
+added. Owner-claim browser coverage verifies identity, fragment removal, single
+submission/replay rejection, malformed input, and cloud-code namespace separation.
+`/claim#CODE` already works; `/pair#CODE` must not be wired to its claim endpoint.
+Full unit **296 files / 4341 passed / 8 skipped / 0 failed**; browser **29/29**;
+focused unit **66/66**; all three typechecks, lint and fresh build pass. Native
+and real-provider/device acceptance remain open. See the corrected
+[handoff](handoff-next-agent.md); this is not a deployment receipt.
 
 **Owner priority:** keep the existing web layout, Flower mascot, /app and /os
 shells, choices and sessions stable. Read [the stability contract](../guides/web-app-stability.md).

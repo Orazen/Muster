@@ -1,5 +1,11 @@
 # Muster product direction — owner decisions, locked 2026-09-18
 
+**Supersession, 19 September:** read [personal-assistant beta decisions](personal-assistant-beta-decisions-2026-09-19.md)
+first. The owner now requests capped included AI alongside BYOK, free beta with
+revenue decided later, Google Drive before Telegram storage, and all-platform
+beta acceptance centered on daily planning and Watch calling. Conflicting
+statements below are historical; they must not override the newer record.
+
 The owner answered 17 strategy questions this session. This file is the
 binding record: latest owner request outranks every older plan. When a slice
 seems ambiguous, resolve it with the decisions below before consulting any

@@ -5872,3 +5872,40 @@ Continued the owner's "test everything" pass on the live preview harness through
 Receipts: unit **296 files / 4341 passed / 8 skipped / 0 failed**; e2e **26/26** (fresh build); both typechecks 0; oxlint **0/0** (831 files); Electron syntax OK. Commit 2f04b3e on main.
 
 **Honest notes:** marketplace Connect buttons disabled in harness because no connector runtime is configured there (by design, not a bug); the "Internal error: Agent error" chip on those old turns is legacy persisted text from a pre-Loop120 build — current code composes different, clearer error chips; the Droid 402 itself remains owner-gated (subscription).
+
+## Owner strategy interview — 19 September 2026
+
+Recorded the completed multiple-choice interview in `personal-assistant-beta-decisions-2026-09-19.md` and linked it from current-state and the superseded September 18 strategy. All-platform personal-assistant beta; Watch calling with Plan my day first; Drive-first user-held recovery; optional connections; capped included usage plus BYOK; default pause on exhaustion, opt-in fallback; free beta, EUR 50–200 planning envelope (no spending authorization). Public expansion requires passing core flows and five testers completing planning on three separate days each.
+
+Documentation only: **0 product tests run**, no product edits, no release/deployment claim. Preceding recorded baseline remains **296 files / 4341 passed / 8 skipped; browser 26/26**, not rerun here. Existing untracked work preserved.
+
+## Beta execution — claim acceptance slice started (19 September 2026)
+
+Goal set from the completed owner interview. File ownership: new
+`e2e/claim.e2e.spec.ts` and Astra decision/handoff/current-state/CEO docs.
+No app redesign or authentication route mutation. Audit found `/claim#CODE`
+already implemented by ClaimPage/ClaimFlow; the inherited request to wire
+`/pair#CODE` to the claim endpoint confused separate code namespaces. Add
+real browser coverage before treating the route as missing. Verification pending.
+
+## Loop129 — beta decisions and owner-claim browser acceptance (19 September 2026)
+
+First slice under the new active beta goal. Preserved all existing product code
+and unrelated snapshots. Added three real-browser acceptance tests proving:
+owner claim creates the intended fresh-install identity, removes the credential
+fragment, submits once and rejects replay; cloud pairing codes cannot redeem as
+owner claims and remain usable in their own namespace; malformed claim links
+remove the fragment without submitting or authenticating. Corrected the inherited
+backlog that proposed routing `/pair#CODE` through the unrelated owner-claim API.
+
+Owner interview decisions, corrected handoff and an all-platform acceptance
+matrix are now documented; beta rollout still needs real device/Google/Drive
+acceptance and five testers on three separate days. No deployment or security
+claim. No automatic schedules enabled; demo and user services untouched.
+
+Verification: focused unit **2 files / 66 passed**; focused browser **3/3**;
+full unit **296 files / 4341 passed / 8 skipped / 0 failed**, 453.28s (baseline
+unchanged); full browser **29/29**, 3.0m (up from 26); fresh build exit 0;
+server, project and e2e typechecks exit 0; oxlint exit 0 with no diagnostics;
+`git diff --check` clean. Native tests not rerun: no native changes. Browser
+fixtures report owned process/port/temp-directory cleanup.
