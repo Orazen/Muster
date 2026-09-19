@@ -8,8 +8,17 @@ BYOK, free beta. Public expansion requires passing core flows and five testers
 completing daily planning on three separate days each. This is a decision record,
 not a new implementation or verification claim.
 
-Updated 19 September 2026 (Loop129). This snapshot takes precedence over historical roadmap
+Updated 19 September 2026 (Loop130). This snapshot takes precedence over historical roadmap
 status; the latest owner request takes precedence over this file.
+
+**Loop130:** fixed OpenConnector-only bot dispatch and connection cards that
+incorrectly required Composio. Shared backend selection now mounts tools and
+routes card creation, authorization and status to the configured runtime;
+Composio fallback and bot opt-out remain. Reproduced before fix on an owned
+server. Full **298 files / 4347 passed / 8 skipped**, browser **29/29**,
+packaged-server smoke **14/14**, focused connector **20/20**, types/lint pass.
+This verifies the connector prerequisite, not real Calendar consent or Plan my
+day completion. No native release or production rollout claimed.
 
 **Loop129:** beta decision record and [acceptance matrix](beta-acceptance-matrix-2026-09-19.md)
 added. Owner-claim browser coverage verifies identity, fragment removal, single

@@ -251,6 +251,7 @@ import {
 } from "./restore-apply.ts";
 import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
 import * as openconnector from "./openconnector.ts";
+import * as connectedApps from "./connected-apps.ts";
 import { isText, json, readBody } from "./http-helpers.ts";
 import * as driveSync from "./drive-sync.ts";
 import * as accountDrive from "./account-drive.ts";
@@ -408,7 +409,7 @@ function connectedAppsIntegration(botId: string, threadId: string) {
   };
   // Both backends spawn the same loopback bridge; only the upstream differs
   // (resolved inside the harness relay by the same priority as the routes).
-  return composio.mcpIntegration(cfg, context);
+  return connectedApps.mcpIntegration(cfg, context);
 }
 
 /** Curated slugs for the Muster Connector's default status view — the same
@@ -2231,7 +2232,7 @@ async function startTurn(
       // them — a key in the config says the connections exist, not that
       // this engine can reach them — and only to a bot the user has not
       // switched off: the key is workspace-wide, the grant is per bot.
-      if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
+      if (bot.composio !== false && connectedApps.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
         const connection = await connectedAppsIntegration(bot.id, threadId);
         requireDispatch();
         if (connection) integrations.composio = connection;
@@ -2602,8 +2603,8 @@ async function startTurn(
           // gated on the integration, not the key: the hint only goes to a
           // bot whose driver actually mounted the tools
           (integrations.composio
-            ? " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service."
-            : bot.composio !== false && composio.configured(cfg)
+            ? connectedApps.toolGuidance(cfg)
+            : bot.composio !== false && connectedApps.configured(cfg)
               ? " The user has connected apps (Gmail, GitHub, and others) at the account level, but this specific model engine's driver doesn't mount those tools yet — do not claim nothing is connected; say the apps are connected but not reachable from this engine, and suggest switching to Claude or an ACP engine (Codex, Gemini CLI) to use them."
               : "") +
           (coordinationPrompt ? ` ${coordinationPrompt}` : "") +
@@ -3033,7 +3034,7 @@ async function runGroupMemberTurn(
   store.setActivity(bot.id, "working");
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
   try {
-    if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
+    if (bot.composio !== false && connectedApps.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
       const connection = await connectedAppsIntegration(bot.id, group.threadId);
       if (connection) integrations.composio = connection;
     }
@@ -4940,10 +4941,10 @@ let requestUserEmail = "";
         if (!owner) return json(res, 403, { error: "conversation does not belong to this bot" });
         if (!/^[\w-]{8,100}$/.test(resumeKey)) return json(res, 400, { error: "invalid resume key" });
         if (!slugs.length || slugs.length > 12) return json(res, 400, { error: "one to twelve valid apps are required" });
-        if (!composio.configured(cfg) || owner.bot.composio === false) {
+        if (!connectedApps.configured(cfg) || owner.bot.composio === false) {
           return json(res, 409, { error: "connected apps are not enabled for this bot" });
         }
-        const connectionState: Record<string, { connected?: boolean }> = await composio.connectionStatus(cfg, slugs).catch(() => ({}));
+        const connectionState: Record<string, { connected?: boolean }> = await connectedApps.connectionStatus(cfg, slugs).catch(() => ({}));
         const messageIds: string[] = [];
         for (const slug of slugs) {
           const existing = store.messagesFor(threadId).find(
@@ -4953,7 +4954,7 @@ let requestUserEmail = "";
             messageIds.push(existing.id);
             continue;
           }
-          const toolkit = await composio.toolkitCard(cfg, slug);
+          const toolkit = await connectedApps.toolkitCard(cfg, slug);
           const connected = connectionState[slug]?.connected === true;
           const messageInput: Omit<Message, "id" | "at"> = {
             role: "bot",
@@ -8369,7 +8370,7 @@ let requestUserEmail = "";
           connector: { ...connector, status: "authorizing", error: undefined, dismissed: false },
         });
         try {
-          return json(res, 200, await composio.authorizeService(cfg, connector.slug));
+          return json(res, 200, await connectedApps.authorizeService(cfg, connector.slug));
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
           // inside a catch that rethrows the original error — the failure
@@ -8384,7 +8385,7 @@ let requestUserEmail = "";
         }
       }
       if (m[3] === "status" && method === "GET") {
-        const state = (await composio.connectionStatus(cfg, [connector.slug]))[connector.slug];
+        const state = (await connectedApps.connectionStatus(cfg, [connector.slug]))[connector.slug];
         const failed = /failed|expired|revoked|error/i.test(state?.status ?? "");
         const next = {
           ...connector,

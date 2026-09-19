@@ -11,7 +11,7 @@ This is an evidence checklist, not a declaration of production readiness.
 | Owner claim link | New owned Chromium tests: session identity, one redemption, fragment removal, replay rejection, malformed input; cloud code namespace rejection | Native/phone browser on intended served artifact; do not conflate claim with cloud or companion pairing |
 | Calendar-backed Plan my day | Product direction accepted; no acceptance receipt in this slice | Real selected calendar yields overview, three priorities and suggested blocks; timezone/empty calendar/offline/auth-expired cases; no calendar writes without approval |
 | Watch calling | Native builds and prior walkie fixture receipts; not proof of true calling | Ring/accept/end, planning result, interruption/backgrounding and failed/reconnected transport on hardware |
-| Optional connections | Existing connector surface and owned harness checks recorded | Calendar, email, files, Telegram, browser, tasks/notes: connect, cancel, revoke, unavailable and least-required permissions; do not require all to onboard |
+| Optional connections | Loop130 reproduces and fixes runtime-only tool mounting and calendar-card backend selection; owned runtime fixture, not real consent | Calendar, email, files, Telegram, browser, tasks/notes: connect, cancel, revoke, unavailable and least-required permissions; do not require all to onboard |
 | Memory permissions and action approvals | Existing approval tests; owner defaults recorded | Verify memory controls and draft-first defaults across surfaces; allow/deny reaches intended task exactly once |
 | Capable-device routing and queue | Direction recorded; no current acceptance receipt here | Offline preferred device, another capable device, no device, reconnect, cancellation and duplicate prevention |
 | Drive restore and cross-device consistency | Prior encrypted bundle/fake-provider round trips | Real consent, fresh-device recovery, interrupted restore, concurrent edits, deletion and stale-device behavior; exact coverage of transcripts/files/memory |
@@ -45,3 +45,17 @@ Record with permission: pseudonymous tester ID, date/timezone, platform/build,
 completion outcome and issue reference. Do not copy private calendar contents,
 tokens or recovery keys into the repository. Keep raw private feedback in an
 owner-approved location; repository evidence can summarize consented outcomes.
+
+## Calendar acceptance preparation (19 September)
+
+Use the selected user's calendar and a read-only event scope for the first
+planning experience. Google documents event listing with explicit time bounds,
+response timezone, recurring-instance expansion and pagination; an empty page
+with a next-page token is not proof of an empty calendar. Handle these before
+claiming a complete day. References: [events.list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list),
+[Calendar scopes](https://developers.google.com/workspace/calendar/api/auth).
+
+Connector tool availability is only a prerequisite: it does not prove the
+connected account is the intended beta user's calendar, that a model chose the
+correct read action, or that suggested blocks respect busy/all-day events.
+Verify those through a real account and bounded fixtures in the next slice.

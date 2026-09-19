@@ -5909,3 +5909,44 @@ unchanged); full browser **29/29**, 3.0m (up from 26); fresh build exit 0;
 server, project and e2e typechecks exit 0; oxlint exit 0 with no diagnostics;
 `git diff --check` clean. Native tests not rerun: no native changes. Browser
 fixtures report owned process/port/temp-directory cleanup.
+
+## Loop130 started — connected-app backend consistency
+
+Calendar-path audit found OpenConnector appears in Settings but dispatch and
+connection-card flows still require Composio. Reproduce with an owned runtime
+and real harness before fixing. File ownership: server/index.ts, new
+server/connected-apps.ts, server/connected-apps-harness.test.ts and loop docs.
+Keep per-bot opt-out and credentials in the harness; no account/production changes.
+
+## Loop130 — configured connector tools reach bots and calendar connection cards
+
+Reproduced before changing product code: a real owned server configured only
+with OpenConnector dispatched a fake-ACP turn with no connected-app integration;
+the new harness assertion failed with an undefined composio MCP entry. The
+Settings catalog/relay already preferred OpenConnector, but dispatch readiness,
+bridge creation, card creation, authorization and polling still chose Composio.
+
+Added a shared backend selector and wired those paths (including group dispatch)
+to the configured backend. OpenConnector tools receive provider-appropriate
+instructions instead of invented Composio tool names. Existing Composio fallback,
+per-bot opt-out and the loopback credential boundary are retained. No UI redesign,
+calendar event mutation, new permissions or production configuration changes.
+
+Owned real-route acceptance proves runtime-only dispatch, card creation, calendar
+authorization/status, no runtime secret in the provider environment, and opt-out
+without a runtime request. Adapter tests cover both-backend precedence, fallback,
+no backend and failure without silent provider switching. Runtime OAuth URLs are
+synthetic and never followed: real Google consent/events/planning are still open.
+
+Receipts: focused **5 files / 20 passed**; full **298 files / 4347 passed /
+8 skipped / 0 failed**, 442.47s (prior 296/4341, +2 files/+6 tests); browser
+**29/29**, 3.0m (unchanged UI artifact from Loop129; real source server rebuilt
+by each fixture); packaged server rebuilt and smoke **14/14**; server/project/e2e
+typechecks exit 0; full oxlint exit 0 with no diagnostics; diff whitespace clean.
+Initial scoped lint findings in the new fixture were corrected before this gate.
+No native tests rerun; installed app/release and hosted per-account connector
+acceptance are not established by the owned fixture. Production remains GET-only.
+
+Next: a user-visible daily-planning entry using the connected calendar, with
+explicit date/timezone, complete event coverage and honest missing-access states;
+then verify the real account and Watch call journey against the beta matrix.
