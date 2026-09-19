@@ -203,3 +203,28 @@ posixOnly("real cloud to desktop pairing fixture", () => {
     }
   });
 });
+
+posixOnly("optional owned calendar fixture", () => {
+  it("serves the seeded desktop calendar and day while refusing other calendars", async () => {
+    const staticDir = mkdtempSync(join(tmpdir(), "muster-calendar-test-ui-"));
+    writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Calendar fixture</title>");
+    let harness: Awaited<ReturnType<typeof startPairingHarness>> | undefined;
+    try {
+      harness = await startPairingHarness({ staticDir, calendarFixture: true });
+      expect(harness.calendarFixture?.calendarId).toBe("owned-calendar");
+      const headers = { cookie: harness.calendarFixture!.cookie, origin: harness.desktopUrl };
+      const calendars = await fetch(`${harness.desktopUrl}/api/calendar/calendars`, { headers, redirect: "error" });
+      expect(calendars.status).toBe(200);
+      expect(await calendars.json()).toEqual({ calendars: [{ id: "owned-calendar", summary: "Owned Calendar", timeZone: "UTC", primary: false }] });
+      const query = "date=2040-01-02&timeZone=UTC";
+      const day = await fetch(`${harness.desktopUrl}/api/calendar/day?calendarId=owned-calendar&${query}`, { headers, redirect: "error" });
+      expect(day.status).toBe(200);
+      expect(await day.json()).toMatchObject({ complete: true, events: [{ summary: "Owned planning meeting", start: "2040-01-02T10:00:00.000Z", end: "2040-01-02T11:00:00.000Z" }] });
+      const foreign = await fetch(`${harness.desktopUrl}/api/calendar/day?calendarId=foreign&${query}`, { headers, redirect: "error" });
+      expect(foreign.status).toBe(409);
+    } finally {
+      await harness?.stop();
+      await removeTempDir(staticDir);
+    }
+  }, 45_000);
+});

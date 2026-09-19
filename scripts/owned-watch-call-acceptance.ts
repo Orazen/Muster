@@ -46,7 +46,7 @@ async function listen(server: Server) {
 try {
   console.log(JSON.stringify({ phase: "scratch", scratch }));
   const ui = join(scratch, "ui"); mkdirSync(ui); writeFileSync(join(ui, "index.html"), "Owned Watch call fixture");
-  harness = await startPairingHarness({ staticDir: ui });
+  harness = await startPairingHarness({ staticDir: ui, calendarFixture: true });
   const base = harness.desktopUrl;
   const request = async (path: string, method = "GET", body?: JsonValue) => {
     const init: RequestInit = { method, headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(10_000) };
@@ -73,6 +73,28 @@ try {
     handler(req, res);
   }));
   const control = await listen(createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/calendar-approve" && !req.headers.origin) {
+      void (async () => {
+        let body = "";
+        for await (const chunk of req) { body += String(chunk); if (body.length > 1024) throw new Error("Oversized owned control request"); }
+        const { code: enrollmentCode } = z.object({ code: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{8}$/) }).strict().parse(JSON.parse(body));
+        const fixture = harness?.calendarFixture;
+        if (!fixture) throw new Error("Owned Calendar fixture missing");
+        for (const [action, payload] of [
+          ["inspect", { code: enrollmentCode }],
+          ["approve", { code: enrollmentCode, calendarId: fixture.calendarId, label: "Owned Watch" }],
+        ] as const) {
+          const approved = await fetch(`${base}/api/calendar/enrollment/${action}`, {
+            method: "POST", headers: { "content-type": "application/json", cookie: fixture.cookie, origin: base },
+            body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000), redirect: "error",
+          });
+          if (!approved.ok) throw new Error(`Owned Calendar ${action}: ${approved.status}`);
+          await approved.arrayBuffer();
+        }
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true }));
+      })().catch(() => res.writeHead(500).end());
+      return;
+    }
     if (req.method === "GET" && req.url === "/status" && !req.headers.origin) {
       void request(`/api/threads/${bot.threadId}/messages`).then(({ messages }) => {
         const userMessages = messages.filter((value: { role: string; kind: string }) => value.role === "user" && value.kind === "text").length;

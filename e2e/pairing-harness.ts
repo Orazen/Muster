@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { DatabaseSync } from "node:sqlite";
+import { CALENDAR_READONLY_SCOPE, createCalendarState, consumeCalendarState, saveCalendarGrant } from "../server/calendar-grants.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -103,7 +105,7 @@ export async function waitForOwnedServer(
 }
 
 // Every guard is a child-only preload. It never patches the test runner.
-function outboundGuard(cloudUrl?: string): string {
+function outboundGuard(cloudUrl?: string, calendarFixture = false): string {
   return `
 import { Socket } from "node:net";
 const allowed = ${JSON.stringify(cloudUrl ? `${cloudUrl}/api/pair/verify` : null)};
@@ -112,6 +114,25 @@ const connectOriginal = Socket.prototype.connect;
 const blocked = () => { throw new Error("Outbound network disabled in pairing fixture"); };
 globalThis.fetch = async (input, init) => {
   const request = new Request(input, init);
+  const url = new URL(request.url);
+  if (${JSON.stringify(calendarFixture)} && request.method === "GET" && request.redirect === "error"
+      && url.origin === "https://www.googleapis.com" && !url.username && !url.password) {
+    if (url.pathname === "/calendar/v3/users/me/calendarList" && url.search === "?maxResults=250&showDeleted=false") {
+      return Response.json({ kind: "calendar#calendarList", items: [{ id: "owned-calendar", summary: "Owned Calendar", timeZone: "UTC" }] });
+    }
+    const start = Date.parse(url.searchParams.get("timeMin"));
+    const end = Date.parse(url.searchParams.get("timeMax"));
+    const keys = ["timeMin", "timeMax", "timeZone", "singleEvents", "orderBy", "showDeleted", "maxResults"];
+    if (url.pathname === "/calendar/v3/calendars/owned-calendar/events" && [...url.searchParams.keys()].length === keys.length
+        && keys.every(key => url.searchParams.has(key)) && url.searchParams.get("singleEvents") === "true"
+        && url.searchParams.get("orderBy") === "startTime" && url.searchParams.get("showDeleted") === "false"
+        && url.searchParams.get("maxResults") === "2500" && Number.isFinite(start) && Number.isFinite(end) && end > start) {
+      return Response.json({ kind: "calendar#events", items: [{ id: "owned-meeting", summary: "Owned planning meeting",
+        start: { dateTime: new Date(start + (end - start) * 10 / 24).toISOString() },
+        end: { dateTime: new Date(start + (end - start) * 11 / 24).toISOString() } }] });
+    }
+    blocked();
+  }
   if (!allowed || request.url !== allowed || request.method !== "POST" || request.redirect === "follow") blocked();
   return fetchOriginal(request);
 };
@@ -192,6 +213,7 @@ export interface PairingHarness {
   password: string;
   /** Actual ACP response evidence, present only in gated modes. */
   permissionOutcomePath?: string;
+  calendarFixture?: { cookie: string; calendarId: "owned-calendar" };
   stop(): Promise<void>;
 }
 
@@ -205,7 +227,7 @@ interface FakeEngineEnvironment {
 }
 
 export async function startPairingHarness(
-  { staticDir = join(ROOT, "dist"), engineMode = "happy" }: { staticDir?: string; engineMode?: FixtureEngineMode } = {},
+  { staticDir = join(ROOT, "dist"), engineMode = "happy", calendarFixture = false }: { staticDir?: string; engineMode?: FixtureEngineMode; calendarFixture?: boolean } = {},
   { waitForServer = waitForOwnedServer }: { waitForServer?: typeof waitForOwnedServer } = {},
 ): Promise<PairingHarness> {
   if (process.platform === "win32") throw new Error("Pairing fixture requires POSIX process groups");
@@ -279,13 +301,14 @@ setInterval(() => { if (process.ppid !== owner) process.exit(0); }, 100).unref()
             config: { cli: fakeCli, fullAuto: false, workspace: home } } },
       }), { mode: 0o600 });
       const guard = join(directory, "block-outbound.mjs");
-      await writeFile(guard, outboundGuard(kind === "desktop" ? cloudUrl : undefined), { mode: 0o600 });
+      await writeFile(guard, outboundGuard(kind === "desktop" ? cloudUrl : undefined, kind === "desktop" && calendarFixture), { mode: 0o600 });
       const env = pairingServerEnvironment({ home, dataDirectory, companionDirectory, staticDir: builtUi, port, webhookPort: port + 1, secret: randomBytes(32).toString("hex") });
-      if (kind === "cloud") {
+      if (kind === "cloud" || calendarFixture) {
         env.OMB_ALLOW_SIGNUPS = "true";
         env.GOOGLE_CLIENT_ID = randomBytes(24).toString("hex");
         env.GOOGLE_CLIENT_SECRET = randomBytes(32).toString("hex");
-      } else {
+      }
+      if (kind === "desktop") {
         env.OMB_DESKTOP_APP = "true";
         env.OMB_PAIR_CLOUD_URL = cloudUrl;
       }
@@ -318,6 +341,27 @@ setInterval(() => { if (process.ppid !== owner) process.exit(0); }, 100).unref()
     if (!signup.ok) throw new Error(`Pairing fixture signup failed (${signup.status})`);
     await signup.arrayBuffer();
     const harness: PairingHarness = { cloudUrl, desktopUrl, rootDirectory, email, password, stop };
+    if (calendarFixture) {
+      const response = await fetch(`${desktopUrl}/api/auth/sign-up/email`, {
+        method: "POST", redirect: "error", signal: AbortSignal.timeout(10_000),
+        headers: { "content-type": "application/json", origin: desktopUrl },
+        body: JSON.stringify({ email, password, name: "Calendar Fixture Owner" }),
+      });
+      if (!response.ok) throw new Error(`Calendar fixture signup failed (${response.status})`);
+      const account = z.object({ user: z.object({ id: z.string().min(1) }) }).parse(await response.json());
+      const cookie = response.headers.getSetCookie().map(value => value.split(";")[0]).join("; ");
+      if (!cookie) throw new Error("Calendar fixture session missing");
+      const db = new DatabaseSync(join(rootDirectory, "desktop", "data", "auth.db"));
+      try {
+        const binding = { userId: account.user.id, sessionId: randomBytes(24).toString("hex") };
+        const pending = createCalendarState(db, binding);
+        consumeCalendarState(db, { ...binding, state: pending.state });
+        saveCalendarGrant(db, { userId: account.user.id, expectedGeneration: pending.generation,
+          googleSub: randomBytes(24).toString("hex"), accessToken: randomBytes(32).toString("hex"),
+          refreshToken: randomBytes(32).toString("hex"), expiresAt: Date.now() + 3_600_000, scopes: [CALENDAR_READONLY_SCOPE] });
+      } finally { db.close(); }
+      harness.calendarFixture = { cookie, calendarId: "owned-calendar" };
+    }
     if (permissionOutcomePath) harness.permissionOutcomePath = permissionOutcomePath;
     return harness;
   } catch (error) {

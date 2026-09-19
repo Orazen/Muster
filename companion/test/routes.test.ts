@@ -239,6 +239,18 @@ describe("what it may not", () => {
 
 describe("explicit foreground call surface", () => {
   const call = "/api/bots/bot_123/calls/00000000-0000-4000-8000-000000000001";
+  it.each(["calendar-enrollment", "calendar-enrollment-status", "calendar-enrollment-cancel"])("restricts %s to exact full-access POST", action => {
+    const path = `${call}/${action}`;
+    expect(ask("POST", path, true, "full")).toBeNull();
+    expect(ask("POST", path, true, "approvals")?.status).toBe(403);
+    expect(ask("POST", path, false, "full")?.status).toBe(401);
+    for (const method of ["GET", "PUT", "PATCH", "DELETE"]) {
+      expect(ask(method, path, true, "full")?.status).toBe(404);
+    }
+    for (const suffix of ["/extra", "/", "-extra"]) {
+      expect(ask("POST", path + suffix, true, "full")?.status).toBe(404);
+    }
+  });
   it.each([
     ["POST", "/api/bots/bot_123/calls"], ["GET", call],
     ["POST", `${call}/accept`], ["POST", `${call}/messages`], ["POST", `${call}/end`], ["POST", `${call}/prepare-calendar`],

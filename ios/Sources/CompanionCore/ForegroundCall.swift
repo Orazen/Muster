@@ -51,6 +51,12 @@ public final class ForegroundCallCoordinator {
     private var identity: (bot: String, thread: String, id: String, capability: String)?
     private let changed: @MainActor () -> Void
 
+    /// Ephemeral authorization for explicit calendar actions in this connected call.
+    public var calendarScope: CallCalendarScope? {
+        guard foreground, phase == .connected, !endingRequested, let identity else { return nil }
+        return CallCalendarScope(botId: identity.bot, threadId: identity.thread, callId: identity.id, capability: identity.capability)
+    }
+
     public init(changed: @escaping @MainActor () -> Void = {}) { self.changed = changed }
 
     public func bind(sessionId: UUID, transport: (any ForegroundCallTransport)?) {

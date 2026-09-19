@@ -10,12 +10,15 @@ import { json, readBody } from "./http-helpers.ts";
 import { createCalendarState, consumeCalendarState, getCalendarGrant, saveCalendarGrant, disconnectCalendar } from "./calendar-grants.ts";
 import { GoogleCalendarOAuthProvider } from "./calendar-oauth.ts";
 
+import { CalendarEnrollmentError, type CalendarEnrollmentRegistry } from "./calendar-enrollment.ts";
 import { issueCalendarDeviceGrant, listCalendarDeviceGrants, revokeCalendarDeviceGrant } from "./calendar-device-grants.ts";
 
 export const CALENDAR_CALLBACK_PATH = "/api/calendar/google/callback";
 interface CalendarSession { userId: string; sessionId: string }
 export interface CalendarRouteContext {
   db(): DatabaseSync;
+  enrollment?: CalendarEnrollmentRegistry;
+  enrollmentBotName?(botId: string): string;
   session(): Promise<CalendarSession | null>;
   origin: string;
   clientId: string;
@@ -82,6 +85,20 @@ export async function handleCalendarRoute(req: IncomingMessage, res: ServerRespo
       json(res, 403, { error: "Open Calendar settings in Muster to try again." }); return true;
     }
   }
+  if (method === "POST" && path === "/api/calendar/enrollment/inspect") {
+    if (!ctx.enrollment) { json(res, 503, { error: "Calendar enrollment is unavailable on this host." }); return true; }
+    let code: string;
+    try { code = z.object({ code: z.string().max(32) }).strict().parse(await readBody(req)).code; }
+    catch { json(res, 400, { error: "Enter the code shown on your Watch." }); return true; }
+    try {
+      const enrollment = ctx.enrollment.inspect(code, session.userId);
+      json(res, 200, { enrollment: { ...enrollment, botName: ctx.enrollmentBotName?.(enrollment.botId) ?? "Bot" } });
+    } catch (error) {
+      if (error instanceof CalendarEnrollmentError) json(res, error.status, { error: error.message });
+      else json(res, 409, { error: "Could not inspect this enrollment. Open Calendar on the computer connected to your Watch." });
+    }
+    return true;
+  }
   if (method === "GET" && path === "/api/calendar/devices") {
     json(res, 200, { devices: listCalendarDeviceGrants(ctx.db(), session.userId) }); return true;
   }
@@ -92,32 +109,40 @@ export async function handleCalendarRoute(req: IncomingMessage, res: ServerRespo
     revokeCalendarDeviceGrant(ctx.db(), session.userId, id);
     json(res, 200, { ok: true }); return true;
   }
-  if (method === "POST" && path === "/api/calendar/devices") {
+  if (method === "POST" && (path === "/api/calendar/devices" || path === "/api/calendar/enrollment/approve")) {
     if (!configured) { json(res, 503, { error: "Google Calendar connection is not configured yet." }); return true; }
+    const enrolling = path === "/api/calendar/enrollment/approve";
+    if (enrolling && !ctx.enrollment) { json(res, 503, { error: "Calendar enrollment is unavailable on this host." }); return true; }
     const schema = z.object({
+      code: z.string().max(32).optional(),
       calendarId: z.string().min(1).max(1024).refine(value => [...value].every(character => character.charCodeAt(0) >= 32)),
       label: z.string().trim().min(1).max(80),
     }).strict();
     let body: z.infer<typeof schema>;
-    try { body = schema.parse(await readBody(req)); }
+    try { body = schema.parse(await readBody(req)); if (enrolling !== (body.code !== undefined)) throw new Error("Invalid enrollment selection"); }
     catch { json(res, 400, { error: "Choose a calendar and name this authorization." }); return true; }
     try {
-      const guard = async () => {
-        const current = await ctx.session();
-        if (current?.userId !== session.userId || current.sessionId !== session.sessionId) throw new Error("Calendar session changed");
+      const issue = async () => {
+        const guard = async () => {
+          const current = await ctx.session();
+          if (current?.userId !== session.userId || current.sessionId !== session.sessionId) throw new Error("Calendar session changed");
+        };
+        const provider = ctx.provider?.refresh ? { refresh: ctx.provider.refresh.bind(ctx.provider) }
+          : new GoogleCalendarOAuthProvider({ clientId: ctx.clientId, clientSecret: ctx.clientSecret, redirectUri: `${ctx.origin}${CALENDAR_CALLBACK_PATH}` });
+        const access = await getCalendarAccess(ctx.db(), session.userId, provider, guard);
+        const reader = ctx.reader ?? new GoogleCalendarReader({});
+        const calendars = await reader.listCalendars(access.grant.accessToken, access.assertCurrent);
+        await access.assertCurrent();
+        if (!calendars.some(calendar => calendar.id === body.calendarId)) throw new Error("Calendar is not available");
+        return issueCalendarDeviceGrant(ctx.db(), { userId: session.userId, calendarId: body.calendarId, label: body.label });
       };
-      const provider = ctx.provider?.refresh ? { refresh: ctx.provider.refresh.bind(ctx.provider) }
-        : new GoogleCalendarOAuthProvider({ clientId: ctx.clientId, clientSecret: ctx.clientSecret, redirectUri: `${ctx.origin}${CALENDAR_CALLBACK_PATH}` });
-      const access = await getCalendarAccess(ctx.db(), session.userId, provider, guard);
-      const reader = ctx.reader ?? new GoogleCalendarReader({});
-      const calendars = await reader.listCalendars(access.grant.accessToken, access.assertCurrent);
-      await access.assertCurrent();
-      if (!calendars.some(calendar => calendar.id === body.calendarId)) throw new Error("Calendar is not available");
-      // Explicit selected-calendar delegation, never implicit installation ownership.
-      const result = issueCalendarDeviceGrant(ctx.db(), { userId: session.userId, ...body });
-      json(res, 201, result);
-    } catch {
-      json(res, 409, { error: "Could not authorize Calendar. Reconnect, check the selected calendar, or remove an existing authorization and try again." });
+      if (enrolling) {
+        await ctx.enrollment!.approve(body.code!, session.userId, issue);
+        json(res, 200, { ok: true });
+      } else json(res, 201, await issue());
+    } catch (error) {
+      if (error instanceof CalendarEnrollmentError) json(res, error.status, { error: error.message });
+      else json(res, 409, { error: "Could not authorize Calendar. Reconnect, check the selected calendar, or remove an existing authorization and try again." });
     }
     return true;
   }

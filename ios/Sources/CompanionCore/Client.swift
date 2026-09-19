@@ -250,6 +250,27 @@ public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport, A
         try await send(try callRequest("POST", botId: botId, callId: callId, action: "/end", capability: capability, body: [:]), as: CallEnvelope.self).call
     }
 
+    public func beginCalendarEnrollment(botId: String, callId: String, capability: String, requestId: String) async throws -> CallCalendarEnrollmentReceipt {
+        guard UUID(uuidString: requestId) != nil else { throw APIError.badURL }
+        return try await send(try callRequest("POST", botId: botId, callId: callId, action: "/calendar-enrollment", capability: capability,
+            body: ["requestId": requestId]), as: CallCalendarEnrollmentReceipt.self)
+    }
+    public func checkCalendarEnrollment(botId: String, callId: String, capability: String, enrollmentId: String) async throws -> CallCalendarEnrollmentReceipt {
+        try await calendarEnrollmentAction("/calendar-enrollment-status", botId: botId, callId: callId, capability: capability, enrollmentId: enrollmentId)
+    }
+    public func cancelCalendarEnrollment(botId: String, callId: String, capability: String, enrollmentId: String) async throws {
+        guard UUID(uuidString: enrollmentId) != nil else { throw APIError.badURL }
+        struct CancelReceipt: Decodable { let ok: Bool }
+        let receipt = try await send(try callRequest("POST", botId: botId, callId: callId, action: "/calendar-enrollment-cancel", capability: capability,
+            body: ["enrollmentId": enrollmentId]), as: CancelReceipt.self)
+        guard receipt.ok else { throw APIError.transport("Calendar cancellation was not confirmed.") }
+    }
+    private func calendarEnrollmentAction(_ action: String, botId: String, callId: String, capability: String, enrollmentId: String) async throws -> CallCalendarEnrollmentReceipt {
+        guard UUID(uuidString: enrollmentId) != nil else { throw APIError.badURL }
+        return try await send(try callRequest("POST", botId: botId, callId: callId, action: action, capability: capability,
+            body: ["enrollmentId": enrollmentId]), as: CallCalendarEnrollmentReceipt.self)
+    }
+
     /// Prepare an unsent draft from the calendar bound to the supplied capability.
     public func prepareCallCalendarPlan(botId: String, callId: String, capability: String,
                                         calendarCapability: String, input: CallCalendarPlanRequest) async throws -> CallCalendarPlanDraft {

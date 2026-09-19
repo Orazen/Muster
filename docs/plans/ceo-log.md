@@ -6503,3 +6503,40 @@ Next: explicit same-host Calendar enrollment and Watch review controls. Cloud
 and local Calendar databases remain separate: no silent cross-host grant lookup.
 Real Google/hardware/Drive/allowance/tester-day gates and production rollout remain
 open. Automation remains paused; unrelated files and release-agent work preserved.
+
+## Loop143 started — Calendar enrollment and Watch review
+
+Root owns call-instance binding, enrollment HTTP routes/integration and end-to-end
+server tests. Registry agent owns bounded enrollment memory/tests; web agent owns
+Calendar settings approval/revocation UI and browser tests; native agent owns
+Watch enrollment, Keychain, planning review and transport/coordinator tests.
+Existing call/user sessions and unrelated files remain untouched. Same-host
+approval, explicit read-only selection, separate preparation and Send are required.
+
+### Loop143 — Watch Calendar enrollment and reviewed planning
+
+An accepted Watch call now requests a five-minute code. A signed-in user on the
+same host inspects the bot, selects a calendar and approves 24-hour read-only
+access. Only the original call receives the capability, once; the Watch stores
+it in connection-scoped Keychain storage. Date/timezone, working hours and up to
+three priorities are reviewed before Prepare; Send remains separate. No calendar
+writes or automatic dispatch. Local and hosted grants remain separate.
+
+Gates: **317 files / 4734 passed / 8 skipped / 0 failed**,635.98s (+2 files,
++32 passing versus Loop142); fresh browser **40/40**,6.5m; Swift **390/390**,
+focused native34/34. Both typechecks/full lint passed. Signed Watch test build,
+Companion and Widget simulator builds passed. Actual final-source owned Watch
+XCTest **1/1 passed**,147.407s: pair/start/connect, code approval through real
+server routes, selected-calendar preparation including synthetic event evidence,
+review/keyboard return, zero dispatch before Send, one message/reply, End.
+
+Focused HTTP61/61, registry19/19, companion160/160, fixture10/10. Reviews fixed
+concurrent native reconnect, stale preparation inputs and revocation cleanup retry.
+Earlier stale-bundle/select-locator browser failures, mixed-source native linker
+failure and first Watch keyboard-focus failure are retained in the audit; none
+are counted as passing acceptance. See docs/audits/watch-calendar-enrollment-2026-09-19.md.
+
+Real Google consent, wrist audio/physical devices, Drive recovery, allowance and
+15 qualifying tester-days remain open. Production GET still has unchanged build
+identities/null revisions/no attestation; push is not deployment. Release-agent
+changes remain outside this slice. Existing automation remains paused.

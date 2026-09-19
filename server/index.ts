@@ -1,3 +1,5 @@
+import { CalendarEnrollmentRegistry } from "./calendar-enrollment.ts";
+import { revokeCalendarDeviceGrant, resolveCalendarDeviceGrant } from "./calendar-device-grants.ts";
 import { ForegroundCallRegistry, ForegroundCallError, type CallDispatch } from "./foreground-call.ts";
 import { ForegroundCallDispatchTracker } from "./foreground-call-dispatch.ts";
 import { prepareCallCalendarPlan } from "./call-calendar-plan.ts";
@@ -362,6 +364,22 @@ await registry.load(instanceConfigs(cfg));
 
 const foregroundCallDispatch = new ForegroundCallDispatchTracker((lease) => peerCapabilities.current(lease));
 const foregroundCalls = new ForegroundCallRegistry({ dispatch: dispatchForegroundCall });
+const calendarEnrollment = new CalendarEnrollmentRegistry({
+  assertCallCurrent(binding) {
+    foregroundCalls.assertEnrollmentBinding(binding);
+    const bot = store.bot(binding.botId);
+    if (!bot || bot.threadId !== binding.threadId || peerOwnerOf(bot) !== binding.ownerId) throw new Error("Calendar call changed");
+  },
+  revoke(accountId, grantId) { revokeCalendarDeviceGrant(getDb(), accountId, grantId); },
+  isPermissionCurrent(accountId, issued) {
+    const current = resolveCalendarDeviceGrant(getDb(), issued.token);
+    return current?.userId === accountId && current.id === issued.grant.id;
+  },
+});
+const calendarEnrollmentSweep = setInterval(() => {
+  try { calendarEnrollment.sweep(); } catch { console.warn("Calendar enrollment cleanup will retry."); }
+}, 30_000);
+calendarEnrollmentSweep.unref();
 const foregroundCallSweep = setInterval(() => {
   void foregroundCalls.sweep();
   foregroundCallDispatch.sweep();
@@ -4832,6 +4850,7 @@ let requestUserEmail = "";
       // of installation connector credentials.
       if (await handleCalendarRoute(req, res, method, path, {
         db: getDb, session, origin: requestOrigin(req),
+        enrollment: calendarEnrollment, enrollmentBotName: botId => store.bot(botId)?.name ?? "Bot",
         clientId: process.env.GOOGLE_CLIENT_ID?.trim() ?? "",
         clientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "",
       })) return;
@@ -4910,7 +4929,7 @@ let requestUserEmail = "";
       }
       const remote = req.socket.remoteAddress ?? "";
       if (await handleForegroundCallRoute(req, res, method, path, {
-        registry: foregroundCalls, origin: requestOrigin(req),
+        registry: foregroundCalls, calendarEnrollment, origin: requestOrigin(req),
         prepareCalendar: async (input, assertCallCurrent) => {
           const clientId = process.env.GOOGLE_CLIENT_ID?.trim() ?? "";
           const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "";

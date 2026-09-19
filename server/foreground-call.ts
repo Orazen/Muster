@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual, randomUUID } from "node:crypto";
 
 export interface CallScope { ownerId: string | null; botId: string; token: string }
 export interface CallTurn {
@@ -24,7 +24,8 @@ export interface CallDispatch {
   update(patch: Partial<Omit<CallTurn, "requestId">>): void;
 }
 interface Receipt { dispatched?: boolean; text: string; turn: CallTurn; cancel?: () => void | Promise<void>; cancellation?: Promise<void> }
-interface Entry { ownerId: string | null; hash: Buffer; view: CallView; receipts: Map<string, Receipt>; current?: Receipt; endedAt?: number }
+export interface CallEnrollmentBinding { ownerId: string | null; botId: string; threadId: string; callId: string; callTokenHash: string; callInstanceId: string }
+interface Entry { instanceId: string; ownerId: string | null; hash: Buffer; view: CallView; receipts: Map<string, Receipt>; current?: Receipt; endedAt?: number }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN = /^[0-9a-f]{64}$/;
 const TERMINAL = new Set<CallTurn["state"]>(["completed", "failed", "uncertain", "cancelled"]);
@@ -109,11 +110,29 @@ export class ForegroundCallRegistry {
       if (!oldest) fail(429, "Too many active calls. End a call before starting another.");
       this.calls.delete(oldest.view.id);
     }
-    const entry: Entry = { ownerId: scope.ownerId, hash, receipts: new Map(), view: {
+    const entry: Entry = { instanceId: randomUUID(), ownerId: scope.ownerId, hash, receipts: new Map(), view: {
       id: input.requestId, botId: scope.botId, threadId: input.threadId, state: "ringing", revision: 1, expiresAt: this.now() + this.leaseMs,
     } };
     this.calls.set(input.requestId, entry);
     return this.copy(entry);
+  }
+  /** Internal enrollment proof; never exposed by HTTP. Does not renew the lease. */
+  enrollmentBinding(scope: CallScope, id: string): CallEnrollmentBinding {
+    const entry = this.lookup(scope, id);
+    const binding = { ownerId: entry.ownerId, botId: entry.view.botId, threadId: entry.view.threadId,
+      callId: id, callTokenHash: entry.hash.toString("hex"), callInstanceId: entry.instanceId };
+    this.assertEnrollmentBinding(binding);
+    return binding;
+  }
+  assertEnrollmentBinding(binding: CallEnrollmentBinding): void {
+    const entry = this.calls.get(binding.callId);
+    if (!entry || !TOKEN.test(binding.callTokenHash) || entry.instanceId !== binding.callInstanceId
+      || entry.ownerId !== binding.ownerId || entry.view.botId !== binding.botId || entry.view.threadId !== binding.threadId
+      || !timingSafeEqual(entry.hash, Buffer.from(binding.callTokenHash, "hex"))) fail(404, "Call not found.");
+    this.expire(entry);
+    if (entry.view.state !== "connected" || (entry.current && !["completed", "failed", "cancelled"].includes(entry.current.turn.state))) {
+      fail(409, "Connect an idle call before authorizing Calendar.");
+    }
   }
   peek(scope: CallScope, id: string): CallView {
     return this.copy(this.lookup(scope, id));

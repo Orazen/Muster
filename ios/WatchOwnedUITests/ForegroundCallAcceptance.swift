@@ -22,7 +22,7 @@ final class ForegroundCallAcceptance: XCTestCase {
 
     func reveal(_ identifier: String) throws -> XCUIElement {
         let element = app.descendants(matching: .any)[identifier].firstMatch
-        let isCall = identifier.hasPrefix("watch-call-")
+        let isCall = identifier.hasPrefix("watch-call-") || identifier.hasPrefix("watch-calendar-")
         let isScrollScreen = isCall || identifier == "watch-open-call"
         let container = isScrollScreen ? app.scrollViews.firstMatch : app.collectionViews.firstMatch
         let top = isCall ? 52.0 : 65.0
@@ -61,9 +61,16 @@ final class ForegroundCallAcceptance: XCTestCase {
 
     func enter(_ identifier: String, _ value: String) throws {
         try tap(identifier)
-        app.typeText(value)
         let done = app.buttons["Done"].firstMatch
+        if !done.waitForExistence(timeout: 5) {
+            // A cold Watch can ignore the first tap while the editor starts.
+            // Only retry the observed field when no editor appeared; never type
+            // into the application before its system keyboard is visible.
+            capture("editor-not-open-" + identifier)
+            try tap(identifier)
+        }
         guard done.waitForExistence(timeout: 10) else { throw NSError(domain: "OwnedWatchKeyboardDone", code: 1) }
+        app.typeText(value)
         done.tap()
     }
 
@@ -104,8 +111,34 @@ final class ForegroundCallAcceptance: XCTestCase {
         try tap("watch-call-start")
         try tap("watch-call-connect")
         try tap("watch-call-plan-day")
+        try tap("watch-calendar-connect")
+        let calendarCode = app.descendants(matching: .any)["watch-calendar-code"].firstMatch
+        guard calendarCode.waitForExistence(timeout: 15) else { throw NSError(domain: "OwnedWatchCalendarCodeMissing", code: 1) }
+        _ = try reveal("watch-calendar-code")
+        var approval = URLRequest(url: control.appendingPathComponent("calendar-approve"))
+        approval.httpMethod = "POST"; approval.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        approval.httpBody = try JSONEncoder().encode(["code": calendarCode.label])
+        let (_, approvalResponse) = try await network.data(for: approval)
+        guard (approvalResponse as? HTTPURLResponse)?.statusCode == 200 else { throw NSError(domain: "OwnedWatchCalendarApproval", code: 1) }
+        try tap("watch-calendar-check")
+        let selected = app.descendants(matching: .any)["watch-calendar-selected"].firstMatch
+        guard selected.waitForExistence(timeout: 15) else { throw NSError(domain: "OwnedWatchCalendarNotConnected", code: 1) }
+        _ = try reveal("watch-calendar-date")
+        _ = try reveal("watch-calendar-time-zone")
+        _ = try reveal("watch-calendar-work-start")
+        _ = try reveal("watch-calendar-work-end")
+        try enter("watch-calendar-priority-0", "Prepare owned report")
+        _ = try reveal("watch-calendar-minutes-0")
+        try tap("watch-calendar-prepare")
+        let ready = app.descendants(matching: .any)["watch-calendar-draft-notice"].firstMatch
+        guard ready.waitForExistence(timeout: 20) else { capture("calendar-draft-failure"); throw NSError(domain: "OwnedWatchCalendarDraftMissing", code: 1) }
+        XCTAssertTrue(ready.label.contains("Draft ready"))
         let input = try reveal("watch-call-input")
-        XCTAssertEqual(input.value as? String, "Help me plan my day using my actual connected calendar. If the calendar is unavailable, say so explicitly and do not invent events. Give me a calendar overview, suggest three priorities, and propose time blocks.")
+        let draft = try XCTUnwrap(input.value as? String)
+        XCTAssertTrue(draft.contains("Google Calendar read-only day read"))
+        XCTAssertTrue(draft.contains("Prepare owned report"))
+        XCTAssertTrue(draft.contains("owned-calendar"))
+        XCTAssertTrue(draft.contains("Owned planning meeting"))
         // The system full-screen text editor must not end this foreground call.
         input.tap()
         let done = app.buttons["Done"].firstMatch

@@ -14,6 +14,7 @@
 // already has a first-class dictation affordance on every keyboard, so
 // there is no Speech framework work here, and no microphone permission.
 import Foundation
+import CryptoKit
 import OSLog
 import SwiftUI
 import CompanionCore
@@ -45,6 +46,8 @@ final class WatchSession: ObservableObject {
             composerCoordinator.reconcile()
             hapticOnFleetChange()
             if let target = callTarget, state.bot(target.botId)?.threadId != target.threadId {
+                calendarCoordinator.reset()
+                calendarBoundContext = nil
                 callCoordinator.endImmediately()
             }
         }
@@ -59,6 +62,8 @@ final class WatchSession: ObservableObject {
                 approvalCoordinator.connectionChanged()
                 composerCoordinator.connectionChanged()
                 if callTarget != nil {
+                    calendarCoordinator.reset()
+                    calendarBoundContext = nil
                     callCoordinator.endImmediately()
                 }
             }
@@ -116,6 +121,8 @@ final class WatchSession: ObservableObject {
             approvalSessionId = UUID()
             approvalCoordinator.bind(sessionId: approvalSessionId, transport: client)
             composerCoordinator.bind(sessionId: approvalSessionId, transport: client)
+            calendarCoordinator.reset()
+            calendarBoundContext = nil
             callTarget = nil
             callCoordinator.bind(sessionId: approvalSessionId, transport: client)
         }
@@ -171,14 +178,64 @@ final class WatchSession: ObservableObject {
     func pollCall(_ context: WatchCallContext) async {
         guard callContextAvailable(context) else { return }
         await callCoordinator.poll()
+        if callPhase == .ended { calendarCoordinator.reset(); calendarBoundContext = nil }
     }
     func endCallImmediately(_ context: WatchCallContext) {
         guard callMatches(context) else { return }
+        calendarCoordinator.reset()
+        calendarBoundContext = nil
         callCoordinator.endImmediately()
     }
     func dismissUnknownCall(_ context: WatchCallContext) {
         guard callMatches(context) else { return }
         callCoordinator.dismissUnknownCall()
+    }
+
+    private var calendarBoundContext: WatchCallContext?
+    private var calendarBoundCallId: String?
+    private lazy var calendarCoordinator = CallCalendarCoordinator(changed: { [weak self] in self?.objectWillChange.send() })
+    var calendarEnrollment: CallCalendarEnrollment? { calendarCoordinator.enrollment }
+    var calendarCode: String? { calendarCoordinator.code }
+    var calendarIssued: CallCalendarIssued? { calendarCoordinator.issued }
+    var calendarBusy: Bool { calendarCoordinator.busy }
+    var calendarNotice: String? { calendarCoordinator.notice }
+    private var calendarStorageKey: String? {
+        guard let connection, let token = try? Keychain.token(for: connection.id) else { return nil }
+        let binding = "\(connection.id)|\(connection.scheme.rawValue)|\(connection.host)|\(connection.port)|\(token)"
+        return "calendar:" + SHA256.hash(data: Data(binding.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+    private func bindCalendar(_ context: WatchCallContext) -> Bool {
+        guard callContextAvailable(context), let scope = callCoordinator.calendarScope, let client, let key = calendarStorageKey else { return false }
+        if calendarBoundContext != context || calendarBoundCallId != scope.callId {
+            var issued: CallCalendarIssued?
+            if let text = try? Keychain.token(for: key) { issued = try? JSONDecoder().decode(CallCalendarIssued.self, from: Data(text.utf8)) }
+            calendarBoundContext = context; calendarBoundCallId = scope.callId
+            calendarCoordinator.bind(scope: scope, transport: client, issued: issued, save: { value in
+                let data = try JSONEncoder().encode(value)
+                try Keychain.save(String(decoding: data, as: UTF8.self), for: key)
+            })
+        }
+        return true
+    }
+    func loadCalendar(_ context: WatchCallContext) { _ = bindCalendar(context) }
+    func beginCalendarEnrollment(_ context: WatchCallContext) async {
+        guard bindCalendar(context) else { return }
+        await calendarCoordinator.start()
+    }
+    func checkCalendarEnrollment(_ context: WatchCallContext) async {
+        guard bindCalendar(context) else { return }
+        await calendarCoordinator.check()
+    }
+    func cancelCalendarEnrollment(_ context: WatchCallContext) async {
+        guard callMatches(context), calendarBoundContext == context else { return }
+        await calendarCoordinator.cancel()
+    }
+    func prepareCalendar(_ input: CallCalendarPlanRequest, context: WatchCallContext) async -> CallCalendarPlanDraft? {
+        guard bindCalendar(context) else { return nil }
+        let callId = callRecord?.id
+        let result = await calendarCoordinator.prepare(input)
+        guard callContextAvailable(context), callRecord?.id == callId, callPhase == .connected else { return nil }
+        return result
     }
 
     private var streamTask: Task<Void, Never>?
@@ -266,6 +323,7 @@ final class WatchSession: ObservableObject {
         streamTask?.cancel()
         streamTask = nil
         restorePending = false
+        if let key = calendarStorageKey { Keychain.remove(key) }
         if let id = connection?.id { Keychain.remove(id) }
         UserDefaults.standard.removeObject(forKey: Self.connectionKey)
         connection = nil
@@ -311,6 +369,7 @@ final class WatchSession: ObservableObject {
         approvalCoordinator.setForeground(active)
         composerCoordinator.setForeground(active)
         callForeground = active
+        if !active { calendarCoordinator.reset(); calendarBoundContext = nil }
         callCoordinator.setForegroundImmediately(active)
     }
 

@@ -9,6 +9,9 @@ struct WatchCallView: View {
     let bot: Bot
 
     @State private var draft = ""
+    @State private var draftRevision = 0
+    @State private var showCalendar = false
+    @State private var calendarDraftReady = false
     @State private var actionPending = false
     @State private var visible = false
     @State private var context: WatchCallContext?
@@ -101,9 +104,11 @@ struct WatchCallView: View {
             .padding(.horizontal)
         }
         .navigationTitle("Call")
+        .onChange(of: draft) { _, _ in draftRevision += 1 }
         .onAppear {
             context = session.makeCallContext(botId: bot.id, threadId: bot.threadId)
             actionPending = false
+            showCalendar = false
             visible = true
         }
         .task {
@@ -138,10 +143,20 @@ struct WatchCallView: View {
             TextField("Say or type a message", text: $draft)
                 .accessibilityIdentifier("watch-call-input")
             Button("Plan my day") {
-                draft = "Help me plan my day using my actual connected calendar. If the calendar is unavailable, say so explicitly and do not invent events. Give me a calendar overview, suggest three priorities, and propose time blocks."
+                calendarDraftReady = false
+                showCalendar = true
+                if let context { session.loadCalendar(context) }
             }
             .disabled(actionPending || session.callPendingRequestId != nil)
             .accessibilityIdentifier("watch-call-plan-day")
+            if showCalendar, let context {
+                WatchCallCalendarView(context: context, draft: $draft, draftRevision: $draftRevision) {
+                    showCalendar = false; calendarDraftReady = true
+                }
+            }
+            if calendarDraftReady {
+                Text("Draft ready. Review the message, then tap Send.").font(.footnote).accessibilityIdentifier("watch-calendar-draft-notice")
+            }
             if draft.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count > 8_000 {
                 Text("Shorten your message to 8,000 characters.").font(.footnote)
                     .accessibilityIdentifier("watch-call-length")

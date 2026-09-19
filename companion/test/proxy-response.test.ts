@@ -225,6 +225,25 @@ describe("calendar preparation capability boundary", () => {
     return response.status;
   }
   const headers = () => ({ authorization: `Bearer ${TOKEN}`, "x-muster-calendar-token": capability, "x-muster-call-token": callToken, cookie: "session=private" });
+  it.each(["calendar-enrollment", "calendar-enrollment-status", "calendar-enrollment-cancel"])("forwards only call capability for %s and denies restricted devices and lookalikes", async action => {
+    const path = `${call}/${action}`;
+    expect(await send(path, headers())).toBe(200);
+    expect(forwardedHeaders["x-muster-call-token"]).toBe(callToken);
+    expect(forwardedHeaders["x-muster-calendar-token"]).toBeUndefined();
+    expect(forwardedHeaders.cookie).toBeUndefined();
+    expect(forwardedHeaders.authorization).toBeUndefined();
+    const before = forwardedRequests;
+    deviceAccess = "approvals";
+    try { expect(await send(path, headers())).toBe(403); }
+    finally { deviceAccess = "full"; }
+    for (const method of ["GET", "PUT", "PATCH", "DELETE"]) {
+      expect(await send(path, headers(), method)).toBe(404);
+    }
+    for (const suffix of ["/extra", "/", "-extra"]) {
+      expect(await send(path + suffix, headers())).toBe(404);
+    }
+    expect(forwardedRequests).toBe(before);
+  });
   it("forwards both narrow capabilities for preparation without account cookies or device credentials", async () => {
     expect(await send(`${call}/prepare-calendar`, headers())).toBe(200);
     expect(forwardedHeaders["x-muster-calendar-token"]).toBe(capability);

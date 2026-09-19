@@ -1,11 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { CalendarEnrollmentError, type CalendarEnrollmentRegistry } from "./calendar-enrollment.ts";
 import { json, readBody } from "./http-helpers.ts";
 import { CallCalendarPlanError, callCalendarPlanInputSchema, type CallCalendarPlanInput, type CallCalendarPlanResult } from "./call-calendar-plan.ts";
 import { ForegroundCallError, type ForegroundCallRegistry } from "./foreground-call.ts";
 
 export interface ForegroundCallRouteContext {
   registry: ForegroundCallRegistry;
+  calendarEnrollment?: CalendarEnrollmentRegistry;
   prepareCalendar?(input: CallCalendarPlanInput, assertCallCurrent: () => Promise<void>): Promise<CallCalendarPlanResult>;
   origin: string;
   /** Only the existing installation-loopback trust may admit originless calls. */
@@ -23,7 +25,7 @@ export async function handleForegroundCallRoute(req: IncomingMessage, res: Serve
   const family = /^\/api\/bots\/([\w-]+)\/calls(?:\/|$)/.exec(path);
   if (!family) return false;
   res.setHeader("Cache-Control", "no-store");
-  const route = /^\/api\/bots\/([\w-]+)\/calls(?:\/([^/]+)(?:\/(accept|messages|end|prepare-calendar))?)?$/.exec(path);
+  const route = /^\/api\/bots\/([\w-]+)\/calls(?:\/([^/]+)(?:\/(accept|messages|end|prepare-calendar|calendar-enrollment|calendar-enrollment-status|calendar-enrollment-cancel))?)?$/.exec(path);
   if (!route || (route[2] && !uuid.safeParse(route[2]).success)) {
     json(res, 404, { error: "Call endpoint not found." }); return true;
   }
@@ -44,6 +46,27 @@ export async function handleForegroundCallRoute(req: IncomingMessage, res: Serve
     let body;
     try { body = await readBody(req); }
     catch { json(res, 400, { error: "Invalid call request." }); return true; }
+    if (action?.startsWith("calendar-enrollment") && callId) {
+      if (!ctx.calendarEnrollment) { json(res, 503, { error: "Calendar enrollment is not available on this host." }); return true; }
+      const current = await ctx.authorizeBot(botId);
+      if (!current || current.ownerId !== authorized.ownerId || current.threadId !== authorized.threadId) {
+        json(res, 409, { error: "The conversation changed. Start enrollment again." }); return true;
+      }
+      ctx.registry.peek(scope, callId);
+      if (action === "calendar-enrollment") {
+        const binding = ctx.registry.enrollmentBinding(scope, callId);
+        const parsed = z.object({ requestId: uuid }).strict().safeParse(body);
+        if (!parsed.success) { json(res, 400, { error: "Invalid enrollment request." }); return true; }
+        json(res, 201, { enrollment: ctx.calendarEnrollment.start(scope, binding, parsed.data.requestId) }); return true;
+      }
+      const parsed = z.object({ enrollmentId: uuid }).strict().safeParse(body);
+      if (!parsed.success) { json(res, 400, { error: "Invalid enrollment request." }); return true; }
+      if (action === "calendar-enrollment-cancel") {
+        ctx.calendarEnrollment.cancel(scope, parsed.data.enrollmentId, callId);
+        json(res, 200, { ok: true }); return true;
+      }
+      json(res, 200, ctx.calendarEnrollment.take(scope, parsed.data.enrollmentId, callId)); return true;
+    }
     if (action === "prepare-calendar" && callId) {
       const calendarToken = capability.safeParse(req.headers["x-muster-calendar-token"]);
       const wireBody = z.record(z.string(), z.unknown()).safeParse(body);
@@ -88,7 +111,7 @@ export async function handleForegroundCallRoute(req: IncomingMessage, res: Serve
     if (action === "accept") json(res, 200, { call: ctx.registry.accept(scope, callId) });
     else json(res, 202, { call: ctx.registry.message(scope, callId, messageBody.parse(parsed.data)) });
   } catch (error) {
-    if (error instanceof ForegroundCallError || error instanceof CallCalendarPlanError) json(res, error.status, { error: error.message });
+    if (error instanceof CalendarEnrollmentError || error instanceof ForegroundCallError || error instanceof CallCalendarPlanError) json(res, error.status, { error: error.message });
     else json(res, 500, { error: "The call could not be updated. Check its status before trying again." });
   }
   return true;

@@ -61,7 +61,7 @@ const FOREGROUND_CALL_ROUTES: ReadonlyArray<{ method: string; path: RegExp }> = 
   CALENDAR_PREPARATION_ROUTE,
   { method: "POST", path: new RegExp(`${CALL_BASE}$`) },
   { method: "GET", path: new RegExp(`${CALL_BASE}/${CALL_UUID}$`) },
-  { method: "POST", path: new RegExp(`${CALL_BASE}/${CALL_UUID}/(?:accept|messages|end)$`) },
+  { method: "POST", path: new RegExp(`${CALL_BASE}/${CALL_UUID}/(?:accept|messages|end|calendar-enrollment|calendar-enrollment-status|calendar-enrollment-cancel)$`) },
 ];
 export function isForegroundCallRoute(method: string, path: string): boolean {
   return FOREGROUND_CALL_ROUTES.some(route => route.method === method && route.path.test(path));

@@ -10,7 +10,7 @@ This is an evidence checklist, not a declaration of production readiness.
 | Sign-up, sign-in, onboarding, return visit | Loop126–128 owned browser suite; completion/connect fixes | Real Google consent on installed app and web; current release, session persistence and error recovery |
 | Owner claim link | New owned Chromium tests: session identity, one redemption, fragment removal, replay rejection, malformed input; cloud code namespace rejection | Native/phone browser on intended served artifact; do not conflate claim with cloud or companion pairing |
 | Calendar-backed Plan my day | Loops133–135: separate consent, complete selected-day reads, deterministic planning draft; isolated provider/browser fixtures only | Real selected calendar yields overview, three priorities and suggested blocks; timezone/empty calendar/offline/auth-expired cases; no calendar writes without approval |
-| Watch calling | Loops139–140 foreground protocol and owned Watch simulator call flow: pair/start/connect/review/edit/send/reply/end, exactly one dispatch | Ring/accept/end, planning result, interruption/backgrounding and failed/reconnected transport on hardware |
+| Watch calling | Loop143 owned Watch UI1/1: pair/start/connect, same-host Calendar approval, event-backed unsent planning, review/send/reply/end; synthetic provider, exactly one dispatch | Ring/accept/end, planning result, interruption/backgrounding and failed/reconnected transport on hardware |
 | Optional connections | Loop130 reproduces and fixes runtime-only tool mounting and calendar-card backend selection; owned runtime fixture, not real consent | Calendar, email, files, Telegram, browser, tasks/notes: connect, cancel, revoke, unavailable and least-required permissions; do not require all to onboard |
 | Memory permissions and action approvals | Existing approval tests; owner defaults recorded | Verify memory controls and draft-first defaults across surfaces; allow/deny reaches intended task exactly once |
 | Capable-device routing and queue | Direction recorded; no current acceptance receipt here | Offline preferred device, another capable device, no device, reconnect, cancellation and duplicate prevention |
@@ -29,7 +29,7 @@ This is an evidence checklist, not a declaration of production readiness.
 | Linux | No current release acceptance receipt; historical billing gate needs fresh verification | Distribution/desktop environment, artifact/install, execution, auth/pairing, updates |
 | iPhone | Loop141 fresh owned signed simulator acceptance: pairing1/1, identity1/1, Walkie1/1; offline provider, no real Google/audio | Device + OS + TestFlight/build, real pairing/auth, planning/calling/recovery |
 | Android | No fresh evidence in this slice | Device + OS + artifact/build, pairing, planning, permissions, reconnect |
-| Apple Watch | Loop140 signed simulator build and real UI test 1/1 passed; foreground call protocol, system text/dictation and manual reply TTS | Watch + watchOS + paired phone/build, calls and approvals on hardware |
+| Apple Watch | Loop143 signed simulator builds and actual Watch UI1/1 passed; Calendar enrollment/preparation, explicit Send/End; Swift390/390 | Watch + watchOS + paired phone/build, calls and approvals on hardware |
 
 Device parity means a coherent supported experience, not identical execution
 capabilities. Unsupported actions must show a clear handoff or queue state.

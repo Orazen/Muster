@@ -8,7 +8,18 @@ BYOK, free beta. Public expansion requires passing core flows and five testers
 completing daily planning on three separate days each. This is a decision record,
 not a new implementation or verification claim.
 
-Updated 19 September 2026 (Loop136). This snapshot takes precedence over historical roadmap
+Updated 19 September 2026 (Loop143).
+
+**Loop143:** same-host signed-in Calendar approval now reaches the Watch through
+single-delivery call-bound enrollment. The Watch reviews planning inputs and a
+calendar-backed draft before explicit Send. Synthetic-provider native acceptance
+passed1/1; unit317files/4734passed/8skipped, browser40/40, Swift390/390,
+all three simulator builds and both typechecks/lint passed. No real Google,
+physical-device, cross-host sync or production rollout claim. See the latest
+handoff/audit for retained failures and next gates. The Loop136 hero gap below
+is historical; Loops139–143 implement and test the foreground call journey.
+
+Historical snapshot, 19 September 2026 (Loop136). This snapshot takes precedence over historical roadmap
 status; the latest owner request takes precedence over this file.
 
 **Loop136:** Automatic provider retry now requires persisted account opt-in, default off.
