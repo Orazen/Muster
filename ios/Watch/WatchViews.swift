@@ -282,6 +282,7 @@ struct FleetView: View {
                         NavigationLink(value: WatchRoute.bot(id: bot.id)) {
                             BotRow(bot: bot)
                         }
+                        .accessibilityIdentifier("watch-chat-bot-\(bot.id)")
                     }
                 }
 
@@ -291,6 +292,7 @@ struct FleetView: View {
                             NavigationLink(value: WatchRoute.room(id: room.id)) {
                                 RoomRow(room: room)
                             }
+                            .accessibilityIdentifier("watch-chat-room-\(room.id)")
                         }
                     }
                 }
@@ -644,7 +646,8 @@ struct ChatView: View {
     @EnvironmentObject private var voice: WatchVoice
     let chat: WatchChat
 
-    @State private var draft = ""
+    @State private var composerLease: ComposerViewLease?
+    @State private var visible = false
 
     private var tail: [Message] {
         Array(session.state.visibleTranscript(forThread: chat.threadId).suffix(20))
@@ -673,6 +676,7 @@ struct ChatView: View {
     }
 
     var body: some View {
+        let context = session.composerContext(for: chat)
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 if chat.busy {
@@ -709,16 +713,16 @@ struct ChatView: View {
                 }
 
                 // The watch keyboard's first-class affordance is dictation;
-                // typing is the fallback, and both arrive here as text.
-                TextField("Reply", text: $draft)
-                    .onSubmit { send() }
-                Button("Send") { send() }
-                    .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+                // typing is the fallback, and both arrive here as text. The
+                // composer lease keeps the draft honest across reconnects.
+                composer(context: context, lease: composerLease)
             }
             .padding(.horizontal)
         }
         .navigationTitle(chat.name)
         .onAppear {
+            visible = true
+            if composerLease == nil { composerLease = session.viewComposer(context) }
             Task {
                 switch chat {
                 case let .bot(bot): await session.markRead(bot)
@@ -726,20 +730,58 @@ struct ChatView: View {
                 }
             }
         }
+        .onChange(of: context) { _, next in
+            if let composerLease { session.leaveComposer(composerLease) }
+            composerLease = visible ? session.viewComposer(next) : nil
+        }
+        .onDisappear {
+            visible = false
+            if let composerLease { session.leaveComposer(composerLease) }
+            composerLease = nil
+        }
     }
 
-    private func send() {
-        let text = draft.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
-        draft = ""
-        // A tap the wearer can feel. The send is otherwise invisible until
-        // the harness echoes it back, which on a slow turn is seconds away.
-        WKInterfaceDevice.current().play(.click)
-        Task {
-            switch chat {
-            case let .bot(bot): await session.send(text, to: bot)
-            case let .room(room): await session.send(text, to: room)
+    private func composer(context: ComposerContext, lease: ComposerViewLease?) -> some View {
+        let draft = session.composerDraft(context)
+        let canEdit = session.canEditComposer(context, lease: lease)
+        let canSend = session.canSendComposer(context, lease: lease)
+        return VStack(alignment: .leading, spacing: 8) {
+            if let message = draft.message {
+                Text(message).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("watch-composer-recovery")
+            } else if !canEdit {
+                Text("Reopen this conversation to write in its current task.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else if session.status != .live {
+                Text("Reconnect to send. Your draft stays here.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
+            if draft.inFlight {
+                ProgressView(draft.message == nil ? "Sending…" : "Waiting for the request to close…")
+                    .font(.caption2)
+                    .accessibilityIdentifier("watch-composer-progress")
+            }
+            // The system editor may make the scene inactive while committing
+            // dictation or typed text. Its captured lease permits local edits;
+            // Done never sends. The explicit button still requires a live app.
+            TextField("Reply", text: Binding(
+                get: { session.composerDraft(context).text },
+                set: { session.editComposer($0, context: context, lease: lease) }
+            ))
+                .submitLabel(.done)
+                .disabled(!canEdit)
+                .accessibilityLabel("Message draft")
+                .accessibilityIdentifier("watch-composer-input")
+            Button(draft.message == nil ? "Send" : "Retry send") {
+                // A tap the wearer can feel. The send is otherwise invisible
+                // until the harness echoes it back, which on a slow turn is
+                // seconds away.
+                WKInterfaceDevice.current().play(.click)
+                session.submitComposer(context, lease: lease)
+            }
+                .disabled(!canSend)
+                .accessibilityIdentifier("watch-composer-send")
         }
     }
 }

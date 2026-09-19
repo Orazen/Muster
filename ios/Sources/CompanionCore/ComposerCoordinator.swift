@@ -85,6 +85,12 @@ public final class ComposerCoordinator {
         for request in Array(requests.values) where !owns(request.context) { invalidate(request) }
     }
 
+    /// Retire sends when the connection stops being live without discarding
+    /// this session's drafts or releasing a transport that is still closing.
+    public func connectionChanged() {
+        for request in Array(requests.values) { invalidate(request) }
+    }
+
     public func draft(for context: ComposerContext) -> ComposerDraft {
         guard context.sessionId == sessionId else { return ComposerDraft() }
         var draft = drafts[context] ?? ComposerDraft()
@@ -100,11 +106,13 @@ public final class ComposerCoordinator {
     }
 
     public func canEdit(_ context: ComposerContext, lease: ComposerViewLease?) -> Bool {
-        foreground && view == lease && lease?.context == context && owns(context) && (drafts[context] != nil || hasRoom)
+        // System text editors may make the scene inactive while returning a
+        // local draft. Sending still requires foreground below.
+        view == lease && lease?.context == context && owns(context) && (drafts[context] != nil || hasRoom)
     }
 
     public func canSend(_ context: ComposerContext, lease: ComposerViewLease?) -> Bool {
-        canEdit(context, lease: lease) && requests[context] == nil && requests.count < maximumContexts
+        foreground && canEdit(context, lease: lease) && requests[context] == nil && requests.count < maximumContexts
             && !ComposerText.normalized(draft(for: context).text).isEmpty
     }
 

@@ -4421,7 +4421,6 @@ the `/app`/`/os` trusted sync path and backup restore evidence in browser.
 - `server/desktop-auth.test.ts`: added negative/positive tests for sanitized local return paths.
 
 **Next:** keep this slice ready for user-authored `/app`/`/os` route audits and browser continuity checks in the active checklist.
-
 ## Loop84 — row 6 continuation evidence (13 September 2026)
 
 **Status:** no further code edits in web auth/onboarding logic this loop; validated behavior end-to-end through Playwright against the current slice.

@@ -35,14 +35,21 @@ final class WatchSession: ObservableObject {
     @Published private(set) var state = CompanionState() {
         didSet {
             approvalCoordinator.reconcile()
+            composerCoordinator.reconcile()
             hapticOnFleetChange()
         }
     }
     @Published private(set) var approvalSessionId = UUID()
     @Published private(set) var approvalActions: [ApprovalActionKey: ApprovalActionState] = [:]
+    @Published private(set) var composerDrafts: [ComposerContext: ComposerDraft] = [:]
     @Published private(set) var connection: Connection?
     @Published private(set) var status: Status = .unpaired {
-        didSet { if status != .live { approvalCoordinator.connectionChanged() } }
+        didSet {
+            if status != .live {
+                approvalCoordinator.connectionChanged()
+                composerCoordinator.connectionChanged()
+            }
+        }
     }
     /// Transient, user-facing failures from an action they just took.
     @Published var actionError: String?
@@ -95,6 +102,7 @@ final class WatchSession: ObservableObject {
             streamTask = nil
             approvalSessionId = UUID()
             approvalCoordinator.bind(sessionId: approvalSessionId, transport: client)
+            composerCoordinator.bind(sessionId: approvalSessionId, transport: client)
         }
     }
     private var pairingGeneration = 0
@@ -103,6 +111,11 @@ final class WatchSession: ObservableObject {
         changed: { [weak self] in self?.approvalActions = $0 },
         unauthorized: { [weak self] in self?.status = .unauthorized },
         confirmed: { _, _ in WKInterfaceDevice.current().play(.success) }
+    )
+    private lazy var composerCoordinator = ComposerCoordinator(
+        readState: { [weak self] in self?.state ?? CompanionState() },
+        changed: { [weak self] in self?.composerDrafts = $0 },
+        unauthorized: { [weak self] in self?.status = .unauthorized }
     )
     private var streamTask: Task<Void, Never>?
     /// Identifies the task currently stored in `streamTask`. A cancelled task
@@ -225,11 +238,15 @@ final class WatchSession: ObservableObject {
     func disconnect() {
         streamGeneration += 1
         approvalCoordinator.connectionChanged()
+        composerCoordinator.connectionChanged()
         streamTask?.cancel()
         streamTask = nil
     }
 
-    func setForeground(_ active: Bool) { approvalCoordinator.setForeground(active) }
+    func setForeground(_ active: Bool) {
+        approvalCoordinator.setForeground(active)
+        composerCoordinator.setForeground(active)
+    }
 
     private func currentStream(_ identity: UUID, _ generation: Int) -> Bool {
         !Task.isCancelled && approvalSessionId == identity && streamGeneration == generation && client != nil
@@ -300,12 +317,28 @@ final class WatchSession: ObservableObject {
     // the source of truth, and a watch that draws its own version of events
     // is a watch that disagrees with the laptop.
 
-    func send(_ text: String, to bot: Bot) async {
-        await perform { try await $0.send(text: text, toBot: bot.id) }
+    func composerContext(for chat: WatchChat) -> ComposerContext {
+        let kind: ComposerTarget.Kind
+        switch chat { case .bot: kind = .bot; case .room: kind = .room }
+        return ComposerContext(sessionId: approvalSessionId, target: ComposerTarget(
+            kind: kind, ownerId: chat.id, threadId: chat.threadId))
     }
 
-    func send(_ text: String, to room: Room) async {
-        await perform { try await $0.send(text: text, toRoom: room.id) }
+    func viewComposer(_ context: ComposerContext) -> ComposerViewLease { composerCoordinator.enter(context) }
+    func leaveComposer(_ lease: ComposerViewLease) { composerCoordinator.leave(lease) }
+    func composerDraft(_ context: ComposerContext) -> ComposerDraft { composerCoordinator.draft(for: context) }
+    func canEditComposer(_ context: ComposerContext, lease: ComposerViewLease?) -> Bool {
+        composerCoordinator.canEdit(context, lease: lease)
+    }
+    func canSendComposer(_ context: ComposerContext, lease: ComposerViewLease?) -> Bool {
+        status == .live && composerCoordinator.canSend(context, lease: lease)
+    }
+    func editComposer(_ text: String, context: ComposerContext, lease: ComposerViewLease?) {
+        composerCoordinator.edit(text, context: context, lease: lease)
+    }
+    func submitComposer(_ context: ComposerContext, lease: ComposerViewLease?) {
+        guard canSendComposer(context, lease: lease) else { return }
+        composerCoordinator.submit(context, lease: lease)
     }
 
     func approvalContext(threadId: String) -> ComposerContext? {

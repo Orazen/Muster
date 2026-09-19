@@ -62,6 +62,68 @@ private final class ComposerHarness {
 }
 
 final class ComposerCoordinatorTests: XCTestCase {
+    @MainActor func testInactiveSystemEditorPreservesDraftButCannotSendOrUseRetiredLease() async {
+        let h = ComposerHarness(); h.edit("before editor")
+        let previous = h.lease
+        h.coordinator.setForeground(false)
+        let raw = "  editor e\u{301}\nreturn  "
+        h.edit(raw)
+        XCTAssertTrue(h.draft.text.utf16.elementsEqual(raw.utf16))
+        XCTAssertTrue(h.coordinator.canEdit(h.context, lease: h.lease))
+        XCTAssertFalse(h.coordinator.canSend(h.context, lease: h.lease)); XCTAssertNil(h.submit())
+        h.coordinator.leave(previous!)
+        h.lease = h.coordinator.enter(h.context)
+        h.coordinator.edit("stale editor", context: h.context, lease: previous)
+        XCTAssertNil(h.coordinator.submit(h.context, lease: previous))
+        h.coordinator.setForeground(true)
+        await Task.yield()
+        let calls = await h.transport.calls; XCTAssertTrue(calls.isEmpty)
+        XCTAssertTrue(h.draft.text.utf16.elementsEqual(raw.utf16))
+        XCTAssertNotNil(h.submit()); XCTAssertNil(h.submit())
+        await h.calls(1); await h.transport.resolve(); await h.closed()
+    }
+
+    @MainActor func testConnectionLossBeforeQueuedDispatchPreservesDraftWithoutSending() async {
+        let h = ComposerHarness(); let raw = "  e\u{301}\nkeep  "
+        h.edit(raw); XCTAssertNotNil(h.submit())
+        h.coordinator.connectionChanged()
+        await h.closed()
+        XCTAssertTrue(h.draft.text.utf16.elementsEqual(raw.utf16))
+        XCTAssertEqual(h.draft.message, ComposerCoordinator.recoveryMessage)
+        let calls = await h.transport.calls; XCTAssertTrue(calls.isEmpty)
+    }
+
+    @MainActor func testConnectionReturnCannotReplayOrClearNewEditUntilPhysicalRequestCloses() async {
+        let h = ComposerHarness(); h.edit("original"); h.submit(); await h.calls(1)
+        h.coordinator.connectionChanged(); h.coordinator.connectionChanged()
+        h.coordinator.reconcile() // A restored snapshot does not revive the request.
+        h.edit("  newer e\u{301}\n  ")
+        XCTAssertTrue(h.draft.inFlight); XCTAssertNil(h.submit())
+        await h.transport.resolve(); await h.closed()
+        XCTAssertTrue(h.draft.text.utf16.elementsEqual("  newer e\u{301}\n  ".utf16))
+        XCTAssertEqual(h.draft.message, ComposerCoordinator.recoveryMessage)
+        let calls = await h.transport.calls; XCTAssertEqual(calls.count, 1)
+        XCTAssertNotNil(h.submit()); XCTAssertNil(h.submit())
+        await h.calls(2); await h.transport.resolve(1); await h.closed()
+        XCTAssertEqual(h.draft.text, "")
+    }
+
+    @MainActor func testConnectionRetirementCannotAdoptLateOutcomeIntoAnotherSession() async {
+        for success in [true, false] {
+            let h = ComposerHarness(); h.edit("previous account"); h.submit(); await h.calls(1)
+            h.coordinator.connectionChanged()
+            h.identity = UUID(); h.coordinator.bind(sessionId: h.identity, transport: h.transport)
+            h.lease = h.coordinator.enter(h.context); h.edit("current account")
+            let before = h.changedCount
+            if success { await h.transport.resolve() }
+            else { await h.transport.reject(APIError.status(code: 401, message: nil)) }
+            await h.published(after: before)
+            XCTAssertEqual(h.draft.text, "current account"); XCTAssertNil(h.draft.message)
+            XCTAssertFalse(h.draft.inFlight); XCTAssertEqual(h.unauthorized, 0)
+            let calls = await h.transport.calls; XCTAssertEqual(calls.count, 1)
+        }
+    }
+
     @MainActor func testSynchronousLockExactDraftAndOnlyAcknowledgmentClears() async {
         let h = ComposerHarness(); let raw = "  e\u{301}\nnext line  "
         h.edit(raw); XCTAssertNotNil(h.submit()); XCTAssertNil(h.submit())

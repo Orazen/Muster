@@ -8,6 +8,11 @@
 //
 // The title rule is `ReaderText`'s, in the core, so both this and any future
 // reader agree on when the heading moves into the navigation bar.
+//
+// Replies go through the composer-lease system, not a raw send: the draft is
+// owned by the conversation's ComposerContext, survives scene switches and
+// reconnects, and the explicit Send requires a live connection — the same
+// rules the chat composer follows.
 import SwiftUI
 import WatchKit
 import CompanionCore
@@ -32,13 +37,19 @@ struct MessageReaderView: View {
     /// and pulse the right flower while it reads.
     let chat: WatchChat
 
-    @State private var draft = ""
+    @State private var composerLease: ComposerViewLease?
+    @State private var visible = false
 
     private var usesTitleInNavigationBar: Bool {
         ReaderText.isLongForm(message.body)
     }
 
+    private var composerContext: ComposerContext {
+        session.composerContext(for: chat)
+    }
+
     var body: some View {
+        let context = composerContext
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 if let from = message.from {
@@ -58,6 +69,7 @@ struct MessageReaderView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("watch-reader-body")
 
+
                 if let activity = speechActivity {
                     Button {
                         voice.toggle(activity)
@@ -74,29 +86,64 @@ struct MessageReaderView: View {
                 // Replying from here, rather than sending the reader back to
                 // the chat, is the whole point of opening a long answer: you
                 // have just read it, and the answer is usually one line.
-                TextField("Reply", text: $draft)
-                    .onSubmit { send() }
-                    .accessibilityIdentifier("watch-reader-reply")
-                Button("Send") { send() }
-                    .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .accessibilityIdentifier("watch-reader-send")
+                readerComposer(context: context)
             }
             .padding(.horizontal, 4)
         }
         .navigationTitle(navigationTitle)
         .accessibilityIdentifier("watch-message-reader")
+        .onAppear {
+            visible = true
+            if composerLease == nil { composerLease = session.viewComposer(context) }
+        }
+        .onChange(of: context) { _, next in
+            if let composerLease { session.leaveComposer(composerLease) }
+            composerLease = visible ? session.viewComposer(next) : nil
+        }
+        .onDisappear {
+            visible = false
+            if let composerLease { session.leaveComposer(composerLease) }
+            composerLease = nil
+        }
     }
 
-    private func send() {
-        let text = draft.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
-        draft = ""
-        WKInterfaceDevice.current().play(.click)
-        Task {
-            switch chat {
-            case let .bot(bot): await session.send(text, to: bot)
-            case let .room(room): await session.send(text, to: room)
+    /// The reader's reply row: same draft, same lease rules, same honest
+    /// disabled states as the chat composer — a reply typed here is the same
+    /// message a reply typed there would be.
+    @ViewBuilder
+    private func readerComposer(context: ComposerContext) -> some View {
+        let draft = session.composerDraft(context)
+        let canEdit = session.canEditComposer(context, lease: composerLease)
+        let canSend = session.canSendComposer(context, lease: composerLease)
+        VStack(alignment: .leading, spacing: 8) {
+            if let blockingMessage = draft.message {
+                Text(blockingMessage).font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if !canEdit {
+                Text("Reopen this conversation to write in its current task.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else if session.status != .live {
+                Text("Reconnect to send. Your draft stays here.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
+            if draft.inFlight {
+                ProgressView(draft.message == nil ? "Sending…" : "Waiting for the request to close…")
+                    .font(.caption2)
+            }
+            TextField("Reply", text: Binding(
+                get: { session.composerDraft(context).text },
+                set: { session.editComposer($0, context: context, lease: composerLease) }
+            ))
+                .submitLabel(.done)
+                .disabled(!canEdit)
+                .accessibilityLabel("Message draft")
+                .accessibilityIdentifier("watch-reader-reply")
+            Button("Send") {
+                WKInterfaceDevice.current().play(.click)
+                session.submitComposer(context, lease: composerLease)
+            }
+                .disabled(!canSend)
+                .accessibilityIdentifier("watch-reader-send")
         }
     }
 

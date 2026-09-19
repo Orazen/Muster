@@ -270,8 +270,8 @@ public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport, A
         try await send(try makeRequest("POST", "/api/groups/\(groupId)/messages", body: ["text": text]))
     }
 
-    /// Ordinary iOS composer acknowledgment. The legacy send methods above
-    /// retain their existing Watch contract. A fresh capability probe avoids
+    /// Shared iPhone and Watch composer acknowledgment. The legacy send
+    /// methods above retain their public API. A fresh capability probe avoids
     /// submitting to old desktops that silently ignore expectedThreadId.
     public func sendOrdinary(text: String, to target: ComposerTarget) async throws -> ComposerAcknowledgment {
         guard target.isValid, !ComposerText.normalized(text).isEmpty else { throw APIError.badURL }
