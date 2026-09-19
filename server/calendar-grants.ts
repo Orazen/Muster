@@ -89,6 +89,16 @@ export function getCalendarGrant(db: DatabaseSync, userId: string): CalendarGran
   } catch { return null; }
 }
 
+/** A saved token is usable only while both its consent epoch and exact row remain current. */
+export function isCalendarGrantCurrent(db: DatabaseSync, grant: CalendarGrant): boolean {
+  const saved = getCalendarGrant(db, grant.userId);
+  const epoch = db.prepare("SELECT generation FROM calendar_grant_generations WHERE userId = ?").get(grant.userId);
+  return !!saved && epoch?.generation === grant.generation
+    && saved.generation === grant.generation && saved.googleSub === grant.googleSub
+    && saved.accessToken === grant.accessToken && saved.refreshToken === grant.refreshToken
+    && saved.expiresAt === grant.expiresAt && JSON.stringify(saved.scopes) === JSON.stringify(grant.scopes);
+}
+
 /** Provider-verified identity is required. Switching Google accounts requires disconnect first. */
 export function saveCalendarGrant(db: DatabaseSync, input: CalendarGrantInput): CalendarGrant {
   initialize(db);

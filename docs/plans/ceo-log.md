@@ -6095,3 +6095,46 @@ mobile sidebar click); final callback-panel acceptance passes without loosening
 timeouts. No real Google consent, installed Electron/native acceptance or
 production deployment is claimed. Next: refresh, selected-calendar complete
 day reads and grounded planning draft, using the acceptance matrix guidance.
+
+## Loop134 — complete account-owned calendar-day reads
+
+Pulled e8d45db (deployment trigger only). Loop133 pushed as 3165a78; production
+GET after push still reported backend 7632065f and web 453b2f23, unchanged.
+Parent owns Calendar OAuth refresh, grant freshness checks, route integration,
+connection UI and cycle docs. calendar_day_reader owns only new
+server/calendar-day.ts and .test.ts; parent adds server-only Temporal polyfill
+for explicit timezone day boundaries. No event writes, automatic task submission,
+real provider traffic or user/demo service changes.
+
+Parallel ownership: calendar_refresh_access owns Calendar OAuth/grant modules
+and their tests plus new calendar-access.ts/.test.ts. calendar_agenda_ui owns
+new CalendarAgenda.tsx, its insertion into CalendarConnection.tsx and new
+calendar-agenda.e2e.spec.ts. Parent owns calendar-routes.ts/.test.ts and package
+manifest/lockfile. Provider refresh and agenda retrieval are read-only to Google.
+
+Verification caught a real strip-only Node startup failure: newly added refresh
+error classes used TypeScript parameter properties, which transpiled unit tests
+and typechecks accepted but the direct server runtime rejected. First agenda
+browser run failed during fixture startup (0/1), before UI. Parent replaced both
+constructors with explicit fields/assignments; native Node imports now pass.
+The then-active full unit run was deliberately interrupted (exit130), not counted
+as a gate. Rechecking actual source-server startup before a fresh full run.
+
+Focused backend **5 files / 98 passed** before final gates; source-runtime fix
+recheck **3 files / 59 passed** including the real hosted server. Native Node
+module imports pass. Agenda browser then exposed only a fixture label locator
+mismatch (visible combobox had accessible name Calendar); role-based locator
+corrected it and focused browser **1/1** passed. No UI behavior workaround.
+Review also fixed malformed empty collection acceptance (requires endpoint kind)
+and busy/private confusion in UI (busy means availability, not hidden title).
+Build/types and lint checks pass; final full gates running.
+
+Final gates: **305 files / 4470 passed / 8 skipped / 0 failed** in 441.87s,
++2 files/+43 passing tests over Loop133; fresh browser **35/35** (3.4m), +1;
+final packaged-server rebuild **14/14**. Focused backend **98/98**, runtime
+startup recheck **59/59**, agenda browser **1/1**. Build/server/project/e2e types
+and final lint pass. Initial full unit run was interrupted130 after a real source
+startup issue; the final full run is the acceptance receipt. No tests disabled,
+timeouts loosened, or failure history omitted. Calendar provider reads remain
+mocked; real Google consent/refresh/revoke and installed-device acceptance remain
+open. Next: grounded planning draft and deterministic available time blocks.

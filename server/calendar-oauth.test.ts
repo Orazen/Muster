@@ -106,3 +106,22 @@ describe('Google signed identity verification', () => {
     await expect(verify('eyJhbGciOiJub25lIn0.e30.', nonce)).rejects.toThrow(/^Google Calendar authorization failed$/);
   });
 });
+
+describe('Calendar refresh', () => {
+  const old = { googleSub: 'verified-user', accessToken: 'old', refreshToken: 'existing-refresh', expiresAt: 1, scopes: ['openid', GOOGLE_CALENDAR_READONLY_SCOPE] };
+  it('preserves verified identity, omitted scopes and refresh token at the bounded official endpoint', async () => {
+    const { provider, request, verifyIdToken } = fixture({ access_token: 'new', token_type: 'Bearer', expires_in: 3600 });
+    expect(await provider.refresh(old)).toMatchObject({ googleSub: old.googleSub, refreshToken: old.refreshToken, scopes: old.scopes, accessToken: 'new' });
+    expect(verifyIdToken).not.toHaveBeenCalled();
+    const [url, options] = request.mock.calls[0];
+    expect(url).toBe('https://oauth2.googleapis.com/token');
+    expect(options).toMatchObject({ redirect: 'error', signal: expect.any(AbortSignal) });
+    expect(String(options?.body)).toContain('grant_type=refresh_token');
+  });
+  it.each([{ scope: 'openid' }, { token_type: 'Basic' }, { expires_in: 0 }, { expires_in: -1 }, { expires_in: '3600' }, { refresh_token: '' }])('rejects invalid refresh %j', async patch => {
+    await expect(fixture({ ...validResponse(), ...patch }).provider.refresh(old)).rejects.toThrow('Google Calendar refresh failed');
+  });
+  it('reports invalid_grant without exposing provider details', async () => {
+    await expect(fixture({ error: 'invalid_grant', error_description: 'PRIVATE' }, 400).provider.refresh(old)).rejects.toMatchObject({ message: 'Google Calendar refresh failed', reconnectRequired: true });
+  });
+});

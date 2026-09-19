@@ -168,3 +168,42 @@ browser **34/34**, packaged-server **14/14**, focused backend **65/65**.
 Calendar UI fixtures include mobile consent/local disconnect, malformed status
 recovery, explicit sign-in capability and automatic callback result panel.
 Real Google consent and installed-device acceptance remain pending.
+
+### Loop134 read-only agenda and next planning handoff
+
+Reader requests selected-calendar recurring instances and follows all page
+tokens, including empty pages; a missing/wrong collection kind, malformed event,
+repeated page token or resource bound fails the read rather than yielding an
+empty/free day. Boundaries use explicit IANA civil days (including DST and skipped
+dates). All-day dates retain exclusive ends; transparent and self-declined
+appointments do not block availability. Offset-free timed provider responses
+are explicitly rejected rather than guessed. No events are written or sent to
+models by the reader. The UI loads only on explicit clicks and invalidates old
+results when input changes or the connection is removed.
+
+Calendar refresh uses only Calendar grant rows. Session/consent-generation checks
+run around provider requests and before returning results; disconnect or newer
+consent wins over in-flight work. Concurrent callers share provider refresh but
+retain independent session guards. Real Google refresh/revoke behavior still
+needs provider acceptance; fake-provider tests are not that evidence.
+
+Next slice: gather user commitments/durations and selected owned bot; compute
+candidate work blocks in selected timezone after merging/clipping busy intervals
+(including all-day blocks). Reject ambiguous/nonexistent work-hour boundaries;
+for today omit past time. Report unplaced commitments instead of moving meetings.
+Then explicitly prepare an unsent draft with calendar evidence, up to three
+grounded priorities and suggested blocks. Check evidence freshness before using
+an old loaded day. Never infer commitments from event titles alone.
+
+Source audit for that handoff: src/lib/drafts.ts currently reads the initial draft
+on mount; seeding a draft for the already-mounted bot may not update its composer.
+Reproduce first, then add same-tab notification with preservation of existing
+text/attachments. Existing seedDraft + select pattern is in src/state/store.tsx;
+reuse src/lib/daily-planning.ts and the existing explicit Send path. Verify no
+message POST until Send, refresh persistence, current-bot handoff and busy-day
+behavior in personal-assistant/calendar-agenda browser tests. No new send API is
+needed. This source finding is not yet a reproduced defect or completed fix.
+
+Loop134 acceptance receipts: full **305 files / 4470 passed / 8 skipped**,
+browser **35/35**, packaged-server **14/14**, focused backend **98/98**.
+These establish isolated reader/UI behavior, not real Google or device acceptance.

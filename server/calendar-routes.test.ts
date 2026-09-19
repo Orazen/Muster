@@ -3,7 +3,7 @@ import { z } from "zod";
 import { DatabaseSync } from "node:sqlite";
 import { createServer, type Server } from "node:http";
 import { handleCalendarRoute, type CalendarRouteContext } from "./calendar-routes.ts";
-import { getCalendarGrant } from "./calendar-grants.ts";
+import { getCalendarGrant, disconnectCalendar, createCalendarState } from "./calendar-grants.ts";
 
 let db: DatabaseSync;
 let server: Server;
@@ -104,5 +104,56 @@ describe("personal Calendar HTTP family", () => {
     user = { userId: "bob", sessionId: "bob-session" };
     await fetch(`${origin}/api/calendar/connection`, { method: "DELETE", headers: { origin } });
     expect(getCalendarGrant(db, "alice")).not.toBeNull();
+  });
+});
+
+
+describe("account-owned Calendar day reads", () => {
+  const selection = "calendarId=primary&date=2026-10-25&timeZone=Europe%2FRome";
+  const day = { calendarId: "primary", date: "2026-10-25", timeZone: "Europe/Rome", timeMin: "2026-10-24T22:00:00Z", timeMax: "2026-10-25T23:00:00Z", events: [], complete: true as const };
+  async function connect() { await start(); expect((await callback()).headers.get("location")).toBe("/app?calendar=connected"); }
+  it("returns only the signed-in account's calendars/day without credentials", async () => {
+    await connect();
+    ctx.reader = {
+      listCalendars: vi.fn(async (token, guard) => { expect(token).toBe("private-access"); await guard?.(); return [{ id: "primary", summary: "My calendar", timeZone: "Europe/Rome", primary: true }]; }),
+      readDay: vi.fn(async (token, args, guard) => { expect(token).toBe("private-access"); expect(args).toEqual({ calendarId: "primary", date: "2026-10-25", timeZone: "Europe/Rome" }); await guard?.(); return day; }),
+    };
+    expect(await (await fetch(`${origin}/api/calendar/calendars`)).json()).toEqual({ calendars: [{ id: "primary", summary: "My calendar", timeZone: "Europe/Rome", primary: true }] });
+    expect(await (await fetch(`${origin}/api/calendar/day?${selection}`)).json()).toEqual(day);
+    user = { userId: "bob", sessionId: "bob-session" };
+    const other = await fetch(`${origin}/api/calendar/day?${selection}`);
+    expect(other.status).toBe(409);
+    expect(await other.text()).not.toContain("private-access");
+    expect(ctx.reader.readDay).toHaveBeenCalledTimes(1);
+  });
+  it("rejects bad dates and timezones before provider access", async () => {
+    await connect();
+    ctx.reader = { listCalendars: vi.fn(), readDay: vi.fn() };
+    for (const query of ["", "calendarId=primary&date=2026-02-30&timeZone=Europe/Rome", "calendarId=primary&date=2026-01-01&timeZone=bad", "calendarId=primary&date=2011-12-30&timeZone=Pacific/Apia"]) {
+      expect((await fetch(`${origin}/api/calendar/day?${query}`)).status).toBe(400);
+    }
+    expect(ctx.reader.readDay).not.toHaveBeenCalled();
+  });
+  it.each(["disconnect", "new-consent", "session-change"])("discards results after %s while reading", async (change) => {
+    await connect();
+    ctx.reader = { listCalendars: vi.fn(), readDay: vi.fn(async () => {
+      if (change === "disconnect") disconnectCalendar(db, "alice");
+      else if (change === "new-consent") createCalendarState(db, user);
+      else user = { userId: "bob", sessionId: "bob-session" };
+      return { ...day, events: [{ id: "private", summary: "private event", start: "2026-10-25T10:00:00Z", end: "2026-10-25T11:00:00Z", allDay: false, busy: true }] };
+    }) };
+    const response = await fetch(`${origin}/api/calendar/day?${selection}`);
+    expect(response.status).toBe(409);
+    expect(await response.text()).not.toContain("private event");
+  });
+  it("never converts provider failure into an empty complete day", async () => {
+    await connect();
+    ctx.reader = { listCalendars: vi.fn(), readDay: vi.fn(async () => { throw new Error("private upstream partial data"); }) };
+    const response = await fetch(`${origin}/api/calendar/day?${selection}`);
+    expect(response.status).toBe(409);
+    const result = await response.json();
+    expect(result).not.toHaveProperty("events");
+    expect(result).not.toHaveProperty("complete");
+    expect(JSON.stringify(result)).not.toContain("private upstream");
   });
 });

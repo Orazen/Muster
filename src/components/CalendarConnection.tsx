@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { api } from "@/state/store";
+import { CalendarAgenda } from "./CalendarAgenda";
 
 const statusSchema = z.object({ configured: z.boolean(), connected: z.boolean(), requiresSignIn: z.boolean().optional() });
 type CalendarStatus = z.infer<typeof statusSchema>;
@@ -68,6 +69,7 @@ export function CalendarConnection() {
       {status?.requiresSignIn && <a href="/sign-in?next=%2Fapp" className="mt-3 inline-block rounded-lg bg-raised px-3 py-2 text-ink">Sign in for Calendar</a>}
       {status && !status.requiresSignIn && (status.configured || status.connected) && <button disabled={busy} onClick={() => void changeConnection()} className="mt-3 rounded-lg bg-raised px-3 py-2 text-ink disabled:opacity-40">{status.connected ? "Disconnect Calendar here" : "Connect Google Calendar"}</button>}
       {status?.connected && !status.requiresSignIn && <p className="mt-2 text-ink-secondary">Disconnecting removes Calendar access from Muster. It does not revoke Google’s combined permission grant or disconnect your Drive backup.</p>}
+      {status?.connected && !status.requiresSignIn && !busy && <CalendarAgenda />}
     </section>
   );
 }

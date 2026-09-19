@@ -3284,3 +3284,21 @@ Watch calling, broader recovery, allowance and real-tester release gates remain
 open. Production was still the older artifact at the start of this slice; a
 push is not deployment. Existing automation stays paused. Preserve unrelated
 untracked research, templates, marketing-video, .freebuff and .zcode content.
+
+## Astra Loop134 — selected-calendar agenda
+
+Account-owned Calendar day reads and refresh are implemented. Existing Connected
+apps UI now offers explicit calendar/date/timezone selection and complete agenda.
+Nothing is sent to a bot or written to Google events. Revocation/session and
+selection changes invalidate in-flight results; malformed/partial/pagination-bound
+reads fail rather than becoming empty availability. Real provider/device gates
+remain open. Next: user commitments, deterministic work slots, explicit unsent
+planning draft, and current-composer draft notification/preservation. Details in
+current-state.md and beta-acceptance-matrix-2026-09-19.md.
+
+Latest full baseline: **305 files / 4470 passed / 8 skipped / 0 failed**
+(441.87s); browser **35/35**, packaged-server **14/14**, focused **98/98**;
+build/types/lint pass. Initial source startup failure (TS parameter properties)
+was fixed, interrupted full run excluded, and source startup recheck **59/59**
+passed before the final full gate. Preserve failure receipts in ceo-log.md.
+Production remains separately verified by GET; existing automation stays paused.

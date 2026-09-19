@@ -58,6 +58,14 @@ export interface GoogleCalendarOAuthGrant {
   scopes: string[];
 }
 
+export class CalendarOAuthRefreshError extends Error {
+  readonly reconnectRequired: boolean;
+  constructor(reconnectRequired = false) {
+    super('Google Calendar refresh failed');
+    this.reconnectRequired = reconnectRequired;
+  }
+}
+
 export class GoogleCalendarOAuthProvider {
   private readonly options: GoogleCalendarOAuthOptions;
   private readonly request: typeof globalThis.fetch;
@@ -94,6 +102,35 @@ export class GoogleCalendarOAuthProvider {
       code_challenge_method: 'S256',
     }).toString();
     return url.toString();
+  }
+
+  async refresh(grant: GoogleCalendarOAuthGrant): Promise<GoogleCalendarOAuthGrant> {
+    try {
+      if (!z.object({ googleSub: nonemptyString, accessToken: nonemptyString, refreshToken: nonemptyString,
+        expiresAt: z.number().int().nonnegative().max(8.64e15),
+        scopes: z.array(nonemptyString).refine(scopes => scopes.includes(GOOGLE_CALENDAR_READONLY_SCOPE)),
+      }).safeParse(grant).success) throw new CalendarOAuthRefreshError(true);
+      const response = await this.request(TOKEN_ENDPOINT, {
+        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(TIMEOUT_MS),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ client_id: this.options.clientId, client_secret: this.options.clientSecret,
+          grant_type: 'refresh_token', refresh_token: grant.refreshToken! }),
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        const failure = z.object({ error: z.string() }).safeParse(body);
+        throw new CalendarOAuthRefreshError(failure.success && failure.data.error === 'invalid_grant');
+      }
+      const token = tokenSchema.omit({ id_token: true }).extend({ scope: z.string().optional() }).parse(body);
+      const scopes = token.scope === undefined ? [...grant.scopes] : [...new Set(token.scope.split(/\s+/).filter(Boolean))];
+      if (!scopes.includes(GOOGLE_CALENDAR_READONLY_SCOPE)) throw new CalendarOAuthRefreshError(true);
+      const expiresAt = Date.now() + token.expires_in * 1000;
+      if (!Number.isSafeInteger(expiresAt) || expiresAt > 8.64e15) throw new CalendarOAuthRefreshError();
+      return { googleSub: grant.googleSub, accessToken: token.access_token,
+        refreshToken: token.refresh_token ?? grant.refreshToken, expiresAt, scopes };
+    } catch (error) {
+      throw new CalendarOAuthRefreshError(error instanceof CalendarOAuthRefreshError && error.reconnectRequired);
+    }
   }
 
   async exchange(code: string, { codeVerifier, nonce }: { codeVerifier: string; nonce: string }): Promise<GoogleCalendarOAuthGrant> {

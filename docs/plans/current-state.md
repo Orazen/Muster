@@ -8,8 +8,20 @@ BYOK, free beta. Public expansion requires passing core flows and five testers
 completing daily planning on three separate days each. This is a decision record,
 not a new implementation or verification claim.
 
-Updated 19 September 2026 (Loop133). This snapshot takes precedence over historical roadmap
+Updated 19 September 2026 (Loop134). This snapshot takes precedence over historical roadmap
 status; the latest owner request takes precedence over this file.
+
+**Loop134:** connected users can explicitly choose a calendar/date/timezone
+and read the complete agenda in the existing panel. Separate Calendar credentials
+refresh with session/generation checks; old responses are discarded after
+revocation or selection changes. Pagination/collection checks fail closed;
+recurrence, all-day intervals and DST boundaries are handled without event writes.
+Full **305 files / 4470 passed / 8 skipped / 0 failed**, browser **35/35**,
+packaged-server **14/14**, focused **98/98**, build/types/lint pass. Gates caught
+and fixed native Node strip-only syntax plus a browser fixture locator issue.
+No real-provider or production acceptance claim. Next: explicit unsent planning
+draft with user commitments and deterministic time blocks; verify current-bot
+draft notifications/preservation first (source audit in acceptance matrix).
 
 **Loop133:** account-owned Google Calendar consent now has separate token
 storage, signed provider identity checks, PKCE, one-use session-bound state and

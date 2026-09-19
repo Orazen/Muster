@@ -2,6 +2,9 @@
 // It never updates login/Drive credentials or revokes a combined Google grant.
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
+import { GoogleCalendarReader, calendarDayWindow } from "./calendar-day.ts";
+import { getCalendarAccess } from "./calendar-access.ts";
 import { json } from "./http-helpers.ts";
 import { createCalendarState, consumeCalendarState, getCalendarGrant, saveCalendarGrant, disconnectCalendar } from "./calendar-grants.ts";
 import { GoogleCalendarOAuthProvider } from "./calendar-oauth.ts";
@@ -14,7 +17,8 @@ export interface CalendarRouteContext {
   origin: string;
   clientId: string;
   clientSecret: string;
-  provider?: Pick<GoogleCalendarOAuthProvider, "authorizationUrl" | "exchange">;
+  provider?: Pick<GoogleCalendarOAuthProvider, "authorizationUrl" | "exchange"> & Partial<Pick<GoogleCalendarOAuthProvider, "refresh">>;
+  reader?: Pick<GoogleCalendarReader, "listCalendars" | "readDay">;
 }
 
 export async function handleCalendarRoute(req: IncomingMessage, res: ServerResponse, method: string, path: string, ctx: CalendarRouteContext): Promise<boolean> {
@@ -31,6 +35,41 @@ export async function handleCalendarRoute(req: IncomingMessage, res: ServerRespo
   if (!session) { json(res, 401, { error: "Sign in to connect your calendar." }); return true; }
   if (method === "GET" && path === "/api/calendar/status") {
     json(res, 200, { configured, connected: Boolean(getCalendarGrant(ctx.db(), session.userId)) });
+    return true;
+  }
+  if (method === "GET" && (path === "/api/calendar/calendars" || path === "/api/calendar/day")) {
+    if (!configured) { json(res, 503, { error: "Google Calendar connection is not configured yet." }); return true; }
+    const query = new URL(req.url ?? path, ctx.origin).searchParams;
+    const selection = z.object({
+      calendarId: z.string().min(1).max(1024).refine(value => [...value].every(character => character.charCodeAt(0) >= 32)),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      timeZone: z.string().min(1).max(100),
+    }).safeParse({ calendarId: query.get("calendarId"), date: query.get("date"), timeZone: query.get("timeZone") });
+    if (path === "/api/calendar/day") {
+      try {
+        if (!selection.success) throw new Error();
+        calendarDayWindow(selection.data.date, selection.data.timeZone);
+      } catch { json(res, 400, { error: "Choose a valid calendar, date and timezone." }); return true; }
+    }
+    try {
+      const guard = async () => {
+        const current = await ctx.session();
+        if (current?.userId !== session.userId || current.sessionId !== session.sessionId) throw new Error("Calendar session changed");
+      };
+      const provider = ctx.provider?.refresh ? { refresh: ctx.provider.refresh.bind(ctx.provider) }
+        : new GoogleCalendarOAuthProvider({ clientId: ctx.clientId, clientSecret: ctx.clientSecret, redirectUri: `${ctx.origin}${CALENDAR_CALLBACK_PATH}` });
+      const access = await getCalendarAccess(ctx.db(), session.userId, provider, guard);
+      const reader = ctx.reader ?? new GoogleCalendarReader({});
+      const payload = path === "/api/calendar/calendars"
+        ? { calendars: await reader.listCalendars(access.grant.accessToken, access.assertCurrent) }
+        : await reader.readDay(access.grant.accessToken, selection.data!, access.assertCurrent);
+      await access.assertCurrent();
+      json(res, 200, payload);
+    } catch {
+      // A partial page/expired grant is never an empty agenda. Do not leak
+      // upstream responses, tokens or details from another session.
+      json(res, 409, { error: "Could not read the complete calendar. Retry, or reconnect Calendar if access has expired." });
+    }
     return true;
   }
   // Browser mutations require an explicit same-origin request. The OAuth
