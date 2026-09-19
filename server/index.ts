@@ -5,6 +5,7 @@ import { createBuildDiagnostics } from "./build-identity.ts";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { readFileSync, statSync, unlinkSync } from "node:fs";
 import { writeFileAtomic } from "./atomic.ts";
+import { pickSeedEngine } from "./model-selection.ts";
 import { createServer, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import { extname, isAbsolute, join } from "node:path";
@@ -483,8 +484,11 @@ async function defaultSelection(forUserId?: string) {
   // spawn ENOENT — the single worst first-run experience, and the one every
   // user with no CLIs used to get. An empty selection is honest: the UI shows
   // the setup path instead of a bot that cannot answer.
-  const pick = available.find((d) => d.driverKind === "claudeAgent") ?? available[0];
-  return { instanceId: pick?.instanceId ?? "", model: pick?.models.default ?? "" };
+  // The pick itself mirrors the wizard's engineReady: an installed CLI with
+  // expired auth (authenticated === false) fails every send ("OAuth session
+  // expired"), so a signed-in engine outranks an unsigned-in claudeAgent —
+  // the seed bot must not be born onto an engine that cannot answer.
+  return pickSeedEngine(available);
 }
 let bootSelection = { instanceId: "", model: "" };
 // A staged v2 restore commits HERE — before the Store reads bots/groups and

@@ -190,7 +190,12 @@ posixOnly("unattended turns keep asking", () => {
       // payload and releases the bot that ACTS on it.
       const created = await api("POST", "/api/bots");
       const teammate = created.body.bot;
-      await api("PATCH", `/api/bots/${teammate.id}`, { name: "Teammate", autoApprove: true });
+      // Pin the engine like every scenario bot below: the teammate is created
+      // unpinned, so it inherited defaultSelection() — and the seed rule now
+      // (correctly) prefers a signed-in instance over an unsigned-in one,
+      // which reordered this fixture's fake fleet and left the acting bot on
+      // an instance whose fake mode never asks. Isolation, not product.
+      await api("PATCH", `/api/bots/${teammate.id}`, { name: "Teammate", autoApprove: true, modelSelection: { instanceId: "grok", model: "fake-model" } });
 
       const delegator = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${delegator.id}`, {
