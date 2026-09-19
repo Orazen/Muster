@@ -115,7 +115,7 @@ export function OnboardingChat() {
         <div className="onboarding-chat-column">
           {transcript.map((turn, i) =>
             turn.who === "assistant" ? (
-              <div key={i} className="chat-row assistant">
+              <div key={i} className="chat-row assistant" style={{ animationDelay: `${Math.min(i * 0.45, 3)}s` }}>
                 <FlowerCharacter color="orange" size={30} state={busy ? "working" : "listening"} focusable={false} label="Your guide" />
                 <div className="bubble assistant">{turn.text}</div>
               </div>

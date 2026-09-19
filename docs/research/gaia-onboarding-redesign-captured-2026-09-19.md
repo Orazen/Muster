@@ -5,10 +5,15 @@ the shared browser pane (two screenshots in the session artifacts). Purpose:
 design mapping for Muster's onboarding. Study only — GAIA's product repo is
 PolyForm Noncommercial; nothing is copied, patterns and copy tone only.
 
-## The pattern (as captured)
+## The pattern (as captured, incl. the logged-in re-walk 2026-09-19)
 
 The whole onboarding is a **conversation with the assistant**, not a wizard:
 
+0. **The greeting IS the product moment**: on Google signup the first bubble
+   addresses the account owner by name ("Hey Ramagiri! I'm GAIA. Nice to
+   meet you."), and the bubbles arrive **one-by-one with staggered fade-ins**
+   — never a wall. (Muster's chat implements the same greeting from the
+   account profile; the stagger is now ported too.)
 1. Full-screen ambient aurora (deep blue/teal glow rising from the bottom);
    no card chrome at all — pure centered chat column.
 2. GAIA speaks in **progressive bubbles** (their avatar beside them): a
@@ -24,7 +29,17 @@ The whole onboarding is a **conversation with the assistant**, not a wizard:
    question.
 5. Earlier messages **blur as they leave focus** (depth, not deletion).
 6. Progress: thin segmented bars across the top; "Restart Onboarding" pinned
-   bottom-right.
+   bottom-right (with a confirm dialog: "This wipes your answers, linked
+   apps and what I've learned about you. Nothing about your subscription
+   changes.").
+7. **The pricing beat is part of the conversation** (step 3 of 6): "quick
+   thing before we go on. I'm not an app you're buying. I'm someone you're
+   hiring." / "A person doing all this costs a salary. I cost about a dollar
+   a day." → "So, monthly or yearly?" → a glass pricing card ($30/month,
+   monthly/yearly toggle with "2 months free", an Includes checklist).
+   Steps beyond pricing are payment-gated — not capturable without a
+   subscription, and Muster is BYOK-free-forever (strategy decision 4), so
+   Muster's equivalent beat is the crew-hire, already shipped.
 
 ## Muster mapping (next pass; plan only — nothing built)
 

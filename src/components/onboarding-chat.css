@@ -52,6 +52,14 @@
 .chat-row.user { justify-content: flex-end; }
 .chat-row.options { flex-direction: column; align-items: stretch; gap: 9px; margin-top: 4px; }
 
+/* GAIA's alive quality: bubbles arrive one-by-one, not as a wall. Each
+   transcript row fades in with a small stagger (index set inline). */
+.chat-row { animation: chat-row-in 0.34s cubic-bezier(.24, 1, .4, 1) backwards; }
+@keyframes chat-row-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .bubble {
   max-width: 78%;
   padding: 11px 15px;
@@ -156,4 +164,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .chip, .continue-pill { transition: none; }
+  .chat-row { animation: none; }
 }
