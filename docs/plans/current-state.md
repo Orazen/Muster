@@ -8,8 +8,36 @@ BYOK, free beta. Public expansion requires passing core flows and five testers
 completing daily planning on three separate days each. This is a decision record,
 not a new implementation or verification claim.
 
-Updated 19 September 2026 (Loop134). This snapshot takes precedence over historical roadmap
+Updated 19 September 2026 (Loop135). This snapshot takes precedence over historical roadmap
 status; the latest owner request takes precedence over this file.
+
+**Loop135:** selected-calendar planning now gathers one to three commitments
+and durations, re-reads the complete day, computes deterministic available blocks
+and appends a readable unsent proposal to the chosen bot. Mounted composers now
+receive draft updates while preserving existing text and attachments. No task is
+sent before explicit Send; no calendar events are written. Stale responses,
+all-busy days, DST/work boundaries, exact time precision and 320px layout are
+covered. Full unit **306 files / 4505 passed / 8 skipped / 0 failed** (435.55s),
++1 file/+35 passing tests over Loop134; full browser **36/36** (3.7m),
+packaged-server **14/14**, focused recovery **52/52**. Project/server/e2e
+typechecks, production build, native source import and lint passed.
+
+A Node-only panel test needed its browser auth import mocked; the failed full run
+and interrupted earlier run are preserved in ceo-log.md. Real provider, installed
+device and production acceptance remain open. Next bounded correction: existing
+automatic cross-provider fallback lacks the owner's explicit opt-in requirement;
+see the acceptance matrix before implementing. No allowance spending enabled.
+
+**Loop135 deployment audit:** GitHub CI run 35458357189 passed and automatic
+deploy run 35459042896 succeeded (19 September, 17:45 UTC). Dokploy returned
+“Application deployed successfully”; webhook 669688357 is active with last
+HTTP 200. These supersede historical billing/404 explanations for the hosted
+web rollout. GET at 17:52 UTC still returned backend 7632065f-88c9-4614-8faa-42adb590f61b
+(started 18 September 14:08 UTC) and web 453b2f23-e6ce-4963-ad5b-c5d09ac598a6,
+with null revisions and no attestation. The unresolved boundary is accepted
+trigger → running service/artifact replacement. Inspect authenticated Dokploy
+build/rollout logs and domain-to-application/build-context mapping next. This
+CI receipt does not establish Windows/Linux release acceptance.
 
 **Loop134:** connected users can explicitly choose a calendar/date/timezone
 and read the complete agenda in the existing panel. Separate Calendar credentials

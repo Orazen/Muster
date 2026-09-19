@@ -5,7 +5,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { GoogleCalendarReader, calendarDayWindow } from "./calendar-day.ts";
 import { getCalendarAccess } from "./calendar-access.ts";
-import { json } from "./http-helpers.ts";
+import { buildCalendarPlan, calendarPlanInputSchema } from "./calendar-plan.ts";
+import { json, readBody } from "./http-helpers.ts";
 import { createCalendarState, consumeCalendarState, getCalendarGrant, saveCalendarGrant, disconnectCalendar } from "./calendar-grants.ts";
 import { GoogleCalendarOAuthProvider } from "./calendar-oauth.ts";
 
@@ -78,6 +79,38 @@ export async function handleCalendarRoute(req: IncomingMessage, res: ServerRespo
     if (req.headers.origin !== ctx.origin) {
       json(res, 403, { error: "Open Calendar settings in Muster to try again." }); return true;
     }
+  }
+  if (method === "POST" && path === "/api/calendar/plan") {
+    if (!configured) { json(res, 503, { error: "Google Calendar connection is not configured yet." }); return true; }
+    const bodySchema = z.object({
+      calendarId: z.string().min(1).max(1024).refine(value => [...value].every(character => character.charCodeAt(0) >= 32)),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), timeZone: z.string().min(1).max(100),
+      workStart: z.string(), workEnd: z.string(), commitments: z.array(z.object({ title: z.string(), minutes: z.number() })),
+    });
+    let body: z.infer<typeof bodySchema>;
+    try {
+      body = bodySchema.parse(await readBody(req));
+      calendarDayWindow(body.date, body.timeZone);
+      calendarPlanInputSchema.parse({ workStart: body.workStart, workEnd: body.workEnd, commitments: body.commitments });
+    } catch { json(res, 400, { error: "Choose a valid day, work hours and one to three commitments with durations." }); return true; }
+    try {
+      const guard = async () => {
+        const current = await ctx.session();
+        if (current?.userId !== session.userId || current.sessionId !== session.sessionId) throw new Error("Calendar session changed");
+      };
+      const provider = ctx.provider?.refresh ? { refresh: ctx.provider.refresh.bind(ctx.provider) }
+        : new GoogleCalendarOAuthProvider({ clientId: ctx.clientId, clientSecret: ctx.clientSecret, redirectUri: `${ctx.origin}${CALENDAR_CALLBACK_PATH}` });
+      const access = await getCalendarAccess(ctx.db(), session.userId, provider, guard);
+      const reader = ctx.reader ?? new GoogleCalendarReader({});
+      // Never accept a browser-supplied event snapshot as calendar authority.
+      const day = await reader.readDay(access.grant.accessToken, { calendarId: body.calendarId, date: body.date, timeZone: body.timeZone }, access.assertCurrent);
+      const plan = buildCalendarPlan(day, { workStart: body.workStart, workEnd: body.workEnd, commitments: body.commitments });
+      await access.assertCurrent();
+      json(res, 200, plan);
+    } catch {
+      json(res, 409, { error: "Could not prepare a complete plan. Check work hours, reload Calendar and try again." });
+    }
+    return true;
   }
   if (method === "DELETE" && path === "/api/calendar/connection") {
     disconnectCalendar(ctx.db(), session.userId);

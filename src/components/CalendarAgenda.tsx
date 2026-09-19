@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { api } from "@/state/store";
+import { CalendarPlanning } from "./CalendarPlanning";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const date = new Date(`${value}T00:00:00Z`);
@@ -94,6 +95,7 @@ export function CalendarAgenda() {
     {day && <div className="mt-3 min-w-0" aria-label="Calendar day">
       <p className="break-words text-ink-secondary">{day.date} · {day.timeZone}</p>
       {day.events.length === 0 ? <p role="status" className="mt-2 text-ink-secondary">No events for this day.</p> : <ul className="mt-2 space-y-3">{day.events.map((event, index) => <li key={`${event.id}-${index}`} className="min-w-0 break-words"><p className="text-ink">{event.summary || "Untitled event"}</p><p className="text-ink-secondary">{eventTime(event, day.timeZone)}</p></li>)}</ul>}
+      <CalendarPlanning key={`${day.calendarId}:${day.date}:${day.timeZone}`} calendarId={day.calendarId} date={day.date} timeZone={day.timeZone} />
     </div>}
   </div>;
 }

@@ -9,14 +9,14 @@ This is an evidence checklist, not a declaration of production readiness.
 |---|---|---|
 | Sign-up, sign-in, onboarding, return visit | Loop126–128 owned browser suite; completion/connect fixes | Real Google consent on installed app and web; current release, session persistence and error recovery |
 | Owner claim link | New owned Chromium tests: session identity, one redemption, fragment removal, replay rejection, malformed input; cloud code namespace rejection | Native/phone browser on intended served artifact; do not conflate claim with cloud or companion pairing |
-| Calendar-backed Plan my day | Loop131 adds personal-assistant hiring and reviewable first-task draft; no real-calendar result receipt yet | Real selected calendar yields overview, three priorities and suggested blocks; timezone/empty calendar/offline/auth-expired cases; no calendar writes without approval |
+| Calendar-backed Plan my day | Loops133–135: separate consent, complete selected-day reads, deterministic planning draft; isolated provider/browser fixtures only | Real selected calendar yields overview, three priorities and suggested blocks; timezone/empty calendar/offline/auth-expired cases; no calendar writes without approval |
 | Watch calling | Native builds and prior walkie fixture receipts; not proof of true calling | Ring/accept/end, planning result, interruption/backgrounding and failed/reconnected transport on hardware |
 | Optional connections | Loop130 reproduces and fixes runtime-only tool mounting and calendar-card backend selection; owned runtime fixture, not real consent | Calendar, email, files, Telegram, browser, tasks/notes: connect, cancel, revoke, unavailable and least-required permissions; do not require all to onboard |
 | Memory permissions and action approvals | Existing approval tests; owner defaults recorded | Verify memory controls and draft-first defaults across surfaces; allow/deny reaches intended task exactly once |
 | Capable-device routing and queue | Direction recorded; no current acceptance receipt here | Offline preferred device, another capable device, no device, reconnect, cancellation and duplicate prevention |
 | Drive restore and cross-device consistency | Prior encrypted bundle/fake-provider round trips | Real consent, fresh-device recovery, interrupted restore, concurrent edits, deletion and stale-device behavior; exact coverage of transcripts/files/memory |
 | Included allowance and BYOK fallback | Decision only | Cost proposal; per-user/global limits; concurrent usage accounting; default pause preserves work; opt-in fallback; no surprise billing |
-| Live and installed update delivery | Commits exist; production identity lacks source revision | Verified artifact/source mapping, platform distribution/install/update receipts and preservation of sessions/preferences |
+| Live and installed update delivery | Recent CI and Dokploy trigger succeed; GET still returns older unattributed artifacts | Verified artifact/source mapping, platform distribution/install/update receipts and preservation of sessions/preferences |
 | Result/template sharing | Owner-approved direction | Preview, explicit publication, personal-data exclusion, cancellation and private-by-default behavior |
 
 ## Device coverage
@@ -25,8 +25,8 @@ This is an evidence checklist, not a declaration of production readiness.
 |---|---|---|
 | Web | Owned Chromium automation, not all real browsers | Browser/version, deployed build, core journeys |
 | Mac | Electron syntax/build history | Signed artifact/install, real OAuth, calls/relay, updates |
-| Windows | Inherited release gate: Actions billing | Artifact/install, execution, auth/pairing, updates |
-| Linux | Inherited release gate: Actions billing | Distribution/desktop environment, artifact/install, execution, auth/pairing, updates |
+| Windows | No current release acceptance receipt; historical billing gate needs fresh verification | Artifact/install, execution, auth/pairing, updates |
+| Linux | No current release acceptance receipt; historical billing gate needs fresh verification | Distribution/desktop environment, artifact/install, execution, auth/pairing, updates |
 | iPhone | Swift/core tests, simulator pairing/walkie history | Device + OS + TestFlight/build, real pairing/auth, planning/calling/recovery |
 | Android | No fresh evidence in this slice | Device + OS + artifact/build, pairing, planning, permissions, reconnect |
 | Apple Watch | Build/simulator evidence; inspected WatchVoice is manual reply TTS, not a ring/accept call implementation | Watch + watchOS + paired phone/build, calls and approvals on hardware |
@@ -207,3 +207,55 @@ needed. This source finding is not yet a reproduced defect or completed fix.
 Loop134 acceptance receipts: full **305 files / 4470 passed / 8 skipped**,
 browser **35/35**, packaged-server **14/14**, focused backend **98/98**.
 These establish isolated reader/UI behavior, not real Google or device acceptance.
+
+### Loop135 planning proposal acceptance
+
+The Loop134 composer finding is now reproduced and fixed. Same-tab subscriptions
+update the mounted composer; preparing a plan appends to the latest text rather
+than replacing it, while existing attachments remain intact. A storage failure
+retains text for the current session. This is local draft behavior, not a new
+cross-device sync claim.
+
+Connected apps → selected agenda → Plan your day collects one to three stated
+commitments, durations, work hours and an owned bot. Preparing re-reads the
+complete selected calendar under current session/grant checks. Deterministic
+first-fit blocks merge busy intervals, honor all-day events, omit elapsed time,
+reject ambiguous/nonexistent work boundaries and report unplaced commitments.
+Readable drafts preserve exact local time/offset and identify the selected
+calendar, freshness and untrusted titles. No calendar mutation is introduced.
+
+The browser contract test verifies stale response rejection, an all-busy day,
+current mounted bot handoff, existing text and attachments, reload persistence,
+320px layout and zero task sends until explicit Send. Provider data is a fixture.
+Real Google consent/refresh/revoke and real-account planning still require
+acceptance, as do Watch calling, installed-device behavior, Drive recovery,
+allowance and the five-testers/three-days launch gate. No fixture receipt is
+substituted for these human/provider/device gates.
+
+### Next bounded slice: explicit provider fallback consent
+
+Loop135 read-only source audit found automatic cross-provider rescue in
+server/index.ts (attemptProviderFallback, invoked on runtime error) after quota,
+credit or rate-limit errors. server/provider-fallback.ts checks cooldown and
+owner-scoped availability, but does not check explicit consent. The chosen
+alternate changes the bot model selection and re-dispatches the last user text.
+This conflicts with the accepted default-pause/opt-in-fallback decision.
+
+Before funded inference, add persisted account consent defaulting false and an
+explicit control in existing ProvidersSection. Guard before mutation and again
+after asynchronous registry lookup; revalidate owner, active turn and consent.
+Cover default-off zero dispatch, opt-in, revocation during lookup, account
+isolation, missing owned key and duplicate prevention in owned server tests.
+Audit other model-selection paths before claiming comprehensive fallback control.
+
+Included allowance remains a separate implementation: per-user/global atomic
+reservations, idempotent settlement/recovery and explicit funding-source routing.
+Existing agent-vault settled-cost caps cannot account for concurrent reservations
+or providers that omit cost reporting; cloud-computer billing is not an included
+AI allowance. Numerical quota, reset, supported models and global cap still need
+a costed owner decision. No funded execution or spending is enabled by this plan.
+
+Loop135 final acceptance receipts: Full unit **306 files / 4505 passed / 8 skipped / 0 failed** (435.55s),
++1 file/+35 passing tests over Loop134; full browser **36/36** (3.7m),
+packaged-server **14/14**, focused recovery **52/52**. Project/server/e2e
+typechecks, production build, native source import and lint passed.

@@ -3302,3 +3302,33 @@ build/types/lint pass. Initial source startup failure (TS parameter properties)
 was fixed, interrupted full run excluded, and source startup recheck **59/59**
 passed before the final full gate. Preserve failure receipts in ceo-log.md.
 Production remains separately verified by GET; existing automation stays paused.
+
+## Loop135 acceptance — calendar-backed planning drafts
+
+Full unit **306 files / 4505 passed / 8 skipped / 0 failed** (435.55s),
++1 file/+35 passing tests over Loop134; full browser **36/36** (3.7m),
+packaged-server **14/14**, focused recovery **52/52**. Project/server/e2e
+typechecks, production build, native source import and lint passed.
+
+Preparation uses fresh authorized Calendar evidence and stated commitments;
+readable blocks preserve local time precision and offsets. Append updates the
+currently mounted composer without losing latest typing or attachments. Explicit
+Send remains required. Provider snapshots and browser fixtures are isolated;
+real Google/account/device acceptance remains open.
+
+Failed full run: 305 files passed, one panel suite failed to import browser auth,
+4503 tests passed/8 skipped. Its two pure status tests now mock the unrelated auth
+hook; all 306 files pass in the final receipt. The earlier interrupted130 run and
+intermediate formatter assertion failures are not acceptance receipts.
+
+Next: default-off explicit provider-fallback consent, including revalidation
+across async lookup and no duplicate resend. Detailed source findings and tests
+are in beta-acceptance-matrix-2026-09-19.md. Included allowance remains disabled
+pending implementation and a costed numerical proposal; budget is not spending
+permission. Watch/device, recovery and five-testers/three-days gates remain open.
+
+Deployment audit supersedes old billing/hook404 diagnosis: recent CI and Dokploy
+trigger succeeded, hook last200, but GET still served backend7632065f/web453b2f23.
+Dashboard is signed out in the available browser. Need authenticated build/rollout
+logs and verified application/domain/build mapping. Push is not deployment.
+Preserve unrelated untracked files and keep existing automation paused.

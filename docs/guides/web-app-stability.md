@@ -69,6 +69,16 @@ installed or describe an unverified deployment as successful.
 
 ### Deployment wiring discrepancy — verified 12 September 2026
 
+**Superseded operational status, 19 September (Loop135):** CI run 35458357189
+passed; deploy run 35459042896 received Dokploy's successful trigger response.
+Hook 669688357 is active with last HTTP200. Production GET still reports backend
+7632065f-88c9-4614-8faa-42adb590f61b and web
+453b2f23-e6ce-4963-ad5b-c5d09ac598a6 with null source revisions. The available
+browser still shows Dokploy sign-in. Inspect authenticated build/rollout logs,
+repository/branch/build context and domain-to-service mapping; trigger acceptance
+does not establish running-artifact replacement. The following September 12
+failure receipts are historical, not a current billing or webhook diagnosis.
+
 Repository push hook **669688357** delivered product commit **e1cfcb9** at
 19:26:43 UTC and received **HTTP404**. Four preceding push deliveries also
 returned 404. Actions CI/autodeploy meanwhile recorded four billing-rejected jobs,
@@ -115,7 +125,8 @@ merely to make a test pass. For an owner-authorized web repair, one trigger upda
 may ship in the same fully verified product commit; record the candidate and GET
 acceptance. This uses the existing repository-to-Dokploy path and is not proof
 that the live webhook accepted it. Never create a trigger retry loop. Billing
-remains an account-level gate for Actions. Use the
+was an account-level gate for Actions; verify current run receipts before
+repeating that diagnosis. Use the
 [local verification guide](verification-without-actions.md); it does not turn
 blocked GitHub checks green. Keep the existing automation paused.
 

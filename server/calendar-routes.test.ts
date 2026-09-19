@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import type { JsonObject } from "./schema.ts";
 import { DatabaseSync } from "node:sqlite";
 import { createServer, type Server } from "node:http";
 import { handleCalendarRoute, type CalendarRouteContext } from "./calendar-routes.ts";
@@ -155,5 +156,57 @@ describe("account-owned Calendar day reads", () => {
     expect(result).not.toHaveProperty("events");
     expect(result).not.toHaveProperty("complete");
     expect(JSON.stringify(result)).not.toContain("private upstream");
+  });
+});
+
+describe("planning draft preparation", () => {
+  const request = { calendarId: "primary", date: "2040-01-02", timeZone: "UTC", workStart: "09:00", workEnd: "17:00", commitments: [{ title: "Finish report", minutes: 90 }] };
+  const day = { calendarId: "primary", date: request.date, timeZone: "UTC", timeMin: "2040-01-02T00:00:00Z", timeMax: "2040-01-03T00:00:00Z", events: [{ id: "meeting", summary: "Team meeting", start: "2040-01-02T10:00:00Z", end: "2040-01-02T11:00:00Z", allDay: false, busy: true }], complete: true as const };
+  async function connect() { await start(); expect((await callback()).headers.get("location")).toBe("/app?calendar=connected"); }
+  function prepare(body: JsonObject = request, source = origin) {
+    return fetch(`${origin}/api/calendar/plan`, { method: "POST", headers: { origin: source, "content-type": "application/json" }, body: JSON.stringify(body) });
+  }
+  it("re-reads the owned calendar and prepares an unsent proposal", async () => {
+    await connect();
+    ctx.reader = { listCalendars: vi.fn(), readDay: vi.fn(async (_token, args, guard) => { await guard?.(); expect(args).toEqual({ calendarId: "primary", date: request.date, timeZone: "UTC" }); return day; }) };
+    const response = await prepare();
+    expect(response.status).toBe(200);
+    const plan = z.object({ priorities: z.array(z.object({ title: z.string(), minutes: z.number(), start: z.string().optional(), end: z.string().optional() })), draft: z.string() }).parse(await response.json());
+    expect(plan.priorities).toEqual([{ title: "Finish report", minutes: 90, start: "2040-01-02T11:00:00Z", end: "2040-01-02T12:30:00Z" }]);
+    expect(plan.draft).toContain("Finish report");
+    expect(plan.draft).toContain("Team meeting");
+    expect(plan.draft).not.toContain("private-access");
+    expect(ctx.reader.readDay).toHaveBeenCalledTimes(1);
+  });
+  it("ignores a forged empty snapshot and reports a fully busy day", async () => {
+    await connect();
+    ctx.reader = { listCalendars: vi.fn(), readDay: vi.fn(async () => ({ ...day, events: [{ id: "busy", summary: "Away", start: "2040-01-02", end: "2040-01-03", allDay: true, busy: true }] })) };
+    const response = await prepare({ ...request, events: [], complete: true });
+    expect(response.status).toBe(200);
+    const plan = z.object({ unplaced: z.array(z.object({ title: z.string(), minutes: z.number() })), available: z.array(z.object({ start: z.string(), end: z.string() })), draft: z.string() }).parse(await response.json());
+    expect(plan.unplaced).toEqual(request.commitments);
+    expect(plan.available).toEqual([]);
+    expect(plan.draft).toContain("Away");
+  });
+  it("rejects invalid commitments and cross-origin preparation before reading", async () => {
+    await connect(); ctx.reader = { listCalendars: vi.fn(), readDay: vi.fn() };
+    expect((await prepare(request, "https://foreign.example")).status).toBe(403);
+    expect((await prepare({ ...request, commitments: [] })).status).toBe(400);
+    expect((await prepare({ ...request, commitments: [{ title: "report", minutes: -1 }] })).status).toBe(400);
+    expect(ctx.reader.readDay).not.toHaveBeenCalled();
+  });
+  it("requires the requesting account's grant", async () => {
+    await connect(); user = { userId: "bob", sessionId: "bob-session" };
+    ctx.reader = { listCalendars: vi.fn(), readDay: vi.fn() };
+    expect((await prepare()).status).toBe(409);
+    expect(ctx.reader.readDay).not.toHaveBeenCalled();
+  });
+  it("discards a plan if permission changes while refreshing evidence", async () => {
+    await connect(); ctx.reader = { listCalendars: vi.fn(), readDay: vi.fn(async () => { disconnectCalendar(db, "alice"); return day; }) };
+    const response = await prepare();
+    expect(response.status).toBe(409);
+    const result = await response.json();
+    expect(result).not.toHaveProperty("draft");
+    expect(JSON.stringify(result)).not.toContain("Team meeting");
   });
 });

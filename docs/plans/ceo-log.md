@@ -6138,3 +6138,85 @@ startup issue; the final full run is the acceptance receipt. No tests disabled,
 timeouts loosened, or failure history omitted. Calendar provider reads remain
 mocked; real Google consent/refresh/revoke and installed-device acceptance remain
 open. Next: grounded planning draft and deterministic available time blocks.
+
+## Loop135 started — calendar-backed planning drafts
+
+Pulled 69369ee (deployment trigger only). Loop134 pushed as 526aa04; production
+GET remains backend 7632065f/web 453b2f23. Parent owns calendar-routes.ts/.test.ts
+and cycle docs. planning_slots owns new calendar-plan.ts/.test.ts; draft_handoff
+owns src/lib/drafts.ts and existing server/drafts.test.ts; planning_ui owns new
+CalendarPlanning.tsx, insertion into CalendarAgenda.tsx and new planning E2E.
+Draft agent reproduced mounted-composer seeding failure in an owned real React
+browser harness: storage changed to seeded plan while visible text stayed old.
+Harness stopped/cleaned. Planning uses fresh read-only Calendar data and stated
+commitments; prepare appends an unsent draft, preserving text/attachments.
+
+Focused planning/routes/drafts **49/49** pass; fresh project/server build and
+native strip-only planning module import pass. Draft browser repro now passes
+mounted seed, latest typing+append, attachments and blocked storage cases.
+Planning integration browser **1/1** passes, including currentbot preservation,
+stale response discard, mobile layout and zero sends before explicit Enter.
+Full browser gate running. Draft text is being made directly readable (local
+time blocks and quoted event titles) instead of exposing a machine JSON blob.
+API data shape and authorization boundaries stay the same.
+
+Review caught a presentation boundary issue before commit: formatting proposed
+blocks to minutes rounded second-level start times backward into elapsed/busy
+time. Display now retains exact local time precision and UTC offset; a regression
+pins the fractional-second case. The first full unit run was interrupted130 so
+the final gate will cover this correction; no result from it is claimed.
+
+Full browser **36/36** (3.7m) and final packaged-server **14/14** pass;
+final lint exits 0. Focused planning/routes/drafts **3 files / 50 passed**.
+Two intermediate formatter expectation failures were corrected by retaining
+seconds/fractions when present and eliding exact zero seconds only. Final full
+unit receipt pending. Owned browser fixture processes/ports/data cleaned.
+
+Read-only deployment audit: CI 35458357189 passed; automatic deploy 35459042896
+succeeded at 17:45 UTC, with Dokploy acknowledging “Application deployed
+successfully”. Hook 669688357 active/last200. GET at 17:52 UTC still serves
+backend 7632065f/web453b2f23, null revisions/unattested. Historical billing and
+hook404 are not current explanations. Next investigate accepted trigger versus
+actual build/rollout/domain mapping with authenticated Dokploy evidence.
+
+Dashboard access rechecked in an owned browser tab: Dokploy currently shows
+the sign-in form, not an authenticated dashboard. No credentials entered or
+services changed; temporary tab closed. Build/rollout logs remain unavailable.
+
+Full gate caught one suite import failure: PluginsPanel's two pure status-race
+tests imported CalendarPlanning's browser-only auth client in Node (window
+undefined). Actual result: 305 passing files, 1 failed suite, 4503 passing tests,
+8 skipped (450.25s). Parent also owns PluginsPanel.test.ts for the correction:
+mock its unrelated auth hook, preserving both race assertions. Focused recovery
+**4 files / 52 passed**; full acceptance run restarted. Product code unchanged,
+so existing final browser/package/build receipts remain applicable.
+
+## Loop135 acceptance — calendar-backed planning drafts
+
+Full unit **306 files / 4505 passed / 8 skipped / 0 failed** (435.55s),
++1 file/+35 passing tests over Loop134; full browser **36/36** (3.7m),
+packaged-server **14/14**, focused recovery **52/52**. Project/server/e2e
+typechecks, production build, native source import and lint passed.
+
+Preparation uses fresh authorized Calendar evidence and stated commitments;
+readable blocks preserve local time precision and offsets. Append updates the
+currently mounted composer without losing latest typing or attachments. Explicit
+Send remains required. Provider snapshots and browser fixtures are isolated;
+real Google/account/device acceptance remains open.
+
+Failed full run: 305 files passed, one panel suite failed to import browser auth,
+4503 tests passed/8 skipped. Its two pure status tests now mock the unrelated auth
+hook; all 306 files pass in the final receipt. The earlier interrupted130 run and
+intermediate formatter assertion failures are not acceptance receipts.
+
+Next: default-off explicit provider-fallback consent, including revalidation
+across async lookup and no duplicate resend. Detailed source findings and tests
+are in beta-acceptance-matrix-2026-09-19.md. Included allowance remains disabled
+pending implementation and a costed numerical proposal; budget is not spending
+permission. Watch/device, recovery and five-testers/three-days gates remain open.
+
+Deployment audit supersedes old billing/hook404 diagnosis: recent CI and Dokploy
+trigger succeeded, hook last200, but GET still served backend7632065f/web453b2f23.
+Dashboard is signed out in the available browser. Need authenticated build/rollout
+logs and verified application/domain/build mapping. Push is not deployment.
+Preserve unrelated untracked files and keep existing automation paused.

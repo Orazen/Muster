@@ -1,0 +1,77 @@
+import { z } from "zod";
+import { test, expect, pairDesktop } from "./browser-fixtures.ts";
+
+// Explicit provider fixtures: these verify the unsent draft boundary, not Google.
+test("Calendar planning preserves the current draft and attachments, rejects stale completion and exposes unplaced commitments", async ({ harness, newPage, pairCodeFromCloud }) => {
+  const page = await newPage();
+  await pairDesktop(page, harness, pairCodeFromCloud);
+  await page.getByRole("button", { name: "Quick start — skip setup, just get me in", exact: true }).click();
+  const roster = z.object({ bots: z.array(z.object({ id: z.string(), name: z.string() })) }).parse(await (await page.context().request.get(`${harness.desktopUrl}/api/bots`)).json());
+  const bot = roster.bots[0];
+  expect(bot).toBeDefined();
+  const attachment = { kind: "paste", id: "planning-preserved", text: "Existing attachment context", size: 27, lines: 1 };
+  await page.evaluate(({ id, attachment }) => localStorage.setItem("omb-draft-attachments", JSON.stringify({ [`bot:${id}`]: [attachment] })), { id: bot.id, attachment });
+  await page.reload();
+  const composer = page.getByRole("textbox", { name: `Message ${bot.name}`, exact: true });
+  await composer.fill("Keep my existing draft.");
+  await expect(page.getByText("Existing attachment context", { exact: true })).toBeVisible();
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && /\/api\/bots\/[^/]+\/messages$/.test(request.url())) writes.push(request.url());
+  });
+  await page.route("**/api/calendar/status", (route) => route.fulfill({ json: { configured: true, connected: true } }));
+  await page.route("**/api/connectors/catalog", (route) => route.fulfill({ json: { configured: false, cards: [] } }));
+  await page.route("**/api/calendar/calendars", (route) => route.fulfill({ json: { calendars: [{ id: "personal", summary: "Personal", timeZone: "UTC", primary: true }] } }));
+  await page.route("**/api/calendar/day?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    return route.fulfill({ json: { calendarId: query.get("calendarId"), date: query.get("date"), timeZone: query.get("timeZone"), timeMin: "2026-09-19T00:00:00Z", timeMax: "2026-09-20T00:00:00Z", complete: true, events: [{ id: "busy", summary: "Fully booked", start: "2026-09-19T09:00:00Z", end: "2026-09-19T17:00:00Z", allDay: false, busy: true }] } });
+  });
+  let calls = 0;
+  let release: (() => void) | undefined;
+  let pending = true;
+  const proposal = "Planning proposal — 2026-09-19 (UTC)\nNo available work time.\nUnplaced: Finish report (30 minutes).";
+  await page.route("**/api/calendar/plan", async (route) => {
+    calls++;
+    expect(route.request().method()).toBe("POST");
+    const request = route.request().postDataJSON();
+    expect(request).toMatchObject({ calendarId: "personal", date: "2026-09-19", timeZone: "UTC", workStart: "09:00", workEnd: "17:00", commitments: [{ title: "Finish report", minutes: 30 }] });
+    const stale = pending;
+    if (stale) await new Promise<void>((resolve) => { release = resolve; });
+    await route.fulfill({ json: { calendarId: request.calendarId, date: request.date, timeZone: request.timeZone, overview: [], priorities: request.commitments, unplaced: request.commitments, available: [], draft: stale ? "Stale planning proposal" : proposal } });
+  });
+  await page.getByRole("button", { name: "Connected apps", exact: true }).click();
+  const card = page.getByRole("region", { name: "Personal Google Calendar", exact: true });
+  await card.getByRole("button", { name: "Choose a calendar", exact: true }).click();
+  await card.getByRole("combobox", { name: "Calendar", exact: true }).selectOption("personal");
+  await card.getByLabel("Date", { exact: true }).fill("2026-09-19");
+  await card.getByRole("button", { name: "Load day", exact: true }).click();
+  await card.getByLabel("Commitment 1", { exact: true }).fill("Finish report");
+  await expect(card.getByRole("combobox", { name: "Draft for bot", exact: true })).toHaveValue(bot.id);
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await card.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await card.getByRole("button", { name: "Prepare planning draft", exact: true }).click();
+  await expect.poll(() => calls).toBe(1);
+  const staleResponse = page.waitForResponse("**/api/calendar/plan");
+  await card.getByLabel("Date", { exact: true }).fill("2026-09-20");
+  release!();
+  await staleResponse;
+  await expect(card.getByLabel("Commitment 1", { exact: true })).toHaveCount(0);
+  await expect(composer).toHaveValue("Keep my existing draft.");
+  pending = false;
+  await card.getByLabel("Date", { exact: true }).fill("2026-09-19");
+  await card.getByRole("button", { name: "Load day", exact: true }).click();
+  await card.getByLabel("Commitment 1", { exact: true }).fill("Finish report");
+  await card.getByRole("button", { name: "Prepare planning draft", exact: true }).click();
+  await expect(composer).toHaveValue(`Keep my existing draft.\n\n${proposal}`);
+  await expect(composer).toBeVisible();
+  await expect(page.getByText("Existing attachment context", { exact: true })).toBeVisible();
+  expect(writes).toEqual([]);
+  expect(calls).toBe(2);
+  await page.reload();
+  await expect(composer).toHaveValue(`Keep my existing draft.\n\n${proposal}`);
+  expect(await page.evaluate((id) => JSON.parse(localStorage.getItem("omb-draft-attachments") ?? "{}")[`bot:${id}`], bot.id)).toEqual([attachment]);
+  expect(writes).toEqual([]);
+  await composer.press("Enter");
+  await expect.poll(() => writes.length).toBe(1);
+  await expect(page.getByLabel(`Conversation with ${bot.name}`, { exact: true }).getByText("hello from fake acp", { exact: true })).toBeVisible();
+});
