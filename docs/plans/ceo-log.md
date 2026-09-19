@@ -5862,3 +5862,13 @@ Owner ask: use the app and find bugs. Ran the real first-run journey on the live
 Receipts: unit **295 files / 4332 passed / 8 skipped / 0 failed**; e2e **26/26** (fresh build); both typechecks exit 0; oxlint **0/0** (829 files); swift test 356/356; MusterWatch + MusterCompanion builds clean. Production untouched (GET-only); preview stack on isolated 8802/5199 with its own data dir.
 
 **Next:** pairing redeem web surface (§7 #7), scorecard trending (§7 #1 remainder), memory history+rollback UI (§7 #2).
+
+## Loop128 — continued live test pass: provider-error humanizer (19 September 2026)
+
+Continued the owner's "test everything" pass on the live preview harness through every surface: Connected apps (marketplace renders, honest unavailable banner without a connector runtime), Social (honest empty states, both-humans consent copy), /os (workspace overview, wave, workspace → open-chat chain into /app), console clean throughout.
+
+**Fixed:** when a provider rejects a turn, the Droid CLI echoes the whole JSON envelope as the assistant reply — users saw `Error: 402 {"detail":...,"requestId":...}` as a chat bubble. `src/lib/provider-error.ts` (zod-parsed, conservative whole-message detection, envelope-shaped keys required so model-authored JSON is never rewritten) renders the detail sentence with status-appropriate copy; CopyButton keeps the raw bytes. Verified live: the persisted 402 bubble now reads "No active subscription found. Subscribe to start using Droid." (screenshot-checked, zero raw-JSON leaks).
+
+Receipts: unit **296 files / 4341 passed / 8 skipped / 0 failed**; e2e **26/26** (fresh build); both typechecks 0; oxlint **0/0** (831 files); Electron syntax OK. Commit 2f04b3e on main.
+
+**Honest notes:** marketplace Connect buttons disabled in harness because no connector runtime is configured there (by design, not a bug); the "Internal error: Agent error" chip on those old turns is legacy persisted text from a pre-Loop120 build — current code composes different, clearer error chips; the Droid 402 itself remains owner-gated (subscription).
