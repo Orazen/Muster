@@ -3458,3 +3458,25 @@ iPhone interaction, installed update or production rollout claim.
 CI/autodeploy for e59b6e9 passed; Dependabot0open; historical Telegram secret
 alert1open/unknown and Mimosa incomplete. Production GET still old backend/web
 identities with null source revisions. Existing automation remains paused.
+
+### Loop141 — selected-calendar device authorization and iPhone acceptance
+
+Added signed-in same-origin Calendar permission issuance/list/revoke. A fresh
+complete calendar list verifies the selection; session/grant guards run after
+reads. Opaque32byte capabilities are hashed at rest, selected-account/calendar/
+Google-subject/consent-generation bound,24h expiry, max10active without eviction.
+No account inferred from local pairing. Native transfer/consumption remains next;
+Watch planning is still prompt-only, not an account-linked calendar read.
+
+Final gates: **314files/4658passed/8skipped/0failed**,506.59s (+1file/+26passing
+from Loop140). Focusedroutes27/27 and store17/17; both typechecks/full lint/diff
+check passed. Independent code review found no blocking defect in this scope.
+
+Fresh owned iPhone acceptance **3/3 passed**,0failed/0skipped: pairing, identity,
+Walkie. Signedbuild/install passed, no retries. Simulator/processes/ports cleaned.
+Offline provider only; no hardware microphone, real Google or new iPhone call
+protocol claim. See docs/audits/calendar-device-authorization-2026-09-19.md.
+Updated beta matrix to reflect verified Watch/Desktop/iPhone and fallback work.
+Other agent owns release workflow7161903; preserved/excluded from this slice.
+Existing automation remains paused; real-device/Drive/allowance/tester-day and
+production rollout gates remain open. Previous Watch commitac05ae3 CIpassed.

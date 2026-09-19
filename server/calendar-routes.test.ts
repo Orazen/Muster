@@ -210,3 +210,70 @@ describe("planning draft preparation", () => {
     expect(JSON.stringify(result)).not.toContain("Team meeting");
   });
 });
+
+describe("explicit Calendar device authorizations", () => {
+  async function connected() {
+    await start(); await callback();
+    ctx.reader = { listCalendars: vi.fn(async () => [{ id: "chosen", summary: "Personal", primary: false, timeZone: "UTC" }]), readDay: vi.fn() };
+  }
+  function issue(body: JsonObject = { calendarId: "chosen", label: "My Watch" }, source = origin) {
+    return fetch(`${origin}/api/calendar/devices`, { method: "POST", headers: { origin: source, "content-type": "application/json" }, body: JSON.stringify(body) });
+  }
+  async function list() { return z.object({ devices: z.array(z.object({ id: z.string(), label: z.string(), calendarId: z.string(), expiresAt: z.number() }).strict()) }).parse(await (await fetch(`${origin}/api/calendar/devices`)).json()); }
+  it("issues once after a fresh owned calendar read and lists no capability", async () => {
+    await connected();
+    const response = await issue(); expect(response.status).toBe(201);
+    const result = z.object({ token: z.string().regex(/^[0-9a-f]{64}$/), grant: z.object({ id: z.string().uuid(), label: z.string(), calendarId: z.string(), expiresAt: z.number() }) }).parse(await response.json());
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(result.grant).toMatchObject({ label: "My Watch", calendarId: "chosen" });
+    expect(await list()).toEqual({ devices: [result.grant] });
+    expect(JSON.stringify(await list())).not.toContain(result.token);
+    expect(JSON.stringify(result)).not.toContain("private-access");
+    expect(ctx.reader!.listCalendars).toHaveBeenCalledTimes(1);
+    expect(ctx.reader!.readDay).not.toHaveBeenCalled();
+  });
+  it("requires account session, same origin and an explicit bounded selection", async () => {
+    await connected();
+    expect((await issue(undefined, "https://foreign.example")).status).toBe(403);
+    expect((await issue({ calendarId: "chosen", label: "" })).status).toBe(400);
+    expect((await issue({ calendarId: "chosen", label: "Watch", userId: "bob" })).status).toBe(400);
+    expect(ctx.reader!.listCalendars).not.toHaveBeenCalled();
+    ctx.session = async () => null;
+    expect((await issue()).status).toBe(401);
+    expect((await fetch(`${origin}/api/calendar/devices`)).status).toBe(401);
+  });
+  it("does not infer the connected account from local installation access", async () => {
+    await connected(); user = { userId: "bob", sessionId: "bob-session" };
+    expect((await issue()).status).toBe(409);
+    expect(ctx.reader!.listCalendars).not.toHaveBeenCalled();
+    expect(await list()).toEqual({ devices: [] });
+  });
+  it("refuses a calendar absent from the complete fresh account list", async () => {
+    await connected(); expect((await issue({ calendarId: "foreign", label: "Watch" })).status).toBe(409);
+    expect(await list()).toEqual({ devices: [] });
+  });
+  it.each(["logout", "switch", "disconnect", "partial"])("does not authorize after %s during selection read", async failure => {
+    await connected();
+    vi.mocked(ctx.reader!.listCalendars).mockImplementationOnce(async () => {
+      if (failure === "logout") ctx.session = async () => null;
+      if (failure === "switch") user = { userId: "bob", sessionId: "bob-session" };
+      if (failure === "disconnect") disconnectCalendar(db, "alice");
+      if (failure === "partial") throw new Error("private-provider-details");
+      return [{ id: "chosen", summary: "Personal", primary: false, timeZone: "UTC" }];
+    });
+    const response = await issue(); expect(response.status).toBe(409);
+    expect(await response.text()).not.toContain("private-provider-details");
+    ctx.session = async () => ({ userId: "alice", sessionId: "alice-session" });
+    expect(await list()).toEqual({ devices: [] });
+  });
+  it("revokes only the signed-in account's selection without revealing other records", async () => {
+    await connected();
+    const { grant: created } = z.object({ grant: z.object({ id: z.string() }) }).parse(await (await issue()).json());
+    const revoke = () => fetch(`${origin}/api/calendar/devices/${created.id}`, { method: "DELETE", headers: { origin } });
+    user = { userId: "bob", sessionId: "bob-session" };
+    expect((await revoke()).status).toBe(200); expect(await list()).toEqual({ devices: [] });
+    user = { userId: "alice", sessionId: "alice-session" };
+    expect((await list()).devices).toHaveLength(1);
+    expect((await revoke()).status).toBe(200); expect(await list()).toEqual({ devices: [] });
+  });
+});
