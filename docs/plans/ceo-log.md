@@ -5825,3 +5825,13 @@ Receipts: onboarding e2e **7/7**; full Playwright suite **26/26**; oxlint 0/0 (8
 - **Kept from the attempt (9a2fc19):** the workspace-backup signIn now settles EVERY first-run surface in a loop (chat flags + reload → wizard Escape → settle), and the lib exports `onboardingChatDone()` / `ONBOARDING_CHAT_DONE_KEY`.
 
 Receipts at the tip (9a2fc19): stop-cleanup + onboarding e2e green after revert (exit 0); beats engine 5/5; lint 0/0; build ✓. Full unit suite last measured Loop121-122 era (4322 passed); re-run owed with the next slice.
+
+## Loop125 — the earlier "regression" was load flake; the greet condition is now deployment-agnostic (19 September 2026)
+
+The universal-first-run mystery resolved: re-applying the empty-roster greet with NO other change ran stop-cleanup **3/3 green in isolation**, and the full Playwright suite **26/26** — the earlier three-failure signature (contexts dying at fixture setup) was parallel-resource contention, not the product change. The stop-cleanup slice is unblocked and needs no further investigation.
+
+The shipped condition (e9d8872) is now deployment-agnostic and honest: **any signup whose roster is empty greets in chat** — on hosted fresh installs that is every signup (decisions 13+14); on desktop the seed bot keeps the classic wizard as the first-run per the stability contract. TeamTemplates remains the chat's fallback after the chat completes.
+
+Receipts: full Playwright suite **26/26** with the greet condition applied; beats engine 5/5; both typechecks; oxlint 0/0 (827 files); build ✓. GAIA's live re-walk also captured its pricing beat ("I'm not an app you're buying. I'm someone you're hiring." → $30/month glass card) and the staggered bubble arrival — the stagger is ported (e8c777e); Muster's BYOK-free-forever decision means no pricing beat.
+
+Next: the spotlight tour (data-tour anchors), the owner-gated deploy/CI/cert rows, and MusterMobile/Watch device acceptance when hardware is available.
