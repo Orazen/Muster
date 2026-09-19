@@ -48,8 +48,8 @@ importers:
         specifier: 6.2.9
         version: 6.2.9
       lucide-react:
-        specifier: ^0.539.0
-        version: 0.539.0(react@19.2.8)
+        specifier: ^1.46.0
+        version: 1.47.0(react@19.2.8)
       posthog-js:
         specifier: ^1.415.6
         version: 1.415.6
@@ -2735,8 +2735,8 @@ packages:
     resolution: {integrity: sha512-Jo6dJ04CmSjuznwJSS3pUeWmd/H0ffTlkXXgwZi+eq1UCmqQwCh+eLsYOYCwY991i2Fah4h1BEMCx4qThGbsiA==}
     engines: {node: '>=10'}
 
-  lucide-react@0.539.0:
-    resolution: {integrity: sha512-VVISr+VF2krO91FeuCrm1rSOLACQUYVy7NQkzrOty52Y8TlTPcXcMdQFj9bYzBgXbWCiywlwSZ3Z8u6a+6bMlg==}
+  lucide-react@1.47.0:
+    resolution: {integrity: sha512-o8C23aXpNQypRY73W7fW02EyvWJinEMXgKeGjFoKym0zj3Q73hD97A1IQps1g8C14HTGsOpZL0Am+xjfgFZAbg==}
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
@@ -6189,7 +6189,7 @@ snapshots:
     dependencies:
       yallist: 4.0.0
 
-  lucide-react@0.539.0(react@19.2.8):
+  lucide-react@1.47.0(react@19.2.8):
     dependencies:
       react: 19.2.8
 
