@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { Check, CircleHelp, ExternalLink, Loader2, Plus, Trash2 } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { ProviderFallbackPreference } from "./ProviderFallbackPreference";
 
 interface ProviderMeta {
   id: string;
@@ -136,10 +137,9 @@ export function ProvidersSection() {
       .catch(() => {});
   }, []);
 
-  if (!providers.length) return null;
-
   return (
     <div className="flex flex-col gap-2">
+      <ProviderFallbackPreference />
       {providers.map((p) => (
         <ProviderRow key={p.id} provider={p} />
       ))}

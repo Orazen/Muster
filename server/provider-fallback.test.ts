@@ -12,6 +12,8 @@ describe("fallbackEligible", () => {
     expect(fallbackEligible("t4", "HTTP 401 unauthorized")).toBe(false);
     expect(fallbackEligible("t5", "Install a supported container runtime first")).toBe(false);
     expect(fallbackEligible("t6", "")).toBe(false);
+    expect(fallbackEligible("t7", "insufficient permissions to read balance")).toBe(false);
+    expect(fallbackEligible("t8", "HTTP 403 quota API access denied")).toBe(false);
   });
 
   it("one attempt per thread per cooldown", () => {

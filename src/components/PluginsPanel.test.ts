@@ -1,10 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-
-// These Node tests exercise status merging, not the browser auth client.
-// Calendar/auth rendering is covered by the owned browser suite.
-vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: null }) }));
-
-import { mergeCurrentConnectorStatus, type ConnectorStatus } from "./PluginsPanel";
+import { describe, expect, it } from "vitest";
+import { mergeCurrentConnectorStatus, type ConnectorStatus } from "../lib/connector-status";
 
 describe("connected-app status races", () => {
   it("does not let an older not_connected response erase a newer OAuth attempt", async () => {

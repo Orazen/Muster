@@ -6220,3 +6220,70 @@ trigger succeeded, hook last200, but GET still served backend7632065f/web453b2f2
 Dashboard is signed out in the available browser. Need authenticated build/rollout
 logs and verified application/domain/build mapping. Push is not deployment.
 Preserve unrelated untracked files and keep existing automation paused.
+
+## Loop136 started — explicit provider fallback consent
+
+Prior goal turn made verified progress: Loop135 pushed93255e8; pulled0a71d1d
+(deployment trigger only). Parent owns index integration, existing fallback
+policy/tests as needed and cycle docs. fallback_consent_store owns new consent
+store/routes and tests. fallback_consent_ui owns ProvidersSection, new preference
+component and browser fixture. draft_handoff owns new fallback runner/tests.
+Default pause, explicit account consent with generation invalidation, own-key
+alternates only, no replay after model/tool progress. Revalidate through provider
+setup; Stop/new work/revocation invalidate pending retry. No funded inference.
+
+Focused ownership/dispatch tests caught an actual PATCH500: rebuilding a Web
+Request after its body had been consumed threw before the session recheck.
+Account route registration now reuses header-only session input; Calendar's
+existing callback had the same shape and uses that correction too. Fixture
+instance IDs needed the real Api: owner namespace. Initial focused runs31pass/
+3fail and10pass/3fail retained; corrected combined35pass and harness14pass.
+Followup Stop/progress fixtures initially14pass/2fail from a fixture syntax typo;
+clean16/16 pass proves actual alternate cancellation and zero retry aftertools.
+
+Review preserved preferred selection through a temporary retry override, routes
+Stop/approval answers to active turn provenance, retains original userMessage
+identity to avoid duplicating it in API context, and fences late predecessor
+provider events out of active turn folding. Source and target must be account
+owned; missing explicit providers no longer heal to arbitrary otherproviders.
+
+Full lint found an inherited Loop135 module mock disallowed by the configured
+rule. UI agent additionally owns PluginsPanel, its test and new pure
+connector-status helper: unchanged status merge extracted, mock removed;2/2pass.
+No assertions removed. New consent browser cases3/3pass onfreshbuild; final
+focused/build/full gates follow the remaining review corrections.
+
+## Loop136 acceptance — explicit provider retry consent
+
+Automatic provider retry now requires persisted account opt-in, default off.
+A retry requires a failed quota turn with no progress, current source-turn
+identity, unchanged owner/task/message/provider and unchanged consent generation.
+Stop, new work and revoke/re-enable invalidate pending retries. Only owned
+providers participate. Missing explicit choices no longer silently select
+another provider. A temporary alternate preserves the saved model and original
+message identity; Stop and approvals target the active provider. Late predecessor
+events cannot settle the active alternate. The existing Providers panel reports
+unknown/loading/save failures honestly and explains possible paid-credit use.
+
+Full unit **309 files / 4556 passed / 8 skipped / 0 failed** (483.77s),
++3 files/+51 passing tests over Loop135; fresh browser **39/39** (4.1m),
+packaged-server **14/14**, final focused **6 files / 70 passed**. Build,
+project/server/e2e typechecks and full lint passed. No native-device or
+real-provider acceptance is claimed by these isolated fixtures.
+
+Real owned harness16/16 covers account consent, absent default/revoked no retry,
+one opt-in reply and one user bubble, preserved preferred provider, unavailable
+explicit choice refusal, Stop reaching the temporary alternate and zero alternate
+invocation after tool progress. Browser3newcases/39full verifies save/recheck,
+malformed results, stale response, sign-in and320px. Failure history retained in
+CEO log: real consumed-body session error, fixture namespace/syntax corrections,
+and inherited disallowed module mock extracted into a pure helper. Final full
+gates passed without skipping tests or weakening assertions.
+
+Next: foreground Watch call session with paired-host authorization, explicit
+ring/accept/end, request/result correlation and cancellation/duplicate coverage.
+Watch dictation/TTS and current web window-local calls are not that protocol;
+capable-device selection and durable queue remain separate subsequent work.
+Real Google/device/recovery acceptance, funded allowance accounting and cost
+choices, production rollout and five-testers/three-days gate remain open.
+Existing automation stays paused; unrelated untracked content remains untouched.

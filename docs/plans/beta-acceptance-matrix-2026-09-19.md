@@ -259,3 +259,63 @@ Loop135 final acceptance receipts: Full unit **306 files / 4505 passed / 8 skipp
 +1 file/+35 passing tests over Loop134; full browser **36/36** (3.7m),
 packaged-server **14/14**, focused recovery **52/52**. Project/server/e2e
 typechecks, production build, native source import and lint passed.
+
+### Loop136 explicit fallback implementation
+
+Account-owned automatic provider retry now has persisted opt-in, default off.
+The existing Providers panel checks/saves the preference explicitly and explains
+that another connected provider receives the task and may spend paid credits.
+Anonymous, loading, failed or ambiguous saves do not display confirmed consent.
+An account/session change discards stale UI responses. Shared installation
+providers are excluded from automatic retry.
+
+A quota failure can retry once only after a failed terminal event, no model/tool
+progress, and unchanged account, task, message, selection and consent generation.
+New work, Stop, revoke/re-enable and stale source-turn events invalidate it.
+Missing explicit provider choices no longer silently heal to arbitrary providers.
+The retry temporarily selects an owned alternate without changing the saved
+provider; the original message identity prevents duplicated provider context.
+Active-provider checks preserve retry state against predecessor events; Stop and
+approval answers target the active provider. Authentication/permission errors
+are not quota signals. No automatic action approval is added.
+
+Owned real-server evidence covers default off, opt-in, revocation, account
+isolation, exactly one reply/user bubble, unchanged saved provider, missing
+provider refusal, Stop reaching the alternate and zero replay after tool use.
+Coordinator fixtures cover concurrent completion, generation changes and stale
+turn identity. These are fake-provider receipts, not real paid-provider success.
+The included allowance still needs accounting/reservations and a costed owner
+choice; this slice does not introduce an included pool or authorize spending.
+
+### Next hero journey: foreground Watch calling
+
+Loop136 read-only audit confirms an implementation gap before hardware testing.
+ios/Watch/WatchVoice.swift provides explicit local reply TTS; WatchSession uses
+system dictation and disconnects on backgrounding. WatchViews preserves an unsent
+draft when disconnected; this is not a durable execution queue. iPhone's
+WalkieVoice and CompanionCore/Walkie derive voice state from ordinary messages.
+Web CallView/call.ts state is window-local and not a Watch signaling protocol.
+Companion routes currently forward messages/interrupts/events to one configured
+host; no call-session or Calendar-planning endpoints were found. No incoming
+call/accept protocol or capable-device routing was established in this audit.
+
+Next bounded implementation should deliver one foreground Watch call session
+against its paired execution host: account/device session identity, explicit
+ring/accept/end transitions, duplicate protection, disconnect cancellation and
+no task execution before acceptance. Add a native coordinator and foreground
+Watch controls, correlate an explicit planning request/result through the
+existing message contract and reuse reply TTS. Test owned transports for late
+replies, duplicate accept/end, reconnect and cancellation. Define the exact
+protocol and device authorization against companion contracts before coding.
+
+This does not establish background incoming calling, automatic host selection
+or offline execution. Capability registration/selection and durable queued
+requests remain subsequent work. Wrist microphone/audio, suspension, background
+delivery and interruptions require real hardware acceptance. No new native tests
+were run for this source audit; prior builds do not prove the missing call flow.
+
+Loop136 final receipts: Full unit **309 files / 4556 passed / 8 skipped / 0 failed** (483.77s),
++3 files/+51 passing tests over Loop135; fresh browser **39/39** (4.1m),
+packaged-server **14/14**, final focused **6 files / 70 passed**. Build,
+project/server/e2e typechecks and full lint passed. No native-device or
+real-provider acceptance is claimed by these isolated fixtures.

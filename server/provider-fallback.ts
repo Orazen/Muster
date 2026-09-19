@@ -6,17 +6,15 @@
 // the turn dies with only activity chips in the thread, no words. The
 // owner often HAS a second configured provider sitting unused.
 //
-// What. After a runtime error that confidently names a rate/quota limit,
-// the bot is re-pointed at another AVAILABLE instance (owner-scoped when
-// the bot has an owner) and the original message re-dispatched once, with
-// a visible activity note explaining the switch.
-//
-// Guardrails: one attempt per thread per cooldown window — a dead provider
-// must cause one hop, not a bounce storm between two failing engines.
+// Policy helpers for the consent-checked runner. A quota error alone grants
+// nothing: the runner also checks explicit account consent, turn identity,
+// absence of progress and current ownership before a one-time temporary retry.
+// Saved model selection stays unchanged. Cooldown prevents bounce storms.
 
 /** Errors that confidently mean "this provider can't serve right now" —
  * matched against driver messages like `OpenCode Zen (API) HTTP 429: …`. */
-const RATE_LIMITED = /\b429\b|\brate.?limit|\bquota\b|\bcredit\b|\bbalance\b|insufficient/i;
+const RATE_LIMITED = /\b429\b|\brate.?limit|\bquota\b|\bcredit\b|\bbalance\b/i;
+const AUTH_FAILURE = /\b401\b|\b403\b|unauthori[sz]ed|authentication|permission denied|insufficient (?:permission|scope)/i;
 
 const COOLDOWN_MS = 10 * 60_000;
 const attempted = new Map<string, number>();
@@ -49,7 +47,7 @@ export function providerFamilyOf(instanceId: string): string {
 }
 
 export function fallbackEligible(threadId: string, errorMessage: string, now = Date.now()): boolean {
-  if (!RATE_LIMITED.test(errorMessage)) return false;
+  if (AUTH_FAILURE.test(errorMessage) || !RATE_LIMITED.test(errorMessage)) return false;
   const last = attempted.get(threadId);
   return !last || now - last >= COOLDOWN_MS;
 }

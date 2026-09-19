@@ -87,7 +87,14 @@ Socket.prototype.connect=function(...args){const v=Array.isArray(args[0])?args[0
     dumps[key] = join(directory, `${key}.json`);
     return [id, { driver: "grokAgent", config: { cli: join(root, "server/testing/fake-acp-cli.ts"), fullAuto: true, workspace: home }, environment: { FAKE_ACP_MODE: "echo-gated", FAKE_ACP_DUMP: dumps[key] } }];
   })));
-  writeFileSync(configPath, JSON.stringify({ ...config, instances }));
+  // Separate deterministic fallback providers share only the secondary account namespace.
+  const fallbackInstances = Object.fromEntries(["healthy", "quota", "progress"].map(kind => {
+    const id = engineIds.secondary.replace("providerApi:", `fallback${kind}Api:`);
+    engineIds[`fallback-${kind}`] = id;
+    dumps[`fallback-${kind}`] = join(directory, `fallback-${kind}.rpc.json`);
+    return [id, { driver: "grokAgent", config: { cli: join(root, "server/testing/fake-acp-cli.ts"), fullAuto: true, workspace: home }, environment: { FAKE_ACP_MODE: kind === "quota" ? "quota-error" : kind === "progress" ? "quota-after-progress" : "fallback-healthy", FAKE_ACP_RPC_DUMP: dumps[`fallback-${kind}`] } }];
+  }));
+  writeFileSync(configPath, JSON.stringify({ ...config, instances: { ...fallbackInstances, ...instances } }));
   child = spawn(process.execPath, ["--import", guard, "--experimental-strip-types", join(root, "server/index.ts")], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
   child.stdout?.on("data", () => {}); child.stderr?.on("data", () => {});
   await waitForOwnedServer(child, base);
@@ -208,3 +215,117 @@ it("personal Calendar requires a real hosted session and allows each account its
     expect(consent.searchParams.get("state")).toMatch(/^[A-Za-z0-9_-]{43}$/);
   }
 });
+
+
+it("persists explicit provider fallback per account through real authenticated routes", async () => {
+  for (const cookie of [primary, secondary]) {
+    const result = await api("/api/provider-fallback", cookie);
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({ enabled: false, generation: 0, requiresSignIn: false });
+  }
+  expect((await api("/api/provider-fallback", primary, "PATCH", { enabled: "true" })).status).toBe(400);
+  const enabled = await api("/api/provider-fallback", primary, "PATCH", { enabled: true });
+  expect(enabled.status, await enabled.clone().text()).toBe(200);
+  expect(await enabled.json()).toEqual({ enabled: true, generation: 1, requiresSignIn: false });
+  expect(await (await api("/api/provider-fallback", secondary)).json()).toEqual({ enabled: false, generation: 0, requiresSignIn: false });
+  expect((await api("/api/provider-fallback", primary, "PATCH", { enabled: false })).status).toBe(200);
+});
+
+it("keeps failed turns on their provider by default and after revoke, with one resend only when opted in", async () => {
+  const botSchema = z.object({ id: z.string(), threadId: z.string(), activity: z.string(), modelSelection: z.object({ instanceId: z.string() }) });
+  const messagesSchema = z.object({ messages: z.array(z.object({ role: z.string(), kind: z.string(), text: z.string().optional(), tool: z.object({ name: z.string() }).passthrough().optional() })) });
+  for (const [index, enabled] of [false, true, false].entries()) {
+    if (index > 0) expect((await api("/api/provider-fallback", secondary, "PATCH", { enabled })).status).toBe(200);
+    const created = await api("/api/bots", secondary, "POST", {});
+    expect(created.status).toBe(201);
+    const { bot } = z.object({ bot: z.object({ id: z.string(), threadId: z.string() }) }).parse(await created.json());
+    expect((await api(`/api/bots/${bot.id}`, secondary, "PATCH", { composio: false, modelSelection: { instanceId: engineIds["fallback-quota"], model: "fake-acp-model" }, computer: "off" })).status).toBe(200);
+    const text = `Owned fallback ${bot.id}`;
+    expect((await api(`/api/bots/${bot.id}/messages`, secondary, "POST", { text })).status).toBe(202);
+    const readMessages = async () => messagesSchema.parse(await (await api(`/api/threads/${bot.threadId}/messages`, secondary)).json()).messages;
+    // Observe the real driver error before checking terminal state; creation starts idle.
+    await expect.poll(async () => JSON.stringify(await readMessages()), { timeout: 15_000 }).toContain("quota exceeded");
+    if (enabled) await expect.poll(async () => JSON.stringify(await readMessages()), { timeout: 15_000 }).toContain("hello from fake acp");
+    await expect.poll(async () => {
+      const { bots } = z.object({ bots: z.array(botSchema) }).parse(await (await api("/api/bots", secondary)).json());
+      return bots.find(candidate => candidate.id === bot.id)?.activity;
+    }, { timeout: 15_000 }).toBe("idle");
+    const { bots } = z.object({ bots: z.array(botSchema) }).parse(await (await api("/api/bots", secondary)).json());
+    const finalBot = bots.find(candidate => candidate.id === bot.id);
+    const messages = await readMessages();
+    expect(finalBot?.modelSelection.instanceId).toBe(engineIds["fallback-quota"]);
+    expect(messages.filter(message => message.role === "user" && message.kind === "text")).toHaveLength(1);
+    expect(messages.filter(message => message.role === "bot" && message.kind === "text" && message.text?.includes("hello from fake acp"))).toHaveLength(enabled ? 1 : 0);
+  }
+}, 60_000);
+
+
+it("does not silently replace an unavailable explicit provider even with fallback consent", async () => {
+  expect((await api("/api/provider-fallback", secondary, "PATCH", { enabled: true })).status).toBe(200);
+  const created = await api("/api/bots", secondary, "POST", {});
+  expect(created.status).toBe(201);
+  const { bot } = z.object({ bot: z.object({ id: z.string(), threadId: z.string() }) }).parse(await created.json());
+  const missingInstance = engineIds.secondary.replace("providerApi:", "missingOwnedApi:");
+  expect((await api(`/api/bots/${bot.id}`, secondary, "PATCH", { modelSelection: { instanceId: missingInstance, model: "fake-acp-model" }, computer: "off" })).status).toBe(200);
+  const sent = await api(`/api/bots/${bot.id}/messages`, secondary, "POST", { text: "Keep my explicit provider choice" });
+  expect(sent.status).toBe(409);
+  expect(await sent.json()).toMatchObject({ error: expect.stringContaining("unavailable") });
+  const { bots } = z.object({ bots: z.array(z.object({ id: z.string(), modelSelection: z.object({ instanceId: z.string() }) })) }).parse(await (await api("/api/bots", secondary)).json());
+  expect(bots.find(candidate => candidate.id === bot.id)?.modelSelection.instanceId).toBe(missingInstance);
+  const messages = await (await api(`/api/threads/${bot.threadId}/messages`, secondary)).json();
+  expect(JSON.stringify(messages)).not.toContain("hello from fake acp");
+  expect((await api("/api/provider-fallback", secondary, "PATCH", { enabled: false })).status).toBe(200);
+});
+
+
+it("returns a recoverable Calendar plan failure after reading the body without a grant", async () => {
+  const response = await api("/api/calendar/plan", secondary, "POST", {
+    calendarId: "primary", date: "2026-09-21", timeZone: "UTC", workStart: "09:00", workEnd: "17:00",
+    commitments: [{ title: "Owned calendar task", minutes: 30 }],
+  });
+  expect(response.status, await response.clone().text()).toBe(409);
+  expect(await response.json()).toMatchObject({ error: expect.stringContaining("Could not prepare a complete plan") });
+});
+
+
+it("interrupts the actual temporary alternate while preserving the preferred provider", async () => {
+  expect((await api("/api/provider-fallback", secondary, "PATCH", { enabled: true })).status).toBe(200);
+  const created = await api("/api/bots", secondary, "POST", {});
+  expect(created.status).toBe(201);
+  const { bot } = z.object({ bot: z.object({ id: z.string(), threadId: z.string() }) }).parse(await created.json());
+  expect((await api(`/api/bots/${bot.id}`, secondary, "PATCH", { composio: false, modelSelection: { instanceId: engineIds["fallback-quota"], model: "fake-acp-model" }, computer: "off" })).status).toBe(200);
+  const receipt = dumps["fallback-healthy"];
+  writeFileSync(receipt, "[]");
+  expect((await api(`/api/bots/${bot.id}/messages`, secondary, "POST", { text: "Owned FAKE_FALLBACK_HANG cancellation" })).status).toBe(202);
+  const methods = () => z.array(z.string()).parse(JSON.parse(readFileSync(receipt, "utf8")));
+  await expect.poll(methods, { timeout: 15_000 }).toContain("session/prompt");
+  expect(methods()).not.toContain("session/prompt.result");
+  const state = async () => z.object({ bots: z.array(z.object({ id: z.string(), activity: z.string(), modelSelection: z.object({ instanceId: z.string() }) })) }).parse(await (await api("/api/bots", secondary)).json()).bots.find(candidate => candidate.id === bot.id);
+  expect(await state()).toMatchObject({ activity: "working", modelSelection: { instanceId: engineIds["fallback-quota"] } });
+  const stopped = await api(`/api/bots/${bot.id}/interrupt`, secondary, "POST", {});
+  expect(stopped.status, await stopped.clone().text()).toBe(200);
+  await expect.poll(methods, { timeout: 10_000 }).toContain("session/cancel");
+  expect(methods().filter(method => method === "session/cancel")).toHaveLength(1);
+  await expect.poll(async () => (await state())?.activity, { timeout: 10_000 }).toBe("idle");
+  expect((await state())?.modelSelection.instanceId).toBe(engineIds["fallback-quota"]);
+  expect((await api("/api/provider-fallback", secondary, "PATCH", { enabled: false })).status).toBe(200);
+}, 30_000);
+
+it("does not replay quota failures after tool progress even with explicit consent", async () => {
+  expect((await api("/api/provider-fallback", secondary, "PATCH", { enabled: true })).status).toBe(200);
+  const created = await api("/api/bots", secondary, "POST", {});
+  expect(created.status).toBe(201);
+  const { bot } = z.object({ bot: z.object({ id: z.string(), threadId: z.string() }) }).parse(await created.json());
+  expect((await api(`/api/bots/${bot.id}`, secondary, "PATCH", { composio: false, modelSelection: { instanceId: engineIds["fallback-progress"], model: "fake-acp-model" }, computer: "off" })).status).toBe(200);
+  writeFileSync(dumps["fallback-healthy"], "[]");
+  expect((await api(`/api/bots/${bot.id}/messages`, secondary, "POST", { text: "Owned progress must not replay" })).status).toBe(202);
+  const readMessages = async () => z.object({ messages: z.array(z.object({ role: z.string(), kind: z.string(), text: z.string().optional(), tool: z.object({ name: z.string() }).passthrough().optional() })) }).parse(await (await api(`/api/threads/${bot.threadId}/messages`, secondary)).json()).messages;
+  await expect.poll(async () => JSON.stringify(await readMessages()), { timeout: 15_000 }).toContain("quota exceeded");
+  await expect.poll(async () => z.object({ bots: z.array(z.object({ id: z.string(), activity: z.string() })) }).parse(await (await api("/api/bots", secondary)).json()).bots.find(candidate => candidate.id === bot.id)?.activity, { timeout: 10_000 }).toBe("idle");
+  const messages = await readMessages();
+  expect(JSON.stringify(messages)).toContain("Owned work already started");
+  expect(messages.filter(message => message.role === "user" && message.kind === "text")).toHaveLength(1);
+  expect(JSON.stringify(messages)).not.toContain("hello from fake acp");
+  expect(JSON.parse(readFileSync(dumps["fallback-healthy"], "utf8"))).toEqual([]);
+  expect((await api("/api/provider-fallback", secondary, "PATCH", { enabled: false })).status).toBe(200);
+}, 25_000);

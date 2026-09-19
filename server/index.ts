@@ -202,7 +202,10 @@ import {
   signedSessionCookieValue,
   deleteAuthUser,
 } from "./auth.ts";
-import { fallbackEligible, markAttempted, pickAlternate, providerFamilyOf, recordRateLimitHit, recentRateLimitHits } from "./provider-fallback.ts";
+import { fallbackEligible, providerFamilyOf, recordRateLimitHit, recentRateLimitHits } from "./provider-fallback.ts";
+import { ProviderFallbackRunner, matchesActiveProvider } from "./provider-fallback-runner.ts";
+import { getProviderFallbackConsent } from "./provider-fallback-consent.ts";
+import { handleProviderFallbackRoute } from "./provider-fallback-routes.ts";
 import { describeFreeBestChain, FREE_BEST_COOLDOWN_MS, pickFreeBest, recordFreeBestFailure, type FreeCandidate } from "./free-best.ts";
 import { consumeCode, getOrCreateCode, VerifyError } from "./pairing.ts";
 import { consumeClaimCode, createClaimCode } from "./claim.ts";
@@ -533,6 +536,7 @@ function peerTarget(lease: PeerLease, id: string) {
   return bot && !bot.hidden && bot.id !== lease.botId && peerOwnerOf(bot) === lease.ownerId ? bot : undefined;
 }
 function stopPeerDispatch(botId: string) {
+  providerFallback.cancel(botId);
   const lease = peerCapabilities.forBot(botId);
   peerCapabilities.revokeBot(botId);
   connectorCapabilities.revokeBot(botId);
@@ -626,15 +630,8 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
         store.patchBot(bot.id, { modelSelection: { ...bot.modelSelection, instanceId: userInstanceId(base, bot.ownerId) } });
         return exact;
       }
-      // Fallback: try ANY vault instance owned by this user
-      const described = await registry.describe();
-      const anyOwn = described.find(
-        (d) => d.instanceId.endsWith(`:${bot.ownerId}`) && d.snapshot.state === "available",
-      );
-      if (anyOwn) {
-        store.patchBot(bot.id, { modelSelection: { instanceId: anyOwn.instanceId, model: "" } });
-        return registry.get(anyOwn.instanceId);
-      }
+      // A missing explicit choice must not silently spend another provider.
+      // Quota retries use the separate, consent-checked runner.
     }
     return null;
   }
@@ -651,53 +648,42 @@ async function resolveInstanceForBot(bot: NonNullable<ReturnType<typeof store.bo
  * picker's recommendation never points at an instance that just tripped. */
 const freeBestFailures = new Map<string, number>();
 
-/** One-shot cross-provider rescue for rate-limited turns. Re-points the bot
- * at another available instance it is allowed to use and re-dispatches the
- * user's message through connectorContinuation so no duplicate bubble is
- * appended. Guarded by fallbackEligible/markAttempted in
- * server/provider-fallback.ts: one hop per thread per cooldown. */
-async function attemptProviderFallback(threadId: string, errorMessage: string): Promise<void> {
-  try {
-    if (!fallbackEligible(threadId, errorMessage)) return;
-    const threadBot = store.botByThread(threadId);
-    if (!threadBot?.ownerId && !threadBot) return;
-    // Record the hit for the usage dashboard even when no alternate exists:
-    // "your only provider is rate-limited" is exactly what it must show.
-    recordRateLimitHit(providerFamilyOf(threadBot.modelSelection?.instanceId ?? ""));
-    recordFreeBestFailure(threadBot.modelSelection?.instanceId ?? "", freeBestFailures);
-    const current = threadBot.modelSelection?.instanceId ?? "";
-    const described = await registry.describe();
-    const alt = pickAlternate(
-      current,
-      threadBot.ownerId,
-      described.map((d) => ({ instanceId: d.instanceId, state: d.snapshot.state })),
-    );
-    // Consume the one-shot only when an alternate actually exists — an
-    // owner adding a provider seconds later should not hit the cooldown.
-    markAttempted(threadId);
-    if (!alt) return;
-    const lastUser = [...store.messagesFor(threadId)].reverse().find((m) => m.role === "user" && m.kind === "text");
-    if (!lastUser?.text) return;
-    store.patchBot(threadBot.id, {
-      modelSelection: { ...threadBot.modelSelection, instanceId: alt, model: "" },
-    });
-    store.appendMessage(
-      threadId,
-      {
-        role: "bot",
-        kind: "activity",
-        tool: {
-          name: `${current.split(":")[0]} hit its limit — switching this bot to ${alt.split(":")[0]} and re-asking`,
-          ok: true,
+/** Quota retries preserve the preferred model and reuse the original user
+ * bubble. Only a failed turn with no output/actions can opt into a single retry. */
+const providerFallback = new ProviderFallbackRunner({
+  snapshot: (botId) => {
+    const bot = store.bot(botId);
+    if (!bot?.ownerId) return null;
+    const latestUser = [...store.activePath(bot.threadId)].reverse().find(message => message.role === "user" && message.kind === "text");
+    return { ownerId: bot.ownerId, threadId: bot.threadId, instanceId: bot.modelSelection.instanceId,
+      model: bot.modelSelection.model, latestUserId: latestUser?.id ?? "" };
+  },
+  consent: (ownerId) => {
+    try { return getProviderFallbackConsent(getDb(), ownerId); }
+    catch { return { enabled: false, generation: -1 }; }
+  },
+  describe: async () => (await registry.describe()).map(instance => ({ instanceId: instance.instanceId, state: instance.snapshot.state })),
+  retry: async (candidate) => {
+    const bot = store.bot(candidate.botId);
+    if (!candidate.guard() || !bot || bot.busy || userInstanceOwner(candidate.targetInstanceId) !== bot.ownerId) return;
+    const originalMessage = [...store.activePath(candidate.threadId)].reverse().find(message => message.role === "user" && message.kind === "text");
+    if (!originalMessage || originalMessage.text !== candidate.text) return;
+    await new Promise<void>((resolve) => {
+      void startTurn(candidate.botId, candidate.text, {
+        threadId: candidate.threadId, connectorContinuation: true, userMessage: originalMessage,
+        fallbackSelection: { instanceId: candidate.targetInstanceId, model: "" },
+        peerGuard: candidate.guard,
+        onDispatchError: () => resolve(),
+        onDispatched: () => {
+          store.appendMessage(candidate.threadId, { role: "bot", kind: "activity", tool: {
+            name: `Your enabled automatic retry used ${candidate.targetInstanceId.split(":")[0]}. Your preferred provider is unchanged.`, ok: true,
+          } }, { bestEffort: true });
+          resolve();
         },
-      },
-      { bestEffort: true },
-    );
-    await startTurn(threadBot.id, lastUser.text, { threadId, connectorContinuation: true }).catch(() => {});
-  } catch {
-    // fallback must never become a second failure surface
-  }
-}
+      }).catch(() => resolve());
+    });
+  },
+});
 // First-run seed: desktop installs open with one friendly bot. A hosted
 // deployment with open signups seeds NOTHING — its first user signs up,
 // connects their own storage (decision 14), and hires their team from
@@ -1103,6 +1089,7 @@ const STALE_SETTLE_GRACE_MS = 60_000;
  * resolve, queued sends drain, group ownership returns, and the bot idles
  * after a short grace that keeps the dying process as the turn's owner. */
 function settleLostTurn(turn: WatchedTurn, note: string): void {
+  providerFallback.cancel(turn.botId);
   peerCapabilities.revokeThread(turn.threadId, turn.turnId);
   connectorCapabilities.revokeThread(turn.threadId, turn.turnId);
   cancelConnectorResumes(undefined, turn.threadId);
@@ -1160,7 +1147,7 @@ const watchdog = new TurnWatchdog({
   onStall: (turn) => {
     const instance = (() => {
       const bot = store.bot(turn.botId);
-      return bot ? registry.get(bot.modelSelection.instanceId) : null;
+      return bot ? registry.get(turnProvenance.get(turn.threadId)?.instanceId ?? bot.modelSelection.instanceId) : null;
     })();
     void instance?.adapter.interruptTurn(turn.threadId).catch(() => {});
     const minutes = Math.round(TURN_STALL_MS / 60_000);
@@ -1181,7 +1168,7 @@ const reaper = new LivenessReaper({
   snapshotTurns: () => watchdog.snapshot(),
   onLost: (turn, death) => {
     const bot = store.bot(turn.botId);
-    const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
+    const instance = bot ? registry.get(turnProvenance.get(turn.threadId)?.instanceId ?? bot.modelSelection.instanceId) : null;
     void instance?.adapter.interruptTurn(turn.threadId).catch(() => {});
     watchdog.settle(turn.threadId);
     settleLostTurn(turn, `${describeProcessDeath(death)} mid-turn — the turn was stopped`);
@@ -1316,6 +1303,9 @@ void containerComputerStatus()
   .catch(() => null);
 
 bus.subscribe((event: RuntimeEvent) => {
+  // A late completion from the failed provider must not idle a temporary
+  // retry, erase its active provider, or release its computer lease.
+  if (!matchesActiveProvider(event, turnProvenance.get(event.threadId))) return;
   const heldKey = threadDesktopTarget.get(event.threadId);
   if (heldKey !== undefined) {
     localVmLeases.forTarget(heldKey).touch(event.threadId);
@@ -1332,6 +1322,13 @@ bus.subscribe((event: RuntimeEvent) => {
   const group = bot ? undefined : store.groupByThread(event.threadId);
   if (!bot && !group) return;
   const speaker = group ? groupSpeakers.get(event.threadId) : undefined;
+  if (bot) {
+    if (event.type === "turn.started" && event.providerInstanceId && event.turnId) {
+      providerFallback.bindTurn(bot.id, event.threadId, event.providerInstanceId, event.turnId);
+    } else if ((event.type === "content.delta" && !!event.delta) || event.type === "item.started" || event.type === "item.updated" || event.type === "item.completed" || event.type === "request.opened") {
+      providerFallback.markProgress(bot.id, event.threadId, event);
+    }
+  }
 
   const pushMessage = (m: Omit<Message, "id" | "at">) => {
     // The fold runs inside the turn — a persistence failure here must keep
@@ -1447,7 +1444,7 @@ bus.subscribe((event: RuntimeEvent) => {
       if (settled && asker && event.requestId) {
         const instance = event.providerInstanceId
           ? registry.get(event.providerInstanceId)
-          : registry.get(asker.modelSelection.instanceId);
+          : registry.get(turnProvenance.get(event.threadId)?.instanceId ?? asker.modelSelection.instanceId);
         const requestId = event.requestId;
         const { tool, summary } = event;
         // The chip is written only AFTER the provider takes the answer.
@@ -1567,10 +1564,12 @@ bus.subscribe((event: RuntimeEvent) => {
       // dispatch moves it to working; turn.completed (which follows a setup
       // failure) is told to leave "dead" alone.
       if (event.setup && bot) store.setActivity(bot.id, "dead");
-      // Rate-limit deaths are recoverable when the owner has another
-      // provider configured — hop once and re-ask instead of leaving the
-      // user staring at activity chips with no words.
-      void attemptProviderFallback(event.threadId, event.message);
+      if (fallbackEligible(event.threadId, event.message)) {
+        recordRateLimitHit(providerFamilyOf(event.providerInstanceId ?? ""));
+        recordFreeBestFailure(event.providerInstanceId ?? "", freeBestFailures);
+        if (bot) providerFallback.error(bot.id, event.threadId, event.message, event);
+        pushMessage({ role: "bot", kind: "text", text: "This provider reached a limit. Your task is preserved. You can choose another provider and send again. Automatic retry only runs if you enabled it and this attempt made no progress." });
+      }
       break;
     case "thread.token-usage.updated":
       // running totals for the turn in flight; folded into the task's
@@ -1663,6 +1662,9 @@ bus.subscribe((event: RuntimeEvent) => {
       // channel that only ever shows requests is half a record. Mirror the
       // reply on success; mirror a failed/stopped terminal chip otherwise.
       finalizeDelegationWatch(event.threadId, event.ok, reply);
+      if (bot) void providerFallback.complete(bot.id, event.threadId, event.ok, event).catch(() => {
+        // The original failure and user input remain visible; no retry loop.
+      });
       // group busy/unread settle in the group turn engine, which knows
       // whether more member turns are queued behind this one
       break;
@@ -1994,9 +1996,12 @@ async function startTurn(
     onDispatched?: () => void;
     /** Validated peer provenance must survive provider/setup awaits. */
     peerGuard?: () => boolean;
+    /** Internal, consent-guarded one-time retry; never changes saved selection. */
+    fallbackSelection?: { instanceId: string; model: string };
   },
 ) {
-  const bot = store.bot(botId);
+  const savedBot = store.bot(botId);
+  const bot: typeof savedBot = savedBot && opts?.fallbackSelection ? { ...savedBot, modelSelection: opts.fallbackSelection } : savedBot;
   if (!bot) throw Object.assign(new Error("no such bot"), { status: 404 });
   if (opts?.peerGuard && !opts.peerGuard()) throw Object.assign(new Error("peer exchange is no longer authorized"), { status: 403 });
   if (bot.busy) throw Object.assign(new Error("the bot is already working — interrupt it first"), { status: 409 });
@@ -2031,6 +2036,7 @@ async function startTurn(
   // The catch below resets to idle if dispatch fails; the watchdog, reaper,
   // and turn.completed fold all settle from "working" as usual. setActivity
   // is idempotent, so the later call stays as documentation, not state.
+  if (!opts?.fallbackSelection) providerFallback.cancel(bot.id);
   stopCleanups.begin(bot.id, peerOwnerOf(bot));
   store.setActivity(bot.id, "working");
   let dispatchLease: PeerLease | undefined;
@@ -2138,7 +2144,7 @@ async function startTurn(
   // which computer backend gets mounted (below), not which model runs.
   const instance = opts?.runOn === "cloud"
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
-    : await resolveInstanceForBot(bot);
+    : opts?.fallbackSelection ? registry.get(opts.fallbackSelection.instanceId) : await resolveInstanceForBot(bot);
   requireDispatch();
   if (!instance) {
     failVisible(Object.assign(
@@ -2585,6 +2591,10 @@ async function startTurn(
       if (connectorLease && !connectorLeaseValid(connectorLease)) throw new Error("connected apps are no longer authorized");
       const peerToken = peerCapabilities.activate(lease, instanceId, canUsePeers);
       if (peerToken) integrations.agents = agentsIntegration(lease, peerToken);
+      if (!opts?.connectorContinuation && !opts?.automationSource && !opts?.commsDepth && !opts?.unattended && bot.ownerId && userInstanceOwner(instanceId) === bot.ownerId && threadId === bot.threadId) {
+        providerFallback.begin({ botId: bot.id, threadId, ownerId: bot.ownerId,
+          instanceId, model: bot.modelSelection.model, latestUserId: userMessage.id, text });
+      }
       driverInvoked = true;
       const dispatched = await instance.adapter.sendTurn({
         threadId,
@@ -2647,6 +2657,7 @@ async function startTurn(
         integrations,
         cwd,
       });
+      if (dispatched.turnId && !opts?.fallbackSelection) providerFallback.bindTurn(bot.id, threadId, instanceId, dispatched.turnId);
       peerCapabilities.bindTurn(lease, instanceId, dispatched.turnId);
       if (connectorLease) connectorCapabilities.bindTurn(connectorLease, instanceId, dispatched.turnId);
       opts?.onDispatched?.();
@@ -2666,7 +2677,10 @@ async function startTurn(
       peerCapabilities.revoke(lease);
       if (connectorLease) connectorCapabilities.revoke(connectorLease);
       // A late setup rejection belongs to this lease, never a replacement.
-      if (currentLease && currentLease !== lease) return;
+      if (currentLease && currentLease !== lease) {
+        opts?.onDispatchError?.("dispatch was superseded", driverInvoked);
+        return;
+      }
       const failedKey = threadDesktopTarget.get(threadId);
       if (failedKey !== undefined) {
         localVmLeases.forTarget(failedKey).release(threadId);
@@ -2718,6 +2732,7 @@ routines = new RoutineManager({
   startTurn: (botId, threadId, prompt, runOn, triggerSource, onDispatchError) =>
     startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError }),
   interruptTurn: async (botId, threadId, runOn) => {
+    providerFallback.cancel(botId);
     peerCapabilities.revokeThread(threadId);
     connectorCapabilities.revokeThread(threadId);
     cancelConnectorResumes(undefined, threadId);
@@ -2726,7 +2741,7 @@ routines = new RoutineManager({
     const instance = runOn === "cloud"
       ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
       : bot
-        ? registry.get(bot.modelSelection.instanceId)
+        ? registry.get(turnProvenance.get(threadId)?.instanceId ?? bot.modelSelection.instanceId)
         : null;
     await instance?.adapter.interruptTurn(threadId);
   },
@@ -3020,6 +3035,7 @@ async function runGroupMemberTurn(
   const bot = store.bot(botId);
   if (!group || !bot || (connectorGuard && !connectorGuard())) return false;
   if (SELF_HOSTED && (!group.memberIds.includes(botId) || !roomMembersAvailable(group))) return false;
+  providerFallback.cancel(botId);
   spoken.add(botId);
   const instance = registry.get(bot.modelSelection.instanceId);
   const userName = cfg.profile?.name?.trim() || "User";
@@ -4744,19 +4760,26 @@ let requestUserEmail = "";
       requestUserEmail = sessAcct?.user?.email ?? "";
     }
 
-    // Calendar grants always resolve a real account and session, including
-    // loopback installs. No installation connector credentials are reused.
-    if (await handleCalendarRoute(req, res, method, path, {
-      db: getDb,
-      session: async () => {
-        const current = await auth.api.getSession({ headers: toWebRequest(req).headers }).catch(() => null);
-        return current?.user?.id && current.session?.id
-          ? { userId: current.user.id, sessionId: current.session.id } : null;
-      },
-      origin: requestOrigin(req),
-      clientId: process.env.GOOGLE_CLIENT_ID?.trim() ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "",
-    })) return;
+    // Re-check live sessions after async work without rebuilding a Request
+    // around a body stream that the route has already consumed.
+    if (path === "/api/provider-fallback" || path.startsWith("/api/calendar/")) {
+      const accountHeaders = new Headers();
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (value !== undefined) accountHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
+      }
+      const session = async () => {
+        const current = await auth.api.getSession({ headers: accountHeaders }).catch(() => null);
+        return current?.user?.id && current.session?.id ? { userId: current.user.id, sessionId: current.session.id } : null;
+      };
+      if (await handleProviderFallbackRoute(req, res, method, path, { db: getDb, origin: requestOrigin(req), session })) return;
+      // Calendar grants resolve a real account on loopback too, independently
+      // of installation connector credentials.
+      if (await handleCalendarRoute(req, res, method, path, {
+        db: getDb, session, origin: requestOrigin(req),
+        clientId: process.env.GOOGLE_CLIENT_ID?.trim() ?? "",
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "",
+      })) return;
+    }
 
     // ── workspace-backup family (server/workspace-backup-routes.ts) ────
     // Capability advertisement, the hosted installation wall, account-linked
@@ -6870,7 +6893,7 @@ let requestUserEmail = "";
       stopCleanups.invalidate(bot.id);
       // a running turn dies with its bot
       const runningThread = stopPeerDispatch(bot.id).threadId ?? bot.threadId;
-      await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(runningThread).catch(() => {});
+      await registry.get(turnProvenance.get(runningThread)?.instanceId ?? bot.modelSelection.instanceId)?.adapter.interruptTurn(runningThread).catch(() => {});
       stopScreenPoller(bot.id);
       routines!.disableForBot(bot.id);
       // a deleted bot leaves the social network too: profile, edges, requests
@@ -7199,7 +7222,7 @@ let requestUserEmail = "";
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
       if (behavior === "allow" || behavior === "deny") recordHumanAnswer(bot.id, bot.threadId, String(body.requestId), behavior);
-      const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message);
+      const outcome = await answerRequest(bot.threadId, turnProvenance.get(bot.threadId)?.instanceId ?? bot.modelSelection.instanceId, String(body.requestId), behavior, body.message);
       return json(res, 200, { ok: true, outcome });
     }
     // Answer by THREAD, so a request raised inside a room can be answered
@@ -7219,7 +7242,7 @@ let requestUserEmail = "";
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
       if (behavior === "allow" || behavior === "deny") recordHumanAnswer(owner.id, threadId, String(body.requestId), behavior);
-      const outcome = await answerRequest(threadId, owner.modelSelection.instanceId, String(body.requestId), behavior, body.message);
+      const outcome = await answerRequest(threadId, turnProvenance.get(threadId)?.instanceId ?? owner.modelSelection.instanceId, String(body.requestId), behavior, body.message);
       return json(res, 200, { ok: true, outcome });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/stop-cleanup$/);
@@ -7263,7 +7286,7 @@ let requestUserEmail = "";
       const cleanupReceipt = !stoppedPeers.queuedCanceled
         ? stopCleanups.issue(bot.id, ownerId, stoppedPeers.failedQueues) : undefined;
       const runningThread = stoppedPeers.threadId ?? bot.threadId;
-      const instance = registry.get(bot.modelSelection.instanceId);
+      const instance = registry.get(turnProvenance.get(runningThread)?.instanceId ?? bot.modelSelection.instanceId);
       const busyGroup = store.groups.find((g) => g.busyBotId === bot.id);
       let interruptError: unknown;
       try {

@@ -8,8 +8,31 @@ BYOK, free beta. Public expansion requires passing core flows and five testers
 completing daily planning on three separate days each. This is a decision record,
 not a new implementation or verification claim.
 
-Updated 19 September 2026 (Loop135). This snapshot takes precedence over historical roadmap
+Updated 19 September 2026 (Loop136). This snapshot takes precedence over historical roadmap
 status; the latest owner request takes precedence over this file.
+
+**Loop136:** Automatic provider retry now requires persisted account opt-in, default off.
+A retry requires a failed quota turn with no progress, current source-turn
+identity, unchanged owner/task/message/provider and unchanged consent generation.
+Stop, new work and revoke/re-enable invalidate pending retries. Only owned
+providers participate. Missing explicit choices no longer silently select
+another provider. A temporary alternate preserves the saved model and original
+message identity; Stop and approvals target the active provider. Late predecessor
+events cannot settle the active alternate. The existing Providers panel reports
+unknown/loading/save failures honestly and explains possible paid-credit use.
+
+Full unit **309 files / 4556 passed / 8 skipped / 0 failed** (483.77s),
++3 files/+51 passing tests over Loop135; fresh browser **39/39** (4.1m),
+packaged-server **14/14**, final focused **6 files / 70 passed**. Build,
+project/server/e2e typechecks and full lint passed. No native-device or
+real-provider acceptance is claimed by these isolated fixtures.
+
+Next owner hero: foreground Watch calling. Source audit confirms Watch currently
+has dictation/TTS, no ring/accept/end call protocol or durable offline queue.
+The acceptance matrix records the implementation boundary and hardware gates.
+Included allowance reservations/accounting and numerical cost approval remain
+open; no pool or spending was enabled. Production rollout still needs actual
+served-artifact verification and authenticated Dokploy build/rollout evidence.
 
 **Loop135:** selected-calendar planning now gathers one to three commitments
 and durations, re-reads the complete day, computes deterministic available blocks

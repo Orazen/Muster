@@ -13,6 +13,9 @@
 //                   | die-midturn (engine exits code 9 mid-prompt while a
 //                     grandchild holds stdio open — the pipe-held crash the
 //                     liveness reaper exists for)
+//                   | quota-error (fail session/prompt with an explicit HTTP 429 quota error)
+//                   | quota-after-progress (emit a tool call, then the quota error)
+//                   | fallback-healthy (happy, except explicit FAKE_FALLBACK_HANG prompt holds)
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
 //                   | ask-peer (spawn the injected "agents" MCP server from
@@ -319,7 +322,14 @@ function handle(msg: any) {
     }
     case "session/prompt": {
       peerReceipt("prompt.json", { pid: process.pid, received: true });
-      if (mode === "hang") {
+      if (mode === "quota-error" || mode === "quota-after-progress") {
+        if (mode === "quota-after-progress") {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "quota-progress", title: "Owned work already started" } } });
+        }
+        out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "HTTP429 quota exceeded" } });
+        return;
+      }
+      if (mode === "hang" || (mode === "fallback-healthy" && String(msg.params?.prompt?.[0]?.text ?? "").includes("FAKE_FALLBACK_HANG"))) {
         // never resolve the prompt — lets tests exercise interrupt
         setInterval(() => {}, 1_000);
         return;
