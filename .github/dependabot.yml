@@ -1,0 +1,31 @@
+# Dependabot — weekly grouped updates (configured 2026-09-19 after the
+# security audit enabled Dependabot alerts; this file adds the update PRs).
+#
+# Groups are deliberate: one PR per ecosystem per week keeps the agent
+# queue readable and each PR is still a scoped, revertable slice.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-bump:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"

@@ -1,21 +1,33 @@
-# Security Policy
+# Security policy
+
+## Supported versions
+
+Muster ships as a rolling product: the current release tag (see
+[Releases](https://github.com/Orazen/Muster/releases)) plus `main`.
+Older releases receive no patches; update via the in-app updater or a
+fresh download.
 
 ## Reporting a vulnerability
 
-Please **do not open a public issue** for security problems. Email **ramagiritharun@gmail.com** with
-the details (or use GitHub's private vulnerability reporting on this repo if enabled). You'll get a
-response as soon as possible, normally within a few days.
+**Do not open a public issue for a security problem.**
 
-## Scope notes for researchers
+Use GitHub's **private vulnerability reporting** on this repository
+(Security → Report a vulnerability). Reports reach the maintainers
+directly and stay confidential until a fix ships.
 
-- The harness server binds **127.0.0.1 only** and has no authentication by design — it trusts the
-  local user. Anything that makes it reachable from off-machine, or lets one local *unprivileged
-  other user* drive it, is a vulnerability.
-- API keys live in `~/.muster/config.json` and are write-only through the API (`configured`
-  booleans out, never values). Any path that echoes a stored secret back — API response, SSE event,
-  log line, argv visible in `ps` — is a vulnerability.
-- Agents run real CLIs (`claude`, `codex`) with the user's own privileges, and the permission broker
-  is the consent layer for risky actions. Bypasses of the broker (approving without a user decision,
-  spoofing the broker socket) are vulnerabilities.
-- Spawning must never route user-influenced strings through a shell. Report any `shell: true` /
-  `cmd.exe` string-building you find.
+Include: affected component (desktop app, local server, web UI, CLI,
+companions), reproduction steps, and any evidence you can share.
+Please do not test against installations you do not own.
+
+## Scope notes
+
+- Muster is local-first: the server and data live on the operator's
+  machine. Remote access is explicit and pairing-based.
+- Claims about security properties are made only from verified bytes
+  (reproducible builds, checksums); release artifacts carry SHA256SUMS.
+- This project is licensed under BSL 1.1 — see LICENSE.
+
+## Disclosure
+
+We coordinate disclosure: acknowledge, fix, publish, then credit the
+reporter (unless anonymity is requested).
