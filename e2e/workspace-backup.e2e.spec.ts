@@ -253,23 +253,28 @@ async function signIn(page: Page, fixture: OwnedFixture) {
   // makes the wizard eligible on a no-bot account, so settle only when no
   // first-run surface remains.
   const wizard = page.getByRole("region", { name: "Set up Muster", exact: true });
-  for (let round = 0; round < 3; round += 1) {
+  const chat = page.getByRole("region", { name: "Set up Muster with your assistant", exact: true });
+  for (let round = 0; round < 4; round += 1) {
+    // The first-run decision is async (SSE connect, then a server gate round
+    // trip), so a single count races the mount: on a cold fixture the surface
+    // can appear AFTER the check and the closing assertion fails. Wait for a
+    // surface inside each round; no surface within the window means the app
+    // has settled with none.
+    const surfaced = await wizard.or(chat).first()
+      .waitFor({ state: "visible", timeout: 2_500 })
+      .then(() => true, () => false);
+    if (!surfaced) break;
     if (await wizard.count()) {
       await page.keyboard.press("Escape");
       await expect(wizard).toHaveCount(0);
       break;
     }
-    const chat = page.getByRole("region", { name: "Set up Muster with your assistant", exact: true });
-    if (await chat.count()) {
-      await page.evaluate(() => {
-        localStorage.setItem("muster.onboarding-chat.done", "1");
-        localStorage.setItem("muster.team-templates.dismissed", "1");
-      });
-      await page.reload();
-      await expect(page).toHaveURL(`${fixture.url}/app`);
-      continue;
-    }
-    break;
+    await page.evaluate(() => {
+      localStorage.setItem("muster.onboarding-chat.done", "1");
+      localStorage.setItem("muster.team-templates.dismissed", "1");
+    });
+    await page.reload();
+    await expect(page).toHaveURL(`${fixture.url}/app`);
   }
   await expect(wizard).toHaveCount(0);
 }

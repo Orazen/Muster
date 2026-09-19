@@ -9,7 +9,7 @@ import "./onboarding-chat.css";
 
 import { FlowerCharacter } from "@/components/FlowerCharacter";
 import { api, useStore } from "@/state/store";
-import { beatAt, beatCount, planCrew, type Turn } from "@/lib/onboarding-chat";
+import { beatAt, beatCount, onboardingChatDone, planCrew, type Turn } from "@/lib/onboarding-chat";
 
 const DONE_KEY = "muster.onboarding-chat.done";
 
@@ -20,14 +20,22 @@ export function OnboardingChat() {
   const [picked, setPicked] = useState<{ role?: string; pains: string[]; crew?: string }>({ pains: [] });
   const [busy, setBusy] = useState(false);
   const [hired, setHired] = useState(false);
-  const [dismissed] = useState(false);
+  // Persisted completion is the fast path (the lib's gate helper): a chat
+  // finished here or on an earlier visit never re-greets — bots deleted
+  // later or a reload mid-chat must not resurrect the interview. The flag
+  // is the one the completion paths below write; it was previously only
+  // ever written, so an empty roster greeted again on every load.
+  const [dismissed, setDismissed] = useState(() => onboardingChatDone());
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // The conversational first-run: any signup whose roster is empty greets in
   // chat. On hosted fresh installs that is every signup (decision 13 + 14);
   // on desktop the seed bot keeps the classic wizard as the first-run — the
   // stability contract holds, and this condition stays honest about it.
-  const shown = !state.bots.length && !dismissed && !hired;
+  // The connect guard is the same late-decision rule the classic wizard
+  // follows: before SSE delivers the roster every account reads as empty,
+  // so deciding here would flash the chat on every load of every account.
+  const shown = state.connected && !state.bots.length && !dismissed && !hired;
 
   const beat = beatAt(step);
   const userName = state.config?.profile?.name?.split(" ")[0] ?? "there";
@@ -90,6 +98,7 @@ export function OnboardingChat() {
           }
         }
         try { window.localStorage.setItem(DONE_KEY, "1"); } catch { /* private mode */ }
+        setDismissed(true);
         setHired(true);
       } catch {
         setError("Hiring failed — try again.");
@@ -172,6 +181,7 @@ export function OnboardingChat() {
                     className="continue-pill"
                     onClick={() => {
                       try { window.localStorage.setItem(DONE_KEY, "1"); } catch { /* private mode */ }
+                      setDismissed(true);
                       setHired(true);
                     }}
                   >
