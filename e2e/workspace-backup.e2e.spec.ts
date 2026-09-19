@@ -249,20 +249,29 @@ async function signIn(page: Page, fixture: OwnedFixture) {
   expect(sessionSchema.parse(await session.json()).user.email).toBe(fixture.email);
   // Desktop first-run mounts the classic wizard; a hosted first-run mounts
   // the conversational onboarding instead. These specs exercise an EXISTING
-  // user, so dismiss whichever mounted (Escape for the wizard; the chat and
-  // template overlays carry localStorage done-flags and a remount).
+  // user, so dismiss whichever mounted — and loop: marking the chat done
+  // makes the wizard eligible on a no-bot account, so settle only when no
+  // first-run surface remains.
   const wizard = page.getByRole("region", { name: "Set up Muster", exact: true });
-  if (await wizard.count()) {
-    await page.keyboard.press("Escape");
-    await expect(wizard).toHaveCount(0);
-  } else {
-    await page.evaluate(() => {
-      localStorage.setItem("muster.onboarding-chat.done", "1");
-      localStorage.setItem("muster.team-templates.dismissed", "1");
-    });
-    await page.reload();
-    await expect(page).toHaveURL(`${fixture.url}/app`);
+  for (let round = 0; round < 3; round += 1) {
+    if (await wizard.count()) {
+      await page.keyboard.press("Escape");
+      await expect(wizard).toHaveCount(0);
+      break;
+    }
+    const chat = page.getByRole("region", { name: "Set up Muster with your assistant", exact: true });
+    if (await chat.count()) {
+      await page.evaluate(() => {
+        localStorage.setItem("muster.onboarding-chat.done", "1");
+        localStorage.setItem("muster.team-templates.dismissed", "1");
+      });
+      await page.reload();
+      await expect(page).toHaveURL(`${fixture.url}/app`);
+      continue;
+    }
+    break;
   }
+  await expect(wizard).toHaveCount(0);
 }
 
 async function openBackup(page: Page) {

@@ -93,6 +93,15 @@ export function beatCount(): number {
   return ONBOARDING_CHAT_BEATS.length;
 }
 
+export const ONBOARDING_CHAT_DONE_KEY = "muster.onboarding-chat.done";
+
+/** True when the conversational first-run has finished (or been dismissed).
+ * The classic wizard's auto-open waits for this so both surfaces never fight
+ * over the first-run moment or the focus. */
+export function onboardingChatDone(): boolean {
+  try { return window.localStorage.getItem(ONBOARDING_CHAT_DONE_KEY) === "1"; } catch { return false; }
+}
+
 /** A chat turn for the transcript: who said it and what. */
 export type Turn =
   | { who: "assistant"; text: string }
@@ -127,6 +136,8 @@ const CREWS = {
  * pains sharpen the crew's descriptions so the hire feels chosen, not
  * generic. `empty` and unknown ids return null — the caller creates nothing. */
 export function planCrew(crewId: string, pains: string[]): { key: string; members: CrewMember[] } | null {
+  // SAFETY: the id originates from the crew beat's own option list; unknown
+  // ids (and the deliberate "empty" path) fall through to null.
   const members: CrewMember[] | undefined = CREWS[crewId as keyof typeof CREWS];
   if (!members) return null;
   const painLabels = (ONBOARDING_CHAT_BEATS.find((b) => b.id === "pains")?.options ?? [])
