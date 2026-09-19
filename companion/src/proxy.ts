@@ -14,7 +14,7 @@
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 
 import { bearerToken, type DeviceAccess } from "./devices.ts";
-import { denyReason, isCloudDesktopJoin, isForegroundCallRoute } from "./routes.ts";
+import { denyReason, isCloudDesktopJoin, isForegroundCallRoute, isCalendarPreparationRoute } from "./routes.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
 /** Decoded JSON, mirroring the harness's schema.ts contract. */
@@ -121,6 +121,7 @@ type ForwardedHeaders = {
   "content-type"?: string;
   "last-event-id"?: string;
   "x-muster-call-token"?: string;
+  "x-muster-calendar-token"?: string;
 };
 
 const forwardHeaders = (req: IncomingMessage): ForwardedHeaders => {
@@ -134,6 +135,10 @@ const forwardHeaders = (req: IncomingMessage): ForwardedHeaders => {
   if (isForegroundCallRoute(req.method ?? "GET", (req.url ?? "/").split("?")[0])) {
     const callToken = req.headers["x-muster-call-token"];
     if (!Array.isArray(callToken) && callToken && /^[0-9a-f]{64}$/.test(callToken)) out["x-muster-call-token"] = callToken;
+  }
+  if (isCalendarPreparationRoute(req.method ?? "GET", (req.url ?? "/").split("?")[0])) {
+    const calendarToken = req.headers["x-muster-calendar-token"];
+    if (!Array.isArray(calendarToken) && calendarToken && /^[0-9a-f]{64}$/.test(calendarToken)) out["x-muster-calendar-token"] = calendarToken;
   }
   return out;
 };

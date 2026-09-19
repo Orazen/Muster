@@ -250,6 +250,18 @@ public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport, A
         try await send(try callRequest("POST", botId: botId, callId: callId, action: "/end", capability: capability, body: [:]), as: CallEnvelope.self).call
     }
 
+    /// Prepare an unsent draft from the calendar bound to the supplied capability.
+    public func prepareCallCalendarPlan(botId: String, callId: String, capability: String,
+                                        calendarCapability: String, input: CallCalendarPlanRequest) async throws -> CallCalendarPlanDraft {
+        guard calendarCapability.utf8.count == 64,
+              calendarCapability.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { throw APIError.badURL }
+        var request = try callRequest("POST", botId: botId, callId: callId, action: "/prepare-calendar", capability: capability,
+            body: ["date": input.date, "timeZone": input.timeZone, "workStart": input.workStart, "workEnd": input.workEnd,
+                   "commitments": input.commitments.map { ["title": $0.title, "minutes": $0.minutes] as [String: Any] }])
+        request.setValue(calendarCapability, forHTTPHeaderField: "X-Muster-Calendar-Token")
+        return try await send(request, as: CallCalendarPlanDraft.self)
+    }
+
     // MARK: - Doing
 
     private func seedRequest(_ method: String, botId: String, cardId: String, threadId: String,

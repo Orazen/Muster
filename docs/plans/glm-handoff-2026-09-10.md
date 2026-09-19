@@ -3480,3 +3480,28 @@ Updated beta matrix to reflect verified Watch/Desktop/iPhone and fallback work.
 Other agent owns release workflow7161903; preserved/excluded from this slice.
 Existing automation remains paused; real-device/Drive/allowance/tester-day and
 production rollout gates remain open. Previous Watch commitac05ae3 CIpassed.
+
+### Loop142 — call-bound Calendar draft service and native transport
+
+Added a narrowly allowed prepare-calendar operation requiring both live call
+and selected-calendar capabilities. The host rechecks call/account/thread/turn
+and Calendar permission around retrieval, requires complete matching evidence,
+and rejects oversized drafts without truncation. Hosted account mismatch is
+refused; local ownership never selects an arbitrary account. Preparation returns
+unsent text only, with no model dispatch or lease renewal. Companion full-access
+allowlist and Swift typed transport are wired. Enrollment/review UI remains next;
+Watch's visible planning shortcut is still prompt-only.
+
+Final gates: **315 files /4702 passed /8 skipped /0 failed**,513.37s (+1file,
++44 passing versus Loop141). Focused service19/19, routes28/28, final companion
+154/154; Swift380/380 (+4), focused client6/6; both typechecks and full lint passed.
+Companion, corrected WatchOwnedAcceptance, Widget simulator builds all passed.
+Initial missing Watch scheme invocation and final dependency cleanup are recorded
+in docs/audits/call-calendar-preparation-2026-09-19.md. No native UI interaction
+rerun: this slice changes transport/service only. Independent review found no
+blocking issue; no security or production release claim.
+
+Next: explicit same-host Calendar enrollment and Watch review controls. Cloud
+and local Calendar databases remain separate: no silent cross-host grant lookup.
+Real Google/hardware/Drive/allowance/tester-day gates and production rollout remain
+open. Automation remains paused; unrelated files and release-agent work preserved.

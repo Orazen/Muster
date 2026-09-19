@@ -1,5 +1,8 @@
-import { ForegroundCallRegistry, type CallDispatch } from "./foreground-call.ts";
+import { ForegroundCallRegistry, ForegroundCallError, type CallDispatch } from "./foreground-call.ts";
 import { ForegroundCallDispatchTracker } from "./foreground-call-dispatch.ts";
+import { prepareCallCalendarPlan } from "./call-calendar-plan.ts";
+import { GoogleCalendarReader } from "./calendar-day.ts";
+import { GoogleCalendarOAuthProvider } from "./calendar-oauth.ts";
 import { handleForegroundCallRoute } from "./foreground-call-routes.ts";
 import { createBuildDiagnostics } from "./build-identity.ts";
 // Muster server — the harness host. Clients hold no transports
@@ -4908,6 +4911,16 @@ let requestUserEmail = "";
       const remote = req.socket.remoteAddress ?? "";
       if (await handleForegroundCallRoute(req, res, method, path, {
         registry: foregroundCalls, origin: requestOrigin(req),
+        prepareCalendar: async (input, assertCallCurrent) => {
+          const clientId = process.env.GOOGLE_CLIENT_ID?.trim() ?? "";
+          const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "";
+          if (!clientId || !clientSecret) throw new ForegroundCallError(503, "Google Calendar connection is not configured yet.");
+          return prepareCallCalendarPlan({
+            db: getDb(), accountId: requestUserId ?? undefined, assertCallCurrent,
+            provider: new GoogleCalendarOAuthProvider({ clientId, clientSecret, redirectUri: `${requestOrigin(req)}/api/calendar/google/callback` }),
+            reader: new GoogleCalendarReader({}),
+          }, input);
+        },
         allowOriginless: !SELF_HOSTED && (remote === "::1" || remote === "::ffff:127.0.0.1" || remote.startsWith("127.")),
         authorizeBot: async (botId) => {
           if (SELF_HOSTED) {

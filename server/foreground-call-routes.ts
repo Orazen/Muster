@@ -1,10 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { json, readBody } from "./http-helpers.ts";
+import { CallCalendarPlanError, callCalendarPlanInputSchema, type CallCalendarPlanInput, type CallCalendarPlanResult } from "./call-calendar-plan.ts";
 import { ForegroundCallError, type ForegroundCallRegistry } from "./foreground-call.ts";
 
 export interface ForegroundCallRouteContext {
   registry: ForegroundCallRegistry;
+  prepareCalendar?(input: CallCalendarPlanInput, assertCallCurrent: () => Promise<void>): Promise<CallCalendarPlanResult>;
   origin: string;
   /** Only the existing installation-loopback trust may admit originless calls. */
   allowOriginless: boolean;
@@ -21,7 +23,7 @@ export async function handleForegroundCallRoute(req: IncomingMessage, res: Serve
   const family = /^\/api\/bots\/([\w-]+)\/calls(?:\/|$)/.exec(path);
   if (!family) return false;
   res.setHeader("Cache-Control", "no-store");
-  const route = /^\/api\/bots\/([\w-]+)\/calls(?:\/([^/]+)(?:\/(accept|messages|end))?)?$/.exec(path);
+  const route = /^\/api\/bots\/([\w-]+)\/calls(?:\/([^/]+)(?:\/(accept|messages|end|prepare-calendar))?)?$/.exec(path);
   if (!route || (route[2] && !uuid.safeParse(route[2]).success)) {
     json(res, 404, { error: "Call endpoint not found." }); return true;
   }
@@ -42,6 +44,31 @@ export async function handleForegroundCallRoute(req: IncomingMessage, res: Serve
     let body;
     try { body = await readBody(req); }
     catch { json(res, 400, { error: "Invalid call request." }); return true; }
+    if (action === "prepare-calendar" && callId) {
+      const calendarToken = capability.safeParse(req.headers["x-muster-calendar-token"]);
+      const wireBody = z.record(z.string(), z.unknown()).safeParse(body);
+      const input = callCalendarPlanInputSchema.safeParse(wireBody.success
+        ? { ...wireBody.data, capability: calendarToken.success ? calendarToken.data : undefined } : null);
+      // The capability belongs in its dedicated header, never the body.
+      if (!calendarToken.success || !wireBody.success || !input.success || "capability" in wireBody.data) {
+        json(res, 400, { error: "Choose a valid Calendar permission and planning details." }); return true;
+      }
+      const initial = ctx.registry.peek(scope, callId);
+      const assertCallCurrent = async () => {
+        const latest = await ctx.authorizeBot(botId);
+        const call = ctx.registry.peek(scope, callId);
+        if (!latest || latest.ownerId !== authorized.ownerId || latest.threadId !== authorized.threadId || call.threadId !== latest.threadId
+          || call.state !== "connected" || call.turn?.requestId !== initial.turn?.requestId
+          || (call.turn && !["completed", "failed", "cancelled"].includes(call.turn.state))) {
+          throw new ForegroundCallError(409, "The call changed. Check its status before preparing a plan.");
+        }
+      };
+      await assertCallCurrent();
+      if (!ctx.prepareCalendar) { json(res, 503, { error: "Calendar planning is not available on this host." }); return true; }
+      const plan = await ctx.prepareCalendar(input.data, assertCallCurrent);
+      await assertCallCurrent();
+      json(res, 200, plan); return true;
+    }
     const parsed = (!callId ? ringBody : action === "messages" ? messageBody : emptyBody).safeParse(body);
     if (!parsed.success) { json(res, 400, { error: "Invalid call request." }); return true; }
     const current = await ctx.authorizeBot(botId);
@@ -61,7 +88,7 @@ export async function handleForegroundCallRoute(req: IncomingMessage, res: Serve
     if (action === "accept") json(res, 200, { call: ctx.registry.accept(scope, callId) });
     else json(res, 202, { call: ctx.registry.message(scope, callId, messageBody.parse(parsed.data)) });
   } catch (error) {
-    if (error instanceof ForegroundCallError) json(res, error.status, { error: error.message });
+    if (error instanceof ForegroundCallError || error instanceof CallCalendarPlanError) json(res, error.status, { error: error.message });
     else json(res, 500, { error: "The call could not be updated. Check its status before trying again." });
   }
   return true;

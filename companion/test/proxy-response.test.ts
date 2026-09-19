@@ -213,3 +213,53 @@ describe("foreground call capability forwarding", () => {
     expect(forwardedRequests).toBe(before);
   });
 });
+
+describe("calendar preparation capability boundary", () => {
+  const call = "/api/bots/b1/calls/00000000-0000-4000-8000-000000000001";
+  const capability = "d".repeat(64);
+  const callToken = "c".repeat(64);
+  async function send(path: string, headers: RequestInit['headers'], method = "POST") {
+    respond = res => { res.writeHead(200, { "content-type": "application/json" }); res.end("{}"); };
+    const response = await fetch(`http://127.0.0.1:${sidecarPort}${path}`, { method, headers });
+    await response.arrayBuffer();
+    return response.status;
+  }
+  const headers = () => ({ authorization: `Bearer ${TOKEN}`, "x-muster-calendar-token": capability, "x-muster-call-token": callToken, cookie: "session=private" });
+  it("forwards both narrow capabilities for preparation without account cookies or device credentials", async () => {
+    expect(await send(`${call}/prepare-calendar`, headers())).toBe(200);
+    expect(forwardedHeaders["x-muster-calendar-token"]).toBe(capability);
+    expect(forwardedHeaders["x-muster-call-token"]).toBe(callToken);
+    expect(forwardedHeaders.cookie).toBeUndefined();
+    expect(forwardedHeaders.authorization).toBeUndefined();
+  });
+  it.each([`${call}/messages`, `${call}/accept`, `${call}/end`, "/api/bots"])("strips calendar permission from other allowed route %s", async path => {
+    expect(await send(path, headers())).toBe(200);
+    expect(forwardedHeaders["x-muster-calendar-token"]).toBeUndefined();
+  });
+  it.each(["A".repeat(64), "a".repeat(63), "z".repeat(64), `${capability}, ${capability}`])("strips invalid calendar capability %s", async value => {
+    expect(await send(`${call}/prepare-calendar`, { ...headers(), "x-muster-calendar-token": value })).toBe(200);
+    expect(forwardedHeaders["x-muster-calendar-token"]).toBeUndefined();
+    expect(forwardedHeaders["x-muster-call-token"]).toBe(callToken);
+  });
+  it("strips duplicated header fields", async () => {
+    const duplicate = new Headers(headers());
+    duplicate.append("x-muster-calendar-token", capability);
+    expect(await send(`${call}/prepare-calendar`, duplicate)).toBe(200);
+    expect(forwardedHeaders["x-muster-calendar-token"]).toBeUndefined();
+  });
+  it("refuses approvals-only devices before forwarding any capability", async () => {
+    const before = forwardedRequests;
+    deviceAccess = "approvals";
+    try { expect(await send(`${call}/prepare-calendar`, headers())).toBe(403); }
+    finally { deviceAccess = "full"; }
+    expect(forwardedRequests).toBe(before);
+  });
+  it("refuses generic calendar APIs and lookalike preparation routes before forwarding", async () => {
+    const before = forwardedRequests;
+    for (const path of ["/api/calendar/plan", `${call}/prepare-calendar/extra`, `${call}/prepare%2dcalendar`, "/api/bots/b1/calls/not-uuid/prepare-calendar"]) {
+      expect(await send(path, headers())).toBe(404);
+    }
+    expect(await send(`${call}/prepare-calendar`, headers(), "GET")).toBe(404);
+    expect(forwardedRequests).toBe(before);
+  });
+});

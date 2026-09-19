@@ -117,3 +117,56 @@ it("denies unlisted methods, extended paths and nonempty accept/end bodies", asy
   expect((await request(`${base}/${callId}/accept`, "POST", { text: "unexpected" })).status).toBe(400);
   expect((await request(`${base}/${callId}/end`, "POST", { requestId: randomUUID() })).status).toBe(400);
 });
+
+const planningDetails = { date: "2040-01-02", timeZone: "UTC", workStart: "09:00", workEnd: "17:00", commitments: [{ title: "Report", minutes: 30 }] };
+async function prepareCalendar(body: JsonValue = planningDetails, calendarToken = "c".repeat(64), callToken = token) {
+  return fetch(`${origin}${base}/${callId}/prepare-calendar`, { method: "POST", headers: {
+    origin, "content-type": "application/json", "x-muster-call-token": callToken, "x-muster-calendar-token": calendarToken,
+  }, body: JSON.stringify(body) });
+}
+async function connectedCall() { await ring(); await request(`${base}/${callId}/accept`); }
+it("prepares a calendar draft without dispatch or lease renewal", async () => {
+  await connectedCall();
+  const before = ctx.registry.peek({ ownerId: owner, botId: "bot-a", token }, callId);
+  ctx.prepareCalendar = vi.fn(async (input, guard) => {
+    await guard(); expect(input).toEqual({ ...planningDetails, capability: "c".repeat(64) });
+    return { draft: "A reviewed proposal", date: input.date, timeZone: input.timeZone, calendarId: "selected" };
+  });
+  const response = await prepareCalendar(); expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({ draft: "A reviewed proposal", date: "2040-01-02", timeZone: "UTC", calendarId: "selected" });
+  expect(ctx.registry.peek({ ownerId: owner, botId: "bot-a", token }, callId)).toEqual(before);
+  expect(dispatch).not.toHaveBeenCalled();
+});
+it("requires both capabilities and rejects body-supplied authority", async () => {
+  await connectedCall(); ctx.prepareCalendar = vi.fn();
+  expect((await prepareCalendar(planningDetails, "")).status).toBe(400);
+  expect((await prepareCalendar(planningDetails, "c".repeat(64), "b".repeat(64))).status).toBe(404);
+  expect((await prepareCalendar({ ...planningDetails, capability: "d".repeat(64) })).status).toBe(400);
+  expect((await prepareCalendar({ ...planningDetails, calendarId: "foreign" })).status).toBe(400);
+  expect(ctx.prepareCalendar).not.toHaveBeenCalled(); expect(dispatch).not.toHaveBeenCalled();
+});
+it("requires an accepted idle call before reading any calendar", async () => {
+  await ring(); ctx.prepareCalendar = vi.fn();
+  expect((await prepareCalendar()).status).toBe(409);
+  await request(`${base}/${callId}/accept`);
+  await request(`${base}/${callId}/messages`, "POST", { requestId: randomUUID(), text: "Work" });
+  expect((await prepareCalendar()).status).toBe(409);
+  expect(ctx.prepareCalendar).not.toHaveBeenCalled();
+});
+it.each(["end", "thread", "owner", "new-message"])("discards prepared calendar data after %s changes during retrieval", async change => {
+  await connectedCall();
+  ctx.prepareCalendar = vi.fn(async (input) => {
+    if (change === "end") await ctx.registry.end({ ownerId: owner, botId: "bot-a", token }, callId);
+    if (change === "thread") threadId = "replacement";
+    if (change === "owner") owner = "bob";
+    if (change === "new-message") ctx.registry.message({ ownerId: owner, botId: "bot-a", token }, callId, { requestId: randomUUID(), text: "New work" });
+    return { draft: "private-calendar-evidence", date: input.date, timeZone: input.timeZone, calendarId: "selected" };
+  });
+  const response = await prepareCalendar(); expect(response.status).toBe(409);
+  expect(await response.text()).not.toContain("private-calendar-evidence");
+});
+it("reports unsupported hosts before calendar retrieval", async () => {
+  await connectedCall(); expect((await prepareCalendar()).status).toBe(503);
+  expect(dispatch).not.toHaveBeenCalled();
+});

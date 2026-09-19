@@ -53,7 +53,12 @@ export function isCloudDesktopJoin(method: string, path: string): boolean {
 /** Foreground calling is deliberately full-access only, including lease reads. */
 const CALL_UUID = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
 const CALL_BASE = "^/api/bots/[\\w-]+/calls";
+const CALENDAR_PREPARATION_ROUTE = { method: "POST", path: new RegExp(`${CALL_BASE}/${CALL_UUID}/prepare-calendar$`) };
+export function isCalendarPreparationRoute(method: string, path: string): boolean {
+  return method === CALENDAR_PREPARATION_ROUTE.method && CALENDAR_PREPARATION_ROUTE.path.test(path);
+}
 const FOREGROUND_CALL_ROUTES: ReadonlyArray<{ method: string; path: RegExp }> = [
+  CALENDAR_PREPARATION_ROUTE,
   { method: "POST", path: new RegExp(`${CALL_BASE}$`) },
   { method: "GET", path: new RegExp(`${CALL_BASE}/${CALL_UUID}$`) },
   { method: "POST", path: new RegExp(`${CALL_BASE}/${CALL_UUID}/(?:accept|messages|end)$`) },
