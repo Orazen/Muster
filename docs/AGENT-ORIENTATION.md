@@ -136,3 +136,31 @@ electron/preload.cjs`. iOS/Watch: `cd ios && swift test`, then
 - If a reported defect cannot be located in the tree (see the "router
   metrics NaN" entry, Loop116), record it **unverifiable** — never invent a
   fix for a defect you could not reproduce.
+
+## 10. Repository protections (read before pushing — 2026-09-19)
+
+`main` carries a branch ruleset (`main-protected`, active):
+
+- **Blocked for everyone:** force-pushes and branch deletion.
+- **Required checks:** `lint`, `typecheck`, `test`, `build` must pass for
+  PR merges. `github-actions[bot]` pushes are exempt from the
+  required-checks gate by GitHub's GITHUB_TOKEN rule, and the repo owner
+  bypasses everything — direct agent pushes to main keep working, but
+  they are YOUR responsibility to gate-verify first (Section 5), exactly
+  as before. The ruleset is the PR safety net, not a substitute for the
+  local gate.
+- **Why required checks are bypass-exempt for the bot:** the autodeploy
+  chain (workflow bumps `.deploy-trigger` → bot commit → Dokploy
+  webhook) must never be blocked. On 2026-09-19 a classic
+  required-checks policy silently broke that chain (GH006 push
+  rejection, autodeploy failure) — reverted within minutes and replaced
+  by this ruleset. If you touch branch protection, **prove the bot
+  chain with a real push cycle before claiming done**.
+- Historical red check-rollups on merged PRs #8–#13 are stale Sept-17
+  branch-head checks under the old platform-refused policy — do not
+  "fix" them; judge main's CI runs only.
+- Security posture: secret scanning + push protection on, Dependabot
+  alerts + automated fixes on, private vulnerability reporting on
+  (SECURITY.md), alerts zero-open. Fixture-shaped tokens in tests must
+  stay split-string (`["xoxb-", …].join("")`) so scanners never flag
+  them.
