@@ -191,3 +191,20 @@ it.each(["primary", "secondary"])("mounts operator connectors only for primary-o
   expect(JSON.stringify(entries)).not.toContain(runtimeToken);
   expect(requests.length).toBe(before);
 }, 20_000);
+
+it("personal Calendar requires a real hosted session and allows each account its own consent", async () => {
+  expect((await api("/api/calendar/status", "")).status).toBe(401);
+  for (const cookie of [primary, secondary]) {
+    const status = await api("/api/calendar/status", cookie);
+    expect(status.status).toBe(200);
+    expect(await status.json()).toEqual({ configured: true, connected: false });
+    const started = await api("/api/calendar/connect", cookie, "POST", {});
+    expect(started.status).toBe(200);
+    const { url } = z.object({ url: z.string() }).parse(await started.json());
+    const consent = new URL(url);
+    expect(consent.origin).toBe("https://accounts.google.com");
+    expect(consent.searchParams.get("scope")).toContain("calendar.readonly");
+    expect(consent.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(consent.searchParams.get("state")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  }
+});

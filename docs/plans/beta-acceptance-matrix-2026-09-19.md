@@ -118,3 +118,53 @@ browser **31/31**, packaged-server **14/14**. Secondary users receive an explici
 unavailable reason; Stop/opt-out cancel queued connector continuations. These
 fake-provider receipts close the reproduced installation authority defects;
 per-account Google Calendar consent and real daily planning remain unverified.
+
+### Loop133 Calendar consent contract and provider acceptance
+
+Implementation: the existing Connected apps panel exposes Personal Google
+Calendar separately from installation app connectors. Consent requests `openid`
+and `https://www.googleapis.com/auth/calendar.readonly`; it is explicit, uses
+PKCE/nonce and a one-use state bound to the exact Muster account/session.
+Calendar token rows are separate from Google login and Drive. Disconnect is
+local removal only; it invalidates pending/in-flight consent, not Google's
+combined authorization. Existing providers and account sessions stay unchanged.
+
+Deployment prerequisites: configure GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET from
+secrets, enable Calendar API in that Google project, and register the exact
+served origin plus `/api/calendar/google/callback` as an authorized redirect URI
+(e.g. `https://muster.today/api/calendar/google/callback`). Each alternate origin
+requires its own registered redirect. Check Google consent publishing/test-user
+access and required verification before inviting users. This is not a claim
+that the production Google project has been configured.
+
+Real-provider acceptance still required: sign in, open Connected apps, explicitly
+connect Calendar, check successful return, confirm the same account's Drive
+backup still works, disconnect Calendar and confirm Drive still works. Repeat
+with a second Muster/Google account and in an installed desktop build. Browser
+fixture tests do not substitute for these checks. Different Google subjects
+require disconnect before reconnect; no email-based identity matching.
+
+Next implementation: refresh with generation checks; calendar selection and
+complete paginated read-only day events; recurrence/all-day/DST/partial-response
+handling; deterministic free slots; explicit unsent Plan my day draft from the
+verified agenda. A connected grant alone does not prove daily planning works.
+
+Day-reader audit: existing routines use server-local Date operations, so do not
+reuse them for an account-selected timezone. Resolve consecutive local day
+boundaries independently (23/25-hour DST days), preserve all-day exclusive date
+ends, and explicitly reject nonexistent dates. Consider a server-only Temporal
+adapter ([polyfill source](https://github.com/js-temporal/temporal-polyfill)).
+Google event reads should request recurrence expansion, follow every page token,
+and fail explicitly on pagination bounds. `timeMin` filters event ends and
+`timeMax` filters starts, both exclusive; include overlapping events rather than
+only events starting that day. Source: [events.list](https://developers.google.com/workspace/calendar/api/v3/reference/events/list).
+
+Treat event titles/descriptions as untrusted external content when preparing the
+planning draft. Event text must not change tool permissions or trigger actions;
+only the user's explicit reviewed request may submit the planning task.
+
+Loop133 receipts: **303 files / 4427 passed / 8 skipped / 0 failed**,
+browser **34/34**, packaged-server **14/14**, focused backend **65/65**.
+Calendar UI fixtures include mobile consent/local disconnect, malformed status
+recovery, explicit sign-in capability and automatic callback result panel.
+Real Google consent and installed-device acceptance remain pending.

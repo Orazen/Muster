@@ -6053,3 +6053,45 @@ packaged-server **14/14**, focused **72/72**, fresh build, project/server/e2e
 checks and lint pass. No tests skipped beyond the existing eight. These are
 owned fake-provider/local receipts, not real provider or native acceptance.
 Next slice: account-owned Calendar consent and grants, preserving Drive storage.
+
+## Loop133 — account-owned Calendar consent
+
+Loop132 pushed as 52b84b6; production GET still reports backend 7632065f and
+web 453b2f23, unchanged. Pulled 64eb6a1 (deployment trigger only).
+Parent owns new Calendar provider/routes/integration tests, server/index.ts,
+and cycle docs. Parallel calendar_grant_store agent owns only new
+server/calendar-grants.ts and server/calendar-grants.test.ts. Separate grant
+storage and single-use session-bound consent preserve Drive/login token rows.
+No provider revocation, event writes or automatic planning submission.
+
+Loop133 parallel ownership extension: calendar_oauth_provider owns only new
+server/calendar-oauth.ts and its tests; calendar_connection_ui owns only new
+src/components/CalendarConnection.tsx, e2e/calendar-connection.e2e.spec.ts and
+its insertion in PluginsPanel.tsx. Parent owns package.json/pnpm-lock.yaml to
+make already-resolved jose 6.2.9 a direct dependency (four-line manifest change),
+Calendar route family/tests and registration. No overlapping edits.
+
+Root additionally owns connector-ownership-harness.test.ts for real hosted
+session registration coverage: anonymous Calendar requests fail, while both
+primary and secondary can start their own read-only consent. No Google calls.
+
+Root owns the small App.tsx Calendar-return effect: explicit consent return
+opens the existing Connected apps panel to show success/recovery on mobile.
+No automatic consent or task submission. Local capability responses explicitly
+indicate requiresSignIn, avoiding API-client navigation as a side effect of
+status reads. The old-server-comment sign-out concern was not reproduced and
+was retracted on review; this is explicit capability handling, not a claimed
+production defect. First browser fixture run: 1 passed/1 failed due to attempting
+to click the closed mobile sidebar after returning; trace retained. Final test
+will use the actual callback panel rather than a hidden navigation button.
+
+Final gates: **303 files / 4427 passed / 8 skipped / 0 failed** in 448.41s;
++3 files and +56 passing tests over Loop132. Full fresh browser **34/34** (3.3m),
++3 cases; focused backend **65/65**, final packaged-server rebuild **14/14**.
+Server/project/e2e types pass; full lint plus final touched-file lint pass.
+Initial route-test lint rejected a runtime typeof check; replaced with Zod
+boundary parsing. The first browser fixture run was 1 passed/1 failed (closed
+mobile sidebar click); final callback-panel acceptance passes without loosening
+timeouts. No real Google consent, installed Electron/native acceptance or
+production deployment is claimed. Next: refresh, selected-calendar complete
+day reads and grounded planning draft, using the acceptance matrix guidance.

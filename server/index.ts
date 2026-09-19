@@ -250,6 +250,7 @@ import * as workspaceBundle from "./workspace-bundle.ts";
 import {
   applyPendingRestore,
 } from "./restore-apply.ts";
+import { handleCalendarRoute } from "./calendar-routes.ts";
 import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
 import * as openconnector from "./openconnector.ts";
 import * as connectedApps from "./connected-apps.ts";
@@ -4742,6 +4743,20 @@ let requestUserEmail = "";
       requestUserName = sessAcct?.user?.name ?? "";
       requestUserEmail = sessAcct?.user?.email ?? "";
     }
+
+    // Calendar grants always resolve a real account and session, including
+    // loopback installs. No installation connector credentials are reused.
+    if (await handleCalendarRoute(req, res, method, path, {
+      db: getDb,
+      session: async () => {
+        const current = await auth.api.getSession({ headers: toWebRequest(req).headers }).catch(() => null);
+        return current?.user?.id && current.session?.id
+          ? { userId: current.user.id, sessionId: current.session.id } : null;
+      },
+      origin: requestOrigin(req),
+      clientId: process.env.GOOGLE_CLIENT_ID?.trim() ?? "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "",
+    })) return;
 
     // ── workspace-backup family (server/workspace-backup-routes.ts) ────
     // Capability advertisement, the hosted installation wall, account-linked

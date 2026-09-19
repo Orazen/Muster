@@ -3260,3 +3260,27 @@ signing/device, actual Google consent, full sync/restore, VM, scanner and the tw
 high dependency alerts remain open. Allowance and reset readings were not
 re-measured in this pass.
 
+
+## Astra ownership update — 19 September 2026, Loops129–133
+
+Current owner strategy and read order supersede the historical next-slice list
+above: read current-state.md and personal-assistant-beta-decisions-2026-09-19.md.
+Loop132 (52b84b6) scopes installation connector access to owner and active
+bot/thread/turn, including Stop/opt-out cancellation. Loop133 adds separate
+account-owned Calendar consent, not event reading. Do not wire cloud pairing
+codes into owner-claim redemption: those namespaces differ and are tested.
+
+Latest verified baseline: **303 files / 4427 passed / 8 skipped / 0 failed**
+(448.41s), full browser **34/34**, packaged-server **14/14**, focused backend
+**65/65**; project/server/e2e types, build and lint pass. Initial Calendar browser
+fixture failed on hidden mobile-sidebar click; final callback-panel tests pass.
+See ceo-log.md for evidence and beta-acceptance-matrix-2026-09-19.md for real
+provider acceptance and next implementation details.
+
+Next: generation-checked Calendar refresh, calendar selection and complete
+paginated day reads with timezone/recurrence/all-day handling; then grounded
+planning draft. Actual Google consent/Drive coexistence, installed devices,
+Watch calling, broader recovery, allowance and real-tester release gates remain
+open. Production was still the older artifact at the start of this slice; a
+push is not deployment. Existing automation stays paused. Preserve unrelated
+untracked research, templates, marketing-video, .freebuff and .zcode content.

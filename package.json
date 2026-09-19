@@ -82,6 +82,7 @@
     "better-auth": "^1.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^13.1.1",
+    "jose": "6.2.9",
     "lucide-react": "^0.539.0",
     "posthog-js": "^1.415.6",
     "qrcode.react": "^4.2.0",

@@ -8,8 +8,19 @@ BYOK, free beta. Public expansion requires passing core flows and five testers
 completing daily planning on three separate days each. This is a decision record,
 not a new implementation or verification claim.
 
-Updated 19 September 2026 (Loop132). This snapshot takes precedence over historical roadmap
+Updated 19 September 2026 (Loop133). This snapshot takes precedence over historical roadmap
 status; the latest owner request takes precedence over this file.
+
+**Loop133:** account-owned Google Calendar consent now has separate token
+storage, signed provider identity checks, PKCE, one-use session-bound state and
+revocation-generation guards. The existing Connected apps panel offers explicit
+read-only consent/local disconnect and reopens on callback, including at 320px.
+Drive/login token rows are preserved; local disconnect does not revoke Google's
+combined grant. Full **303 files / 4427 passed / 8 skipped / 0 failed**,
+browser **34/34**, packaged-server **14/14**, focused backend **65/65**;
+build/types/lint pass. Real Google consent and installed-device acceptance remain
+open. Next: token refresh and complete selected-calendar day reads, then an
+explicit planning draft; consent alone is not working daily planning.
 
 **Loop132:** installation connections now require the hosted primary owner;
 connector credentials are scoped to the active bot/thread/turn and revalidated

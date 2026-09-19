@@ -48,6 +48,15 @@ function Shell() {
   const { user, loading: authLoading } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const calendarReturnHandled = useRef(false);
+  useEffect(() => {
+    const result = new URLSearchParams(location.search).get("calendar");
+    if (!user || calendarReturnHandled.current || (result !== "connected" && result !== "failed")) return;
+    calendarReturnHandled.current = true;
+    // Explicit consent returns to its existing panel so success/recovery is
+    // visible, including when the mobile sidebar is closed.
+    dispatch({ type: "togglePlugins", open: true });
+  }, [location.search, user, dispatch]);
   const consumedHandoff = useRef<string | null>(null);
   const handoff = resolveBotChatHandoff(location.search, user?.id, state.rosterHydrated, state.bots);
   useEffect(() => {

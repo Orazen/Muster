@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Loader2, RefreshCw, Search, X } from "lucide-react";
 import { api, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { CalendarConnection } from "./CalendarConnection";
 
 interface ToolkitCard {
   slug: string;
@@ -359,6 +360,7 @@ export function PluginsPanel() {
         {error && <div role="alert" className="mx-6 mt-2 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger sm:mx-8">{error}</div>}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-7 pt-5 sm:px-8">
+          <CalendarConnection />
           {cards === null ? (
             <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary">
               <Loader2 size={14} className="animate-spin" /> Loading catalog…
