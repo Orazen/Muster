@@ -5845,3 +5845,20 @@ Resumed the previous session's interrupted verification (unit 292/4320 green, iO
 - **Which exposed two real product defects** in the always-mounted OnboardingChat: (1) it **wrote** `muster.onboarding-chat.done` on completion but never **read** it (`dismissed` was `useState(false)` with no setter), so any empty-roster account — bots deleted later, reload mid-chat — re-greeted on every load; now the persisted gate is read via the lib's `onboardingChatDone()` helper Loop124 exported for exactly this. (2) No connect guard: `shown = !state.bots.length` was true during the pre-SSE boot window when every account reads as empty — the chat flashed on every load of every account; now `shown` requires `state.connected` (the same late-decision rule Onboarding.tsx:434 already applies). Completion paths now also set the in-memory flag so a finished chat cannot re-render.
 
 Receipts: e2e **26/26**; onboarding-draft **7/7**; full unit **294 files / 4327 passed / 8 skipped / 0 failed** (2 files / 7 tests grown by parallel work); both typechecks exit 0; oxlint **0/0** (827 files); fresh build ✓; Electron main/preload syntax OK. iOS/Watch/widget builds unchanged from the recorded runs (no native files touched).
+
+## Loop127 — live bug hunt: seed-on-signed-in engine, copy-leak fix, watch composer completion (19 September 2026)
+
+Owner ask: use the app and find bugs. Ran the real first-run journey on the live preview harness (fresh data dir): sign-up → onboarding → /app → /os → settings → automations → real message send.
+
+**Found and fixed by using it:**
+
+1. **Seed bot born onto an expired engine** (src→server): the seed picked Claude (installed, OAuth expired) while the wizard's own scan reported only Droid/Antigravity/Hermes ready — a brand-new user's first message failed with "OAuth session expired". `server/model-selection.ts` (new, pure) mirrors the wizard's `engineReady` rule at the single seed point; live acceptance: fresh workspace seed bot now lands on signed-in Droid and a real turn reaches the real provider (provider 402 = honest owner-account state, surfaced cleanly by the UI).
+2. **"AGENT" identifier leaked into 16 user-facing strings** (RoutinesPage, WebhooksPanel) by a mechanical rebrand replace — "Run AGENT tasks", "All AGENTs", "a AGENT scheduled work". Rewritten with the product's teammate vocabulary; verified in the live preview.
+3. **Inherited 4-file stash-pop conflict resolved as union** (commit 7ee975f, previous in ledger as its own commit): LoginPage kept the Loop116 OAuth handoff fix; Watch composer-lease system kept; MessageReaderView converted off the removed raw-send API (Watch scheme had stopped compiling); swift test 356/356; both schemes build.
+4. **Test isolation**: unattended.test.ts teammate now pins modelSelection like its sibling bots (40s deterministic failure → sub-second pass; root-caused by flip-in-place causality check).
+
+**Also reviewed, deliberately not changed:** the Automations page's blue `--color-accent` is the documented GAIA-vendored skins architecture (auth//os surfaces hardcode brand orange) — Loop106 precedent kept; recorded as intentional.
+
+Receipts: unit **295 files / 4332 passed / 8 skipped / 0 failed**; e2e **26/26** (fresh build); both typechecks exit 0; oxlint **0/0** (829 files); swift test 356/356; MusterWatch + MusterCompanion builds clean. Production untouched (GET-only); preview stack on isolated 8802/5199 with its own data dir.
+
+**Next:** pairing redeem web surface (§7 #7), scorecard trending (§7 #1 remainder), memory history+rollback UI (§7 #2).
