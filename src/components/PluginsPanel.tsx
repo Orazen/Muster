@@ -2,6 +2,7 @@
 // from /api/connectors/catalog — the full toolkit list with logos when a
 // Composio API key is configured, a curated set otherwise. Icons resolve
 // logo → favicon → monogram.
+import { z } from "zod";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Loader2, RefreshCw, Search, X } from "lucide-react";
 import { api, useStore } from "@/state/store";
@@ -64,6 +65,7 @@ export function PluginsPanel() {
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
   const [source, setSource] = useState<"api" | "curated">("curated");
   const [configured, setConfigured] = useState(true);
+  const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
   const [mode, setMode] = useState<"managed" | "self-hosted" | "muster-connector" | "unavailable">("unavailable");
   const [status, setStatus] = useState<Record<string, ConnectorStatus>>({});
   const [pendingUrls, setPendingUrls] = useState<Record<string, string>>({});
@@ -120,6 +122,8 @@ export function PluginsPanel() {
         setCards(r.cards ?? []);
         setSource(r.source ?? "curated");
         setConfigured(Boolean(r.configured));
+        const reason = z.string().max(300).safeParse(r.reason);
+        setUnavailableReason(reason.success ? reason.data : null);
         setMode(r.mode ?? "unavailable");
         if (r.configured) void refreshStatus((r.cards ?? []).map((c: ToolkitCard) => c.slug).slice(0, 40));
       })
@@ -310,8 +314,8 @@ export function PluginsPanel() {
 
         {!configured && (
           <div className="mx-6 mb-1 rounded-xl bg-warning/10 px-4 py-3 text-[13px] text-warning sm:mx-8">
-            Connected apps are temporarily unavailable. You can retry after restarting, or configure your own connection service.{" "}
-            <button
+            {unavailableReason ?? "Connected apps are temporarily unavailable. You can retry after restarting, or configure your own connection service."}{" "}
+            {!unavailableReason && <button
               className="font-medium underline underline-offset-2"
               onClick={() => {
                 close();
@@ -319,7 +323,7 @@ export function PluginsPanel() {
               }}
             >
               Open settings
-            </button>
+            </button>}
           </div>
         )}
         {configured && source === "curated" && mode === "self-hosted" && (

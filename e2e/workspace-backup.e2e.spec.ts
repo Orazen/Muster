@@ -426,6 +426,9 @@ test("configured local backup reports transport failure, then explicitly retries
 test("loading, failed and malformed status never enable writes before an explicit checked retry", async ({ fixture, guarded }, testInfo) => {
   const { page } = guarded;
   await signIn(page, fixture);
+  // Settle the sidebar capability probe before measuring Settings itself.
+  await expect(page.getByText("Recover your workspace", { exact: true })).toBeVisible();
+  const beforeSettings = guarded.statusRequests.length;
   const held = guarded.statusSeam("error", true);
   await openBackup(page);
   await held.entered.promise;
@@ -447,10 +450,8 @@ test("loading, failed and malformed status never enable writes before an explici
   expect((await actual).status()).toBe(200);
   await expect(backup(page).getByText("Drive configured on this computer", { exact: true })).toBeVisible();
   await expect(backup(page).getByRole("button", { name: "Back up to Drive", exact: true })).toBeEnabled();
-  // Two capability consumers mount on this tab (the sync card and the backup
-  // card each check /api/workspace/google/status); three status rounds
-  // measure 5 capability fetches here.
-  expect(guarded.statusRequests).toHaveLength(5);
+  // Two Settings consumers mount; each explicit Retry checks only the sync card.
+  expect(guarded.statusRequests.slice(beforeSettings)).toHaveLength(4);
   expect(guarded.writes).toEqual([]);
   expect(fixture.drive.entries()).toEqual([]);
 });
@@ -458,6 +459,9 @@ test("loading, failed and malformed status never enable writes before an explici
 test("a status result from closed Settings cannot replace the reopened card's current failure", async ({ fixture, guarded }, testInfo) => {
   const { page } = guarded;
   await signIn(page, fixture);
+  // Settle the sidebar capability probe before measuring Settings itself.
+  await expect(page.getByText("Recover your workspace", { exact: true })).toBeVisible();
+  const beforeSettings = guarded.statusRequests.length;
   const old = guarded.statusSeam("actual", true);
   await openBackup(page);
   await old.entered.promise;
@@ -475,9 +479,8 @@ test("a status result from closed Settings cannot replace the reopened card's cu
   await capture(page, testInfo, "retired-status-current-error", backup(page).getByRole("alert"));
   await backup(page).getByRole("button", { name: "Retry backup status", exact: true }).click();
   await expect(backup(page).getByText("Drive configured on this computer", { exact: true })).toBeVisible();
-  // Two capability consumers on this tab; two card mounts + one retry
-  // click = 3 rounds × 2 consumers = 6.
-  expect(guarded.statusRequests).toHaveLength(6);
+  // Two Settings consumers on each mount, then one sync-card Retry.
+  expect(guarded.statusRequests.slice(beforeSettings)).toHaveLength(5);
   expect(guarded.writes).toEqual([]);
   expect(fixture.drive.entries()).toEqual([]);
 });

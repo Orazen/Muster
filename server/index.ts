@@ -44,6 +44,7 @@ import { signReceipt, verifyReceipt, verifyableReceiptSchema } from "./receipt-s
 import { checkBudget, checkDailyUsdCap, DAILY_USD_CAP_MAX, DAILY_USD_CAP_MIN, dailyUsdCapSchema, TOKEN_BUDGET_MAX, TOKEN_BUDGET_MIN, tokenBudgetSchema } from "./agent-vault.ts";
 import { scanBotSecurity } from "./security-scan.ts";
 import { PeerCapabilities, type PeerLease } from "./peer-capabilities.ts";
+import { ConnectorCapabilities, installationAppsAllowed, type ConnectorLease } from "./connector-capabilities.ts";
 import { StopCleanupRegistry, STOP_CLEANUP_PENDING, STOP_CLEANUP_STALE, STOP_CLEANUP_PENDING_MESSAGE, STOP_CLEANUP_STALE_MESSAGE, STOP_CLEANUP_RESTART_SETTLED_MESSAGE, STOP_CLEANUP_RESTART_UNRESOLVED_MESSAGE, settleInterruptedStopCleanups } from "./stop-cleanup.ts";
 import { installObscuraLocal, resolveObscuraMount, OBSCURA_TOOLS } from "./obscura.ts";
 import { legalPageFor, withVerificationMeta } from "./legal-pages.ts";
@@ -355,7 +356,7 @@ bus.attach(registry.instances());
 // ── peer-agent comms wiring ────────────────────────────────────────────
 // Connector authority cannot authorize peer operations. Peer credentials are
 // issued only for an exact, live harness dispatch and rotated on every turn.
-const CONNECTOR_TOKEN = randomBytes(24).toString("hex");
+const connectorCapabilities = new ConnectorCapabilities();
 const peerCapabilities = new PeerCapabilities(Date.now, 24 * 60 * 60_000, (lease) => {
   discardDelegations(commsBus, lease.threadId);
 });
@@ -363,17 +364,10 @@ const stopCleanupDurability = stopCleanupJournal();
 const stopCleanups = new StopCleanupRegistry(Date.now, 24 * 60 * 60_000, stopCleanupDurability);
 const settledPeerEvents = new WeakSet<RuntimeEvent>();
 bus.subscribe((event) => {
+  connectorCapabilities.onEvent(event);
   if (peerCapabilities.onEvent(event)) settledPeerEvents.add(event);
 });
 
-/** Constant-time bearer check for the internal comms endpoints. The token
- * is high-entropy and loopback-only, so a timing oracle is a long shot —
- * but the compare costs nothing to make safe. */
-function authorizedConnector(header: string | string[] | undefined): boolean {
-  const expected = Buffer.from(`Bearer ${CONNECTOR_TOKEN}`);
-  const got = Buffer.from(Array.isArray(header) ? "" : (header ?? ""));
-  return got.length === expected.length && timingSafeEqual(got, expected);
-}
 // Cap message chains: depth 0 = a user-initiated turn (may ask a peer);
 // a peer invoked via ask_bot runs at depth 1 and gets NO agents tool, so
 // A→B is allowed but B→C (and A→B→A loops) never start.
@@ -400,16 +394,39 @@ function agentsIntegration(lease: PeerLease, token: string) {
   };
 }
 
-function connectedAppsIntegration(botId: string, threadId: string) {
-  const context = {
-    harnessUrl: `http://127.0.0.1:${PORT}`,
-    commsToken: CONNECTOR_TOKEN,
-    botId,
-    threadId,
-  };
-  // Both backends spawn the same loopback bridge; only the upstream differs
-  // (resolved inside the harness relay by the same priority as the routes).
-  return connectedApps.mcpIntegration(cfg, context);
+function installationAppsFor(ownerId?: string | null): boolean {
+  return installationAppsAllowed(SELF_HOSTED, primaryUserId(), ownerId);
+}
+
+function botAppsAllowed(bot: { ownerId?: string; composio?: boolean }): boolean {
+  return installationAppsFor(bot.ownerId) && bot.composio !== false && connectedApps.configured(cfg);
+}
+
+function connectorLeaseValid(lease: ConnectorLease): boolean {
+  const owner = connectorThread(lease.botId, lease.threadId);
+  const valid = connectorCapabilities.current(lease) && !!owner &&
+    botAppsAllowed(owner.bot) && peerOwnerOf(owner.bot) === lease.ownerId;
+  if (!valid) connectorCapabilities.revoke(lease);
+  return valid;
+}
+
+async function connectedAppsIntegration(botId: string, threadId: string, instanceId: string) {
+  const owner = connectorThread(botId, threadId);
+  if (!owner || !botAppsAllowed(owner.bot)) return null;
+  const { lease, token } = connectorCapabilities.issue({ botId, threadId, ownerId: peerOwnerOf(owner.bot) }, instanceId);
+  try {
+    const integration = await connectedApps.mcpIntegration(cfg, {
+      harnessUrl: `http://127.0.0.1:${PORT}`, commsToken: token, botId, threadId,
+    });
+    if (!integration || !connectorLeaseValid(lease)) {
+      connectorCapabilities.revoke(lease);
+      return null;
+    }
+    return { integration, lease };
+  } catch (error) {
+    connectorCapabilities.revoke(lease);
+    throw error;
+  }
 }
 
 /** Curated slugs for the Muster Connector's default status view — the same
@@ -517,6 +534,8 @@ function peerTarget(lease: PeerLease, id: string) {
 function stopPeerDispatch(botId: string) {
   const lease = peerCapabilities.forBot(botId);
   peerCapabilities.revokeBot(botId);
+  connectorCapabilities.revokeBot(botId);
+  cancelConnectorResumes(botId);
   cancelPeerApprovalsFor(botId);
   let queuedCanceled = true;
   const failedQueues: DelegationSnapshot[] = [];
@@ -1084,6 +1103,8 @@ const STALE_SETTLE_GRACE_MS = 60_000;
  * after a short grace that keeps the dying process as the turn's owner. */
 function settleLostTurn(turn: WatchedTurn, note: string): void {
   peerCapabilities.revokeThread(turn.threadId, turn.turnId);
+  connectorCapabilities.revokeThread(turn.threadId, turn.turnId);
+  cancelConnectorResumes(undefined, turn.threadId);
   discardDelegations(commsBus, turn.threadId);
   repeats.settle(turn.threadId);
   // The interrupted provider usually survives and emits its real
@@ -2012,6 +2033,7 @@ async function startTurn(
   stopCleanups.begin(bot.id, peerOwnerOf(bot));
   store.setActivity(bot.id, "working");
   let dispatchLease: PeerLease | undefined;
+  let connectorLease: ConnectorLease | undefined;
   /** Pre-dispatch failure: this turn never reached a driver, so release
    * the busy claim before propagating — otherwise the bot is stuck working
    * with no turn running and nothing will ever settle it.
@@ -2023,6 +2045,7 @@ async function startTurn(
   const fail: (err: Error) => never = (err) => {
     const current = peerCapabilities.forBot(bot.id);
     if (dispatchLease) peerCapabilities.revoke(dispatchLease);
+    if (connectorLease) connectorCapabilities.revoke(connectorLease);
     if (!current || current === dispatchLease) store.setActivity(bot.id, "idle");
     throw err;
   };
@@ -2232,10 +2255,11 @@ async function startTurn(
       // them — a key in the config says the connections exist, not that
       // this engine can reach them — and only to a bot the user has not
       // switched off: the key is workspace-wide, the grant is per bot.
-      if (bot.composio !== false && connectedApps.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
-        const connection = await connectedAppsIntegration(bot.id, threadId);
+      if (botAppsAllowed(bot) && instance.adapter.capabilities.composioMcp === true) {
+        const connection = await connectedAppsIntegration(bot.id, threadId, instanceId);
+        connectorLease = connection?.lease;
         requireDispatch();
-        if (connection) integrations.composio = connection;
+        if (connection) integrations.composio = connection.integration;
       }
       // CLI engines work inside the bot's own workspace directory rather
       // than the user's home: a bot with file tools and acceptEdits gets a
@@ -2557,6 +2581,7 @@ async function startTurn(
       }
 
       requireDispatch();
+      if (connectorLease && !connectorLeaseValid(connectorLease)) throw new Error("connected apps are no longer authorized");
       const peerToken = peerCapabilities.activate(lease, instanceId, canUsePeers);
       if (peerToken) integrations.agents = agentsIntegration(lease, peerToken);
       driverInvoked = true;
@@ -2604,7 +2629,7 @@ async function startTurn(
           // bot whose driver actually mounted the tools
           (integrations.composio
             ? connectedApps.toolGuidance(cfg)
-            : bot.composio !== false && connectedApps.configured(cfg)
+            : botAppsAllowed(bot)
               ? " The user has connected apps (Gmail, GitHub, and others) at the account level, but this specific model engine's driver doesn't mount those tools yet — do not claim nothing is connected; say the apps are connected but not reachable from this engine, and suggest switching to Claude or an ACP engine (Codex, Gemini CLI) to use them."
               : "") +
           (coordinationPrompt ? ` ${coordinationPrompt}` : "") +
@@ -2622,6 +2647,7 @@ async function startTurn(
         cwd,
       });
       peerCapabilities.bindTurn(lease, instanceId, dispatched.turnId);
+      if (connectorLease) connectorCapabilities.bindTurn(connectorLease, instanceId, dispatched.turnId);
       opts?.onDispatched?.();
       // dispatched: the rewind is spent, and the old cursors are dead
       if (rewound) store.patchBot(bot.id, { rewound: false, resumeCursors: {} });
@@ -2637,6 +2663,7 @@ async function startTurn(
     } catch (e) {
       const currentLease = peerCapabilities.forBot(bot.id);
       peerCapabilities.revoke(lease);
+      if (connectorLease) connectorCapabilities.revoke(connectorLease);
       // A late setup rejection belongs to this lease, never a replacement.
       if (currentLease && currentLease !== lease) return;
       const failedKey = threadDesktopTarget.get(threadId);
@@ -2691,6 +2718,8 @@ routines = new RoutineManager({
     startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError }),
   interruptTurn: async (botId, threadId, runOn) => {
     peerCapabilities.revokeThread(threadId);
+    connectorCapabilities.revokeThread(threadId);
+    cancelConnectorResumes(undefined, threadId);
     discardDelegations(commsBus, threadId);
     const bot = store.bot(botId);
     const instance = runOn === "cloud"
@@ -2984,10 +3013,11 @@ async function runGroupMemberTurn(
   // must not run Pixel twice (once chained, once as a direct responder)
   spoken: Set<string> = new Set(),
   connectorContinuation?: string,
+  connectorGuard?: () => boolean,
 ): Promise<boolean> {
   let group = store.group(groupId);
   const bot = store.bot(botId);
-  if (!group || !bot) return false;
+  if (!group || !bot || (connectorGuard && !connectorGuard())) return false;
   if (SELF_HOSTED && (!group.memberIds.includes(botId) || !roomMembersAvailable(group))) return false;
   spoken.add(botId);
   const instance = registry.get(bot.modelSelection.instanceId);
@@ -3033,12 +3063,15 @@ async function runGroupMemberTurn(
   stopCleanups.begin(bot.id, peerOwnerOf(bot));
   store.setActivity(bot.id, "working");
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
+  let connectorLease: ConnectorLease | undefined;
   try {
-    if (bot.composio !== false && connectedApps.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
-      const connection = await connectedAppsIntegration(bot.id, group.threadId);
-      if (connection) integrations.composio = connection;
+    if (botAppsAllowed(bot) && instance.adapter.capabilities.composioMcp === true) {
+      const connection = await connectedAppsIntegration(bot.id, group.threadId, instance.instanceId);
+      connectorLease = connection?.lease;
+      if (connection) integrations.composio = connection.integration;
     }
   } catch (error) {
+    if (connectorLease) connectorCapabilities.revoke(connectorLease);
     store.setActivity(bot.id, "idle");
     // inside a catch with the claim just released — the chip must not throw
     // past the release, or the bot is stranded working
@@ -3058,7 +3091,9 @@ async function runGroupMemberTurn(
   // Connector setup yields. Re-read before using the roster or dispatching a
   // cached responder; an edit/deletion must not bypass the initial check.
   const currentGroup = store.group(groupId);
-  if (!currentGroup || (SELF_HOSTED && (!currentGroup.memberIds.includes(botId) || !roomMembersAvailable(currentGroup)))) {
+  if (!currentGroup || (SELF_HOSTED && (!currentGroup.memberIds.includes(botId) || !roomMembersAvailable(currentGroup))) ||
+    (connectorLease && !connectorLeaseValid(connectorLease)) || (connectorGuard && !connectorGuard())) {
+    if (connectorLease) connectorCapabilities.revoke(connectorLease);
     store.setActivity(bot.id, "idle");
     return false;
   }
@@ -3120,6 +3155,7 @@ async function runGroupMemberTurn(
     const timer = setTimeout(() => {
       // Graceful stop: interrupt first (the driver unwinds its process),
       // then record why — the channel must show the turn ended on purpose.
+      if (connectorLease) connectorCapabilities.revoke(connectorLease);
       void instance.adapter.interruptTurn(group.threadId).catch(() => {});
       // timer callbacks must not throw — best-effort chip on a degraded disk
       store.appendMessage(
@@ -3144,7 +3180,11 @@ async function runGroupMemberTurn(
         integrations,
         ...memberTurnSelection(bot.modelSelection),
       })
+      .then((dispatched) => {
+        if (connectorLease) connectorCapabilities.bindTurn(connectorLease, instance.instanceId, dispatched.turnId);
+      })
       .catch((err) => {
+        if (connectorLease) connectorCapabilities.revoke(connectorLease);
         store.appendMessage(
           group.threadId,
           {
@@ -3174,6 +3214,7 @@ async function runGroupMemberTurn(
     if (store.bot(bot.id)?.busy) store.setActivity(bot.id, "idle");
   }
 
+  if (connectorGuard && !connectorGuard()) return false;
   // chained mentions: a member's reply can summon teammates — one hop only
   if (hop < MAX_GROUP_HOPS && replyText.trim()) {
     const members = group.memberIds
@@ -3181,7 +3222,7 @@ async function runGroupMemberTurn(
       .filter((b): b is NonNullable<typeof b> => Boolean(b) && b!.id !== bot.id);
     for (const next of roomResponders(replyText, members, { kind: "mentions" })) {
       if (spoken.has(next.id)) continue;
-      if (!(await runGroupMemberTurn(groupId, next.id, hop + 1, spoken))) return false;
+      if (!(await runGroupMemberTurn(groupId, next.id, hop + 1, spoken, undefined, connectorGuard))) return false;
     }
   }
   return true;
@@ -3243,34 +3284,51 @@ function startGroupTurn(groupId: string, text: string) {
 }
 
 const CONNECTOR_SLUG = /^[a-z0-9][a-z0-9_-]{0,80}$/;
-const pendingConnectorResumes = new Map<
-  string,
-  { botId: string; threadId: string; resumeKey: string; labels: string[] }
->();
+interface ConnectorResumeEntry {
+  botId: string;
+  threadId: string;
+  resumeKey: string;
+  labels: string[];
+  cancelled?: boolean;
+}
+const pendingConnectorResumes = new Map<string, ConnectorResumeEntry>();
+const connectorResumeJobs = new Set<ConnectorResumeEntry>();
+
+function cancelConnectorResumes(botId?: string, threadId?: string) {
+  for (const entry of connectorResumeJobs) {
+    if ((botId && entry.botId !== botId) || (threadId && entry.threadId !== threadId)) continue;
+    entry.cancelled = true;
+    pendingConnectorResumes.delete(`${entry.botId}:${entry.threadId}:${entry.resumeKey}`);
+    connectorResumeJobs.delete(entry);
+    markConnectorResumeFailed(entry.botId, entry.threadId, entry.resumeKey, "Connection continuation cancelled; send again when ready");
+  }
+}
 
 function connectorThread(botId: string, threadId: string) {
   const bot = store.bot(botId);
   if (!bot) return null;
   if (store.taskByThread(botId, threadId)) return { bot, group: undefined };
   const group = store.groupByThread(threadId);
-  if (group?.memberIds.includes(botId)) return { bot, group };
+  if (group?.memberIds.includes(botId) && (!SELF_HOSTED || (roomMembersAvailable(group) && peerOwnerOf(group) === peerOwnerOf(bot)))) return { bot, group };
   return null;
 }
 
 function connectorMessage(botId: string, threadId: string, messageId: string) {
-  if (!connectorThread(botId, threadId)) return null;
+  const owner = connectorThread(botId, threadId);
+  if (!owner) return null;
   const message = store.messagesFor(threadId).find((candidate) => candidate.id === messageId);
-  return message?.kind === "connector" && message.connector ? message : null;
+  return message?.kind === "connector" && message.connector && (!owner.group || message.from?.botId === botId) ? message : null;
 }
 
-function connectorCards(threadId: string, resumeKey: string) {
+function connectorCards(botId: string, threadId: string, resumeKey: string) {
   return store.messagesFor(threadId).filter(
-    (message) => message.kind === "connector" && message.connector?.resumeKey === resumeKey,
+    (message) => message.kind === "connector" && message.connector?.resumeKey === resumeKey &&
+      (!store.groupByThread(threadId) || message.from?.botId === botId),
   );
 }
 
-function markConnectorResumeFailed(threadId: string, resumeKey: string, error: string) {
-  for (const message of connectorCards(threadId, resumeKey)) {
+function markConnectorResumeFailed(botId: string, threadId: string, resumeKey: string, error: string) {
+  for (const message of connectorCards(botId, threadId, resumeKey)) {
     if (!message.connector) continue;
     // Only reachable from catch handlers — a throw here would be an unhandled
     // rejection, so the failure marker itself degrades to memory-only.
@@ -3285,51 +3343,78 @@ function markConnectorResumeFailed(threadId: string, resumeKey: string, error: s
   }
 }
 
-function dispatchConnectorResume(entry: { botId: string; threadId: string; resumeKey: string; labels: string[] }) {
+function dispatchConnectorResume(entry: ConnectorResumeEntry) {
+  if (entry.cancelled) return;
   const owner = connectorThread(entry.botId, entry.threadId);
-  if (!owner) return;
+  if (!owner || !botAppsAllowed(owner.bot)) {
+    connectorResumeJobs.delete(entry);
+    markConnectorResumeFailed(entry.botId, entry.threadId, entry.resumeKey, "Connected apps are no longer available to this bot");
+    return;
+  }
   const names = entry.labels.join(", ");
   const prompt = `Muster connection update: the user securely connected ${names}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
   if (owner.bot.busy) {
-    pendingConnectorResumes.set(`${entry.threadId}:${entry.resumeKey}`, entry);
+    pendingConnectorResumes.set(`${entry.botId}:${entry.threadId}:${entry.resumeKey}`, entry);
     return;
   }
   if (owner.group) {
     const previous = groupQueues.get(owner.group.id) ?? Promise.resolve();
     const next = previous.then(async () => {
+      if (entry.cancelled) return;
       const current = connectorThread(entry.botId, entry.threadId);
-      if (!current?.group) return;
-      if (current.bot.busy) {
-        pendingConnectorResumes.set(`${entry.threadId}:${entry.resumeKey}`, entry);
+      if (!current?.group || !botAppsAllowed(current.bot)) {
+        connectorResumeJobs.delete(entry);
+        markConnectorResumeFailed(entry.botId, entry.threadId, entry.resumeKey, "Connected apps are no longer available to this bot");
         return;
       }
-      await runGroupMemberTurn(current.group.id, entry.botId, 0, new Set(), prompt);
+      if (current.bot.busy) {
+        pendingConnectorResumes.set(`${entry.botId}:${entry.threadId}:${entry.resumeKey}`, entry);
+        return;
+      }
+      try {
+        await runGroupMemberTurn(current.group.id, entry.botId, 0, new Set(), prompt, () => !entry.cancelled);
+      } finally { connectorResumeJobs.delete(entry); }
     });
     groupQueues.set(owner.group.id, next.catch((error) => {
-      markConnectorResumeFailed(entry.threadId, entry.resumeKey, error instanceof Error ? error.message : String(error));
+      connectorResumeJobs.delete(entry);
+      if (entry.cancelled) return;
+      markConnectorResumeFailed(entry.botId, entry.threadId, entry.resumeKey, error instanceof Error ? error.message : String(error));
     }));
     return;
   }
   void startTurn(entry.botId, prompt, {
     threadId: entry.threadId,
     connectorContinuation: true,
-    onDispatchError: (message) => markConnectorResumeFailed(entry.threadId, entry.resumeKey, message),
+    peerGuard: () => !entry.cancelled,
+    onDispatched: () => { connectorResumeJobs.delete(entry); },
+    onDispatchError: (message) => {
+      connectorResumeJobs.delete(entry);
+      if (!entry.cancelled) markConnectorResumeFailed(entry.botId, entry.threadId, entry.resumeKey, message);
+    },
   }).catch((error) => {
+    if (entry.cancelled) { connectorResumeJobs.delete(entry); return; }
     const message = error instanceof Error ? error.message : String(error);
-    if (/already working/i.test(message)) pendingConnectorResumes.set(`${entry.threadId}:${entry.resumeKey}`, entry);
-    else markConnectorResumeFailed(entry.threadId, entry.resumeKey, message);
+    if (/already working/i.test(message)) pendingConnectorResumes.set(`${entry.botId}:${entry.threadId}:${entry.resumeKey}`, entry);
+    else {
+      connectorResumeJobs.delete(entry);
+      if (!entry.cancelled) markConnectorResumeFailed(entry.botId, entry.threadId, entry.resumeKey, message);
+    }
   });
 }
 
 function maybeResumeConnectors(botId: string, threadId: string, resumeKey: string) {
-  const cards = connectorCards(threadId, resumeKey);
+  const owner = connectorThread(botId, threadId);
+  if (!owner || !botAppsAllowed(owner.bot)) return false;
+  const cards = connectorCards(botId, threadId, resumeKey);
   if (!cards.length || cards.some((message) => message.connector?.dismissed || message.connector?.status !== "connected")) return false;
   if (cards.every((message) => message.connector?.resumed)) return true;
   const labels = cards.map((message) => message.connector!.label);
   for (const message of cards) {
     store.patchMessage(threadId, message.id, { connector: { ...message.connector!, resumed: true, error: undefined } });
   }
-  dispatchConnectorResume({ botId, threadId, resumeKey, labels });
+  const entry = { botId, threadId, resumeKey, labels };
+  connectorResumeJobs.add(entry);
+  dispatchConnectorResume(entry);
   return true;
 }
 
@@ -3509,10 +3594,10 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
     box: { configured: vaultFlags ? Boolean(vaultFlags["box"]?.configured) : Boolean(cfg.box?.token) },
     opensandbox: { configured: vaultFlags ? Boolean(vaultFlags["opensandbox"]?.configured) : Boolean(cfg.opensandbox?.apiKey) },
     composio: {
-      configured: vaultFlags ? Boolean(vaultFlags["composio"]?.configured) : composio.configured(cfg),
-      mode: vaultFlags ? "direct" : composio.connectionMode(cfg),
+      configured: installationAppsFor(userId) && composio.configured(cfg),
+      mode: installationAppsFor(userId) ? composio.connectionMode(cfg) : "direct",
     },
-    openConnector: { configured: openconnector.configured(cfg) },
+    openConnector: { configured: installationAppsFor(userId) && openconnector.configured(cfg) },
     opencodeGo: { configured: vaultFlags ? Boolean(vaultFlags["opencodeZen"]?.configured) : Boolean(cfg.opencodeGo?.apiKey) },
     musterCloud: { configured: musterCloudEnabled(cfg), url: cfg.musterCloud?.url ?? "" },
     // hi.new agent-mail: the handle is a setting (shown), the token is a
@@ -3605,6 +3690,7 @@ async function reloadProviders() {
     stopPeerDispatch(bot.id);
   }
   peerCapabilities.clear();
+  connectorCapabilities.clear();
   bus.detachAll();
   // Disposal below kills healthy engines on purpose. The reaper must not
   // read those exits as crashes: its 5s tick races the settle loop further
@@ -4908,9 +4994,11 @@ let requestUserEmail = "";
         return json(res, 200, { botName: store.bot(toBotId)!.name, text: reply });
       }
       // Connector credentials deliberately have no peer authority.
-      if (!authorizedConnector(req.headers.authorization)) return json(res, 401, { error: "unauthorized" });
+      const connectorLease = connectorCapabilities.resolve(req.headers.authorization);
+      if (!connectorLease || !connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
       if (method === "POST" && path === "/api/internal/connectors/mcp") {
         const body = await readBody(req);
+        if (!connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
         const sessionId = Array.isArray(req.headers["mcp-session-id"])
           ? req.headers["mcp-session-id"][0]
           : req.headers["mcp-session-id"];
@@ -4919,6 +5007,7 @@ let requestUserEmail = "";
         const upstream = openconnector.configured(cfg)
           ? await openconnector.relayMcp(cfg, body, sessionId)
           : await composio.relayMcp(cfg, body, sessionId);
+        if (!connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
         const headers = upstream.transportSessionId
           ? {
               "content-type": upstream.contentType,
@@ -4934,6 +5023,8 @@ let requestUserEmail = "";
         const botId = String(body.botId ?? "");
         const threadId = String(body.threadId ?? "");
         const resumeKey = String(body.resumeKey ?? "");
+        if (botId !== connectorLease.botId || threadId !== connectorLease.threadId) return json(res, 403, { error: "conversation does not belong to this credential" });
+        if (!connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
         const slugs: string[] = Array.isArray(body.slugs)
           ? [...new Set<string>(body.slugs.map((slug: string) => String(slug).toLowerCase()).filter((slug: string) => CONNECTOR_SLUG.test(slug)))]
           : [];
@@ -4941,20 +5032,22 @@ let requestUserEmail = "";
         if (!owner) return json(res, 403, { error: "conversation does not belong to this bot" });
         if (!/^[\w-]{8,100}$/.test(resumeKey)) return json(res, 400, { error: "invalid resume key" });
         if (!slugs.length || slugs.length > 12) return json(res, 400, { error: "one to twelve valid apps are required" });
-        if (!connectedApps.configured(cfg) || owner.bot.composio === false) {
+        if (!botAppsAllowed(owner.bot)) {
           return json(res, 409, { error: "connected apps are not enabled for this bot" });
         }
         const connectionState: Record<string, { connected?: boolean }> = await connectedApps.connectionStatus(cfg, slugs).catch(() => ({}));
+        if (!connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
         const messageIds: string[] = [];
         for (const slug of slugs) {
           const existing = store.messagesFor(threadId).find(
-            (message) => message.connector?.resumeKey === resumeKey && message.connector.slug === slug,
+            (message) => message.connector?.resumeKey === resumeKey && message.connector.slug === slug && (!owner.group || message.from?.botId === botId),
           );
           if (existing) {
             messageIds.push(existing.id);
             continue;
           }
           const toolkit = await connectedApps.toolkitCard(cfg, slug);
+          if (!connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
           const connected = connectionState[slug]?.connected === true;
           const messageInput: Omit<Message, "id" | "at"> = {
             role: "bot",
@@ -6539,6 +6632,8 @@ let requestUserEmail = "";
       const busy = group.busyBotId ? store.bot(group.busyBotId) : undefined;
       const instance = busy ? registry.get(busy.modelSelection.instanceId) : undefined;
       peerCapabilities.revokeThread(group.threadId);
+      connectorCapabilities.revokeThread(group.threadId);
+      cancelConnectorResumes(undefined, group.threadId);
       await instance?.adapter.interruptTurn(group.threadId).catch(() => {});
       return json(res, 200, { ok: true });
     }
@@ -6738,6 +6833,10 @@ let requestUserEmail = "";
       }
       const bot = store.patchBot(m[1], patch);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (patch.composio === false) {
+        connectorCapabilities.revokeBot(bot.id);
+        cancelConnectorResumes(bot.id);
+      }
       const chiefChanges =
         body.chiefOfStaff === true
           ? store.setChiefOfStaff(bot.id)
@@ -7223,6 +7322,8 @@ let requestUserEmail = "";
       if (!updated) return json(res, 400, { error: "a bot keeps at least one task" });
       stopCleanups.invalidate(m[1]);
       peerCapabilities.revokeThread(m[2]);
+      connectorCapabilities.revokeThread(m[2]);
+      cancelConnectorResumes(undefined, m[2]);
       discardDelegations(commsBus, m[2]);
       const fresh = botWithThread(updated);
       broadcast({ kind: "bot", bot: fresh });
@@ -8323,6 +8424,7 @@ let requestUserEmail = "";
     // own-branded backend; Composio (managed broker or self-hosted key)
     // remains the fallback so no existing setup changes behavior.
     if (method === "GET" && path === "/api/connectors/catalog") {
+      if (!installationAppsFor(requestUserId)) return json(res, 200, { configured: false, cards: [], source: "curated", mode: "unavailable", reason: "Personal app connections are not available for this account yet. You can keep working without connecting an app." });
       if (openconnector.configured(cfg)) {
         const { cards, source } = await openconnector.listToolkits(cfg);
         return json(res, 200, { configured: true, mode: "muster-connector", source, cards });
@@ -8331,6 +8433,7 @@ let requestUserEmail = "";
       return json(res, 200, { configured: composio.configured(cfg), mode: composio.connectionMode(cfg), source, cards });
     }
     if (method === "GET" && path === "/api/connectors") {
+      if (!installationAppsFor(requestUserId)) return json(res, 200, { configured: false, services: {}, reason: "Account connections are not available yet" });
       const services = (url.searchParams.get("services") ?? "").split(",").filter(Boolean);
       if (openconnector.configured(cfg)) {
         const status = await openconnector.connectionStatus(cfg, services.length ? services : connectorCuratedSlugs());
@@ -8344,12 +8447,14 @@ let requestUserEmail = "";
     }
     m = path.match(/^\/api\/connectors\/([\w-]+)\/authorize$/);
     if (m && method === "POST") {
+      if (!installationAppsFor(requestUserId)) return json(res, 403, { error: "Account connections are not available yet" });
       return json(res, 200, openconnector.configured(cfg)
         ? await openconnector.authorizeService(cfg, m[1])
         : await composio.authorizeService(cfg, m[1]));
     }
     m = path.match(/^\/api\/connectors\/([\w-]+)$/);
     if (m && method === "DELETE") {
+      if (!installationAppsFor(requestUserId)) return json(res, 403, { error: "Account connections are not available yet" });
       return json(res, 200, openconnector.configured(cfg)
         ? await openconnector.removeService(cfg, m[1])
         : await composio.removeService(cfg, m[1]));
@@ -8365,12 +8470,19 @@ let requestUserEmail = "";
       const message = connectorMessage(m[1], threadId, m[2]);
       if (!message?.connector) return json(res, 404, { error: "no such connection request" });
       const connector = message.connector;
+      const cardAllowed = () => {
+        const owner = connectorThread(m![1], threadId);
+        return !!owner && botAppsAllowed(owner.bot) && installationAppsFor(requestUserId);
+      };
+      if (m[3] !== "dismiss" && !cardAllowed()) return json(res, 403, { error: "Connected apps are unavailable to this bot" });
       if (m[3] === "authorize" && method === "POST") {
         store.patchMessage(threadId, message.id, {
           connector: { ...connector, status: "authorizing", error: undefined, dismissed: false },
         });
         try {
-          return json(res, 200, await connectedApps.authorizeService(cfg, connector.slug));
+          const authorization = await connectedApps.authorizeService(cfg, connector.slug);
+          if (!cardAllowed()) return json(res, 403, { error: "Connected apps are no longer available to this bot" });
+          return json(res, 200, authorization);
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
           // inside a catch that rethrows the original error — the failure
@@ -8386,6 +8498,7 @@ let requestUserEmail = "";
       }
       if (m[3] === "status" && method === "GET") {
         const state = (await connectedApps.connectionStatus(cfg, [connector.slug]))[connector.slug];
+        if (!cardAllowed()) return json(res, 403, { error: "Connected apps are no longer available to this bot" });
         const failed = /failed|expired|revoked|error/i.test(state?.status ?? "");
         const next = {
           ...connector,

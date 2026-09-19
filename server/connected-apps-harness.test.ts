@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,6 +43,7 @@ beforeAll(async () => {
     const path = new URL(req.url ?? "/", "http://fixture").pathname;
     let payload: JsonValue;
     if (path === "/v1/providers") payload = [{ service: "googlecalendar", displayName: "Google Calendar", iconUrl: null, homepageUrl: "https://calendar.google.com" }];
+    else if (path === "/mcp") payload = {};
     else if (path === "/v1/apps/authenticated") payload = connected ? ["googlecalendar"] : [];
     else if (path === "/v1/connections/googlecalendar/connect" && req.method === "POST") payload = { authorizationUrl: "https://consent.example.test/calendar" };
     else { res.writeHead(404); res.end(); return; }
@@ -55,7 +56,7 @@ beforeAll(async () => {
   dump = join(directory, "engine.json");
   writeFileSync(join(data, "config.json"), JSON.stringify({
     openConnector: { url: runtimeUrl, token: runtimeToken },
-    instances: Object.fromEntries(["fake", "optout"].map((id) => [id, { driver: "grokAgent", config: { cli: join(root, "server/testing/fake-acp-cli.ts"), fullAuto: true, workspace: home }, environment: { FAKE_ACP_MODE: "happy", FAKE_ACP_DUMP: id === "fake" ? dump : `${dump}.optout` } }])),
+    instances: Object.fromEntries(["fake", "optout", "room"].map((id) => [id, { driver: "grokAgent", config: { cli: join(root, "server/testing/fake-acp-cli.ts"), fullAuto: true, workspace: home }, environment: { FAKE_ACP_MODE: id === "optout" ? "happy" : "echo-gated", FAKE_ACP_GATE_FILE: join(directory, id === "room" ? "release-room" : "release-turn"), FAKE_ACP_DUMP: id === "fake" ? dump : `${dump}.${id}` } }])),
   }));
   // Only this owned runtime is reachable from the server; no provider account.
   const guard = join(directory, "network.mjs");
@@ -96,6 +97,12 @@ it("mounts the configured runtime and connects a calendar card without any Compo
   const token = connector?.env.find((entry) => entry.name === "OMB_COMMS_TOKEN")?.value;
   expect(token).toBeTruthy();
   connectorToken = token;
+  const siblingResponse = await api("/api/bots", "POST", {});
+  const sibling = z.object({ bot: botWire }).parse(await siblingResponse.json()).bot;
+  const beforeImpersonation = requests.length;
+  const impersonation = await api("/api/internal/connectors/request", "POST", { botId: sibling.id, threadId: sibling.threadId, slugs: ["googlecalendar"], resumeKey: "foreign-conversation" }, token);
+  expect(impersonation.status).toBe(403);
+  expect(requests.length).toBe(beforeImpersonation);
   const cards = await api("/api/internal/connectors/request", "POST", { botId: bot.id, threadId: bot.threadId, slugs: ["googlecalendar"], resumeKey: "owned-calendar-request" }, token);
   expect(cards.status).toBe(200);
   const listing = await api("/api/bots");
@@ -112,6 +119,23 @@ it("mounts the configured runtime and connects a calendar card without any Compo
   expect(status.status).toBe(200);
   expect(await status.json()).toMatchObject({ connected: true });
   expect(requests).toContain("POST /v1/connections/googlecalendar/connect");
+  // Status queued a continuation while the real fake-engine turn is held.
+  // Revoking app permission must refuse retained credentials and cancel that queue.
+  expect((await api(`/api/bots/${bot.id}`, "PATCH", { composio: false })).status).toBe(200);
+  const beforeRevoke = requests.length;
+  expect((await api(`${prefix}/status?threadId=${bot.threadId}`)).status).toBe(403);
+  // No credential request while disabled: switching back on must not restore it.
+  expect((await api(`/api/bots/${bot.id}`, "PATCH", { composio: true })).status).toBe(200);
+  expect((await api("/api/internal/connectors/mcp", "POST", { jsonrpc: "2.0", id: 1, method: "tools/list" }, token)).status).toBe(401);
+  expect(requests.length).toBe(beforeRevoke);
+  writeFileSync(join(directory, "release-turn"), "release");
+  await expect.poll(async () => {
+    const response = await api("/api/bots");
+    const rows = z.object({ bots: z.array(botWire.extend({ messages: z.array(z.object({ id: z.string(), connector: z.object({ resumed: z.boolean().optional() }).optional() })) })) }).parse(await response.json());
+    return rows.bots.find((entry) => entry.id === bot.id)?.messages.find((entry) => entry.id === message.id)?.connector?.resumed;
+  }, { timeout: 10_000 }).toBe(false);
+  expect((await api(`/api/bots/${bot.id}`, "PATCH", { composio: true })).status).toBe(200);
+  expect((await api("/api/internal/connectors/mcp", "POST", { jsonrpc: "2.0", id: 2, method: "tools/list" }, token)).status).toBe(401);
 }, 30_000);
 
 it("keeps connected apps unavailable to a bot whose owner switched them off", async () => {
@@ -125,6 +149,52 @@ it("keeps connected apps unavailable to a bot whose owner switched them off", as
   expect(entries.some((entry) => entry.name === "composio")).toBe(false);
   const before = requests.length;
   const refused = await api("/api/internal/connectors/request", "POST", { botId: bot.id, threadId: bot.threadId, slugs: ["googlecalendar"], resumeKey: "owned-optout-request" }, connectorToken);
-  expect(refused.status).toBe(409);
+  expect(refused.status).toBe(401);
   expect(requests.length).toBe(before);
 }, 30_000);
+
+
+it("binds a room connector credential to its bot and room and retires it after completion", async () => {
+  const created = await api("/api/bots", "POST", {});
+  expect(created.status).toBe(201);
+  const bot = z.object({ bot: botWire }).parse(await created.json()).bot;
+  expect((await api(`/api/bots/${bot.id}`, "PATCH", { name: "RoomHelper", modelSelection: { instanceId: "room", model: "fake-acp-model" }, computer: "off" })).status).toBe(200);
+  const roomResponse = await api("/api/groups", "POST", { name: "Owned room", memberIds: [bot.id] });
+  expect(roomResponse.status).toBe(201);
+  const room = z.object({ group: z.object({ id: z.string(), threadId: z.string() }) }).parse(await roomResponse.json()).group;
+  expect((await api(`/api/groups/${room.id}/messages`, "POST", { text: "@RoomHelper review my calendar", expectedThreadId: room.threadId })).status).toBe(202);
+  await expect.poll(() => existsSync(`${dump}.room.mcp.json`), { timeout: 10_000 }).toBe(true);
+  const entries = serversWire.parse(JSON.parse(readFileSync(`${dump}.room.mcp.json`, "utf8")));
+  const token = entries.find((entry) => entry.name === "composio")?.env.find((entry) => entry.name === "OMB_COMMS_TOKEN")?.value;
+  expect(token).toBeTruthy();
+  expect(token).not.toBe(connectorToken);
+  expect((await api("/api/internal/agents", "GET", undefined, token)).status).toBe(401);
+  const before = requests.length;
+  expect((await api("/api/internal/connectors/request", "POST", { botId: bot.id, threadId: bot.threadId, slugs: ["googlecalendar"], resumeKey: "wrong-room-thread" }, token)).status).toBe(403);
+  expect(requests.length).toBe(before);
+  expect((await api("/api/internal/connectors/mcp", "POST", { jsonrpc: "2.0", id: 1, method: "tools/list" }, token)).status).toBe(200);
+  writeFileSync(join(directory, "release-room"), "release");
+  await expect.poll(async () => (await api("/api/internal/connectors/mcp", "POST", { jsonrpc: "2.0", id: 2, method: "tools/list" }, token)).status, { timeout: 10_000 }).toBe(401);
+  // A second room turn gets a different credential. Stop cancels the
+  // connection continuation rather than letting completion restart work.
+  unlinkSync(join(directory, "release-room"));
+  unlinkSync(`${dump}.room.mcp.json`);
+  expect((await api(`/api/groups/${room.id}/messages`, "POST", { text: "@RoomHelper connect my calendar", expectedThreadId: room.threadId })).status).toBe(202);
+  await expect.poll(() => existsSync(`${dump}.room.mcp.json`), { timeout: 10_000 }).toBe(true);
+  const nextEntries = serversWire.parse(JSON.parse(readFileSync(`${dump}.room.mcp.json`, "utf8")));
+  const nextToken = nextEntries.find((entry) => entry.name === "composio")?.env.find((entry) => entry.name === "OMB_COMMS_TOKEN")?.value;
+  expect(nextToken).toBeTruthy();
+  expect(nextToken).not.toBe(token);
+  const requested = await api("/api/internal/connectors/request", "POST", { botId: bot.id, threadId: room.threadId, slugs: ["googlecalendar"], resumeKey: "room-pending-connection" }, nextToken);
+  expect(requested.status).toBe(200);
+  const ids = z.object({ messageIds: z.array(z.string()) }).parse(await requested.json()).messageIds;
+  expect((await api(`/api/groups/${room.id}/interrupt`, "POST", {})).status).toBe(200);
+  writeFileSync(join(directory, "release-room"), "release after Stop");
+  await expect.poll(async () => {
+    const response = await api("/api/bots");
+    const rows = z.object({ groups: z.array(z.object({ id: z.string(), busyBotId: z.string().nullable().optional(), messages: z.array(z.object({ id: z.string(), text: z.string().optional(), connector: z.object({ resumed: z.boolean().optional() }).optional() })) })) }).parse(await response.json());
+    const saved = rows.groups.find((entry) => entry.id === room.id);
+    return { busy: Boolean(saved?.busyBotId), resumed: saved?.messages.find((message) => ids.includes(message.id))?.connector?.resumed };
+  }, { timeout: 10_000 }).toEqual({ busy: false, resumed: false });
+  expect((await api("/api/internal/connectors/mcp", "POST", { jsonrpc: "2.0", id: 3, method: "tools/list" }, nextToken)).status).toBe(401);
+});

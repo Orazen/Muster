@@ -85,3 +85,36 @@ permissions, malformed/partial responses, pagination, recurrence, DST and all-da
 events, plus no write calls or automatic submission. Follow with deterministic
 free-slot checks and grounded priorities; persona text alone is insufficient.
 This is a source-audit finding and implementation plan, not provider acceptance.
+
+### Calendar grant implementation notes (19 September research)
+
+Google recommends requesting permissions in context and checking which scopes
+were actually granted. Combined authorization can cover scopes granted across
+clients in the same project; revoking such a token revokes all of its combined
+scopes. Therefore separate Calendar token storage alone does not prove Drive
+revocation isolation. Preserve the Drive row, verify granted scopes, and test
+Calendar connect/disconnect alongside working Drive recovery before advertising
+independent recovery. Source: [Google web-server OAuth](https://developers.google.com/identity/protocols/oauth2/web-server).
+
+Use the verified Google `sub` as provider identity, not email; validate issuer,
+audience, expiry and the flow nonce when accepting an ID token. Source:
+[Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect).
+Muster's own session remains the owner of the grant. Bind consent to that session
+and a one-use flow; do not copy the Drive helper's reusable timestamp-only state
+or its shared login-account token overwrite into the new Calendar adapter.
+
+Implementation order after the connector boundary gate: account-owned consent
+and grant storage; calendar selection and complete day reads; deterministic
+free-slot validation; explicit planning draft using the verified agenda. Empty
+pages still require following nextPageToken. Source: [Calendar event listing](https://developers.google.com/workspace/calendar/api/v3/reference/events/list).
+Real consent/refresh/revoke acceptance remains an owner-assisted gate.
+
+### Loop132 prerequisite verification
+
+Hosted installation connector isolation and bot/thread/turn credential lifetime
+now pass owned HTTP harnesses: owner cases **9/9**, lifecycle cases **3/3**,
+capability unit cases **14/14**. Full suite **300 files / 4371 passed / 8 skipped**;
+browser **31/31**, packaged-server **14/14**. Secondary users receive an explicit
+unavailable reason; Stop/opt-out cancel queued connector continuations. These
+fake-provider receipts close the reproduced installation authority defects;
+per-account Google Calendar consent and real daily planning remain unverified.

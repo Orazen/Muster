@@ -8,8 +8,20 @@ BYOK, free beta. Public expansion requires passing core flows and five testers
 completing daily planning on three separate days each. This is a decision record,
 not a new implementation or verification claim.
 
-Updated 19 September 2026 (Loop131). This snapshot takes precedence over historical roadmap
+Updated 19 September 2026 (Loop132). This snapshot takes precedence over historical roadmap
 status; the latest owner request takes precedence over this file.
+
+**Loop132:** installation connections now require the hosted primary owner;
+connector credentials are scoped to the active bot/thread/turn and revalidated
+across async work. Opt-out and Stop revoke credentials and queued continuations.
+Unavailable connections show their actual reason in the existing panel.
+Full **300 files / 4371 passed / 8 skipped / 0 failed** (449.92s), browser
+**31/31**, packaged-server **14/14**, focused **72/72**, build/types/lint pass.
+Compared with Loop131: +2 unit files, +24 passing tests, +1 browser test.
+The first browser gate exposed a backup fixture request-count race; corrected
+fixture boundaries retain stale-result and zero-write assertions. No backup
+product change. Real Calendar consent/day reading is next; provider, native,
+production and whole-codebase security acceptance are not established here.
 
 **Loop131:** added the Daylight personal-assistant template and an explicit
 Plan my day first-task draft. Reproduced and fixed Agent Hub clipping off-screen

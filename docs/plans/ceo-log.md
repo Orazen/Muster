@@ -5991,3 +5991,65 @@ separate account-scoped read-only Calendar grant and complete day reader,
 preserving Drive credentials. Details and evidence boundaries are in the beta
 acceptance matrix. Persona instructions do not establish provider isolation or
 calendar-planning correctness.
+
+## Loop132 — installation connector ownership and scoped authority
+
+Reproduce hosted non-owner access to installation connections before adding
+per-user Calendar. Parent owns server/index.ts and loop/current-state docs.
+Parallel test agent owns only a new server/connector-ownership-harness.test.ts;
+capability agent owns only new server/connector-capabilities.ts and .test.ts.
+Existing connected-apps-harness.test.ts remains parent-owned for lifecycle
+updates. Keep connector backends and layout stable; no real provider traffic.
+
+Loop132 scope extension: parent owns src/components/PluginsPanel.tsx and new
+e2e/connector-permissions.e2e.spec.ts so a denied hosted capability shows its
+actual reason instead of telling the user to restart or configure installation
+credentials. Reuse the existing panel and layout.
+
+Reproductions: local bot credential accepted a foreign bot/thread card request
+(HTTP 200 instead of 403); hosted secondary status/catalog/authorize/delete and
+configuration exposed installation connectors (four failing regression cases,
+primary control passed). Fixed with primary-owner gating and a separate
+per-dispatch connector capability registry using the existing tested lease
+lifecycle. Internal calls bind bot/thread from the credential; current owner,
+permission and conversation are rechecked before and after upstream awaits.
+Direct/group tool mounting and model capability hints share the owner gate.
+
+Review additionally caught off→on credential revival and Stop-triggered queued
+resumption. Permission revocation now immediately retires credentials and
+cancels pending/chained continuation jobs; Stop does the same. Canceled room
+continuations carry the guard into mention chains. Card identities and resume
+keys are scoped to the initiating room member.
+
+Focused evidence so far: **6 files / 72 passed**; account harness **9/9** uses
+synthetic per-user fake engines and real hosted HTTP auth/dispatch; lifecycle
+harness **3/3** covers cross-bot/thread rejection, off→on without an intervening
+credential request, repeated room token rotation/completion, Stop cancellation
+and peer-token namespace rejection. Unit capability tests **14/14** cover owner
+defaults, expiry, rotation and provider/turn event matching. Fresh build,
+project/server/e2e types and full lint pass. New 320px panel browser test **1/1**.
+Full gates pending; no real provider consent, whole-codebase security claim,
+native release or deployment receipt.
+
+Loop132 browser gate initially **30 passed / 1 failed**. Trace analysis proved
+backup fixture count contamination: two RecoveryCard capability requests ran
+before Settings, then the intended five Settings requests ran (two mount, two
+reopen, one retry). Extend parent ownership to e2e/workspace-backup.e2e.spec.ts
+to await the sidebar's fulfilled recovery capability and count only subsequent
+Settings requests; retain all stale-response, disabled-write and zero-write
+assertions. The sibling error/malformed/retry test likewise counts its four
+Settings requests instead of including the sidebar probe. No backup product
+code changes. Original trace preserved under .omb-scratch/loop132.
+Packaged-server rebuild and smoke **14/14** passed.
+
+Browser correction verified: both focused backup cases **2/2** pass; final
+full browser run **31/31** passes (4.0m). Fresh packaged server smoke **14/14**.
+Full unit gate now running in /tmp/muster-loop132-unit.log. No timeout or retry
+policy was loosened. All user/demo services and unrelated snapshots preserved.
+
+Final full unit gate: **300 files / 4371 passed / 8 skipped / 0 failed** in
+449.92s; +2 files and +24 passing tests over Loop131. Final browser **31/31**,
+packaged-server **14/14**, focused **72/72**, fresh build, project/server/e2e
+checks and lint pass. No tests skipped beyond the existing eight. These are
+owned fake-provider/local receipts, not real provider or native acceptance.
+Next slice: account-owned Calendar consent and grants, preserving Drive storage.
