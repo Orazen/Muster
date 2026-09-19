@@ -73,6 +73,7 @@ import { CallButton, CallOverlay } from "./CallView";
 import { cn } from "@/lib/cn";
 import { useFocusMessage } from "@/lib/focus-message";
 import { webhookMessageView } from "@/lib/webhook-message";
+import { describeProviderError, providerErrorView } from "@/lib/provider-error";
 import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "@/lib/bottom-follow";
 import {
   TRANSCRIPT_WINDOW_SIZE,
@@ -347,6 +348,10 @@ function Bubble({
   const via = !user && message.kind === "text" ? message.via : undefined;
   const viaInstance = via ? state.instances.find((i) => i.instanceId === via.instanceId) : undefined;
   const text = message.text ?? "";
+  // Some CLIs echo the provider's rejection envelope as the whole reply;
+  // render the sentence, keep the raw bytes one copy-click away.
+  const providerView = !user && message.kind === "text" ? providerErrorView(text) : null;
+  const displayText = providerView ? describeProviderError(providerView) : text;
   const webhookView = user ? webhookMessageView(text) : null;
   const visibleText = webhookView?.task ?? text;
   const collapsible =
@@ -418,8 +423,8 @@ function Bubble({
               )}
             </>
           ) : (
-            <MessageBoundary fallbackText={text}>
-              <MessageBody text={text} markdown />
+            <MessageBoundary fallbackText={displayText}>
+              <MessageBody text={displayText} markdown />
             </MessageBoundary>
           )}
         </div>
