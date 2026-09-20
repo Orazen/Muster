@@ -213,3 +213,23 @@ struct FleetWidget: Widget {
     }
 }
 
+// MARK: - Entry point
+
+// A WidgetKit extension must ship a @main entry. Without it the Swift
+// compiler emits no __swift5_entry section in the appex binary and App
+// Store validation rejects the build with error 90896 ("__swift5_entry
+// section is missing") — the failure that stopped the first TestFlight
+// upload. This file compiles into BOTH the app (sources: App) and the
+// widget extension, so the bundle is guarded by the widget-only
+// compilation condition set in project.yml; the app module keeps its
+// own @main in CompanionApp.swift. The bundle also gives the future
+// Live Activity a place to register beside the widget.
+#if WIDGET_EXTENSION
+@main
+struct MusterFleetWidgetBundle: WidgetBundle {
+    var body: some Widget {
+        FleetWidget()
+    }
+}
+#endif
+

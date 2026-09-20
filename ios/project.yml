@@ -296,6 +296,12 @@ targets:
         CURRENT_PROJECT_VERSION: "5"
         SWIFT_VERSION: "5.9"
         SKIP_INSTALL: YES
+        # This target compiles App/FleetWidget.swift, which is also compiled
+        # into the app (whose sources are all of App/). The condition gates
+        # the extension's @main WidgetBundle so each module gets exactly one
+        # entry point — without it the appex shipped with no __swift5_entry
+        # section and App Store validation rejected the upload (error 90896).
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: WIDGET_EXTENSION
     info:
       path: App/FleetWidgetInfo.plist
       properties:
