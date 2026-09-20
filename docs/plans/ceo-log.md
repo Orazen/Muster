@@ -6788,3 +6788,19 @@ short-lived ES256 JWTs (~20 min); re-mint per batch of calls. Xcode Cloud's
 exit-70 exports also involved a beta Xcode 27 (27A266a) runner; with the
 widget fix on main (2cb4795) the next Xcode Cloud run should export — the
 local altool path now delivers TestFlight regardless.
+## Loop148 — GAIA-style companion onboarding with cloud Google sign-in (20 September 2026)
+
+Owner ask: adopt GAIA's welcome style and GAIA-UI's chat language across Muster, add Google sign-in to MusterMobile, verify on the simulator.
+
+Shipped:
+- **Web GAIA-UI adoption landed earlier in this loop** (verified on disk, previously committed): `src/components/ui/wave-spinner.tsx`, `raised-button.tsx`, `stat-row.tsx`, GAIA iMessage bubble grouping + tool-calls section in ChatView, GAIA-styled Composer.
+- **server/desktop-auth.ts**: the desktop OAuth handoff now accepts the exact companion scheme target `muster://oauth/finish` beside loopback redirects (`isHandoffRedirect`, `handoffFinishURL` — the scheme URL IS the finish endpoint, no append). Fixed allowlist; arbitrary schemes/lookalikes rejected by test.
+- **ios/App/CloudAuth.swift**: `ASWebAuthenticationSession` (ephemeral) → cloud `/desktop-auth/start` → Google → cloud 302 to `muster://oauth/finish#code=…` → exchange against `/api/desktop-auth/exchange`. Stores identity only (email/name); no token exists to store. Idempotent against the completion-handler + onOpenURL double delivery.
+- **ios/App/WelcomeView.swift**: dark hero, animated flower, one primary action per step, drawn Google glyph; both buttons complete onboarding (`session.welcomeSeen`).
+- **Routing contract**: RootView shows the welcome only when unpaired AND not seen; a pending `muster://pair` deep link ALWAYS wins (owned UI tests and real invites never intercepted). `onOpenURL` routes `muster://oauth/finish` to CloudAuth, everything else to pairing.
+
+Receipts: owned rig on iPhone 17 Pro simulator — **5/5 phases green** (welcome, welcome-pair, pair, identity, walkie), the two new WelcomeAcceptance tests prove render, pair-button routing + persistence, and clean Google cancel. Swift tests 390/390. Watch scheme builds. Both tsc gates exit 0; oxlint 0/0; vitest **321 files / 4810 passed / 8 skipped / 0 failed** (desktop-auth-route.test.ts updated to the combined handoff gate + happy-path scheme bounce to Google).
+
+Deliberately not taken: codex-apple-watch-style watch UI redesign (the watch already has dictation + one-tap TTS with owned test ids; a redesign deserves its own slice + rig), sign-in-gated features (identity ≠ authorization, pairing remains the trust root).
+
+Committed 616e193, merged to origin/main as 0e0ff2c. www/* modifications in the tree are another agent's concurrent work — untouched.
