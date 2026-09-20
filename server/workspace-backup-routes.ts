@@ -337,6 +337,27 @@ const routes: BackupRoute[] = [
     },
   },
   {
+    match: (_method, path) => path === "/api/workspace/google/snapshots" && _method === "GET",
+    handle: async (req, res, ctx) => {
+      if (!ctx.requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
+      try {
+        const binding = await ctx.session?.();
+        if (!binding || binding.userId !== ctx.requestUserId) return json(res, 401, { error: "Sign in again." });
+        const guard = async () => {
+          const current = await ctx.session?.();
+          if (!current || current.userId !== binding.userId || current.sessionId !== binding.sessionId) throw new Error("Drive session changed");
+        };
+        const access = await accountDrive.accountDriveAccess(getDb(), binding.userId, requestOrigin(req), guard);
+        await access.assertCurrent();
+        const snapshots = await accountDrive.driveListSnapshotsFor(access.grant.accessToken, access.assertCurrent);
+        await access.assertCurrent();
+        json(res, 200, { snapshots });
+      } catch (e) {
+        json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    },
+  },
+  {
     match: (method, path) => method === "POST" && (path === "/api/workspace/google/push" || path === "/api/workspace/google/pull"),
     handle: async (req, res, ctx) => {
       // Session-bound: the push/pull transport moves this user's own bundle
@@ -359,12 +380,15 @@ const routes: BackupRoute[] = [
           const payload = bundleV2.buildPayloadV2({ dataDir: ctx.dataDir(), appVersion: ctx.appVersion() });
           const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
           await access.assertCurrent();
-          const fileId = await accountDrive.drivePushFor(accessToken, bytes.toString("utf8"), access.assertCurrent);
+          const snapshotId = await accountDrive.drivePushFor(accessToken, bytes.toString("utf8"), access.assertCurrent);
           await access.assertCurrent();
           syncState.stampSync("local", "push", "google-account");
-          return json(res, 200, { uploaded: fileId, counts: payload.counts, skipped: payload.skipped ?? [] });
+          return json(res, 200, { uploaded: snapshotId, counts: payload.counts, skipped: payload.skipped ?? [] });
         }
-        const payloadText = await accountDrive.drivePullFor(accessToken, access.assertCurrent);
+        const snapshotId = isText(body?.snapshotId) ? body.snapshotId : undefined;
+        const payloadText = snapshotId !== undefined
+          ? await accountDrive.driveDownloadSnapshotFor(accessToken, snapshotId, access.assertCurrent)
+          : await accountDrive.drivePullFor(accessToken, access.assertCurrent);
         await access.assertCurrent();
         if (!payloadText) return json(res, 404, { error: "no portable backup exists in your Google Drive yet — push from the other device first" });
         const out = stageV2Restore(passphrase, payloadText, "google-account", ctx.dataDir());
