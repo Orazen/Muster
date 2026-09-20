@@ -15,6 +15,10 @@
 //                     liveness reaper exists for)
 //                   | quota-error (fail session/prompt with an explicit HTTP 429 quota error)
 //                   | quota-after-progress (emit a tool call, then the quota error)
+//                   | payment-error (fail session/prompt with droid's exact
+//                     live 402 envelope: useless message, actionable detail
+//                     in `data` — the regression frame for the core's
+//                     data-composing and shared classifier)
 //                   | fallback-healthy (happy, except explicit FAKE_FALLBACK_HANG prompt holds)
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
@@ -322,6 +326,13 @@ function handle(msg: any) {
     }
     case "session/prompt": {
       peerReceipt("prompt.json", { pid: process.pid, received: true });
+      if (mode === "payment-error") {
+        // Verbatim shape from a real droid 0.196 session (harness ndjson,
+        // 2026-09-19): the message names nothing, `data` carries the HTTP
+        // status and the text a human needs.
+        out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "Internal error: Agent error", data: '402 {"detail":"No active subscription found.\\nSubscribe to start using Droid.","status":402,"title":"Payment Required","displayToUser":true,"requestId":"fra1::regression"}' } });
+        return;
+      }
       if (mode === "quota-error" || mode === "quota-after-progress") {
         if (mode === "quota-after-progress") {
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "quota-progress", title: "Owned work already started" } } });

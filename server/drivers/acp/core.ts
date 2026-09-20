@@ -46,6 +46,27 @@ const isFlag = (v: JsonValue): v is boolean => v === true || v === false;
 const isCount = (v: JsonValue): v is number =>
   !(v instanceof Object) && v !== null && !isText(v) && !isFlag(v);
 
+/** Classify a JSON-RPC error frame by its `data` payload — the shared floor
+ * under every ACP support's own classifier. CLIs relay upstream HTTP errors
+ * as the data string (droid: `"402 {\"detail\":\"No active subscription…\"}"`),
+ * and the status code in there is the truthful signal: 401/403 are
+ * credentials, 402 is a dead subscription, 429 is quota. A support's
+ * classifier still wins; this only runs when it has no opinion. */
+export function classifyJsonRpcError(error: { message?: string; code?: JsonValue }): ProviderErrorCode | undefined {
+  const haystack = `${error?.message ?? ""}`;
+  const statusMatch = /\b(401|402|403|429)\b/.exec(haystack);
+  if (statusMatch) {
+    const status = statusMatch[1];
+    if (status === "402") return "inactive_subscription";
+    if (status === "429") return "quota_or_region_restriction";
+    return "invalid_credentials"; // 401 / 403
+  }
+  if (/payment required|no active subscription|subscription expired/i.test(haystack)) return "inactive_subscription";
+  if (/unauthorized|invalid api key|not signed in|authentication/i.test(haystack)) return "invalid_credentials";
+  if (/quota exceeded|rate limit/i.test(haystack)) return "quota_or_region_restriction";
+  return undefined;
+}
+
 /** Spawn environment: a present key means the variable is set, an absent key
  * means unset. PATH is pinned last so it always wins over inherited values. */
 function withPath(base: ChildEnvironment, path: string) {
@@ -487,7 +508,22 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 rpcPending.delete(msg.id);
                 if (pend.timer) clearTimeout(pend.timer);
                 if (msg.error) {
-                  const error = new Error(msg.error.message ?? JSON.stringify(msg.error));
+                  // The CLI's own `message` is often a useless envelope
+                  // ("Internal error: Agent error") while the actionable
+                  // detail — the HTTP status and its human text — rides in
+                  // `data` (droid: `"402 {\"detail\":\"No active subscription…\"}"`).
+                  // Compose both so the error card names the real reason.
+                  // SAFETY: msg is JSON.parse output, so isText decides the
+                  // string members exactly as a primitive test would.
+                  const detail = isText(msg.error.data) && msg.error.data.trim()
+                    ? msg.error.data.trim()
+                    : msg.error.data !== undefined
+                      ? JSON.stringify(msg.error.data)
+                      : "";
+                  const base = isText(msg.error.message) && msg.error.message.trim()
+                    ? msg.error.message.trim()
+                    : "request failed";
+                  const error = new Error(detail && !base.includes(detail) ? `${base}: ${detail}` : base);
                   Object.assign(error, { code: msg.error.code, data: msg.error.data });
                   pend.reject(error);
                 } else {
@@ -666,7 +702,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               const message = e instanceof Error ? e.message : String(e);
               // SAFETY: thrown values here are Error-like from this runtime or
               // the RPC layer; classification only inspects `message`/`code`.
-              const code = support.classifyError?.(e as { message?: string; code?: JsonValue });
+              const code = support.classifyError?.(e as { message?: string; code?: JsonValue })
+                ?? classifyJsonRpcError(e as { message?: string; code?: JsonValue });
               // Authentication setup is a user action, not a retry. The
               // classifier is preferred; loginNote remains a compatibility
               // fallback for existing ACP supports.

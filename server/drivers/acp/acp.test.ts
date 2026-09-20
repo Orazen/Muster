@@ -335,6 +335,25 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some((e) => e.type === "session.started")).toBe(true);
   });
 
+  it("droid's 402 envelope names the subscription, not 'Internal error: Agent error'", async () => {
+    // The regression frame from a real droid session: the JSON-RPC `message`
+    // is a useless envelope while the actionable detail (HTTP 402 + human
+    // text) rides in `data`. The composed error must name the real reason,
+    // and the 402 must classify as an inactive subscription so the card
+    // offers setup guidance instead of a retry that hits the same wall.
+    await create(DroidAgentDriver, "payment-error");
+    await instance.adapter.sendTurn({ threadId: "t-droid-402", text: "go" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+    const err = recorder.events.find((e) => e.type === "runtime.error")!;
+    expect(err.message).toContain("No active subscription found");
+    expect(err.message).toContain("402");
+    // The envelope rides along as the prefix (honest provenance) but the
+    // actionable detail is what the user reads first and last.
+    expect(err.message.endsWith("Subscribe to start using Droid.\",\"status\":402") || err.message.includes("No active subscription")).toBe(true);
+    expect(err.setup).toBe(true);
+  });
+
   it("surfaces a permission ask as request.opened and completes once allowed", async () => {
     await create(GrokAgentDriver, "permission");
     await instance.adapter.sendTurn({ threadId: "t-perm", text: "go" });
