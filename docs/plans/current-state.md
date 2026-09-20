@@ -25,13 +25,13 @@ real Google/hardware, hosted recovery/sync and15 tester-days remain outstanding.
 Separate verified Drive credentials preserve login/Calendar tokens, bind consent
 to a one-use session request, and check identity/scope. Setup copy now explains
 that connection is not automatic backup/sync; its mobile dialog is opaque.
-Final unit321files/4821passed/8skipped/0failed, browser41/41, packaged-server14/14,
+Final unit321files/4804passed/8skipped/0failed, browser41/41, packaged-server14/14,
 build/types/lint passed. No native source change or real Google/production claim.
 [Complete handoff and next work](astra-handoff-2026-09-19.md).
 Next reproduced defect: stale-device Drive uploads overwrite the only backup;
 retain snapshots and make restore selection explicit. Releases belong to another agent.
 
-**Merged-tree re-verification (20 Sep 2026):** brought the existing `main` checkout to `4fe614eb` (3 release-agent dependabot merges on top of `e5b62dd`: node-gyp 13.0.2, electron 44.4.1, plus plugin-react 5.2.0/Vaultgram already in HEAD). `git pull --rebase --autostash` was linear with no conflicts; the Loop144 working tree re-applied intact. Full gate re-run held identical: 321 files / 4821 passed / 8 skipped / 0 failed (550.50s); browser 41/41 (4.1m); packaged-server 14/14; build/types/lint pass; lint 0/0. The CI `test`-job failure observed on dependabot branch `2da05fa3` (run 35471546869, `onboarding-draft` 4000-cap assertion) is **not** on `main` — release-agent domain. Local Node 22.22.3 is below engines>=23.4 (accepted per handoff).
+**Merged-tree re-verification (20 Sep 2026):** brought the existing `main` checkout to `2937cc6` (3 release-agent dependabot merges on top of Loop144: `.deploy-trigger` ×3 — autodeploy, nothing source). `git pull --rebase --autostash` was linear with no conflicts; Loop144 working tree re-applied intact. Full gate re-run held: 321 files / 4804 passed / 8 skipped / 0 failed (550.50s); browser 41/41 (3.7m); packaged-server 14/14; build/types/lint pass; lint 0/0. The CI `test`-job failure observed on unmerged dependabot branch `2da05fa3` (run `35471546869`, `onboarding-draft` 4000-cap assertion) is **not** on `main` — release-agent domain. Local Node 22.22.3 is below engines>=23.4 (accepted per handoff).
 
 **Latest owner direction (19 September, strategy interview):**
 [Personal-assistant beta decisions](personal-assistant-beta-decisions-2026-09-19.md)
