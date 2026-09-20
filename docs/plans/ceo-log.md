@@ -6667,3 +6667,14 @@ revision `null`, **attestation `false`**); web `453b2f23-e6ce-4963-ad5b-c5d09ac5
 a push is not a deployment.** Verified served identity recorded; no deploy claimed.
 Demo on 8845 + release agent's `/tmp/muster-depwork` typecheck (PID 19161) left
 untouched; automation stays paused.
+## Loop145 — v1.13.0 released: signed, notarized, stapled, byte-verified (20 September 2026)
+
+Owner authorized the local release. Corrected a false claim from the gate report: notarization WAS configured all along — the `muster-notary` notarytool keychain profile exists (App Store Connect API key AuthKey_Z8854APF6U, used 17 Sep for 1.12.3-intel); only `electron-builder.yml`'s notarize flag is off because notarization runs via scripts/notarize-mac.sh after the build, per that file's own comment.
+
+Flow executed exactly as Loops 101/110: worktree at tip a3db744 (171 commits past 1.12.3), version 1.13.0, CSC_IDENTITY_AUTO_DISCOVERY=true + MAC_SIGNING_IDENTITY="Developer ID Application: THARUN RAMAGIRI (7375K23WFU)" package:mac:arm64 / :x64; hardened runtime + Developer ID chain verified before submission; notarize-mac.sh per leg → Apple status **Accepted** both legs, stapled, stapler validate OK; spctl on the arm64 app: **accepted / source=Notarized Developer ID** (the check 1.12.1 failed, 1.12.3 passed, 1.13.0 passes).
+
+Payload published to GitHub release v1.13.0 (public, not draft, 14 assets — same layout as v1.12.3): both DMGs + zips + blockmaps, arm64-first latest-mac.yml covering all four macOS artifacts, muster-cli.mjs (self-reports 1.13.0 / source a3db744c…), versioned CLI copy, SHA256SUMS-cli/darwin-arm64/darwin. Post-publish byte check: public Muster-1.13.0.dmg download sha256 ee81d5de… == published SHA256SUMS entry. repo package.json bumped to 1.13.0 on main.
+
+Known gaps, unchanged and stated plainly: the web download mirror still serves 1.12.1 (VPS SSH owner-gated; the in-app updater on the installed 1.12.3 also points at GitHub releases, so users on the notarized chain can update via in-app update to 1.13.0 — the updater feed on the release is valid); Windows/Linux legs remain impossible without Actions billing; iOS TestFlight remains blocked on Xcode Cloud authorization (Archive runs cancelled until the owner authorizes the integration in App Store Connect → Settings → Integrations → Xcode Cloud).
+
+Owner setup instructions delivered: (1) Xcode Cloud authorization click, (2) VPS SSH access for mirror promotion, (3) Actions billing for CI legs.
