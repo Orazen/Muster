@@ -3,7 +3,7 @@
 // not verified by the old Drive callback. Users explicitly reconnect Drive.
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { uploadBundle, downloadBundle, BUNDLE_V2_NAME } from "./drive-sync.ts";
+import { uploadSnapshot, downloadLatestSnapshot, listSnapshots, downloadSnapshot, type SnapshotInfo } from "./drive-sync.ts";
 import { getDriveGrant, isDriveGrantCurrent, createDriveState, saveDriveGrant, type DriveStateBinding, type DrivePendingState } from "./drive-grants.ts";
 import { getDriveAccess } from "./drive-access.ts";
 import { GoogleDriveOAuthProvider } from "./drive-oauth.ts";
@@ -58,8 +58,20 @@ export async function completeDriveConsent(db: DatabaseSync, binding: DriveState
 }
 
 export async function drivePushFor(accessToken: string, payload: string, guard?: () => Promise<void>): Promise<string> {
-  return (await uploadBundle(accessToken, payload, BUNDLE_V2_NAME, guard)).id;
+  // Immutable v2 upload: always POST a fresh snapshot so a stale device can
+  // never clobber the newest backup. The returned id is the snapshot's name.
+  return (await uploadSnapshot(accessToken, payload, guard)).id;
 }
 export async function drivePullFor(accessToken: string, guard?: () => Promise<void>): Promise<string | null> {
-  return downloadBundle(accessToken, BUNDLE_V2_NAME, guard);
+  // Restore picks the newest snapshot by its Drive id (list + download-by-id),
+  // so a stale later upload can never win simply by being newer.
+  return downloadLatestSnapshot(accessToken, guard);
+}
+/** List the user's immutable v2 snapshots for explicit restore selection. */
+export async function driveListSnapshotsFor(accessToken: string, guard?: () => Promise<void>): Promise<SnapshotInfo[]> {
+  return listSnapshots(accessToken, guard);
+}
+/** Download a specific snapshot chosen by the user for restore. */
+export async function driveDownloadSnapshotFor(accessToken: string, snapshotId: string, guard?: () => Promise<void>): Promise<string> {
+  return downloadSnapshot(accessToken, snapshotId, guard);
 }

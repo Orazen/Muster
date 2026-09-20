@@ -14,10 +14,6 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe.each([
   { name: "manual Drive connection", push: async (payload: string) => (await uploadBundle("test-access", payload)).id, pull: () => downloadBundle("test-access"), file: "muster-workspace.enc" },
-  // The account transport moves the v2 bundle under its own name: a
-  // Google-login backup must never clobber the manual connection's v1
-  // file, which an older build may still need for its own restore flow.
-  { name: "Google account connection", push: (payload: string) => drivePushFor("test-access", payload), pull: () => drivePullFor("test-access"), file: "muster-workspace-v2.enc" },
 ])("$name", ({ push, pull, file }) => {
   it("creates only after a complete empty search and includes the app folder", async () => {
     fetchMock.mockResolvedValueOnce(Response.json({ files: [] }));
@@ -191,14 +187,40 @@ describe("Explicit account Drive token selection", () => {
 });
 
 
-describe("Account consent revalidation around Drive requests", () => {
-  it("does not upload after consent changes during the list request", async () => {
-    let current = true;
-    fetchMock.mockImplementation(async () => { current = false; return Response.json({ files: [] }); });
-    await expect(drivePushFor("test-access", "encrypted", async () => { if (!current) throw new Error("consent changed"); })).rejects.toThrow("consent changed");
+describe("Account Drive v2 routing and consent", () => {
+  it("push POSTs a new snapshot without a prior Drive list search", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ id: "snap-x", name: "muster-workspace-v2-1000-ab.enc" }));
+    expect(await drivePushFor("test-access", "encrypted-payload")).toBe("snap-x");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][1]?.method).toBeUndefined();
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("POST");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name");
   });
+
+  it("does not upload after consent changes before the snapshot POST", async () => {
+    let guarded = false;
+    const guard = vi.fn(async () => { guarded = true; throw new Error("consent changed"); });
+    await expect(drivePushFor("test-access", "encrypted", guard)).rejects.toThrow("consent changed");
+    expect(guarded).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+  });
+
+  it("does not download after consent changes before the snapshot list", async () => {
+    let guarded = false;
+    const guard = vi.fn(async () => { guarded = true; throw new Error("consent changed"); });
+    await expect(drivePullFor("test-access", guard)).rejects.toThrow("consent changed");
+    expect(guarded).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+  });
+
+  it("pull lists snapshots then downloads the newest by id", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ files: [{ id: "newest", name: "muster-workspace-v2-2000-0b.enc", createdTime: "t2", size: "5" }] }));
+    fetchMock.mockResolvedValueOnce(new Response("downloaded-payload"));
+    expect(await drivePullFor("test-access")).toBe("downloaded-payload");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("q")).toBe("name contains 'muster-workspace-v2-' and trashed = false");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("https://www.googleapis.com/drive/v3/files/newest?alt=media");
+  });
+
   it("does not follow provider redirects with a credential", async () => {
     fetchMock.mockResolvedValue(Response.json({ files: [] }));
     expect(await drivePullFor("test-access")).toBeNull();

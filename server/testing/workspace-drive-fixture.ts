@@ -63,6 +63,20 @@ function installTransport(settingsPath: string): void {
     if (!credentialsMatch) throw new Error("Synthetic Drive credential boundary mismatch");
   };
   const json = (body: string, status = 200) => new Response(body, { status, headers: { "content-type": "application/json" } });
+  const snapshotsManifest = () => owned("snapshots/manifest.json");
+  const snapshotEntrySchema = z.object({ id: z.string(), name: z.string(), createdTime: z.string(), size: z.string() });
+  const readSnapshots = (): Array<z.infer<typeof snapshotEntrySchema>> => {
+    if (!existsSync(snapshotsManifest())) return [];
+    try { return z.array(snapshotEntrySchema).parse(JSON.parse(readFileSync(snapshotsManifest(), "utf8"))); }
+    catch { return []; }
+  };
+  const storeSnapshot = (id: string, name: string, payload: string) => {
+    mkdirSync(owned("snapshots"), { recursive: true });
+    writeFileSync(owned(`snapshots/${id}.payload`), payload, { mode: 0o600 });
+    const manifest = readSnapshots();
+    manifest.push({ id, name, createdTime: new Date().toISOString(), size: String(payload.length) });
+    writeFileSync(snapshotsManifest(), JSON.stringify(manifest), { mode: 0o600 });
+  };
   globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
@@ -111,15 +125,22 @@ function installTransport(settingsPath: string): void {
     const authorized = request.headers.get("authorization") === `Bearer ${settings.accessToken}`;
     if (url.pathname === "/drive/v3/files" && request.method === "GET") {
       if (url.searchParams.get("spaces") !== "appDataFolder" || !(url.searchParams.get("q")?.includes("muster-workspace") ?? false)) return blocked();
-      const v2 = url.searchParams.get("q")?.includes("muster-workspace-v2.enc") === true;
+      const q = url.searchParams.get("q") || "";
       record("list", mode, authorized);
-      return mode === "list-error" ? json('{"error":"fixture list refused"}', 503)
-        : json(JSON.stringify({ files: existsSync(owned(v2 ? "uploaded-bundle-v2.txt" : "uploaded-bundle.txt")) ? [{ id: fixtureFileId }] : [] }));
+      if (mode === "list-error") return json('{"error":"fixture list refused"}', 503);
+      // Immutable snapshot searches use "name contains"; legacy v1/v2 bundle
+      // searches use "name =" on the single owned file id.
+      if (q.includes("name contains")) {
+        return json(JSON.stringify({ files: readSnapshots().slice().reverse().map((s) => ({ id: s.id, name: s.name, createdTime: s.createdTime, size: s.size })) }));
+      }
+      const v2 = q.includes("muster-workspace-v2.enc") === true;
+      return json(JSON.stringify({ files: existsSync(owned(v2 ? "uploaded-bundle-v2.txt" : "uploaded-bundle.txt")) ? [{ id: fixtureFileId }] : [] }));
     }
     const v2Name = "muster-workspace-v2.enc";
     const existing = url.pathname === `/upload/drive/v3/files/${fixtureFileId}` && request.method === "PATCH";
     if (existing || (url.pathname === "/upload/drive/v3/files" && request.method === "POST")) {
-      if (url.searchParams.get("uploadType") !== "multipart" || url.searchParams.get("fields") !== "id") return blocked();
+      const fields = url.searchParams.get("fields") || "";
+      if (url.searchParams.get("uploadType") !== "multipart" || (fields !== "id" && fields !== "id,name")) return blocked();
       record("upload", mode, authorized);
       if (mode === "upload-error") return json('{"error":"fixture upload refused"}', 503);
       const boundary = request.headers.get("content-type")?.match(/^multipart\/related; boundary=(.+)$/)?.[1];
@@ -128,10 +149,10 @@ function installTransport(settingsPath: string): void {
       const metadataPart = parts.find((part) => part.includes("Content-Type: application/json"));
       const payloadPart = parts.find((part) => part.startsWith("\r\nContent-Type: application/octet-stream\r\n\r\n"));
       if (!metadataPart || !payloadPart) throw new Error("Fixture upload has no metadata or encrypted payload");
-      const metadata = z.object({ name: z.enum(["muster-workspace.enc", v2Name]), parents: z.array(z.literal("appDataFolder")).optional() })
+      const metadata = z.object({ name: z.string().min(1), parents: z.array(z.literal("appDataFolder")).optional() })
         .parse(JSON.parse(metadataPart.slice(metadataPart.indexOf("\r\n\r\n") + 4).trim()));
       if (!existing && metadata.parents?.[0] !== "appDataFolder") throw new Error("Fixture upload is not appDataFolder scoped");
-      const v2 = metadata.name === v2Name;
+      const name = metadata.name;
       const payload = payloadPart.slice("\r\nContent-Type: application/octet-stream\r\n\r\n".length, -2);
       // The v1 bundle is the colon-string form; the v2 bundle is a JSON
       // envelope whose kdf/cipher fields carry the encryption. Either way the
@@ -140,10 +161,25 @@ function installTransport(settingsPath: string): void {
       const v2Envelope = payload.startsWith(`{"magic":"muster-workspace-bundle","schema":`)
         && payload.includes('"kdf"') && payload.includes('"cipher"');
       if (!v1Envelope && !v2Envelope) throw new Error(`Fixture received an unencrypted workspace (head: ${payload.slice(0, 40).replace(/[^\x20-\x7e]/g, "?")})`);
-      writeFileSync(owned(v2 ? "uploaded-bundle-v2.txt" : "uploaded-bundle.txt"), payload, { mode: 0o600 });
-      return json(JSON.stringify({ id: fixtureFileId }));
+      if (name === v2Name) {
+        writeFileSync(owned("uploaded-bundle-v2.txt"), payload, { mode: 0o600 });
+        return json(JSON.stringify({ id: fixtureFileId }));
+      }
+      if (name === "muster-workspace.enc") {
+        writeFileSync(owned("uploaded-bundle.txt"), payload, { mode: 0o600 });
+        return json(JSON.stringify({ id: fixtureFileId }));
+      }
+      // Immutable v2 snapshot: a fresh, uniquely-named file per push so a
+      // stale device can never clobber the newest backup.
+      if (/^muster-workspace-v2-[0-9]+-[0-9a-f]{8}\.enc$/.test(name)) {
+        const id = `snap-${randomBytes(6).toString("hex")}`;
+        storeSnapshot(id, name, payload);
+        return json(JSON.stringify({ id, name }));
+      }
+      throw new Error(`Fixture does not recognize bundle name: ${name}`);
     }
-    if (url.pathname === `/drive/v3/files/${fixtureFileId}` && url.search === "?alt=media" && request.method === "GET") {
+    if (url.pathname.startsWith("/drive/v3/files/") && url.search === "?alt=media" && request.method === "GET") {
+      const fileId = decodeURIComponent(url.pathname.slice("/drive/v3/files/".length));
       record("download", mode, authorized);
       if (mode === "download-error") return json('{"error":"fixture download refused"}', 503);
       if (mode === "corrupt-download") return new Response("fixture-corrupt-bundle");
@@ -158,10 +194,16 @@ function installTransport(settingsPath: string): void {
           }
         } finally { rmSync(owned("download-held"), { force: true }); }
       }
-      // The two bundle names share one file id, so the stored query decides
-      // which payload to hand back.
-      const storedV2 = existsSync(owned("uploaded-bundle-v2.txt"));
-      return new Response(readFileSync(owned(storedV2 ? "uploaded-bundle-v2.txt" : "uploaded-bundle.txt"), "utf8"));
+      if (fileId === fixtureFileId) {
+        // The two bundle names share one file id, so the stored payload decides
+        // which to hand back.
+        const storedV2 = existsSync(owned("uploaded-bundle-v2.txt"));
+        return new Response(readFileSync(owned(storedV2 ? "uploaded-bundle-v2.txt" : "uploaded-bundle.txt"), "utf8"));
+      }
+      // Immutable v2 snapshots are downloaded by the id assigned at upload time.
+      const snapshot = readSnapshots().find((s) => s.id === fileId);
+      if (!snapshot) return Response.json({ error: { message: "Snapshot not found" } }, { status: 404 });
+      return new Response(readFileSync(owned(`snapshots/${fileId}.payload`), "utf8"));
     }
     return blocked();
   };

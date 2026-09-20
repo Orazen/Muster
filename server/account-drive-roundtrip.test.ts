@@ -203,14 +203,14 @@ describe.skipIf(process.platform === "win32")("account-linked Google Drive round
     expect(push.status).toBe(200);
     // SAFETY: the push receipt shape is pinned by the toMatchObject below.
     const receipt = (await push.json()) as { uploaded: string; counts: { threads: number } };
-    expect(receipt.uploaded).toBe("owned-workspace-file");
+    expect(receipt.uploaded).toMatch(/^snap-[0-9a-f]+$/);
     expect(receipt.counts.threads).toBeGreaterThanOrEqual(1);
     // Token continuity: the callback persisted a fresh access token with its
-    // expiry, so push reuses it — list + upload, no refresh grant.
-    expect(operationsSince(offset)).toEqual(["list", "upload"]);
+    // expiry, so push reuses it — a single immutable snapshot upload, no list.
+    expect(operationsSince(offset)).toEqual(["upload"]);
     expect(transport.entries().slice(offset).every((entry) => entry.credentialsMatch)).toBe(true);
 
-    const uploaded = readFileSync(join(rootDirectory, "google", "uploaded-bundle-v2.txt"), "utf8");
+    const uploaded = readFileSync(join(rootDirectory, "google", "snapshots", `${receipt.uploaded}.payload`), "utf8");
     expect(uploaded).toContain('"magic":"muster-workspace-bundle"');
     expect(uploaded).not.toContain("canary-");
     expect(uploaded).not.toContain(passphrase);
@@ -241,7 +241,7 @@ describe.skipIf(process.platform === "win32")("account-linked Google Drive round
     const offset = transport.entries().length;
     const push = await api("/api/workspace/google/push", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ passphrase }) });
     expect(push.status).toBe(200);
-    expect(operationsSince(offset)).toEqual(["refresh", "list", "upload"]);
+    expect(operationsSince(offset)).toEqual(["refresh", "upload"]);
     const expiry = driveRow().expiresAt;
     expect(googleRow()).toEqual(loginBefore);
     expect(expiry).toBeGreaterThan(Date.now() + 30 * 60_000);
