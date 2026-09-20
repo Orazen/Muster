@@ -73,6 +73,31 @@ export function isLoopbackRedirect(url: string): boolean {
   }
 }
 
+/** The iOS companion's OAuth finish target. A phone cannot host a loopback
+ * listener, so it registers the `muster` URL scheme and finishes the
+ * handoff in its own process: the cloud bounces to this exact URL with the
+ * one-time code in the fragment, the app catches it in onOpenURL and
+ * exchanges the code against the cloud's /api/desktop-auth/exchange
+ * directly. Fixed allowlist — never an arbitrary scheme, which would let
+ * any web page fish the code into an app of its choosing. */
+export const COMPANION_OAUTH_REDIRECT = "muster://oauth/finish";
+
+export function isCompanionRedirect(url: string): boolean {
+  return url === COMPANION_OAUTH_REDIRECT;
+}
+
+/** Any redirect a handoff grant may carry. */
+export function isHandoffRedirect(url: string): boolean {
+  return isLoopbackRedirect(url) || isCompanionRedirect(url);
+}
+
+/** Where /desktop-auth/done sends the browser at the end of the handshake.
+ * Loopback targets get the finish page appended (the desktop serves it);
+ * the companion's scheme URL is already the finish endpoint. */
+export function handoffFinishURL(redirect: string): string {
+  return isLoopbackRedirect(redirect) ? `${redirect.replace(/\/$/, "")}/oauth/finish` : redirect;
+}
+
 /** Step 1: a desktop asks for a handshake. Returns the grant id that must
  * ride through the Google callback round-trip. */
 export function issueDesktopGrant(redirect: string, now = Date.now()): string {

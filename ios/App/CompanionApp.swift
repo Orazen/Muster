@@ -31,7 +31,16 @@ struct CompanionApp: App {
                     }
                     session.setForeground(scenePhase == .active); session.connect()
                 }
-                .onOpenURL { session.receivePairingURL($0) }
+                .onOpenURL { url in
+                    // Two flavors ride the `muster` scheme: pairing invites
+                    // (muster://pair?…) and the cloud OAuth finish
+                    // (muster://oauth/finish#code=…). Route by host.
+                    if url.host?.lowercased() == "oauth" {
+                        CloudAuth.shared.handleCallback(url)
+                    } else {
+                        session.receivePairingURL(url)
+                    }
+                }
                 .onChange(of: scenePhase) { _, phase in
                     session.setForeground(phase == .active)
                     switch phase {
@@ -54,7 +63,14 @@ struct RootView: View {
         Group {
             switch session.status {
             case .unpaired:
-                PairingView()
+                // A pending pairing invite always wins — deep links are
+                // explicit intent and must never be intercepted by the
+                // welcome (owned UI tests and real invites both ride this).
+                if session.pairingInvite != nil || session.welcomeSeen {
+                    PairingView()
+                } else {
+                    WelcomeView()
+                }
             case .unauthorized:
                 UnpairedView()
             default:

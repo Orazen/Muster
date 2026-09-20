@@ -282,13 +282,23 @@ posixOnly("desktop OAuth start route", () => {
     "https://127.0.0.1:5199",
     "/app",
     "http://localhost.example.test:5199",
-  ])("rejects invalid loopback target %j before issuing auth cookies", async (redirect) => {
+  ])("rejects invalid handoff target %j before issuing auth cookies", async (redirect) => {
     const query = new URLSearchParams({ redirect });
     const response = await fetch(`${fixture.base}/desktop-auth/start?${query}`, { redirect: "manual" });
     expect(response.status).toBe(400);
     expect(response.headers.get("location")).toBeNull();
     expect(response.headers.getSetCookie()).toHaveLength(0);
-    expect(await response.text()).toContain("desktop sign-in needs");
+    expect(await response.text()).toContain("sign-in needs");
+  });
+
+  it("accepts the companion's muster://oauth/finish and bounces to Google", async () => {
+    const query = new URLSearchParams({ redirect: "muster://oauth/finish" });
+    const response = await fetch(`${fixture.base}/desktop-auth/start?${query}`, { redirect: "manual" });
+    // The full happy path: the scheme target validates, and the browser is
+    // bounced into Google exactly as a loopback target would be.
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location") ?? "").toContain("accounts.google.com");
+    expect(response.headers.getSetCookie().length).toBeGreaterThan(0);
   });
 
   it("does not finish a desktop handoff without an authenticated cloud session", async () => {

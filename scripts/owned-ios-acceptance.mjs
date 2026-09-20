@@ -331,6 +331,10 @@ async function main() {
   };
 
   const phases = [
+    // Welcome first: it is app-local (no rig dependency) and it must not
+    // have broken the invite-first routing the later phases rely on.
+    { name: "welcome", only: "-only-testing:MusterOwnedUITests/WelcomeAcceptance/testWelcomeRenders" },
+    { name: "welcome-pair", only: "-only-testing:MusterOwnedUITests/WelcomeAcceptance/testPairButtonCompletesOnboarding" },
     { name: "pair", only: "-only-testing:MusterOwnedUITests/IdentityAcceptance/testPairAcceptsInvite" },
     { name: "identity", only: "-only-testing:MusterOwnedUITests/IdentityAcceptance/testIdentityTour" },
     { name: "walkie", only: "-only-testing:MusterOwnedUITests/WalkieAcceptance/testWalkieTour" },

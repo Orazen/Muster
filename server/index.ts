@@ -181,7 +181,8 @@ import {
 import { vpsComputerStatus, vpsEnsureDesktop, vpsDockerHost, vpsReachable } from "./vps-computer.ts";
 import {
   desktopSignInRetrySeconds,
-  isLoopbackRedirect,
+  handoffFinishURL,
+  isHandoffRedirect,
   issueDesktopGrantWithReturn,
   issueHandoffCode,
   redeemHandoffCode,
@@ -4475,8 +4476,8 @@ let requestUserEmail = "";
       const redirectRaw = url.searchParams.get("redirect") ?? "";
       const redirect = decodeURIComponent(redirectRaw);
       const returnTo = url.searchParams.get("next") ?? "";
-      if (!isLoopbackRedirect(redirect)) {
-        return html(res, 400, "<body style=\"font:14px -apple-system,sans-serif;padding:2rem\">desktop sign-in needs a http://127.0.0.1 or localhost redirect.</body>");
+      if (!isHandoffRedirect(redirect)) {
+        return html(res, 400, "<body style=\"font:14px -apple-system,sans-serif;padding:2rem\">sign-in needs a http://127.0.0.1 or localhost redirect (or the companion's muster://oauth/finish).</body>");
       }
       const grant = issueDesktopGrantWithReturn(redirect, returnTo);
       const callback = `/desktop-auth/done?grant=${encodeURIComponent(grant)}`;
@@ -4546,7 +4547,7 @@ let requestUserEmail = "";
       // Code rides in the FRAGMENT: browsers never send #... to servers, so
       // it can't leak into access logs or Referrer headers anywhere.
       const nextHash = handoff.returnTo ? `&next=${encodeURIComponent(handoff.returnTo)}` : "";
-      return res.writeHead(302, { Location: `${handoff.redirect}/oauth/finish#code=${encodeURIComponent(handoff.code)}${nextHash}` }).end();
+      return res.writeHead(302, { Location: `${handoffFinishURL(handoff.redirect)}#code=${encodeURIComponent(handoff.code)}${nextHash}` }).end();
     }
     if (method === "POST" && path === "/api/desktop-auth/exchange") {
       // Server-to-server: a desktop's LOCAL server burns the one-time code

@@ -53,6 +53,21 @@ final class Session: ObservableObject {
     @Published private(set) var notificationAuthorization: UNAuthorizationStatus = .notDetermined
     /// A short-lived desktop handoff waiting for PairingView to present it.
     @Published private(set) var pairingInvite: PairingInvite?
+    /// Whether the GAIA-style welcome has been dismissed. Backed by
+    /// UserDefaults; flipped by the welcome's own buttons (or a pairing
+    /// deep link, whose intent beats onboarding). RootView reads it to
+    /// decide WelcomeView vs PairingView while unpaired. The owned UI
+    /// tests pass -com.muster.companion.reset-welcome to start cold even
+    /// on a simulator that has launched the app before.
+    @Published var welcomeSeen: Bool = {
+        if ProcessInfo.processInfo.arguments.contains("-com.muster.companion.reset-welcome") {
+            UserDefaults.standard.removeObject(forKey: "onboardingWelcomeSeen.v1")
+            return false
+        }
+        return UserDefaults.standard.bool(forKey: "onboardingWelcomeSeen.v1")
+    }() {
+        didSet { UserDefaults.standard.set(welcomeSeen, forKey: "onboardingWelcomeSeen.v1") }
+    }
     /// A conversation a notification tap asked to open. It stays set until a
     /// roster can actually resolve it to a chat, because a cold launch from a
     /// banner reaches the roster before the stream has folded the bot — the
