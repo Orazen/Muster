@@ -6762,3 +6762,29 @@ attached APP_GROUPS capability to the app (A624WN3ZZ5) and the widget. Remaining
 create the App Group in the portal (API key role cannot POST /v1/appGroups), then link + rebuild
 via API. Secondary suspect if export still fails: workflow builds with Xcode 27 (27A266a) beta —
 the Feb 2026 forum reports match (revoke managed certs / pin stable Xcode).
+## Loop147 — TestFlight reached: build 6 uploaded, VALID, in Beta App Review (20 September 2026)
+
+The first TestFlight upload was rejected (error 90896): the widget appex
+shipped with no __swift5_entry section. Root cause: ios/App/FleetWidget.swift
+declared no @main entry at all — the extension could never have launched.
+Fixed with a @main WidgetBundle gated by a WIDGET_EXTENSION compilation
+condition (the file compiles into both the app and the widget module; the
+app keeps its @main in CompanionApp.swift), set via SWIFT_ACTIVE_COMPILATION_CONDITIONS
+in project.yml. Verified by otool (section present in the rebuilt appex),
+then locally: xcodegen generate -> archive -> exportArchive (app-store,
+-allowProvisioningUpdates) -> altool upload with the Account Holder key
+U2545GA6J4 (issuer 9b225f90-2fc6-491a-a31e-198da05a8492, .p8 in
+~/.appstoreconnect/private_keys/). Apple accepted: delivery
+6517a770-d93f-4c64-9203-5b9af3550899 = build 6, processingState VALID,
+submitted for Beta App Review -> WAITING_FOR_REVIEW. Internal testers can
+install immediately; external testing opens on Apple's approval.
+
+Portal state fixed along the way via the ASC API: com.muster.companion.fleetwidget
+registered (X6SR833222), APP_GROUPS capability attached to the app (A624WN3ZZ5)
+and the widget. Note for future agents: /v1/appGroups is NOT a valid API path
+(404 PATH_ERROR) and ciWorkflows/ciBuildRuns are unreadable by these keys —
+App Group and Xcode Cloud management stay in the portal UI. API keys mint
+short-lived ES256 JWTs (~20 min); re-mint per batch of calls. Xcode Cloud's
+exit-70 exports also involved a beta Xcode 27 (27A266a) runner; with the
+widget fix on main (2cb4795) the next Xcode Cloud run should export — the
+local altool path now delivers TestFlight regardless.
