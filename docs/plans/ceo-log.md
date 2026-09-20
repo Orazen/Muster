@@ -6678,3 +6678,59 @@ Payload published to GitHub release v1.13.0 (public, not draft, 14 assets — sa
 Known gaps, unchanged and stated plainly: the updater publishes a generic feed at https://muster.orazen.online/downloads (electron-builder.yml), and that VPS mirror still serves 1.12.1 — VPS SSH is owner-gated, so installed desktop apps will NOT auto-update to 1.13.0 until the mirror is promoted (scripts/promote-release-mirror.py is ready, needs SSH); fresh installs via the GitHub release get 1.13.0 directly; Windows/Linux legs remain impossible without Actions billing; iOS TestFlight remains blocked on Xcode Cloud authorization (Archive runs cancelled until the owner authorizes the integration in App Store Connect → Settings → Integrations → Xcode Cloud).
 
 Owner setup instructions delivered: (1) Xcode Cloud authorization click, (2) VPS SSH access for mirror promotion, (3) Actions billing for CI legs.
+
+## Loop146 — Phase 6 stale-device v2 Drive overwrite defect fixed (20 September 2026)
+
+Reproduced defect in `server/drive-sync.ts`: `drivePushFor` called
+`uploadBundle(BUNDLE_V2_NAME)` -> `findBundleFile` (returns the single newest
+`muster-workspace-v2.enc`, `orderBy modifiedTime desc`) -> unconditional `PATCH`
+with no revision guard; a stale/empty device upload clobbered the only backup.
+
+Fix (immutable snapshots, append-only): transport `4dc7655` "Add immutable v2 Drive
+snapshot transport" — `uploadSnapshot` always POSTs a fresh, uniquely-named file
+(`muster-workspace-v2-<ts>-<rand>.enc`, `fields=id,name`); `listSnapshots`,
+`downloadSnapshot`, `downloadLatestSnapshot` added. v1 helpers
+`uploadBundle`/`downloadBundle`/`findBundleFile` left untouched (still used by the
+v1 `/api/workspace/drive/{push,pull}` routes and `workspace-auth-harness`). Route +
+adapter rewire in `d71fae0` "Immutable v2 Drive snapshots with explicit restore
+selection": `account-drive.ts` `drivePushFor->uploadSnapshot`,
+`drivePullFor->downloadLatestSnapshot`, new `driveListSnapshotsFor` /
+`driveDownloadSnapshotFor`; `workspace-backup-routes.ts` adds
+`GET /api/workspace/google/snapshots` (list for restore selection) and the POST pull
+now accepts an optional `snapshotId` to restore a chosen snapshot instead of the
+newest. v1 `/api/workspace/drive/*` and v2 `/api/workspace/v2/restore` routes
+untouched. `assertCurrent` (`server/drive-access.ts`) remains a local-only check
+(no extra Drive round-trip).
+
+Pin-sequence deltas vs pre-fix: push = `["upload"]` (was `["list","upload"]`),
+refresh+push = `["refresh","upload"]`, pull = `["list","download"]` (unchanged).
+
+Tests: `server/drive-transport.test.ts` "Immutable v2 snapshots (stale-device
+overwrite defect)" suite — push POSTs without a prior list search; a stale upload
+cannot clobber the real backup; snapshots listed newest-first scoped to snapshot
+names; page-token paging; `downloadSnapshot(id)` = explicit restore selection;
+`pull lists snapshots then downloads the newest by id`. Fixture
+`server/testing/workspace-drive-fixture.ts` models immutable snapshots by upload-time
+id (`snapshots/<id>.payload` + manifest), rejects `fields=id,name`-only reads on the
+legacy path, and keeps v1/v2 bundle paths byte-identical.
+`account-drive-roundtrip.test.ts` asserts push `["upload"]`, refresh+push
+`["refresh","upload"]`, pull `["list","download"]`.
+
+Verified gate (on merged dependency tree): `npx tsc --noEmit -p tsconfig.server.json`
+PASS; `npx tsc -b` PASS; oxlint 0/0; vite build PASS. `vitest` no-cache full suite:
+**321 files / 4804 passed / 8 skipped / 0 failed** (460.7s, no-cache baseline
+recorded at `dd6944a`, which corrected the stale 4821 cache-hit figure).
+`npx playwright test` 41/41; packaged-server 14/14. CI run `35495086908` on `d71fae0`
+-> success; HEAD is now `9d2f4d4` (autodeploy `.deploy-trigger` bump on top),
+`0 0` in sync with origin/main. Also landed on HEAD: `d3b0494` "restore UTF-16 draft
+caps that zod 4 silently loosened" — fixes the `onboarding-draft` 4000-task-cap
+`test`-job assertion that appeared only on the unmerged dependabot branch `2da05fa3`
+(run `35471546869`), not on main.
+
+Production: read-only `GET https://muster.today/api/build-identity` at 20 Sep
+07:09-07:11 UTC still reports backend `7632065f` / web `453b2f23` (v1.12.3,
+`attestation:false`); the autodeploy trigger `9d2f4d4` fired but the live service has
+not swapped, and the VPS mirror still serves 1.12.1. **A push is not a deployment.**
+v1.13.0 + Phase 6 are NOT live. Coordinating with the release agent for VPS-SSH
+mirror promotion (owner-gated); read-only GET only, no deploy action taken. Demo on
+8845 + release agent processes left untouched; automation paused.
