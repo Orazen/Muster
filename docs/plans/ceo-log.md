@@ -6734,3 +6734,31 @@ not swapped, and the VPS mirror still serves 1.12.1. **A push is not a deploymen
 v1.13.0 + Phase 6 are NOT live. Coordinating with the release agent for VPS-SSH
 mirror promotion (owner-gated); read-only GET only, no deploy action taken. Demo on
 8845 + release agent processes left untouched; automation paused.
+## Loop146 — v1.13.0 promoted to the live updater mirror, byte-verified (20 September 2026)
+
+The desktop updater (electron-updater, generic provider) points at muster.orazen.online/downloads —
+which was serving 1.12.1 while v1.13.0 sat only on GitHub Releases. Promoted with a detached,
+resumable, self-verifying uploader (launchctl job `mirror13-upload`; note for future agents:
+`launchctl submit` restarts jobs after clean exit — gate re-runs with a DONE sentinel or remove
+the job).
+
+Receipts, all byte-verified: the three big artifacts (arm64 zip `799dffe4…`, x64 zip `77bde96c…`,
+intel dmg `fc77388b…`) sha256-match the GitHub release checksums on the VPS; full-HTTPS download
+of Muster.dmg hashes exactly to `ee81d5de…`; live feed https://muster.orazen.online/downloads/latest-mac.yml
+serves version 1.13.0 (arm64-first, 4 artifacts, same layout as production 1.12.1); latest.json
+manifest updated (version 1.13.0, sha a3db744 — release targetCommitish verified via API, not
+assumed); muster-cli.mjs refreshed (`68c4cad1…`); aliases Muster.dmg / Muster-intel.dmg atomically
+replaced with 1.13.0 content after backing up the 1.12.1 bytes (Muster-1.12.1.dmg.bak,
+Muster-1.12.1-intel.dmg.bak, latest-mac.yml.1.12.1.bak, latest.json.1.12.1.bak). Nothing deleted;
+Windows/Linux feeds (latest.yml, latest-linux.yml) untouched. Range-header probes against this
+server stream the whole file (server ignores Range) — earlier ranged "mismatches" were that
+artifact, not corruption; full-download hashes are the receipts that count.
+
+iOS/Xcode Cloud diagnosis (Build 179, exit 70 on all three exports): archive PASSES; export fails.
+ASC API evidence (key Z8854APF6U): no App ID for com.muster.companion.fleetwidget and no
+group.com.muster.companion App Group — the widget target and both App-Group entitlements cannot
+be signed at export. Fixed via API: registered com.muster.companion.fleetwidget (X6SR833222),
+attached APP_GROUPS capability to the app (A624WN3ZZ5) and the widget. Remaining owner click:
+create the App Group in the portal (API key role cannot POST /v1/appGroups), then link + rebuild
+via API. Secondary suspect if export still fails: workflow builds with Xcode 27 (27A266a) beta —
+the Feb 2026 forum reports match (revoke managed certs / pin stable Xcode).
