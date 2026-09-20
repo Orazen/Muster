@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { DAILY_PLANNING_TASK } from "@/lib/daily-planning";
 
+// Length caps in UTF-16 code units (string .length), matching what the
+// server's limits measure. zod 4 changed `max()` to count codepoints, so
+// astral characters (emoji) no longer overflow the same check — a 4001-unit
+// draft would sail past z.string().max(4000) and overflow the API on restore.
+const maxUtf16 = (max: number) =>
+  z.string().refine((value) => value.length <= max, { message: `Too long: must be ${max} characters or fewer` });
+
 /* Onboarding draft persistence — the wizard is component state, so a reload
  * or the sign-in round trip (AuthGate bounces to /sign-in and back in the
  * same tab) used to throw away everything the user had typed. Drafts live in
@@ -98,11 +105,11 @@ const draftSchema = z.object({
   // Preserve unfinished email input; format validation belongs to submission.
   email: z.string().max(320).optional(),
   botName: z.string().max(100),
-  botRole: z.string().max(200),
+  botRole: maxUtf16(200),
   botColor: z.string().max(64),
   botCharacter: z.string().max(64),
-  suggestion: z.string().max(2000),
-  customTask: z.string().max(4000),
+  suggestion: maxUtf16(2000),
+  customTask: maxUtf16(4000),
   showPersonality: z.boolean(),
   axes: z.object({
     companion: z.number().min(0).max(100),
