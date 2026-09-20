@@ -277,6 +277,16 @@ targets:
     dependencies:
       - package: CompanionCore
         product: CompanionCore
+    entitlements:
+      path: App/FleetWidget.entitlements
+      properties:
+        # The widget is a renderer that reads the fleet snapshot the app
+        # publishes (FleetSnapshotStore). Without this entitlement its
+        # UserDefaults(suiteName:) returns nil and the mascot widget shows
+        # its placeholder forever, no matter what the app publishes.
+        # Extension and container must both carry the same group.
+        com.apple.security.application-groups:
+          - group.com.muster.companion
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion.fleetwidget
