@@ -6804,3 +6804,14 @@ Receipts: owned rig on iPhone 17 Pro simulator — **5/5 phases green** (welcome
 Deliberately not taken: codex-apple-watch-style watch UI redesign (the watch already has dictation + one-tap TTS with owned test ids; a redesign deserves its own slice + rig), sign-in-gated features (identity ≠ authorization, pairing remains the trust root).
 
 Committed 616e193, merged to origin/main as 0e0ff2c. www/* modifications in the tree are another agent's concurrent work — untouched.
+## Loop149 — ACP error cards name the real failure (20 September 2026)
+
+Owner ask (live preview pass): use the app, find what's broken, fix, commit, push, retest.
+
+Defect found live: a failed Droid turn showed "Something didn't go through — Internal error: Agent error" with a futile Retry, while the actual reason (droid 402, "No active subscription found") sat in a separate bare bubble. Harness ndjson proved droid's JSON-RPC shape: useless `message`, actionable `data` (`402 {"detail":…}`) that core.ts dropped on the floor.
+
+Fix (server/drivers/acp/core.ts): the JSON-RPC reject path now composes message + data, and a shared `classifyJsonRpcError` floor reads the HTTP status out of that data into the canonical codes (402 → inactive_subscription, 401/403 → invalid_credentials, 429 → quota), so the card renders as setup-gated guidance instead of retry-bait. Per-support classifiers still take precedence.
+
+Proof: fake-acp-cli gained a `payment-error` mode replaying the verbatim live envelope; acp.test.ts asserts the composed message names the subscription and `setup: true`. Verified live in the preview harness — a fresh turn against the real droid CLI shows the 402 detail on the card. Gates: server tsc exit 0, oxlint 0/0, drivers 345 passed, full suite **321 files / 4814 passed / 0 failed**. Committed 77a92d2, pushed via merge d58e45d.
+
+Droid's 402 itself stays owner-gated (subscription), per the no-security-claims rule.
