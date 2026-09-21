@@ -6871,3 +6871,45 @@ Mobile build 9: bump to 9, unsigned archive (CODE_SIGNING_ALLOWED=NO), Loop151-s
 Desktop 1.14.0: package:mac:arm64/x64 with Developer ID; notarytool store-credentials refreshed (old keychain entry pointed at a stale key); both DMGs Accepted + stapled + stapler-validate OK, spctl accepted on the app inside; zips Accepted (stapler cannot staple zips — auto-updater extracts verify-transitively); CLI built via RELEASE_VERSION/RELEASE_SHA env (positional args unsupported), self-checks 5/5; latest-mac.yml regenerated sha512-complete arm64-first; GitHub release v1.14.0 published public with 14 assets; published-DMG byte-match verified against local sha256.
 
 Committed f5ea49c.
+## Loop154 — chat failure surfaces made fixable (transcript-driven)
+
+The owner pasted a live Muster session transcript where every send failed.
+Forensics traced four real defects behind the noise; all fixed, tested,
+committed (72e0ac9), pushed.
+
+1. **"Failed to authenticate: OAuth session expired" with no way out.**
+   claude.ts exited auth-shaped failures as plain runtime.error; only codex
+  .ts set setup:true, which is what makes ChatView render the one-click
+   EngineSetup card. Claude now flags auth exits (please run /login,
+   expired OAuth, 401, invalid key, credit balance) with setup:true and
+   stopReason auth_required; ordinary crashes deliberately do NOT set it
+   (pinned both ways in claude.test.ts; retry.test.ts expectation updated
+   to the more precise stopReason).
+
+2. **Stacked Gmail/Calendar connection cards.** /api/internal/connectors/
+   request deduped only within one resumeKey, and every turn mints a new
+   key — so re-requests stacked duplicate cards. Dedupe is now bot+slug
+   wide: the newest live card wins, connected cards are reused as-is
+   (an app that is linked needs no second card), stale pending ones are
+   dismissed as superseded. Pinned in connected-apps-harness.test.ts
+   (re-request after connect returns the original card's id).
+
+3. **"Something didn't go through / this model engine cannot use the Local
+   VM / Create the Local VM" loop.** ErrorRow now classifies the two Local
+   VM failure classes and offers real fixes in the chat: an embedded
+   LocalVmQuickSetup card (useLocalVmSetup hook + auto-setup chain
+   extracted from LocalComputerSection — start runtime, prepare image,
+   create VM in one click) or a one-click switch of the bot to its cloud
+   computer (PATCH /api/bots/:id computer:"cloud" + updateBot + retry).
+
+4. **Connection cards frozen on "Waiting for sign-in…".** The 5-minute
+   poll cap stopped silently even when the sign-in had expired. Now an
+   expired/revoked/not-found status response stops polling honestly with
+   a "request expired — Try again" message, and 5 consecutive transport
+   failures surface a lost-contact error instead of an endless spinner.
+
+Gates: tsc 0; oxlint 0/0 (895 files); targeted suites 40+444 pass; full
+vitest 321 files / 4815 passed / 8 skipped / 0 failed (after retry.test
+update); e2e 41/41. The seed-card dead end ("This saved question cannot
+be answered here") was verified to already carry the UnavailableSeedSend
+recovery affordance — no change needed.
