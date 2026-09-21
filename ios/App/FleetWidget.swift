@@ -27,6 +27,33 @@ struct MascotBotLine: Codable, Hashable, Sendable {
     var line: String
 }
 
+// MARK: - Live Activity view
+
+/// The Lock Screen face: the flower, the mood, and the narrated line — the
+/// same truthfulness contract as every other mascot surface (face is never
+/// the whole message; the line is always present while the activity is).
+struct FleetActivityView: View {
+    let context: ActivityViewContext<FleetActivityAttributes>
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SnapshotFlower(state: context.state.moodState, colorHex: FlowerArtwork.flowerFallbackHex)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(context.state.moodLabel)
+                    .font(.system(size: 15, weight: .semibold))
+                if let focus = context.state.bots.first(where: { !$0.line.isEmpty }) {
+                    Text(focus.line)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+    }
+}
+
 // MARK: - Timeline entry
 
 struct FleetEntry: TimelineEntry {
@@ -225,10 +252,52 @@ struct FleetWidget: Widget {
 // own @main in CompanionApp.swift. The bundle also gives the future
 // Live Activity a place to register beside the widget.
 #if WIDGET_EXTENSION
+/// The Lock Screen Live Activity, wrapped as a Widget so the bundle builder
+/// accepts it (ActivityConfiguration is a WidgetConfiguration, not a Widget).
+struct FleetLiveActivity: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: FleetActivityAttributes.self) { context in
+            // Lock Screen presentation.
+            FleetActivityView(context: context)
+        } dynamicIsland: { context in
+            DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    SnapshotFlower(state: context.state.moodState, colorHex: FlowerArtwork.flowerFallbackHex)
+                        .frame(width: 36, height: 36)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    Text(context.state.moodLabel)
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    if let focus = context.state.bots.first(where: { !$0.line.isEmpty }) {
+                        Text(focus.line)
+                            .font(.system(size: 12))
+                            .lineLimit(1)
+                    }
+                }
+            } compactLeading: {
+                SnapshotFlower(state: context.state.moodState, colorHex: FlowerArtwork.flowerFallbackHex)
+                    .frame(width: 18, height: 18)
+            } compactTrailing: {
+                Text(context.state.moodLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(maxWidth: 44)
+            } minimal: {
+                SnapshotFlower(state: context.state.moodState, colorHex: FlowerArtwork.flowerFallbackHex)
+                    .frame(width: 18, height: 18)
+            }
+        }
+    }
+}
+
 @main
 struct MusterFleetWidgetBundle: WidgetBundle {
     var body: some Widget {
         FleetWidget()
+        // The Lock Screen Live Activity shares this extension and the same
+        // FleetSnapshotStore source — one publisher, two surfaces.
+        FleetLiveActivity()
     }
 }
 #endif

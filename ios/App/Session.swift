@@ -139,6 +139,7 @@ final class Session: ObservableObject {
             return
         }
         FleetSnapshotStore.publish(snapshot)
+        FleetActivitySync.sync(snapshot)
     }
 
     // MARK: - Pairing

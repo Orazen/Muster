@@ -6923,3 +6923,23 @@ Ships Loop154's four chat-failure fixes as a notarized desktop release.
 - CLI rebuilt at 1.14.1 (self-checks 5/5), SHA256SUMS written, `latest-mac.yml` merged to cover all 4 artifacts arm64-first (electron-builder had emitted x64-only).
 - Release created draft → arm64 DMG byte-match verified against published asset → published + marked latest. 13 assets live on GitHub Releases v1.14.1.
 - www/* marketing-page redesigns left uncommitted (other thread's work).
+## Loop156 — mascot slice E completed: Lock Screen Live Activity + Dynamic Island
+
+The widget shipped earlier (Loop155-era); the Live Activity half of slice E was
+skeleton-only (FleetActivityAttributes declared, never rendered, never started).
+
+- App side: `ios/App/FleetActivitySync.swift` — starts/updates/ends the activity
+  from the same content-throttled publish point in Session (no extra timers, no
+  polling). Truthfulness contract: idle + offline moods END the activity rather
+  than render (a stale "Working" on the Lock Screen while offline is worse than
+  nothing). Unpair/teardown paths end all activities.
+- Widget side: FleetLiveActivity (Lock Screen HStack face + narrated line;
+  DynamicIsland expanded leading/trailing/bottom + compactLeading/compactTrailing
+  + minimal). Wrapped in a Widget type because the bundle builder requires
+  children to be Widgets. NSSupportsLiveActivities added to app Info properties.
+- SDK notes for the next person: iPhoneSimulator26.5 — `var body: some Widget`
+  inside WidgetBundle (not `some WidgetBundle`); DynamicIsland's expanded
+  builder requires minimal:; .center overload needs a minimal argument (used
+  .bottom instead); Activity.update requires the `using:` label.
+- Gates: xcodebuild TEST BUILD SUCCEEDED (iPhone 17 Pro sim); swift test
+  399/399. No web/server files touched.
