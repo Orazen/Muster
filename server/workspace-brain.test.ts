@@ -129,4 +129,37 @@ describe("WorkspaceBrain", () => {
     const second = await brain();
     expect(second.stats("u1").kinds.company).toBe(1);
   });
+
+  it("history returns the full correction lineage oldest-first", async () => {
+    const b = await brain();
+    const v1 = b.add({ text: "The launch is March 1", source: "kickoff", ownerId: "u1" });
+    const v2 = b.add({ text: "The launch is March 8", source: "kickoff", ownerId: "u1", supersedes: v1.id });
+    const v3 = b.add({ text: "The launch is April 2", source: "kickoff", ownerId: "u1", supersedes: v2.id });
+    const chain = b.history(v2.id, "u1");
+    expect(chain.ancestors.map((f) => f.id)).toEqual([v1.id]);
+    expect(chain.fact?.id).toBe(v2.id);
+    expect(chain.descendants.map((f) => f.id)).toEqual([v3.id]);
+  });
+
+  it("restore un-withdraws a fact; restore of a live fact is refused", async () => {
+    const b = await brain();
+    const f = b.add({ text: "The API base is api.acme.ai", source: "ops", ownerId: "u1" });
+    expect(b.withdraw(f.id, "u1")).toBe(true);
+    expect(b.query("api base", "u1").hits.length).toBe(0);
+    expect(b.restore(f.id, "u1")).toBe(true);
+    expect(b.query("api base", "u1").hits.length).toBe(1);
+    expect(b.restore(f.id, "u1")).toBe(false);
+  });
+
+  it("history never leaks another owner's chain", async () => {
+    const b = await brain();
+    const mine = b.add({ text: "My rollout is Tuesday", source: "standup", ownerId: "u1" });
+    const other = b.add({ text: "Other rollout is Wednesday", source: "standup", ownerId: "u2" });
+    expect(b.history(other.id, "u1").fact).toBeUndefined();
+    const cross = b.add({ text: "My rollout is actually Thursday", source: "standup", ownerId: "u1", supersedes: other.id });
+    // A correction pointing at a foreign fact stays visible, but the foreign
+    // ancestor does not leak into my history.
+    expect(b.history(cross.id, "u1").ancestors).toEqual([]);
+    expect(b.history(mine.id, "u1").fact?.id).toBe(mine.id);
+  });
 });

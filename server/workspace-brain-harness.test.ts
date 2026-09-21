@@ -138,6 +138,52 @@ describe.skipIf(process.platform === "win32")("workspace brain over the live har
     expect(audit.result.hits.length).toBe(1);
   });
 
+  it("history, restore and revert run end-to-end over HTTP", async () => {
+    const write = await api("/api/brain/facts", "POST", {
+      text: "The deploy window is Tuesday",
+      source: "ops calendar",
+    });
+    expect(write.status).toBe(201);
+    const { fact } = writeBody.parse(await write.json());
+
+    // Correction chains the fact forward.
+    const correction = await api("/api/brain/facts", "POST", {
+      text: "The deploy window is Wednesday", source: "ops calendar", supersedes: fact.id,
+    });
+    expect(correction.status).toBe(201);
+    const { fact: v2 } = writeBody.parse(await correction.json());
+
+    // History shows the lineage in both directions.
+    const history = await api(`/api/brain/facts/${fact.id}/history`);
+    expect(history.status).toBe(200);
+    const historyBody = z.object({
+      history: z.object({
+        ancestors: z.array(factSchema),
+        fact: factSchema.nullable(),
+        descendants: z.array(factSchema),
+      }),
+    }).parse(await history.json());
+    expect(historyBody.history.fact?.id).toBe(fact.id);
+    expect(historyBody.history.descendants.map((f) => f.id)).toEqual([v2.id]);
+
+    // Withdraw the latest, restore it, then revert past it.
+    expect((await api(`/api/brain/facts/${v2.id}/withdraw`, "POST")).status).toBe(200);
+    expect((await api(`/api/brain/facts/${v2.id}/restore`, "POST")).status).toBe(200);
+    // Revert requires text: a revert is a new fact, not silent history edit.
+    expect((await api(`/api/brain/facts/${v2.id}/revert`, "POST", {})).status).toBe(400);
+    const revert = await api(`/api/brain/facts/${v2.id}/revert`, "POST", {
+      text: "The deploy window is Thursday", source: "ops calendar",
+    });
+    expect(revert.status).toBe(201);
+    const { fact: v3 } = writeBody.parse(await revert.json());
+    const after = queryBody.parse(await (await api("/api/brain/query", "POST", { text: "deploy window" })).json());
+    expect(after.result.hits[0]?.fact.id).toBe(v3.id);
+    // History of the chain head now carries both ancestors.
+    const tail = await api(`/api/brain/facts/${v3.id}/history`);
+    const tailBody = z.object({ history: z.object({ ancestors: z.array(z.object({ id: z.string() })) }) }).parse(await tail.json());
+    expect(tailBody.history.ancestors.map((f) => f.id)).toEqual([fact.id, v2.id]);
+  });
+
   it("keeps accounts isolated: beta never sees alpha's facts", async () => {
     const betaQuery = await fetch(`${url}/api/brain/query`, {
       method: "POST", redirect: "error", signal: AbortSignal.timeout(15_000),

@@ -5303,6 +5303,37 @@ let requestUserEmail = "";
       const ok = workspaceBrain().withdraw(brainMatch[1], brainOwner);
       return json(res, ok ? 200 : 404, ok ? { withdrawn: true } : { error: "no such fact" });
     }
+    // History + rollback (plan item #2): a fact's correction lineage and a
+    // way back. Revert mints a NEW fact superseding the latest descendant —
+    // history is never rewritten, only extended — so provenance stays true.
+    brainMatch = path.match(/^\/api\/brain\/facts\/([\w-]+)\/history$/);
+    if (brainMatch && method === "GET") {
+      const chain = workspaceBrain().history(brainMatch[1], brainOwner);
+      if (!chain.fact) return json(res, 404, { error: "no such fact" });
+      return json(res, 200, { history: chain });
+    }
+    brainMatch = path.match(/^\/api\/brain\/facts\/([\w-]+)\/restore$/);
+    if (brainMatch && method === "POST") {
+      const ok = workspaceBrain().restore(brainMatch[1], brainOwner);
+      return json(res, ok ? 200 : 404, ok ? { restored: true } : { error: "no such withdrawn fact" });
+    }
+    brainMatch = path.match(/^\/api\/brain\/facts\/([\w-]+)\/revert$/);
+    if (brainMatch && method === "POST") {
+      const brain = workspaceBrain();
+      const chain = brain.history(brainMatch[1], brainOwner);
+      if (!chain.fact) return json(res, 404, { error: "no such fact" });
+      const latest = chain.descendants.at(-1) ?? chain.fact;
+      if (latest.withdrawnAt) return json(res, 409, { error: "the latest correction is already withdrawn — restore it instead" });
+      const body = await readBody(req);
+      const text = isText(body.text) ? body.text.trim() : "";
+      if (!text) return json(res, 400, { error: "text required — a revert is a new fact, state what is true now" });
+      try {
+        const fact = brain.add({ text, source: isText(body.source) ? body.source : "revert", origin: "revert", supersedes: latest.id, ownerId: brainOwner });
+        return json(res, 201, { fact });
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
 
     // ── routines calendar ────────────────────────────────────────────────
     // A routine belongs to whoever owns its bot; the helper guards every

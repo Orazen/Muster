@@ -31,6 +31,16 @@ import { parseJson } from "./schema.ts";
 
 export type FactKind = "person" | "company" | "project" | "decision" | "note";
 
+/** The correction chain around one fact — the history/rollback surface. */
+export interface BrainHistory {
+  /** The facts this one corrected, oldest first. */
+  ancestors: BrainFact[];
+  /** The fact itself, or undefined when it is outside the owner's view. */
+  fact: BrainFact | undefined;
+  /** The facts that correct this one, in correction order. */
+  descendants: BrainFact[];
+}
+
 export interface BrainFact {
   id: string;
   ownerId?: string;
@@ -213,6 +223,48 @@ export class WorkspaceBrain {
     fact.withdrawnAt = Date.now();
     this.persist();
     return true;
+  }
+
+  /** Restore a withdrawn fact to live. Corrections are not undone by
+   * restore: the fact becomes visible again alongside its correction, and
+   * the user re-chains with `supersedes` if they truly want to reverse a
+   * correction — reverting a chain silently would rewrite provenance. */
+  restore(factId: string, ownerId: string | undefined): boolean {
+    const fact = this.facts.find((f) => f.id === factId);
+    if (!fact || fact.ownerId !== ownerId || !fact.withdrawnAt) return false;
+    delete fact.withdrawnAt;
+    this.persist();
+    return true;
+  }
+
+  /** The correction chain of a fact: its full lineage (ancestors, oldest
+   * first) and descendants, including itself. Owner-scoped; an id outside
+   * the owner's visibility yields an empty chain, never another account's
+   * history. */
+  history(factId: string, ownerId: string | undefined): BrainHistory {
+    const own = (f: BrainFact | undefined): f is BrainFact =>
+      !!f && (ownerId === undefined || !f.ownerId || f.ownerId === ownerId);
+    const byId = new Map(this.facts.map((f) => [f.id, f]));
+    const fact = byId.get(factId);
+    if (!own(fact)) return { ancestors: [], fact: undefined, descendants: [] };
+    const ancestors: BrainFact[] = [];
+    let cursor = fact?.supersedes ? byId.get(fact.supersedes) : undefined;
+    while (cursor && own(cursor) && ancestors.length < MAX_FACTS) {
+      ancestors.unshift(cursor);
+      cursor = cursor.supersedes ? byId.get(cursor.supersedes) : undefined;
+    }
+    const descendants: BrainFact[] = [];
+    const walk = (id: string, depth: number) => {
+      if (depth > MAX_FACTS) return;
+      for (const f of this.facts) {
+        if (f.supersedes === id && own(f)) {
+          descendants.push(f);
+          walk(f.id, depth + 1);
+        }
+      }
+    };
+    if (fact) walk(fact.id, 0);
+    return { ancestors, fact, descendants };
   }
 
   get(factId: string, ownerId: string | undefined): BrainFact | undefined {

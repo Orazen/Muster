@@ -16,25 +16,69 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_TREND = "docs/benchmarks/role-eval-trend.jsonl";
-const ROLE_NAMES = ["assistant", "coordinator", "specialist"];
+const ROLE_NAMES = ["assistant", "coordinator", "specialist"] as const;
+type RoleName = (typeof ROLE_NAMES)[number];
+
+/** Structural input: a parsed scorecard JSON before validation. */
+interface ScorecardScenario {
+  status?: unknown;
+  elapsedMs?: number | null;
+  tokens?: number | null;
+  costUsd?: number | null;
+}
+interface ScorecardInput {
+  version?: unknown;
+  label?: unknown;
+  source?: unknown;
+  status?: unknown;
+  roles?: Record<string, { status?: unknown; scenarios?: ScorecardScenario[] | undefined } | undefined>;
+}
+
+export interface RoleTrend {
+  status: string;
+  scenarios: number;
+  passed: number;
+  failed: number;
+  elapsedMs: number;
+  tokens: number;
+  costUsd: number;
+}
+export interface TrendRecord {
+  recordedAt: string;
+  label: string;
+  source: string;
+  status: string;
+  scenarios: number;
+  roles: Record<RoleName, RoleTrend>;
+}
+
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- JSON boundary: this guard ESTABLISHES the string domain type from parsed JSON
+const isText = (value: unknown): value is string =>
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- boundary parser: typeof is how parsed JSON becomes a string here
+  typeof value === "string";
+
+const emptyRole = (): RoleTrend => ({ status: "unknown", scenarios: 0, passed: 0, failed: 0, elapsedMs: 0, tokens: 0, costUsd: 0 });
 
 /** Extract the trend projection from a scorecard. Pure. */
-export function projectScorecard(scorecard, recordedAt = new Date().toISOString()) {
+export function projectScorecard(scorecard: ScorecardInput, recordedAt: string = new Date().toISOString()): TrendRecord {
   if (!scorecard || Array.isArray(scorecard)) throw new Error("scorecard must be an object");
   if (scorecard.version !== 1) throw new Error("unsupported scorecard version");
-  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- JSON.parse boundary: no domain type exists yet
-  if (typeof scorecard.label !== "string" || !scorecard.label) throw new Error("scorecard label missing");
-  if (!["live", "simulated"].includes(scorecard.source)) throw new Error("scorecard source must be live or simulated");
-  const roles = {};
+  if (!isText(scorecard.label) || !scorecard.label) throw new Error("scorecard label missing");
+  if (!isText(scorecard.source) || !["live", "simulated"].includes(scorecard.source)) {
+    throw new Error("scorecard source must be live or simulated");
+  }
+  const roles = { assistant: emptyRole(), coordinator: emptyRole(), specialist: emptyRole() };
   let scenarios = 0;
   for (const roleName of ROLE_NAMES) {
     const role = scorecard.roles?.[roleName];
     if (!role) throw new Error(`scorecard is missing the ${roleName} role`);
     const list = Array.isArray(role.scenarios) ? role.scenarios : [];
     scenarios += list.length;
-    const sum = (pick) => list.reduce((acc, s) => (Number.isFinite(s?.[pick]) ? acc + s[pick] : acc), 0);
+    const sum = (pick: keyof ScorecardScenario): number =>
+      // SAFETY: Number.isFinite guard proves the picked value is numeric.
+      list.reduce((acc: number, s) => (Number.isFinite(s?.[pick]) ? acc + (s[pick] as number) : acc), 0);
     roles[roleName] = {
-      status: role.status,
+      status: isText(role.status) ? role.status : "unknown",
       scenarios: list.length,
       passed: list.filter((s) => s.status === "passed").length,
       failed: list.filter((s) => s.status === "failed").length,
@@ -48,21 +92,22 @@ export function projectScorecard(scorecard, recordedAt = new Date().toISOString(
     recordedAt,
     label: scorecard.label,
     source: scorecard.source,
-    status: scorecard.status,
+    status: isText(scorecard.status) ? scorecard.status : "unknown",
     scenarios,
     roles,
   };
 }
 
 /** Parse a trend file into records. Tolerates a trailing blank line. */
-export function readTrend(trendPath) {
+export function readTrend(trendPath: string): TrendRecord[] {
   if (!existsSync(trendPath)) return [];
   const raw = readFileSync(trendPath, "utf8");
-  const records = [];
+  const records: TrendRecord[] = [];
   for (const [index, line] of raw.split("\n").entries()) {
     if (!line.trim()) continue;
     try {
-      records.push(JSON.parse(line));
+      // SAFETY: a trend file only ever holds records this script wrote.
+      records.push(JSON.parse(line) as TrendRecord);
     } catch {
       throw new Error(`${trendPath}:${index + 1} is not valid JSONL`);
     }
@@ -71,28 +116,27 @@ export function readTrend(trendPath) {
 }
 
 /** One human-readable trend line per record, oldest first. */
-export function renderTrend(records) {
+export function renderTrend(records: TrendRecord[]): string {
   if (records.length === 0) return "no trend records yet";
-  const lines = ["role-eval trend (oldest first)", ""];
+  const lines: string[] = ["role-eval trend (oldest first)", ""];
   for (const r of records) {
     const roles = ROLE_NAMES.map((name) => {
-      const role = r.roles?.[name] ?? {};
-      const mark = role.status === "passed" ? "pass" : role.status === "failed" ? "FAIL" : "part";
-      return `${name} ${mark} (${role.passed ?? 0}/${role.scenarios ?? 0})`;
+      const role = r.roles?.[name];
+      const mark = role?.status === "passed" ? "pass" : role?.status === "failed" ? "FAIL" : "part";
+      return `${name} ${mark} (${role?.passed ?? 0}/${role?.scenarios ?? 0})`;
     }).join(" · ");
     lines.push(`${r.recordedAt}  ${r.source.padEnd(9)} ${String(r.label).padEnd(24)} ${r.status.padEnd(11)} ${roles}`);
   }
   const last = records.at(-1);
   const first = records[0];
   if (records.length > 1 && last && first) {
-    const drift = (pick) => last.roles && first.roles
-      ? last.roles[pick] && first.roles[pick] ? last.roles[pick].elapsedMs - first.roles[pick].elapsedMs : null
-      : null;
     lines.push("");
     lines.push(`records: ${records.length}; latest status ${last.status}.`);
     for (const roleName of ROLE_NAMES) {
-      const delta = drift(roleName);
-      if (Number.isFinite(delta) && last.roles[roleName].elapsedMs != null) {
+      const latest = last.roles?.[roleName]?.elapsedMs;
+      const earliest = first.roles?.[roleName]?.elapsedMs;
+      if (typeof latest === "number" && typeof earliest === "number") { // oxlint-disable-line anti-slop/no-runtime-typeof -- narrowing number|undefined from the typed record
+        const delta = latest - earliest;
         lines.push(`${roleName} elapsed change since first record: ${delta >= 0 ? "+" : ""}${delta}ms`);
       }
     }
@@ -100,7 +144,7 @@ export function renderTrend(records) {
   return lines.join("\n");
 }
 
-function trendPath() {
+function trendPath(): string {
   const flag = process.argv.indexOf("--file");
   return flag > -1 && process.argv[flag + 1] ? resolve(process.argv[flag + 1]) : resolve(DEFAULT_TREND);
 }
@@ -112,7 +156,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       const input = process.argv[3];
       if (!input) throw new Error("Usage: bench-trend.ts record <scorecard.json> [--file trend.jsonl]");
       if (statSync(input).size > 2_000_000) throw new Error("Scorecard exceeds 2 MB.");
-      const record = projectScorecard(JSON.parse(readFileSync(input, "utf8")));
+      // SAFETY: projectScorecard re-validates every field before use.
+      const record = projectScorecard(JSON.parse(readFileSync(input, "utf8")) as ScorecardInput);
       appendFileSync(trendPath(), `${JSON.stringify(record)}\n`, { mode: 0o600 });
       console.log(JSON.stringify({ recorded: record.recordedAt, status: record.status }));
     } else if (mode === "report") {
@@ -127,7 +172,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       throw new Error("Usage: bench-trend.ts record <scorecard.json> | report [--file trend.jsonl] [--json]");
     }
   } catch (error) {
-    console.error(`[bench-trend] ${error.message}`);
+    console.error(`[bench-trend] ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
   }
 }

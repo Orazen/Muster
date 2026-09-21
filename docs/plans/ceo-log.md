@@ -6970,3 +6970,20 @@ scorecards were discarded — no memory, no drift detection.
   bump commit explicitly.
 - Gates: vitest 7/7 (new), tsc 0, oxlint 0/0 on touched files, CLI smoke
   record+report OK.
+## Loop158 — brain history + rollback (plan item #2 closed)
+
+The brain kept correction chains and withdrawal provenance but had no way
+to browse a fact's history or back out of a change.
+
+- Core: `WorkspaceBrain.restore(id, owner)` un-withdraws (corrections are
+  not silently reversed); `WorkspaceBrain.history(id, owner)` returns the
+  full lineage (ancestors oldest-first + descendants), owner-scoped with a
+  hard no-leak guarantee. New exported `BrainHistory` contract.
+- HTTP: GET /api/brain/facts/:id/history, POST .../restore, POST
+  .../revert. Revert mints a NEW fact superseding the latest descendant —
+  history is extended, never rewritten — and requires text (a revert states
+  what is true now; 409 if the latest correction is already withdrawn).
+- Tests: 3 new unit pins (lineage order, restore semantics, cross-owner
+  no-leak) + 1 live-route harness test (history → withdraw → restore →
+  revert end-to-end, zod-pinned bodies). Suite 15/15 unit, 6/6 harness.
+- Gates: oxlint 0/0 on touched files; web + server tsc exit 0.
