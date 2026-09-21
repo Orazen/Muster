@@ -6913,3 +6913,13 @@ vitest 321 files / 4815 passed / 8 skipped / 0 failed (after retry.test
 update); e2e 41/41. The seed-card dead end ("This saved question cannot
 be answered here") was verified to already carry the UnavailableSeedSend
 recovery affordance — no change needed.
+## Loop155 — desktop 1.14.1 released (chat failures made fixable)
+
+Ships Loop154's four chat-failure fixes as a notarized desktop release.
+
+- Gates: tsc 0 errors, vitest 322 files / 4,815 passed / 8 skipped, e2e 41/41, electron syntax check clean.
+- Packaged arm64 + x64 (DMG + zip) with Developer ID + hardened runtime; x64 leg initially died on a transient DNS error, clean retry.
+- Notarized all 4 artifacts in parallel (`notarytool --wait` → Accepted ×4), stapled DMGs, `stapler validate` OK, `spctl` accepts both apps (DMG open + extracted app).
+- CLI rebuilt at 1.14.1 (self-checks 5/5), SHA256SUMS written, `latest-mac.yml` merged to cover all 4 artifacts arm64-first (electron-builder had emitted x64-only).
+- Release created draft → arm64 DMG byte-match verified against published asset → published + marked latest. 13 assets live on GitHub Releases v1.14.1.
+- www/* marketing-page redesigns left uncommitted (other thread's work).
