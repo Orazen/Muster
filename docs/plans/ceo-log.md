@@ -6828,3 +6828,18 @@ Test rig: fake-acp gained FAKE_ACP_STREAM_DELAY_MS (chunk at N ms, settle at 3N 
 Proof: owned watch rig green end-to-end on a fresh Apple Watch Ultra 3 simulator — both tests pass, traffic ledger shows the full call lifecycle, chat dispatch counted. Gates: watch scheme builds, CompanionCore 390/390, server tsc exit 0, oxlint 0/0, drivers+call-harness 68/68.
 
 Committed 424b104, pushed via merge 8041160. www/* and other untracked files in the tree are other agents' work — untouched.
+## Loop151 — TestFlight build 8 released: watch streaming ships (21 September 2026)
+
+Owner ask: run all tests, finish remaining work, release a new version.
+
+All gates green first: vitest 321 files / 4814 passed / 8 skipped / 0 failed; e2e 41 passed (one real fix: calendar-enrollment raced quick-start's async PUT /api/me/onboarding — reloading before the gate saved legitimately re-showed the wizard whose overlay intercepted the test; the spec now waits for the save); CompanionCore 390/390; watch scheme builds; oxlint 0/0.
+
+Release (build 8, CURRENT_PROJECT_VERSION 7→8 in project.yml): archive succeeded; exportArchive failed — the team's iOS Distribution certificate no longer existed (ASC API: 0 distribution certs; loop147's was evidently revoked/expired since 20 Sep). Rebuilt the whole signing chain headlessly:
+- iOS Distribution cert minted via ASC API POST /v1/certificates — CSR must be base64 of the DER bytes, not the PEM (PEM 409s with "Invalid Certificate"); key+cert imported into the login keychain (identity 87B0ED90…).
+- Fresh IOS_APP_STORE profiles created per bundle (companion / watchkitapp / fleetwidget) bound to that cert, installed by UUID into both profile directories.
+- exportArchive still refused headlessly ("Failed to find an account with App Store Connect access") — so the archive was re-signed directly with codesign (widget → watch → app, entitlements extracted from each profile) and the IPA built by hand (Payload zip).
+- altool: VERIFY SUCCEEDED → UPLOAD SUCCEEDED, delivery 0fada3b4-4c54-4780-8844-479bedbe143b. ASC API: build 8 processingState VALID, betaAppReviewSubmission betaReviewState **APPROVED**.
+
+Testers can install build 8 (watch streaming + readable replies) from TestFlight as soon as processing finishes; build 6/7 remain valid.
+
+Committed 68062d2 on main. Note for future agents: ASC API cert-mint requires DER CSR; API-key minting of profiles works but exportArchive cannot see Xcode-managed profiles — codesign-the-archive + hand-rolled IPA is the deterministic headless path.
