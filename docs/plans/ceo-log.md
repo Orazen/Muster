@@ -6815,3 +6815,16 @@ Fix (server/drivers/acp/core.ts): the JSON-RPC reject path now composes message 
 Proof: fake-acp-cli gained a `payment-error` mode replaying the verbatim live envelope; acp.test.ts asserts the composed message names the subscription and `setup: true`. Verified live in the preview harness — a fresh turn against the real droid CLI shows the 402 detail on the card. Gates: server tsc exit 0, oxlint 0/0, drivers 345 passed, full suite **321 files / 4814 passed / 0 failed**. Committed 77a92d2, pushed via merge d58e45d.
 
 Droid's 402 itself stays owner-gated (subscription), per the no-security-claims rule.
+## Loop150 — watch voice chat: live streaming + readable replies (21 September 2026)
+
+Owner ask: the codex-apple-watch-style watch slice ("faster and sync, make it better").
+
+Found by reading the live watch code: ChatView computed the transcript tail and defined a Bubble view but rendered neither (dead code), and the codex-reader route (WatchRoute.message) existed with zero callers. A sent message was answered by silence until the turn fully settled — the phone streamed a live bubble the whole time.
+
+Fix (ios/Watch/WatchViews.swift): the chat face now renders the last messages as bubbles, the newest bot reply taps through to the full-screen reader, a live bubble carries streaming tokens (same store contract as the phone), a busy line covers the pre-first-token gap, and the view rests anchored on the newest message. The Call button moved to the navigation bar — bottom-anchoring left it above the fold, which the owned test caught as Unreachable.
+
+Test rig: fake-acp gained FAKE_ACP_STREAM_DELAY_MS (chunk at N ms, settle at 3N — default 0 keeps every mode byte-identical) and the pairing harness a streamDelayMs option, so the live window is deterministic. ForegroundCallAcceptance grew testChatStreamsAndOpensReader (pair → dictate → busy line → live bubble with the exact chunk text → settled tail bubble → reader body) alongside the existing call tour; suite-order fixes: shared pairIfNeeded keyed on the always-materialized code field, edge-of-screen scroll drags (center drags activated the Reply field), bar-pinned elements return on sight, message counts asserted relative to a baseline.
+
+Proof: owned watch rig green end-to-end on a fresh Apple Watch Ultra 3 simulator — both tests pass, traffic ledger shows the full call lifecycle, chat dispatch counted. Gates: watch scheme builds, CompanionCore 390/390, server tsc exit 0, oxlint 0/0, drivers+call-harness 68/68.
+
+Committed 424b104, pushed via merge 8041160. www/* and other untracked files in the tree are other agents' work — untouched.
