@@ -6987,3 +6987,25 @@ to browse a fact's history or back out of a change.
   no-leak) + 1 live-route harness test (history → withdraw → restore →
   revert end-to-end, zod-pinned bodies). Suite 15/15 unit, 6/6 harness.
 - Gates: oxlint 0/0 on touched files; web + server tsc exit 0.
+## Loop159 — Engines "Add account" (OMB parity gap closed)
+
+Plan §3/§7: the readiness-grouped engine list existed but a row showing
+"Needs sign-in" offered only a CLI-path picker — no account-add flow.
+
+- `EnginesSettings.tsx`: row actions are now a typed decision (`rowAction`):
+  installed-but-unsigned-in → **Add account** (accent-colored), ready →
+  Configure, missing CLI → Set up. Expanding an add-account row embeds the
+  same `EngineSetup` sign-in card the model picker uses — one account flow,
+  two surfaces, no drift.
+- Tests: rowAction pins in EngineSetup.test.ts (5/5). tsc + oxlint clean.
+## Loop159 — Engines "Add account" (OMB parity gap closed)
+
+Plan section 3/7: the readiness-grouped engine list existed but a row showing
+"Needs sign-in" offered only a CLI-path picker — no account-add flow.
+
+- EnginesSettings.tsx: row actions are now a typed decision (rowAction):
+  installed-but-unsigned-in -> Add account (accent-colored), ready ->
+  Configure, missing CLI -> Set up. Expanding an add-account row embeds the
+  same EngineSetup sign-in card the model picker uses — one account flow,
+  two surfaces, no drift.
+- Tests: rowAction pins in EngineSetup.test.ts (5/5). tsc + oxlint clean.

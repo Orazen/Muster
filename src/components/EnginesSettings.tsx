@@ -13,6 +13,7 @@ import { Check, ChevronDown, Loader2, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineGroupLabel } from "./EngineGroupLabel";
+import { EngineSetup, needsSignIn } from "./EngineSetup";
 import { ProviderMark } from "./ProviderIcons";
 import { cn } from "@/lib/cn";
 
@@ -27,6 +28,14 @@ interface ProbeResult {
  * other state the panel can act on. */
 function isReady(instance: InstanceInfo): boolean {
   return instance.snapshot.state === "available";
+}
+
+/** What the row's primary action is. An installed-but-unsigned-in engine is
+ * one sign-in from Ready, so its action is adding the account — a different
+ * job from pointing the row at a different binary. */
+export function rowAction(instance: InstanceInfo): "add-account" | "configure" | "set-up" {
+  if (needsSignIn(instance)) return "add-account";
+  return isReady(instance) ? "configure" : "set-up";
 }
 
 /** The subtitle under an engine's name: the account it runs as when the
@@ -255,15 +264,27 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
           {instance.snapshot.version && (
             <span className="font-mono text-[11.5px] text-ink-secondary">{instance.snapshot.version}</span>
           )}
-          {!ready && (
-            <button
-              onClick={() => setOpen((v) => !v)}
-              aria-expanded={open}
-              className="rounded-lg bg-raised px-2.5 py-1 text-[12px] text-ink hover:bg-raised-hover"
-            >
-              Set up
-            </button>
+      {rowAction(instance) === "set-up" && (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="rounded-lg bg-raised px-2.5 py-1 text-[12px] text-ink hover:bg-raised-hover"
+        >
+          Set up
+        </button>
+      )}
+      {rowAction(instance) !== "set-up" && (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className={cn(
+            "rounded-lg px-2.5 py-1 text-[12px]",
+            rowAction(instance) === "add-account" ? "bg-accent text-ink hover:brightness-110" : "bg-raised text-ink hover:bg-raised-hover",
           )}
+        >
+          {rowAction(instance) === "add-account" ? "Add account" : "Configure"}
+        </button>
+      )}
           <button
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
@@ -277,6 +298,16 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
       {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
       {open && (
         <div className="mt-1 pl-10">
+          {/* Account first: an engine that is installed but not signed in is
+              one sign-in away from Ready, and that is a different job from
+              pointing the row at a different binary. The embedded card is the
+              same EngineSetup the model picker uses, so the two surfaces can
+              never disagree about how to add the account. */}
+          {needsSignIn(instance) && (
+            <div className="mb-2">
+              <EngineSetup instance={instance} />
+            </div>
+          )}
           {instance.cli && (
             <div className="mb-1.5 flex items-center gap-2 text-[12px] text-ink-secondary">
               <span className="truncate font-mono text-accent" title={instance.cli}>{instance.cli}</span>

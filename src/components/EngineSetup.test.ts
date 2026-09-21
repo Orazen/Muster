@@ -32,3 +32,17 @@ describe("needsCli / needsSignIn", () => {
     expect(needsSignIn(ready)).toBe(false);
   });
 });
+
+describe("EnginesSettings rowAction", () => {
+  it("routes an installed-but-unsigned-in engine to add-account", async () => {
+    const { rowAction } = await import("./EnginesSettings");
+    const unsigned = instance({ state: "available", authenticated: false, version: "0.36.1" });
+    expect(rowAction(unsigned)).toBe("add-account");
+  });
+
+  it("keeps a ready engine on configure and a missing CLI on set-up", async () => {
+    const { rowAction } = await import("./EnginesSettings");
+    expect(rowAction(instance({ state: "available", authenticated: true }))).toBe("configure");
+    expect(rowAction(instance({ state: "unavailable", reason: "`kimi` CLI not found" }))).toBe("set-up");
+  });
+});
