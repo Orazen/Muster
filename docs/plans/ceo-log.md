@@ -6843,3 +6843,16 @@ Release (build 8, CURRENT_PROJECT_VERSION 7→8 in project.yml): archive succeed
 Testers can install build 8 (watch streaming + readable replies) from TestFlight as soon as processing finishes; build 6/7 remain valid.
 
 Committed 68062d2 on main. Note for future agents: ASC API cert-mint requires DER CSR; API-key minting of profiles works but exportArchive cannot see Xcode-managed profiles — codesign-the-archive + hand-rolled IPA is the deterministic headless path.
+## Loop152 — watch fleet-mood complication (21 September 2026)
+
+Owner ask: an always-on, glanceable complication showing fleet mood from the watch app.
+
+Design: a new MusterWatchComplication widget extension (WidgetKit, watchOS) renders the FleetSnapshot the watch app already publishes to the shared app-group store - the exact store and freshness contract the phone widget renders from (FleetSnapshotStore.readFresh(), 15-minute max age reads as offline). The complication never opens a socket; the app is the only source of truth. All four accessory families: circular = flower alone, inline = one-line label, corner = flower + curved label, rectangular = flower + label + the focused bot line (first bot with a non-empty narrated line).
+
+Watch app fixes found on the way (ios/Watch/WatchSession.swift): restore() on a fresh install never assigns status, so nothing was ever published until the first sync - publishSnapshot() now also runs at init; and the watch mood treated unpaired as "Up to date" (a lie on the wrist) - the unpaired-means-offline rule now matches the phone publishFleetSnapshot exactly.
+
+Project wiring (ios/project.yml): MusterWatchComplication target (app-extension, watchOS, CompanionCore dep, widgetkit-extension Info plist, app-group entitlement shared with the watch app), embedded into the watch bundle; the Watch sources folder excludes FleetComplication.swift from the app target (its @main collides with the app own).
+
+Proof: CompanionCore 395/395 (+5 new FleetSnapshotPublishTests pinning the moodState vocabulary, per-bot flower state/narration, hidden-bot filtering, JSON round-trip); runtime end-to-end on the watch simulator - fresh install, launch, terminate, then read the group plist directly: {"moodState":"sleepy","moodLabel":"Offline"} in group.com.muster.companion, the exact container the extension reads; owned watch rig green on a fresh sim (both acceptance tests, paired, full call lifecycle). First-time TestFlight note: new appex means a new bundle id (com.muster.companion.watchkitapp.fleetwidget) needs an App Store profile before the next archive - profiles were minted for it in Loop151 only if listed; the export path from Loop151 (codesign + hand-rolled IPA) applies.
+
+Committed 08dfae6.
