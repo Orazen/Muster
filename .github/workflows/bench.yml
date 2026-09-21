@@ -1,0 +1,60 @@
+name: Bench
+
+# Nightly role-eval capture + trend. Runs the owned harness (real server,
+# fake ACP fleet) on a schedule and appends the graded scorecard to the
+# trend file committed in the repo, so score history survives runner churn.
+# This is the scheduled half of remaining-work item #1: the pipeline existed
+# and ran on demand; nothing ran it on a schedule or kept the numbers.
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # daily 03:17 UTC — off the hour, away from CI rush
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  role-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The trend file is updated by a follow-up commit from the same
+          # workflow; the default GITHUB_TOKEN cannot push to a protected
+          # main, so the job falls back to uploading the record as an
+          # artifact when the push is refused (see below).
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: Run the per-role capture harness
+        env:
+          BENCH_TREND_FILE: ${{ github.workspace }}/role-eval-trend.jsonl
+        run: pnpm bench:roles
+      - name: Render the trend report
+        if: always()
+        run: node --experimental-strip-types scripts/bench-trend.ts report --file role-eval-trend.jsonl || true
+      - name: Upload trend record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: role-eval-trend-${{ github.run_id }}
+          path: role-eval-trend.jsonl
+          if-no-files-found: ignore
+      - name: Append to the committed trend on main
+        if: success() && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          if [ ! -f role-eval-trend.jsonl ]; then echo "no trend record produced" >&2; exit 0; fi
+          mkdir -p docs/benchmarks
+          cat role-eval-trend.jsonl >> docs/benchmarks/role-eval-trend.jsonl
+          git config user.name "muster-bench-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs/benchmarks/role-eval-trend.jsonl
+          git commit -m "chore(bench): nightly role-eval trend record" || echo "nothing to commit"
+          git push origin HEAD:main || echo "refused push (protected main) — record kept as artifact"

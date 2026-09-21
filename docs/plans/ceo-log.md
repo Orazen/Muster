@@ -6943,3 +6943,30 @@ skeleton-only (FleetActivityAttributes declared, never rendered, never started).
   .bottom instead); Activity.update requires the `using:` label.
 - Gates: xcodebuild TEST BUILD SUCCEEDED (iPhone 17 Pro sim); swift test
   399/399. No web/server files touched.
+## Loop157 — bench:roles scheduled wiring + scorecard trending (plan item #1 closed)
+
+The capture harness ran on demand (`pnpm bench:roles`) and in CI, but graded
+scorecards were discarded — no memory, no drift detection.
+
+- `scripts/bench-trend.ts`: dependency-free JSONL trend recorder
+  (`record <scorecard.json>` appends a projection; `report` renders per-role
+  pass/fail + elapsed deltas). Projection keeps label/source verbatim and the
+  numeric evidence (elapsed/tokens/cost per role).
+- `scripts/bench-trend.test.ts`: 7 tests (projection contract, malformed
+  scorecards, JSONL store + corruption line numbers, report rendering).
+  vitest `include` gained `scripts/**/*.test.ts`.
+- Harness opt-in: `BENCH_TREND_FILE` env appends the projected record after
+  grading (re-validated through the recorder so schema drift fails the suite,
+  not a nightly job).
+- `.github/workflows/bench.yml`: nightly 03:17 UTC run of bench:roles with
+  trend artifact upload + append-and-push to
+  docs/benchmarks/role-eval-trend.jsonl (artifact fallback if the push is
+  refused). Actions billing is unblocked — CI green on main since 09-21.
+- Release-workflow note: the v1.14.1 tag run failed in `prepare`
+  (release-policy: tag must match package version) because `gh release
+  create` pinned the tag at pre-bump HEAD. Published release + feeds are
+  unaffected (the job died before publish). Lesson: bump must be committed
+  and pushed BEFORE creating the release tag, or the tag must point at the
+  bump commit explicitly.
+- Gates: vitest 7/7 (new), tsc 0, oxlint 0/0 on touched files, CLI smoke
+  record+report OK.
