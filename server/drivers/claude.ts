@@ -724,12 +724,23 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           void scheduleRetry(transient.reason);
           return;
         }
+        // An auth-shaped exit ("Please run /login", expired OAuth token,
+        // 401 credit errors) must reach the user as a setup failure, not a
+        // dead-end error bubble: the chat's ErrorRow renders EngineSetup —
+        // the one-click sign-in flow — only when setup is flagged (the same
+        // contract codex.ts:593 established). Without this, an expired
+        // Claude session fails every send with no way to fix it in place.
+        const needsAuth =
+          /(?:please run \/login|not logged in|\boauth\b.*(?:expired|invalid|refresh)|invalid api key|\b401\b|authentication required|unauthorized|credit balance)/i.test(
+            stderr,
+          );
         emit({
           ...base(threadId, turnId),
           type: "runtime.error",
           message: `claude exited ${code} before result${stderr ? `: ${stderr.trim().slice(-300)}` : ""}`,
+          ...(needsAuth ? { setup: true } : undefined),
         });
-        settle(false, "exit_before_result");
+        settle(false, needsAuth ? "auth_required" : "exit_before_result");
       });
 
         // prompt over stdin as a stream-json message — never argv (ARG_MAX)

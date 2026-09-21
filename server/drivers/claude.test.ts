@@ -315,6 +315,23 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: false, stopReason: "exit_before_result" });
     const error = recorder.events.find((e) => e.type === "runtime.error")!;
     expect(error.message).toContain("simulated crash");
+    // An ordinary crash is NOT a setup failure: no EngineSetup card.
+    expect(error.setup).toBeUndefined();
+  });
+
+  it("an auth-shaped exit flags setup so the chat offers the sign-in flow", async () => {
+    await create("auth-error");
+    await instance.adapter.sendTurn({ threadId: "t-auth", text: "go" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+    const error = recorder.events.find((e) => e.type === "runtime.error")!;
+    expect(error.message).toContain("please run /login");
+    // The contract codex.ts established: setup=true renders the one-click
+    // EngineSetup card in chat instead of a dead-end error bubble. This is
+    // what turns "Failed to authenticate: OAuth session expired…" into a
+    // fixable surface.
+    expect(error.setup).toBe(true);
   });
 
   it("skips malformed protocol lines without losing the turn", async () => {

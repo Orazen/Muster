@@ -38,6 +38,7 @@ import { TaskUsageStats } from "./TaskUsageStats";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { costCaption, formatTokens, formatUsd, usageChip } from "@/lib/usage";
 import {
+  api,
   useStore,
   useStopCleanup,
   useStreaming,
@@ -64,6 +65,7 @@ import { Composer } from "./Composer";
 import { StopCleanupNotice } from "./StopCleanupNotice";
 import { TimelineStrip } from "./TimelineStrip";
 import { ConnectorCard } from "./ConnectorCard";
+import { LocalVmQuickSetup } from "./LocalComputerSection";
 import { ModelPicker } from "./ModelPicker";
 import { RenameTitle } from "./RenameTitle";
 import { TaskPicker } from "./TaskPicker";
@@ -204,15 +206,65 @@ function ThinkingStrip({ text, active }: { text: string; active: boolean }) {
  * Once the engine reports itself fixed the card flips back to Retry, which
  * (with the on-focus re-probe) happens by itself when the user returns from
  * the terminal. */
+/** Turn-failure classes with a one-click fix, detected from the error text
+ * the server already sends. Each maps to the exact surface that repairs it:
+ * no more re-reading "Create the Local VM (App Settings → Local VM)" and
+ * manually digging through Settings on every failed "hi". */
+const ERROR_FIXES: Array<{
+  match: RegExp;
+  label: string;
+  action: "open-vm-settings" | "switch-computer-cloud";
+  hint: string;
+}> = [
+  {
+    match: /Create the Local VM|Local VM is not ready|Start \w+ first|Prepare the Cua desktop image|container runtime/i,
+    label: "Open Local VM setup",
+    action: "open-vm-settings",
+    hint: "Set up or start the Local VM, then retry.",
+  },
+  {
+    match: /cannot use the Local VM|can't drive a computer|no tool loop/i,
+    label: "Switch to Cloud computer",
+    action: "switch-computer-cloud",
+    hint: "This engine can't drive the Local VM. Switching this bot to the cloud computer fixes it in one click.",
+  },
+];
+
+function errorFix(message: string) {
+  return ERROR_FIXES.find((fix) => fix.match.test(message));
+}
+
 function ErrorRow({
+  bot,
   message,
   onRetry,
   setupInstance,
 }: {
+  bot?: Bot;
   message: string;
   onRetry?: () => void;
   setupInstance?: InstanceInfo;
 }) {
+  const { dispatch } = useStore();
+  const [fixing, setFixing] = useState(false);
+  const [showVmSetup, setShowVmSetup] = useState(false);
+  const fix = errorFix(message);
+  const applyFix = async () => {
+    if (!fix) return;
+    if (fix.action === "open-vm-settings") {
+      setShowVmSetup((open) => !open);
+      return;
+    }
+    if (!bot) return;
+    setFixing(true);
+    try {
+      await api(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ computer: "cloud" }) });
+      dispatch({ type: "updateBot", botId: bot.id, patch: { computer: "cloud" } });
+      onRetry?.();
+    } finally {
+      setFixing(false);
+    }
+  };
   return (
     <div className="flex justify-start">
       <div className="max-w-[70%] rounded-2xl border border-hairline/40 bg-card px-4 py-3">
@@ -223,7 +275,7 @@ function ErrorRow({
           <span className="text-[13px] font-medium text-ink">Something didn't go through</span>
         </div>
         <div className="mt-1.5 text-[13px] leading-relaxed text-ink-secondary">{message}</div>
-        <div className="mt-2.5 flex items-center gap-2">
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
           {setupInstance &&
           !(setupInstance.snapshot.state === "available" && setupInstance.snapshot.authenticated !== false) ? (
             <EngineSetup instance={setupInstance} className="text-ink-secondary" />
@@ -237,7 +289,21 @@ function ErrorRow({
               </button>
             )
           )}
+          {fix && (
+            <span className="flex items-center gap-2">
+              {fix.action !== "switch-computer-cloud" && <span className="text-[12px] text-ink-secondary">{fix.hint}</span>}
+              <button
+                onClick={() => void applyFix()}
+                disabled={fixing}
+                className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+              >
+                {fixing ? <Loader2 size={12} className="animate-spin" /> : <Wrench size={12} />}
+                {fixing ? "Switching…" : fix.label}
+              </button>
+            </span>
+          )}
         </div>
+        {fix?.action === "open-vm-settings" && showVmSetup && <LocalVmQuickSetup />}
       </div>
     </div>
   );
@@ -865,6 +931,7 @@ const MessagesList = memo(function MessagesList({
               // a failed turn is an error, not a tool run — render it as one
               return m.tool?.name.startsWith("error:") ? (
                 <ErrorRow
+                  bot={bot}
                   message={m.tool.name.slice(6).trim()}
                   onRetry={m.id === messages.at(-1)?.id && canRetryLast ? onRegenerate : undefined}
                   setupInstance={m.tool.setup ? engine : undefined}

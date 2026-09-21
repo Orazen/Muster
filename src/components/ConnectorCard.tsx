@@ -3,6 +3,14 @@ import { Check, Loader2, PlugZap, RefreshCw, X } from "lucide-react";
 
 import { api, type Message } from "@/state/store";
 
+/** Does the status endpoint's failure mean the connection attempt itself
+ * expired (stop polling honestly) versus a transport hiccup? The api helper
+ * throws Error carrying the server's message; parse that message here, at
+ * the UI boundary where the string actually lives. */
+function connectedError(error: Error): boolean {
+  return /expired|revoked|no such connection request|404/i.test(error.message);
+}
+
 async function openConnectionPage(url: string) {
   if (window.ogb?.openExternal) {
     await window.ogb.openExternal(url);
@@ -19,7 +27,6 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const polling = useRef(false);
-
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/connector-cards/${encodeURIComponent(message.id)}`;
   const checkStatus = useCallback(async () => {
     const result = await api(`${endpoint}/status?threadId=${encodeURIComponent(threadId)}`);
@@ -30,18 +37,40 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
     if (connector.status !== "authorizing" || connector.dismissed) return;
     polling.current = true;
     let tries = 0;
+    let consecutiveFailures = 0;
+    // 75 × 4s = 5 min of polling. Two things used to break this: the timer
+    // stopping silently at the cap (the card froze on "Waiting for sign-in…"
+    // even though the sign-in itself had long expired), and transient API
+    // hiccups counting against the cap like real time. Now the cap restarts
+    // whenever the server says the connection expired — the card flips to
+    // its failed state with a Try again button instead of lying — and
+    // consecutive transport failures surface an honest local error rather
+    // than spinning forever.
     const timer = setInterval(() => {
       if (!polling.current) return;
       void checkStatus()
         .then((connected) => {
           tries += 1;
+          consecutiveFailures = 0;
           if (connected || tries >= 75) {
             polling.current = false;
             clearInterval(timer);
           }
         })
-        .catch(() => {
+        .catch((error: Error) => {
           tries += 1;
+          consecutiveFailures += 1;
+          if (connectedError(error)) {
+            // the sign-in session itself expired server-side: stop polling
+            // and show the failed state (Try again) instead of a frozen spinner
+            polling.current = false;
+            clearInterval(timer);
+            setLocalError("The connection request expired. Click Try again to start a new sign-in.");
+          } else if (consecutiveFailures >= 5) {
+            polling.current = false;
+            clearInterval(timer);
+            setLocalError("Lost contact with the server while waiting for sign-in. Try again when it's back.");
+          }
           if (tries >= 75) clearInterval(timer);
         });
     }, 4_000);

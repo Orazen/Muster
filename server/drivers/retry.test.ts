@@ -124,7 +124,7 @@ describe("ClaudeDriver auto-retry (fake CLI)", () => {
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-auth", text: "hi" });
     const done = await recorder.until((e) => e.type === "turn.completed");
 
-    expect(done).toMatchObject({ ok: false, stopReason: "exit_before_result", turnId });
+    expect(done).toMatchObject({ ok: false, stopReason: "auth_required", turnId });
     expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
     expect(recorder.events.filter((e) => e.type === "runtime.error")).toHaveLength(1);
   }, 20_000);

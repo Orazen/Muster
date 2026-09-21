@@ -5186,8 +5186,37 @@ let requestUserEmail = "";
         if (!connectorLeaseValid(connectorLease)) return json(res, 401, { error: "unauthorized" });
         const messageIds: string[] = [];
         for (const slug of slugs) {
-          const existing = store.messagesFor(threadId).find(
-            (message) => message.connector?.resumeKey === resumeKey && message.connector.slug === slug && (!owner.group || message.from?.botId === botId),
+          // Dedupe by bot+slug ACROSS resume keys, not just within one: a
+          // bot that re-requests the same app on a later turn (new resume
+          // key) used to mint a second card, so an unanswered Gmail request
+          // stacked duplicate Gmail/Calendar cards every turn. Rules:
+          //   · newest non-dismissed card for the slug is the live one;
+          //   · if it is already connected, reuse it (the app is linked —
+          //     another card would be noise) and dismiss nothing;
+          //   · otherwise reuse it when the resume key matches, or dismiss
+          //     it as superseded and mint a fresh card for the new key.
+          const prior = store
+            .messagesFor(threadId)
+            .filter(
+              (message) =>
+                message.connector &&
+                message.connector.slug === slug &&
+                !message.connector.dismissed &&
+                (!owner.group || message.from?.botId === botId),
+            )
+            .sort((a, b) => b.at - a.at);
+          const newest = prior[0];
+          if (newest?.connector!.status === "connected") {
+            messageIds.push(newest.id);
+            continue;
+          }
+          for (const stale of prior.filter((message) => message.connector!.resumeKey !== resumeKey)) {
+            store.patchMessage(threadId, stale.id, {
+              connector: { ...stale.connector!, dismissed: true },
+            });
+          }
+          const existing = prior.find(
+            (message) => message.connector!.resumeKey === resumeKey,
           );
           if (existing) {
             messageIds.push(existing.id);

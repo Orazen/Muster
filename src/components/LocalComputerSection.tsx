@@ -11,6 +11,7 @@ import {
   RotateCcw,
   Square,
   Trash2,
+  Wrench,
 } from "lucide-react";
 import { Card, CommandLine } from "./SettingsPrimitives";
 import { RaisedButton } from "./ui/raised-button";
@@ -117,6 +118,142 @@ const MAX_DESKTOPS_MAX = 16;
 function clampMaxDesktops(value: number): number {
   if (!Number.isFinite(value)) return 4;
   return Math.min(MAX_DESKTOPS_MAX, Math.max(MAX_DESKTOPS_MIN, Math.trunc(value)));
+}
+
+/** Everything the quick-setup card and the full section need: the live VM
+ * status plus the one-click chain (start runtime → prepare image → create
+ * VM). Extracted so the chat's error card can embed real setup, not a
+ * pointer to Settings. */
+export function useLocalVmSetup() {
+  const [status, setStatus] = useState<Status | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState<Action | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    const response = await fetch("/api/local-computer", { signal });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `Status request failed (${response.status})`);
+    // SAFETY: /api/local-computer serves the Status shape by contract; a
+    // malformed body falls back to {} above and renders as an idle panel.
+    setStatus(body as Status);
+    setError(null);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let timer: number | undefined;
+    let controller: AbortController | undefined;
+    const poll = async () => {
+      controller = new AbortController();
+      try {
+        await refresh(controller.signal);
+      } catch (e) {
+        if (active && !(e instanceof DOMException && e.name === "AbortError")) {
+          setStatus(null);
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+          timer = window.setTimeout(() => void poll(), 5000);
+        }
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      controller?.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [refresh, refreshKey]);
+
+  const post = useCallback(async (action: Exclude<Action, "recreate">) => {
+    const response = await fetch(`/api/local-computer/${action}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `${action} failed`);
+    // SAFETY: the action endpoints answer with the same Status shape the
+    // poll endpoint serves; the UI re-polls, so a stale body self-heals.
+    setStatus(body as Status);
+  }, []);
+
+  const runAutoSetup = useCallback(async () => {
+    setPending("run");
+    setError(null);
+    try {
+      let current = status;
+      if (current?.runtime && !current.daemonUp) {
+        if (current.runtime === "docker" && current.platform === "linux") {
+          throw new Error("Starting docker on Linux needs sudo — run the command shown below yourself, then continue.");
+        }
+        await post("runtimeStart");
+        current = await (await fetch("/api/local-computer")).json();
+        setStatus(current);
+      }
+      if (current && !current.image) {
+        await post("pull");
+        current = await (await fetch("/api/local-computer")).json();
+        setStatus(current);
+      }
+      if (current && current.container === "missing" && current.image) {
+        await post("run");
+        current = await (await fetch("/api/local-computer")).json();
+        setStatus(current);
+      }
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPending(null);
+    }
+  }, [post, refresh, status]);
+
+  return { status, loading, pending, error, runAutoSetup, refresh: () => setRefreshKey((key) => key + 1) };
+}
+
+/** Compact one-click setup embedded wherever a failed turn points at the
+ * Local VM: shows the live status and the same auto-setup chain the full
+ * Settings section offers, in a card a fraction of the size. */
+export function LocalVmQuickSetup() {
+  const { status, loading, pending, error, runAutoSetup } = useLocalVmSetup();
+  const ready = status?.ready === true;
+  const canAutoSetup = Boolean(status?.runtime) && !ready;
+  return (
+    <div className="mt-3 w-full rounded-xl border border-hairline/50 bg-panel/60 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={cn(
+            "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px]",
+            ready ? "bg-success/15 text-success" : "bg-raised text-ink-secondary",
+          )}
+        >
+          {loading ? <Loader2 size={12} className="animate-spin" /> : ready ? <Check size={12} /> : <Circle size={9} />}
+          {loading ? "Checking…" : !status ? "Status unavailable" : ready ? "Local VM ready" : (status.problem ?? "Not ready")}
+        </span>
+        {canAutoSetup && (
+          <button
+            onClick={() => void runAutoSetup()}
+            disabled={pending !== null}
+            className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+          >
+            {pending !== null ? <Loader2 size={13} className="animate-spin" /> : <Wrench size={12} />}
+            {pending !== null ? "Setting up…" : "Set up automatically"}
+          </button>
+        )}
+      </div>
+      {error && <div className="mt-2 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] text-danger">{error}</div>}
+      {!canAutoSetup && !loading && status && !ready && !status.runtime && (
+        <div className="mt-2 text-[12px] text-ink-secondary">
+          Install a container runtime first — App Settings → Local VM has the one-line command.
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Radio pair + cap input persisted to /api/config {localVm}. The server

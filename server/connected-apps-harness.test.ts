@@ -119,6 +119,22 @@ it("mounts the configured runtime and connects a calendar card without any Compo
   expect(status.status).toBe(200);
   expect(await status.json()).toMatchObject({ connected: true });
   expect(requests).toContain("POST /v1/connections/googlecalendar/connect");
+  // Re-requesting the SAME app on a NEW resume key must not stack a second
+  // card: the newest card for a slug wins and older still-pending ones are
+  // superseded (the duplicate-Gmail/Calendar-cards bug). The existing card
+  // here is already connected, so it survives the re-request untouched and
+  // the re-request returns its id rather than minting a new message.
+  const rerequest = await api("/api/internal/connectors/request", "POST", { botId: bot.id, threadId: bot.threadId, slugs: ["googlecalendar"], resumeKey: "owned-calendar-request-2" }, connectorToken);
+  expect(rerequest.status).toBe(200);
+  const rerequestIds = z.object({ messageIds: z.array(z.string()) }).parse(await rerequest.json()).messageIds;
+  expect(rerequestIds).toHaveLength(1);
+  // The prior card is connected: the re-request reuses it (the app is
+  // linked — a second card would be pure noise) instead of minting one.
+  expect(rerequestIds[0]).toBe(message.id);
+  const calendarDump = await api("/api/bots");
+  const calendarRoster = z.object({ bots: z.array(botWire.extend({ messages: z.array(z.object({ id: z.string(), connector: z.object({ slug: z.string(), status: z.string(), dismissed: z.boolean().optional() }).optional() })) })) }).parse(await calendarDump.json());
+  const calendarCards = calendarRoster.bots.find((entry) => entry.id === bot.id)?.messages.filter((entry) => entry.connector?.slug === "googlecalendar" && !entry.connector.dismissed) ?? [];
+  expect(calendarCards).toHaveLength(1);
   // Status queued a continuation while the real fake-engine turn is held.
   // Revoking app permission must refuse retained credentials and cancel that queue.
   expect((await api(`/api/bots/${bot.id}`, "PATCH", { composio: false })).status).toBe(200);
