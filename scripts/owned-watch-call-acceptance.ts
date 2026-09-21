@@ -47,9 +47,11 @@ try {
   console.log(JSON.stringify({ phase: "scratch", scratch }));
   const ui = join(scratch, "ui"); mkdirSync(ui); writeFileSync(join(ui, "index.html"), "Owned Watch call fixture");
   // Paced fake engine: the chat-streaming test observes a deterministic
-  // live window (chunk at 1s, settle at 3s). The call test is timing-
-  // insensitive to it; both ride the same happy-mode engine.
-  harness = await startPairingHarness({ staticDir: ui, calendarFixture: true, streamDelayMs: 1_000 });
+  // live window (chunk at 3s, settle at 9s — XCTest's existence polling
+  // ticks about once a second, and a 1s busy window raced the poller).
+  // Real engines take seconds to first token; the fixture mirrors that.
+  // The call test is timing-insensitive to it; both ride the same engine.
+  harness = await startPairingHarness({ staticDir: ui, calendarFixture: true, streamDelayMs: 3_000 });
   const base = harness.desktopUrl;
   const request = async (path: string, method = "GET", body?: JsonValue) => {
     const init: RequestInit = { method, headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(10_000) };

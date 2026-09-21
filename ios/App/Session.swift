@@ -157,6 +157,9 @@ final class Session: ObservableObject {
         }
 #endif
         restore()
+        // Wake the radio early so a handoff sent while the phone was closed
+        // (application context) is readable by the time the watch asks.
+        WatchHandoffBridge.shared.activateIfNeeded()
         Task { await refreshNotificationAuthorization() }
     }
 
@@ -218,6 +221,11 @@ final class Session: ObservableObject {
         try Keychain.save(paired.token, for: stored.id)
         UserDefaults.standard.set(try? JSONEncoder().encode(stored), forKey: Self.connectionKey)
 
+        // The watch follows the phone: same computer, its own device token,
+        // no six-digit dance on the wrist. Silent no-op without a paired
+        // watch.
+        WatchHandoffBridge.shared.pushPairing(connection: stored, token: paired.token)
+
         self.state = CompanionState()
         self.connection = stored
         self.client = CompanionClient(connection: stored, token: paired.token)
@@ -255,6 +263,9 @@ final class Session: ObservableObject {
         state = CompanionState()
         NotificationCoordinator.shared.setBadge(0)
         status = .unpaired
+        // The watch follows the phone off the computer too — a wrist that
+        // kept the token would be a stale trust root.
+        WatchHandoffBridge.shared.pushUnpair()
     }
 
     // MARK: - Lifecycle

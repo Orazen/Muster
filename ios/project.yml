@@ -309,6 +309,8 @@ targets:
     sources:
       - path: WatchOwnedUITests
     dependencies:
+      - package: CompanionCore
+        product: CompanionCore
       - target: MusterWatch
     settings:
       base:

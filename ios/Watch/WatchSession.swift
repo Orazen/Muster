@@ -342,6 +342,33 @@ final class WatchSession: ObservableObject {
         connect()
     }
 
+    /// Adopt a pairing handed over by the phone (WatchConnectivity). The
+    /// phone paired normally and shares the outcome; the watch skips the
+    /// six-digit code entirely. Same postconditions as pair(with:): token
+    /// to the keychain, connection to defaults, client built, connected.
+    func adoptHandoff(_ handoff: CompanionHandoff) {
+        pairingGeneration += 1
+        streamGeneration += 1
+        streamTask?.cancel()
+        streamTask = nil
+        restorePending = false
+        // A previous pairing's token has no business outliving its adoption.
+        if let old = connection?.id, old != handoff.connection.id { Keychain.remove(old) }
+        do {
+            try Keychain.save(handoff.token, for: handoff.connection.id)
+        } catch {
+            status = .offline("Could not store the pairing from your phone: \(error.localizedDescription)")
+            return
+        }
+        UserDefaults.standard.set(try? JSONEncoder().encode(handoff.connection), forKey: Self.connectionKey)
+        connection = handoff.connection
+        client = CompanionClient(connection: handoff.connection, token: handoff.token)
+        state = CompanionState()
+        status = .connecting
+        reconnectDelay = 0
+        connect()
+    }
+
     func signOut() {
         pairingGeneration += 1
         streamGeneration += 1

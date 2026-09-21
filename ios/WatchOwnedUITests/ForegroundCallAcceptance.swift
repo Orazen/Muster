@@ -1,3 +1,4 @@
+import CompanionCore
 import XCTest
 
 private final class OwnedWatchRedirectPolicy: NSObject, URLSessionTaskDelegate {
@@ -234,12 +235,19 @@ final class ForegroundCallAcceptance: XCTestCase {
         try enter("watch-composer-input", "stream check")
         try tap("watch-composer-send")
 
-        // Phase 1 — before the first token (chunk lands at ~1s): the busy
-        // line stands in, and the composer reflects the in-flight send.
+        // Phase 1 — before the first token (chunk lands at ~3s): the busy
+        // line stands in. The settled reply is the failure signal here, not
+        // a pass: if the poll sees it, the busy window was missed entirely.
         let thinking = app.descendants(matching: .any)["watch-thinking"].firstMatch
         guard thinking.waitForExistence(timeout: 10) else {
-            capture("no-thinking-line")
-            throw NSError(domain: "OwnedWatchNoThinkingLine", code: 1)
+            let settledEarly = app.descendants(matching: .any)["watch-chat-reply"].firstMatch
+            if settledEarly.exists {
+                XCTFail("Busy line missed: the reply settled before phase 1 (fixture pacing too fast)")
+            } else {
+                capture("no-thinking-line")
+                throw NSError(domain: "OwnedWatchNoThinkingLine", code: 1)
+            }
+            return
         }
         // Phase 2 — the streaming window (chunk at ~1s, result at ~3s): the
         // live bubble carries the tokens while the turn is still working.
@@ -252,13 +260,22 @@ final class ForegroundCallAcceptance: XCTestCase {
         let picture = XCTAttachment(screenshot: app.screenshot()); picture.name = "watch-streaming-window"; picture.lifetime = .keepAlways; add(picture)
 
         // Phase 3 — settled: the live bubble is replaced by the newest tail
-        // bubble carrying the finished reply, tappable into the reader.
+        // bubble carrying the finished reply, tappable into the reader. The
+        // replacement is a one-frame SwiftUI swap, so poll for the live
+        // entry to vanish rather than asserting against a stale snapshot:
+        // XCTest can snapshot the tree mid-transition (settled tail present,
+        // streaming node not yet torn down) and fail a plain .exists check.
         let tail = app.descendants(matching: .any)["watch-chat-reply"].firstMatch
         guard tail.waitForExistence(timeout: 15) else {
             capture("no-tail-bubble")
             throw NSError(domain: "OwnedWatchTailBubbleMissing", code: 1)
         }
-        XCTAssertFalse(live.exists, "Live bubble must disappear when the reply settles")
+        var liveGone = false
+        for _ in 0..<15 {
+            if !live.exists { liveGone = true; break }
+            usleep(1_000_000)
+        }
+        XCTAssertTrue(liveGone, "Live bubble must disappear when the reply settles")
         try tap("watch-chat-reply")
         let reader = app.descendants(matching: .any)["watch-reader-body"].firstMatch
         guard reader.waitForExistence(timeout: 10) else {
@@ -266,5 +283,73 @@ final class ForegroundCallAcceptance: XCTestCase {
             throw NSError(domain: "OwnedWatchReaderNotOpened", code: 1)
         }
         XCTAssertTrue(reader.label.contains("hello from fake acp"))
+    }
+
+    /// Auto-pair: the phone shares its pairing over WatchConnectivity; the
+    /// watch must reach the fleet without touching the pairing UI. The rig
+    /// cannot create a physically paired iPhone+Watch simulator duo, so the
+    /// test drives the same ingest the radio delivers into and then asserts
+    /// the app never showed a code field — the fleet roster is up with zero
+    /// pairing interaction. The credential is minted through the rig's own
+    /// control plane exactly as the phone's pairing would have produced.
+    func testHandoffFromPhonePairsWithoutPairingUI() async throws {
+        let companion = try origin("MUSTER_WATCH_COMPANION")
+        let control = try origin("MUSTER_WATCH_CONTROL")
+        let bot = try XCTUnwrap(ProcessInfo.processInfo.environment["MUSTER_WATCH_BOT"])
+
+        // Mint a pairing code the way the phone's successful pairing would
+        // have (the control plane's POST /pairing, single-use).
+        let network = URLSession(configuration: .ephemeral)
+        defer { network.invalidateAndCancel() }
+        var mint = URLRequest(url: control.appendingPathComponent("pairing"))
+        mint.httpMethod = "POST"
+        mint.timeoutInterval = 10
+        let (mintData, mintResponse) = try await network.data(for: mint)
+        XCTAssertEqual((mintResponse as? HTTPURLResponse)?.statusCode, 201)
+        struct Mint: Decodable { let code: String }
+        let minted = try JSONDecoder().decode(Mint.self, from: mintData)
+
+        // The handoff payload the phone's WatchHandoffBridge would have
+        // pushed: the connection plus the device token from redeeming that
+        // code. Built BEFORE launch — launch arguments only apply at launch.
+        var redeem = URLRequest(url: companion.appendingPathComponent("api/pair"))
+        redeem.httpMethod = "POST"
+        redeem.setValue("application/json", forHTTPHeaderField: "content-type")
+        redeem.timeoutInterval = 10
+        redeem.httpBody = try JSONEncoder().encode(["code": minted.code, "deviceName": "Watch via phone"])
+        let (redeemData, redeemResponse) = try await network.data(for: redeem)
+        XCTAssertEqual((redeemResponse as? HTTPURLResponse)?.statusCode, 201)
+        struct Redeem: Decodable { let token: String }
+        let redeemed = try JSONDecoder().decode(Redeem.self, from: redeemData)
+        let handoff = CompanionHandoff(
+            connection: Connection(name: "Owned Watch Rig", host: "127.0.0.1", port: companion.port!, scheme: .http),
+            token: redeemed.token
+        )
+        let payload = try String(data: XCTUnwrap(CompanionHandoffCodec.encode(handoff)), encoding: .utf8)!
+
+        // Launch once, with the handoff already waiting: the receiver
+        // consumes it during attach, mirroring didReceiveApplicationContext.
+        app.launchArguments = ["-watch-handoff-payload", payload]
+        app.launch()
+
+        // The fleet must appear with no pairing UI involvement whatsoever:
+        // no code field may ever exist in this run.
+        let codeField = app.descendants(matching: .any)["watch-pairing-code"].firstMatch
+        let mascot = app.descendants(matching: .any)["watch-fleet-mascot"].firstMatch
+        var sawFleet = false
+        for _ in 0..<30 {
+            if mascot.waitForExistence(timeout: 2) { sawFleet = true; break }
+            XCTAssertFalse(codeField.exists, "Auto-pair must not route through the pairing UI")
+        }
+        guard sawFleet else {
+            capture("handoff-never-paired")
+            throw NSError(domain: "OwnedWatchHandoffNotPaired", code: 1)
+        }
+        let roster = app.descendants(matching: .any)["watch-chat-bot-" + bot].firstMatch
+        guard roster.waitForExistence(timeout: 10) else {
+            capture("handoff-no-roster")
+            throw NSError(domain: "OwnedWatchHandoffNoRoster", code: 1)
+        }
+        let picture = XCTAttachment(screenshot: app.screenshot()); picture.name = "watch-handoff-paired"; picture.lifetime = .keepAlways; add(picture)
     }
 }

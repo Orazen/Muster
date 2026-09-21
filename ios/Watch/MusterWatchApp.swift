@@ -12,6 +12,9 @@ struct MusterWatchApp: App {
     /// audio session watchOS gives an app, and the fleet header and the chat
     /// both need to reach it.
     @StateObject private var voice = WatchVoice()
+    /// Phone-to-watch pairing handoff. Attached once here, at the
+    /// composition root, so the receiver has the session to adopt into.
+    @State private var handoffAttached = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -20,6 +23,10 @@ struct MusterWatchApp: App {
                 .environmentObject(session)
                 .environmentObject(voice)
                 .task {
+                    if !handoffAttached {
+                        WatchHandoffReceiver.shared.attach(to: session)
+                        handoffAttached = true
+                    }
                     session.setForeground(scenePhase == .active)
                     if scenePhase == .active { session.connect() }
                 }
