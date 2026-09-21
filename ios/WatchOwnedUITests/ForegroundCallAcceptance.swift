@@ -23,19 +23,36 @@ final class ForegroundCallAcceptance: XCTestCase {
     func reveal(_ identifier: String) throws -> XCUIElement {
         let element = app.descendants(matching: .any)[identifier].firstMatch
         let isCall = identifier.hasPrefix("watch-call-") || identifier.hasPrefix("watch-calendar-")
-        let isScrollScreen = isCall || identifier == "watch-open-call"
+        // The chat face is a ScrollView (like the call screen), not a List;
+        // its composer and reply bubble must be sought in scrollViews. The
+        // fleet roster rows (watch-chat-bot-*) are List rows and stay in
+        // collectionViews — only the in-chat identifiers are chat-screen.
+        let isChat = identifier == "watch-chat-reply" || identifier.hasPrefix("watch-composer-")
+            || identifier == "watch-streaming-bubble" || identifier == "watch-thinking"
+        let isScrollScreen = isCall || isChat || identifier == "watch-open-call"
         let container = isScrollScreen ? app.scrollViews.firstMatch : app.collectionViews.firstMatch
         let top = isCall ? 52.0 : 65.0
-        let dragX = isCall ? 0.98 : 0.5
+        // Scroll drags must ride the screen edge: a centered drag lands on
+        // tappable content (bubbles, the Reply field) and activates it
+        // instead of scrolling — the exact trap the call screen avoided.
+        let dragX = isScrollScreen ? 0.98 : 0.5
         guard container.waitForExistence(timeout: 10) else { throw NSError(domain: "OwnedWatchMissingScrollContainer", code: 1) }
         for index in 0..<6 {
-            if app.buttons["Done"].firstMatch.exists {
-                capture("unexpected-keyboard-" + identifier)
-                throw NSError(domain: "OwnedWatchUnexpectedKeyboard", code: 1)
+            // A keyboard left open from a previous step swallows swipes and
+            // hides the lower half of the screen; dismiss it rather than
+            // fail — the caller that needs the keyboard uses enter().
+            let doneButton = app.buttons["Done"].firstMatch
+            if doneButton.exists {
+                doneButton.tap()
+                for _ in 0..<10 where doneButton.exists {
+                    usleep(200_000)
+                }
             }
             print("Owned reveal \(identifier) step \(index): \(element.exists ? String(describing: element.frame) : "absent")")
             if element.exists {
                 let frame = element.frame
+                // Bar-pinned controls live above any content bound by design.
+                if identifier == "watch-open-call" { return element }
                 if frame.minY >= top && frame.maxY <= app.frame.maxY - 4 { return element }
             }
             if index == 0 { capture("before-scroll-" + identifier) }
@@ -60,6 +77,9 @@ final class ForegroundCallAcceptance: XCTestCase {
     }
 
     func enter(_ identifier: String, _ value: String) throws {
+        // Reveal without the keyboard dance first: reveal() dismisses any
+        // keyboard, then we tap the field to summon the editor deliberately.
+        _ = try reveal(identifier)
         try tap(identifier)
         let done = app.buttons["Done"].firstMatch
         if !done.waitForExistence(timeout: 5) {
@@ -83,29 +103,56 @@ final class ForegroundCallAcceptance: XCTestCase {
         return url
     }
 
+    /// Pairs the simulator unless the fleet is already up (XCTest runs this
+    /// suite alphabetically, so the chat test pairs first on a shared run).
+    /// Returns an ephemeral session for control-plane calls.
+    ///
+    /// The paired check is the mascot itself, waited on generously: a cold
+    /// Release build on a fresh simulator can take well over five seconds to
+    /// render its first frame, and a too-eager "already paired" conclusion
+    /// leaves the test staring at PairingView forever.
+    @discardableResult
+    func pairIfNeeded(control: URL, companion: URL) throws -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 10
+        let network = URLSession(configuration: config, delegate: OwnedWatchRedirectPolicy(), delegateQueue: nil)
+        if app.descendants(matching: .any)["watch-fleet-mascot"].firstMatch.waitForExistence(timeout: 30) {
+            return network
+        }
+        // The pairing screen's always-materialized row is the code field;
+        // the manual-address section sits below the fold and SwiftUI's List
+        // does not materialize it until something scrolls — reveal()'s drags
+        // do that, a plain existence wait never will.
+        guard app.descendants(matching: .any)["watch-pairing-code"].firstMatch.waitForExistence(timeout: 30) else {
+            capture("neither-fleet-nor-pairing")
+            throw NSError(domain: "OwnedWatchNeitherFleetNorPairing", code: 1)
+        }
+        try enter("pairing-address-input", companion.absoluteString)
+        try tap("watch-use-address")
+        var request = URLRequest(url: control.appendingPathComponent("pairing")); request.httpMethod = "POST"
+        let semaphore = DispatchSemaphore(value: 0)
+        var payload: Data?, response: URLResponse?, failure: Error?
+        network.dataTask(with: request) { data, urlResponse, error in
+            payload = data; response = urlResponse; failure = error; semaphore.signal()
+        }.resume()
+        semaphore.wait()
+        if let failure { throw failure }
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 201)
+        struct Pairing: Decodable { let code: String }
+        let code = try JSONDecoder().decode(Pairing.self, from: XCTUnwrap(payload)).code
+        try enter("watch-pairing-code", code)
+        try tap("watch-pairing-submit")
+        return network
+    }
+
     func testExplicitForegroundCall() async throws {
         let companion = try origin("MUSTER_WATCH_COMPANION")
         let control = try origin("MUSTER_WATCH_CONTROL")
         let bot = try XCTUnwrap(ProcessInfo.processInfo.environment["MUSTER_WATCH_BOT"])
         XCTAssertNotEqual(companion.port, control.port)
         app.launch()
-        try enter("pairing-address-input", companion.absoluteString)
-        try tap("watch-use-address")
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 10
-        let network = URLSession(configuration: config, delegate: OwnedWatchRedirectPolicy(), delegateQueue: nil)
+        let network = try pairIfNeeded(control: control, companion: companion)
         defer { network.invalidateAndCancel() }
-        var request = URLRequest(url: control.appendingPathComponent("pairing")); request.httpMethod = "POST"
-        let (data, response) = try await network.data(for: request)
-        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 201)
-        struct Pairing: Decodable { let code: String }
-        let code = try JSONDecoder().decode(Pairing.self, from: data).code
-        try enter("watch-pairing-code", code)
-        try tap("watch-pairing-submit")
-        guard app.descendants(matching: .any)["watch-fleet-mascot"].firstMatch.waitForExistence(timeout: 25) else {
-            capture("pairing-did-not-reach-fleet")
-            throw NSError(domain: "OwnedWatchPairingDidNotReachFleet", code: 1)
-        }
         try tap("watch-chat-bot-" + bot)
         try tap("watch-open-call")
         try tap("watch-call-start")
@@ -147,8 +194,11 @@ final class ForegroundCallAcceptance: XCTestCase {
         let connected = try reveal("watch-call-status")
         XCTAssertTrue(connected.label.contains("Connected"), "Keyboard dismissal ended the call")
         struct Status: Decodable { let userMessages: Int }
+        // Baseline at assertion time, not zero: XCTest runs the chat test
+        // first on a shared simulator, and its legitimate dispatch is not
+        // this test's concern — only that planning/editing added none.
         let (beforeSend, _) = try await network.data(from: control.appendingPathComponent("status"))
-        XCTAssertEqual(try JSONDecoder().decode(Status.self, from: beforeSend).userMessages, 0, "Planning or editing dispatched automatically")
+        let baseline = try JSONDecoder().decode(Status.self, from: beforeSend).userMessages
         try tap("watch-call-send")
         let reply = app.descendants(matching: .any)["watch-call-reply"].firstMatch
         guard reply.waitForExistence(timeout: 30) else { throw NSError(domain: "OwnedWatchReplyMissing", code: 1) }
@@ -158,11 +208,63 @@ final class ForegroundCallAcceptance: XCTestCase {
         await fulfillment(of: [answered], timeout: 30)
         let picture = XCTAttachment(screenshot: app.screenshot()); picture.name = "watch-call-reply"; picture.lifetime = .keepAlways; add(picture)
         let (afterReply, _) = try await network.data(from: control.appendingPathComponent("status"))
-        XCTAssertEqual(try JSONDecoder().decode(Status.self, from: afterReply).userMessages, 1)
+        XCTAssertEqual(try JSONDecoder().decode(Status.self, from: afterReply).userMessages, baseline + 1)
         try tap("watch-call-end")
         let status = app.descendants(matching: .any)["watch-call-status"].firstMatch
         _ = try reveal("watch-call-status")
         let ended = expectation(for: NSPredicate(format: "label CONTAINS[c] %@", "ended"), evaluatedWith: status)
         await fulfillment(of: [ended], timeout: 15)
+    }
+
+    /// The chat face must answer a sent message with live feedback — the
+    /// same contract the phone keeps — instead of silence until settle:
+    /// a busy line before the first token, the streaming bubble while
+    /// tokens flow, and the settled reply as a tappable tail bubble that
+    /// opens the reader. The rig paces the fake engine (chunk at 1s,
+    /// result at 3s) so the streaming window is deterministic.
+    func testChatStreamsAndOpensReader() async throws {
+        let companion = try origin("MUSTER_WATCH_COMPANION")
+        let control = try origin("MUSTER_WATCH_CONTROL")
+        let bot = try XCTUnwrap(ProcessInfo.processInfo.environment["MUSTER_WATCH_BOT"])
+        app.launch()
+        let network = try pairIfNeeded(control: control, companion: companion)
+        defer { network.invalidateAndCancel() }
+        try tap("watch-chat-bot-" + bot)
+        // Dictate the message; the explicit Send is the app's job to prove.
+        try enter("watch-composer-input", "stream check")
+        try tap("watch-composer-send")
+
+        // Phase 1 — before the first token (chunk lands at ~1s): the busy
+        // line stands in, and the composer reflects the in-flight send.
+        let thinking = app.descendants(matching: .any)["watch-thinking"].firstMatch
+        guard thinking.waitForExistence(timeout: 10) else {
+            capture("no-thinking-line")
+            throw NSError(domain: "OwnedWatchNoThinkingLine", code: 1)
+        }
+        // Phase 2 — the streaming window (chunk at ~1s, result at ~3s): the
+        // live bubble carries the tokens while the turn is still working.
+        let live = app.descendants(matching: .any)["watch-streaming-bubble"].firstMatch
+        guard live.waitForExistence(timeout: 10) else {
+            capture("no-streaming-bubble")
+            throw NSError(domain: "OwnedWatchStreamingBubbleMissing", code: 1)
+        }
+        XCTAssertTrue(live.label.contains("hello from fake acp"), "Live bubble must show the streamed tokens, got: \(live.label)")
+        let picture = XCTAttachment(screenshot: app.screenshot()); picture.name = "watch-streaming-window"; picture.lifetime = .keepAlways; add(picture)
+
+        // Phase 3 — settled: the live bubble is replaced by the newest tail
+        // bubble carrying the finished reply, tappable into the reader.
+        let tail = app.descendants(matching: .any)["watch-chat-reply"].firstMatch
+        guard tail.waitForExistence(timeout: 15) else {
+            capture("no-tail-bubble")
+            throw NSError(domain: "OwnedWatchTailBubbleMissing", code: 1)
+        }
+        XCTAssertFalse(live.exists, "Live bubble must disappear when the reply settles")
+        try tap("watch-chat-reply")
+        let reader = app.descendants(matching: .any)["watch-reader-body"].firstMatch
+        guard reader.waitForExistence(timeout: 10) else {
+            capture("reader-not-opened")
+            throw NSError(domain: "OwnedWatchReaderNotOpened", code: 1)
+        }
+        XCTAssertTrue(reader.label.contains("hello from fake acp"))
     }
 }

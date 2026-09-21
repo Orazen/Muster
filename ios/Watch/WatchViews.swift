@@ -648,6 +648,7 @@ struct ChatView: View {
 
     @State private var composerLease: ComposerViewLease?
     @State private var visible = false
+    @State private var showCall = false
 
     private var tail: [Message] {
         Array(session.state.visibleTranscript(forThread: chat.threadId).suffix(20))
@@ -679,14 +680,6 @@ struct ChatView: View {
         let context = session.composerContext(for: chat)
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                if case let .bot(bot) = chat {
-                    NavigationLink {
-                        WatchCallView(bot: bot)
-                    } label: {
-                        Label("Call", systemImage: "phone.fill")
-                    }
-                    .accessibilityIdentifier("watch-open-call")
-                }
                 if chat.busy {
                     if case let .bot(bot) = chat {
                         Button {
@@ -699,9 +692,48 @@ struct ChatView: View {
                 }
 
 
-                if tail.isEmpty, streaming == nil {
+                // The tail of the conversation, oldest to newest — the
+                // codex-reader shape the fleet already uses: glance here,
+                // tap a reply to open it at reading size. The newest bot
+                // reply carries a stable identifier (tool activity can land
+                // after a reply, so position alone does not name it).
+                let recent = Array(tail.suffix(8))
+                let newestReply = recent.lastIndex { $0.role == .bot && ($0.text ?? "").isEmpty == false }
+                if recent.isEmpty, streaming == nil, !chat.busy {
                     Text("No messages yet.")
                         .foregroundStyle(.secondary)
+                }
+                ForEach(Array(recent.enumerated()), id: \.element.id) { offset, message in
+                    Group {
+                        if message.role == .bot, message.kind == .text || message.kind == .unknown,
+                           let text = message.text, !text.isEmpty {
+                            NavigationLink(value: WatchRoute.message(threadId: chat.threadId, messageId: message.id)) {
+                                Bubble(message: message)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier(offset == newestReply ? "watch-chat-reply" : "")
+                        } else {
+                            Bubble(message: message)
+                        }
+                    }
+                }
+
+                // The reply as it is typed — the same live-feedback
+                // contract the phone's chat keeps, so a sent message is
+                // never answered by silence. While the turn is working but
+                // no tokens have arrived, a small busy line stands in; once
+                // tokens flow, the live bubble sits where the settled one
+                // will land and disappears the moment the store swaps them.
+                if let live = streaming, !live.isEmpty {
+                    Text(live)
+                        .font(.system(size: 13).italic())
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .background(Color.gray.opacity(0.2), in: RoundedRectangle(cornerRadius: 10))
+                        .accessibilityIdentifier("watch-streaming-bubble")
+                } else if chat.busy {
+                    Text("Thinking…").font(.caption2).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("watch-thinking")
                 }
 
                 // Never automatic, always cancellable: the same control
@@ -728,6 +760,30 @@ struct ChatView: View {
             .padding(.horizontal)
         }
         .navigationTitle(chat.name)
+        // The call lives in the navigation bar, not the scrolling content:
+        // the chat now rests anchored on its newest message, and a control
+        // buried above the fold is a control nobody finds. Same rule as the
+        // roster — one always-visible door per conversation.
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if case .bot = chat {
+                    Button {
+                        showCall = true
+                    } label: {
+                        Image(systemName: "phone.fill")
+                    }
+                    .accessibilityIdentifier("watch-open-call")
+                }
+            }
+        }
+        .navigationDestination(isPresented: $showCall) {
+            if case let .bot(bot) = chat {
+                WatchCallView(bot: bot)
+            }
+        }
+        // Newest at the resting position: a conversation grows from the
+        // bottom, and the wrist reads the latest line first.
+        .defaultScrollAnchor(.bottom)
         .onAppear {
             visible = true
             if composerLease == nil { composerLease = session.viewComposer(context) }

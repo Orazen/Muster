@@ -224,10 +224,11 @@ interface FakeEngineEnvironment {
   FAKE_ACP_DUMP: string;
   FAKE_ACP_PERMISSION_DUMP?: string;
   FAKE_ACP_PEER_DIRECTORY?: string;
+  FAKE_ACP_STREAM_DELAY_MS?: string;
 }
 
 export async function startPairingHarness(
-  { staticDir = join(ROOT, "dist"), engineMode = "happy", calendarFixture = false }: { staticDir?: string; engineMode?: FixtureEngineMode; calendarFixture?: boolean } = {},
+  { staticDir = join(ROOT, "dist"), engineMode = "happy", calendarFixture = false, streamDelayMs = 0 }: { staticDir?: string; engineMode?: FixtureEngineMode; calendarFixture?: boolean; streamDelayMs?: number } = {},
   { waitForServer = waitForOwnedServer }: { waitForServer?: typeof waitForOwnedServer } = {},
 ): Promise<PairingHarness> {
   if (process.platform === "win32") throw new Error("Pairing fixture requires POSIX process groups");
@@ -289,6 +290,7 @@ setInterval(() => { if (process.ppid !== owner) process.exit(0); }, 100).unref()
         FAKE_ACP_MODE: engineMode,
         FAKE_ACP_DUMP: join(directory, "fake-acp.json"),
       };
+      if (streamDelayMs > 0) engineEnvironment.FAKE_ACP_STREAM_DELAY_MS = String(streamDelayMs);
       if (permissionOutcomePath) engineEnvironment.FAKE_ACP_PERMISSION_DUMP = permissionOutcomePath;
       if (engineMode === "peer-capability") {
         engineEnvironment.FAKE_ACP_PEER_DIRECTORY = join(directory, "peer-receipts");

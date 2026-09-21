@@ -46,7 +46,10 @@ async function listen(server: Server) {
 try {
   console.log(JSON.stringify({ phase: "scratch", scratch }));
   const ui = join(scratch, "ui"); mkdirSync(ui); writeFileSync(join(ui, "index.html"), "Owned Watch call fixture");
-  harness = await startPairingHarness({ staticDir: ui, calendarFixture: true });
+  // Paced fake engine: the chat-streaming test observes a deterministic
+  // live window (chunk at 1s, settle at 3s). The call test is timing-
+  // insensitive to it; both ride the same happy-mode engine.
+  harness = await startPairingHarness({ staticDir: ui, calendarFixture: true, streamDelayMs: 1_000 });
   const base = harness.desktopUrl;
   const request = async (path: string, method = "GET", body?: JsonValue) => {
     const init: RequestInit = { method, headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(10_000) };
@@ -123,7 +126,7 @@ try {
   writeFileSync(join(scratch, "xcodebuild.log"), output);
   const { messages } = await request(`/api/threads/${bot.threadId}/messages`);
   const userMessages = messages.filter((value: { role: string; kind: string }) => value.role === "user" && value.kind === "text").length;
-  if (userMessages !== 1) throw new Error(`Expected exactly one explicit user dispatch; got ${userMessages}`);
+  if (userMessages !== 2) throw new Error(`Expected exactly two explicit user dispatches (call + chat); got ${userMessages}`);
   console.log(JSON.stringify({ phase: "passed", userMessages, calls, result: join(scratch, "acceptance.xcresult") }));
 } finally {
   writeFileSync(join(scratch, "traffic.json"), JSON.stringify({ paired, traffic }, null, 2));

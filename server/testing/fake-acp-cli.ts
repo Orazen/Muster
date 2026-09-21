@@ -20,6 +20,9 @@
 //                     in `data` — the regression frame for the core's
 //                     data-composing and shared classifier)
 //                   | fallback-healthy (happy, except explicit FAKE_FALLBACK_HANG prompt holds)
+//   FAKE_ACP_STREAM_DELAY_MS
+//                   hold the happy-mode reply chunk for N ms so a UI test can
+//                   observe the live streaming bubble (default 0, off)
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
 //                   | ask-peer (spawn the injected "agents" MCP server from
@@ -194,10 +197,20 @@ function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: str
 /** True only for primitive strings — the ACP wire contract for id fields. */
 const isText = <T>(value: T): value is T & string => String(value) === value;
 
+// FAKE_ACP_STREAM_DELAY_MS paces the happy turn so a UI test can observe its
+// phases deterministically: the reply chunk lands at N ms, the prompt result
+// at 3N ms — leaving a 2N ms window in which the client is demonstrably
+// streaming (tokens arrived, turn not settled). Zero — the default — keeps
+// every existing mode byte-identical to before.
+const streamDelay = Number(process.env.FAKE_ACP_STREAM_DELAY_MS ?? 0);
 function playTurn() {
-  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "hello from fake acp" } } } });
-  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "tc-1", title: "run" } } });
-  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", toolCallId: "tc-1", status: "completed" } } });
+  const emit = () => {
+    out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "hello from fake acp" } } } });
+    out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "tc-1", title: "run" } } });
+    out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", toolCallId: "tc-1", status: "completed" } } });
+  };
+  if (streamDelay > 0) setTimeout(emit, streamDelay);
+  else emit();
 }
 
 let buf = "";
@@ -550,6 +563,9 @@ function handle(msg: any) {
         });
         return;
       }
+      // With the pacing delay set, hold the result so the streaming window
+      // between the chunk and the settle is observable (see playTurn).
+      if (streamDelay > 0 && mode !== "empty-reply") { setTimeout(complete, streamDelay * 3); break; }
       complete();
       break;
     }
