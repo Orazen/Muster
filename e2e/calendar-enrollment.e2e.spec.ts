@@ -3,7 +3,12 @@ import { test, expect, pairDesktop } from "./browser-fixtures.ts";
 test("Watch Calendar enrollment requires inspected consent and discards changed-code responses", async ({ harness, newPage, pairCodeFromCloud }) => {
   const page = await newPage();
   await pairDesktop(page, harness, pairCodeFromCloud);
+  // Quick start persists its gate asynchronously (PUT /api/me/onboarding);
+  // reloading before it lands legitimately re-shows the wizard, whose
+  // overlay then intercepts everything below. Wait for the save.
+  const gateSaved = page.waitForResponse(response => response.url().includes("/api/me/onboarding") && response.request().method() === "PUT");
   await page.getByRole("button", { name: "Quick start — skip setup, just get me in", exact: true }).click();
+  await gateSaved;
   await page.reload();
   await page.route("**/api/calendar/status", route => route.fulfill({ json: { configured: true, connected: true } }));
   await page.route("**/api/connectors/catalog", route => route.fulfill({ json: { configured: false, cards: [] } }));
