@@ -174,6 +174,10 @@ targets:
     platform: watchOS
     sources:
       - path: Watch
+        # The complication file is the widget extension's whole source;
+        # compiled here too, its @main collides with the app's own.
+        excludes:
+          - "FleetComplication.swift"
       # Two files shared verbatim from the phone target, not copied: the
       # keychain wrapper and Bonjour discovery are Foundation/Network only
       # and behave identically on watchOS.
@@ -182,6 +186,19 @@ targets:
     dependencies:
       - package: CompanionCore
         product: CompanionCore
+      # The complication extension renders the fleet snapshot out-of-process
+      # from the watch face. Embed like the phone's widget: the embed phase
+      # places the appex inside the watch bundle.
+      - target: MusterWatchComplication
+        embed: true
+    entitlements:
+      path: Watch/MusterWatch.entitlements
+      properties:
+        # Shared with the phone app's widget: the same app group carries the
+        # FleetSnapshotStore data the complication renders. The group exists
+        # in the portal (created in Loop147 for the phone targets).
+        com.apple.security.application-groups:
+          - group.com.muster.companion
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion.watchkitapp
@@ -236,6 +253,41 @@ targets:
             ts.net:
               NSIncludesSubdomains: true
               NSExceptionAllowsInsecureHTTPLoads: true
+
+  MusterWatchComplication:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - path: Watch/FleetComplication.swift
+    dependencies:
+      - package: CompanionCore
+        product: CompanionCore
+    entitlements:
+      path: Watch/FleetComplication.entitlements
+      properties:
+        # Same group as the watch app: extension and container must carry
+        # the identical group or UserDefaults(suiteName:) reads nil and the
+        # complication shows its placeholder forever (the phone widget's
+        # exact lesson, Loop147).
+        com.apple.security.application-groups:
+          - group.com.muster.companion
+    info:
+      path: Watch/FleetComplicationInfo.plist
+      properties:
+        CFBundleDisplayName: Muster Fleet
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion.watchkitapp.fleetwidget
+        DEVELOPMENT_TEAM: 7375K23WFU
+        CODE_SIGN_STYLE: Automatic
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "8"
+        SWIFT_VERSION: "5.9"
+        SKIP_INSTALL: YES
 
   MusterOwnedUITests:
     type: bundle.ui-testing
@@ -337,6 +389,7 @@ schemes:
     build:
       targets:
         MusterWatch: all
+        MusterWatchComplication: all
         MusterWatchOwnedUITests: [test]
     test:
       targets:

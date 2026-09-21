@@ -45,6 +45,7 @@ final class WatchSession: ObservableObject {
             approvalCoordinator.reconcile()
             composerCoordinator.reconcile()
             hapticOnFleetChange()
+            publishSnapshot()
             if let target = callTarget, state.bot(target.botId)?.threadId != target.threadId {
                 calendarCoordinator.reset()
                 calendarBoundContext = nil
@@ -67,6 +68,9 @@ final class WatchSession: ObservableObject {
                     callCoordinator.endImmediately()
                 }
             }
+            // Offline/unpaired must reach the complication too — a mood
+            // derived only from fleet data cannot say "offline".
+            publishSnapshot()
         }
     }
     /// Transient, user-facing failures from an action they just took.
@@ -80,6 +84,7 @@ final class WatchSession: ObservableObject {
     private func hapticOnFleetChange() {
         var isOffline = false
         if case .offline = status { isOffline = true }
+        if case .unpaired = status { isOffline = true }
         let mood = FleetMood.from(
             isOffline: isOffline,
             approvals: state.pendingApprovals.count,
@@ -102,15 +107,30 @@ final class WatchSession: ObservableObject {
 
     /// The fleet as one face. Precedence lives in `FleetMood` so the header
     /// and any future surface cannot disagree about what matters most.
+    /// Offline rule matches the phone's publishFleetSnapshot exactly:
+    /// unpaired is offline — a watch that has never connected must not
+    /// glance "Up to date".
     var fleetMood: FleetMood {
         var isOffline = false
         if case .offline = status { isOffline = true }
+        if case .unpaired = status { isOffline = true }
         return FleetMood.from(
             isOffline: isOffline,
             approvals: state.pendingApprovals.count,
             working: state.bots.filter { $0.busy == true }.count,
             unread: state.bots.filter(\.unread).count + state.rooms.filter(\.unread).count
         )
+    }
+
+    /// Publish the fleet snapshot for the complication (and any future
+    /// out-of-process surface). Same store the phone's widget uses, so the
+    /// render contract is one function — the snapshot is written on every
+    /// state change and a status change; the store's freshness rule turns a
+    /// stale one into "offline" at render time. A status didSet also fires
+    /// this: offline/unpaired must reach the complication, not just fleet
+    /// data changes.
+    func publishSnapshot() {
+        FleetSnapshotStore.publish(fleetSnapshot(state: state, mood: fleetMood))
     }
 
     private var client: CompanionClient? {
@@ -252,6 +272,11 @@ final class WatchSession: ObservableObject {
 
     init() {
         restore()
+        // A fresh install reaches no didSet — no state arrives, status never
+        // changes from .unpaired — so the complication would show nothing
+        // until the first successful sync. Publish the honest empty truth
+        // immediately: the face reads "Offline" until pairing connects.
+        publishSnapshot()
     }
 
     // MARK: - Pairing
