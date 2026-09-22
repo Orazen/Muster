@@ -520,6 +520,12 @@ jobs:
             fi
             echo "$out" | grep -q "status: Accepted" || {
               echo "::error::notarization not Accepted for $f"; exit 1; }
+          done
+          # Staple the dmg only — stapler exits 66 on zips ("incapable of
+          # working with ZIP archive files"); the zip's signed payload is
+          # already covered by its notarization ticket, same as the arm64 leg.
+          for f in release/*.dmg; do
+            [ -e "$f" ] || continue
             xcrun stapler staple "$f"
             xcrun stapler validate "$f"
           done

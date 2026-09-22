@@ -60,6 +60,12 @@ for f in "$DIR"/*.dmg "$DIR"/*.zip; do
   [ -e "$f" ] || continue
   echo "-- submitting $(basename "$f")"
   xcrun notarytool submit "$f" --keychain-profile "$PROFILE" --wait
+  echo "-- $(basename "$f") notarized"
+done
+# Staple the dmg only — stapler exits 66 on zips; the zip's signed payload is
+# covered by its notarization ticket.
+for f in "$DIR"/*.dmg; do
+  [ -e "$f" ] || continue
   xcrun stapler staple "$f"
   xcrun stapler validate "$f"
   echo "-- $(basename "$f") stapled and validated"
