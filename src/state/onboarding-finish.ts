@@ -9,6 +9,10 @@ export interface OnboardingFinishInput {
   identity: SetupIdentity | null;
   task: string;
   sendFirstTask?: boolean;
+  /** The wizard's strict engine-gate evidence. Required so a closed gate can
+   * never be forgotten at a call site; only consulted when a task will
+   * actually be sent — skip paths never gate. */
+  engineConnected: boolean;
   readRoster(): Promise<Bot[]>;
   createBot(): Promise<{ bot: Bot }>;
   patchBot(botId: string, identity: SetupIdentity): Promise<{ bot: Bot }>;
@@ -87,6 +91,13 @@ export function createOnboardingFinishSession() {
         input.onBotReady(result.bot);
         check(attempt);
         const task = input.sendFirstTask === false ? "" : input.task.trim();
+        // The teammate is created and selected either way; it is the task
+        // that needs a live engine. Refuse here — BEFORE sendTask — so a
+        // closed gate can never burn the first message, and a retry with the
+        // gate open only re-checks state it already owns (no double create).
+        if (task && !input.engineConnected) {
+          throw new Error("Connect an engine or add a provider key before sending a first task.");
+        }
         const receipt = task ? await input.sendTask(result.bot.id, task) : {};
         check(attempt);
         accepted = { bot: result.bot, task, message: receipt.message };

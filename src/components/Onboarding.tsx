@@ -1,10 +1,16 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Check,
   AlertTriangle,
+  ArrowLeft,
+  Brain,
+  Inbox,
+  Layers,
   Loader2,
   Mic,
-  ArrowLeft,
+  PenLine,
+  Repeat,
+  Search,
   Sparkles,
   ShieldCheck,
   GitBranch,
@@ -16,7 +22,9 @@ import {
   BellRing,
   Lock,
 } from "lucide-react";
-import { FlowerCharacter } from "@/components/FlowerCharacter";
+import type { LucideIcon } from "lucide-react";
+import "./onboarding-chat.css";
+import { AgentBotAvatar } from "@/components/AgentBotAvatar";
 import { speaker } from "@/lib/tts";
 import { AgentAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, consumeTourReplay, track } from "@/lib/analytics";
@@ -29,12 +37,20 @@ import { useAuth } from "@/lib/auth";
 import type { InstanceInfo } from "@/state/store";
 import { createOnboardingFinishSession } from "@/state/onboarding-finish";
 import {
+  canEnterStep,
+  canSendFirstTask,
+  clampOnboardingStep,
   clearOnboardingDraft,
   FIRST_TASK_TEMPLATES,
+  ONBOARDING_NEEDS_MAX,
+  ONBOARDING_NEED_OPTIONS,
   ONBOARDING_STEPS,
   readOnboardingDraft,
   resolveInitialTaskDraft,
+  sanitizeNeeds,
   saveOnboardingDraft,
+  stageForStep,
+  type OnboardingDraft,
 } from "@/state/onboarding-draft";
 
 // First-run onboarding, vellum-assistant style: a wizard that talks about the
@@ -62,6 +78,64 @@ const GUIDE_BEATS: ReadonlyArray<{ state: AgentState; line: string }> = [
   { state: "listening", line: "Let's check your voice setup." },
   { state: "celebrate", line: "All set — they're ready to work!" },
 ];
+
+/** The spoken lead-in above each step's content — the GAIA presentation
+ * arc's question-per-stage rhythm. Dense array indexed by step, like
+ * stepContent; the copy is distinct from GUIDE_BEATS so the rail and the
+ * stage never say the same sentence twice. */
+const STEP_QUESTIONS: ReadonlyArray<string> = [
+  "First things first — who's setting this up?",
+  "Shall I show you what you're getting before we start?",
+  "Which engine should your bots run on?",
+  "Should approvals follow you to your phone?",
+  "What do you want off your plate first?",
+  "Anything you want to switch on before we hand off?",
+  "Handoff time — what should we try first?",
+];
+
+/** GAIA's finishing line (constants/messages.ts), verbatim — shown while the
+ * first task is being accepted so the handoff reads as a chat starting. */
+const FINISHING_MESSAGE = "One sec, starting our first chat…";
+
+/** Needs chips (Q2): one tint + icon per pain id, mirroring GAIA's
+ * OPTION_STYLE shape. Inline styles carry the tints because
+ * onboarding-chat.css is unlayered — its `.chip` background beats Tailwind
+ * color utilities. Active chips sit on their solid tint with near-black
+ * text (Muster is dark-theme/light-ink, so `text-ink` would vanish there). */
+type NeedStyle = { icon: LucideIcon; hex: string };
+
+const NEED_STYLE = {
+  research: { icon: Search, hex: "#7dd3fc" },
+  writing: { icon: PenLine, hex: "#f0abfc" },
+  inbox: { icon: Inbox, hex: "#a7f3d0" },
+  meetings: { icon: Calendar, hex: "#fde68a" },
+  grunt: { icon: Repeat, hex: "#ffb259" },
+  tracking: { icon: Brain, hex: "#c7d2fe" },
+  tools: { icon: Layers, hex: "#a7f3d0" },
+  other: { icon: MessageSquare, hex: "#f0abfc" },
+} satisfies Partial<Record<string, NeedStyle>>;
+
+const NEED_FALLBACK_STYLE: NeedStyle = { icon: Sparkles, hex: "#fde68a" };
+
+function needStyle(id: string): NeedStyle {
+  // SAFETY: NEED_STYLE is a closed map of the pains-beat ids; the cast only
+  // lets an arbitrary id probe it — unknown ids read undefined, and the
+  // fallback below styles whatever this build has not mapped yet.
+  const style: NeedStyle | undefined = NEED_STYLE[id as keyof typeof NEED_STYLE];
+  return style ?? NEED_FALLBACK_STYLE;
+}
+
+/** One stage's spoken question, rendered once per step above its content. */
+function WizardBubble({ text, busy = false }: { text: string; busy?: boolean }) {
+  return (
+    <div className="wizard-bubble-row">
+      <div className="wizard-bubble">
+        {busy && <Loader2 size={14} className="shrink-0 animate-spin text-ink-secondary" />}
+        <span>{text}</span>
+      </div>
+    </div>
+  );
+}
 
 function StatusRow({
   ok,
@@ -382,6 +456,9 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [instances, setInstances] = useState<InstanceRow[] | null>(null);
+  // Needs multi-select (Q2) + the "something else" free text behind it.
+  const [needs, setNeeds] = useState<string[]>([]);
+  const [otherNeed, setOtherNeed] = useState("");
   const [perms, setPerms] = useState<{ mic: string } | null>(null);
   const valid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 
@@ -501,6 +578,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       if (savedCharacter) setBotCharacter(savedCharacter);
       setAxes(stored.axes);
       setShowPersonality(stored.showPersonality);
+      setNeeds(sanitizeNeeds(stored.needs));
+      setOtherNeed(stored.otherNeed ?? "");
     }
     const firstTask = resolveInitialTaskDraft(stored, new URLSearchParams(window.location.search).get("template"));
     setSuggestion(firstTask.suggestion);
@@ -515,7 +594,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     const currentStep = ONBOARDING_STEPS[step];
     if (!draftReady || !user || !currentStep) return;
-    saveOnboardingDraft(user.id, {
+    const toSave: OnboardingDraft = {
       version: 2,
       name,
       email,
@@ -528,8 +607,14 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       customTask,
       showPersonality,
       axes,
-    });
-  }, [draftReady, user, name, email, step, botName, botRole, botColor, botCharacter, suggestion, customTask, showPersonality, axes]);
+    };
+    // Absent while empty: the e2e draft contract compares stored bytes
+    // before/after unrelated edits, so cleared picks must remove the keys
+    // rather than write empty arrays/strings.
+    if (needs.length) toSave.needs = needs;
+    if (otherNeed) toSave.otherNeed = otherNeed;
+    saveOnboardingDraft(user.id, toSave);
+  }, [draftReady, user, name, email, step, botName, botRole, botColor, botCharacter, suggestion, customTask, showPersonality, axes, needs, otherNeed]);
 
   useEffect(() => {
     track("onboarding_step", { step, name: STEP_LABELS[step] });
@@ -585,24 +670,77 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     return () => clearInterval(t);
   }, [step]);
 
+  // Engine evidence for the first-task gate: fetched on mount (the gate has
+  // to be knowable before step 2), refreshed on window focus, and again when
+  // Settings closes — a provider key saved mid-setup must reopen the gate
+  // without a reload. A failed fetch settles the list closed ([]), never a
+  // perpetual "checking" that could strand the wizard.
+  const instancesRequestRef = useRef(0);
+  const instancesAliveRef = useRef(true);
+  const refreshInstances = useCallback(() => {
+    const request = ++instancesRequestRef.current;
+    fetch("/api/instances")
+      .then((r) => r.json())
+      .then((d) => {
+        if (instancesAliveRef.current && request === instancesRequestRef.current) setInstances(d.instances ?? []);
+      })
+      .catch(() => {
+        if (instancesAliveRef.current && request === instancesRequestRef.current) setInstances([]);
+      });
+  }, []);
+
   useEffect(() => {
-    if (step !== 2) return;
-    let active = true;
-    let latestRequest = 0;
-    const refresh = () => {
-      const request = ++latestRequest;
-      fetch("/api/instances")
-        .then((r) => r.json())
-        .then((d) => active && request === latestRequest && setInstances(d.instances ?? []))
-        .catch(() => active && request === latestRequest && setInstances([]));
-    };
-    refresh();
-    window.addEventListener("focus", refresh);
+    instancesAliveRef.current = true;
+    refreshInstances();
+    window.addEventListener("focus", refreshInstances);
     return () => {
-      active = false;
-      window.removeEventListener("focus", refresh);
+      instancesAliveRef.current = false;
+      window.removeEventListener("focus", refreshInstances);
     };
-  }, [step]);
+  }, [refreshInstances]);
+
+  // Re-run the gate when the settings dialog closes — the provider-key save
+  // path already dispatches fresh config, and this covers instance evidence.
+  const settingsWasOpenRef = useRef(state.appSettingsOpen);
+  useEffect(() => {
+    const wasOpen = settingsWasOpenRef.current;
+    settingsWasOpenRef.current = state.appSettingsOpen;
+    if (wasOpen && !state.appSettingsOpen) refreshInstances();
+  }, [state.appSettingsOpen, refreshInstances]);
+
+  // Gate evidence — any engine the SERVER calls "can run a turn" (available)
+  // or any provider key already saved. Deliberately looser than engineReady():
+  // subscription engines in the e2e/first-run environment report
+  // authenticated: false until a real turn, and gating on that would disable
+  // Continue on a machine that demonstrably can run. Auth surfaces at turn
+  // time in chat, where the user has context to fix it.
+  const configuredProviders = Object.values(state.config?.providers ?? {});
+  const engineConnected =
+    instances?.some((instance) => instance.snapshot.state === "available") === true ||
+    state.instances.some((instance) => instance.snapshot.state === "available") ||
+    configuredProviders.some((provider) => provider.configured === true);
+  // Unknown only while the fetch is still in flight AND nothing has already
+  // answered the gate open.
+  const gateSettled = engineConnected || instances !== null;
+
+  // A restored draft can sit on the handoff step while the gate is closed
+  // (the engine went away with the tab). Park it on Permissions — the last
+  // free step — and release it untouched once the gate settles open. Runs
+  // only after hydration + settle so an early fetch cannot yank a draft.
+  useEffect(() => {
+    if (!draftReady || !gateSettled) return;
+    if (!canEnterStep(step, engineConnected)) setStep(clampOnboardingStep(step, engineConnected));
+  }, [draftReady, gateSettled, step, engineConnected]);
+
+  const toggleNeed = (id: string) => {
+    setNeeds((current) =>
+      current.includes(id)
+        ? current.filter((entry) => entry !== id)
+        : current.length >= ONBOARDING_NEEDS_MAX
+        ? current
+        : [...current, id],
+    );
+  };
 
   useEffect(() => {
     if (step === 5 && capabilities.dictation.available) {
@@ -697,6 +835,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           body: JSON.stringify({ text }),
         }),
         sendFirstTask,
+        engineConnected,
       });
       if (!result || !finishSession.active) return;
       if (result.message) dispatch({ type: "messageAdded", threadId: result.bot.threadId, message: result.message });
@@ -880,6 +1019,45 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             ? "Bots run on AI tools installed on this computer — here's what we found."
             : "Web bots run on API-key providers — Claude, GPT, Gemini and more. Paste a key now, or set it up later in Settings → Providers."}
         </p>
+        {/* Status chips over the UNFILTERED instance list — the gate's own
+            evidence. The Ready/Needs-setup rows below stay install-filtered,
+            but the gate must show every engine the server considers
+            runnable (a key-only provider has no install block). */}
+        <fieldset className="wizard-chips m-0 mt-3 min-w-0 border-0 p-0" aria-label="Engine status">
+          {!instances ? (
+            <span className="chip" aria-disabled="true" style={{ background: "#fde68a1f", color: "#fde68a" }}>
+              <Loader2 size={14} className="shrink-0 animate-spin" /> Checking for engines…
+            </span>
+          ) : instances.length === 0 ? (
+            <span className="chip" aria-disabled="true" style={{ background: "#fde68a1f", color: "#fde68a" }}>
+              No engine detected yet
+            </span>
+          ) : (
+            instances.map((instance) =>
+              instance.snapshot.state === "available" ? (
+                <span
+                  key={instance.instanceId}
+                  className="chip"
+                  style={{ background: "#a7f3d0", color: "#101010" }}
+                >
+                  <ProviderMark driverKind={instance.driverKind} size={14} />
+                  {instance.displayName}
+                  <Check size={14} className="shrink-0" />
+                </span>
+              ) : (
+                <button
+                  key={instance.instanceId}
+                  type="button"
+                  disabled
+                  className="chip disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ProviderMark driverKind={instance.driverKind} size={14} />
+                  {instance.displayName}
+                </button>
+              ),
+            )
+          )}
+        </fieldset>
         {/* Subscription path (free-trial spec): most people already pay for
             ChatGPT Plus or Claude Pro — say out loud that those count, and
             point desktop users at the CLI engines that use them directly.
@@ -1003,6 +1181,49 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
     (
       <div className="flex min-h-0 flex-col">
+        {/* Q2 (GAIA pattern): the stage question comes from the wizard
+            bubble; picks sit ABOVE the avatar so the multi-select reads as
+            the step's ask, not a footnote to identity setup. Tints render
+            inline — onboarding-chat.css is unlayered and its `.chip`
+            background beats Tailwind color utilities. */}
+        <fieldset
+          className="wizard-chips m-0 min-w-0 border-0 p-0"
+          aria-label="What do you want off your plate first?"
+        >
+          {ONBOARDING_NEED_OPTIONS.map((option) => {
+            const selected = needs.includes(option.id);
+            const atCap = needs.length >= ONBOARDING_NEEDS_MAX;
+            const { icon: Icon, hex } = needStyle(option.id);
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => toggleNeed(option.id)}
+                aria-pressed={selected}
+                disabled={!selected && atCap}
+                className="chip disabled:cursor-not-allowed disabled:opacity-50"
+                style={selected ? { background: hex, color: "#101010" } : { background: `${hex}1f`, color: hex }}
+              >
+                <Icon size={14} className="shrink-0" />
+                {option.label}
+              </button>
+            );
+          })}
+        </fieldset>
+        <p className="mt-1.5 text-[12px] text-ink-secondary">
+          {needs.length}/{ONBOARDING_NEEDS_MAX} picked
+        </p>
+        {needs.includes("other") && (
+          <input
+            type="text"
+            value={otherNeed}
+            onChange={(e) => setOtherNeed(e.target.value)}
+            maxLength={200}
+            placeholder="What else should I take over?"
+            aria-label="Something else, in your words"
+            className="mt-2 w-full max-w-sm rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+          />
+        )}
         {/* Vellum-style: centered column, avatar front-and-center, scroll strips below */}
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4">
           <div className="flex items-center justify-center py-2">
@@ -1148,7 +1369,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         <p className="mt-1 text-[13.5px] text-ink-secondary">
           Optional, and only ever used when you ask for the feature.
         </p>
-        <div className="mt-4 flex flex-col gap-2.5">
+        <div className="wizard-ack mt-4 flex flex-col gap-2.5">
           <div className="flex items-center justify-between gap-3 rounded-xl bg-card p-3.5">
             <div className="flex items-start gap-3">
               <Mic size={18} className="mt-0.5 shrink-0 text-ink-secondary" />
@@ -1237,11 +1458,33 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           </button>
           <button
             onClick={() => setStep(6)}
-            className="flex-1 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
+            disabled={!canEnterStep(6, engineConnected)}
+            className="flex-1 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white disabled:opacity-40"
           >
             Continue
           </button>
         </div>
+        {/* The gate explains itself before the user meets a disabled button
+            on the next step: unknown shows an honest "checking", settled-closed
+            states the fix and jumps straight to the engine step. */}
+        {!gateSettled ? (
+          <p role="status" className="mt-2 text-[12.5px] text-ink-secondary">
+            Checking…
+          </p>
+        ) : !engineConnected ? (
+          <>
+            <p role="status" className="mt-2 text-[12.5px] text-ink-secondary">
+              Connect an engine or add a provider key before sending a first task.
+            </p>
+            <button
+              type="button"
+              onClick={() => setStep(2)}
+              className="mt-1 self-start text-[12.5px] text-[#f08a24] hover:underline"
+            >
+              Connect an engine
+            </button>
+          </>
+        ) : null}
       </div>
     ),
 
@@ -1290,7 +1533,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           </button>
           <button
             onClick={() => finish(true)}
-            disabled={creating}
+            disabled={creating || !canSendFirstTask(step, engineConnected)}
             className="flex-1 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white disabled:opacity-40"
           >
             {creating ? "Setting up…" : botName.trim() ? `Muster ${botName.trim()} →` : "Start using Muster"}
@@ -1347,18 +1590,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         <aside className="onboarding-guide" aria-label="Your setup guide">
           <div className="onboarding-guide-intro">
             <div className="onboarding-guide-flower" aria-hidden="false">
-              {/* The living guide: the interactive character with a per-beat
-                  face and first-person line. Poke it — it stays honest about
-                  which setup step you are on while it reacts. */}
-              <FlowerCharacter
+              {/* The guide's face: the shared bot-avatars adapter reading the
+                  honest per-step state — no pokes, no antics. */}
+              <AgentBotAvatar
                 color={botColor}
                 size={112}
                 state={micTesting ? "dictating" : setupError ? "thinking" : creating ? "working" : (GUIDE_BEATS[step]?.state ?? "idle")}
-                status={creating ? "working" : "idle"}
-                task={micTesting ? "Listening…" : undefined}
-                withLabel={true}
-                focusable={false}
-                label={`Your setup guide — ${GUIDE_BEATS[step]?.line ?? ""} (poke to wave)`}
+                label={`Your setup guide — ${GUIDE_BEATS[step]?.line ?? ""}`}
               />
             </div>
             <div className="onboarding-guide-copy">
@@ -1394,6 +1632,22 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             >
               {STEP_LABELS[step]}
             </h2>
+            {/* Segmented progress (GAIA OnboardingProgress parity): current +
+                completed read 100, future reads 0. Names differ from the
+                sidebar list ("Setup progress") so both remain addressable. */}
+            <div className="wizard-progress" role="group" aria-label="Setup progress by step">
+              {ONBOARDING_STEPS.map((entry, index) => (
+                <span
+                  key={entry.id}
+                  role="progressbar"
+                  aria-label={`Step ${index + 1} of ${ONBOARDING_STEPS.length}`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={index <= step ? 100 : 0}
+                  className={`seg${index <= step ? " on" : ""}`}
+                />
+              ))}
+            </div>
           </header>
           <div ref={stageScrollRef} data-testid="onboarding-stage-scroll" className="onboarding-stage-scroll">
             {/* A new failure is revealed above the form. It shares the
@@ -1413,7 +1667,16 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 leave stale content mounted beneath the next step's label. The
                 keyed remount doubles as the beat morph — each step's card
                 rises in (CSS, reduced-motion guarded). */}
-            <fieldset key={step} disabled={creating} className="wizard-step onboard-beat m-0 min-w-0 border-0 p-0">
+            <fieldset
+              key={step}
+              data-stage={stageForStep(ONBOARDING_STEPS[step].id)}
+              disabled={creating}
+              className="wizard-step onboard-beat m-0 min-w-0 border-0 p-0"
+            >
+              <WizardBubble
+                text={step === 6 && creating ? FINISHING_MESSAGE : STEP_QUESTIONS[step]}
+                busy={step === 6 && creating}
+              />
               {stepContent[step]}
             </fieldset>
             {step === 2 && (

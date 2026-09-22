@@ -58,7 +58,7 @@ export function SeedOptionCardView({ card, action, hotkeys = false, writeBlocked
     <div className="mt-3 overflow-hidden rounded-lg border border-hairline/40">
       {card.options.map((option, index) => <button key={option} type="button" disabled={pending || !canAnswer}
         onClick={() => onAnswer(option)}
-        className={`flex min-h-11 w-full items-start gap-3 px-3 py-3 text-left text-[15px] text-ink disabled:cursor-default ${index ? "border-t border-hairline/40" : ""} ${card.answered === option ? "bg-raised" : "enabled:hover:bg-raised/60"}`}>
+        className={`flex min-h-11 w-full items-start gap-3 px-3 py-3 text-left text-[15px] text-ink disabled:cursor-default disabled:opacity-50 ${index ? "border-t border-hairline/40" : ""} ${card.answered === option ? "bg-raised" : "enabled:hover:bg-raised/60"}`}>
         <span title={hotkeys && canAnswer && !pending ? `Press ${LETTERS[index]}` : undefined}
           className="flex size-6 shrink-0 items-center justify-center rounded-md bg-raised text-xs text-ink-secondary">{LETTERS[index]}</span>
         <span className="min-w-0">{option}</span>
@@ -101,7 +101,10 @@ export function UnavailableSeedCard({ card, botId }: { card: OptionCardData; bot
     <p className="mt-1 text-sm text-ink-secondary">{card.subtitle}</p>
     <ul className="mt-3 space-y-2 text-sm text-ink">{card.options.map((option, index) => <li key={`${index}:${option}`}>{option}</li>)}</ul>
     {card.answered !== undefined && <p className="mt-3 whitespace-pre-wrap text-sm text-ink">Saved answer: {card.answered}</p>}
-    <p className="mt-3 text-sm text-ink-secondary">This saved question cannot be answered here. Continue in the conversation.</p>
+    {/* Transcript-ack absorption: without a receipt this card is a record,
+        not a prompt — it confirms the saved question continues in the
+        conversation instead of dead-ending with "cannot be answered". */}
+    <p role="status" className="mt-3 text-sm text-ink-secondary">Saved — this question continues in the conversation.</p>
     {/* The answer may have been recorded without its task ever starting (an
         older client's split write). A dead-end card strands that intent —
         offer to send it as an ordinary message instead. */}

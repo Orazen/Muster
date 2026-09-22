@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DAILY_PLANNING_TASK } from "@/lib/daily-planning";
+import { ONBOARDING_CHAT_BEATS } from "@/lib/onboarding-chat";
 
 // Length caps in UTF-16 code units (string .length), matching what the
 // server's limits measure. zod 4 changed `max()` to count codepoints, so
@@ -40,6 +41,75 @@ export const ONBOARDING_STEPS = [
 
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number]["id"];
 
+/* ── Presentation stages ──
+ * The seven steps grouped into the five-phase arc the wizard narrates:
+ * intro (welcome + tour) → connect (engines) → needs (phone + teammate) →
+ * acks (permissions) → handoff (first task). Pure labeling: a stage never
+ * changes what a step means, how it saves, or which draft fields it owns. */
+
+export const ONBOARDING_STAGES = ["intro", "connect", "needs", "acks", "handoff"] as const;
+
+export type OnboardingStage = (typeof ONBOARDING_STAGES)[number];
+
+/** Exhaustive by construction — a new step id will not compile without a stage. */
+const STEP_STAGES = {
+  welcome: "intro",
+  tour: "intro",
+  engines: "connect",
+  phone: "needs",
+  teammate: "needs",
+  permissions: "acks",
+  "first-task": "handoff",
+} satisfies Record<OnboardingStep, OnboardingStage>;
+
+export function stageForStep(step: OnboardingStep): OnboardingStage {
+  return STEP_STAGES[step];
+}
+
+/* ── First-task gate ──
+ * Only the handoff step sends a real task, so only the handoff step needs a
+ * connected engine. Every earlier step — and every escape hatch that finishes
+ * without a task (Quick start, Skip, Maybe later, Escape) — stays free: the
+ * wizard must never be able to brick itself when the user has no engine yet. */
+
+const PERMISSIONS_INDEX = ONBOARDING_STEPS.findIndex((entry) => entry.id === "permissions");
+const HANDOFF_INDEX = ONBOARDING_STEPS.length - 1;
+
+export function canEnterStep(step: number, engineConnected: boolean): boolean {
+  return engineConnected || step !== HANDOFF_INDEX;
+}
+
+/** A restored draft can sit past the gate (the engine went away while the
+ * tab was closed). Park it on Permissions — the last free step, where the
+ * wizard explains how to connect — and release it untouched once the gate
+ * opens. */
+export function clampOnboardingStep(step: number, engineConnected: boolean): number {
+  if (canEnterStep(step, engineConnected)) return step;
+  return PERMISSIONS_INDEX;
+}
+
+/** A first task may only be SENT from the handoff step with an engine. */
+export function canSendFirstTask(step: number, engineConnected: boolean): boolean {
+  return step === HANDOFF_INDEX && engineConnected;
+}
+
+/* ── Needs multi-select (Q2) ──
+ * Option ids come from the chat engine's pains beat so a draft written by
+ * either surface restores here, and the cap is the beat's own `max`. */
+
+const PAINS_BEAT = ONBOARDING_CHAT_BEATS.find((beat) => beat.id === "pains");
+
+export const ONBOARDING_NEED_OPTIONS = PAINS_BEAT?.options ?? [];
+export const ONBOARDING_NEEDS_MAX = PAINS_BEAT?.max ?? 3;
+
+const KNOWN_NEED_IDS = ONBOARDING_NEED_OPTIONS.map((option) => option.id);
+
+/** Restored picks drop ids this build no longer offers (and any overflow past
+ * the live cap), so a draft can never light up a chip that does not exist. */
+export function sanitizeNeeds(ids: readonly string[] | undefined): string[] {
+  return (ids ?? []).filter((id) => KNOWN_NEED_IDS.includes(id)).slice(0, ONBOARDING_NEEDS_MAX);
+}
+
 export interface OnboardingDraft {
   version: 2;
   step: OnboardingStep;
@@ -54,6 +124,9 @@ export interface OnboardingDraft {
   customTask: string;
   showPersonality: boolean;
   axes: SetupAxes;
+  /** Optional so drafts saved before the needs step still restore. */
+  needs?: string[];
+  otherNeed?: string;
 }
 
 export interface OnboardingStorage {
@@ -118,6 +191,10 @@ const draftSchema = z.object({
     depth: z.number().min(0).max(100),
     honesty: z.number().min(0).max(100),
   }),
+  // Lenient on restore (≤8 ids), strict at the UI (sanitizeNeeds trims to the
+  // live cap): an older or hand-edited draft can never select a missing chip.
+  needs: z.array(z.string().max(64)).max(8).optional(),
+  otherNeed: maxUtf16(200).optional(),
 });
 
 // Version 1 used these same indexes for two different wizard layouts.

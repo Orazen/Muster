@@ -31,7 +31,8 @@ function fixture(initialRoster: Bot[] = [greeter]) {
   const sendTask = vi.fn(async (): Promise<FirstTaskAcceptance> => ({ message: userMessage }));
   const onBotReady = vi.fn();
   const input = {
-    task: "Draft a brief", identity: { name: "Scout" }, readRoster, createBot, patchBot, sendTask, onBotReady,
+    task: "Draft a brief", identity: { name: "Scout" }, engineConnected: true,
+    readRoster, createBot, patchBot, sendTask, onBotReady,
   } satisfies OnboardingFinishInput;
   return { roster, input, session: createOnboardingFinishSession() };
 }
@@ -97,6 +98,25 @@ describe("onboarding finish lifecycle", () => {
     const result = await session.finish({ ...input, sendFirstTask: false });
     expect(input.sendTask).not.toHaveBeenCalled();
     expect(result).toMatchObject({ bot: { id: greeter.id }, task: "" });
+  });
+
+  it("refuses the first task when the engine gate is closed and never sends it", async () => {
+    const { input, session } = fixture();
+    await expect(session.finish({ ...input, engineConnected: false })).rejects.toThrow(
+      "Connect an engine or add a provider key before sending a first task.",
+    );
+    // The teammate made it through — only the task is gated, so the wizard
+    // shows a ready bot plus an honest reason instead of losing the setup.
+    expect(input.onBotReady).toHaveBeenCalledOnce();
+    expect(input.sendTask).not.toHaveBeenCalled();
+    expect(session.busy).toBe(false);
+  });
+
+  it("still finishes without a task when the gate is closed (skip path stays free)", async () => {
+    const { input, session } = fixture();
+    const result = await session.finish({ ...input, engineConnected: false, sendFirstTask: false });
+    expect(result).toMatchObject({ bot: { id: greeter.id }, task: "" });
+    expect(input.sendTask).not.toHaveBeenCalled();
   });
 
   it("retains acceptance when final bookkeeping fails so retry does not PATCH or send again", async () => {

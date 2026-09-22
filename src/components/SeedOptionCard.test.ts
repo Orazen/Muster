@@ -95,7 +95,7 @@ describe("seed card status and controls (server rendering)", () => {
     } }));
     expect(html).toContain("Allow");
     expect(html).toContain("Deny");
-    expect(html).toContain("This saved question cannot be answered here.");
+    expect(html).toContain("Saved — this question continues in the conversation.");
     expect(html).not.toContain("<button");
     expect(html).not.toContain("<input");
     expect(html).not.toContain("<textarea");

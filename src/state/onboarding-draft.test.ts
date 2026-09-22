@@ -1,12 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  canEnterStep,
+  canSendFirstTask,
+  clampOnboardingStep,
   clearOnboardingDraft,
   FIRST_TASK_TEMPLATES,
+  ONBOARDING_NEED_OPTIONS,
+  ONBOARDING_NEEDS_MAX,
+  ONBOARDING_STAGES,
   ONBOARDING_STEPS,
   readOnboardingDraft,
   resolveFirstTaskTemplate,
   resolveInitialTaskDraft,
+  sanitizeNeeds,
   saveOnboardingDraft,
+  stageForStep,
   type OnboardingDraft,
   type OnboardingStorage,
 } from "./onboarding-draft";
@@ -343,5 +351,97 @@ describe("first-task restoration precedence", () => {
     const stored = readOnboardingDraft("account-a", storage);
     expect(stored).toBeNull();
     expect(resolveInitialTaskDraft(stored, "notes-to-draft")).toEqual({ suggestion: "", customTask: FIRST_TASK_TEMPLATES["notes-to-draft"] });
+  });
+});
+
+describe("presentation stage mapping", () => {
+  it("maps every step onto the five-phase arc in order", () => {
+    expect(ONBOARDING_STEPS.map((entry) => stageForStep(entry.id))).toEqual([
+      "intro", "intro", "connect", "needs", "needs", "acks", "handoff",
+    ]);
+  });
+
+  it("only emits stages the arc declares", () => {
+    for (const entry of ONBOARDING_STEPS) {
+      expect(ONBOARDING_STAGES).toContain(stageForStep(entry.id));
+    }
+  });
+});
+
+describe("first-task gate helpers", () => {
+  const handoffIndex = ONBOARDING_STEPS.findIndex((entry) => entry.id === "first-task");
+  const permissionsIndex = ONBOARDING_STEPS.findIndex((entry) => entry.id === "permissions");
+
+  it("gates exactly the handoff step, closed and open", () => {
+    expect(ONBOARDING_STEPS.map((_, index) => canEnterStep(index, false))).toEqual([
+      true, true, true, true, true, true, false,
+    ]);
+    expect(ONBOARDING_STEPS.map((_, index) => canEnterStep(index, true))).toEqual([
+      true, true, true, true, true, true, true,
+    ]);
+  });
+
+  it("parks a gated handoff step on Permissions and releases it untouched", () => {
+    expect(clampOnboardingStep(handoffIndex, false)).toBe(permissionsIndex);
+    expect(ONBOARDING_STEPS[permissionsIndex].id).toBe("permissions");
+    expect(clampOnboardingStep(handoffIndex, true)).toBe(handoffIndex);
+    expect(clampOnboardingStep(permissionsIndex, false)).toBe(permissionsIndex);
+    expect(clampOnboardingStep(0, false)).toBe(0);
+  });
+
+  it("allows sending a first task only from the handoff step with an engine", () => {
+    expect(canSendFirstTask(handoffIndex, true)).toBe(true);
+    expect(canSendFirstTask(handoffIndex, false)).toBe(false);
+    expect(canSendFirstTask(permissionsIndex, true)).toBe(false);
+    expect(canSendFirstTask(0, true)).toBe(false);
+  });
+});
+
+describe("needs multi-select draft fields", () => {
+  const known = ONBOARDING_NEED_OPTIONS.map((option) => option.id);
+
+  it("round-trips picks and free text, and drops the keys when cleared", () => {
+    const storage = new MemoryDraftStorage();
+    const withNeeds: OnboardingDraft = {
+      ...draft,
+      needs: known.slice(0, ONBOARDING_NEEDS_MAX),
+      otherNeed: "The weekly ops report",
+    };
+    saveOnboardingDraft("account-a", withNeeds, storage);
+    expect(readOnboardingDraft("account-a", storage)).toEqual(withNeeds);
+    saveOnboardingDraft("account-a", draft, storage);
+    const cleared = readOnboardingDraft("account-a", storage);
+    expect(cleared).toEqual(draft);
+    expect(cleared).not.toHaveProperty("needs");
+    expect(cleared).not.toHaveProperty("otherNeed");
+  });
+
+  it("rejects more ids than the lenient restore cap, oversized ids, and oversized free text", () => {
+    const storage = new MemoryDraftStorage();
+    saveOnboardingDraft("account-a", { ...draft, needs: [...known, "ninth"] }, storage);
+    expect(storage.values.size).toBe(0);
+    saveOnboardingDraft("account-a", { ...draft, needs: ["x".repeat(65)] }, storage);
+    expect(storage.values.size).toBe(0);
+    saveOnboardingDraft("account-a", { ...draft, otherNeed: "x".repeat(201) }, storage);
+    expect(storage.values.size).toBe(0);
+  });
+
+  it("measures free text in UTF-16 units so emoji cannot overflow the cap", () => {
+    const storage = new MemoryDraftStorage();
+    const maximum = "🙂".repeat(100); // 200 UTF-16 units
+    saveOnboardingDraft("account-a", { ...draft, otherNeed: maximum }, storage);
+    expect(readOnboardingDraft("account-a", storage)?.otherNeed).toBe(maximum);
+    // A refused save must never overwrite a valid draft — prove the cap by
+    // showing nothing lands in storage (same contract as other rejections).
+    const overflow = new MemoryDraftStorage();
+    saveOnboardingDraft("account-a", { ...draft, otherNeed: "🙂".repeat(101) }, overflow);
+    expect(overflow.values.size).toBe(0);
+  });
+
+  it("sanitizes restored picks down to live known ids at the UI cap", () => {
+    const atCap = known.slice(0, ONBOARDING_NEEDS_MAX);
+    expect(sanitizeNeeds(undefined)).toEqual([]);
+    expect(sanitizeNeeds(["ghost", ...atCap])).toEqual(atCap);
+    expect(sanitizeNeeds(known)).toEqual(atCap);
   });
 });

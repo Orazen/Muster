@@ -165,4 +165,79 @@
 @media (prefers-reduced-motion: reduce) {
   .chip, .continue-pill { transition: none; }
   .chat-row { animation: none; }
+  .wizard-bubble-row { animation: none; }
+}
+
+/* ── The 7-step wizard's GAIA-arc presentation ──
+   Per-stage question bubble, segmented progress, transcript-style acks and
+   the needs/engine chips. Everything is wizard-prefixed so it cannot leak
+   into the chat surface above. Chip colors arrive as inline styles from the
+   component: this file is unlayered, so its `.chip` background beats any
+   Tailwind color utility. */
+
+.wizard-bubble-row {
+  display: flex;
+  margin-bottom: 14px;
+  animation: wizard-bubble-in 0.34s cubic-bezier(.24, 1, .4, 1) backwards;
+}
+@keyframes wizard-bubble-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.wizard-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 9px 14px;
+  border-radius: 18px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-panel) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-hairline) 60%, transparent);
+}
+
+.wizard-progress {
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 8px;
+}
+.wizard-progress .seg {
+  width: 30px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-ink) 16%, transparent);
+}
+.wizard-progress .seg.on { background: var(--color-accent); }
+
+.wizard-ack {
+  border-left: 3px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  padding-left: 12px;
+}
+
+.wizard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+.wizard-chips .chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none;
+}
+.wizard-chips .chip:disabled:hover {
+  transform: none;
+  border-color: color-mix(in srgb, var(--color-hairline) 80%, transparent);
+}
+/* Status chips are spans, not controls — never let them look tappable. */
+.wizard-chips span.chip { cursor: default; }
+.wizard-chips span.chip:hover {
+  transform: none;
+  border-color: color-mix(in srgb, var(--color-hairline) 80%, transparent);
 }

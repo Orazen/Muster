@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./onboarding-chat.css";
 
-import { FlowerCharacter } from "@/components/FlowerCharacter";
+import { AgentBotAvatar } from "@/components/AgentBotAvatar";
 import { api, useStore } from "@/state/store";
 import { beatAt, beatCount, onboardingChatDone, planCrew, type Turn } from "@/lib/onboarding-chat";
 
@@ -128,7 +128,7 @@ export function OnboardingChat() {
           {transcript.map((turn, i) =>
             turn.who === "assistant" ? (
               <div key={i} className="chat-row assistant" style={{ animationDelay: `${Math.min(i * 0.45, 3)}s` }}>
-                <FlowerCharacter color="orange" size={30} state={busy ? "working" : "listening"} focusable={false} label="Your guide" />
+                <AgentBotAvatar color="orange" size={30} state={busy ? "working" : "listening"} label="Your guide" />
                 <div className="bubble assistant">{turn.text}</div>
               </div>
             ) : (
