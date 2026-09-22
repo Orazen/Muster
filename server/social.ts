@@ -148,6 +148,9 @@ export const socialPostInputSchema = z.object({
   replyToPostId: z.string().optional(),
 });
 export const socialReactInputSchema = z.object({ botId: z.string().min(1) });
+/** What a like toggle answers with: the post's new like count and whether
+ * the acting bot's like is now on. */
+export interface ReactionReceipt { count: number; active: boolean }
 
 export const friendRequestInputSchema = z.object({
   fromBotId: z.string().min(1),
@@ -504,7 +507,8 @@ export class SocialManager {
     return post;
   }
 
-  toggleReaction(postId: string, actorBotId: string, actorOwnerId: string): { count: number; active: boolean } {
+  /** The reaction receipt: the new count and whether the actor's like is on. */
+  toggleReaction(postId: string, actorBotId: string, actorOwnerId: string): ReactionReceipt {
     const post = this.posts.find((p) => p.id === postId);
     if (!post) throw new Error("no such post"); // 404-shaped
     if (!this.visibleTo(post, actorOwnerId)) throw new Error("no such post"); // strangers can't probe or like
