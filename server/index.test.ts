@@ -574,6 +574,28 @@ describe("harness HTTP API", () => {
     expect(after.modelSelection.effort).toBeUndefined();
   });
 
+  it("keeps bot skills a plain playbook family over the HTTP surface", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+
+    // empty fleet to start, and the name policy is enforced at the boundary
+    expect((await api("GET", `/api/bots/${bot.id}/skills`)).body).toEqual({ skills: [] });
+    expect((await api("PUT", `/api/bots/${bot.id}/skills/${encodeURIComponent("../evil.md")}`, { text: "x" })).status).toBe(400);
+
+    // write → list → read → replace → delete round-trip
+    const put = await api("PUT", `/api/bots/${bot.id}/skills/${encodeURIComponent("triage.md")}`, { text: "# Triage\nRead before replying." });
+    expect(put.status).toBe(200);
+    expect((await api("GET", `/api/bots/${bot.id}/skills`)).body.skills).toMatchObject([{ name: "triage.md" }]);
+    const got = await api("GET", `/api/bots/${bot.id}/skills/${encodeURIComponent("triage.md")}`);
+    expect(got.body.text).toContain("Read before replying");
+    expect((await api("PUT", `/api/bots/${bot.id}/skills/${encodeURIComponent("triage.md")}`, { text: "# v2" })).status).toBe(200);
+    expect((await api("GET", `/api/bots/${bot.id}/skills/${encodeURIComponent("triage.md")}`)).body.text).toBe("# v2");
+    expect((await api("DELETE", `/api/bots/${bot.id}/skills/${encodeURIComponent("triage.md")}`)).status).toBe(200);
+    expect((await api("GET", `/api/bots/${bot.id}/skills/${encodeURIComponent("triage.md")}`)).status).toBe(404);
+
+    // the memory family's 404-before-skills guard holds on this family too
+    expect((await api("GET", "/api/bots/does-not-exist/skills")).status).toBe(404);
+  });
+
   it("records one welcome answer and exposes its durable startup receipt", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     const card = bot.messages.find((m: { kind: string }) => m.kind === "options");

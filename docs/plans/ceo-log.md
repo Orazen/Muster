@@ -7049,3 +7049,17 @@ Now bots can be reached from a Telegram chat end to end.
   status/disconnect shape, chat.channel.status drives UI state.
 - Tests: telegram-sync.test.ts pins offset tracking + parse (13/13);
   workspace-auth-harness covers the session gate (35/35).
+## Loop161 — Bot skills: installable playbook files (OMB "Automations"-adjacent)
+
+Per-bot skills/ directory in the workspace: instruction playbooks the user
+installs; the system prompt mounts their first 4KB via skillsSystemPrompt
+(after persona, before memory) and the bot reads the full file with its own
+file tools. Same ownership + bot-lookup guards as the memory family.
+
+- server/workspace-skills.ts: isSkillName gate (one plain *.md segment —
+  traversal, dotfiles, non-md rejected), write/read/list/delete, SKILL_FILE_MAX_BYTES
+  bound, empty-skill omission, truncation notice pointing at the file.
+- server/index.ts: GET list, GET/PUT/DELETE one under /api/bots/:id/skills;
+  persona mount in the 1:1 system prompt and the room composite.
+- Tests: workspace-skills.test.ts (9 — name gate, crud, bounded mount);
+  index.test.ts route round-trip incl. name policy + unowned-bot 404 (60/60).
