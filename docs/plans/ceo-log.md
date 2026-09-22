@@ -8159,3 +8159,18 @@ never device; Stages 4–5 iPhone/Tailscale remain owner-held).
 **Not claimed:** any real transport, producer, running drainer, the app
 waves before they run, or a security attestation (scanner re-run still
 owed). Next per §38 after the app waves: S2c real wiring.
+
+## Loop168 — 2026-09-22 — v1.15.0 release: draft staged, gate fixed
+
+The first v1.15.0 tag attempt failed twice for different reasons, both
+fixed: (1) the tag initially pinned aff3fc3, whose tree still carried the
+social lint error — re-tagged on 729e8e6 (lint fix included); (2) the
+Release prepare step then failed with a misleading "GitHub API request
+failed (HTTP 200)": the releases listing (53 entries with full asset
+lists) had grown past the script's 1 MB maxBuffer, and the overflow was
+caught as a generic failure so prepare could never see its own draft.
+scripts/release-state.mjs now reads with a 32 MB buffer, verified by the
+existing 50-test suite. The staging draft "Muster 1.15.0 (staging)"
+exists on GitHub (id 393980548, draft, target 729e8e6) and
+assert-draft verifies green; the re-run of the pinned Release workflow
+proceeds to the platform build legs against that draft.
