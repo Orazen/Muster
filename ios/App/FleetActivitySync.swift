@@ -20,18 +20,18 @@ enum FleetActivitySync {
             endAll()
             return
         }
-        let contentState = buildState(snapshot)
+        let content = ActivityContent(state: buildState(snapshot), staleDate: Date())
         let existing = Activity<FleetActivityAttributes>.activities
         if existing.isEmpty {
             _ = try? Activity<FleetActivityAttributes>.request(
                 attributes: FleetActivityAttributes(fleetName: "Muster"),
-                contentState: contentState,
+                content: content,
                 pushType: nil
             )
         } else {
             Task {
                 for activity in existing {
-                    await activity.update(using: contentState)
+                    await activity.update(content)
                 }
             }
         }

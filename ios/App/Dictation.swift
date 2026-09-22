@@ -44,7 +44,7 @@ final class DictationController: ObservableObject {
     /// through the partial pump (or not at all).
     func toggle(base: String) async -> String? {
         if isListening {
-            await talk.end()
+            _ = await talk.end()
             return flow.finish()
         }
         guard await authorized() else { return nil }
