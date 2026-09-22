@@ -2,11 +2,43 @@
 // so extracted route families import one definition instead of re-inlining
 // index.ts's private helpers. index.ts imports these too.
 
+import { gzipSync } from "node:zlib";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-/** Send a JSON response. The single serialization point for every API route. */
+// Below this, gzip wins nothing but costs a CPU pass and a `Vary` header, so
+// tiny error bodies ship plain. ~1 KiB is where JSON responses start to earn
+// their keep on a slow link.
+const GZIP_MIN_BYTES = 1024;
+
+/** Send a JSON response. The single serialization point for every API route.
+ *
+ * Negotiates gzip from `Accept-Encoding`: the client opted in AND the
+ * serialized body is worth compressing, so the wire carries a much smaller
+ * body on exactly the links where it helps (mobile, long-haul). Everything
+ * else — no header, `identity` only, tiny payloads — is byte-for-byte the old
+ * path, so a client that cannot or will not decompress is never surprised.
+ * The response is a fresh writeHead (this is the only writer on the route),
+ * so `Vary: Accept-Encoding` is set alongside the encoding and shared caches
+ * key the two variants separately. */
 export function json<B>(res: ServerResponse, status: number, body: B) {
   const data = JSON.stringify(body);
+  if (res.headersSent) {
+    res.end(data);
+    return;
+  }
+  const accept = String(res.req.headers["accept-encoding"] ?? "");
+  const wantsGzip = accept.includes("gzip") && !accept.includes("identity");
+  if (wantsGzip && data.length >= GZIP_MIN_BYTES) {
+    const compressed = gzipSync(data);
+    res.writeHead(status, {
+      "content-type": "application/json",
+      "content-encoding": "gzip",
+      "content-length": compressed.length,
+      "vary": "Accept-Encoding",
+    });
+    res.end(compressed);
+    return;
+  }
   res.writeHead(status, { "content-type": "application/json" });
   res.end(data);
 }
