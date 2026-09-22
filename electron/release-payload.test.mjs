@@ -114,6 +114,15 @@ describe("release payload validation", () => {
     await expect(validateReleasePayload(options(false))).rejects.toThrow(/Stale/);
   });
 
+  it("accepts the main DMG's blockmap companion as a versioned asset", async () => {
+    // electron-builder uploads Muster-<version>.dmg.blockmap beside the dmg;
+    // the allowlist once missed it and the first complete CI release failed
+    // publish with "Stale or unexpected versioned asset".
+    const { dmg } = complete();
+    put(`${dmg}.blockmap`);
+    await expect(validateReleasePayload(options(false))).resolves.toBeTruthy();
+  });
+
   it.each(["../outside.zip", "/tmp/outside.zip", "folder/item.zip", "folder\\item.zip", "https://example.test/item.zip", "%2e%2e%2foutside.zip", "file.zip\nother.zip"])("rejects uncontained or non-flat feed URL %s", async (url) => {
     const zip = partial(); feed("latest-mac.yml", [zip], { files: [{ url, sha512: hash(bytes(zip)), size: bytes(zip).length }] });
     await expect(validateReleasePayload(options(false))).rejects.toThrow(/Malformed update feed/);

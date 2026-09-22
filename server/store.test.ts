@@ -1,7 +1,7 @@
 // Store persistence contract: bots.json + messages-<threadId>.json are
 // the durable record — everything here must survive a process restart
 // except `busy`, which never does (no turn survives one either).
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -688,5 +688,55 @@ describe("Store task working folder — cloud runs", () => {
     expect(store.taskByThread(bot.id, bot.threadId)?.cwd).toBeNull();
     // and it stays pinned even if a host run follows
     expect(store.pinTaskCwd(bot.id, bot.threadId)).toBeNull();
+  });
+});
+
+describe("Store save coalescing — identical bytes are not rewritten", () => {
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  const botsPath = () => join(DATA_DIR, "bots.json");
+  const groupsPath = () => join(DATA_DIR, "groups.json");
+  // writeFileAtomic replaces the target via rename, so any real write lands
+  // on a fresh inode; a skipped save leaves the inode untouched.
+  const ino = (p: string) => statSync(p).ino;
+
+  it("writes once for a change, skips the no-op re-save, writes again on a real change", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const firstIno = ino(botsPath());
+
+    // re-save with identical bytes: the expensive temp+fsync+rename is skipped
+    store.saveBots();
+    expect(ino(botsPath())).toBe(firstIno);
+    // SAFETY: bots.json is written only by this Store's saveBots() as the
+    // JSON of its BotRecord[] — no other writer in the single-process data
+    // dir — so the parsed value is that array shape.
+    expect((JSON.parse(readFileSync(botsPath(), "utf8")) as BotRecord[]).map((b) => b.id)).toEqual([bot.id]);
+
+    // a real change still reaches disk, on a fresh inode
+    store.patchBot(bot.id, { name: "Renamed" });
+    expect(ino(botsPath())).not.toBe(firstIno);
+    // SAFETY: same single-writer invariant as above.
+    expect((JSON.parse(readFileSync(botsPath(), "utf8")) as BotRecord[])[0].name).toBe("Renamed");
+  });
+
+  it("skips groups re-saves whose bytes are unchanged (busy is not persisted)", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const group = store.createGroup("Room", [bot.id]);
+    const firstIno = ino(groupsPath());
+
+    // busy is stripped by the serializer, so a save with busy flipped is
+    // byte-identical and must not touch the file
+    store.groups.find((g) => g.id === group.id)!.busyBotId = bot.id;
+    store.saveGroups();
+    expect(ino(groupsPath())).toBe(firstIno);
+
+    // a real group change still rewrites
+    store.patchGroup(group.id, { name: "Renamed room" });
+    expect(ino(groupsPath())).not.toBe(firstIno);
+    expect(store.group(group.id)?.name).toBe("Renamed room");
   });
 });

@@ -43,8 +43,12 @@ async function inventory(assetsDir, version) {
   const files = new Map();
   for (const name of await readdir(assetsDir)) {
     if (!FlatName.safeParse(name).success) fail(`Invalid flat asset name: ${name}`);
+    // The versioned-name allowlist must include every companion the real
+    // builder emits: the main DMG's .blockmap rides alongside it (the first
+    // complete CI release failed publish on exactly this omission).
+    const versionedNames = [`Muster-${version}.dmg`, `Muster-${version}.dmg.blockmap`];
     if (name.startsWith("Muster-") && !STABLE.includes(name)
-      && !name.startsWith(`Muster-${version}-`) && name !== `Muster-${version}.dmg`) {
+      && !name.startsWith(`Muster-${version}-`) && !versionedNames.includes(name)) {
       fail(`Stale or unexpected versioned asset: ${name}`);
     }
     files.set(name, await regularFile(join(assetsDir, name)));

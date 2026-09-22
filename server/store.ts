@@ -452,6 +452,11 @@ export class Store {
   private startupLosses: string[] = [];
   private defaultSelection: () => ModelSelection;
   private listeners = new Set<(change: StoreChange) => void>();
+  /** Last persisted serialization, per file. `undefined` until the first
+   * write, so the first save always reaches disk (a fresh process must never
+   * trust that an absent cache means the file is current). */
+  private lastBotsJson: string | undefined;
+  private lastGroupsJson: string | undefined;
 
   constructor(defaultSelection: () => ModelSelection) {
     this.defaultSelection = defaultSelection;
@@ -563,11 +568,25 @@ export class Store {
   /** Persist bots after an out-of-band mutation (the ownership boot
    * migration mutates records in place). */
   saveBots() {
-    writeFileAtomic(BOTS_FILE, JSON.stringify(this.bots, null, 2));
+    const data = JSON.stringify(this.bots, null, 2);
+    // The expensive part of a save is the temp-file + fsync + rename, and
+    // busy/turn-state churn calls saveBots constantly with identical bytes.
+    // A serialize that matches the last persist is a no-op on disk. Single-
+    // writer ownership (one process per data dir, atomic replace, no unlink)
+    // means the file always holds exactly what we last wrote, so comparing to
+    // our own last write is safe — we never skip a change that altered bytes.
+    if (data === this.lastBotsJson) return;
+    writeFileAtomic(BOTS_FILE, data);
+    this.lastBotsJson = data;
   }
 
   saveGroups() {
-    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, ...g }) => g), null, 2));
+    const data = JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, ...g }) => g), null, 2);
+    // busyBotId is stripped above, so per-turn busy churn never changes the
+    // persisted bytes and lands in the same skip path as saveBots.
+    if (data === this.lastGroupsJson) return;
+    writeFileAtomic(GROUPS_FILE, data);
+    this.lastGroupsJson = data;
   }
 
   // ── groups ────────────────────────────────────────────────────────────
