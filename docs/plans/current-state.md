@@ -118,7 +118,7 @@ are ignored while fields are frozen.
 acceptance remains owner-held. **Round complete on all four locked
 slices**: crown scrolling, haptic vocabulary, phone dictation, Android
 delivery. Owner-held hardware acceptance (Watch/iPhone/Android) is now the
-open gate; the acceptance checklist follows as a separate doc commit.
+open gate; the acceptance checklist is `docs/guides/mobile-round-acceptance.md`.
 Unrelated working-tree edits (claim-flow, www/*) preserved untouched.
 
 # Current Muster state — read before editing

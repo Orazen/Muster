@@ -7475,5 +7475,5 @@ Parallel-agent WIP (`claim-flow`, www/*) preserved untouched, not staged.
 **Round status:** all four locked slices are committed — crown scrolling
 (`e4ccd99`), haptic vocabulary (`0b989cf`), phone dictation (`96650eb`),
 Android delivery (this commit). The remaining gate is owner-held hardware
-acceptance across Watch, iPhone and Android; the acceptance checklist
-follows as a separate documentation commit.
+acceptance across Watch, iPhone and Android; the acceptance checklist is
+`docs/guides/mobile-round-acceptance.md`, committed with it.
