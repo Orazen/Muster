@@ -7833,3 +7833,67 @@ chat-scroll e2e exists; the behavior is unit-tested pure logic plus CSS,
 not screenshot-verified this loop), or e2e coverage of the command
 picker. DESIGN §38 U-row split: shipped U1/U3/U4 row + a U2/U5 defers
 row. Next per §38 order: P1 per-bot approval levels.
+
+## Loop177 — K1 format half: recovery codes that wrap the MEK (22 Sep 2026)
+
+**Trigger:** §38 order after the U-row. P1 (per-bot approval levels) was
+audited first and deferred — its `Bot` type lives in `store.tsx` and its
+spawn pass-through in `server/index.ts`, both parallel-social-WIP-owned,
+the same recorded rule that already holds A1–A4 (annotated on the board).
+K1 was the next clean row: the v2 bundle family lives in its own ordered
+route table and format module, neither of which the WIP touches.
+
+**The design problem, stated honestly:** threat model #3 says recovery
+codes "must not weaken zero-knowledge v2: wrap a MEK, never store it
+beside ciphertext" — but v2 had no MEK at all: the payload key WAS
+`scrypt(passphrase, salt)` derived directly. Codes cannot re-derive a
+passphrase-derived key, so K1 structurally means introducing the MEK
+indirection as an OPTIONAL envelope capability.
+
+**Red first:** `server/workspace-bundle-v2-recovery.test.ts` written
+against the absent API — 11 failed, then built. Shipped:
+`keySlots` on the envelope (optional, zod-bounded at 16+1). When
+`encryptBundleV2(..., { recovery: { codes } })` is given: a fresh 32-byte
+MEK becomes the payload key; slot one wraps it under the passphrase KEK
+riding the envelope's own `kdf` block (one derivation, recorded once);
+each further slot wraps it under `scrypt(normalizedCode, ownSalt)` with
+`slotId = sha256(canonical code)` as a lookup. Every wrap is AES-256-GCM
+bound by a slot AAD of `{kind, kdf, slotId}` — a wrapped blob cannot move
+between slots. The slots ride the PAYLOAD AAD through the hand-listed
+`canonicalHeader`, whose explicit `keySlots: envelope.keySlots` relies on
+JSON.stringify dropping `undefined` — so legacy envelopes authenticate
+byte-identically to today (proven: all 43 existing bundle/restore tests
+stayed green untouched). Codes are Crockford base32, 4x4 groups = 80
+bits, byte-and-31 uniform over 32 symbols; `normalizeRecoveryCode`
+accepts case/space/dash noise and refuses length, alphabet (no I/L/O/U)
+or junk. Seal-time validation: at least one, at most sixteen, distinct,
+well-formed — malformed input throws at creation, not at open. Reads:
+`recoveryCode` opens EXCLUSIVELY — no passphrase fallback, so a wrong
+code can never be masked by a correct passphrase — and any wrong/missing
+secret reports the existing `bad-key` status (the read path still never
+throws). No plaintext code, no unwrapped MEK and no new field on legacy
+bundles is ever written.
+
+**Scope, stated:** format half only. There is no endpoint and no UI —
+a user cannot yet generate or enter codes; that is the follow-up slice
+(board row annotated). No claim of security beyond what the tests show:
+the repo's scanner re-run is still owed and no attestation is made.
+Recovery-mode sealing costs 1+N sequential scrypt runs (N=131072) —
+deliberate uniformity with the standing KDF, acceptable at backup cadence,
+recorded rather than hidden.
+
+**Gates (real numbers):** red **11 failed** → green **11/11**; focused
+bundle family **54/54** (11 new + 43 existing workspace-bundle-v2 /
+bundle-restore-v2 / restore-apply — zero regressions), post-lint re-run
+**26/26**; oxlint on both touched files **0 warnings 0 errors** (first
+pass had 5 errors — `CODE_SHAPE` name ×2, missing SAFETY comment on a
+JSON.parse assertion, anonymous-object return on `wrapMek`, forbidden
+conditional spread — all five fixed properly, none suppressed); server
+tsc **exit 0**; full suite **330 files / 4919 passed / 8 skipped / 0
+failed** (449.07s; +1 file/+11 tests vs Loop176's 329/4908 = exactly
+this slice, no decrease, zero FAIL lines).
+
+**Not claimed:** product-reachable recovery (no routes/UI yet), security
+attestation, or legacy-bundle migration — old bundles stay passphrase-only
+by design and open exactly as before. Next per §38: S0 (devices table),
+which depends on K1 — now unblocked at the format layer.

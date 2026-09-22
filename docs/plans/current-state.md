@@ -257,6 +257,41 @@ full suite **329 files / 4908 passed / 8 skipped / 0 failed** (427.48s;
 command picker (no chat-scroll e2e exists — pure-logic tests + CSS
 only). Next per §38: P1 per-bot approval levels.
 
+### K1 format half: recovery codes wrapping the MEK (22 September 2026, Loop177)
+
+P1 audited first and **deferred**: its `Bot` type lives in `store.tsx`
+and its spawn pass-through in `server/index.ts` — both social-WIP-owned,
+the A1–A4 rule (board annotated). K1 was the next clean row (the v2
+family lives in its own route table + format module, untouched by the
+WIP). v2 had **no MEK** — the payload key was `scrypt(passphrase, salt)`
+directly — so recovery structurally required introducing the MEK
+indirection as an OPTIONAL envelope capability. Shipped:
+`encryptBundleV2(..., { recovery: { codes } })` seals under a fresh
+32-byte MEK; a passphrase slot (riding the envelope's own `kdf`) plus one
+slot per code (`scrypt` on the normalized code with its own salt,
+`slotId = sha256(canonical code)`) wrap it under AES-256-GCM bound to
+`{kind, kdf, slotId}`; the slots ride the payload AAD via the
+hand-listed `canonicalHeader`, whose explicit keySlots key vanishes on
+legacy envelopes (JSON.stringify drops `undefined`) — **byte-identical
+legacy auth** (43 existing bundle/restore tests green untouched). Codes:
+Crockford base32 4x4 (80 bits), tolerant normalization, seal-time
+validation (≥1, ≤16, distinct). Reads: `recoveryCode` opens exclusively
+(no passphrase fallback — a wrong code can't be masked), wrong secrets
+report the existing `bad-key`, the read path still never throws.
+Recovery seal costs 1+N scrypt runs — uniform with the standing KDF,
+recorded not hidden.
+
+**Gates:** red 11 failed → **11/11**; bundle family **54/54** (zero
+regressions) + post-fix **26/26**; oxlint **0/0** (5 errors fixed
+properly: name ×2, SAFETY comment, named `MekWrap` contract,
+restructured spread); server tsc **exit 0**; full suite **330 files /
+4919 passed / 8 skipped / 0 failed** (449.07s; +1 file/+11 vs Loop176 =
+exactly this slice, no decrease). **Not claimed:** product-reachable
+recovery (no routes/UI yet — follow-up slice), security attestation
+(scanner re-run still owed), legacy migration (old bundles stay
+passphrase-only by design). Next per §38: S0 devices table (depends on
+K1 — unblocked at the format layer).
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

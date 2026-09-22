@@ -107,6 +107,47 @@ const MAX_SKIPPED_ENTRIES = LIMITS.maxManifestEntries;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/u;
 
 // ---------------------------------------------------------------------------
+// Recovery codes (K1) — the user-held half of "the passphrase is the only
+// recovery material", without weakening it: codes wrap the MEK, and nothing
+// ever stores the MEK unwrapped beside the ciphertext it opens.
+// ---------------------------------------------------------------------------
+
+/** Crockford base32 — no I, L, O or U, so a code survives being read off
+ *  paper or typed from memory. Four groups of four = 80 bits: a wrong guess
+ *  costs a full scrypt run, so the space stays out of reach. */
+const RECOVERY_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const RECOVERY_GROUPS = 4;
+const RECOVERY_GROUP_SIZE = 4;
+const RECOVERY_DEFAULT_COUNT = 10;
+const RECOVERY_MAX_CODES = 16;
+
+/** Canonical form: four dash-separated uppercase groups, or null when what
+ *  the user typed is not a recovery code (length, alphabet, junk). */
+export function normalizeRecoveryCode(input: string): string | null {
+  const size = RECOVERY_GROUPS * RECOVERY_GROUP_SIZE;
+  const compact = input.trim().toUpperCase().replace(/[^0-9A-Z]+/gu, "");
+  if (compact.length !== size) return null;
+  for (const char of compact) if (!RECOVERY_ALPHABET.includes(char)) return null;
+  const groups: string[] = [];
+  for (let i = 0; i < size; i += RECOVERY_GROUP_SIZE) groups.push(compact.slice(i, i + RECOVERY_GROUP_SIZE));
+  return groups.join("-");
+}
+
+/** `count` independent codes, shown once by the caller. Byte-and-31 over a
+ * 32-symbol alphabet is uniform, so each symbol is a clean five bits. */
+export function generateRecoveryCodes(count = RECOVERY_DEFAULT_COUNT): string[] {
+  const size = RECOVERY_GROUPS * RECOVERY_GROUP_SIZE;
+  return Array.from({ length: count }, () => {
+    const bytes = randomBytes(size);
+    let compact = "";
+    for (const byte of bytes) compact += RECOVERY_ALPHABET[byte & 31];
+    const groups: string[] = [];
+    for (let i = 0; i < size; i += RECOVERY_GROUP_SIZE) groups.push(compact.slice(i, i + RECOVERY_GROUP_SIZE));
+    return groups.join("-");
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Path safety — the one rule every stored path must satisfy
 // ---------------------------------------------------------------------------
 
@@ -160,6 +201,19 @@ const bundleCipherSchema = z.object({
   tagB64: z.string().min(1).max(512),
 });
 
+/** One way to unwrap the bundle's MEK: a passphrase slot plus one slot per
+ *  recovery code. Everything here is public — `slotId` is the code's SHA-256
+ *  (a lookup, not a secret) and the wrapped key is only meaningful to
+ *  whoever holds the code or passphrase that derives its KEK. */
+const keySlotSchema = z.object({
+  kind: z.enum(["passphrase", "recovery"]),
+  slotId: z.string().min(1).max(128).optional(),
+  kdf: bundleKdfSchema,
+  ivB64: z.string().min(1).max(512),
+  wrappedKeyB64: z.string().min(1).max(256),
+  tagB64: z.string().min(1).max(512),
+});
+
 const bundleEnvelopeSchema = z.object({
   magic: z.literal(BUNDLE_MAGIC),
   // deliberately not a literal: an envelope from a newer producer must be
@@ -169,6 +223,10 @@ const bundleEnvelopeSchema = z.object({
   createdAt: z.number().int(),
   producer: z.string().min(1).max(128),
   kdf: bundleKdfSchema,
+  /** K1: MEK-wrapping slots (one under the passphrase, one per recovery
+   *  code). Absent on legacy bundles, which derive the payload key
+   *  directly from passphrase + top-level kdf. */
+  keySlots: z.array(keySlotSchema).max(RECOVERY_MAX_CODES + 1).optional(),
   cipher: bundleCipherSchema,
   encoding: z.literal("gzip+json"),
   counts: bundleCountsSchema,
@@ -231,6 +289,7 @@ export type BundleCounts = z.infer<typeof bundleCountsSchema>;
 export type BundleEnvelope = z.infer<typeof bundleEnvelopeSchema>;
 export type BundleFileEntry = z.infer<typeof bundleFileSchema>;
 export type BundleKdf = z.infer<typeof bundleKdfSchema>;
+export type BundleKeySlot = z.infer<typeof keySlotSchema>;
 export type BundleMessage = z.infer<typeof bundleMessageSchema>;
 export type BundlePayloadV2 = z.infer<typeof bundlePayloadSchema>;
 export type BundleSkipEntry = z.infer<typeof skippedEntrySchema>;
@@ -300,6 +359,10 @@ function canonicalHeader(envelope: BundleEnvelope): string {
       r: envelope.kdf.r,
       saltB64: envelope.kdf.saltB64,
     },
+    // `undefined` is dropped by JSON.stringify, so a legacy envelope's AAD is
+    // byte-identical to today's; when present, every slot rides the AAD and
+    // editing one fails the payload's authentication.
+    keySlots: envelope.keySlots,
     magic: envelope.magic,
     payloadSha256: envelope.payloadSha256,
     producer: envelope.producer,
@@ -330,6 +393,86 @@ function kdfProblem(kdf: BundleKdf): string | null {
   if (!Number.isInteger(kdf.p) || kdf.p < 1 || kdf.p > 4) return `p ${kdf.p} is outside the accepted scrypt range`;
   if (128 * kdf.N * kdf.r > MAX_KDF_MEMORY_BYTES) return `scrypt parameters request more than ${MAX_KDF_MEMORY_BYTES} bytes`;
   return null;
+}
+
+/** The identity a wrapped MEK is bound to: moving a wrapped blob between
+ *  slots (or editing a slot's KDF) breaks its own tag, independent of the
+ *  payload AAD that also covers the whole envelope. */
+function slotAad(identity: { kind: string; slotId?: string; kdf: BundleKdf }): string {
+  return JSON.stringify({
+    kind: identity.kind,
+    kdf: {
+      N: identity.kdf.N,
+      keyLen: identity.kdf.keyLen,
+      name: identity.kdf.name,
+      p: identity.kdf.p,
+      r: identity.kdf.r,
+      saltB64: identity.kdf.saltB64,
+    },
+    slotId: identity.slotId ?? "",
+  });
+}
+
+/** One slot's contribution to the envelope: the ciphertext of the MEK under
+ *  a KEK — never the MEK itself. */
+interface MekWrap {
+  ivB64: string;
+  wrappedKeyB64: string;
+  tagB64: string;
+}
+
+/** AES-256-GCM wrap of the 32-byte MEK under a slot's KEK. */
+function wrapMek(kek: Buffer, mek: Buffer, identity: { kind: string; slotId?: string; kdf: BundleKdf }): MekWrap {
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv("aes-256-gcm", kek, iv);
+  cipher.setAAD(Buffer.from(slotAad(identity), "utf8"));
+  const wrapped = Buffer.concat([cipher.update(mek), cipher.final()]);
+  return { ivB64: encodeBase64(iv), wrappedKeyB64: encodeBase64(wrapped), tagB64: encodeBase64(cipher.getAuthTag()) };
+}
+
+/** Unwrap a slot's MEK. Null for a wrong KEK or a malformed slot — the read
+ *  path reports failures as statuses, so this never throws either. */
+function unwrapMek(kek: Buffer, slot: BundleKeySlot): Buffer | null {
+  const iv = decodeBase64(slot.ivB64);
+  const wrapped = decodeBase64(slot.wrappedKeyB64);
+  const tag = decodeBase64(slot.tagB64);
+  if (iv === null || iv.byteLength !== IV_BYTES || wrapped === null || wrapped.byteLength !== 32 || tag === null || tag.byteLength !== TAG_BYTES) {
+    return null;
+  }
+  try {
+    const decipher = createDecipheriv("aes-256-gcm", kek, iv);
+    decipher.setAAD(Buffer.from(slotAad(slot), "utf8"));
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(wrapped), decipher.final()]);
+  } catch {
+    return null;
+  }
+}
+
+/** The key to open the payload with: legacy envelopes derive it directly
+ *  from the passphrase; slot'd envelopes unwrap the MEK from the matching
+ *  slot. A recovery code, when present, is the ONLY way in — no passphrase
+ *  fallback, so a wrong code cannot be masked by a correct passphrase.
+ *  Null = no acceptable secret for this envelope (report as bad-key). */
+function payloadKeyFor(envelope: BundleEnvelope, options: DecryptBundleV2Options, salt: Buffer): Buffer | null {
+  if (options.recoveryCode !== undefined) {
+    if (envelope.keySlots === undefined) return null;
+    const code = normalizeRecoveryCode(options.recoveryCode);
+    if (code === null) return null;
+    const slotId = sha256Hex(code);
+    const slot = envelope.keySlots.find((candidate) => candidate.kind === "recovery" && candidate.slotId === slotId);
+    if (slot === undefined) return null;
+    if (kdfProblem(slot.kdf) !== null) return null;
+    const slotSalt = decodeBase64(slot.kdf.saltB64);
+    if (slotSalt === null || slotSalt.byteLength !== SALT_BYTES) return null;
+    return unwrapMek(deriveKey(code, slot.kdf, slotSalt), slot);
+  }
+  const passphrase = options.passphrase;
+  if (passphrase === undefined) return null;
+  if (envelope.keySlots === undefined) return deriveKey(passphrase, envelope.kdf, salt);
+  const slot = envelope.keySlots.find((candidate) => candidate.kind === "passphrase");
+  if (slot === undefined) return null;
+  return unwrapMek(deriveKey(passphrase, envelope.kdf, salt), slot);
 }
 
 // ---------------------------------------------------------------------------
@@ -651,6 +794,10 @@ export interface EncryptBundleV2Options {
   passphrase: string;
   /** scrypt parameters to record in the envelope. Defaults to 131072/8/1/32. */
   kdf?: BundleKdf;
+  /** K1: additionally wrap the MEK under these recovery codes (one slot
+   *  each). The codes are shown once by the caller — this module never
+   *  persists them, and never stores the MEK unwrapped. */
+  recovery?: { codes: string[] };
 }
 
 /** Seal a payload into the portable bundle bytes. The KDF parameters are
@@ -669,7 +816,43 @@ export function encryptBundleV2(payload: BundlePayloadV2, options: EncryptBundle
   if (kdfProblemText !== null) throw new Error(`workspace bundle v2: ${kdfProblemText}`);
   const salt = randomBytes(SALT_BYTES);
   const iv = randomBytes(IV_BYTES);
-  const key = deriveKey(passphrase, kdf, salt);
+  const recoveryCodes = options.recovery?.codes;
+  let key: Buffer;
+  let keySlots: BundleKeySlot[] | undefined;
+  if (recoveryCodes !== undefined) {
+    const normalized = recoveryCodes.map((raw) => {
+      const code = normalizeRecoveryCode(raw);
+      if (code === null) throw new Error(`workspace bundle v2: ${JSON.stringify(raw)} is not a recovery code`);
+      return code;
+    });
+    if (normalized.length < 1) throw new Error("workspace bundle v2: recovery needs at least one recovery code");
+    if (normalized.length > RECOVERY_MAX_CODES) throw new Error(`workspace bundle v2: recovery accepts at most ${RECOVERY_MAX_CODES} codes`);
+    if (new Set(normalized).size !== normalized.length) throw new Error("workspace bundle v2: recovery codes must be distinct");
+    // The MEK is the payload key; every slot wraps it and nothing stores it
+    // bare — the passphrase slot first, then one slot per distinct code.
+    const mek = randomBytes(32);
+    key = mek;
+    const passphraseKdf: BundleKdf = { ...kdf, saltB64: encodeBase64(salt) };
+    keySlots = [
+      { kind: "passphrase", kdf: passphraseKdf, ...wrapMek(deriveKey(passphrase, kdf, salt), mek, { kind: "passphrase", kdf: passphraseKdf }) },
+      ...normalized.map((code) => {
+        const slotKdf: BundleKdf = { ...DEFAULT_KDF, saltB64: encodeBase64(randomBytes(SALT_BYTES)) };
+        const slotSalt = decodeBase64(slotKdf.saltB64);
+        if (slotSalt === null || slotSalt.byteLength !== SALT_BYTES) {
+          throw new Error("workspace bundle v2: could not mint a recovery slot salt"); // unreachable: fresh base64
+        }
+        const slotId = sha256Hex(code);
+        return {
+          kind: "recovery" as const,
+          slotId,
+          kdf: slotKdf,
+          ...wrapMek(deriveKey(code, slotKdf, slotSalt), mek, { kind: "recovery", slotId, kdf: slotKdf }),
+        };
+      }),
+    ];
+  } else {
+    key = deriveKey(passphrase, kdf, salt);
+  }
   const envelope: BundleEnvelope = {
     magic: BUNDLE_MAGIC,
     schema: BUNDLE_SCHEMA,
@@ -682,6 +865,7 @@ export function encryptBundleV2(payload: BundlePayloadV2, options: EncryptBundle
     payloadSha256: sha256Hex(plaintext),
     ciphertextB64: "",
   };
+  if (keySlots !== undefined) envelope.keySlots = keySlots;
   const cipher = createCipheriv("aes-256-gcm", key, iv);
   cipher.setAAD(Buffer.from(canonicalHeader(envelope), "utf8"));
   const ciphertext = Buffer.concat([cipher.update(compressed), cipher.final()]);
@@ -793,7 +977,7 @@ function payloadProblem(payload: BundlePayloadV2): { status: BundleStatus; error
  * reported without the passphrase), structure before AEAD (so a truncated
  * body is named as such rather than as a wrong key), and payload integrity
  * before the payload is handed to anyone. */
-function inspectBundle(bytes: Buffer, passphrase: string): Inspection {
+function inspectBundle(bytes: Buffer, options: DecryptBundleV2Options): Inspection {
   const fail = (status: BundleStatus, error: string, envelope: BundleEnvelope | null): Inspection => ({
     status,
     error,
@@ -833,7 +1017,11 @@ function inspectBundle(bytes: Buffer, passphrase: string): Inspection {
   }
   let plaintext: Buffer;
   try {
-    const decipher = createDecipheriv("aes-256-gcm", deriveKey(passphrase, envelope.kdf, salt), iv);
+    const payloadKey = payloadKeyFor(envelope, options, salt);
+    if (payloadKey === null) {
+      return fail("bad-key", "the bundle did not authenticate — wrong passphrase or recovery code, or the envelope was edited", envelope);
+    }
+    const decipher = createDecipheriv("aes-256-gcm", payloadKey, iv);
     decipher.setAAD(Buffer.from(canonicalHeader(envelope), "utf8"));
     decipher.setAuthTag(tag);
     plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
@@ -863,7 +1051,13 @@ function inspectBundle(bytes: Buffer, passphrase: string): Inspection {
 }
 
 export interface DecryptBundleV2Options {
-  passphrase: string;
+  /** The standing way to open a bundle. Optional only because a recovery
+   *  code can stand in for it. */
+  passphrase?: string;
+  /** K1: a recovery code opens the bundle INSTEAD of the passphrase. When it
+   *  is present nothing falls back to the passphrase, so a wrong code is
+   *  reported rather than masked by a correct passphrase. */
+  recoveryCode?: string;
 }
 
 export interface DecryptBundleV2Result {
@@ -877,7 +1071,7 @@ export interface DecryptBundleV2Result {
  * caller that has to catch in order to learn "wrong passphrase" will
  * eventually catch something else with it. */
 export function decryptBundleV2(bytes: Buffer, options: DecryptBundleV2Options): DecryptBundleV2Result {
-  const inspection = inspectBundle(bytes, options.passphrase);
+  const inspection = inspectBundle(bytes, options);
   const result: DecryptBundleV2Result = { status: inspection.status };
   if (inspection.envelope !== null) result.envelope = inspection.envelope;
   // only an accepted payload leaves this function: verify may inspect one it
@@ -963,7 +1157,7 @@ function parentIdOf(json: string): string | null {
 /** Report every structural guarantee as its own line, so a failure names the
  * property that broke instead of "the bundle is bad". Never throws. */
 export function verifyBundleV2(bytes: Buffer, options: DecryptBundleV2Options): VerifyBundleV2Result {
-  const inspection = inspectBundle(bytes, options.passphrase);
+  const inspection = inspectBundle(bytes, options);
   const envelope = inspection.envelope;
   const payload = inspection.payload;
   const checks: VerifyCheck[] = [];

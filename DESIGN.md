@@ -575,9 +575,10 @@ release pipeline.
 | S5 | social feed (posts/reactions, rate limits) | social |
 | S6 | bot social tools (loopback API, socialEnabled) | S5 |
 | ✔ | U1 agent-row menu (New task) · U3 header collapse-on-scroll · U4 composer /commands — shipped Loop176 | — |
+| P1 | per-bot approval levels (provider-native) — DEFERRED: the `Bot` type lives in `store.tsx` and the spawn pass-through in `server/index.ts`, both social-WIP-owned (same recorded rule as A1–A4) | social, store |
 | U2, U5 | drag-reorder (DEFERRED: row order lives in `store.tsx`, social-WIP-owned) · activity panel (DEFERRED: name-only row, no source spec; FleetOrb unmounted by owner direction — needs owner shape first) | social, owner |
 | P1 | per-bot approval levels (provider-native) | — |
-| K1 | v2 recovery codes (MEK wrap) | v2 |
+| K1 | v2 recovery codes (MEK wrap): format half shipped Loop177 (envelope `keySlots` — MEK wrapped under passphrase + per-code Crockford slots, AAD-covered, legacy byte-compatible; 11 tests) — routes + UI remain | v2 |
 | S0–S3 | devices table → journal → per-object incremental sync → selective restore | K1, v2 |
 | B1 | automatic snapshots + retention (passphrase-store decision) | S1 |
 | M1–M2 | memory retrieval pipeline · shared-memory grants | — |
