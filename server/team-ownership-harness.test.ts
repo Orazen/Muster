@@ -261,7 +261,9 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
   it.each(["primary", "alice", "bob"] as const)("exports only %s's visible team, not foreign descriptions or the operator profile", async (name) => {
     const account = role(name);
     const before = files(hosted);
-    const response = await request(hosted, "/api/teams/export", "POST", {}, account);
+    // format=json: the structured manifest this ownership contract parses;
+    // the route's default is now the portable Markdown playbook.
+    const response = await request(hosted, "/api/teams/export?format=json", "POST", {}, account);
     expect(response.status).toBe(200);
     const manifest = z.object({ team: z.object({ name: z.string(), members: z.array(z.object({ name: z.string(), description: z.string() })) }) }).parse(await response.json());
     expect.soft(manifest.team.members.map((member) => ({ name: member.name, description: member.description })).sort((a, b) => a.name.localeCompare(b.name))).toEqual(owned(account).filter((bot) => !bot.hidden).map((bot) => ({ name: bot.name, description: bot.description })).sort((a, b) => a.name.localeCompare(b.name)));
@@ -307,7 +309,7 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
   it("retains global local export, scan, room membership and replace-import behavior", async () => {
     const bot = await createBot(local, "local teammate");
     const before = rows(local);
-    const exported = await request(local, "/api/teams/export", "POST", {});
+    const exported = await request(local, "/api/teams/export?format=json", "POST", {});
     expect(exported.status).toBe(200);
     const manifest = z.object({ team: z.object({ members: z.array(z.object({ name: z.string() })) }) }).passthrough().parse(await exported.json());
     expect(manifest.team.members.map((member) => member.name).sort()).toEqual(before.map((entry) => entry.name).sort());
