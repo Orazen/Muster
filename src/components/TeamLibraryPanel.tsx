@@ -176,6 +176,21 @@ export function TeamLibraryPanel({
 
   const readFile = async (file: File) => {
     if (file.size > MAX_TEAM_FILE_BYTES) throw new Error("That team file is too large.");
+    // The portable Markdown playbook (.musterteam.md, OpenMausBot parity):
+    // sent as { markdown } and parsed server-side, then folded through the
+    // same client preview as a JSON file. JSON team files parse locally.
+    if (file.name.endsWith(".md")) {
+      const text = await file.text();
+      // SAFETY: api returns any (untyped transport); the preview route
+      // returns the parsed manifest (or an error), and teamImportPreview
+      // re-checks the shape before anything is displayed or installed.
+      const response = await api("/api/teams/import/preview", {
+        method: "POST",
+        body: JSON.stringify({ markdown: text }),
+      });
+      previewManifest(teamImportPreview(response), "file");
+      return;
+    }
     try {
       previewManifest(teamImportPreview(JSON.parse(await file.text())), "file");
     } catch (cause) {
@@ -473,7 +488,7 @@ export function TeamLibraryPanel({
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".json,.musterteam.json,application/json"
+                    accept=".json,.musterteam.json,.musterteam.md,.md,application/json,text/markdown"
                     className="hidden"
                     onChange={(event) => {
                       const file = event.currentTarget.files?.[0];
@@ -505,14 +520,14 @@ export function TeamLibraryPanel({
                     >
                       <UploadCloud size={27} className="text-accent" />
                       <span className="mt-3 text-[14px] font-medium text-ink">Choose a team file</span>
-                      <span className="mt-1 text-[12.5px] text-ink-secondary">or drop a .musterteam.json here</span>
+                      <span className="mt-1 text-[12.5px] text-ink-secondary">or drop a .musterteam.md or .musterteam.json here</span>
                     </button>
 
                     <div className="flex min-h-56 flex-col justify-center rounded-2xl bg-raised/25 px-6">
                       <GithubMark size={25} className="text-ink-secondary" />
                       <h3 className="mt-3 text-[14px] font-medium text-ink">Load from repository</h3>
                       <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">
-                        Paste a public repository path or a direct team JSON link.
+                        Paste a public repository path or a direct team file link (.musterteam.md or .json).
                       </p>
                       <div className="mt-4 flex gap-2">
                         <input

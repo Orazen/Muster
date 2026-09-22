@@ -425,7 +425,7 @@ describe("harness HTTP API", () => {
     const visibleNames = stateBefore.bots
       .filter((bot: { hidden?: boolean }) => !bot.hidden)
       .map((bot: { name: string }) => bot.name);
-    const exported = await api("POST", "/api/teams/export", { name: "Field Team" });
+    const exported = await api("POST", "/api/teams/export?format=json", { name: "Field Team" });
     expect(exported.status).toBe(200);
     expect(exported.body).toMatchObject({ format: "muster.team", version: 2, team: { name: "Field Team" } });
     expect(exported.body.team.members.map((member: { name: string }) => member.name)).toEqual(visibleNames);
@@ -436,7 +436,23 @@ describe("harness HTTP API", () => {
     expect(exported.body.team).not.toHaveProperty("room");
     expect(JSON.stringify(exported.body)).not.toMatch(/Archived|autoApprove|alwaysAllow|modelSelection|threadId/);
     expect((await api("GET", "/api/bots")).body.groups).toHaveLength(roomsBefore);
-    expect((await api("POST", "/api/teams/export", {})).body.team.name).toBe("My Muster Team");
+    expect((await api("POST", "/api/teams/export?format=json", {})).body.team.name).toBe("My Muster Team");
+
+    // The default export is the portable Markdown playbook (OpenMausBot
+    // parity): frontmatter only, no secrets, and it round-trips through the
+    // markdown import path into the same members as the JSON twin.
+    const markdownExport = await api("POST", "/api/teams/export", { name: "Field Team" });
+    expect(markdownExport.status).toBe(200);
+    expect(String(markdownExport.body.markdown)).toContain("format: muster.team");
+    expect(markdownExport.body.name).toBe("Field Team");
+    expect(markdownExport.body.markdown).toContain("    - name: Scout");
+    expect(markdownExport.body.markdown).not.toMatch(/autoApprove|alwaysAllow|modelSelection|threadId/);
+    const markdownPreview = await api("POST", "/api/teams/import/preview", { markdown: markdownExport.body.markdown });
+    expect(markdownPreview.status).toBe(200);
+    expect(markdownPreview.body.team.members.map((member: { name: string }) => member.name)).toEqual(visibleNames);
+    const markdownImported = await api("POST", "/api/teams/import?mode=add", { markdown: markdownExport.body.markdown });
+    expect(markdownImported.status).toBe(201);
+    expect(markdownImported.body.bots.map((bot: { name: string }) => bot.name)).toEqual(visibleNames);
 
     const stream = await openSse(`${BASE}/api/events`);
     try {

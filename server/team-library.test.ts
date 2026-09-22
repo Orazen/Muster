@@ -77,18 +77,24 @@ describe("team library", () => {
   });
 
   it("normalizes public GitHub repository, blob, and raw links", () => {
+    // A bare repository link now probes the portable Markdown playbook
+    // first (OpenMausBot-parity), then the JSON forms.
     expect(githubManifestUrls("https://github.com/acme/team")).toEqual([
+      "https://raw.githubusercontent.com/acme/team/main/team.musterteam.md",
       "https://raw.githubusercontent.com/acme/team/main/team.musterteam.json",
       "https://raw.githubusercontent.com/acme/team/master/team.musterteam.json",
     ]);
     expect(githubManifestUrls("https://github.com/acme/team/blob/main/presets/seo.musterteam.json")).toEqual([
       "https://raw.githubusercontent.com/acme/team/main/presets/seo.musterteam.json",
     ]);
+    expect(githubManifestUrls("https://github.com/acme/team/blob/main/presets/seo.musterteam.md")).toEqual([
+      "https://raw.githubusercontent.com/acme/team/main/presets/seo.musterteam.md",
+    ]);
     expect(githubManifestUrls("https://raw.githubusercontent.com/acme/team/main/team.musterteam.json")).toEqual([
       "https://raw.githubusercontent.com/acme/team/main/team.musterteam.json",
     ]);
     expect(() => githubManifestUrls("http://example.com/team.json")).toThrow("public HTTPS GitHub");
-    expect(() => githubManifestUrls("https://github.com/acme/team/blob/main/run.sh")).toThrow("JSON team file");
+    expect(() => githubManifestUrls("https://github.com/acme/team/blob/main/run.sh")).toThrow("team file");
   });
 
   it("falls back from main to master for a repository link", async () => {
@@ -98,6 +104,7 @@ describe("team library", () => {
 
     const loaded = await fetchGithubTeam("https://github.com/acme/team", fetcher);
     expect(loaded.team.members[0]?.name).toBe("Ada");
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    // .md probe 404s on /main/, then the JSON answers — three candidates.
+    expect(fetcher).toHaveBeenCalledTimes(3);
   });
 });

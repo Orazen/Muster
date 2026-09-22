@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { parseJson, type JsonObject, type JsonValue } from "./schema.ts";
+import { parseTeamMarkdown } from "./team-markdown.ts";
 import { parseTeamManifest, type ParsedTeamManifest } from "./team-manifest.ts";
 
 export const TEAM_LIBRARY_REPOSITORY = "https://github.com/tharunramagiri/muster-teams";
@@ -144,8 +145,22 @@ export function parseTeamCatalog(value: JsonValue): TeamCatalog {
   };
 }
 
-async function fetchJson(url: string, maxBytes: number, fetcher: Fetcher): Promise<JsonValue> {  const response = await fetcher(url, {
-    headers: { accept: "application/json, text/plain;q=0.9" },
+async function fetchJson(url: string, maxBytes: number, fetcher: Fetcher): Promise<JsonValue> {
+  const raw = await fetchTeamFile(url, maxBytes, fetcher);
+  try {
+    // SAFETY: parseJson is the boundary; its return is this module's JsonValue.
+    return parseJson(raw) as JsonValue;
+  } catch {
+    throw new Error("GitHub did not return valid JSON");
+  }
+}
+
+/** Fetch a remote team file as text (JSON or Markdown) with the same size
+ * and host discipline as before. Malformed content is left to the caller's
+ * parser so the error names the actual format problem. */
+async function fetchTeamFile(url: string, maxBytes: number, fetcher: Fetcher): Promise<string> {
+  const response = await fetcher(url, {
+    headers: { accept: "application/json, text/markdown, text/plain;q=0.9" },
     redirect: "error",
     signal: AbortSignal.timeout(10_000),
   });
@@ -157,11 +172,7 @@ async function fetchJson(url: string, maxBytes: number, fetcher: Fetcher): Promi
   if (announced > maxBytes) throw new Error("The remote team file is too large");
   const raw = await response.text();
   if (Buffer.byteLength(raw) > maxBytes) throw new Error("The remote team file is too large");
-  try {
-    return parseJson(raw);
-  } catch {
-    throw new Error("GitHub did not return valid JSON");
-  }
+  return raw;
 }
 
 export async function fetchTeamCatalog(fetcher: Fetcher = fetch): Promise<TeamCatalog> {
@@ -225,23 +236,24 @@ export function githubManifestUrls(input: string): string[] {
     if (parts.length === 2) {
       const [owner, repo] = parts;
       return [
+        `https://raw.githubusercontent.com/${owner}/${repo}/main/team.musterteam.md`,
         `https://raw.githubusercontent.com/${owner}/${repo}/main/team.musterteam.json`,
         `https://raw.githubusercontent.com/${owner}/${repo}/master/team.musterteam.json`,
       ];
     }
     if (parts.length >= 5 && (parts[2] === "blob" || parts[2] === "raw")) {
       const [owner, repo, , ref, ...file] = parts;
-      if (!file.at(-1)?.endsWith(".json")) throw new Error("The GitHub link must point to a JSON team file");
+      if (!file.at(-1)?.endsWith(".json") && !file.at(-1)?.endsWith(".md")) throw new Error("The GitHub link must point to a .musterteam.json or .musterteam.md team file");
       return [`https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${file.join("/")}`];
     }
   }
 
   if (url.hostname === "raw.githubusercontent.com" && parts.length >= 4) {
-    if (!parts.at(-1)?.endsWith(".json")) throw new Error("The GitHub link must point to a JSON team file");
+    if (!parts.at(-1)?.endsWith(".json") && !parts.at(-1)?.endsWith(".md")) throw new Error("The GitHub link must point to a .musterteam.json or .musterteam.md team file");
     return [`https://raw.githubusercontent.com/${parts.join("/")}`];
   }
 
-  throw new Error("Paste a GitHub repository or JSON file link");
+  throw new Error("Paste a GitHub repository or team file link");
 }
 
 export async function fetchGithubTeam(input: string, fetcher: Fetcher = fetch): Promise<ParsedTeamManifest> {
@@ -249,13 +261,16 @@ export async function fetchGithubTeam(input: string, fetcher: Fetcher = fetch): 
   let lastError: unknown;
   for (const url of urls) {
     try {
-      return parseTeamManifest(await fetchJson(url, MAX_MANIFEST_BYTES, fetcher));
+      // .musterteam.md is the portable Markdown playbook dialect (same
+      // schema, YAML frontmatter); anything else parses as the JSON form.
+      const raw = await fetchTeamFile(url, MAX_MANIFEST_BYTES, fetcher);
+      return url.endsWith(".md") ? parseTeamMarkdown(raw) : parseTeamManifest(parseJson(raw));
     } catch (error) {
       lastError = error;
-      // SAFETY: fetchJson stamps the errors it throws with a numeric HTTP status;
+      // SAFETY: fetchText stamps the errors it throws with a numeric HTTP status;
       // other failures here have no status property and read undefined.
       if ((error as { status?: number }).status !== 404) throw error;
     }
   }
-  throw lastError ?? new Error("No team.musterteam.json file was found in that repository");
+  throw lastError ?? new Error("No team.musterteam.json or team.musterteam.md file was found in that repository");
 }

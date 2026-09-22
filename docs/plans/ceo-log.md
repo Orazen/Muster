@@ -7128,3 +7128,26 @@ The optout instance moved to echo-gated mode so its prompt is observable.
 Post-Loop163 full gates: tsc (app + server tsconfigs) 0 errors, oxlint 0/0
 repo-wide, vitest 324 files / 4,846 passed / 0 failed (one up from Loop162:
 the local-driver tool-less-retry test), Playwright e2e 41/41.
+## Loop165 — portable Markdown team files (OpenMausBot parity)
+
+Studied OpenMausBot's design docs (desktop-companion, ios-companion, local-vm,
+networking): Muster already ships the companion sidecar with HTTPS/Tailscale/
+LAN pairing, per-bot Local VMs with maxInstances, VPS computers, keep-awake,
+device revocation, and the team library. The clearest adoptable gap was OMB's
+signature portable team format: one Markdown document with YAML frontmatter
+that people read/edit and the app installs.
+
+- server/team-markdown.ts: renderTeamMarkdown (v2 manifest -> playbook with
+  YAML frontmatter + human body) and parseTeamMarkdown (frontmatter ->
+  manifest) delegating to the shared team-manifest schema. Human-friendly
+  dialect: flat color/mascot keys, derived member keys, green default.
+- Routes: export default is now Markdown (?format=json keeps the old shape);
+  /api/teams/import takes { markdown }; /api/teams/import/preview parses
+  without installing; GitHub fetch probes team.musterteam.md first, then the
+  JSON forms, and accepts .md blob/raw links.
+- UI: Teams import accepts .musterteam.md drops (server-parsed preview);
+  sidebar export downloads the Markdown playbook.
+- Tests: team-markdown.test.ts (9 — round-trip incl. YAML-quoting, edited
+  body, hand-written members, rejections); index.test.ts exercises the live
+  Markdown export -> preview -> import path (60/60); team-library URL
+  normalization covers the .md candidates.

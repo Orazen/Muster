@@ -194,7 +194,9 @@ export function parseTeamManifest(value: TeamManifestInput): ParsedTeamManifest 
   return result;
 }
 
-function memberKey(name: string, index: number, used: Set<string>): string {
+/** Derive a stable member key from a display name — used by export and by
+ * the portable Markdown importer (humans write names, not keys). */
+export function memberKey(name: string, index: number, used: Set<string>): string {
   const stem =
     name
       .normalize("NFKD")

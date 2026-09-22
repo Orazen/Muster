@@ -281,6 +281,7 @@ import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./rou
 import { GoalManager } from "./goals.ts";
 import { SocialManager, socialProfileInputSchema, friendRequestInputSchema } from "./social.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchLibraryTeamReadme, fetchTeamCatalog } from "./team-library.ts";
+import { parseTeamMarkdown, renderTeamMarkdown } from "./team-markdown.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { readRuntimeEvidence, readThreadEvents } from "./thread-events.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
@@ -6751,17 +6752,20 @@ let requestUserEmail = "";
       const memberIds = store.bots.filter((bot) => !bot.hidden && ownsRecord(bot)).map((bot) => bot.id);
       if (memberIds.length === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
       try {
-        return json(
-          res,
-          200,
-          createTeamManifest(
-            {
-              name,
-              memberIds,
-            },
-            store.bots,
-          ),
+        const manifest = createTeamManifest(
+          {
+            name,
+            memberIds,
+          },
+          store.bots,
         );
+        // The portable Markdown playbook (OpenMausBot-parity) is the default
+        // export: readable, editable, and installs exactly like the JSON.
+        // ?format=json keeps the old behavior for tooling.
+        if (url.searchParams.get("format") !== "json") {
+          return json(res, 200, { markdown: renderTeamMarkdown(manifest), name: manifest.team.name });
+        }
+        return json(res, 200, manifest);
       } catch (error) {
         return json(res, 400, { error: error instanceof Error ? error.message : "Team could not be exported" });
       }
@@ -6798,6 +6802,17 @@ let requestUserEmail = "";
         return json(res, status, { error: error instanceof Error ? error.message : "The GitHub team could not be loaded" });
       }
     }
+    if (method === "POST" && path === "/api/teams/import/preview") {
+      // Parse-only preview of a portable Markdown team file: the review
+      // screen renders from this without installing anything.
+      const body = await readBody(req);
+      if (!isText(body?.markdown)) return json(res, 400, { error: "markdown must be a string" });
+      try {
+        return json(res, 200, parseTeamMarkdown(body.markdown));
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : "Invalid team file" });
+      }
+    }
     if (method === "POST" && path === "/api/teams/import") {
       const importMode = url.searchParams.get("mode") ?? "add";
       if (importMode !== "add" && importMode !== "replace") {
@@ -6806,7 +6821,10 @@ let requestUserEmail = "";
       const body = await readBody(req);
       let manifest;
       try {
-        manifest = parseTeamManifest(body);
+        // A request carrying { markdown } is a portable .musterteam.md
+        // document (OpenMausBot-parity): the playbook people share. Anything
+        // else is the JSON manifest the route has always taken.
+        manifest = isText(body?.markdown) ? parseTeamMarkdown(body.markdown) : parseTeamManifest(body);
       } catch (error) {
         return json(res, 400, { error: error instanceof Error ? error.message : "Invalid team file" });
       }
