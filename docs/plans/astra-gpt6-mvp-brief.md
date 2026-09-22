@@ -90,9 +90,17 @@ Ranked; each is a bounded, shippable increment consistent with §3's rule:
 4. **Watch escalation depth.** needs-user cards on Watch with one-tap
    Allow/Deny and the why-journal entry auto-attached. The approval moment is
    the moat; make it frictionless.
+   *(shipped — `ios/Watch/WatchViews.swift` renders pending permission
+   options as one-tap buttons plus the collapsible previous-run why entry
+   produced by `server/approval-why.ts`; the haptic vocabulary followed in
+   Loop169.)*
 5. **Engine parity.** Match OpenMausBot's 11-engine breadth through the
    existing driver layer (CLI/ACP/direct-API); see
    [competitive-landscape.md](competitive-landscape.md).
+   *(premise withdrawn by its own reference: competitive-landscape.md no
+   longer treats a fixed engine count as a current measurement — compare
+   available models and completed first tasks on the same machine instead.
+   The driver layer already spans every major provider family.)*
 
 ## 6. Hard constraints (non-negotiable)
 

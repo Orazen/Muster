@@ -7661,3 +7661,51 @@ GitHub-billing-blocked workflow, not code. Head-of-main CI: green.
 
 **Gates:** tsc both configs 0; oxlint 0/0; container-computer 47/47; vitest
 325 files / 4,876 passed / 0 failed; Playwright e2e 42/42.
+
+## Loop174 — backlog census: every "remaining" queue mapped before building (22 Sep 2026)
+
+**Trigger:** owner said continue all remaining. Rather than guess, every
+open queue was diffed against the tree.
+
+**Astra brief §5 is now fully closed.** Item 1 eval harness: playbook +
+`muster eval` + `role-eval-harness` + Loop157 trending/scheduling. Item
+2: `list_sessions` (Loop173). Item 3: delegation ships as `send_task`
+`receiptRef` + `attachReceipt`. Item 4: Watch escalation depth ships —
+one-tap Allow/Deny (`ios/Watch/WatchViews.swift` permission buttons +
+ApprovalContract always-allow) with the previous-run why entry attached
+by `server/approval-why.ts` and the Loop169 haptics. Item 5: engine
+parity — its own reference (competitive-landscape.md) withdrew the fixed
+count claim ("not current measurements"); `server/drivers/` covers every
+major provider family. Annotations written: brief items 4/5, and the
+landscape's stale "eight-tool Fleet MCP" corrected to a dated eleven
+("the count was checked against fleet-mcp.ts" — now honest again).
+
+**Voice parity W1–W5: four of five already shipped, W4 is the gap.** W1
+mute/captions/spoken-end-call (c40ba38); W2 spoken register
+(`src/lib/tts/speech-text.ts` + tests, applied at `tts/index.ts:140`);
+W3 playhead word cursor (`word-cursor.ts` + tests, driving
+`VoiceCaption` via playedFraction with the WPS ceiling); W5 session
+controls (`session-controls.ts`: quieter/louder/faster/slower with
+bounds + spoken "end the call", chips in the call room). Open: **W4
+barge-in with browser AEC** — 250ms sustained speech + 200ms gap
+tolerance + duty-cycle cap per the voice plan, shipped behind a
+default-off control; real-device proof stays an owner gate (headless
+has no audio; the native SFSpeech path deliberately stays half-duplex).
+
+**Ownership map recorded (current-state, Loop174 block):** L102 in
+flight elsewhere; social S5/S6 = the parallel agent's live WIP across
+`server/social.ts`, `server/index.ts`, `src/state/store.tsx`,
+`src/components/SocialView.tsx`, `src/lib/social.ts` — never staged by
+this session, and index.ts-touching rows (A1–A4) defer while that WIP
+is live. **X5 credential vault deliberately NOT built:** its spec's own
+status line records the security-sensitive deferral ("shipping a
+half-vault is worse than shipping none"); this session respects that
+recorded owner decision and flags it for explicit override rather than
+unilaterally shipping crypto. U1–U5's source audits located
+(fleet-benchmark-2026-09-12 §sidebar; agent-social-ecosystem-plan §3);
+its store-touching sub-items (drag-reorder) also defer while store.tsx
+is owned by the social WIP.
+
+**Next loop:** W4 barge-in (default-off, web capture path only), then
+the unowned §38 rows in order. Not claimed: any device audio behavior,
+X5, or deployment. Nothing pushed in this entry.

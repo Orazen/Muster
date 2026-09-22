@@ -158,6 +158,43 @@ files mid-edit (container-computer's daemon test among them); an
 immediate captured re-run was 325/0 with zero FAIL lines — reported as
 observed, not as a flake dismissal.
 
+### Backlog census — every remaining queue mapped (22 September 2026, Loop174)
+
+Owner said "continue all remaining"; before building, every open queue was
+audited against the tree so the next loops execute real gaps:
+
+**Astra brief §5 — all five ranked slices now closed:** (1) eval harness
+shipped (playbook + `muster eval` + capture harness + Loop157 trending);
+(2) `list_sessions` completed the write-safe reads (Loop173); (3)
+cross-fleet delegation ships as `send_task` `receiptRef`; (4) Watch
+escalation depth ships — one-tap Allow/Deny in `WatchViews.swift` with
+the previous-run why entry attached by `server/approval-why.ts`; (5)
+engine parity's premise is retracted by competitive-landscape.md itself
+(fixed engine counts are "not current measurements") while
+`server/drivers/` spans every major provider family. Items 4/5 annotated
+in the brief; competitive-landscape's stale "eight-tool" corrected to a
+dated eleven.
+
+**Voice W1–W5: only W4 (barge-in) remains.** W1 mute/captions/spoken-end
+(c40ba38), W2 `speech-text.ts` applied at speak-time (`tts/index.ts:140`),
+W3 `word-cursor.ts` driving `VoiceCaption`, W5 `session-controls.ts`
+(quieter/louder/faster/slower + end-call) — all shipped with tests.
+W4 is the next code slice (browser AEC + 250ms/200ms guard, default off;
+device proof stays owner-held).
+
+**DESIGN §38 ownership (do not collide):** L102 in flight (another
+agent); S5/S6 social is the parallel agent's live WIP
+(`social.ts`, `SocialView.tsx`, `store.tsx`, `server/index.ts` — never
+stage those). A1–A4 and other index.ts-touching rows defer while that
+WIP is live. **X5 credential vault stays spec'd-not-built** — its own
+status line records a deliberate security-sensitive deferral ("shipping
+a half-vault is worse than shipping none"); building it needs an
+explicit owner override, not an agent's discretion. Remaining unowned
+rows in order: U1–U5 (source audits: fleet-benchmark §sidebar,
+agent-social §3 — store-touching sub-items collide with social WIP), P1,
+K1, S0–S3, B1, M1–M2, T1, SS1, L2–L3, RC; R1 release rollout is
+owner/release-agent surface.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

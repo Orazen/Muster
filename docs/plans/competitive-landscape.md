@@ -39,12 +39,13 @@ Primary evidence:
 - A persistent fleet with per-bot engines, budgets, tasks, and memory.
 - OptionCard approvals, approval history, and phone/Watch delivery.
 - Task receipts, why-journal entries, routine scorecards, and plan rehearsal.
-- An eight-tool Fleet MCP surface that excludes approval grants, deletes,
+- An eleven-tool Fleet MCP surface that excludes approval grants, deletes,
   credentials, and engine changes (`server/fleet-mcp.ts`). OpenMausBot also
   documents a bounded MCP surface, with a different and broader set of team
   operations; tool count alone does not establish product quality. Muster's
-  original six tools have since gained read-only why-journal and scorecard
-  access; the current count was checked against `server/fleet-mcp.ts`.
+  original six tools have since gained read-only why-journal, scorecard and
+  session-discovery access; the count here was checked against
+  `server/fleet-mcp.ts` (eleven as of 2026-09-22).
 - Local execution and device pairing. These are shared category capabilities;
   compare setup effort, failure recovery, and the resulting evidence.
 
