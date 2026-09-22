@@ -128,10 +128,19 @@ The same gate can run without opening Xcode:
 ```sh
 xcodebuild -project MusterCompanion.xcodeproj \
   -scheme MusterCompanion \
-  -sdk iphonesimulator \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   CODE_SIGNING_ALLOWED=NO build
 ```
+
+Do **not** add `-sdk iphonesimulator`. The app embeds the watch bundle, so
+this build compiles `MusterWatch` for watchOS as a dependency; forcing the
+iOS SDK onto it fails twice — WatchKit will not resolve on that platform
+(`unable to resolve module dependency: 'WatchKit'`) and the watch AppIcon
+entries no longer apply (`icon stack named "AppIcon" did not have any
+applicable content`). Let the destination pick each target's own SDK.
+(`CODE_SIGNING_ALLOWED=NO` is fine for this compile gate only — test runs
+must stay signed or the keychain refuses pairing with
+`errSecMissingEntitlement`.)
 
 **Re-run `xcodegen generate` whenever a pull adds a file to `App/`.** The
 generated project lists source files explicitly, so a new one is missing from

@@ -411,6 +411,35 @@ directive queued next: desktop wave (non-vitest legs of `npm test`) +
 iOS TESTING.md Stages 1/3 (host swift test, SIMULATOR xcodebuild — never
 a device; iPhone/Tailscale stages owner-held). Next per §38: S2c wiring.
 
+### App-test waves: desktop + iOS/Watch (22 September 2026, Loop182)
+
+Owner directive "computer all test use desktop and ios app all" executed.
+**Desktop (all exit 0):** check:electron 8 files; desktop-lifecycle
+**14/14**; updater **14/14**; broker **2/2**; packaged-server smoke
+**14/14 checks** after build:server (node 22.22.3 arm64). **iOS —
+SIMULATOR only:** host `swift test` **435/0 failures**; Stage 3 build
+first failed on the DOCUMENTED command (`-sdk iphonesimulator` forces the
+embedded watch target onto the iOS SDK: WatchKit unresolvable + watch
+AppIcon "no applicable content") — destination-only form **BUILD
+SUCCEEDED exit 0** and ios/TESTING.md now carries the verified command
+with the reason (plus: signing-off is compile-gate-only, test runs stay
+signed). Owned iOS rig **5/5 green** exit 0 (welcome, welcome-pair,
+pair, identity, walkie) — owned sim created+deleted, 2 PIDs/4 ports/3
+roots receipted clean, 8810/8811/8845 untouched. Watch rig **3/3 passed,
+0 skipped** — the complete WatchOwnedUITests target (foreground call,
+chat stream + reader, phone handoff) on an owned Apple Watch Ultra 3
+watchOS 26.5 simulator, deleted at cleanup, xcresult retained.
+**Not run (honest):** Stage 2 interactive in-app clicks (GUI against live
+companion ports — owner-held), Google cloud-live sign-in case
+(MUSTER_WELCOME_CLOUD_LIVE-gated, self-skipping), real-device Stages 4–5
+(owner-held). No device/deployment/security claim. **Gate:** full suite
+**335 / 4988 / 8 skipped / 0 failed** (470.23s = docs-only change,
+unchanged from Loop181). Next per §38: S2c wiring (recon complete: pass
+= sole queue consumer; Drive transport stat-before-download
+modifiedTime guard + verify-before-write — no If-Match in Drive v3,
+window documented; base64 byte bridge; persisted local manifest;
+writeMemoryFile = first producer).
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

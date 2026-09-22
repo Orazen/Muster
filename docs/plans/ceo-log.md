@@ -8174,3 +8174,57 @@ existing 50-test suite. The staging draft "Muster 1.15.0 (staging)"
 exists on GitHub (id 393980548, draft, target 729e8e6) and
 assert-draft verifies green; the re-run of the pinned Release workflow
 proceeds to the platform build legs against that draft.
+
+## Loop182 — the owner's app-test directive: desktop + iOS/Watch waves (22 Sep 2026)
+
+**Trigger:** owner — "gohead computer all test use desktop and ios app all".
+Ran every automated leg of both apps and reported the real numbers below;
+the two stages that cannot be honestly automated here stay owner-held and
+are labeled as such.
+
+**Desktop wave (all exit 0):** `check:electron` — 8 entry files
+syntax-checked; `test:desktop-lifecycle` **14/14 pass**; `test:updater`
+**14/14 pass**; `broker:test` **2/2 pass** (1 file, broker config);
+`test:packaged-server` — `build:server` bundle + smoke **14/14 checks**
+(ownedHttp, 7 proxyPaths, nativeDatabase, buildIdentity, webReplacement,
+cacheRefresh, rootServed, appServed — node 22.22.3, arm64). The vitest
+chain already covers all 23 `electron/*.test.mjs` via the vite.config
+include, so together these ARE the canonical `npm test` legs.
+
+**iOS wave (SIMULATOR — never a device):** Stage 1 `swift test` on host
+**435 tests, 0 failures** (0.9s). Stage 3 build gate first FAILED with the
+documented command: `-sdk iphonesimulator` forces the EMBEDDED watch
+target onto the iOS SDK, where WatchKit cannot resolve and the watch
+AppIcon entries don't apply ("did not have any applicable content") —
+the destination-only form **BUILD SUCCEEDED, exit 0**, and TESTING.md now
+carries the verified command plus the reason and a note that
+`CODE_SIGNING_ALLOWED=NO` is a compile-gate-only flag (test runs must
+stay signed or keychain pairing dies with errSecMissingEntitlement —
+the rig already documents the f889c54 breakage). Owned iOS rig:
+**5/5 green** (welcome, welcome-pair, pair, identity, walkie), exit 0 —
+owned simulator created and DELETED, 2 PIDs, 4 probed ports and 3 temp
+roots receipted and removed, error null; ports 8810/8811 and the demo
+server on 8845 untouched. Watch rig (`--experimental-strip-types`,
+offline fixture): **3/3 passed, 0 skipped** — the COMPLETE
+WatchOwnedUITests target (explicit foreground call, chat stream + reader,
+handoff-from-phone-pairs-without-pairing-UI) on an owned Apple Watch
+Ultra 3 watchOS 26.5 simulator, deleted at cleanup, xcresult evidence
+retained; the fixture saw paired:true across 33 requests.
+
+**Not run, honestly:** TESTING.md Stage 2 (interactive in-app clicks —
+Settings → Companion, countdown check — against the user's live
+companion ports; an agent driving a GUI blind is not a test, it's a
+risk), the Google sign-in cloud-live case (gated on
+MUSTER_WELCOME_CLOUD_LIVE=1 with live Google; it self-skips otherwise),
+and real-device Stages 4–5 (owner-held). No device, no deployment, no
+security attestation is claimed.
+
+**Gate:** full suite **335 files / 4988 passed / 8 skipped / 0 failed**
+(470.23s — identical to Loop181: this slice changed docs only). Next per
+§38: S2c real wiring — recon done this loop: single-consumer design (the
+pass is the ONLY claimant, so no drainer/pass double-drain row loss),
+Drive transport over uploadBundle/findBundleFile/downloadBundle with a
+stat-BEFORE-download modifiedTime guard and verify-before-write save
+(Drive v3 has no If-Match — TOCTOU window documented, not hidden),
+base64 byte bridge for the binary envelope, a persisted local-manifest
+store, and the first producer at workspace.ts writeMemoryFile.
