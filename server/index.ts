@@ -2351,7 +2351,11 @@ async function startTurn(
       // this engine can reach them — and only to a bot the user has not
       // switched off: the key is workspace-wide, the grant is per bot.
       if (botAppsAllowed(bot) && instance.adapter.capabilities.composioMcp === true) {
-        const connection = await connectedAppsIntegration(bot.id, threadId, instanceId);
+        // A connector outage (OpenConnector/composio unreachable, session
+        // hiccup) must degrade to a turn without apps, never a failed send —
+        // the user asked their bot something; a dead provider key is not
+        // their error to see, and the next turn retries the mount.
+        const connection = await connectedAppsIntegration(bot.id, threadId, instanceId).catch(() => null);
         connectorLease = connection?.lease;
         requireDispatch();
         if (connection) integrations.composio = connection.integration;
@@ -2728,13 +2732,20 @@ async function startTurn(
           (computerKind
             ? " At a sign-in, password, MFA, CAPTCHA, or other protected-input step, stop and ask the user to complete it on the visible computer. Never type their password or ask them to paste a password or one-time code into chat."
             : "") +
-          // gated on the integration, not the key: the hint only goes to a
-          // bot whose driver actually mounted the tools
+          // gated on the integration, not the key: the guidance only goes to
+          // a bot whose driver actually mounted the tools, or an honest
+          // "here's how to turn it on" when apps are off or not yet
+          // connected. No branch ever tells the model to blame the engine —
+          // every engine that can act, can act with apps.
           (integrations.composio
             ? connectedApps.toolGuidance(cfg)
             : botAppsAllowed(bot)
-              ? " The user has connected apps (Gmail, GitHub, and others) at the account level, but this specific model engine's driver doesn't mount those tools yet — do not claim nothing is connected; say the apps are connected but not reachable from this engine, and suggest switching to Claude or an ACP engine (Codex, Gemini CLI) to use them."
-              : "") +
+              ? ""
+              : installationAppsFor(bot.ownerId)
+                ? connectedApps.configured(cfg)
+                  ? " The user's connected apps are switched off for you right now (Settings → Connected apps, or the bot's Apps toggle). Do not say you lack the ability — say they can be switched on, and that turning them on is enough; no engine change is needed."
+                  : " The user hasn't connected any apps yet. If the request needs one (email, calendar, files, and so on), briefly tell them Muster can connect it in Settings → Connected apps and offer to walk them through it — then use the app once it's connected. Never claim the task is impossible."
+                : "") +
           (coordinationPrompt ? ` ${coordinationPrompt}` : "") +
           teamContextSystemPrompt() +
           (privateWorkspace ? memorySystemPrompt(bot.id) : "") +
@@ -3245,7 +3256,9 @@ async function runGroupMemberTurn(
   let connectorLease: ConnectorLease | undefined;
   try {
     if (botAppsAllowed(bot) && instance.adapter.capabilities.composioMcp === true) {
-      const connection = await connectedAppsIntegration(bot.id, group.threadId, instance.instanceId);
+      // Same outage-degradation as the 1:1 path: apps are an enhancement,
+      // their unavailability must not fail the room turn.
+      const connection = await connectedAppsIntegration(bot.id, group.threadId, instance.instanceId).catch(() => null);
       connectorLease = connection?.lease;
       if (connection) integrations.composio = connection.integration;
     }

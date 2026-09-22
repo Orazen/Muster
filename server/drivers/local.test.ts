@@ -3,6 +3,7 @@
 // keyless bearer, ping-based availability, server-derived model list — plus
 // the model-free tool-output pruning pass it motivated in model-context.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
 
 import { LocalDriver } from "./local.ts";
 import { createOpenAICompatibleDriver } from "./openai-compatible.ts";
@@ -34,6 +35,22 @@ function jsonResponse(body: JsonValue, ok = true): Response {
   // SAFETY: the chat-completions code only reads ok/status/json/text on a
   // response; this stub provides exactly that surface.
   return { ok, status: ok ? 200 : 500, json: async () => body, text: async () => payload } as Response;
+}
+
+function sseChunk(delta: string): string {
+  return `data: ${JSON.stringify({ choices: [{ delta: { content: delta } }] })}\n\n`;
+}
+
+function streamResponse(chunks: string[]): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const encoder = new TextEncoder();
+      for (const c of chunks) controller.enqueue(encoder.encode(c));
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 }
 
 describe("LocalDriver", () => {
@@ -137,7 +154,7 @@ describe("LocalDriver", () => {
     await instance.dispose();
   });
 
-  it("honestly declares no computer/composio tooling", async () => {
+  it("honestly declares no computer tooling but mounts connected apps through the tool loop", async () => {
     // SAFETY: empty data array → static fallback catalog, still creatable.
     fetchMock().mockResolvedValue(jsonResponse({ data: [] }));
     const instance = await LocalDriver.create({
@@ -148,10 +165,74 @@ describe("LocalDriver", () => {
       config: LocalDriver.defaultConfig(),
     });
     expect(instance.adapter.capabilities.computerMcp).toBe(false);
-    expect(instance.adapter.capabilities.composioMcp).toBe(false);
+    // Connected apps ride the OpenAI-compatible tool loop — Ollama/LM
+    // Studio/vLLM models that speak tools use the user's composio
+    // connectors like any cloud engine; models that don't degrade to a
+    // plain streamed answer (see openai-compatible's tool-less retry).
+    expect(instance.adapter.capabilities.composioMcp).toBe(true);
     expect(instance.adapter.capabilities.effortLevels).toBeUndefined();
     await instance.dispose();
   });
+
+  it("degrades to a plain streamed answer when the served model rejects tools", async () => {
+    // Ollama refuses a tools-carrying chat/completions call for a model
+    // pulled without tool templates (HTTP 400 naming the model). The turn
+    // must degrade to a plain streamed answer, never fail. The request
+    // sequence over global.fetch pins the retry: request 1 carries tools
+    // and is refused; request 2 carries none and answers.
+    fetchMock()
+      // create(): the /models catalog refresh
+      .mockResolvedValueOnce(jsonResponse({ data: [] }))
+      // 1: the tools-carrying chat request — Ollama's refusal shape for a
+      // model pulled without tool templates (HTTP 400 naming the model).
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: { message: "registry.ollama.ai/library/llama3.2:latest does not support tools" } }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        ),
+      )
+      // 2: the tool-less retry — a normal streamed answer.
+      .mockImplementation(async () => streamResponse([sseChunk("plain answer")]));
+    const instance = await LocalDriver.create({
+      instanceId: "local-tools-fallback",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: LocalDriver.defaultConfig(),
+    });
+    const events: any[] = [];
+    // SAFETY: the driver's event union is broader than these assertions
+    // read; the any-typed collector keeps this test honest about that.
+    instance.adapter.onEvent((e: any) => events.push(e));
+    // SAFETY: the turn shape mirrors SendTurnInput for the fields this
+    // factory reads (threadId/text/model/integrations); any-typed here so
+    // the test compiles against the union without a fixtures module.
+    const turn = {
+      threadId: "t-tools-fallback",
+      text: "hi",
+      model: "llama3.2",
+      integrations: {
+        composio: { command: process.execPath, args: [join(import.meta.dirname, "../testing/fake-mcp-server.mjs")], env: {} },
+      },
+    } as any;
+    await instance.adapter.sendTurn(turn);
+    await vi.waitFor(() => {
+      if (!events.some((e) => e.type === "turn.completed")) throw new Error("turn not settled");
+    }, { timeout: 15_000 });
+    await instance.dispose();
+    const text = events.filter((e) => e.type === "content.delta").map((e) => e.delta).join("");
+    expect(text).toContain("plain answer");
+    expect(events.find((e) => e.type === "turn.completed")?.ok).toBe(true);
+    // exactly two chat requests: the refused one, then the tool-less retry
+    // SAFETY: the fetch mock records (url, init) tuples; the init exists on
+    // every recorded call.
+    const chatCalls = fetchMock().mock.calls.filter((call: any[]) => String(call[0]).includes("/chat/completions"));
+    expect(chatCalls).toHaveLength(2);
+    // SAFETY: fetch was called as (url, init); the JSON body lives on init.
+    expect(JSON.parse(String((chatCalls[0]![1] as RequestInit).body)).tools).toHaveLength(1);
+    // SAFETY: same recorded (url, init) tuple shape as the assertion above.
+    expect(JSON.parse(String((chatCalls[1]![1] as RequestInit).body)).tools).toBeUndefined();
+  }, 30_000);
 
   it("cloud drivers keep their defaults when the new spec options are absent", () => {
     const cloud = createOpenAICompatibleDriver({

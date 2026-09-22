@@ -7070,3 +7070,56 @@ file tools. Same ownership + bot-lookup guards as the memory family.
   was already shipped) marked done with loop references and gate evidence.
 - Full gates on the accumulated session: tsc app+server 0 errors, oxlint 0,
   vitest 324 files / 4,845 passed / 0 failed, e2e 41/41.
+## Loop163 — every engine reaches connected apps; no more "switch engines" dead ends
+
+A non-technical user's qwen/local bot answered "your apps are connected but not
+reachable from this engine — switch to Claude or an ACP engine." Root causes,
+all fixed:
+
+- The system prompt literally taught bots to say it (index.ts mounted a
+  "suggest switching to Claude or an ACP engine" hint whenever integrations
+  were unmounted). Replaced with two-branch honest guidance: apps switched
+  off → say the switch (Settings/bot toggle) turns them on, no engine
+  change; apps never connected → offer to walk the user through connecting.
+  No branch mentions engines.
+- The local driver (Ollama/LM Studio/vLLM) declared composioMcp:false, the
+  only true gap. Its factory already had the whole MCP tool loop — flip the
+  flag: local models now search and execute the user's connectors like any
+  cloud engine.
+- Models that cannot carry tools (Ollama 400 "does not support tools") now
+  degrade to a plain streamed answer instead of failing the turn
+  (isUnsupportedToolsError retry in openai-compatible, pinned by a test
+  through the real fake-mcp-server).
+- A connector outage during dispatch degraded to a failed send; now caught
+  and the turn proceeds without apps (1:1 + room paths).
+
+Pinned live: the connected-apps harness asserts the mounted bot's echoed
+prompt carries connector guidance, and the opt-out bot's prompt carries the
+"switched off for you" guidance — neither contains the old dead-end line.
+optout instance moved to echo-gated mode so its prompt is observable.
+## Loop163 — every engine reaches connected apps; no more switch-engines dead ends
+
+A non-technical user's qwen/local bot answered that apps are "not reachable
+from this engine — switch to Claude or an ACP engine." Root causes, all fixed:
+
+- The system prompt literally taught bots to say it (index.ts mounted a
+  suggest-switching-to-Claude-or-ACP hint whenever integrations were
+  unmounted). Replaced with two-branch honest guidance: apps switched off ->
+  the switch (Settings or the bot Apps toggle) turns them on, no engine
+  change; apps never connected -> offer to walk the user through connecting.
+  No branch mentions engines.
+- The local driver (Ollama/LM Studio/vLLM) declared composioMcp:false, the
+  one true gap. Its factory already had the whole MCP tool loop, so the flag
+  is flipped: local models now search and execute the user's connectors like
+  any cloud engine.
+- Models that cannot carry tools (Ollama 400 does-not-support-tools) now
+  degrade to a plain streamed answer instead of failing the turn
+  (isUnsupportedToolsError retry in openai-compatible, pinned through the
+  real fake-mcp-server).
+- A connector outage during dispatch used to fail the send; it is now caught
+  and the turn proceeds without apps (1:1 + room paths).
+
+Pinned live: the connected-apps harness asserts the mounted bot's echoed
+prompt carries connector guidance, and the opt-out bot's prompt carries the
+switched-off-for-you guidance — neither contains the old dead-end line.
+The optout instance moved to echo-gated mode so its prompt is observable.

@@ -56,7 +56,7 @@ beforeAll(async () => {
   dump = join(directory, "engine.json");
   writeFileSync(join(data, "config.json"), JSON.stringify({
     openConnector: { url: runtimeUrl, token: runtimeToken },
-    instances: Object.fromEntries(["fake", "optout", "room"].map((id) => [id, { driver: "grokAgent", config: { cli: join(root, "server/testing/fake-acp-cli.ts"), fullAuto: true, workspace: home }, environment: { FAKE_ACP_MODE: id === "optout" ? "happy" : "echo-gated", FAKE_ACP_GATE_FILE: join(directory, id === "room" ? "release-room" : "release-turn"), FAKE_ACP_DUMP: id === "fake" ? dump : `${dump}.${id}` } }])),
+    instances: Object.fromEntries(["fake", "optout", "room"].map((id) => [id, { driver: "grokAgent", config: { cli: join(root, "server/testing/fake-acp-cli.ts"), fullAuto: true, workspace: home }, environment: { FAKE_ACP_MODE: "echo-gated", FAKE_ACP_GATE_FILE: join(directory, id === "room" ? "release-room" : "release-turn"), FAKE_ACP_DUMP: id === "fake" ? dump : `${dump}.${id}` } }])),
   }));
   // Only this owned runtime is reachable from the server; no provider account.
   const guard = join(directory, "network.mjs");
@@ -152,6 +152,17 @@ it("mounts the configured runtime and connects a calendar card without any Compo
   }, { timeout: 10_000 }).toBe(false);
   expect((await api(`/api/bots/${bot.id}`, "PATCH", { composio: true })).status).toBe(200);
   expect((await api("/api/internal/connectors/mcp", "POST", { jsonrpc: "2.0", id: 2, method: "tools/list" }, token)).status).toBe(401);
+  // The gate release settles the echo-gated turn: the mounted bot's echoed
+  // system prompt carries the connector tool guidance — and never the
+  // dead-end "switch engines" instruction (no engine is second-class).
+  const echo = z.object({ bots: z.array(z.object({ id: z.string(), messages: z.array(z.object({ role: z.string(), text: z.string().optional() })) })) });
+  await expect.poll(async () => {
+    const response = await api("/api/bots");
+    const rows = echo.parse(await response.json());
+    return rows.bots.find((entry) => entry.id === bot.id)?.messages.find((m) => m.role === "bot" && m.text?.includes("echo:"))?.text ?? "";
+  }, { timeout: 10_000 }).toContain("Connected-app tools are available");
+  const mounted = echo.parse(await (await api("/api/bots")).json());
+  expect(mounted.bots.find((entry) => entry.id === bot.id)?.messages.map((m) => m.text ?? "").join("\n")).not.toContain("not reachable from this engine");
 }, 30_000);
 
 it("keeps connected apps unavailable to a bot whose owner switched them off", async () => {
@@ -167,6 +178,16 @@ it("keeps connected apps unavailable to a bot whose owner switched them off", as
   const refused = await api("/api/internal/connectors/request", "POST", { botId: bot.id, threadId: bot.threadId, slugs: ["googlecalendar"], resumeKey: "owned-optout-request" }, connectorToken);
   expect(refused.status).toBe(401);
   expect(requests.length).toBe(before);
+  // The opt-out bot's echoed prompt must point at the switch, not at the
+  // engine: the honest "turn it on" guidance, never dead-end engine advice.
+  const echo = z.object({ bots: z.array(z.object({ id: z.string(), messages: z.array(z.object({ role: z.string(), text: z.string().optional() })) })) });
+  await expect.poll(async () => {
+    const response = await api("/api/bots");
+    const rows = echo.parse(await response.json());
+    return rows.bots.find((entry) => entry.id === bot.id)?.messages.find((m) => m.role === "bot" && m.text?.includes("echo:"))?.text ?? "";
+  }, { timeout: 10_000 }).toContain("switched off for you");
+  const off = echo.parse(await (await api("/api/bots")).json());
+  expect(off.bots.find((entry) => entry.id === bot.id)?.messages.map((m) => m.text ?? "").join("\n")).not.toContain("not reachable from this engine");
 }, 30_000);
 
 

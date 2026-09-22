@@ -110,13 +110,27 @@ export interface OpenAICompatibleSpec {
   /** Install/sign-in affordances surfaced by the picker rail. */
   install?: EngineInstall;
   /** Capability-flag overrides. Defaults keep the cloud-API behavior
-   * (computer + composio MCP mounted); local engines set honest falses. */
+   * (computer + composio MCP mounted); the local twin keeps computer off
+   * (no cloud-browser story) but mounts connected apps through the same
+   * tool loop, with a tool-less retry for models that can't carry tools. */
   capabilities?: { computerMcp?: boolean; composioMcp?: boolean };
   /** Vision: the provider's chat endpoint accepts multimodal content parts
    * (image_url data URLs). Opt-in per twin — a text-only model 4xxs on
    * image parts, and the app's contract is to refuse the attach politely
    * up front rather than fail mid-turn. */
   vision?: boolean;
+}
+
+/** True when a server rejected the request because the served model cannot
+ * carry tools — the signal to retry the turn tool-less rather than fail it.
+ * Ollama names the model and says tools; LM Studio/vLLM/OpenAI-compatible
+ * servers phrase it as tool support, tool calling, or function calling. */
+function isUnsupportedToolsError(
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- JSON/HTTP boundary: the only input is a thrown Error whose message this guard parses; a non-match simply means "not this failure"
+  error: unknown,
+): boolean {
+  const text = error instanceof Error ? error.message : "";
+  return /does not support tools|does not support tool calling|tool (calling|use|support) (is )?not supported|tools? (are )?not supported|function calling is not supported|does not support function/i.test(text);
 }
 
 export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): ProviderDriver<OpenAICompatibleConfig> {
@@ -364,7 +378,22 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
               // is non-streaming, needed to read tool_calls out of the
               // response) — the whole answer arrives as one chunk once the
               // loop finishes, same "item.completed" event either way.
-              ({ text, usage } = await runTurnToolLoop(messages, model, clients, tools, abort.signal));
+              // Not every served model speaks tools: Ollama refuses a
+              // chat/completions call carrying tools for a non-tools model
+              // (HTTP 400, "does not support tools"), and LM Studio/vLLM have
+              // equivalent refusals. That must degrade to a plain streamed
+              // answer, never a failed turn — retry once without the tools.
+              try {
+                ({ text, usage } = await runTurnToolLoop(messages, model, clients, tools, abort.signal));
+              } catch (error) {
+                if (!isUnsupportedToolsError(error)) throw error;
+                ({ text, usage } = await complete(messages, model, {
+                  stream: true,
+                  signal: abort.signal,
+                  onDelta: (delta) =>
+                    emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta }),
+                }));
+              }
             } else {
               ({ text, usage } = await complete(messages, model, {
                 stream: true,

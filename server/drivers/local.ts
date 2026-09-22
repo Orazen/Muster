@@ -48,7 +48,12 @@ export const LocalDriver = createOpenAICompatibleDriver({
     signInCommand: "ollama serve",
     docsUrl: "https://ollama.com/download",
   },
-  // Honest capability flags: a local engine gets none of the harness's
-  // mounted integrations by default — no cloud computer, no connected apps.
-  capabilities: { computerMcp: false, composioMcp: false },
+  // Capability flags: connected apps ride the factory's OpenAI tool loop —
+  // Ollama/LM Studio/vLLM all speak native tool calls, so a local model can
+  // search and execute the user's composio connectors like any cloud engine
+  // (models that cannot handle tools fail the request and the driver falls
+  // back to a plain streaming turn — no dead end). The cloud computer stays
+  // unmounted: the browser automation image is a cloud-engine surface, and a
+  // local desktop-driving story would need its own design.
+  capabilities: { computerMcp: false, composioMcp: true },
 });
