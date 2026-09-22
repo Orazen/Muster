@@ -8353,3 +8353,57 @@ extracted step **OK**; full suite **337 files / 5022 passed / 8 skipped
 deployment, notarization success, the flake's root cause (unreproduced —
 diagnosability only), security attestation. Next per §38: S3 selective
 restore.
+## Loop186 — the Windows installer icon was corrupt, and the notarize 401 is an owner gate (22 Sep 2026)
+
+Owner asked to check every commit for failed builds and fix them. Two legs
+of the pinned Release workflow were red; Loop185 had written the Windows one
+off as "electron-builder HTTP 500, retry-class, no repo defect" — that verdict
+was wrong, and this loop corrects it.
+
+**Windows x64 (NSIS) — real repo defect, FIXED.** The failure is not the
+download: `package:win` compiled better-sqlite3, produced win-unpacked, then
+died in `signAndEditResources`:
+`RangeError: Offset is outside the bounds of the DataView` at
+`resedit/dist/data/IconFile.js:116` ← `IconFile.from` ← `editWindowsResources`.
+Cause: `scripts/make-brand-icons.mjs` wrote the ICO directory's `dwBytesInRes`
+and `dwImageOffset` with `writeUInt32BE`, but the ICO directory is
+little-endian. Every one of the seven entries therefore claimed an offset and
+length far past EOF (entry 0 read as offset 1,979,711,488 / 1,459,683,328
+bytes instead of 118 / 343). Fixes, all verified:
+1. Both fields now little-endian (the generator's other icons were already
+   byte-identical, so only build/icon.ico changed on regeneration).
+2. Entries now DIB, not PNG. Proved on a real PE (electron-builder's exact
+   path, resedit + signtool.exe as the subject): a PNG-entry ICO makes resedit
+   write PNG bytes into RT_ICON, while a DIB-entry ICO writes DIB — the format
+   Windows and the rcedit it replaced produce. A PNG-entry icon builds and
+   ships a blank exe icon. Added `encodeDib` (BITMAPINFOHEADER + 32bpp BGRA,
+   bottom-up); orientation confirmed by decoding the DIB back to PNG and
+   viewing it (mascot upright).
+3. Guard test `scripts/brand-icons.test.ts` (5 assertions): directory shape,
+   every entry in-bounds, back-to-back to exact EOF, per-entry DIB header with
+   `40 + w*h*4` payload, plus a source guard on the little-endian writer.
+   Negative controls: the previous file fails 3 of 5; reverting the writer to
+   BE fails the source guard; resedit now parses the artifact and the full PE
+   path yields 7 RT_ICON (all DIB) + 1 RT_GROUP_ICON.
+
+**macOS arm64 (sign, notarize, staple) — OWNER GATE, not fixable here.**
+Loop185's capture-then-print fix did its job and revealed the cause on the
+next run: `Error: HTTP status code: 401. Unauthenticated.` from
+`notarytool submit`. The invocation itself is correct
+(`--key/--key-id/--issuer`, and the step only runs when all four ASC_*/
+APPLE_TEAM_ID secrets are non-empty, so they exist but Apple rejects them).
+The owner must re-mint/rotate the App Store Connect API key and update
+`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_CONTENT`. Note the x64 leg never
+signed or notarized at all (it has no sign/notarize steps) — arm64 is the
+only leg that proves notarization, so the draft is missing both arm64 and
+Windows until these two blockers clear. Not claimed: release, notarization,
+signing, deployment.
+
+**Concurrency note for the next agent.** The full-suite reading in this loop
+was invalidated mid-run: `server/testing/setup.ts` was rewritten by a parallel
+agent at 21:50 while the suite ran (21:41 start), and the run captured a
+transient `ReferenceError: setGlobalDispatcher is not defined` at setup.ts:43
+that no longer exists — every test file "failed" as a suite-load error. A
+second agent also regenerated build/icon.ico at 21:46 with a DIB artifact and
+no in-repo producer. Re-run the suite only with a tree-hash guard, and prefer
+the repo's own generator as the artifact's source of truth.
