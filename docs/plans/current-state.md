@@ -63,6 +63,35 @@ SFSpeechRecognizer dictation, Android deep-link + QR pairing. Owner-held
 hardware acceptance still open (haptic acceptance checklist to follow at round
 end). Unrelated working-tree edits preserved untouched.
 
+### Mobile/Watch round — Slice 3: phone composer dictation (22 September 2026, Loop170)
+
+Slice 3 ships SFSpeechRecognizer dictation behind the composer mic — the
+"no affordance without a feature" note in the iOS README said the mic was
+undrawn because dictation did not exist; both now do. The words are owned by
+a pure `DictationFlow` in CompanionCore: it snapshots the draft at mic-tap
+(typed text is carried, never rewritten), each recognition result *replaces*
+the capture's tail (a `bestTranscription` that appended would duplicate every
+word on every result), the draft's own trailing whitespace decides the join,
+and every ending — stop, dead screen, refusal — commits or preserves rather
+than drops. It has no send: dictated text waits for the send button like
+typed text. The iOS side (`App/Dictation.swift`) reuses Walkie's proven
+`TalkSession` capture engine untouched, requests speech + microphone
+permissions with distinct messages per Settings pane, and feeds results into
+the flow; ChatView draws the mic/stop toggle, a live "Listening" line, the
+refusal line, and disables the field and send during a capture so the
+recogniser's write-back cannot race the keyboard. Both Info.plist usage
+strings now name Walkie *and* dictation (project.yml reworded, xcodegen
+re-run).
+
+**Verified this slice:** `cd ios && swift test` **435 tests / 0 failures**
+(Slice 2 baseline 417, +18 DictationFlowTests); iOS simulator build **BUILD
+SUCCEEDED**; watchOS simulator build **BUILD SUCCEEDED**. Unit + simulator
+evidence only — no microphone captured, no permission prompt observed, no
+recognition accuracy claimed; the audio path is Walkie's existing engine,
+unexercised here. Remaining this round: Android deep-link + QR pairing.
+Owner-held hardware acceptance still open (dictation is on the acceptance
+checklist). Unrelated working-tree edits preserved untouched.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

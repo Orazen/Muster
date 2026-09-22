@@ -277,8 +277,12 @@ the host computer remain unreachable through the companion.
   which is the only thing that can insert the newline once Return is claimed.
   Software keyboards have no Shift+Return, so there `.onSubmit` sends.
 - **No affordance without a feature behind it.** The reference design this was
-  modelled on has a composer mic; there is no dictation here, so it is not
-  drawn. Search covers the SQLite transcript store and opens the exact task,
+  modelled on has a composer mic, and now there is dictation behind it:
+  tapping the mic requests speech + microphone access and streams recognized
+  words into the draft — `DictationFlow` in CompanionCore owns the words
+  (typed text is carried, each result replaces the capture's tail, stopping
+  or leaving commits, nothing is ever sent without the send button). Search
+  covers the SQLite transcript store and opens the exact task,
   branch, and message; the roster's "+" creates the same basic bot the desktop
   endpoint creates, then opens it.
 

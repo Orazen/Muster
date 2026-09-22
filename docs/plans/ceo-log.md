@@ -7348,3 +7348,66 @@ banner.
 
 **Gates:** tsc (app + server) 0 errors; oxlint 0/0 on 901 files; vitest 325
 files / 4,856 passed / 0 failed; Playwright e2e 42/42 (4.1m).
+
+## Loop170 — phone composer dictation behind the mic the README said was undrawn
+
+Slice 3 of the owner-directed mobile/Watch round (answers locked in Loop166:
+phone dictation = SFSpeechRecognizer with custom UI, gate = swift test + both
+simulator builds, one commit per slice).
+
+**The gap, as the repo stated it:** `ios/README.md` — "The reference design
+this was modelled on has a composer mic; there is no dictation here, so it is
+not drawn." No `FocusState`-equivalent grep was needed this time: the composer
+had no mic affordance and no dictation behind one. Both now exist, and the
+principle behind the old sentence (no affordance without a feature) is what
+the new code is organized to keep.
+
+- `CompanionCore/DictationFlow.swift` (new): the tested half — whose words
+  are these. `begin(base:)` snapshots the draft so typed text is carried, not
+  rewritten; `hear` *replaces* the capture's segment (a `bestTranscription` is
+  the whole capture so far — appending duplicates every word on every result);
+  the draft's own trailing whitespace decides the join (no double spaces to
+  hunt down); `finish()` is the single commit path for every ending — stop,
+  dead microphone, screen going away — so no path drops spoken words;
+  `refuse` leaves the draft untouched (a refused attempt heard nothing);
+  results arriving while not listening are ignored (late recogniser
+  callbacks); double-taps cannot append the same words twice; and the flow
+  has no concept of send.
+- `App/Dictation.swift` (new): the boundary side. Requests speech then
+  microphone permission — distinct refusals, distinct Settings panes — and
+  drives `TalkSession`, Walkie's proven capture engine, *untouched*: one
+  private instance per controller, fresh recogniser session per capture,
+  results pumped into the flow. Ordering is the whole game and is commented
+  where it matters: the flow listens before the microphone opens (a partial
+  landing while the flow is idle is ignored by design, so the engine-open
+  failure path finishes the empty capture and then refuses), and `detach()`
+  commits *before* `talk.cancel()` (cancel publishes an empty partial, which
+  would wipe the words in the other order).
+- `App/ChatView.swift` (edited): mic/stop toggle between field and send
+  (custom UI, no system speech button), a live "Listening" line, a refusal
+  line, live write-back through `session.editComposer` guarded to a running
+  capture, `detach()` on `onDisappear`, and the field + send disabled while
+  capturing so the next result cannot race the keyboard — sending stays a
+  separate deliberate act, exactly as typing is.
+- `project.yml` (reworded): both usage strings now name Walkie *and*
+  composer dictation (they already existed; Walkie-only wording would have
+  described the prompt inaccurately). `xcodegen generate` re-run.
+- `ios/README.md`: the "no dictation here" sentence replaced with what
+  shipped.
+
+**Gates (real numbers):** `cd ios && swift test` → **435 tests, 0 failures**
+(417 at Slice 2, +18 DictationFlowTests). iOS simulator `xcodebuild … -scheme
+MusterCompanion -destination 'generic/platform=iOS Simulator'` → **BUILD
+SUCCEEDED**. watchOS simulator `xcodebuild … -scheme MusterWatch -destination
+'generic/platform=watchOS Simulator'` → **BUILD SUCCEEDED**.
+
+**Not claimed:** microphone capture, permission prompts, recognition quality,
+or on-device vs server recognition — the audio path is Walkie's existing
+engine and was not exercised by any gate here (unit + simulator-build
+evidence only; the simulator cannot stand in for a person speaking). One test
+fixture was wrong on first run ("keep keep this" — my base/segment collision,
+not a product defect) and was corrected to an unambiguous one before the
+suite went green; reported as observed. Parallel-agent WIP landing during
+this slice (`claim-flow.ts`/test, www/*) preserved untouched, not staged.
+Owner-held hardware acceptance (iPhone dictation) joins the round-end
+checklist.

@@ -27,6 +27,9 @@ struct ChatView: View {
     @State private var seedLease: UUID?
     @State private var seedVisible = false
     @FocusState private var composerFocused: Bool
+    /// The composer's dictation. A `@StateObject` on purpose: a capture
+    /// must survive body re-evaluation, and every partial result is one.
+    @StateObject private var dictation = DictationController()
 
     /// The live bubble's scroll target. A constant because there is at most
     /// one per chat and it has no message id to borrow.
@@ -49,6 +52,9 @@ struct ChatView: View {
         if case .bot = current { return true }
         return false
     }
+
+    /// True while the recogniser owns the tail of the draft.
+    private var dictating: Bool { dictation.isListening }
 
     /// The header reads as one element to VoiceOver: who this is, and the
     /// task it is on — the identity the truncated label visually hides.
@@ -353,7 +359,21 @@ struct ChatView: View {
         let canEdit = session.canEditComposer(context, lease: lease)
         let submit = { session.submitComposer(context, lease: lease) }
         return VStack(alignment: .leading, spacing: 8) {
-            if let message = draft.message {
+            // Dictation's own states first: they are transient and loud,
+            // and a refusal must be read before anything quieter shares
+            // the row with it.
+            if dictating {
+                Label("Listening — speak your message", systemImage: "waveform")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("composer-dictation-status")
+            } else if let refusal = dictation.flow.refusal {
+                Text(refusal)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("composer-dictation-error")
+            } else if let message = draft.message {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -375,7 +395,11 @@ struct ChatView: View {
                     .padding(.vertical, 10)
                     .glassCapsule()
                     .focused($composerFocused)
-                    .disabled(!canEdit)
+                    // While the recogniser owns the tail of the draft,
+                    // typing into it would be overwritten by the next
+                    // result — the words arrive from the microphone or
+                    // they do not move.
+                    .disabled(!canEdit || dictating)
                     .accessibilityLabel("Message draft")
                     .accessibilityIdentifier("composer-field")
                     .submitLabel(.send)
@@ -392,6 +416,33 @@ struct ChatView: View {
                     // key is a send — which is what `.submitLabel(.send)` promises
                     .onSubmit(submit)
 
+                // The mic between the words and the send button: dictation
+                // fills the draft, sending stays a separate, deliberate
+                // act — the same split typing already has.
+                Button {
+                    let base = session.composerDraft(context).text
+                    Task {
+                        // A stop returns the committed draft; starts and
+                        // refusals return nothing (partials write back
+                        // through onChange while the capture runs).
+                        if let text = await dictation.toggle(base: base) {
+                            session.editComposer(text, context: context, lease: lease)
+                        }
+                    }
+                } label: {
+                    Image(systemName: dictating ? "stop.fill" : "mic")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(dictating ? Color.white : Color.primary)
+                        .frame(width: 44, height: 44)
+                        .background(
+                            Circle().fill(dictating ? Color.red : Color.secondary.opacity(0.35))
+                        )
+                }
+                // Stopping must work even if the contract closed mid-capture.
+                .disabled(!canEdit && !dictating)
+                .accessibilityLabel(dictating ? "Stop dictating" : "Dictate a message")
+                .accessibilityIdentifier("composer-dictate")
+
                 Button {
                     submit()
                 } label: {
@@ -403,7 +454,10 @@ struct ChatView: View {
                             Circle().fill(canSend ? Color.primary : Color.secondary.opacity(0.35))
                         )
                 }
-                .disabled(!canSend)
+                // A send racing the next partial would write the old draft
+                // back over the new words; dictation stops first, then the
+                // person sends.
+                .disabled(!canSend || dictating)
                 .accessibilityLabel("Send")
                 .accessibilityIdentifier("composer-send")
                 .animation(.easeOut(duration: 0.15), value: canSend)
@@ -412,6 +466,21 @@ struct ChatView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(.bar)
+        // Dictation writes through the session as the words arrive — the
+        // draft has one owner, and it is not this view. Guarded to a live
+        // capture so a refused or finished flow can never push its stale
+        // text over something the user typed afterwards.
+        .onChange(of: dictation.flow.draft) { _, text in
+            guard dictating else { return }
+            session.editComposer(text, context: context, lease: lease)
+        }
+        .onDisappear {
+            // Leaving the chat mid-capture: detach() commits before it
+            // silences the recogniser, so no spoken word is dropped on the
+            // way out.
+            guard dictating else { return }
+            session.editComposer(dictation.detach(), context: context, lease: lease)
+        }
     }
 }
 
