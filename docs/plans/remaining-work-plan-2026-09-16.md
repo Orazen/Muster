@@ -306,3 +306,31 @@ copy of `ios/AppStore/screenshots/iPhone-6.9-roster.png` for README
 embedding. Untracked snapshots (`docs/research/glm/*`, `www/templates.html`,
 `marketing-video/`, `.freebuff/`, `.zcode/`) preserved byte-identical and
 deliberately not committed.
+
+### Continuation status (2026-09-22, read before assigning slices)
+
+Status changes since the ranked list above — all committed and gated:
+
+1. **bench trending + scheduling: done (Loop157).** `scripts/bench-trend.ts`
+   projects graded scorecards into an append-only JSONL trend
+   (`docs/bench/trend.jsonl`), `renderTrend` summarizes deltas; the harness
+   persists when `BENCH_TREND_PATH` is set; `.github/workflows/bench.yml`
+   runs the harness nightly and commits the trend.
+2. **Memory history + rollback: done (Loop158).** Brain gained
+   `factHistory` (version chain incl. withdrawn ancestors), `restoreFact`
+   (supersedes-with-original-text), `revertFact`; routes under the session
+   gate; unit + harness coverage.
+3. **Skills-creation API: done (Loop161).** `server/workspace-skills.ts` +
+   `/api/bots/:id/skills` CRUD; `skillsSystemPrompt` mounts the first 4KB
+   per bot after persona, before memory, in 1:1 and room prompts.
+4. **Channels UI: Telegram chat channel ships (Loop160).** Bot-reachable
+   Telegram chats: webhook + long-poll, reply fold, settings toggle in
+   WorkspaceSyncCard, `TELEGRAM_CHAT_ENABLED` kill switch. WhatsApp
+   remains env-config; other networks still not started.
+5. **Engines Add account: done (Loop159).** Readiness rows expose an
+   account-add action reusing the EngineSetup card (tested row-action logic).
+6. **Pairing redeem in the browser: verified already shipped.** PairPage +
+   ClaimPage cover generate and redeem with e2e; the ranked item predates it.
+7. **Gate evidence (2026-09-22):** tsc (app + server tsconfigs) 0 errors,
+   oxlint 0/895-file repo, vitest 324 files / 4,845 passed / 0 failed,
+   Playwright e2e 41/41.

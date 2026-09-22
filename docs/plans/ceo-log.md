@@ -7063,3 +7063,10 @@ file tools. Same ownership + bot-lookup guards as the memory family.
   persona mount in the 1:1 system prompt and the room composite.
 - Tests: workspace-skills.test.ts (9 — name gate, crud, bounded mount);
   index.test.ts route round-trip incl. name policy + unowned-bot 404 (60/60).
+## Loop162 — plan-doc continuation addendum + full gates
+
+- remaining-work-plan: items 1 (bench trend), 2 (memory history), 3
+  (skills), 6 (Telegram channel, engines add-account), 7 (pair redeem —
+  was already shipped) marked done with loop references and gate evidence.
+- Full gates on the accumulated session: tsc app+server 0 errors, oxlint 0,
+  vitest 324 files / 4,845 passed / 0 failed, e2e 41/41.
