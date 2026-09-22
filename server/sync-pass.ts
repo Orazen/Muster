@@ -81,7 +81,10 @@ const emptyDoc = (now: number): SyncManifestDoc => ({ schema: 1, updatedAt: now,
 
 /** One entry upsert, entries kept in stable id order so identical states
  * serialize to identical bytes. */
-const withEntry = (base: SyncManifestDoc, entry: SyncManifestEntry, now: number): SyncManifestDoc => ({
+/** Exported for S2c's producer: one upsert, stable id order — the local
+ * manifest has exactly one merge implementation across the pass and the
+ * file-side producer. */
+export const withManifestEntry = (base: SyncManifestDoc, entry: SyncManifestEntry, now: number): SyncManifestDoc => ({
   schema: 1,
   updatedAt: now,
   entries: [...base.entries.filter((existing) => existing.objectId !== entry.objectId), entry].sort(
@@ -149,7 +152,7 @@ export async function runSyncPass(deps: SyncPassDeps): Promise<SyncPassResult> {
       };
       // save local per push: a crash mid-pass re-pushes (idempotent by name)
       // instead of losing the local commit
-      deps.local.save(withEntry(deps.local.load() ?? emptyDoc(now()), entry, now()));
+      deps.local.save(withManifestEntry(deps.local.load() ?? emptyDoc(now()), entry, now()));
       pushedEntries.push(entry);
       result.pushed.push({ objectId: row.objectId, rev: row.rev, fileName });
     },
@@ -158,7 +161,7 @@ export async function runSyncPass(deps: SyncPassDeps): Promise<SyncPassResult> {
   // --- publish: merge pushed entries into remote's index, guard intact ---
   if (pushedEntries.length > 0) {
     let merged = remoteDoc;
-    for (const entry of pushedEntries) merged = withEntry(merged, entry, now());
+    for (const entry of pushedEntries) merged = withManifestEntry(merged, entry, now());
     try {
       await deps.transport.saveRemoteManifest(packSyncManifest(merged, envelope), guard);
       remoteDoc = merged;
@@ -217,7 +220,7 @@ export async function runSyncPass(deps: SyncPassDeps): Promise<SyncPassResult> {
       continue;
     }
     result.pullApplied.push({ objectId: entry.objectId, rev: entry.rev });
-    pulledLocal = withEntry(pulledLocal, entry, now());
+    pulledLocal = withManifestEntry(pulledLocal, entry, now());
     deps.local.save(pulledLocal);
   }
 

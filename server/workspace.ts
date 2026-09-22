@@ -30,6 +30,7 @@ import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
+import { memoryWasWritten } from "./sync-hooks.ts";
 
 export const WORKSPACES_DIR = join(DATA_DIR, "workspaces");
 
@@ -148,6 +149,30 @@ export function writeMemoryFile(botId: string, text: string): void {
   const file = join(workspaceDir(botId), "MEMORY.md");
   const current = readMemoryBytes(botId, "MEMORY.md", false);
   snapshotMemory(botId, "user-edit", current, !current?.equals(bytes));
+  memoryDirectory(botId, false, false);
+  writeFileAtomic(file, text, { mode: 0o600 });
+  writeMemoryBaseline(botId, bytes);
+  // S2c: the write is durable — tell the registered sync producer (a
+  // no-op when nothing is registered: unit tests, unwired builds).
+  memoryWasWritten(botId, text);
+}
+
+/** Install another install's memory bytes (the S2c pass's applier). The
+ * validation sequence mirrors writeMemoryFile — symlink checks BEFORE
+ * ensureWorkspace can create anything through a linked path — but there is
+ * deliberately NO history snapshot and NO producer hook: this write came
+ * FROM the other install, so journaling a push-back would ping-pong the
+ * two installs forever. The baseline still moves, so the next prompt loads
+ * what the manifest says is current. */
+export function applyMemoryFile(botId: string, text: string): void {
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.length > MEMORY_FILE_MAX_BYTES) throw new Error("Memory exceeds the 256KB limit.");
+  memoryDirectory(botId, false, true);
+  readMemoryBytes(botId, "MEMORY.md", false);
+  memoryDirectory(botId, true, true);
+  readMemoryBytes(botId, MEMORY_BASELINE_FILE, true);
+  ensureWorkspace(botId);
+  const file = join(workspaceDir(botId), "MEMORY.md");
   memoryDirectory(botId, false, false);
   writeFileAtomic(file, text, { mode: 0o600 });
   writeMemoryBaseline(botId, bytes);

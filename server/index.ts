@@ -274,6 +274,10 @@ import * as driveSync from "./drive-sync.ts";
 import * as accountDrive from "./account-drive.ts";
 import * as telegramSync from "./telegram-sync.ts";
 import * as syncState from "./sync-state.ts";
+import { setMemoryWriteListener } from "./sync-hooks.ts";
+import { applyMemoryObject, createMemoryProducer, readMemoryObject } from "./sync-memory.ts";
+import { runSyncPass, type SyncPassDeps } from "./sync-pass.ts";
+import { driveSyncTransport, localSyncManifestStore, startSyncEngine } from "./sync-wiring.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimerPool } from "./local-vm-idle.ts";
 import { LocalVmLeasePool } from "./local-vm-lease.ts";
@@ -390,6 +394,45 @@ const foregroundCallSweep = setInterval(() => {
   foregroundCallDispatch.sweep();
 }, 5_000);
 foregroundCallSweep.unref();
+
+// S2c: the sync engine boots with its ONE producer (memory, fired at the
+// file layer's write choke point) and flushes the restart backlog. The
+// passphrase comes from the §11 flagged gate's env workaround: null holds
+// the queue to a reported result instead of guessing, and the manual
+// route below still runs a pass with the operator's own passphrase.
+const syncLocalManifest = localSyncManifestStore(join(DATA_DIR, "muster-sync-manifest.json"));
+const syncTransport = driveSyncTransport({
+  async getAccessToken(): Promise<string> {
+    const refreshToken = cfg.driveSync?.refreshToken;
+    if (!refreshToken) throw new Error("Google Drive is not connected yet");
+    const refreshed = await driveSync.refreshDriveToken(refreshToken);
+    return refreshed.accessToken;
+  },
+});
+const syncPassDeps = (passphrase: string): SyncPassDeps => ({
+  db: getDb(),
+  transport: syncTransport,
+  local: syncLocalManifest,
+  readObject: readMemoryObject(),
+  applyObject: applyMemoryObject(),
+  passphrase,
+  appVersion: appVersion(),
+});
+const syncEngine = startSyncEngine({
+  db: getDb(),
+  transport: syncTransport,
+  local: syncLocalManifest,
+  readObject: readMemoryObject(),
+  applyObject: applyMemoryObject(),
+  passphrase: () => process.env.MUSTER_SYNC_PASSPHRASE ?? null,
+  appVersion: appVersion(),
+});
+setMemoryWriteListener(
+  createMemoryProducer({ db: getDb(), local: syncLocalManifest, notify: () => syncEngine.notify() }),
+);
+// rows enqueued before the restart: run the pass now — held harmlessly
+// to a reported result while the passphrase gate is closed
+void syncEngine.flush();
 
 const bus = new EventBus();
 bus.attach(registry.instances());
@@ -8415,6 +8458,33 @@ let requestUserEmail = "";
         return json(res, 200, { restored: result });
       } catch (e) {
         return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    // S2c: the same pass the boot engine runs, on demand, with the
+    // operator's passphrase — sync works without waiting on the §11
+    // passphrase-store decision. 200 carries the full result (conflicts,
+    // problems and collected errors are reported values, not throws);
+    // only a thrown pass is a 502, mirroring push/pull.
+    if (path === "/api/workspace/drive/sync" && method === "POST") {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const refreshToken = cfg.driveSync?.refreshToken;
+      if (!refreshToken) return json(res, 400, { error: "Google Drive is not connected yet" });
+      try {
+        const result = await runSyncPass(syncPassDeps(passphrase));
+        if (result.pushed.length > 0) syncState.stampSync("local", "push", "google-drive");
+        if (result.pullApplied.length > 0) syncState.stampSync("local", "pull", "google-drive");
+        return json(res, 200, {
+          pushed: result.pushed,
+          pullApplied: result.pullApplied,
+          conflicts: result.conflicts,
+          pullProblems: result.pullProblems,
+          errors: result.errors,
+        });
+      } catch (e) {
+        return json(res, 502, { error: e instanceof Error ? e.message : String(e) });
       }
     }
 

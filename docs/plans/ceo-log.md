@@ -8268,3 +8268,46 @@ against injected deps, not Google's API), any producer (none exists
 until S2c-ii), security attestation, deployment. Next: S2c-ii — the
 memory producer at writeMemoryFile, workspace apply, boot wiring and
 the manual sync route.
+
+## Loop184 — S2c-ii: the memory producer, workspace apply, boot wiring, and the manual route (22 Sep 2026)
+
+Second half of S2c — §10's file side, end to end inside the install:
+**sync-hooks.ts** is a leaf (no imports) so workspace.ts and boot wiring
+both reach it without a cycle; unregistered = no-op. The producer
+(local-manifest rev source) fires from `writeMemoryFile` AFTER the write
+is durable: local entry saved first (so a write after a remote apply
+takes applied-rev + 1 — equal-rev/different-checksum stays §10's
+reported conflict), then `enqueueSyncChange`, then notify;
+byte-identical rewrites burn nothing. `readMemoryObject` recomputes the
+checksum from CURRENT bytes (S2b's pass turns disagreement into a
+retry/dead-letter, so the reader never lies about its row), rejects
+foreign and path-escaping ids before any path math, stamps a persisted
+RANDOM install id (never hardware-derived — S0's rule; garbage in the
+file regenerates). `applyObject` writes through the new
+`workspace.applyMemoryFile`: the same symlink-validation sequence as a
+local write, size cap included, but NO history snapshot and NO hook fire
+— applying install B's bytes must not enqueue a push-back or the two
+installs ping-pong forever; the baseline still moves so the next prompt
+loads what the manifest says. Boot wiring at the line-392 sweep site:
+engine + single producer registered + `flush()` for the restart backlog
+(held to a reported result while `MUSTER_SYNC_PASSPHRASE` — the §11
+flagged gate's env workaround — is unset), token from the same
+`cfg.driveSync.refreshToken` source as push/pull.
+`POST /api/workspace/drive/sync {passphrase}` mirrors push/pull (min-8
+passphrase, connected-Drive check) and runs one `runSyncPass` on demand,
+stamping push/pull receipts only for what actually moved — sync works
+without the store decision.
+
+**Gates:** tests+tsc first run: **111/111 tests green, tsc 11 errors**
+(the dep type is `SyncObject | Promise<SyncObject>` — `await` at both
+read sites) **+ oxlint 2 errors** (`no-shape-in-symbol-names` on
+`INSTALL_ID_SHAPE` — renamed to an `installIdValid` predicate); all
+fixed structurally, no suppressions. Final: touched cluster (memory,
+pass, wiring, journal, objects, workspace-history) **111/111**; oxlint
+6 files **0/0**; server tsc **exit 0**; full suite **337 files / 5022
+passed / 8 skipped / 0 failed** (475.72s = Loop183's 5009 + exactly
+these 13, no decrease). **Not claimed:** a live Drive round-trip,
+multi-object producers (only memory exists — bots/settings/etc. are the
+documented follow-up), tombstone-on-missing-file (a deleted MEMORY.md
+throws and the pass reports it — tombstone producer is the follow-up),
+security attestation, deployment. Next per §38: S3 selective restore.

@@ -466,6 +466,36 @@ identity over `typeof` checks); tsc **exit 0**; full suite **336 files
 deps), producers (S2c-ii), security attestation. Next: S2c-ii, then
 push (owner authorized) + CI watch.
 
+### S2c-ii: memory producer + workspace apply + boot wiring (22 September 2026, Loop184)
+
+Second half of S2c. Leaf **sync-hooks.ts** (no imports — no cycle, no-op
+unregistered); producer fires from `writeMemoryFile` after the write is
+durable: **local manifest entry first** (rev source — a write after a
+remote apply takes applied-rev + 1; equal-rev/different-checksum stays
+§10's reported conflict), enqueue, notify; identical rewrites burn
+nothing. `readMemoryObject` recomputes from CURRENT bytes (S2b pass
+turns disagreement into retry/dead-letter), rejects foreign/path-escaping
+ids before path math, stamps a persisted RANDOM install id (garbage
+regenerates). New **`workspace.applyMemoryFile`**: same symlink checks +
+size cap, NO history snapshot, **NO hook fire** (apply must not push
+back — no two-install ping-pong), baseline still moves. Boot at the
+line-392 sweeps: engine + one producer + `flush()` restart backlog
+(held to a reported result while `MUSTER_SYNC_PASSPHRASE` — the §11
+gate workaround — is unset); token from `cfg.driveSync.refreshToken` as
+push/pull. **`POST /api/workspace/drive/sync {passphrase}`** mirrors
+push/pull, runs one pass on demand, stamps only what moved.
+`withManifestEntry` now exported (one merge impl for pass + producer).
+
+**Gates:** first run **111/111 tests, tsc 11 errors** (dep type is a
+`SyncObject | Promise` union — `await` both read sites) **+ oxlint 2
+errors** (`no-shape-in-symbol-names` — `INSTALL_ID_SHAPE` →
+`installIdValid` predicate), all fixed structurally; final touched
+cluster **111/111**, oxlint 6 files **0/0**, tsc **exit 0**, full
+suite **337 / 5022 / 8 skipped / 0 failed** (475.72s = 5009 + exactly
+these 13, no decrease). **Not claimed:** live Drive round-trip,
+non-memory producers, tombstone-on-deleted-file (throws → reported;
+follow-up), security attestation. Next per §38: S3 selective restore.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`
