@@ -7194,3 +7194,50 @@ focus-highlight behavior — compile + unit + simulator-build evidence only. The
 crown detent is a pure-function decision proven by 8 tests; the SwiftUI focus
 wiring and haptic are compile-verified, not driven on a wrist. Unrelated working-
 tree edits (PortableBackupCard, account-drive tests, www/*) preserved untouched.
+## Loop167 — full-tree re-verification on tip `03da806` (22 Sep 2026)
+
+Scope: verification only — no product code edited. Synced `main` to `03da806`
+(autodeploy triggers ×2 over the stars-study commit; nothing source) with
+`pull --rebase --autostash`; inherited parallel-agent WIP (Drives-loop test/spec
+edits, www edits) re-applied intact, stayed uncommitted, and is included in the
+tested tree.
+
+Receipts, all on this machine:
+- Types: `tsc --noEmit -p tsconfig.server.json` exit 0; `tsc -b` exit 0.
+- Lint: `npx oxlint .` exit 0 (silent output, 0 warnings 0 errors).
+- Unit: `npx vitest run --no-file-parallelism` — **325 files / 4856 passed /
+  8 skipped / 0 failed** (475.55s). Over the Loop164 baseline by +1 file/+10
+  tests (Loop165 team-markdown suite); no number decreased.
+- Build: `npm run build` exit 0 (vite ✓ 14.74s).
+- e2e: `npx playwright test` — **42 passed / 0 failed** (4.2m). +1 over the
+  41-baseline: the inherited uncommitted backup spec adds a checked-retry
+  acceptance and it is green.
+- Native: `cd ios && swift build && swift test` — **399 tests, 0 failures**.
+  Phone UI rig `node scripts/owned-ios-acceptance.mjs --owned-device` —
+  **5/5** (welcome, welcome-pair, pair, identity, walkie); owned simulator
+  created, shut down and deleted; PIDs/ports/temp roots removed with receipts.
+  Owned watch rig `node --experimental-strip-types
+  scripts/owned-watch-call-acceptance.ts` — **passed**: roster reached via the
+  rig's control plane, call accepted, Calendar enrollment + preparation
+  settled, reply message sent, call ended; 34 requests; owned simulator
+  deleted; evidence retained. Desktop: `pnpm check:electron` exit 0;
+  `pnpm test:updater` 14 pass / 0 fail.
+- Production GET-only: muster.today `/`, `/api/health`, `/sign-in`, `/sign-up`,
+  `/os`, `/marketplace` — all **200**; health body
+  `{"app":"muster","pid":8,"static":true,"messageSendVersion":1,
+  "approvalActionVersion":1}`.
+- Release channel GET: releases/latest **v1.14.1**, published 2026-09-21,
+  13 assets, not a prerelease; matches package.json.
+
+Method notes for reproducing (fixture, not product defects): the watch UI
+suite must run through its own rig (`scripts/owned-watch-call-acceptance.ts`)
+— a hand-rolled xcodebuild with raw `TEST_RUNNER_` vars progresses through
+pairing but races the roster (bot pacing lives in the rig); failures
+observed there were mine, and the canonical rig is green. The
+`.xcodeproj` is generated — `cd ios && xcodegen generate` before any
+xcodebuild (per the 20 Sep gate report).
+
+Not claimed: release, signing, notarization, mirror promotion, production
+rollout. Releases remain the release agent's surface; owner gates (Actions
+billing for Windows/Linux legs, `APPLE_CERTIFICATE`, VPS SSH, Apple review,
+physical-device acceptance) unchanged. Existing automation left paused.

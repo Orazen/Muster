@@ -40,6 +40,26 @@ acceptance still open. Unrelated working-tree edits preserved untouched.
 
 # Current Muster state — read before editing
 
+**Full-tree re-verification (22 Sep 2026):** brought the existing `main`
+checkout to `03da806` (autodeploy trigger ×2 over the stars-study commit —
+nothing source). `git pull --rebase --autostash` was linear; inherited
+parallel-agent WIP (Drives-loop test/spec edits, www edits) re-applied intact
+and stayed uncommitted. Full gate held on tip + inherited WIP: types
+(app + server tsconfigs) exit 0; oxlint exit 0 (silent); unit **325 files /
+4856 passed / 8 skipped / 0 failed** (475.55s) — +1 file/+10 tests over the
+Loop164 baseline, the Loop165 team-markdown tests; build exit 0; e2e
+**42 passed (4.2m)** — +1 over the 41-baseline because the inherited
+uncommitted backup spec adds a checked-retry acceptance, green. Native held:
+swift test **399/0**; phone UI rig **5/5** (owned simulator created/deleted,
+cleanup receipts clean); owned watch rig **passed** (pair/accept/enroll/
+prepare/message/end settled, 34 requests, owned simulator deleted); electron
+sweep + updater **14/14**. Production GET receipts: muster.today
+`/`, `/api/health`, `/sign-in`, `/os`, `/marketplace` all **200**; health body
+`{"app":"muster","pid":8,"static":true,...}`. Release channel GET: releases
+latest **v1.14.1** (2026-09-21, 13 assets, matches package.json). No product
+code edited, no release/deployment claim; releases remain the release agent's
+surface.
+
 **Latest verified slice: Loop144 Drive consent isolation.**
 Separate verified Drive credentials preserve login/Calendar tokens, bind consent
 to a one-use session request, and check identity/scope. Setup copy now explains
