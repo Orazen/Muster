@@ -7123,3 +7123,8 @@ Pinned live: the connected-apps harness asserts the mounted bot's echoed
 prompt carries connector guidance, and the opt-out bot's prompt carries the
 switched-off-for-you guidance — neither contains the old dead-end line.
 The optout instance moved to echo-gated mode so its prompt is observable.
+## Loop164 — gate evidence for the every-engine apps fix
+
+Post-Loop163 full gates: tsc (app + server tsconfigs) 0 errors, oxlint 0/0
+repo-wide, vitest 324 files / 4,846 passed / 0 failed (one up from Loop162:
+the local-driver tool-less-retry test), Playwright e2e 41/41.
