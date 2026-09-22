@@ -7032,3 +7032,20 @@ workspace-file-sync only; now the same BotFather bot carries chat:
 - Tests: 7 new primitives tests (parse/send/poll contract incl. transport-
   failure semantics); full 72/72 telegram suite + 239 across the auth harness.
 
+## Loop160 — Telegram chat channel (OMB "Channels" parity)
+
+WhatsApp proved webhook chat into bots; Telegram had only workspace file sync.
+Now bots can be reached from a Telegram chat end to end.
+
+- server/telegram-sync.ts: chat primitives — getChatMe, sendChatText (returns
+  message id), pollChatUpdates (offset-tracked, throws on transport failure),
+  parseChatUpdate (command-bearing text only), chatThreadKey.
+- server/index.ts: routes under the workspace session gate (connect/status/
+  disconnect/webhook), per-workspace long-poll loop gated by config flag +
+  status, inbound fold to startTurn keyed chatThreadKey, reply fold on turn
+  completion (delivered/needs-config/failed states logged, never thrown).
+- server/config.ts: TELEGRAM_CHAT_ENABLED kill switch + telegramChatState.
+- WorkspaceSyncCard.tsx: toggle card beneath workspace backup — same connect/
+  status/disconnect shape, chat.channel.status drives UI state.
+- Tests: telegram-sync.test.ts pins offset tracking + parse (13/13);
+  workspace-auth-harness covers the session gate (35/35).

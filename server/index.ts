@@ -251,6 +251,7 @@ import {
   MEMORY_FILE_MAX_BYTES,
   MEMORY_BUDGET,
 } from "./workspace.ts";
+import { deleteSkill, isSkillName, listSkills, readSkill, skillsSystemPrompt, writeSkill } from "./workspace-skills.ts";
 import {
   deleteWorkspaceFile,
   listWorkspaceFiles,
@@ -2325,9 +2326,14 @@ async function startTurn(
     // when asked who built/founded/owns Muster, instead of saying it's
     // unknown or unverifiable.
     "Muster was built by Tharun Ramagiri at Orazen — an AI, Web, Automation & Digital Agency. ramagiritharun.in, orazen.online, linkedin.com/in/ramagiritharun.",
+    // Skills mount after the persona, before memory: installed playbooks are
+    // standing instructions, but they must not outrank the persona or safety
+    // prompt — appended, never substituted. Empty string when the bot has
+    // none, so nothing dangles in the prompt.
+    skillsSystemPrompt(bot.id),
   ]
     .filter(Boolean)
-    .join(" ");
+    .join("\n");
 
   // busy flips immediately so the composer locks; the dispatch itself runs
   // in the background — box provisioning can take ~90s and must never
@@ -3305,7 +3311,7 @@ async function runGroupMemberTurn(
   // but must not decide the pin: the room's desk is a property of the
   // room, not of whichever member happened to speak first.
   const cwd = groupTurnCwd(workspace, () => store.pinGroupCwd(group.id));
-  const roomSystem = workspace ? `${system}\n${memorySystemPrompt(bot.id).trim()}` : system;
+  const roomSystem = workspace ? `${system}\n${skillsSystemPrompt(bot.id).trim()}\n${memorySystemPrompt(bot.id).trim()}` : system;
 
   // run the turn and wait for it to settle, folding the reply text so a
   // chained @mention can be routed afterwards
@@ -7236,6 +7242,44 @@ let requestUserEmail = "";
       const text = readMemoryTopic(m[1], name);
       if (text === null) return json(res, 404, { error: "no such topic file" });
       return json(res, 200, { name, text });
+    }
+
+    // ── bot skills: skills/ playbook files in the workspace ───────────
+    // Same ownership + bot-lookup guards as the memory family above (the
+    // shared match prefix already 404'd an unowned bot before here). Skills
+    // are instruction playbooks the user installs; the prompt mounts their
+    // first 4KB (skillsSystemPrompt) and the bot reads the full file with
+    // its own file tools when it needs the rest.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/skills$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { skills: listSkills(m[1]) });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/skills\/([^/]+)$/);
+    if (m && (method === "GET" || method === "PUT" || method === "DELETE")) {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      let name: string;
+      try {
+        name = decodeURIComponent(m[2]);
+      } catch {
+        return json(res, 400, { error: "invalid skill name" });
+      }
+      if (!isSkillName(name)) return json(res, 400, { error: "invalid skill name — one plain <name>.md segment" });
+      if (method === "GET") {
+        const text = readSkill(m[1], name);
+        if (text === null) return json(res, 404, { error: "no such skill" });
+        return json(res, 200, { name, text });
+      }
+      if (method === "DELETE") {
+        if (!deleteSkill(m[1], name)) return json(res, 404, { error: "no such skill" });
+        return json(res, 200, { ok: true });
+      }
+      const parsed = z.object({ text: z.string() }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "text must be a string" });
+      const written = writeSkill(m[1], name, parsed.data.text);
+      if (written === null) return json(res, 400, { error: "invalid skill name — one plain <name>.md segment" });
+      if (!written.ok) return json(res, written.status, { error: written.reason });
+      return json(res, 200, { ok: true });
     }
 
     // ── bot memory history: past versions of MEMORY.md + rollback ───────

@@ -15,6 +15,7 @@ interface UpdateFixture {
   message?: {
     chat: { id: number; title?: string; username?: string; first_name?: string };
     document?: { file_id: string; file_name?: string };
+    text?: string;
   };
 }
 
@@ -22,7 +23,8 @@ type MethodResultFixture =
   | { username?: string }
   | UpdateFixture[]
   | { document: { file_id: string } }
-  | { file_path: string };
+  | { file_path: string }
+  | { message_id: number };
 
 interface ResponseFixture {
   ok: boolean;
