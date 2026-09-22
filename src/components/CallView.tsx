@@ -5,8 +5,11 @@
 // running on raw AVAudioEngine input with no acoustic echo cancellation, so
 // a mic left open through playback transcribes the bot's own voice back into
 // the conversation and the two of them talk forever. Interrupting is a tap
-// or Escape instead, which is honest and cannot feed back. (Full-duplex
-// barge-in needs AEC on the capture path — a follow-up, not a footnote.)
+// or Escape instead, which is honest and cannot feed back. Talking over the
+// bot also interrupts now — behind a default-off toggle on the web capture
+// path only, where getUserMedia's echoCancellation is the AEC and the
+// sustained-speech guard in lib/barge-in.ts decides a human is really
+// talking. Native capture has no AEC on its path and stays half-duplex.
 //
 // Turn-taking uses a small silence endpointer in the native helper. Apple's
 // buffer-backed recognizer does not finalize on silence by itself: the helper
@@ -18,7 +21,7 @@
 // it happens, which is why waiting feels like listening to someone work
 // rather than listening to nothing.
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Captions, CaptionsOff, Mic, MicOff, Phone, PhoneOff, X } from "lucide-react";
+import { AudioLines, Captions, CaptionsOff, Mic, MicOff, Phone, PhoneOff, X } from "lucide-react";
 
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
@@ -28,6 +31,7 @@ import { applySpeechControl, CONTROL_ACKS, matchSpeechControl } from "@/lib/tts/
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { roomToneForColor, voiceRoomVars } from "@/lib/voice-surface";
 import { usePushToTalk } from "@/lib/push-to-talk";
+import { startBargeInMonitor, type EnergyMonitor } from "@/lib/barge-in-monitor";
 import { AgentAvatar } from "./Avatar";
 import { SpeechControlChips } from "./SpeechControlChips";
 import { VoiceCaption } from "./VoiceCaption";
@@ -212,6 +216,28 @@ function Call({ bot }: { bot: Bot }) {
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
   const [captions, setCaptions] = useState(true);
+  // W4 barge-in: interrupt by TALKING, not by tapping. Off by default and
+  // persisted outside the store (parallel work owns it); armed only on the
+  // web capture path, where getUserMedia's AEC makes the energy readings
+  // trustworthy enough to act on.
+  const [bargeIn, setBargeIn] = useState(() => {
+    try {
+      return localStorage.getItem("muster:barge-in") === "on";
+    } catch {
+      return false;
+    }
+  });
+  const toggleBargeIn = useCallback(() => {
+    setBargeIn((on) => {
+      const next = !on;
+      try {
+        localStorage.setItem("muster:barge-in", next ? "on" : "off");
+      } catch {
+        // private-mode storage failure just makes the choice per-mount
+      }
+      return next;
+    });
+  }, []);
   const [note, setNote] = useState<string | null>(null);
   const pushToTalk = usePushToTalk(bot.id, phase === "listening", () => {
     setNote("Push to talk couldn't start. Check Microphone and Speech Recognition access.");
@@ -275,6 +301,15 @@ function Call({ bot }: { bot: Bot }) {
       }
     });
   }, [bot.id, move]);
+
+  /** One interrupt path for every door — Space, the Interrupt button, and
+   *  the barge-in guard. The generation bump drops stale narration; capture
+   *  restarts with the next listen(). */
+  const interrupt = useCallback(() => {
+    sayGeneration.current += 1;
+    speaker.stop();
+    listen();
+  }, [listen]);
 
   const toggleMute = useCallback(() => {
     const next = !mutedRef.current;
@@ -508,14 +543,38 @@ function Call({ bot }: { bot: Bot }) {
         endCall(bot.id);
       } else if (e.code === "Space" && speaker.isSpeaking()) {
         e.preventDefault();
-        sayGeneration.current += 1;
-        speaker.stop();
-        listen();
+        interrupt();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [bot.id, listen]);
+  }, [bot.id, interrupt]);
+
+  // Barge-in: while the bot speaks, an AEC'd analysis stream watches for the
+  // user talking over it. The guard's sustained-speech trip uses the same
+  // interrupt as Space; the recognizer starts fresh on the trip (web
+  // SpeechRecognition owns its own capture), so the first beats of the
+  // sentence can land a beat late — exactly like tapping Space. Native
+  // capture has no AEC on this path, so the toggle only arms on the web one.
+  useEffect(() => {
+    if (!bargeIn || phase !== "speaking" || getDictation().kind !== "web") return;
+    let monitor: EnergyMonitor | null = null;
+    let cancelled = false;
+    void startBargeInMonitor({ onTrip: interrupt }).then((started) => {
+      if (cancelled) {
+        started?.stop();
+        return;
+      }
+      monitor = started;
+      if (!started) {
+        setNote("Barge-in needs microphone access with echo cancellation — tap Interrupt instead.");
+      }
+    });
+    return () => {
+      cancelled = true;
+      monitor?.stop();
+    };
+  }, [bargeIn, phase, interrupt]);
 
   const mascotState =
     phase === "listening" ? "listening" : phase === "speaking" ? "sending" : phase === "sending" ? "thinking" : phase === "muted" ? "idle" : "working";
@@ -641,13 +700,25 @@ function Call({ bot }: { bot: Bot }) {
         >
           {captions ? <Captions size={18} /> : <CaptionsOff size={18} />}
         </button>
+        {getDictation().kind === "web" && (
+          <button
+            onClick={toggleBargeIn}
+            aria-pressed={bargeIn}
+            aria-label={bargeIn ? "Turn off talk-to-interrupt" : "Turn on talk-to-interrupt"}
+            title={bargeIn ? "Talking over the bot interrupts it" : "Off — tap Interrupt to cut in"}
+            className={cn(
+              "flex size-11 items-center justify-center rounded-full transition-colors",
+              bargeIn
+                ? "bg-[var(--room-wash)] text-[var(--room-fg)]"
+                : "text-[var(--room-fg-muted)] hover:bg-[var(--room-wash)] hover:text-[var(--room-fg)]",
+            )}
+          >
+            <AudioLines size={18} />
+          </button>
+        )}
         {speaker.isSpeaking() && (
           <button
-            onClick={() => {
-              sayGeneration.current += 1;
-              speaker.stop();
-              listen();
-            }}
+            onClick={interrupt}
             className="rounded-full px-4 py-2 text-[13.5px] text-[var(--room-fg)] transition-colors hover:bg-[var(--room-wash)]"
             style={{ boxShadow: "inset 0 0 0 1px var(--room-fg-muted)" }}
           >
@@ -665,7 +736,7 @@ function Call({ bot }: { bot: Bot }) {
       <div className="text-[11.5px] text-[var(--room-fg-muted)]">
         {getDictation().kind === "native"
           ? "Hold Control + Option to talk · Space interrupts · Esc hangs up"
-          : "Just talk — a short pause sends your turn · say “end the call” or press Esc to hang up"}
+          : `Just talk — a short pause sends your turn${bargeIn ? " · talking over the bot interrupts" : " · Space interrupts"} · say “end the call” or press Esc to hang up`}
       </div>
     </div>
   );

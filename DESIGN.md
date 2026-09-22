@@ -592,7 +592,7 @@ release pipeline.
 | ✔ | X4 chat empty-state trust pills (c9a8384); queued-draft composer verified already shipped | — |
 | X5 | URL-gated credential vault: fill only on allowlisted origins, secrets redacted from results (betterwright model) — SPEC'd docs/plans/credential-vault-spec.md, V1–V4 slices | approvals |
 | ✔ | X6 receipt findings: deterministic failed-step/unanswered/stall detectors (4f8443b); LLM grading stays out | X2 |
-| W1–W5 | voice parity plan (docs/plans/voice-auth-agents-plan-2026-09-15.md): GroupCall mute/captions · spoken register rewrite · TTS-playhead word cursor · browser-AEC barge-in (device-tested, default off) · voice session controls | — |
+| W1–W5 | voice parity plan (docs/plans/voice-auth-agents-plan-2026-09-15.md): GroupCall mute/captions ✔ · spoken register rewrite ✔ · TTS-playhead word cursor ✔ · browser-AEC barge-in shipped default-off Loop175 (device proof owner-held) · voice session controls ✔ | — |
 | A1–A4 | dry-run restore report on v2 verify · sliding session expiry · hosted email-allowlist scopes · per-user key Test button + browser CLI sign-in | — |
 | RC | live run-card (plan ticks pending→active→done on one editable message, actions valid later) + approval tiers as SOUL.md data + teach-as-routine + visible handoff + throttled-edit Telegram streaming | approvals |
 | R1 | release bump + 4-platform desktop rollout + mirror | suite green |

@@ -7709,3 +7709,61 @@ is owned by the social WIP.
 **Next loop:** W4 barge-in (default-off, web capture path only), then
 the unowned §38 rows in order. Not claimed: any device audio behavior,
 X5, or deployment. Nothing pushed in this entry.
+
+## Loop175 — W4 barge-in: the voice parity row completes behind a default-off toggle (22 Sep 2026)
+
+**Trigger:** owner chose "continue §38 in order" after the backlog census
+(Loop174) showed W4 was the last open voice item.
+
+**Red first:** two test files written against modules that did not exist
+(2 failed files), then built. Shipped: `src/lib/barge-in.ts` — pure
+sustained-speech guard, energy gate 0.02 RMS, 250ms sustain, 200ms gap
+tolerance, edge-triggered once per episode with re-arm; 9 tests covering
+silence-never-trips, exact-threshold trip, sub-threshold blips, dips
+inside/outside gap tolerance, the exactly-200ms edge, re-arming, custom
+windows, and reset. `src/lib/barge-in-monitor.ts` — AEC'd
+getUserMedia + AnalyserNode RMS sampler that trips the guard and
+releases the mic; 1 test for the honest degradation (no capture API →
+null → CallView's note + tap fallback). `src/components/CallView.tsx`
+(+84/−13): the three interrupt doors (Space, Interrupt button, guard)
+collapsed into ONE `interrupt()` callback; barge-in effect armed only
+when `bargeIn && phase === "speaking" && getDictation().kind === "web"`;
+toggle button (AudioLines, aria-pressed) next to captions, persisted in
+`localStorage("muster:barge-in")`, default OFF; footer hint switches to
+"talking over the bot interrupts" when armed; header comment rewritten
+(half-duplex is no longer the whole truth — it is the NATIVE path's
+truth).
+
+**Deliberate non-ports, stated honestly:** Vellum's duty-cycle cap and
+learned echo EMA were NOT ported — a naive duty cap cannot separate
+bot-bleed from a human speaking without pauses, and blocking a real
+speaker fails worse than a missed trip; echo defense here is the AEC'd
+capture path itself. The native SFSpeech path never opens the monitor
+(no AEC there) and stays half-duplex. The recognizer is NOT running
+during playback (web SpeechRecognition owns its own mic), so a trip
+starts capture fresh — the same beat and latency as pressing Space; the
+code comment says so instead of implying seamless continuation.
+
+**Gates (real numbers):** red run 2 failed files → green barge-in
+**10/10**; focused tts+barge-in **40/40**; oxlint on all five touched
+files **0 warnings 0 errors** (first pass had 5 anti-slop errors — 3
+`no-runtime-typeof` + 2 missing `SAFETY:` assertion comments — fixed by
+restructuring the capability probe, not by suppressing); app tsc **0
+errors for my files** (first pass had 2: `dictation` referenced from the
+wrong component scope — fixed to `getDictation().kind`); full suite
+**327 files / 4893 passed / 8 skipped / 0 failed** (450.09s, +2 files /
++17 tests vs Loop173's 325/4876 — this slice's 10 plus parallel-WIP
+tests; no decrease, zero FAIL lines); `vite build` ✓ 18.76s. Repo-wide
+tsc/`npm run build` stay red ONLY on the parallel agent's uncommitted
+`SocialView.tsx` (3 errors: unused Heart/SocialPostView, undefined
+FeedTab) — preserved, never staged, theirs to land; a new parallel edit
+to `src/components/LocalComputerSection.tsx` also appeared mid-loop and
+was left alone.
+
+**Not claimed:** real-device barge-in behavior (owner gate — headless
+has no audio), barge-in on the native desktop path, e2e (no call e2e
+exists), deployment. Voice parity row W1–W5 is now code-complete:
+W1 c40ba38, W2 `speech-text.ts`, W3 `word-cursor.ts`, W4 this loop,
+W5 `session-controls.ts` — DESIGN §38 row and the voice plan updated.
+Next per §38 order: U1–U5 (source audits located; drag-reorder sub-item
+defers — `store.tsx` is social-WIP-owned).

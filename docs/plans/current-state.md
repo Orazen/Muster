@@ -195,6 +195,32 @@ agent-social §3 — store-touching sub-items collide with social WIP), P1,
 K1, S0–S3, B1, M1–M2, T1, SS1, L2–L3, RC; R1 release rollout is
 owner/release-agent surface.
 
+### Voice parity completes — W4 barge-in behind a default-off toggle (22 September 2026, Loop175)
+
+The last open voice item shipped. `src/lib/barge-in.ts` is the pure
+sustained-speech guard (energy gate 0.02 RMS · 250ms sustain · 200ms gap
+tolerance; Vellum's duty-cycle/echo-EMA deliberately NOT ported — a naive
+duty cap cannot distinguish bot-bleed from a human talking without
+pausing, and blocking a real speaker fails worse than a missed trip).
+`src/lib/barge-in-monitor.ts` keeps an AEC'd getUserMedia analysis
+stream open while the bot speaks (web capture path only; unsupported
+capture resolves null → note + tap fallback). `src/components/CallView.tsx`
+wires the trip to ONE shared `interrupt()` — Space, the Interrupt button,
+and the guard all take the same path. The toggle defaults OFF, persists
+in `localStorage` (`muster:barge-in`) and never touches
+`src/state/store.tsx` (social-WIP-owned). Native desktop capture keeps
+half-duplex by design.
+
+**Gates:** barge-in **10/10**; focused tts+barge-in **40/40**; full
+suite **327 files / 4893 passed / 8 skipped / 0 failed** (450.09s; +2
+files/+17 tests vs Loop173, no decrease); oxlint **0/0** on all five
+touched files; app tsc **0 errors for my files**; `vite build` ✓
+(18.76s). Full `npm run build` (tsc leg) stays red ONLY on the parallel
+agent's uncommitted `SocialView.tsx` (3 errors) — theirs, untouched.
+**Not claimed:** real-device audio behavior (owner gate; headless has
+no audio), native-path barge-in, e2e (no call e2e exists). Voice row
+W1–W5 is now code-complete.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

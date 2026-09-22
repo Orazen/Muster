@@ -36,6 +36,15 @@ right for a no-server product, but the UX gaps are closable:
   can stay open through playback. The flagship upgrade: interruption by
   talking instead of by button. Needs real-device testing (headless has no
   audio) — ship behind a setting, default off.
+  **Shipped default-off (Loop175, 22 Sep 2026):** guard in
+  `src/lib/barge-in.ts` (energy gate + 250ms sustain + 200ms gap
+  tolerance, 9 tests), AEC analysis stream in `src/lib/barge-in-monitor.ts`
+  (web capture path only; unsupported capture degrades to a note + tap),
+  per-call toggle persisted in localStorage (store untouched), trip = the
+  same interrupt as Space. Vellum's duty-cycle/echo-EMA was deliberately
+  NOT ported (a naive cap blocks a real unpaused speaker) — **real-device
+  proof remains an owner gate**, native desktop stays half-duplex by
+  design (no AEC on its capture path).
 - **W5 voice session controls** — extend the YES/NO recognizer with
   "end the call" (done), "be quieter" (update_config analog), per-call
   speaking-rate. Capability-tagged like Vellum's sessionControls.
