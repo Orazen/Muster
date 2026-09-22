@@ -7411,3 +7411,69 @@ suite went green; reported as observed. Parallel-agent WIP landing during
 this slice (`claim-flow.ts`/test, www/*) preserved untouched, not staged.
 Owner-held hardware acceptance (iPhone dictation) joins the round-end
 checklist.
+
+## Loop171 — Android deep-link + QR pairing: delivery only, never a new grammar
+
+Slice 4 (final) of the owner-directed mobile/Watch round (answers locked in
+Loop166: Android = deep-link + QR; invariant = parse-everything-never-auto-
+submit; gate = npm test + typecheck + lint; one commit per slice).
+
+**The gap as the repo stated it:** `android-companion/README.md` — "QR
+scanning and automatic deep-link delivery remain unimplemented", and in
+Boundaries: "Camera dependencies exist, but neither a scanner UI nor
+automatic deep-link delivery is wired." `expo-camera`, the CAMERA permission
+string, the `muster://pair` invitation grammar and the paste-never-sends
+contract were all already present. What did not exist was any *arrival* —
+nothing ever delivered a link to the form.
+
+- `core/pairing.ts` (edited): `pairingFillFromExternalText` — pure fill
+  validation through `resolvePairingInput` itself, so one grammar decides
+  both what fills and what would submit. It returns field text only: no
+  credential, no normalized value, no send. Anything that is not an
+  invitation (web URLs, other schemes, malformed tokens, plain hosts,
+  whitespace) returns one honest refusal.
+- `screens/PairQrScanner.tsx` (new): expo-camera `CameraView`, QR-only,
+  mounted only while scanning. The permission prompt fires from this
+  component's mount — the pairing screen never asks for a camera it is not
+  showing. One system-prompt attempt, then explanation instead of a loop;
+  a `delivered` ref makes a scan deliver exactly once per mount even if
+  the view reports the code twice; Cancel exists at every stage.
+- `screens/PairingScreen.tsx` (edited): RN `Linking` listener — cold start
+  via `getInitialURL`, then `url` events — plus a Scan QR button; both
+  routes funnel into one `fillFromExternal` that validates, replaces the
+  typed text (an arrival is a deliberate act), and stops. The listener
+  lives on the pairing screen, which mounts exactly when the app is
+  unpaired: a link opened while already paired meets no listener at all.
+  Arrivals during an in-flight attempt are ignored (fields stay frozen by
+  the existing contract). The scanner closes before filling, so an invalid
+  code shows its one error on the form, not in a camera loop.
+- `app.json` (edited): `"scheme": "muster"` — without it no Android intent
+  filter exists and `muster://pair` opens nothing. The camera permission
+  string already existed; the Scan tap is what triggers the prompt.
+- `README.md`: the three "unimplemented / not wired" notes replaced with
+  what shipped, with device acceptance explicitly still open.
+
+Mechanical follow-through in the existing screen test: the button helper
+now finds "Pair with computer" by label (the form gained a second
+touchable), and `expo-camera` is stubbed per test file so no real expo
+module loads under jest — the host stub's captured props are how scan
+reports are driven.
+
+**Gates (real numbers):** `cd android-companion && npm test` → **12 suites,
+573 tests, 0 failed** (555 baseline, +18: 8 core fill, 5 scanner, 5
+delivery); `npm run typecheck` → exit 0; `npm run lint` → **0 warnings, 0
+errors** on 48 files.
+
+**Not claimed:** camera permission prompts, a real scan of a real code, a
+real tapped deep link, cold-start delivery on-device, or Play Store
+builds — JS-host evidence only. Owner-held Android device acceptance
+remains open, and it is precisely the thing QR/deep-link existence is
+for; it sits on the round-end checklist. One invalid fixture line I wrote
+was caught and removed before the suite ran (reported as observed).
+Parallel-agent WIP (`claim-flow`, www/*) preserved untouched, not staged.
+
+**Round status:** all four locked slices are committed — crown scrolling
+(`e4ccd99`), haptic vocabulary (`0b989cf`), phone dictation (`96650eb`),
+Android delivery (this commit). The remaining gate is owner-held hardware
+acceptance across Watch, iPhone and Android; the acceptance checklist
+follows as a separate documentation commit.

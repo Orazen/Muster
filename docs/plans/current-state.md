@@ -92,6 +92,35 @@ unexercised here. Remaining this round: Android deep-link + QR pairing.
 Owner-held hardware acceptance still open (dictation is on the acceptance
 checklist). Unrelated working-tree edits preserved untouched.
 
+### Mobile/Watch round — Slice 4: Android deep-link + QR pairing (22 September 2026, Loop171)
+
+Final slice of the round. The companion's README stated the gap plainly ("QR
+scanning and automatic deep-link delivery remain unimplemented"); the
+`muster://pair` invitation grammar and the paste-never-sends invariant
+already existed, so this slice adds **delivery only** — both routes validate
+through the same parser (`pairingFillFromExternalText` in core) and fill the
+address field; nothing ever pairs until the person taps Pair with computer.
+A deep link arrives through RN `Linking` (cold-start `getInitialURL` + `url`
+events) while PairingScreen is mounted — which is exactly when the app is
+unpaired, so a link opened while paired meets no listener. QR opens a new
+`PairQrScanner` (expo-camera `CameraView`, already a dependency; the
+permission prompt fires only on Scan-tap, one scan delivered per mount,
+denial explains instead of re-prompting). `app.json` gains
+`"scheme": "muster"` so the Android intent filter exists at all. Arrivals
+replace typed text (they are deliberate acts), invalid arrivals show one
+honest error and touch nothing, and arrivals during an in-flight attempt
+are ignored while fields are frozen.
+
+**Verified this slice:** `cd android-companion && npm test` → **12 suites /
+573 tests / 0 failed** (baseline 555, +18); `npm run typecheck` → 0 errors;
+`npm run lint` → **0 warnings / 0 errors** (48 files). JS-host evidence only
+— no camera permission prompt, no real scan, no real tapped link; device
+acceptance remains owner-held. **Round complete on all four locked
+slices**: crown scrolling, haptic vocabulary, phone dictation, Android
+delivery. Owner-held hardware acceptance (Watch/iPhone/Android) is now the
+open gate; the acceptance checklist follows as a separate doc commit.
+Unrelated working-tree edits (claim-flow, www/*) preserved untouched.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

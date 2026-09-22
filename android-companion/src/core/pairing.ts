@@ -93,3 +93,21 @@ export function parsePairingInvite(input: string): { address: string; token: str
   if (!result.ok || !result.value.credential) return null;
   return { address: result.value.address, token: result.value.credential };
 }
+
+/** What a deep link or a scanned QR code may put into the pairing form:
+ * field text and nothing else. Decided by the same invitation grammar that
+ * decides submission, so a fill that succeeds is exactly the paste the user
+ * would have made — and it still waits for the tap on "Pair with computer".
+ * Nothing here sends a request, and nothing here carries a credential the
+ * form did not already accept: the submit path re-parses through
+ * `resolvePairingInput` regardless of how the text arrived. */
+export type PairingFill = { ok: true; address: string } | { ok: false; error: string };
+
+export function pairingFillFromExternalText(text: string): PairingFill {
+  const candidate = text.trim();
+  const result = resolvePairingInput({ address: candidate });
+  if (!result.ok || result.method !== "invite") {
+    return { ok: false, error: "That code is not a Muster pairing invitation." };
+  }
+  return { ok: true, address: candidate };
+}

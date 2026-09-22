@@ -1,5 +1,5 @@
 import { MusterClient, parseAddress, parsePairingURL, type ClientFetch } from "./client";
-import { resolvePairingInput, type PairingInput } from "./pairing";
+import { pairingFillFromExternalText, resolvePairingInput, type PairingInput } from "./pairing";
 import type { ClientRequest } from "./transport";
 
 const token = `omb_pair_${"a".repeat(43)}`;
@@ -146,5 +146,40 @@ describe("normalized pairing transport contract", () => {
     const f = transport();
     await expect(submit({ address: "muster://pair?address=localhost&token=&code=004209", code: "004209" }, f.fetchRequest)).rejects.toThrow("complete Muster pairing invitation");
     expect(f.calls).toEqual([]);
+  });
+});
+
+describe("external pairing fills (deep link and QR)", () => {
+  test("fills a valid invitation as plain field text that re-parses exactly like a paste", () => {
+    const link = invite();
+    const fill = pairingFillFromExternalText(link);
+    expect(fill).toEqual({ ok: true, address: link });
+    // The fill is not a shortcut: what it puts in the field goes through the
+    // same normalization a hand-typed paste would, or nothing would ever send.
+    if (fill.ok) {
+      expect(resolvePairingInput({ address: fill.address })).toEqual(
+        resolvePairingInput({ address: link }),
+      );
+      expect(Object.keys(fill)).toEqual(["ok", "address"]);
+    }
+  });
+
+  test("fills an explicit code-only invitation and trims QR payload whitespace", () => {
+    const codeOnly = "muster://pair?address=%5B%3A%3A1%5D%3A8810&code=004209";
+    expect(pairingFillFromExternalText(` \n${codeOnly}\n`)).toEqual({ ok: true, address: codeOnly });
+  });
+
+  test.each([
+    ["a web address", "https://fixture.invalid/pair?token=anything"],
+    ["an unrelated scheme", `muster://other?address=localhost&token=${token}`],
+    ["a fragment-suffixed invitation", `${invite()}#fragment`],
+    ["a malformed token", "muster://pair?address=localhost&token=omb_pair_bad&code=004209"],
+    ["a plain host with no invitation", "localhost:8810"],
+    ["nothing at all", "   "],
+  ])("refuses %s instead of filling a guess", (_label, text) => {
+    expect(pairingFillFromExternalText(text)).toEqual({
+      ok: false,
+      error: "That code is not a Muster pairing invitation.",
+    });
   });
 });

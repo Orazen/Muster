@@ -2,8 +2,9 @@
 
 The companion pairs with a running Muster desktop sidecar to read transcripts,
 answer approval cards and send tasks. Its Expo 52 / React Native 0.76 implementation
-contains manual address/code pairing, pasted invitation pairing, roster and chat
-screens. QR scanning and automatic deep-link delivery remain unimplemented.
+contains manual address/code pairing, pasted invitation pairing, QR-scan and
+deep-link delivery of invitations, roster and chat screens. Both new delivery
+routes fill the form through the same parser and still wait for the Pair tap.
 Native installation and real-device streaming require separate verification;
 passing the tests below
 does not establish those results or Play Store availability.
@@ -50,6 +51,17 @@ typed code. Leading zeros in codes are preserved. Immediate repeated submits
 share one pending attempt; fields stay fixed until it settles, and failures keep
 the input for retry. The form scrolls and uses native safe-area insets; native
 keyboard/layout acceptance is separate from its React host tests.
+
+Invitations also arrive from a **`muster://pair` deep link or a QR scan**: a
+tap on the link (cold start or while the screen is open) and the in-app
+scanner both validate through the same invitation grammar, fill the address
+field, and stop — nothing pairs until **Pair with computer**. An arrival
+replaces what was typed (it is always a deliberate act), a malformed or
+unrelated code shows one honest error and changes nothing, and an arrival
+during an in-flight attempt is ignored while the fields are frozen. Scanning
+asks for camera permission only after **Scan QR code** is tapped; denial
+explains itself instead of re-prompting. A link opened while already paired
+has no listener and does nothing.
 
 ## Pinned toolchain dependencies
 
@@ -234,8 +246,10 @@ Use an SDK-52-compatible Expo Go or development build; current Expo Go versions
 may require a newer SDK. The local native command generates/builds native projects
 and installs the app, so run it only for an owned emulator or selected device.
 A real-device check must cover manual pairing, local-network reachability,
-HTTPS certificates, streaming reconnect and unpairing. QR permissions and scanning
-belong to a future scanner implementation.
+HTTPS certificates, streaming reconnect and unpairing. QR scanning and deep-link
+delivery now exist in code but have no device acceptance: camera permission
+prompts, an actual scan and a real tapped link still belong to owner-held
+device checks.
 
 The existing EAS configuration and remote build scripts are not release gates
 verified by these tests. Signing, EAS project setup and store distribution need
@@ -245,6 +259,6 @@ a separate release slice. The obsolete `expo build:android` command is not used.
 
 Pairing credentials use `expo-secure-store`. The sidecar's route allowlist controls
 access: this client reads transcripts, sends messages and answers approvals. It
-does not manage desktop API keys or drive the computer. Camera dependencies exist,
-but neither a scanner UI nor automatic deep-link delivery is wired. Paste a
-pairing invitation or enter the address/code instead.
+does not manage desktop API keys or drive the computer. Deep links and QR scans
+fill the pairing form through the invitation parser and never submit it; paste a
+pairing invitation, enter the address/code, tap the link or scan the code.

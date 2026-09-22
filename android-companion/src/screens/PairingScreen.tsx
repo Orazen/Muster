@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator, Image, KeyboardAvoidingView, Platform, ScrollView,
+  ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, ScrollView,
   StatusBar as RNStatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { resolvePairingInput, type PairingInput } from "../core/pairing";
+import { pairingFillFromExternalText, resolvePairingInput, type PairingInput } from "../core/pairing";
 import type { PairResponse } from "../core/types";
+import { PairQrScanner } from "./PairQrScanner";
 
 interface PairingScreenProps {
   pairing: boolean;
@@ -26,6 +27,7 @@ export function PairingScreen({ pairing, error, onPair }: PairingScreenProps) {
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [hideServerError, setHideServerError] = useState(false);
+  const [scanning, setScanning] = useState(false);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; };
@@ -73,6 +75,56 @@ export function PairingScreen({ pairing, error, onPair }: PairingScreenProps) {
       pending.current = false;
       if (mounted.current) setSubmitting(false);
     }
+  }
+
+  // A deep link or a scanned QR code arrives here and fills the form — it
+  // never pairs. The text is validated by the same invitation grammar a
+  // paste goes through, so what fills is exactly what pasting would have
+  // produced, and "Pair with computer" stays the only thing that sends.
+  // An arrival is a deliberate act (the person just tapped the link or
+  // aimed the camera), so it replaces what was typed. It touches only
+  // refs and stable setters, so the effect below can safely hold this
+  // first-render closure.
+  function fillFromExternal(text: string) {
+    if (pending.current || pairingNow.current) return; // fields are frozen mid-attempt
+    const fill = pairingFillFromExternalText(text);
+    if (!fill.ok) {
+      setLocalError(fill.error);
+      setHideServerError(true);
+      return;
+    }
+    draft.current.address = fill.address;
+    draft.current.code = "";
+    setAddress(fill.address);
+    setCode("");
+    setLocalError(null);
+    setHideServerError(true);
+  }
+
+  // Cold start through the link, and links arriving while this screen
+  // lives. PairingScreen mounts exactly when the app is unpaired, so a
+  // link opened while already paired meets no listener at all — a paired
+  // phone ignores it rather than silently re-pairing somewhere else.
+  useEffect(() => {
+    let active = true;
+    void Linking.getInitialURL().then((url) => {
+      if (active && url) fillFromExternal(url);
+    });
+    const subscription = Linking.addEventListener("url", ({ url }) => {
+      if (active) fillFromExternal(url);
+    });
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+
+  // One scan closes the scanner and hands the text to the same fill path
+  // a deep link takes. Closing first means an invalid code shows its one
+  // honest error on the form, not in a camera loop chasing it.
+  function scanned(text: string) {
+    setScanning(false);
+    fillFromExternal(text);
   }
 
   return (
@@ -143,6 +195,16 @@ export function PairingScreen({ pairing, error, onPair }: PairingScreenProps) {
             </>
           )}
 
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Scan a pairing QR code"
+            style={styles.scanButton}
+            onPress={() => setScanning(true)}
+            disabled={busy}
+          >
+            <Text style={styles.scanButtonText}>Scan QR code</Text>
+          </TouchableOpacity>
+
           {visibleError ? (
             <View style={styles.errorBox}>
               <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.error}>{visibleError}</Text>
@@ -163,6 +225,9 @@ export function PairingScreen({ pairing, error, onPair }: PairingScreenProps) {
           <Text style={styles.hint}>Links and codes expire quickly. Open a fresh pairing window on your computer if needed.</Text>
         </View>
       </ScrollView>
+      {scanning ? (
+        <PairQrScanner onScan={scanned} onCancel={() => setScanning(false)} />
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
@@ -192,4 +257,15 @@ const styles = StyleSheet.create({
   buttonText: { color: "#201207", fontSize: 16, fontWeight: "700", flexShrink: 1, textAlign: "center" },
   spinner: { marginRight: 10 },
   hint: { color: "#aaa59d", fontSize: 12, lineHeight: 18, marginTop: 18, marginBottom: 8 },
+  scanButton: {
+    alignSelf: "flex-start",
+    backgroundColor: "#151515",
+    borderWidth: 1,
+    borderColor: "#393631",
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    marginTop: 2,
+  },
+  scanButtonText: { color: "#e8e2d9", fontSize: 14, fontWeight: "600" },
 });
