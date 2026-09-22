@@ -39,6 +39,31 @@ describe("Single-use device claim flow", () => {
     expect(flow.state).toEqual({ status: "done" });
   });
 
+  it.each(["#code=abcd2345", "#code=ABCD-2345", "#code=%61bcd2345", "#abcd-2345", "#ABCD-2345"])(
+    "accepts a hand-typed carry shape %j as the same code",
+    async (fragment) => {
+      const transport = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ok: true }));
+      expect(parseClaimFragment(fragment)).toEqual({ code: syntheticCode });
+      const flow = new ClaimFlow(fragment, transport);
+      await flow.start();
+      expect(transport.mock.calls[0][1]?.body).toBe(JSON.stringify({ code: syntheticCode }));
+      expect(flow.state).toEqual({ status: "done" });
+    },
+  );
+
+  it.each(["#code=", "#code=%", "#code=ABCDEFG0", "#abc-def", "#ABC-DEF-123-456", "#foo=abcd2345"])(
+    "recovery without sending a wrong carry shape %j to the server",
+    async (fragment) => {
+      const transport = vi.fn<typeof fetch>();
+      expect(parseClaimFragment(fragment)).toEqual({ message: expect.any(String) });
+      const flow = new ClaimFlow(fragment, transport);
+      expect(flow.state).toMatchObject({ status: "error", retryable: false });
+      await flow.start();
+      await flow.retry();
+      expect(transport).not.toHaveBeenCalled();
+    },
+  );
+
   it("does not consume a claim while constructing or subscribing during render setup", () => {
     const transport = vi.fn<typeof fetch>();
     const flow = new ClaimFlow(`#${syntheticCode}`, transport);

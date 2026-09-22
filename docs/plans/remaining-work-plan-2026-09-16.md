@@ -331,6 +331,12 @@ Status changes since the ranked list above — all committed and gated:
    account-add action reusing the EngineSetup card (tested row-action logic).
 6. **Pairing redeem in the browser: verified already shipped.** PairPage +
    ClaimPage cover generate and redeem with e2e; the ranked item predates it.
+   Resilient carry shapes added (2026-09-22): the claim front door's
+   fragment parser now normalizes the hand-typed carry shapes the pairing
+   front door documents — bare, keyed (#code=CODE) and grouped (ABCD-EFGH)
+   — to the mint form before the same throttled redeem; wrong strings still
+   fail honestly at the endpoint (8 new parser cases, 40/40 in
+   claim-flow.test.ts).
 7. **Gate evidence (2026-09-22):** tsc (app + server tsconfigs) 0 errors,
    oxlint 0/895-file repo, vitest 324 files / 4,845 passed / 0 failed,
    Playwright e2e 41/41.

@@ -7515,3 +7515,36 @@ answer to "which builds failed" is none locally, and the two red CI runs
 were already proven transient. Not claimed: Playwright e2e, electron
 `check:electron`/`test:updater` (unchanged surface this round), any
 hardware behavior, or deployment — this commit is not pushed.
+## Loop169 — claim front door accepts hand-typed carry shapes (22 Sep 2026)
+
+Gap: the claim front door (mustertoday /claim#CODE, the QR `muster up`
+prints) accepted only the bare bare mint form. A code read off a screen and
+typed by hand can arrive in the carry shapes src/lib/pairing-link.ts
+documents — the keyed form (#code=CODE) and a grouped print (ABCD-EFGH) —
+and those failed as a damaged/damaged link even though the string is the
+operator's own live code.
+
+Change, all browser-side (zero server change, trust unchanged):
+parseClaimFragment now normalizes bare, keyed and grouped carries to the
+mint form (uppercase, hyphens stripped, hand-typed whitespace removed)
+before the same throttled redeem endpoint; a wrong string still fails
+honestly at the endpoint, with its same per-IP throttling posture.
+
+Gates: focused parser cases 40/40 (claim-flow.test.ts; 8 new — 4 accept
+shapes, 4 refused shapes sent nowhere); repo typecheck (tsc -b) exit 0;
+repo-wide oxlint exit 0; full unit **325 files / 4867 passed / 8 skipped /
+0 failed** (EXIT 0) — +11 over the morning full gate (4856): 8 parser cases
+plus 3 elsewhere this day. E2E not re-run: the claim-claim e2e coverage
+(shipped with fc58767) renders construction; the parser is unit-covered
+exhaustively and the component contract (construction never submits; capture
+before fragment removal) is unchanged.
+
+Load-marginal harness flake, recorded honestly: the full suite failed twice
+consecutively on server/index.test.ts "never hands a client the provider
+session cursors" (openSse fetch failed → read ECONNRESET, errno -54), then
+passed on the next full run (EXIT 0); focused server/index.test.ts passes 3/3
+consecutively. Timing-marginal SSE bootstrap under full-suite load — same
+class as the 20 Sep gate report's load notes (the sweep ran at load 10-16).
+Not tied to this slice: the slice touches only the browser claim-fragment
+parser; the failure is a server harness socket reset. If it recurs, retain
+evidence (/tmp/muster-full-2.log) before any retry loop.

@@ -8,17 +8,25 @@ const confirmedClaim = z.object({ ok: z.literal(true) });
 const rejectedClaim = z.object({ error: z.string() });
 
 export function parseClaimFragment(fragment: string): { code: string } | { message: string } {
-  let code: string;
+  let fragmentText: string;
   try {
-    code = decodeURIComponent(fragment.replace(/^#/, "")).trim().toUpperCase();
+    fragmentText = decodeURIComponent(String(fragment ?? "").replace(/^#/, ""));
   } catch {
     return { message: "This link is damaged. Scan a fresh QR from your computer." };
   }
-  if (!code) return { message: "This link is missing its claim code. Scan a fresh QR from your computer." };
-  if (!/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/.test(code)) {
+  // The QR encodes the bare form (#CODE), but a code read off a screen and
+  // typed by hand can arrive in the carry shapes the pairing front door
+  // documents (src/lib/pairing-link.ts): the keyed form (#code=CODE) and a
+  // grouped print (ABCD-EFGH). All normalize to the mint form before the
+  // throttled redeem; a wrong string still fails honestly at the endpoint.
+  const keyed = new URLSearchParams(fragmentText).get("code");
+  let candidate = (keyed ?? fragmentText).trim();
+  if (!candidate) return { message: "This link is missing its claim code. Scan a fresh QR from your computer." };
+  candidate = candidate.toUpperCase().replace(/-/g, "");
+  if (!/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/.test(candidate)) {
     return { message: "This claim code is not valid. Scan a fresh QR from your computer." };
   }
-  return { code };
+  return { code: candidate };
 }
 
 /** Retain a single-use redemption across effect cleanup/re-subscription.
