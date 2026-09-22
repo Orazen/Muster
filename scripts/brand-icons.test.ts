@@ -7,7 +7,10 @@
 // The entries are also DIB (BITMAPINFOHEADER + 32bpp BGRA), not PNG: resedit
 // passes each entry's raw bytes straight through to RT_ICON, and Windows
 // expects DIB there. A PNG-entry ICO builds fine but ships a blank exe icon,
-// so the format is asserted here too.
+// so the format is asserted here too. Each DIB must also carry its 1-bit AND
+// mask with biHeight doubled (XOR rows + mask rows): resedit derives pixel
+// rows as biHeight/2, so a single-height DIB builds clean and ships an icon
+// whose bottom half is garbage.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -66,20 +69,24 @@ describe("build/icon.ico", () => {
     expect(expected).toBe(ICO.length);
   });
 
-  it("embeds a 32bpp DIB per size, with no PNG entry in sight", () => {
+  it("embeds a masked 32bpp DIB per size, with no PNG entry in sight", () => {
     for (const entry of directory()) {
       const dib = payload(entry);
       // A PNG entry is the shape that builds but leaves the exe icon blank.
       expect(dib.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe(false);
+      const s = entry.width; // image edge: directory width, 0 already meaning 256
+      const maskBytes = (((s + 31) >> 5) * 4) * s; // 1-bit rows padded to 32 bits
       expect(dib.readUInt32LE(0)).toBe(DIB_HEADER); // biSize
-      expect(dib.readInt32LE(4)).toBe(entry.width); // biWidth
-      expect(dib.readInt32LE(8)).toBe(entry.height); // biHeight, positive = bottom-up
+      expect(dib.readInt32LE(4)).toBe(s); // biWidth
+      // biHeight counts XOR rows + AND-mask rows, so it is always doubled —
+      // this is what makes resedit decode every pixel row, not just the top half.
+      expect(dib.readInt32LE(8)).toBe(s * 2);
       expect(dib.readUInt16LE(12)).toBe(1); // biPlanes
       expect(dib.readUInt16LE(14)).toBe(32); // biBitCount
       expect(dib.readUInt32LE(16)).toBe(0); // biCompression: BI_RGB
-      // 40-byte header plus one BGRA quad per pixel, and nothing else
-      expect(entry.bytes).toBe(DIB_HEADER + entry.width * entry.height * 4);
-      expect(dib.readUInt32LE(20)).toBe(entry.width * entry.height * 4); // biSizeImage
+      // 40-byte header + one BGRA quad per pixel + the AND mask
+      expect(entry.bytes).toBe(DIB_HEADER + s * s * 4 + maskBytes);
+      expect(dib.readUInt32LE(20)).toBe(s * s * 4); // biSizeImage (XOR data only)
     }
   });
 

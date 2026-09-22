@@ -206,7 +206,8 @@ function render({ size, tile, fullBleed = false, mascotScale = 4.05 }) {
 // PNG ones. electron-builder hands each entry's raw bytes straight to
 // RT_ICON, and Windows expects DIB there — PNG entries survive the build but
 // leave the packaged exe with a blank icon. rcedit, the tool electron-builder
-// replaced with resedit, writes DIB for the same reason.
+// replaced with resedit, writes DIB for the same reason. Each DIB also carries
+// the AND mask Windows expects (biHeight doubled: XOR pixel rows + mask rows).
 function encodeDib(rgba, size) {
   const pixels = Buffer.alloc(size * size * 4);
   for (let y = 0; y < size; y++) {
@@ -225,12 +226,19 @@ function encodeDib(rgba, size) {
   const header = Buffer.alloc(40);
   header.writeUInt32LE(40, 0); // biSize
   header.writeInt32LE(size, 4); // biWidth
-  header.writeInt32LE(size, 8); // biHeight — no AND mask is carried, so not doubled
+  // biHeight counts XOR rows + AND-mask rows: an ICO DIB is always doubled.
+  // resedit's decoder derives pixel rows as biHeight/2, so a single-height
+  // DIB makes it read (and emit) only the top half of the icon.
+  header.writeInt32LE(size * 2, 8);
   header.writeUInt16LE(1, 12); // biPlanes
   header.writeUInt16LE(32, 14); // biBitCount
   header.writeUInt32LE(0, 16); // biCompression: BI_RGB
-  header.writeUInt32LE(pixels.length, 20); // biSizeImage
-  return Buffer.concat([header, pixels]);
+  header.writeUInt32LE(pixels.length, 20); // biSizeImage (XOR data only)
+  // AND mask: 1 bit per pixel, rows padded to 32 bits. Fully opaque (alpha
+  // lives in the BGRA quad), so the mask is zeros — but its bytes must exist.
+  const maskRow = (((size + 31) / 32) | 0) * 4;
+  const mask = Buffer.alloc(maskRow * size);
+  return Buffer.concat([header, pixels, mask]);
 }
 
 let CRC_TABLE = null;

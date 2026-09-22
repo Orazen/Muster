@@ -8427,3 +8427,17 @@ parallel agent is actively editing (uncommitted WIP in
 another agent's live files. Next agent: reproduce it by running the full suite
 concurrently with load, and read the networkLog contents (which call the
 outbound block stopped) before guessing.
+
+**Loop186 addendum 2 — the DIB needed its AND mask, and half the icon was
+missing.** A parallel agent corrected the `encodeDib` this loop added: the DIB
+now carries `biHeight = size * 2` plus the 1-bit AND-mask rows. That is right,
+and the earlier fix was incomplete — `resedit`'s `IconItem` derives the pixel
+rows it will read and re-emit as `Math.abs(bi.height) / 2` (IconItem.js:60 and
+:134), so a single-height DIB decodes as half an image. Proved A/B through
+electron-builder's real PE path (resedit over signtool.exe as the subject):
+single-height emitted `RT_ICON` 135,208 B with `biH=256` → 128 rows read (half
+the icon); doubled-height + mask emits 270,376 B with `biH=512` → 256 rows
+(full). So the Windows leg would have built and shipped a half-rendered icon
+even after the little-endian fix. Artifact regenerated (372,526 B; every entry
+`40 + w*h*4 + mask` and ending exactly at EOF), guard test extended to assert
+the doubled height and mask bytes, 5/5 green, lint and typecheck clean.
