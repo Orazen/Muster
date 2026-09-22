@@ -8110,3 +8110,52 @@ per §38: S2b, the sync-pass engine over injected deps (journal claim →
 reconcile → pack → transport → manifest, plus download → unpack →
 applier), deliberately collision-free of the routes file the parallel
 session is actively landing work in; real wiring is an explicit S2c.
+
+## Loop181 — S2b: the sync pass over injected deps (22 Sep 2026)
+
+**Trigger:** §38 order after S2a; §10's sequence diagram made testable
+without Drive, the routes file, or any producer — deliberately
+collision-free of `server/index.ts` while the parallel session lands work
+there (real wiring is the explicit S2c). `server/sync-pass.ts` runs one
+full cycle: load remote manifest → S1 journal drain → read local object →
+S2a pack → upload under the canonical name → per-push local-manifest
+commit → merged remote publish with the opaque guard passed through
+untouched → S2a reconcile → download → VERIFY → applier → local commit.
+
+**The invariants the 16 tests pin:** the reader must agree with its own
+journal row (objectId/rev/checksum) or the change retries — publishing
+bytes the manifest would misdescribe is a bug, not a rotation; a crash
+mid-pass re-pushes by file name instead of losing the local commit; a
+manifest publish failure keeps the uploaded objects and reports the error
+(the next pass re-pushes idempotently); the pull half applies ONLY an
+object whose rev+checksum+tombstone equal the manifest entry that named
+the file (§10's "download → verify → decrypt → merge — commit" is
+identity verification, not just "it opened"); reconcile's upload side is
+ignored inside pull because the journal owns push; equal-rev/different-
+checksum conflicts are reported with no side picked and no download; and
+an unopenable remote manifest HALTS the pass before anything is claimed —
+without a trustworthy index, merging risks clobbering entries this
+install has never seen. Guard flow (load → save, unmodified) is asserted
+end-to-end; whether Drive can honor it stays an S2c decision.
+
+**Gates (real numbers):** red **1 file failed** (module absent) → 15/16
+(a test of mine seeded an entry where seedObject needed a full object —
+zod rejected at setup, fixed by sharing one builder) → **16/16**; oxlint
+2 files **0/0** (1 error: my `errorText(error: unknown)` helper tripped
+`no-unknown-parameters` — inlined the catch expression at all three
+sites, the S2a `bodyJson` pattern, no suppressions); server tsc **exit
+0**; full suite **335 files / 4988 passed / 8 skipped / 0 failed**
+(481.65s = Loop180's 4972 + exactly this slice's 16, no decrease).
+
+**Owner directive this loop:** "gohead computer all test use desktop and
+ios app" — after this commit: desktop wave (the non-vitest legs of the
+canonical `npm test`: check:electron, test:desktop-lifecycle,
+test:updater, broker:test, test:packaged-server — vitest already covers
+all 23 `electron/*.test.mjs` via vite.config.ts include), then the iOS
+TESTING.md stages I can honestly run here (Stage 1 `swift test` on host,
+Stage 3 xcodegen + xcodebuild on a SIMULATOR — reported as simulator,
+never device; Stages 4–5 iPhone/Tailscale remain owner-held).
+
+**Not claimed:** any real transport, producer, running drainer, the app
+waves before they run, or a security attestation (scanner re-run still
+owed). Next per §38 after the app waves: S2c real wiring.

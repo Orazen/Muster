@@ -381,9 +381,35 @@ returns (`BodyJsonResult`), two assertions → no-cast/zod field parse, one
 unused import); server tsc **exit 0**; full suite **334 files / 4972 passed
 / 8 skipped / 0 failed** (447.25s = 4951 + exactly these 21, no decrease).
 **Not claimed:** transport, producers, a running sync pass, Drive ifMatch
-semantics (S2c decision), security attestation. Next per §38: S2b, the
-sync-pass engine over injected deps (collision-free of the routes file while
-the parallel session lands work there); wiring = explicit S2c.
+semantics (S2c decision), security attestation. In flight: S2b (sync pass).
+
+### S2b sync pass over injected deps (22 September 2026, Loop181)
+
+`server/sync-pass.ts` executes §10's whole sequence diagram as one
+testable cycle with everything injected (no Drive, no routes file — the
+parallel session is actively landing there; real wiring = explicit S2c):
+load remote manifest (an UNOPENABLE one halts before anything is claimed)
+→ S1 journal drain (the reader must agree with its own row's
+objectId/rev/checksum or the change retries — never publish bytes the
+manifest would misdescribe) → S2a pack → upload under the canonical name
+→ per-push local-manifest commit (a crash mid-pass re-pushes by name
+instead of losing state) → merged remote publish with the opaque guard
+passed through untouched → S2a reconcile → download → verify (rev +
+checksum + tombstone equal the entry that named the file) → applier →
+local commit. Pull ignores reconcile's upload side (the journal owns
+push); equal-rev/different-checksum conflicts are reported with no side
+picked and nothing downloaded; publish failure keeps the uploaded objects
+and reports the error for the next idempotent pass.
+
+**Gates:** red 1 file → 15/16 → **16/16**; oxlint 2 files **0/0**
+(`errorText(error: unknown)` param tripped `no-unknown-parameters` —
+inlined at all three catch sites, no suppressions); server tsc **exit
+0**; full suite **335 files / 4988 passed / 8 skipped / 0 failed**
+(481.65s = 4972 + exactly these 16, no decrease). **Not claimed:** real
+transport, producers, running drainer, security attestation. Owner
+directive queued next: desktop wave (non-vitest legs of `npm test`) +
+iOS TESTING.md Stages 1/3 (host swift test, SIMULATOR xcodebuild — never
+a device; iPhone/Tailscale stages owner-held). Next per §38: S2c wiring.
 
 # Current Muster state — read before editing
 
