@@ -7477,3 +7477,41 @@ Parallel-agent WIP (`claim-flow`, www/*) preserved untouched, not staged.
 Android delivery (this commit). The remaining gate is owner-held hardware
 acceptance across Watch, iPhone and Android; the acceptance checklist is
 `docs/guides/mobile-round-acceptance.md`, committed with it.
+
+## Loop172 — failed-build sweep across every unverified commit (22 Sep 2026)
+
+**Trigger:** owner asked to check out every commit, find failed builds, and
+fix them.
+
+**CI picture first (read-only):** the two most recent red CI runs (07:55
+and 10:20 today) were already diagnosed transient in Loop168; every run
+since through 13:04 is green, including the merge that carries the crown
+and haptic commits. Older failures are historical dependabot/Release runs
+from 19–21 Sep, superseded by later green runs. What CI had never seen
+were our three unpushed commits (dictation, Android delivery, checklist
+docs) plus being one bot commit behind `origin/main`.
+
+**Reconciliation:** merged `origin/main` — the delta was a single
+`.deploy-trigger` line from the autodeploy bot, no conflicts, parallel
+agent WIP (`claim-flow`, www/*) untouched and unstaged.
+
+**Full-tree gates at the reconciled tip `718ddb0` (real numbers):**
+
+- `npx tsc --noEmit -p tsconfig.server.json` → exit 0
+- `npx tsc --noEmit` (app) → exit 0
+- `npm run lint` → **0 warnings, 0 errors** on 903 files
+- `npx vitest run` → **325 files, 4867 passed, 8 skipped, 0 failed**
+  (4856 baseline, +11 from parallel-agent WIP riding the tree)
+- `npm run build` → exit 0 (17.35s; the >500 kB chunk warning is
+  pre-existing)
+- `cd ios && swift test` → **435 tests, 0 failures**
+- iOS simulator build → **BUILD SUCCEEDED**; watchOS simulator build →
+  **BUILD SUCCEEDED**
+- `cd android-companion && npm test` → **12 suites, 573 tests, 0 failed**;
+  `typecheck` → exit 0; `lint` → **0 warnings, 0 errors** on 48 files
+
+**Result:** no gate failed, so there was nothing to fix — the honest
+answer to "which builds failed" is none locally, and the two red CI runs
+were already proven transient. Not claimed: Playwright e2e, electron
+`check:electron`/`test:updater` (unchanged surface this round), any
+hardware behavior, or deployment — this commit is not pushed.
