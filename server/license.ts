@@ -4,7 +4,8 @@
 // 1. The trial is a FEATURE unlock, never a token grant — no key needed.
 // 2. A license is an Ed25519-signed JSON; verified offline, 7-day grace.
 // 3. Backup restore is NEVER gated. Data escape hatch always open.
-// 4. Pure logic here: the store persists state, callers enforce caps.
+// 4. Pure logic here: the store persists state; callers act on it. There is
+//    no Free-tier cap left to enforce — bots and vault files are unlimited.
 
 import { join } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -19,8 +20,6 @@ export interface LicensePayload {
   licensee?: string;
 }
 
-export const FREE_BOT_CAP = 2;
-export const FREE_VAULT_FILE_CAP = 1_000;
 export const TRIAL_DAYS = 14;
 
 export interface TierState {
@@ -58,24 +57,14 @@ export function resolveTier(input: {
   }
   const trialActive = Date.parse(now) < Date.parse(trialEndsAt);
   // During the trial the user gets Pro features; after it lapses without a
-  // license they fall back to Free — watermark on, caps on, data intact.
+  // license they fall back to Free — data intact, and no part of the app is
+  // capped: the roster and the vault stay unlimited either way.
   return { tier: trialActive ? "pro" : "free", trialActive, trialEndsAt, bonusDays: bonus };
 }
 
 /** Effective tier for enforcement: identical to resolveTier's tier field. */
 export function effectiveTier(state: TierState): Tier {
   return state.tier;
-}
-
-export function canAddBot(currentBots: number, tier: Tier): boolean {
-  if (tier === "pro") return true;
-  return currentBots < FREE_BOT_CAP;
-}
-
-export function vaultFileAllowed(currentFiles: number, tier: Tier): boolean {
-  if (tier === "pro") return true;
-  // Restores are never gated — only new uploads count against the cap.
-  return currentFiles < FREE_VAULT_FILE_CAP;
 }
 
 // ── persistence ─────────────────────────────────────────────────────────

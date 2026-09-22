@@ -308,7 +308,7 @@ import {
   REFERRAL_INVITER_DAYS,
   type ShareToken,
 } from "./viral.ts";
-import { canAddBot, FREE_BOT_CAP, grantBonusProDays, loadTierFile, vaultFileAllowed, type TierState } from "./license.ts";
+import { grantBonusProDays, loadTierFile, type TierState } from "./license.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { readTeamContext, teamContextSystemPrompt, writeTeamContext } from "./team-context.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
@@ -2185,8 +2185,8 @@ async function startTurn(
       fail(Object.assign(
         new Error(
           engineOwner
-            ? "this bot points at another user's engine — choose one of yours under Settings → Providers"
-            : "power this bot with your own model key: Settings → Providers → add a key (Anthropic, OpenAI, DeepSeek, OpenRouter, …), then send again",
+            ? "This bot points at another user's engine — choose one of your own under Settings → Providers, then send again."
+            : "This bot has no model key of your own to run on — add one under Settings → Providers (Anthropic, OpenAI, DeepSeek, OpenRouter, …), then send again.",
         ),
         { status: 403 },
       ));
@@ -5558,8 +5558,9 @@ let requestUserEmail = "";
     // Proactivity layer step one: a deterministic "what needs me today"
     // composer over roster + vault state. The scheduler and any bot can
     // call it; the format is pinned by server/briefing.test.ts.
-    // Tier & trial — the client reads this for the watermark badge and the
-    // upgrade nudges. Caps are enforced server-side at the action sites.
+    // Tier & trial — the client reads this for trial state and its end date.
+    // The roster and the vault are unlimited, so no cap is enforced at the
+    // action sites and none is reported here.
     // Wrapped — weekly fleet review, shareable (public /w/<token> page).
     const currentWrappedCard = () => {
       // Multi-tenant: the week review (and its public share page) is built
@@ -5764,8 +5765,6 @@ let requestUserEmail = "";
         tier: state.tier,
         trialActive: state.trialActive,
         trialEndsAt: state.trialEndsAt,
-        freeBotCap: FREE_BOT_CAP,
-        watermark: state.tier === "free",
       });
     }
 
@@ -6242,14 +6241,8 @@ let requestUserEmail = "";
       if (!isText(body.localPath) || !isText(body.vaultPath)) {
         return json(res, 400, { error: "localPath and vaultPath are required" });
       }
-      // Tier gate: Free caps new uploads at 1k files. Restores stay open
-      // always — the data escape hatch is never gated (license.ts rule 3).
-      if (!vaultFileAllowed(vault.status().fileCount, tierState().tier)) {
-        return json(res, 402, {
-          error: "Muster Free caps vault uploads at 1,000 files. Upgrade to Pro for unlimited backups — restoring your existing files always stays free.",
-          code: "TIER_VAULT_CAP",
-        });
-      }
+      // No tier gate: uploads are unlimited (license.ts rule 3 still holds —
+      // restores are never gated either).
       const result = await vault.backup(body.localPath, body.vaultPath);
       return json(res, 200, result);
     }
@@ -7094,13 +7087,8 @@ let requestUserEmail = "";
           code: "STORAGE_GATE_REQUIRED",
         });
       }
-      // Tier gate: Free caps the roster at 2 bots (trial and licenses lift it).
-      if (!canAddBot(store.bots.length, tierState().tier)) {
-        return json(res, 402, {
-          error: `Muster Free includes ${FREE_BOT_CAP} teammates. Upgrade to Pro for unlimited bots — your existing bots are untouched.`,
-          code: "TIER_BOT_CAP",
-        });
-      }
+      // No tier gate: the roster is unlimited, so creation proceeds as long
+      // as the storage-sovereignty gate above is satisfied.
       const bot = store.createBot(requestUserId ? { ownerId: requestUserId } : {});
       store.patchBot(bot.id, { modelSelection: await defaultSelection(requestUserId) });
       return json(res, 201, {

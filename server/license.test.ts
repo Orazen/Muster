@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
+import * as license from "./license.js";
 import {
-  canAddBot,
   effectiveTier,
-  FREE_BOT_CAP,
   resolveTier,
-  vaultFileAllowed,
   type LicensePayload,
 } from "./license.js";
 
@@ -47,16 +45,26 @@ describe("resolveTier", () => {
   });
 });
 
-describe("caps", () => {
-  it("free tier caps the roster at 2 bots; pro unlimited", () => {
-    expect(canAddBot(1, "free")).toBe(true);
-    expect(canAddBot(FREE_BOT_CAP, "free")).toBe(false);
-    expect(canAddBot(500, "pro")).toBe(true);
+describe("unlimited — the app has no Free caps", () => {
+  it("exports no roster cap, no vault-file cap, and no guard for either", () => {
+    // FREE_BOT_CAP / FREE_VAULT_FILE_CAP and their guards (canAddBot,
+    // vaultFileAllowed) were deleted: bots and vault files are unlimited on
+    // every tier. This pins that contract at the module surface — the app is
+    // free, so no tier can ever refuse a teammate or an upload.
+    for (const name of ["FREE_BOT_CAP", "FREE_VAULT_FILE_CAP", "canAddBot", "vaultFileAllowed"]) {
+      expect(license).not.toHaveProperty(name);
+    }
   });
 
-  it("vault upload cap applies on free; restore never gated by design", () => {
-    expect(vaultFileAllowed(999, "free")).toBe(true);
-    expect(vaultFileAllowed(1_000, "free")).toBe(false);
-    expect(vaultFileAllowed(50_000, "pro")).toBe(true);
+  it("tier state carries only trial fields, never a cap field", () => {
+    const lapsed = resolveTier({
+      firstLaunchAt: LAUNCH,
+      now: new Date(Date.parse(LAUNCH) + 20 * DAY).toISOString(),
+    });
+    expect(Object.keys(lapsed).sort()).toEqual(["bonusDays", "tier", "trialActive", "trialEndsAt"]);
+    // A lapsed trial still reports free — with nothing left for it to cap.
+    expect(effectiveTier(lapsed)).toBe("free");
+    const active = resolveTier({ firstLaunchAt: LAUNCH, now: new Date(Date.parse(LAUNCH) + DAY).toISOString() });
+    expect(Object.keys(active).sort()).toEqual(["bonusDays", "tier", "trialActive", "trialEndsAt"]);
   });
 });

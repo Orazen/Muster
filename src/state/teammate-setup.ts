@@ -4,7 +4,7 @@
  * The old inline finish() POSTed a brand-new bot unconditionally, but every
  * fresh account already carries the seeded greeting bot (seedIfEmpty), so
  * finishing planted a duplicate teammate on the roster. It also never checked
- * response bodies: a 402 TIER_BOT_CAP parsed into `created.bot === undefined`
+ * response bodies: a rejected create parsed into `created.bot === undefined`
  * and either dispatched a garbage bot or threw inside a bare catch. This
  * module makes the reuse-or-create decision explicit and throws on any
  * response that lacks a usable bot, so the caller can show recovery instead

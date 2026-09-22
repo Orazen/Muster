@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Brain, Building2, Coins, CreditCard, Download, FlaskConical, KeyRound, Monitor, Network, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
+import { Brain, Building2, Coins, Download, FlaskConical, KeyRound, Monitor, Network, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { clearOnboardingGate } from "@/lib/analytics";
 import { useAuth } from "@/lib/auth";
@@ -22,7 +22,6 @@ import { InviteSection } from "./InviteSection";
 import { ProviderHealthSection } from "./ProviderHealthSection";
 import { VaultSection } from "./VaultSection";
 import { ManageDevicesCard } from "./ManageDevicesCard";
-import { BillingSection } from "./BillingSection";
 import { VoiceSettings } from "./VoiceSettings";
 import { ProvidersSection } from "./ProvidersSection";
 import { ConnectedWorkspacesSection } from "./ConnectedWorkspacesSection";
@@ -50,7 +49,6 @@ const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User
   { id: "voice", label: "Voice", icon: Volume2, keywords: ["tts", "speech", "elevenlabs", "speak"] },
   { id: "usage", label: "Usage", icon: Coins, keywords: ["tokens", "cost", "spend", "history"] },
   { id: "vault", label: "Vault", icon: Vault, keywords: ["backup", "restore", "telegram", "google", "vaultgram"] },
-  { id: "billing", label: "Billing", icon: CreditCard, keywords: ["subscription", "payment", "plan", "invoice"] },
 ];
 
 /** Live filter for the section nav. The label and a handful of aliases both
@@ -856,7 +854,7 @@ export function SettingsModal() {
             {section === "providers" && (
               <Card
                 title="Provider API keys"
-                subtitle="Paste a key for any provider — they're stored locally and never leave this machine."
+                subtitle="Paste a key for any provider — each entry becomes an engine your bots pick from in their model selector."
               >
                 <ProvidersSection />
               </Card>
@@ -893,8 +891,6 @@ export function SettingsModal() {
                 <WhyPanel botId={audit.botId} />
               </Card>
             )}
-
-            {section === "billing" && <BillingSection />}
           </div>
         </div>
       </div>

@@ -74,6 +74,10 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
     const companionDirectory = join(root, "companion");
     for (const path of [data, home, companionDirectory]) mkdirSync(path, { recursive: true, mode: 0o700 });
     writeFileSync(join(data, "config.json"), JSON.stringify({ profile: { name: "Operator private profile" }, instances: { ghost: { driver: "not-a-real-driver", displayName: "Offline owner fixture" } } }));
+    // Lapsed trial, no license: this fixture runs on the FREE tier, so every
+    // roster write below also proves the app is free — creation is never
+    // refused with the old TIER_BOT_CAP 402.
+    writeFileSync(join(data, "license.json"), JSON.stringify({ firstLaunchAt: new Date(Date.now() - 30 * 86_400_000).toISOString(), license: null }));
     const operatorId = randomUUID();
     // A legacy unowned record is valid input data, not an authenticated user.
     const operator = { id: operatorId, threadId: randomUUID(), name: `${kind} operator bot`, description: `private-${kind}-operator`, title: "Operator only", color: "orange", notifications: true, unread: false, modelSelection: { instanceId: "ghost", model: "" }, resumeCursors: {}, createdAt: Date.now() };
@@ -155,6 +159,17 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
     }
   });
 
+  it("adds teammates on the free tier — the roster has no cap", async () => {
+    // The fixture's trial has lapsed (tier "free"): the old FREE_BOT_CAP=2
+    // would answer 402 here, so a 201 pins the removed cap end to end.
+    const response = await request(hosted, "/api/bots", "POST", {}, alice);
+    expect(response.status).toBe(201);
+    const { bot } = z.object({ bot: botSchema }).parse(await response.json());
+    // The wire shape strips ownerId (wireBot), so ownership is checked
+    // against the persisted rows the way every other roster assertion does.
+    expect(owned(alice).map((entry) => entry.id)).toContain(bot.id);
+  });
+
   it("engine guard: a non-primary bot refuses on foreign engines with an actionable path, and rides its own vault instance", async () => {
     const bot = alice.bots[0];
     // Fresh account, no vault keys: the bot's selection is not a
@@ -163,7 +178,9 @@ describe.skipIf(process.platform === "win32")("team owner boundaries over real H
     // dead-end that stranded users who had already brought their keys.
     const denied = await request(hosted, `/api/bots/${bot.id}/messages`, "POST", { text: "hello" }, alice);
     expect(denied.status).toBe(403);
-    expect(z.object({ error: z.string() }).parse(await denied.json()).error).toContain("power this bot with your own model key");
+    expect(z.object({ error: z.string() }).parse(await denied.json()).error).toContain(
+      "This bot has no model key of your own to run on — add one under Settings → Providers (Anthropic, OpenAI, DeepSeek, OpenRouter, …), then send again.",
+    );
     // Pointing at ANOTHER user's vault instance refuses with the
     // isolation note, not the setup note.
     await request(hosted, `/api/bots/${bot.id}`, "PATCH", { modelSelection: { instanceId: `deepseekApi:${bob.id}`, model: "x" } }, alice);
