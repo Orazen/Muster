@@ -8,7 +8,7 @@ const step = (workflow, job, fragment) => workflow.jobs[job].steps.find((entry) 
 
 describe('release control decision matrix', () => {
   it('permits real complete publication while rejecting dry, draft, prerelease and failed states', () => {
-    expect(verifyReleaseWorkflow(original)).toEqual({ platformUploads: 4, mutationSteps: 8 });
+    expect(verifyReleaseWorkflow(original)).toEqual({ platformUploads: 4, mutationSteps: 9 });
   });
 
   it.each(['macos', 'macos-x64', 'windows', 'linux'])('catches an unguarded %s upload', (platform) => {
@@ -66,6 +66,9 @@ describe('release control decision matrix', () => {
     ['unsafe manual default', (w) => { w.on.workflow_dispatch.inputs.dry_run.default = false; }],
     ['incorrect Intel runner', (w) => { w.jobs['macos-x64']['runs-on'] = 'macos-latest'; }],
     ['dry-run Apple submission', (w) => { step(w, 'macos', 'notarytool submit').if = "${{ env.APPLE_ID != '' }}"; }],
+    ['Intel notarization despite missing credentials', (w) => { delete step(w, 'macos-x64', 'notarytool submit').if; }],
+    ['Intel notarization ignoring the certificate state', (w) => { const s = step(w, 'macos-x64', 'notarytool submit'); s.if = s.if.replace(" && env.APPLE_CERTIFICATE != ''", ''); }],
+    ['Intel checksums before stapling', (w) => { const all = w.jobs['macos-x64'].steps; const index = all.findIndex((s) => /shasum -a 256/.test(s.run ?? '')); all.splice(1, 0, ...all.splice(index, 1)); }],
     ['publication after failed prepare', (w) => { w.jobs.publish.if = w.jobs.publish.if.replace("needs.prepare.result == 'success' && ", ''); }],
     ['draft mirror promotion', (w) => { w.jobs['deploy-downloads'].if = "${{ !cancelled() && needs.prepare.outputs.dry_run == 'false' && needs.publish.result == 'success' }}"; }],
     ['prerelease mirror promotion', (w) => { w.jobs.publish.outputs.published = "${{ steps.release.outcome == 'success' && steps.draft.outputs.value == 'false' }}"; }],

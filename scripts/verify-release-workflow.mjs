@@ -140,6 +140,7 @@ export function verifyReleaseWorkflow(workflow) {
   check(shell(cliUpload).includes('"release/Muster-${RELEASE_VERSION}-cli.mjs" release/muster-cli.mjs release/SHA256SUMS-cli.txt'),
     'Mac upload must include both exact CLI filenames and dedicated checksums');
   const notarize = one(jobs.macos, (step) => /notarytool submit/.test(shell(step)));
+  const intelNotarize = one(jobs['macos-x64'], (step) => /notarytool submit/.test(shell(step)));
   const gatekeeper = one(jobs.macos, (step) => /spctl --assess/.test(shell(step)));
   check(notarize.id === 'notarize' && notarize['continue-on-error'] === undefined && gatekeeper['continue-on-error'] === undefined &&
     steps(jobs.macos).indexOf(gatekeeper) > steps(jobs.macos).indexOf(notarize),
@@ -162,6 +163,15 @@ export function verifyReleaseWorkflow(workflow) {
         (success && dry === 'false' && credentials), 'Notarization must not submit from a dry or failed run');
     }
   }
+  check(evaluateGuard(intelNotarize.if, { success: true, env: Object.fromEntries(['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_CONTENT', 'APPLE_CERTIFICATE'].map((key) => [key, 'present'])), needs: { prepare: { outputs: { dry_run: 'false' } } } }) === true,
+    'Intel notarization must submit only with credentials from a non-dry run');
+  check(evaluateGuard(intelNotarize.if, { success: true, env: { ASC_KEY_ID: '' }, needs: { prepare: { outputs: { dry_run: 'false' } } } }) === false,
+    'Intel notarization must skip when the ASC key is missing');
+  check(evaluateGuard(intelNotarize.if, { success: true, env: { ASC_KEY_ID: 'present', ASC_ISSUER_ID: 'present', ASC_KEY_CONTENT: 'present', APPLE_CERTIFICATE: '' }, needs: { prepare: { outputs: { dry_run: 'false' } } } }) === false,
+    'Intel notarization must refuse an unsigned build');
+  const intelChecksums = one(jobs['macos-x64'], (step) => /shasum -a 256/.test(shell(step)));
+  check(steps(jobs['macos-x64']).indexOf(intelChecksums) > steps(jobs['macos-x64']).indexOf(intelNotarize),
+    'Intel checksums must follow stapling (stapling rewrites the dmg bytes)');
   const publish = jobs.publish;
   const mirror = jobs['deploy-downloads'];
   const release = one(publish, (step) => String(step.uses ?? '').startsWith('softprops/action-gh-release@'));
@@ -214,7 +224,7 @@ export function verifyReleaseWorkflow(workflow) {
   const mirrorPayload = one(mirror, (step) => shell(step) === 'node scripts/release-payload.mjs mirror');
   const download = one(mirror, (step) => step.id === 'download');
   const deploy = one(mirror, (step) => /rsync /.test(shell(step)));
-  const knownMutations = new Set([staging, ...uploads, notarize, release, deploy]);
+  const knownMutations = new Set([staging, ...uploads, notarize, intelNotarize, release, deploy]);
   const mutationSteps = allSteps.filter((step) => /gh\s+release\s+(create|upload|edit|delete)|release-state\.mjs prepare|notarytool submit|\brsync\b|\bssh\b/.test(shell(step)) ||
     String(step.uses ?? '').startsWith('softprops/action-gh-release@'));
   check(mutationSteps.length === knownMutations.size && mutationSteps.every((step) => knownMutations.has(step)),

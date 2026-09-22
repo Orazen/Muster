@@ -279,6 +279,23 @@ jobs:
             echo "::error::cua-driver lacks arm64 slice"; exit 1; }
           node scripts/release-native-smoke.mjs --platform darwin --arch arm64
 
+      # Credential preflight: prove the ASC key authenticates BEFORE spending
+      # the build. A bad key otherwise surfaces as notarytool's 401 after the
+      # full package step (the v1.15.0 first cut burned 17 minutes learning
+      # this). history is a read-only call — no submissions are touched.
+      - name: "Gate: notarytool credentials must authenticate"
+        if: ${{ success() && needs.prepare.outputs.dry_run == 'false' && env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.ASC_KEY_CONTENT != '' }}
+        run: |
+          set -euo pipefail
+          ASC_KEY_PATH="$RUNNER_TEMP/asc-notary.p8"
+          printf '%s\n' "$ASC_KEY_CONTENT" > "$ASC_KEY_PATH"
+          chmod 600 "$ASC_KEY_PATH"
+          xcrun notarytool history \
+            --key "$ASC_KEY_PATH" \
+            --key-id "$ASC_KEY_ID" \
+            --issuer "$ASC_ISSUER_ID" > /dev/null
+          echo "ASC key $ASC_KEY_ID authenticated."
+
       # Notarization (optional — skipped if secrets are not set)
       - name: Notarize and staple
         id: notarize
@@ -381,8 +398,9 @@ jobs:
           gh release upload "v$RELEASE_VERSION" release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml release/SHA256SUMS-macos-arm64.txt "release/Muster-${RELEASE_VERSION}-cli.mjs" release/muster-cli.mjs release/SHA256SUMS-cli.txt --clobber
 
   # ── macOS (Intel / x64) ───────────────────────────────────────────────────
-  # Unsigned direct download only, by policy: no Developer ID cert is applied
-  # here, and it deliberately does NOT touch latest-mac.yml — that feed drives
+  # Signed and notarized when the APPLE_CERTIFICATE*/ASC_* secrets are set
+  # (same credential set as the arm64 leg); fully unsigned otherwise. Like the
+  # arm64 leg it deliberately does NOT touch latest-mac.yml — that feed drives
   # arm64 auto-update, and merging a second architecture into it needs its own
   # verification pass so it can't silently break the update channel that
   # already works.
@@ -391,6 +409,20 @@ jobs:
     needs: prepare
     runs-on: macos-15-intel
     timeout-minutes: 60
+    # Same credential set as the arm64 leg: with the Developer ID cert and the
+    # ASC key present the Intel dmg/zip ships signed AND notarized, closing the
+    # standing gatekeeper gap where every prior Intel artifact was stapled by
+    # hand. Without the secrets the build stays fully unsigned (CSC_IDENTITY_
+    # AUTO_DISCOVERY=false) exactly as before, and scripts/notarize-draft-dmg.sh
+    # remains the manual fallback.
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -413,9 +445,36 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf dist dist-server dist-companion dist-native release
+      - name: Import Apple certificate
+        if: ${{ env.APPLE_CERTIFICATE != '' }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          rm "$CERT_PATH"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      # electron-builder auto-discovers keychain identities by default. On a
+      # bare runner (no APPLE_CERTIFICATE imported) that produces a broken
+      # partial/ad-hoc signature — hardenedRuntime+entitlements need a real
+      # identity, and without one the result is a *worse* state than fully
+      # unsigned: Gatekeeper reports the app as damaged. Force a clean, fully
+      # unsigned build when there's no real cert.
       - name: Build (macOS x64)
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.APPLE_CERTIFICATE != '' && 'true' || 'false' }}
+          MAC_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
         run: pnpm package:mac:x64
 
       - name: "Gate: actual packaged Electron storage and server"
@@ -428,6 +487,45 @@ jobs:
             echo "::error::cua-driver lacks x86_64 slice"; exit 1; }
           node scripts/release-native-smoke.mjs --platform darwin --arch x64
 
+      # Notarization for the Intel dmg/zip, same credential set as the arm64
+      # leg. (Historically this leg never notarized — every Intel dmg to date
+      # was stapled by hand from the release Mac; scripts/notarize-draft-dmg.sh
+      # remains as the fallback when ASC secrets are unset.) The signature
+      # gate mirrors the arm64 leg's pre-notarize check.
+      - name: "Gate: signature must verify BEFORE notarization"
+        if: ${{ success() && needs.prepare.outputs.dry_run == 'false' && env.APPLE_CERTIFICATE != '' && env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.ASC_KEY_CONTENT != '' }}
+        run: |
+          set -euo pipefail
+          APP=release/mac/Muster.app
+          codesign --verify --deep --strict "$APP"
+          AUTHORITY=$(codesign -dv --verbose=4 "$APP" 2>&1 | awk -F= '/^Authority=Developer ID Application/ {print $2; exit}')
+          [ -n "$AUTHORITY" ] || { echo "::error::no Developer ID Application authority — refusing to notarize"; exit 1; }
+
+      - name: Notarize and staple (Intel)
+        if: ${{ success() && needs.prepare.outputs.dry_run == 'false' && env.APPLE_CERTIFICATE != '' && env.ASC_KEY_ID != '' && env.ASC_ISSUER_ID != '' && env.ASC_KEY_CONTENT != '' }}
+        run: |
+          set -euo pipefail
+          ASC_KEY_PATH="$RUNNER_TEMP/asc-notary.p8"
+          printf '%s\n' "$ASC_KEY_CONTENT" > "$ASC_KEY_PATH"
+          chmod 600 "$ASC_KEY_PATH"
+          for f in release/*.dmg release/*.zip; do
+            [ -e "$f" ] || continue
+            if ! out=$(xcrun notarytool submit "$f" \
+              --key "$ASC_KEY_PATH" \
+              --key-id "$ASC_KEY_ID" \
+              --issuer "$ASC_ISSUER_ID" \
+              --wait 2>&1); then
+              echo "$out"
+              echo "::error::notarytool submit failed for $f"; exit 1
+            fi
+            echo "$out" | grep -q "status: Accepted" || {
+              echo "::error::notarization not Accepted for $f"; exit 1; }
+            xcrun stapler staple "$f"
+            xcrun stapler validate "$f"
+          done
+
+      # Checksums come LAST: stapling rewrites the dmg/zip bytes (the arm64
+      # leg documents the same ordering constraint).
       - name: Stable-named copy and checksums
         run: |
           set -euo pipefail
