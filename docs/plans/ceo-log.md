@@ -8407,3 +8407,23 @@ that no longer exists — every test file "failed" as a suite-load error. A
 second agent also regenerated build/icon.ico at 21:46 with a DIB artifact and
 no in-repo producer. Re-run the suite only with a tree-hash guard, and prefer
 the repo's own generator as the artifact's source of truth.
+
+**Loop186 addendum — verdicts pinned.** CI is **success** on both commits
+(`9028336` the icon fix, `b630e9f` this entry) and on the six consecutive runs
+before them (16:44 `729e8e6`, 17:39 `bab7148`/`65062cf`, 18:49 `9c08df1`), so
+the tree is green on the tip. Correcting Loop185's flake verdict:
+`server/workspace-auth-harness.test.ts` has now failed **twice**, not once —
+CI at 14:46 on `275dd78` (14 tests, `retry x2`, i.e. vitest retried and they
+still failed) and again in this loop's local full run (14 tests) taken while a
+parallel agent's own full suite was running. The assertion is
+`expect(existsSync(shared.networkLog)).toBe(false)` (line 789): the file the
+outbound block writes when it stops a call exists, so something reached for the
+network. It passes focused **139/139 twice** and in every CI run since 16:44,
+which makes it load/ordering-sensitive rather than dead — still not a fixture
+artifact to wave away, and it sits inside the workspace-backup/auth area a
+parallel agent is actively editing (uncommitted WIP in
+`server/workspace-backup-routes.ts`, `server/workspace-bundle-v2.ts`, plus an
+`s3-gate` suite run), so this loop deliberately left it alone rather than edit
+another agent's live files. Next agent: reproduce it by running the full suite
+concurrently with load, and read the networkLog contents (which call the
+outbound block stopped) before guessing.
