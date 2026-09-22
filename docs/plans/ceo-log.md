@@ -7548,3 +7548,30 @@ class as the 20 Sep gate report's load notes (the sweep ran at load 10-16).
 Not tied to this slice: the slice touches only the browser claim-fragment
 parser; the failure is a server harness socket reset. If it recurs, retain
 evidence (/tmp/muster-full-2.log) before any retry loop.
+## Loop173 — final build reconciliation over the full Sep-22 commit list (22 Sep 2026)
+
+Scope: GET-only sweep over every commit the owner listed; every executed run
+now shows a verdict. The last two pending runs completed green this loop:
+CI **success** on `c5ea54a` (claim carry shapes) and on `d61054a` (reconciled
+sweep), autodeploys success. These runs contain ALL of today's source changes
+— claim carry shapes, snapshot restore picker, Watch haptic planner, Phone
+composer dictation, Android deep-link + QR pairing, connected-apps docs — so
+every change is covered green.
+
+Verdict table, full Sep-22 list:
+- CI + autodeploy success (executed): `33ca784`, `4b8b228`, `693bba3`,
+  `0d551d9`, `693bba3` neighbors, `299800c` (merge over snapshot picker +
+  haptic planner), `d61054a`, `c5ea54a`, plus the trigger neighbors
+  (`a5c2347`, `6d3c99c`, `71e1691`, `a8b57b3`, `e5d3dc0`, `3651de`).
+- Superseded queues (pushed seconds apart, zero rows — GitHub starts one run
+  per workflow per ref; later pushes discard pending queues, per orientation
+  §10): `0b989cf`, `0ded86d` (covered through `299800c`), `96650eb`, `bb5f858`,
+  `8ffbb69` (covered through `718ddb0` → `d61054a`/`c5ea54a`).
+- Failures, both pinned STALE on the tip (Loop168): `ad7999d` test job
+  (team-ownership export tests) fixed by `2da741d`, focused **27/27**;
+  `13f96fd` typecheck TS2307 + desktop-auth 21/21 fixed when
+  `server/workspace-skills.ts` landed, focused **21/21**.
+
+No open failure remains on `main`; no workflow touched; automation left
+paused. Owner gates unchanged (Actions billing legs, `APPLE_CERTIFICATE`,
+VPS SSH, Apple review, physical-device acceptance).
