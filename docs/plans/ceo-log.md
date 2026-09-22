@@ -7241,3 +7241,27 @@ Not claimed: release, signing, notarization, mirror promotion, production
 rollout. Releases remain the release agent's surface; owner gates (Actions
 billing for Windows/Linux legs, `APPLE_CERTIFICATE`, VPS SSH, Apple review,
 physical-device acceptance) unchanged. Existing automation left paused.
+## Loop168 — failed-build audit on `main` (22 Sep 2026)
+
+Scope: GET-only audit of every executed GitHub run on `main`; no workflow or
+product code touched. Every run that executed now shows a verdict — no open
+failure remains on `main`.
+
+| Commit | Run | Verdict | Follow-up |
+| --- | --- | --- | --- |
+| `0d551d9` (Loop167 receipts) | CI + autodeploy | success/success | pinned this loop (CI 7-min wait) |
+| `33ca784`, `4b8b228`, `c1cc347`, `c58eed9`, `ada7881`, `ef7c001` | CI + autodeploy | success | — |
+| `ad7999d` | CI failure (10:20Z) | test job only: `server/team-ownership-harness.test.ts` 4 failed (export-visibility tests, retry x2) | stale — `2da7416` ("parse the JSON export format explicitly") landed after; focused re-run on tip: **27/27** |
+| `13f96fd` (09:55Z merge) | CI failure (typecheck + test) | `server/index.ts(254,97): TS2307 Cannot find module './workspace-skills.ts'` + `server/desktop-auth-route.test.ts` 21/21 failed (harness could not boot the missing-file module graph) | stale — transient mid-development merge referencing skills before the file existed; `server/workspace-skills.ts` is on `main`; focused re-run: **21/21** |
+
+No-rows commits (`e4ccd99`, `03da806`, `2da7416`, `36518de`): superseded queued
+runs — GitHub starts one run per workflow per ref, and pushes seconds later
+discarded the pending queues. Expected dedupe, not hidden failures. Judge
+main's CI only by runs that executed (per AGENT-ORIENTATION.md §10).
+
+Also observed this loop: uncommitted parallel-agent WIP in the checkout
+(Drives-loop test/spec edits, www edits) is included in the tested tree by
+convention, but never staged or claimed; the morning handoff's autodeploy
+failure (`35469518670` at "Bump .deploy-trigger") predates the successful
+autodeploy chain visible on every executed run since `36d0e6d` — no trigger
+defect reproduced on current runs. Automation left paused.
