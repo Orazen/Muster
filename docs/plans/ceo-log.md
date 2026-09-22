@@ -8001,3 +8001,53 @@ script updated the download-page badge). Gates at the candidate: tsc
 (app+server) 0; oxlint 0/0 on 916 files; vitest 332 files / 4,934 passed
 / 0 failed (one ECONNRESET flake re-run green twice); Playwright e2e
 42/42; UI build green.
+
+## Loop179 — S1: the change journal (queue-of-latest-rev, rev-guarded) (22 Sep 2026)
+
+**Trigger:** §38 order after S0; DESIGN §10 Phase S1 ("local change →
+append {objectId, rev, checksum}; drain queue (debounced, retry,
+idempotent)"). The audit fixed the shape before any code: this is NOT an
+append log but a QUEUE OF THE LATEST REV per object — the upload unit
+§10 names is `muster-<object>-<rev>.enc`, so only the newest rev is ever
+worth sending, and stacking superseded revs behind it would upload work
+the next change already replaced.
+
+**The edges the module exists for, each pinned by a test:** a change
+arriving while its row is in flight re-pends the row at the new rev, and
+the old upload's completion (success OR failure) becomes a rev-guarded
+no-op instead of clobbering newer work; a process death mid-flight is
+reclaimed after the stale window AS A COUNTED ATTEMPT (dead-letter at 12,
+never silently dropped, revived by a fresh rev); failures back off
+exponentially 5s→5min; re-notifying the same change is a duplicate
+no-op; an out-of-order rev or a same-rev checksum that disagrees is
+refused as "stale" — a version without content identity is a bug, not a
+change. The debounced drainer (notify-coalesced, flush, stop-inert) ships
+now with an INJECTED transport so S2 wires upload without touching queue
+semantics.
+
+**K1-precedent scoping, stated in the file and the board:** producers
+(which local writes enqueue — workspace.ts is file-based, so the enqueue
+hook's db handle is an S2b decision at the write choke points) and the
+Drive transport + drainer start arrive with S2's object model.
+
+**Gates (real numbers):** red **1 file failed** (module absent) → **17/17**;
+oxlint on the 2 touched files **0/0** — first pass had 9 errors, all from
+MY four SQL-result casts (`as Record<...unknown>` tripped both
+anti-slop rules); fixed structurally by following the house pattern
+already in devices.ts and calendar-device-grants.ts — rows feed
+`zod.parse` directly, zero assertions, zero suppressions — plus a typed
+zero-value initializer in the test instead of `as`; server tsc **exit 0**
+(no src/ changes, so no app build gate applies). Full suite **333 files /
+4951 passed / 8 skipped / 0 failed** (448.66s) = Loop178's 4934 + exactly
+this slice's 17, no decrease; run twice (the first overlapped the
+parallel session's `aff3fc3` landing/push by 32s at collection) with
+IDENTICAL totals, and `container-computer.test.ts` — whose +7 tests the
+parallel session committed in `aff3fc3` — passes 54/54 alone: their test
+edits were already in-tree through Loop176–178 (the +11/+15/+17 deltas
+are exactly U/K1, S0, S1), so the baseline already carried them. Repo
+events this loop: parallel WIP committed as `aff3fc3`, CI's autodeploy
+trigger fast-forwarded to `224df9b` (no overlap with my files).
+
+**Not claimed:** any producer wired, any transport, a running drain, or a
+security attestation (scanner re-run still owed). In flight at loop end:
+S2a, the per-object envelope + encrypted manifest (red test in place).

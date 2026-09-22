@@ -327,6 +327,35 @@ hardware identity, key-envelope production, security attestation,
 screenshot verification of the card. Next per §38: S1 the change journal
 (DESIGN §10).
 
+### S1 change journal: queue-of-latest-rev (22 September 2026, Loop179)
+
+S1 is the local change queue §10's diagram starts from — deliberately a
+**queue of the latest rev per object**, not an append log: the upload unit is
+`muster-<object>-<rev>.enc`, so only the newest rev is worth sending.
+`server/sync-journal.ts` (module-owned `sync_journal` table): enqueue is
+idempotent (same rev+checksum = duplicate no-op), a higher rev supersedes and
+re-pends even an in-flight row, a lower rev or a same-rev checksum mismatch is
+refused as stale; every completion is REV-GUARDED (a slow upload finishing
+after newer work re-pended the row touches nothing); failures back off
+exponentially 5s→5min; a claimant's death is reclaimed after the stale window
+as a counted attempt, dead-lettered at 12 and revived by a fresh rev; the
+debounced drainer (notify/flush/stop) takes an INJECTED transport. Scope per
+the K1 precedent: queue semantics shipped and pinned by 17 tests — producers,
+the Drive transport and the drainer's start wire with S2 (workspace.ts is
+file-based, so the enqueue handle is an S2b decision).
+
+**Gates:** red 1 file → **17/17**; oxlint 2 files **0/0** (9→0 structurally:
+removed my four SQL-result casts — the house pattern feeds rows straight to
+`zod.parse`; typed initializer instead of `as`, no suppressions); server tsc
+**exit 0**; full suite **333 files / 4951 passed / 8 skipped / 0 failed**
+(448.66s; = Loop177… Loop178's 4934 + exactly these 17, run twice with
+identical totals after the parallel `aff3fc3` landing raced first-run
+collection; their committed `container-computer.test.ts` passes 54/54 and
+was already in the baseline — the +11/+15/+17 deltas map exactly to U/K1,
+S0, S1). Fast-forwarded to `224df9b` mid-loop (CI trigger, no overlap).
+**Not claimed:** producers wired, transport, a running drain, security
+attestation. In flight: S2a (per-object envelope + encrypted manifest).
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`
