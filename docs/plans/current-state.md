@@ -356,6 +356,35 @@ S0, S1). Fast-forwarded to `224df9b` mid-loop (CI trigger, no overlap).
 **Not claimed:** producers wired, transport, a running drain, security
 attestation. In flight: S2a (per-object envelope + encrypted manifest).
 
+### S2a per-object envelope + encrypted manifest (22 September 2026, Loop180)
+
+S2a implements §10's hard gate — the v2 bundle envelope gates every
+incremental object — by making a sync object a SINGLE-FILE BundlePayloadV2
+riden through `encryptBundleV2`/`decryptBundleV2` (new crypto would violate
+the spec; reuse inherits GCM header binding, scrypt, K1 slots, inspect).
+`server/sync-objects.ts` adds on top: structural single-file gates (reserved
+path, honest counts, no skips/transcripts, body-vs-hash), a RECOMPUTED
+object checksum (pack refuses producer disagreement; tombstones carry the
+canonical empty checksum), the encrypted `muster-manifest.json` whose schema
+enforces the canonical percent-encoded `syncObjectFileName` (no two ids can
+name the same Drive file) and one row per objectId, and pure
+`reconcileSyncObjects` (upload / download / in-sync / conflict-never-
+auto-resolved; tombstones ride as ordinary newer revs). Two additive
+exports in workspace-bundle-v2 (`manifestDigest`, `BUNDLE_SCHEMA`) keep the
+digest single-sourced rather than reimplemented. Pinned vocabulary: flipped
+ciphertext → `bad-key` (GCM's single verdict); authenticated payload with a
+lying file hash → `tampered`.
+
+**Gates:** red 1 file → 19/20 → **21/21**; touched (3 files) **47/47**;
+oxlint **0/0** (6→0 structurally: conditional spread → `if`, two named-type
+returns (`BodyJsonResult`), two assertions → no-cast/zod field parse, one
+unused import); server tsc **exit 0**; full suite **334 files / 4972 passed
+/ 8 skipped / 0 failed** (447.25s = 4951 + exactly these 21, no decrease).
+**Not claimed:** transport, producers, a running sync pass, Drive ifMatch
+semantics (S2c decision), security attestation. Next per §38: S2b, the
+sync-pass engine over injected deps (collision-free of the routes file while
+the parallel session lands work there); wiring = explicit S2c.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

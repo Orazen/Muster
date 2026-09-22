@@ -93,7 +93,9 @@ export const LIMITS = {
 } as const;
 
 const BUNDLE_MAGIC = "muster-workspace-bundle";
-const BUNDLE_SCHEMA = 2;
+/** The payload schema literal — exported so the S2 per-object packer stamps
+ * the same version the envelope's own literal gate requires (DESIGN §10). */
+export const BUNDLE_SCHEMA = 2;
 const BUNDLE_PRODUCER = "muster-workspace-bundle-v2";
 const MIN_PASSPHRASE_LENGTH = 8;
 const SALT_BYTES = 16;
@@ -329,7 +331,11 @@ function decodeBase64(text: string): Buffer | null {
  * the contract. Recorded in the payload and re-derived on every read: a
  * manifest edited without its digest — a swapped hash, a moved entry — is
  * detectable without trusting the producer. */
-function manifestDigest(files: readonly BundleFileEntry[]): string {
+/** The canonical digest over a file index: sorted paths, each bound to its
+ * size and hash. Exported for the S2 per-object packer (DESIGN §10) — a
+ * single-file payload must record the same digest this function defines or
+ * the envelope's own inspect gate rejects it. */
+export function manifestDigest(files: readonly BundleFileEntry[]): string {
   const canonical = [...files]
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
     .map((file) => `${file.path}\u0000${file.size}\u0000${file.sha256}`)

@@ -8051,3 +8051,62 @@ trigger fast-forwarded to `224df9b` (no overlap with my files).
 **Not claimed:** any producer wired, any transport, a running drain, or a
 security attestation (scanner re-run still owed). In flight at loop end:
 S2a, the per-object envelope + encrypted manifest (red test in place).
+
+## Loop180 — S2a: the per-object envelope + encrypted manifest (22 Sep 2026)
+
+**Trigger:** §38 order after S1. §10 states the hard gate verbatim:
+"Incremental uploads only after the v2 bundle format's envelope checks
+(authenticate-then-parse) gate every object." So S2a makes per-object
+files RIDERS on the portable bundle's exact machinery rather than a new
+crypto scheme: a sync object is a single-file BundlePayloadV2 sealed by
+encryptBundleV2 — inheriting GCM header binding, scrypt, K1 recovery
+slots and inspect's gates (authentication, payload schema, payload hash,
+manifest digest, inflate bounds) with zero new cryptography. Two additive
+exports made that reuse honest instead of reimplemented: `manifestDigest`
+(the canonical digest the envelope itself checks — pack must produce the
+same bytes the gate defines) and `BUNDLE_SCHEMA`.
+
+**Gates this module adds on top of inspect's**, all named in failures:
+exactly one file at the reserved path, counts that describe only that
+file, no skips, no transcripts, a body matching its recorded hash and
+size, an object checksum RECOMPUTED against its payload (producer
+disagreement with its own content refuses at pack), tombstones carrying
+the canonical empty-payload checksum, and the manifest's schema enforcing
+the canonical `syncObjectFileName` derivation (percent-encoding keeps
+`a:b` and `a_b` from ever naming the same Drive file) plus one row per
+objectId. `reconcileSyncObjects` is §10's rev-compare made pure:
+local-er uploads, remote-er downloads, equal rev+checksum is in sync,
+equal rev with different checksums is a conflict NOTHING auto-resolves,
+and tombstones travel as ordinary newer revs.
+
+**Vocabulary findings pinned by tests (not assumed):** a flipped
+ciphertext is reported by the envelope layer as `bad-key` — GCM's tag
+gives one verdict, key-or-body is undecidable there — while an
+AUTHENTICATED payload whose file hash lies about its body is `tampered`
+(built digest-consistently so only the post-auth body check can name the
+lie). One self-inflicted bug the discipline caught in my own test: a
+zod `.parse` over the envelope stripped every unknown key, so the
+rebuilt "tampered" envelope was genuinely malformed and the status
+flipped to `malformed-envelope`; fixed by validating only the field and
+keeping the envelope intact — the failure exposed the test's dishonesty,
+not the module's.
+
+**Gates (real numbers):** red **1 file failed** (module absent) → 19/20
+(one wrong vocabulary expectation) → **21/21**; touched-file suite
+(sync-objects + workspace-bundle-v2 + recovery) **47/47**; oxlint on the
+3 touched files **0/0** (6 errors → 0 structurally: conditional
+empty-spread → explicit `if` assignment; two known-value-widening
+returns → one named `BodyJsonResult` contract; two assertions → no-cast
+JSON flow + zod field parse; one unused import removed — no
+suppressions); server tsc **exit 0**; full suite **334 files / 4972
+passed / 8 skipped / 0 failed** (447.25s = Loop179's 4951 + exactly this
+slice's 21, no decrease).
+
+**Not claimed:** any transport call, any producer, a running sync pass,
+Drive `ifMatch`/ETag semantics (sequential-update-by-filename remains
+today's transport behavior — the §10 ifMatch hardening is a stated S2c
+decision), or a security attestation (scanner re-run still owed). Next
+per §38: S2b, the sync-pass engine over injected deps (journal claim →
+reconcile → pack → transport → manifest, plus download → unpack →
+applier), deliberately collision-free of the routes file the parallel
+session is actively landing work in; real wiring is an explicit S2c.
