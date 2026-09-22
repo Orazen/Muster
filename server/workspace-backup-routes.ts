@@ -53,6 +53,7 @@ import {
 import * as driveSync from "./drive-sync.ts";
 import * as syncState from "./sync-state.ts";
 import type { WorkspaceBackupCapability } from "./contracts.ts";
+import { devicesForUser } from "./devices.ts";
 
 /** Everything a family handler may touch for one request. index.ts owns the
  * session resolution, the live config and the data dir; the family only
@@ -172,7 +173,9 @@ const stageV2Restore = (
 /** The ordered family table. Order within the family mirrors the original
  * inline sequence exactly: capability → hosted wall → account connect +
  * callback → v2 status/export/verify/restore → account push/pull → discard →
- * installation-Drive push/pull. */
+ * installation-Drive push/pull → device inventory (session-scoped metadata;
+ * its path matches no earlier entry and the wall claims only workspace/vault
+ * paths, so position within the table cannot shadow it). */
 const routes: BackupRoute[] = [
   {
     // This exact read-only response is the sole hosted workspace exception.
@@ -453,6 +456,21 @@ const routes: BackupRoute[] = [
       } catch (e) {
         json(res, 502, { error: e instanceof Error ? e.message : String(e) });
       }
+    },
+  },
+  {
+    // S0 device inventory (DESIGN §29): the Restore Center's "Manage
+    // devices" list — name, platform, last seen, key-envelope status. The
+    // identity is read from the SESSION binding, never from query or body,
+    // and the view re-filters by that userId; the cross-tenant pin is
+    // server/devices-harness.test.ts. Metadata only — no workspace bytes —
+    // so the installation wall (workspace/vault paths) is not its concern.
+    match: (method, path) => method === "GET" && path === "/api/devices",
+    handle: async (_req, res, ctx) => {
+      const binding = await ctx.session?.();
+      if (!binding) return json(res, 401, { error: "Sign in to see your devices." });
+      res.setHeader("Cache-Control", "no-store");
+      json(res, 200, { devices: devicesForUser(getDb(), binding.userId) });
     },
   },
 ];

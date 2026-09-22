@@ -7897,3 +7897,76 @@ this slice, no decrease, zero FAIL lines).
 attestation, or legacy-bundle migration — old bundles stay passphrase-only
 by design and open exactly as before. Next per §38: S0 (devices table),
 which depends on K1 — now unblocked at the format layer.
+
+## Loop178 — S0: the device inventory behind "Manage devices" (22 Sep 2026)
+
+**Trigger:** §38 order after K1. S0–S3's first phase (depends on K1+v2,
+both shipped). The audit found the route surface is the backup family's
+own ordered table (clean of parallel WIP), no Restore Center component
+exists yet — DESIGN's "target" UI lives as the Vault section — and the
+session table already IS the device raw material: web sign-in, the
+claim-paired phone and `muster pair` all create one, with userAgent /
+updatedAt columns present.
+
+**The design decision:** no new table, no migration. S0 is a per-user
+VIEW over session rows, grouped by user-agent (one machine's re-sign-ins
+collapse into one device, newest sighting wins), identity hashed as
+sha256(userId + agent) so two accounts' identical browsers never collide.
+There is no hardware fingerprint and none is invented — recorded as the
+honest line until S1's journal gives sessions stable device ids.
+`keyEnvelopeStatus` ships as the literal "none" on every row: DESIGN §29
+names the column, but the per-device re-wrap producer arrives with S2/S3
+— the column exists so the view contract is complete, not because
+something fills it.
+
+**Shipped:** `server/devices.ts` (platformOf with watch-before-iPhone
+ordering, nameOf human labels, deriveDevices with a foreign-row drop as a
+SECOND fence after the SQL predicate, sqliteDateWire zod boundary parsing
+number|bigint|ISO|null → epoch-ms with unreadable → 0); GET /api/devices
+as one entry in the backup family's ordered table — identity from the
+ctx.session binding, never query or body, Cache-Control no-store,
+position documented in the family header (its path matches no earlier
+entry and the wall claims only workspace/vault paths); ManageDevicesCard
+in Settings → Vault beside the Vaultgram card; all four CLI
+session-creation fetches (local pair, cloud pair, redeem, claim) now send
+`user-agent: muster-cli` so CLI sign-ins read as cli devices instead of
+"Unknown client".
+
+**Cross-tenant pin (threat-model rule 1):** predicate = SQL keyed by the
+session's own userId + deriveDevices dropping foreign rows (unit-tested:
+another user's row is excluded even when handed over) + a real-server
+harness: two hosted signups with distinct browsers — alice sees exactly
+her deviceIdFor(id, UA_A) row, bob his, neither id in the other's list,
+cookie-less GET → 401.
+
+**The harness debugging worth its receipt:** the first run failed the
+cleanup no-outbound pin — the child had fetched
+https://opencode.ai/zen/go/v1/models. A stack captured through the
+preload traced it to module load (index.ts → ProviderRegistry.load →
+ACP create → resolveModels): an EMPTY `instances: {}` config boots
+config.ts's DEFAULT_FLEET (11 drivers incl. opencodeGo), whose ACP child
+probes its model catalog at boot. Every other harness writes a
+non-empty ghost-instance map, which instanceConfigs uses INSTEAD of the
+default fleet — unknown driver → shadow record → no create() → no fetch.
+Fixture switched to the ghost shape (the why recorded in the file), and
+the preload now classifies attempts — loopback allowed, non-loopback
+refused and logged with a stack — instead of blocking loopback blind.
+
+**Gates (real numbers):** red **2 files failed** (module absent) → unit
+**12/12**, harness **3/3 + cleanup**; touched **15/15**; oxlint on 7
+touched files **0/0** (first pass had 4 errors — `unknown` param + 3×
+runtime-typeof on the date coercer — fixed structurally by moving parsing
+into the zod I/O boundary, none suppressed); server tsc **exit 0**; app
+tsc **exit 0** (the parallel SocialView WIP errors were resolved by their
+owner mid-loop — their working-tree edits remain unstaged); vite build
+**exit 0** (16.89s); full suite **332 files / 4934 passed / 8 skipped / 0
+failed** (468.12s; +2 files/+15 tests vs Loop177's 330/4919 = exactly
+this slice, no decrease, zero FAIL lines).
+
+**Not claimed:** revocation UI (S0 is view-only — `muster sessions
+--revoke` remains the control surface), hardware identity (UA grouping
+until S1), key-envelope production (a stated placeholder column), any
+security attestation (scanner re-run still owed), or browser/screenshot
+verification of the card (typecheck + build only). Next per §38: S1, the
+change journal (DESIGN §10 — local SQLite append {objectId, rev,
+checksum} + debounced idempotent drain).

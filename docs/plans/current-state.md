@@ -292,6 +292,41 @@ recovery (no routes/UI yet — follow-up slice), security attestation
 passphrase-only by design). Next per §38: S0 devices table (depends on
 K1 — unblocked at the format layer).
 
+### S0 device inventory: "Manage devices" (22 September 2026, Loop178)
+
+S0 ships a **per-user view over the better-auth session rows** — no new
+table, no migration: web sign-in, the claim-paired phone and `muster pair`
+all create a session, so the session table already is the device raw
+material. Rows group by user-agent (re-sign-ins collapse, newest sighting
+wins); device id = sha256(userId + agent) so two accounts' identical
+browsers never collide; no hardware fingerprint exists and none is
+invented (stated line until S1). `keyEnvelopeStatus` is honestly "none"
+on every row — DESIGN §29 names the column, the producer arrives with
+S2/S3. GET /api/devices is one entry in the backup family's ordered
+route table: identity from the ctx.session binding (never query/body),
+Cache-Control no-store, foreign-row drop as a second fence after the SQL
+predicate; ManageDevicesCard renders in Settings → Vault; all four CLI
+session-creation fetches send `user-agent: muster-cli`. Cross-tenant pin:
+real-server harness with two hosted signups (distinct browsers) — each
+sees exactly own device, cookie-less → 401. Harness debug finding
+(recorded in-file): an empty `instances: {}` boots config.ts's
+DEFAULT_FLEET whose opencodeGo ACP child fetches its catalog at boot —
+hence the house ghost-instance fixture; the owned preload now allows
+loopback and refuses+logs non-loopback with stacks.
+
+**Gates:** red 2 files (module absent) → unit **12/12**, harness **3/3
++ cleanup**; touched **15/15**; oxlint 7 files **0/0** (4 errors fixed
+structurally: `unknown` param + 3× runtime-typeof moved into the zod
+boundary, none suppressed); server tsc **exit 0**; app tsc **exit 0**
+(parallel SocialView WIP errors resolved by their owner mid-loop — their
+edits remain unstaged); `vite build` ✓ 16.89s; full suite **332 files /
+4934 passed / 8 skipped / 0 failed** (468.12s; +2 files/+15 vs Loop177 =
+exactly this slice, no decrease). **Not claimed:** revoke UI (S0 is
+view-only; `muster sessions --revoke` stays the control surface),
+hardware identity, key-envelope production, security attestation,
+screenshot verification of the card. Next per §38: S1 the change journal
+(DESIGN §10).
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

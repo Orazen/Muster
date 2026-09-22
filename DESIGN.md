@@ -460,9 +460,13 @@ Model switching is per-bot config, zero chat-architecture coupling.
 
 Devices: `muster sessions` (list/revoke), companion tokens (capped, hashed,
 revocable), claim-code pairing (5-min TTL, per-IP throttle, fail-only
-lockout), QR on LAN. Phase S0: a `devices` table view (name, platform, last
-seen, key envelope status) feeding the Restore Center's "Manage devices".
-Session mgmt is better-auth's; logout clears local session, never remote data.
+lockout), QR on LAN. Phase S0 (shipped Loop178): a `devices` table view
+(name, platform, last seen, key envelope status) feeding the Restore Center's
+"Manage devices" — a per-user view over the better-auth session rows (web
+sign-in, claim-paired phone and CLI pair all create one), grouped by
+user-agent (no hardware fingerprint yet), key-envelope status honestly
+"none" until S2/S3 produce per-device wraps. Session mgmt is better-auth's;
+logout clears local session, never remote data.
 
 ## 30. Browser/local storage strategy
 
@@ -579,7 +583,7 @@ release pipeline.
 | U2, U5 | drag-reorder (DEFERRED: row order lives in `store.tsx`, social-WIP-owned) · activity panel (DEFERRED: name-only row, no source spec; FleetOrb unmounted by owner direction — needs owner shape first) | social, owner |
 | P1 | per-bot approval levels (provider-native) | — |
 | K1 | v2 recovery codes (MEK wrap): format half shipped Loop177 (envelope `keySlots` — MEK wrapped under passphrase + per-code Crockford slots, AAD-covered, legacy byte-compatible; 11 tests) — routes + UI remain | v2 |
-| S0–S3 | devices table → journal → per-object incremental sync → selective restore | K1, v2 |
+| S0–S3 | devices table → journal → per-object incremental sync → selective restore — **S0 shipped Loop178**: session-row device view in `server/devices.ts` (UA grouping, no fingerprint; boundary-parsed dates), GET /api/devices in the backup-family table (identity from the session binding, cross-tenant harness pin), Settings → Vault "Manage devices" card; `keyEnvelopeStatus` stays "none" until a producer exists; CLI pair/claim/redeem now sends `user-agent: muster-cli` — S1 journal next | K1, v2 |
 | B1 | automatic snapshots + retention (passphrase-store decision) | S1 |
 | M1–M2 | memory retrieval pipeline · shared-memory grants | — |
 | T1 | Telegram inbound gateway | firewall |

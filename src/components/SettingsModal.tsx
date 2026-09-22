@@ -21,6 +21,7 @@ import { UsageSection } from "./UsageSection";
 import { InviteSection } from "./InviteSection";
 import { ProviderHealthSection } from "./ProviderHealthSection";
 import { VaultSection } from "./VaultSection";
+import { ManageDevicesCard } from "./ManageDevicesCard";
 import { BillingSection } from "./BillingSection";
 import { VoiceSettings } from "./VoiceSettings";
 import { ProvidersSection } from "./ProvidersSection";
@@ -874,7 +875,12 @@ export function SettingsModal() {
             {section === "usage" && <UsageSection />}
             {section === "usage" && <ProviderHealthSection />}
             {section === "usage" && <InviteSection />}
-            {section === "vault" && <VaultSection />}
+            {section === "vault" && (
+              <>
+                <VaultSection />
+                <ManageDevicesCard />
+              </>
+            )}
 
             {section === "audit" && audit.botId && (
               <Card title="Audit" subtitle="Every action this bot takes gets decided before it happens. Newest first.">

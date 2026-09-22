@@ -104,7 +104,7 @@ async function pair() {
     // account; a CLI on the same machine just works once a user exists.
     const signin = await fetch(`${base}/api/auth/sign-in/email`, {
       method: "POST",
-      headers: { "content-type": "application/json", origin: base },
+      headers: { "content-type": "application/json", origin: base, "user-agent": "muster-cli" },
       body: JSON.stringify({ email: arg("--email"), password: arg("--password") }),
     });
     if (!signin.ok) {
@@ -122,7 +122,7 @@ async function pair() {
   const password = arg("--password") ?? process.exit(1);
   const signin = await fetch(`${cloud}/api/auth/sign-in/email`, {
     method: "POST",
-    headers: { "content-type": "application/json", origin: cloud },
+    headers: { "content-type": "application/json", origin: cloud, "user-agent": "muster-cli" },
     body: JSON.stringify({ email, password }),
   });
   if (!signin.ok) {
@@ -145,7 +145,7 @@ async function pairRedeem() {
   const code = arg("--redeem") ?? process.exit(1);
   const verify = await fetch(`${cloud}/api/pair/verify`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "user-agent": "muster-cli" },
     body: JSON.stringify({ code }),
   });
   const raw = verify.headers.getSetCookie().find((c) => c.startsWith("better-auth.session_token="));
@@ -636,7 +636,7 @@ async function claimSession(port) {
   const { code } = await create.json();
   const redeem = await fetch(`${base}/api/pair/claim`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "user-agent": "muster-cli" },
     body: JSON.stringify({ code }),
   });
   const raw = redeem.headers.getSetCookie().find((c) => c.startsWith("better-auth.session_token="));
