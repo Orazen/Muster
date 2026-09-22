@@ -1251,32 +1251,72 @@ export function canAutoStartRuntime(runtime: Runtime | null, platform: NodeJS.Pl
  * the desired end state (the field bug: the Local VM panel stayed red forever
  * because of it). So a failed start is followed by a daemon probe through the
  * same runner the status panel uses: if the daemon answers, the start worked. */
+
+/** How long and how hard to wait for the daemon after a start attempt. A
+ * first-ever `podman machine start` boots a fresh AppleHV/Linux VM and its
+ * API forwarder can take 30–90 s to answer — far beyond the 15 s that read
+ * as "not answering yet" on the machine that reported this bug — while the
+ * already-running path needs only a beat. Probes are cheap (connection-
+ * refused is instant), so the window is attempt-counted with a bounded
+ * per-probe timeout: a hanging probe costs `probeTimeoutMs`, never more. */
+interface ProbeWindow {
+  attempts: number;
+  gapMs: number;
+  probeTimeoutMs: number;
+  /** Silence before the first probe — the forwarder opens asynchronously,
+   * so probing the instant the start command returns is a guaranteed miss
+   * that on some podman versions competes with the machine's own readiness
+   * check. */
+  initialDelayMs: number;
+}
+interface ProbeWindows { success: ProbeWindow; failed: ProbeWindow }
+const PROBE_WINDOWS: ProbeWindows = {
+  // The start command exited 0: trust that a VM is genuinely booting and
+  // give it ~2 minutes. 36 × (≤8 s probe + 2.5 s gap) bounds even a probe
+  // that hangs to its worst case.
+  success: { attempts: 36, gapMs: 2_500, probeTimeoutMs: 8_000, initialDelayMs: 3_000 },
+  // The start command FAILED: don't invest minutes in a command that just
+  // reported failure — one short window catches the "exited non-zero but
+  // actually came up" cases, then report the real error.
+  failed: { attempts: 10, gapMs: 1_500, probeTimeoutMs: 8_000, initialDelayMs: 0 },
+};
+
+/** Windows are caller-tunable so tests can exercise many attempts without
+ * minutes of wall time; production callers take the defaults. */
+export type RuntimeProbeWindows = Partial<typeof PROBE_WINDOWS>;
+
 export async function startContainerRuntime(
   runtime: Runtime,
   platform: NodeJS.Platform = process.platform,
   runner: CommandRunner = sh,
   shell?: (command: string) => Promise<void>,
+  windows: RuntimeProbeWindows = {},
 ): Promise<void> {
+  const window_ = { ...PROBE_WINDOWS, ...windows };
   if (!canAutoStartRuntime(runtime, platform)) {
     throw Object.assign(new Error(`Starting ${runtime} on Linux needs sudo — run the command shown below yourself.`), {
       status: 409,
     });
   }
+  // A machine that doesn't exist yet is created by init; the inspect guard
+  // makes re-running idempotent WITHOUT hiding init's real errors (the old
+  // `2>/dev/null` swallowed them, so a failed init read as a mysterious
+  // "not answering yet" downstream).
   const command =
     runtime === "container"
       ? "container system start"
       : runtime === "podman"
-        ? "podman machine init 2>/dev/null; podman machine start"
+        ? "podman machine inspect >/dev/null 2>&1 || podman machine init; podman machine start"
         : "colima start || open -a Docker";
   const shellRun = promisify(execFile);
   const runShell = shell ?? (async (cmd: string) => {
     // Starting a VM/daemon can genuinely take a while on first run — same
     // generous timeout the image-prepare and container actions already use.
-    await shellRun("/bin/sh", ["-c", cmd], { timeout: 2 * 60_000, env: { ...process.env, PATH: augmentedPath() } });
+    await shellRun("/bin/sh", ["-c", cmd], { timeout: 4 * 60_000, env: { ...process.env, PATH: augmentedPath() } });
   });
-  const probeOnce = async () => {
+  const probeOnce = async (timeoutMs: number) => {
     try {
-      await runner(runtime, runtime === "container" ? ["system", "status"] : ["info", "--format", "{{.ServerVersion}}"], 20_000);
+      await runner(runtime, runtime === "container" ? ["system", "status"] : ["info", "--format", "{{.ServerVersion}}"], timeoutMs);
       return true;
     } catch {
       return false;
@@ -1288,10 +1328,11 @@ export async function startContainerRuntime(
    * while the machine is perfectly healthy seconds later — the field bug
    * where a running podman still read as "not answering yet". Probe until
    * the window closes; every caller below benefits. */
-  const daemonAnswers = async (attempts = 10, gapMs = 1_500) => {
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, gapMs));
-      if (await probeOnce()) return true;
+  const daemonAnswers = async (window: ProbeWindow) => {
+    if (window.initialDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, window.initialDelayMs));
+    for (let attempt = 0; attempt < window.attempts; attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, window.gapMs));
+      if (await probeOnce(window.probeTimeoutMs)) return true;
     }
     return false;
   };
@@ -1303,16 +1344,26 @@ export async function startContainerRuntime(
     // VM came up but the CLI complained about forwarding/labels) should not
     // lock the panel into a permanent red state.
     const message = e instanceof Error ? e.message : String(e);
-    if (!/already running/i.test(message) && !(await daemonAnswers())) {
+    // A missing binary is not a start failure — no probe window can fix it.
+    // Fail fast with the actionable step (the panel's step 1), which the old
+    // path answered only after burning the full window on guaranteed ENOENTs.
+    if (/command not found|ENOENT/i.test(message)) {
+      throw Object.assign(
+        new Error(`${runtime} is not installed (or is not on Muster's PATH) — install it first, then Re-check. ${message}`),
+        { status: 409 },
+      );
+    }
+    if (!/already running/i.test(message) && !(await daemonAnswers(window_.failed))) {
       throw Object.assign(new Error(`Could not start ${runtime}: ${message}`), {
         status: 500,
       });
     }
   }
   // A start that "succeeded" without the daemon ever answering is the cold
-  // `podman info` case: give the API forwarder a moment and ask again before
-  // declaring victory, so callers that re-check status immediately agree.
-  if (!(await daemonAnswers())) {
+  // `podman info` case: give the API forwarder its full boot window before
+  // declaring victory, so a first-ever machine start (30–90 s on macOS)
+  // survives and callers that re-check status immediately agree.
+  if (!(await daemonAnswers(window_.success))) {
     throw Object.assign(new Error(`Could not start ${runtime}: the command finished but ${runtime} is not answering yet — try Re-check in a moment`), {
       status: 500,
     });

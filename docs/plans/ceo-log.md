@@ -7629,3 +7629,35 @@ lines. Reported as observed — mid-flight WIP, not mine, not staged.
 **Not claimed:** a live MCP session against a running server (fixture
 fetch stubs only), e2e (not re-run; no app surface touched), any
 security posture, or deployment. Nothing pushed this slice.
+
+## Loop166 — 2026-09-22 — Local VM podman start: honest boot window
+
+**Shipped:** "Could not start podman: the command finished but podman is
+not answering yet" is fixed at all three of its causes. (1) The probe
+window after a SUCCESSFUL start command is now sized for a first-ever
+machine boot — 36 probes × 2.5 s with an 8 s per-probe timeout and a 3 s
+initial quiet (~2 minutes worst case) — because a fresh AppleHV VM's API
+forwarder can take 30–90 s, far beyond the old 15 s window that produced
+the field report; a FAILED start command still pays only the short window
+before surfacing its real error. (2) `podman machine init 2>/dev/null` is
+replaced by `machine inspect || machine init`: re-runs stay idempotent but
+a failed init now surfaces its own message instead of reading downstream
+as a mystery. (3) A missing binary (ENOENT/command not found) fails fast
+with the install step — 409, "install it first, then Re-check" — instead
+of burning the whole probe window on guaranteed connection failures.
+(4) `/opt/podman/bin` joins augmentedPath(): Podman Desktop's CLI
+installer location, outside brew, was invisible to Finder-launched apps.
+
+**Pinned:** four new startContainerRuntime tests — late-answering daemon
+survives the wide window, never-answering still fails honestly bounded by
+the success window, missing binary costs zero probes, init guard carries
+no stderr discard and its failure propagates.
+
+**CI audit:** every failure on main in the last 40 runs is explained —
+the team-ownership-harness red (35715435633) was the pre-`?format=json`
+export envelope, fixed by 2da7416 and now green (27/27 locally; last 6
+runs on main all success); the two Release failures are the known
+GitHub-billing-blocked workflow, not code. Head-of-main CI: green.
+
+**Gates:** tsc both configs 0; oxlint 0/0; container-computer 47/47; vitest
+325 files / 4,876 passed / 0 failed; Playwright e2e 42/42.

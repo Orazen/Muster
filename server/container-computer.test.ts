@@ -601,9 +601,26 @@ describe("startContainerRuntime", () => {
       return { stdout: "6.1.2\n" };
     };
     await expect(
-      startContainerRuntime("podman", "darwin", warming, async () => undefined),
+      startContainerRuntime("podman", "darwin", warming, async () => undefined, { success: { attempts: 5, gapMs: 1, probeTimeoutMs: 1, initialDelayMs: 1 } }),
     ).resolves.toBeUndefined();
     expect(probes).toBe(3);
+  });
+
+  it("gives a first-ever machine start its full boot window before declaring it dead", async () => {
+    // The field report: "the command finished but podman is not answering
+    // yet" on a FIRST machine start — the old 10×1.5 s window (~15 s) closed
+    // long before a fresh AppleHV VM's API forwarder answered (30–90 s). The
+    // success window must be far larger than the failed window.
+    let probes = 0;
+    const lateUp: CommandRunner = async () => {
+      probes += 1;
+      if (probes < 12) throw new Error("cannot connect");
+      return { stdout: "6.1.3\n" };
+    };
+    await expect(
+      startContainerRuntime("podman", "darwin", lateUp, async () => undefined, { success: { attempts: 14, gapMs: 1, probeTimeoutMs: 1, initialDelayMs: 1 } }),
+    ).resolves.toBeUndefined();
+    expect(probes).toBe(12);
   });
 
   it("verifies the daemon after a clean start and fails honestly when it never answers", async () => {
@@ -613,18 +630,56 @@ describe("startContainerRuntime", () => {
       throw new Error("cannot connect");
     };
     await expect(
-      startContainerRuntime("podman", "darwin", neverUp, async () => undefined),
+      startContainerRuntime("podman", "darwin", neverUp, async () => undefined, { success: { attempts: 6, gapMs: 1, probeTimeoutMs: 1, initialDelayMs: 1 } }),
     ).rejects.toThrow(/not answering yet/);
-    // The window is bounded, not infinite: 10 attempts.
-    expect(probes).toBe(10);
+    // The window is bounded, not infinite — but bounded by the SUCCESS
+    // window (the widest), not the old 10-attempt failed window.
+    expect(probes).toBe(6);
   });
 
   it("still surfaces real start failures when the daemon is down", async () => {
     await expect(
+      // A failed start pays only the short failed window (10×1.5 s worst
+      // case is > the default 20 s test timeout) — bound it for the test.
       startContainerRuntime("podman", "darwin", daemonDown, async () => {
         throw new Error("podman machine start: SSH handshake failed");
-      }),
+      }, { failed: { attempts: 2, gapMs: 1, probeTimeoutMs: 1, initialDelayMs: 1 } }),
     ).rejects.toThrow(/Could not start podman.*SSH handshake/s);
+  });
+
+  it("fails fast with an install hint when the binary is missing, without burning the probe window", async () => {
+    let probes = 0;
+    const probeCounter: CommandRunner = async () => {
+      probes += 1;
+      throw new Error("cannot connect");
+    };
+    await expect(
+      startContainerRuntime("podman", "darwin", probeCounter, async () => {
+        throw new Error("/bin/sh: podman: command not found");
+      }),
+    ).rejects.toThrow(/podman is not installed/);
+    expect(probes).toBe(0); // no window is spent on a guaranteed ENOENT
+  });
+
+  it("creates a missing machine with init instead of hiding its errors", async () => {
+    const commands: string[] = [];
+    const recordingShell = async (cmd: string) => {
+      if (commands.length === 0) {
+        commands.push(cmd);
+        // The shell reports failure like execFile does — stderr rides the
+        // error message, which is exactly what the old 2>/dev/null hid.
+        throw new Error("podman machine init: virtualization framework unavailable");
+      }
+      commands.push(cmd); // machine start succeeds on the retry
+    };
+    await expect(
+      startContainerRuntime("podman", "darwin", daemonUp, recordingShell, { failed: { attempts: 1, gapMs: 1, probeTimeoutMs: 1, initialDelayMs: 1 } }),
+    ).resolves.toBeUndefined();
+    // The init guard is a real inspect-or-init, not a blind init with stderr
+    // discarded: a failed init must surface its own message.
+    expect(commands[0]).toContain("podman machine inspect");
+    expect(commands[0]).toContain("podman machine init");
+    expect(commands[0]).not.toMatch(/init 2>\/dev\/null/);
   });
 
   it("refuses sudo-requiring starts before touching the shell", async () => {

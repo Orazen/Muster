@@ -39,6 +39,7 @@ function knownDirs(): string[] {
     join(home, ".claude", "local"), // claude "local install"
     "/opt/homebrew/bin", // brew, Apple silicon
     "/usr/local/bin", // brew Intel / classic installs
+    "/opt/podman/bin", // podman's official macOS .pkg / Podman Desktop CLI — outside brew entirely
     join(home, ".volta", "bin"),
     join(home, ".bun", "bin"),
     join(home, ".asdf", "shims"),
