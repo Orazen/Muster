@@ -202,6 +202,37 @@ function render({ size, tile, fullBleed = false, mascotScale = 4.05 }) {
 }
 
 // ── PNG (RGBA) + ICO encoders ──────────────────────────────────────────
+// The ICO carries DIB (BITMAPINFOHEADER + 32bpp BGRA) entries rather than
+// PNG ones. electron-builder hands each entry's raw bytes straight to
+// RT_ICON, and Windows expects DIB there — PNG entries survive the build but
+// leave the packaged exe with a blank icon. rcedit, the tool electron-builder
+// replaced with resedit, writes DIB for the same reason.
+function encodeDib(rgba, size) {
+  const pixels = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    // DIB rows run bottom-up; the renderer hands them top-down.
+    const src = y * size * 4;
+    const dst = (size - 1 - y) * size * 4;
+    for (let x = 0; x < size; x++) {
+      const s = src + x * 4;
+      const d = dst + x * 4;
+      pixels[d] = rgba[s + 2]; // blue
+      pixels[d + 1] = rgba[s + 1]; // green
+      pixels[d + 2] = rgba[s]; // red
+      pixels[d + 3] = rgba[s + 3]; // alpha
+    }
+  }
+  const header = Buffer.alloc(40);
+  header.writeUInt32LE(40, 0); // biSize
+  header.writeInt32LE(size, 4); // biWidth
+  header.writeInt32LE(size, 8); // biHeight — no AND mask is carried, so not doubled
+  header.writeUInt16LE(1, 12); // biPlanes
+  header.writeUInt16LE(32, 14); // biBitCount
+  header.writeUInt32LE(0, 16); // biCompression: BI_RGB
+  header.writeUInt32LE(pixels.length, 20); // biSizeImage
+  return Buffer.concat([header, pixels]);
+}
+
 let CRC_TABLE = null;
 function crc32(buf) {
   if (!CRC_TABLE) {
@@ -245,23 +276,27 @@ function encodePng(rgba, size) {
 }
 
 function encodeIco(sizes) {
-  const pngs = sizes.map((s) => ({ s, png: encodePng(render({ size: s, tile: "round" }), s) }));
+  const images = sizes.map((s) => ({ s, data: encodeDib(render({ size: s, tile: "round" }), s) }));
   const header = Buffer.alloc(6);
   header.writeUInt16LE(1, 2); // type: icon
-  header.writeUInt16LE(pngs.length, 4);
-  const entries = Buffer.alloc(16 * pngs.length);
+  header.writeUInt16LE(images.length, 4);
+  const entries = Buffer.alloc(16 * images.length);
   let offset = 6 + entries.length;
-  pngs.forEach(({ s, png }, i) => {
+  images.forEach(({ s, data }, i) => {
     const at = i * 16;
     entries[at] = s === 256 ? 0 : s; // 0 means 256
     entries[at + 1] = s === 256 ? 0 : s;
     entries.writeUInt16LE(1, at + 4); // planes
     entries.writeUInt16LE(32, at + 6); // bpp
-    entries.writeUInt32BE(png.length, at + 8);
-    entries.writeUInt32BE(offset, at + 12);
-    offset += png.length;
+    // The ICO directory is little-endian throughout. Writing these two 32-bit
+    // fields big-endian produced a file whose every entry pointed far past EOF;
+    // resedit (electron-builder's icon rewriter) then threw "Offset is outside
+    // the bounds of the DataView" and the Windows NSIS leg failed to build.
+    entries.writeUInt32LE(data.length, at + 8);
+    entries.writeUInt32LE(offset, at + 12);
+    offset += data.length;
   });
-  return Buffer.concat([header, entries, ...pngs.map((p) => p.png)]);
+  return Buffer.concat([header, entries, ...images.map((p) => p.data)]);
 }
 
 // ── SVG emitters (exact component geometry, static) ────────────────────
