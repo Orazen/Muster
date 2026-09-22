@@ -51,7 +51,12 @@ export async function manageReleaseState(mode, { env = process.env, run = execut
   const release = readReleaseEnvironment(env);
   const childEnv = { ...env, GH_HOST: "github.com", GH_PROMPT_DISABLED: "1", GH_PAGER: "cat", NO_COLOR: "1" };
   delete childEnv.GH_DEBUG;
-  const options = { env: childEnv, timeout: 30_000, maxBuffer: 1024 * 1024 };
+  // The release listing is the one paged endpoint here and it is large —
+  // 53 releases already exceed a 1 MB buffer once each carries its full
+  // asset list, and maxBuffer overflow surfaces as a confusing "HTTP 200
+  // failed" from the catch below. 32 MB bounds the worst case this repo
+  // can produce while staying far under any runner memory limit.
+  const options = { env: childEnv, timeout: 30_000, maxBuffer: 32 * 1024 * 1024 };
 
   const api = async (endpoint, list = false) => {
     let response;
