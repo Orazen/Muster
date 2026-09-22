@@ -467,11 +467,16 @@ describe.skipIf(process.platform === "win32")("workspace backup account boundary
     writeFileSync(join(dataDirectory, "memory", "canary.md"), memoryCanary);
     const networkLog = join(directory, "outbound-attempts.txt");
     const preload = join(directory, "block-outbound.mjs");
+    // The assertions only ever check existence, but the CONTENT now names
+    // the attempted target and caller frame — so the next no-outbound
+    // failure diagnoses its culprit instead of merely proving one existed.
     writeFileSync(preload, `
 import { Socket } from "node:net";
 import { appendFileSync } from "node:fs";
-const blocked = () => {
-  appendFileSync(${JSON.stringify(networkLog)}, "blocked\\n");
+const blocked = (first) => {
+  const where = String(first?.url ?? first?.host ?? first ?? "?").slice(0, 200);
+  const at = String(new Error().stack).split("\\n")[1]?.trim().slice(0, 200) ?? "?";
+  appendFileSync(${JSON.stringify(networkLog)}, "blocked " + where + " at " + at + "\\n");
   throw new Error("Outbound network disabled in workspace fixture");
 };
 globalThis.fetch = blocked;

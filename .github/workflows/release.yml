@@ -292,11 +292,17 @@ jobs:
           chmod 600 "$ASC_KEY_PATH"
           for f in release/*.dmg release/*.zip; do
             [ -e "$f" ] || continue
-            out=$(xcrun notarytool submit "$f" \
+            # A failing substitution under `set -e` would exit before any
+            # echo, hiding Apple's reason entirely — capture first and print
+            # the full output when notarytool itself fails.
+            if ! out=$(xcrun notarytool submit "$f" \
               --key "$ASC_KEY_PATH" \
               --key-id "$ASC_KEY_ID" \
               --issuer "$ASC_ISSUER_ID" \
-              --wait 2>&1)
+              --wait 2>&1); then
+              echo "$out"
+              echo "::error::notarytool submit failed for $f"; exit 1
+            fi
             echo "$out" | tail -2
             echo "$out" | grep -q "status: Accepted" || {
               echo "::error::notarization not Accepted for $f"; exit 1; }

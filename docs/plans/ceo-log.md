@@ -8311,3 +8311,45 @@ multi-object producers (only memory exists — bots/settings/etc. are the
 documented follow-up), tombstone-on-missing-file (a deleted MEMORY.md
 throws and the pass reports it — tombstone producer is the follow-up),
 security attestation, deployment. Next per §38: S3 selective restore.
+
+## Loop185 — CI failure audit on main and the Release notarize blind spot (22 Sep 2026)
+
+Owner asked for every failed issue behind the commits on GitHub, fixed
+and verified. Full inventory: 9 failed/cancelled runs across the last
+60 workflow runs. Verdicts: (1) main CI 16:33 — `social.ts:527`
+anonymous return type on `toggleReaction` → already fixed by `729e8e6`
+(local oxlint 0/0; later CI green). (2) main CI 14:44 —
+`workspace-auth-harness` networkLog assertion at :792 → NOT reproducing:
+standalone 139/139 twice, CI full-suite greens at 16:44 and 17:39, two
+local full-suite greens; fixture suspects audited (the telegram chat
+loop's `TELEGRAM_CHANNEL_BOT_ID === ""` gate + 3s tick is empirically
+inert in fixtures — the instrumented block never fired across 139
+tests; both sweeps are DB-only) — one occurrence in 5+ verdicts =
+unreproduced intermittent, now INSTRUMENTED so the next occurrence
+names its culprit instead of only proving one existed. (3) main CI
+10:20 — team-ownership harness `team` ZodError → fixed by `2da7416`.
+(4) main CI 07:55 — TS2307 `workspace-skills.ts` missing → file exists
+now; tsc exit 0. (5) Release 16:56 — pre-fix SHA lint → superseded.
+(6) Release 16:58 — `release-state` "GitHub API request failed (HTTP
+200)" = maxBuffer overflow on the 53-release list → fixed by `e2202fa`
+(proven: `e2202fa` is NOT an ancestor of the pinned `729e8e6`; the
+18:02 run's prepare passed in 8m50s). (7) Release 18:02 — two jobs:
+macOS notarize exited in 3s with ZERO output because `out=$(xcrun
+...)` failing under `set -e` exits before `echo "$out"` — Apple's
+actual reason was structurally unprintable → FIXED here (capture-then-
+print branch; the exact step verified by js-yaml parse + `bash -n`) —
+the Apple-side cause itself stays unknown until the next run prints it
+(ASC_* secrets are present in the run env; not verifiable from the
+repo); Windows `package:win` hit electron-builder HTTP 500 after the
+electron download completed 100% → external CDN/server, retry-class,
+no repo defect. (8) v1.14.1/v1.14.0 release-policy pin failures
+(yesterday) → superseded by the reworked release-state flow.
+
+**Gates:** harness file **139/139** (probe run — no stray attempt, the
+instrumented block stayed silent); oxlint 1 file **0/0**; server tsc
+**exit 0**; `release.yml` js-yaml parse **OK** + `bash -n` on the
+extracted step **OK**; full suite **337 files / 5022 passed / 8 skipped
+/ 0 failed** (450.26s = Loop184's count, no decrease). **Not claimed:**
+deployment, notarization success, the flake's root cause (unreproduced —
+diagnosability only), security attestation. Next per §38: S3 selective
+restore.

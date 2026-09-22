@@ -496,6 +496,23 @@ these 13, no decrease). **Not claimed:** live Drive round-trip,
 non-memory producers, tombstone-on-deleted-file (throws → reported;
 follow-up), security attestation. Next per §38: S3 selective restore.
 
+### CI failure audit + notarize diagnosability (22 September 2026, Loop185)
+
+Owner-ordered audit of every failed CI/Release run behind main's
+commits: 9 failures inventoried, 6 already fixed on main
+(`729e8e6` lint, `2da7416` team harness, `e2202fa` release-state buffer,
+`workspace-skills.ts` present), 1 unreproduced intermittent
+(workspace-auth-harness networkLog — 1 red in 5+ green verdicts,
+fixture suspects cleared, block now records url/host + caller frame so
+the next occurrence self-diagnoses), 1 repo fix shipped HERE (the
+notarize step's `out=$(xcrun ...)` under `set -e` exited before any
+echo — Apple's rejection reason was unprintable; now captured and
+printed on failure, step verified by yaml parse + `bash -n`), 1 external
+(Windows electron-builder HTTP 500 — retry-class). **Gates:**
+harness 139/139, oxlint 0/0, tsc 0, full suite **337/5022/8/0**
+(450.26s, no decrease). Not claimed: deployment, notarization success,
+flake root cause.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`
