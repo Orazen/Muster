@@ -119,7 +119,7 @@ describe("loadFleetConfig", () => {
 });
 
 describe("protocol", () => {
-  it("answers initialize and lists the ten bounded tools", async () => {
+  it("answers initialize and lists the eleven bounded tools", async () => {
     const { call } = session();
     const init = await call("initialize", { capabilities: {} });
     expect(init.result?.protocolVersion).toBe("2024-11-05");
@@ -128,6 +128,7 @@ describe("protocol", () => {
     const names = z.array(z.object({ name: z.string() })).parse(listed.result?.tools).map((t) => t.name);
     expect(names).toEqual([
       "fleet_status",
+      "list_sessions",
       "send_task",
       "wait_for_conversation",
       "get_receipt",
@@ -158,7 +159,7 @@ describe("protocol", () => {
     const { call } = session();
     const reply = await call("tools/list", {}, id);
     expect(reply.id).toBe(id);
-    expect(z.array(z.json()).parse(reply.result?.tools)).toHaveLength(10);
+    expect(z.array(z.json()).parse(reply.result?.tools)).toHaveLength(11);
   });
 
   it.each([
@@ -219,6 +220,8 @@ describe("tools", () => {
     { name: "get_receipt", arguments: { botId: "b1", threadId: false } },
     { name: "read_memory", arguments: { botId: ["b1"] } },
     { name: "get_approval_history", arguments: { botId: "b1", approve: true } },
+    { name: "list_sessions", arguments: { botId: 7 } },
+    { name: "list_sessions", arguments: { botId: "b1", approve: true } },
   ];
   it.each(malformedArguments)("$name rejects malformed domain arguments before fetching", async (params) => {
     const fetchMock = vi.fn<typeof fetch>();
@@ -237,6 +240,7 @@ describe("tools", () => {
     { name: "read_memory", arguments: { botId: "b1" }, body: { text: 42 } },
     { name: "get_receipt", arguments: { botId: "b1", threadId: "t1" }, body: { receipt: null } },
     { name: "get_approval_history", arguments: { botId: "b1" }, body: { entries: "bad list" } },
+    { name: "list_sessions", arguments: { botId: "b1" }, body: { id: "b1", name: "Vex", tasks: "bad list" } },
   ];
   it.each(malformedResponses)("$name rejects malformed success body $body", async ({ name, arguments: args, body }) => {
     const fetchMock = vi.fn<typeof fetch>(async () => jsonRes(200, body));
@@ -395,6 +399,50 @@ describe("tools", () => {
       lastTask: { title: "Draft brief", usage: { input: 10, output: 5 } },
     });
     expect(z.array(jsonObjectSchema).parse(payload.bots)[1]).not.toHaveProperty("engine");
+  });
+
+  it("list_sessions lists every task thread read-only and marks the active one", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonRes(200, { bot: {
+      id: "b1", name: "Atlas", title: "Atlas", threadId: "t-active",
+      tasks: [
+        { threadId: "t-old", title: "Older job", createdAt: 100, usage: { input: 3, output: 1 }, cwd: "/private/tmp/job" },
+        { threadId: "t-active", title: "Current job", createdAt: 200 },
+      ],
+    } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { call } = session();
+    const response = await call("tools/call", { name: "list_sessions", arguments: { botId: "b1" } });
+    expect(toolResult(response).isError).toBeUndefined();
+    const payload = toolPayload(response);
+    expect(payload.activeThreadId).toBe("t-active");
+    expect(payload.count).toBe(2);
+    const sessions = z.array(jsonObjectSchema).parse(payload.sessions);
+    expect(sessions[0]).toEqual({ threadId: "t-old", title: "Older job", active: false, createdAt: 100, usage: { input: 3, output: 1 } });
+    expect(sessions[0]).not.toHaveProperty("cwd");
+    expect(sessions[1]).toMatchObject({ threadId: "t-active", active: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("https://fleet-fixture.invalid/api/bots/b1?messages=0", expect.objectContaining({ method: "GET" }));
+  });
+
+  it("list_sessions reports a taskless record as its one active session", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => jsonRes(200, { bot: { id: "b1", name: "Vex", threadId: "solo" } })));
+    const { call } = session();
+    const response = await call("tools/call", { name: "list_sessions", arguments: { botId: "b1" } });
+    const payload = toolPayload(response);
+    expect(payload.count).toBe(1);
+    expect(payload.activeThreadId).toBe("solo");
+    expect(z.array(jsonObjectSchema).parse(payload.sessions)).toEqual([
+      { threadId: "solo", title: "", active: true },
+    ]);
+  });
+
+  it("list_sessions stops when the requested bot is inaccessible", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonRes(404, { error: "no such bot" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { call } = session();
+    const response = await call("tools/call", { name: "list_sessions", arguments: { botId: "b1" } });
+    expect(toolResult(response).isError).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("send_task posts and reports queueing", async () => {

@@ -8,8 +8,8 @@
 // out to the harness REST API.
 //
 // Bounded by design, mirroring the OpenMausBot lesson (a bounded MCP server
-// beats a sprawling one): fleet status, send a task, wait for it to settle,
-// read receipts and memory. There is deliberately NO tool for approvals,
+// beats a sprawling one): fleet status, a bot's sessions, send a task, wait
+// for it to settle, read receipts and memory. There is deliberately NO tool for approvals,
 // deletes, credentials, engine changes, or memory writes — a connected
 // agent can watch and work the fleet, never gut it. Approvals stay human
 // (Watch / OptionCard); that is the product's spine.
@@ -53,7 +53,10 @@ const botSchema = z.object({
   id: z.string(), name: z.string().optional(), title: z.string().optional(),
   activity: z.string().optional(), busy: z.boolean().optional(), unread: z.boolean().optional(),
   modelSelection: z.object({ model: z.string(), instanceId: z.string() }).optional(),
-  tasks: z.array(z.object({ title: z.string().optional(), usage: jsonObjectSchema.optional() })).optional(),
+  tasks: z.array(z.object({
+    threadId: z.string().optional(), title: z.string().optional(),
+    createdAt: z.number().optional(), usage: jsonObjectSchema.optional(),
+  })).optional(),
   threadId: z.string().optional(), messages: z.array(messageSchema).optional(),
 });
 const rosterBotSchema = botSchema.extend({ name: z.string() });
@@ -92,6 +95,13 @@ interface BotSummary {
 interface PendingAsk {
   messageId: string; title: string; options: string[]; permission?: string;
 }
+interface SessionSummary {
+  threadId: string; title: string; active: boolean;
+  createdAt?: number; usage?: JsonObject;
+}
+interface SessionList {
+  sessions: SessionSummary[]; count: number; activeThreadId?: string;
+}
 interface SentTask {
   ok: boolean; queued: boolean; receiptRef?: DelegatedTask["receiptRef"]; messageId?: string; note: string;
 }
@@ -99,6 +109,7 @@ interface ConversationOutcome {
   outcome: Outcome; reply?: string; needsUser?: PendingAsk; threadId?: string; hint?: string;
 }
 type FleetToolResult = { bots: BotSummary[]; count: number } | SentTask | ConversationOutcome
+  | SessionList
   | z.infer<typeof receiptSchema> | z.infer<typeof auditSchema> | { memory: string } | WhyEvidence | ScorecardEvidence
   | { written: boolean; fact?: { id: string; text: string; kind: string; source: string } }
   | { hits: Array<{ fact: { id: string; text: string; kind: string; source: string }; matched: string[]; score: number }>; gaps: string[]; unknownEntities: string[] };
@@ -264,6 +275,44 @@ const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "list_sessions",
+    description:
+      "List one bot's sessions — each session is one task thread with its own transcript, receipt and provider session. Returns thread id, title, creation time, per-session usage, and which session is active. Read-only discovery for get_receipt, wait_for_conversation, get_why_journal and get_scorecard.",
+    inputSchema: {
+      type: "object", properties: { botId: botIdSchema },
+      required: ["botId"], additionalProperties: false,
+    },
+    async run(args) {
+      const { botId } = botArgsSchema.parse(args);
+      const cfg = loadFleetConfig();
+      const bot = await harness(cfg, `/api/bots/${encodeURIComponent(botId)}?messages=0`, botResponseSchema, { method: "GET" });
+      const activeThreadId = bot.threadId;
+      const sessions: SessionSummary[] = [];
+      for (const task of bot.tasks ?? []) {
+        if (!task.threadId) continue;
+        const session: SessionSummary = {
+          threadId: task.threadId,
+          title: task.title ?? "",
+          active: task.threadId === activeThreadId,
+        };
+        if (task.createdAt !== undefined) session.createdAt = task.createdAt;
+        if (task.usage) session.usage = task.usage;
+        sessions.push(session);
+      }
+      // A record that predates per-task metadata still has its active
+      // thread — an honest list names that one session instead of
+      // reading as an empty fleet.
+      if (sessions.length === 0 && activeThreadId) {
+        sessions.push({ threadId: activeThreadId, title: bot.title ?? "", active: true });
+      }
+      const reply: SessionList = {
+        sessions, count: sessions.length,
+      };
+      if (activeThreadId) reply.activeThreadId = activeThreadId;
+      return reply;
+    },
+  },
+  {
     name: "send_task",
     description:
       "Send a task (or any message) to one bot and start its turn. Optionally attach a historical receipt from another bot using receiptRef. Returns immediately with the queued/started message id — use wait_for_conversation for the outcome.",
@@ -358,7 +407,7 @@ const TOOLS: ToolDef[] = [
   {
     name: "get_receipt",
     description:
-      "Read the job receipt for a settled task — bot, task title, duration, tokens, cost, final word. Needs the bot id and its active thread id (both in fleet_status / wait_for_conversation output).",
+      "Read the job receipt for a settled task — bot, task title, duration, tokens, cost, final word. Needs the bot id and its thread id (both in list_sessions / wait_for_conversation output).",
     inputSchema: {
       type: "object",
       properties: { botId: botIdSchema, threadId: { type: "string" } },

@@ -38,7 +38,7 @@ Everything already shipped serves that sentence; everything below tightens it.
 | Capability | Where | Status |
 |---|---|---|
 | Fleet REST API (roster, threads, messages, receipts, memory, audit) | `server/index.ts` | Live, session-authed |
-| Fleet MCP server — 8 bounded tools | `server/fleet-mcp.ts` | 67 tests (28 declarations), live-verified against a running server |
+| Fleet MCP server — 11 bounded tools | `server/fleet-mcp.ts` | 73 tests, live-verified against a running server |
 | CLI: `muster mcp` prints client config; `--serve` runs stdio | `cli/muster.mjs` | Verified |
 | Approval cards with A–F hotkeys + history strip | `src/components/OptionCard.tsx` (hotkeys), `src/components/ApprovalCard.tsx` (history) | Shipped |
 | Routines (`once`, `daily{time,weekdays}`) | `server/routines.ts` | Shipped + tested |
@@ -83,6 +83,7 @@ Ranked; each is a bounded, shippable increment consistent with §3's rule:
 2. **Fleet MCP write-safe extensions.** `list_sessions`-style reads,
    `get_why_journal`, `get_scorecard` — read-only trust artifacts. Keep
    approvals/deletes/credentials out; the asymmetry IS the product.
+   *(all three shipped — `list_sessions` completed the set.)*
 3. **Cross-fleet delegation.** One bot's receipt feeding another bot's task
    (`send_task` with a receipt reference), making the fleet composable —
    the "workforce" story beyond parallel chat.

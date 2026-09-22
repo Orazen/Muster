@@ -35,7 +35,7 @@ Advance the AGI harness beyond its current pass: turn provenance via-chips, Goal
 |---|---|
 | Server API (one big file, ~8k lines) | `server/index.ts` |
 | Contracts/wire shapes | `server/contracts.ts` |
-| Fleet MCP server (8 bounded tools; `send_task` writes) | `server/fleet-mcp.ts` (+ `.test.ts`) |
+| Fleet MCP server (11 bounded tools; `send_task` writes) | `server/fleet-mcp.ts` (+ `.test.ts`) |
 | Engine drivers | `server/drivers/` |
 | MCP client/proxies | `server/mcp-client.ts`, `server/*-proxy.ts` |
 | Web UI (React) | `src/` |

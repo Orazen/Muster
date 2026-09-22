@@ -121,6 +121,43 @@ delivery. Owner-held hardware acceptance (Watch/iPhone/Android) is now the
 open gate; the acceptance checklist is `docs/guides/mobile-round-acceptance.md`.
 Unrelated working-tree edits (claim-flow, www/*) preserved untouched.
 
+### AGI-harness round — Fleet MCP `list_sessions` completes ranked slice 2 (22 September 2026, Loop173)
+
+The Astra brief's ranked slice 2 ("write-safe extensions") had shipped
+`get_why_journal` and `get_scorecard` but never the discovery read the
+brief names first: an external agent could reach a thread id only from
+`wait_for_conversation`, because all seven `/api/threads/...` routes are
+per-thread and no list endpoint exists anywhere. `list_sessions` closes
+the gap with **no new server route** — `GET /api/bots/:id?messages=0`
+already carries `tasks[].threadId/title/createdAt/usage` through
+`wireTask`, so the 11th bounded tool projects them to
+`{sessions, count, activeThreadId}`, flags the active session, strips
+`cwd`, and reports a taskless legacy record as its one active thread
+instead of an empty list. GET-only, strict `botId` args, a 404 stops
+before any projection. `get_receipt`'s description now credits the tools
+that actually emit thread ids (`fleet_status` never did). Stale counts
+refreshed where they had drifted: AGENTS repo map (8→11), brief
+capability table (8→11 tools, 73 tests) + ranked item 2 marked shipped,
+public agents page (said "Six", now the full eleven).
+
+**Verified this slice:** `npx vitest run server/fleet-mcp.test.ts` →
+**73/73** (+6: three new behaviors — active-flag projection, taskless
+legacy fallback, inaccessible-bot stop — plus three malformed rows);
+delegation 6/6 + evidence 7/7 unchanged (86 across the three files);
+full suite → **325 files / 4876 passed / 8 skipped / 0 failed** (488.00s;
++9 over today's earlier 4867 = my +6 plus parallel-WIP tests landing
+live); server tsc exit 0; oxlint on both touched files **0/0**. Repo-wide
+oxlint currently shows 1 error + 2 warnings, all in the parallel agent's
+uncommitted live WIP (`social.ts` +194, `container-computer.ts`,
+`env-path.ts`) — preserved, not staged, theirs to land. Evidence is
+fetch-stubbed fixture behavior only — no live MCP session against a
+running server, no e2e re-run (no app/React surface touched; the static
+page edit is referenced by no spec). One honest incident: the first full
+run reported 2 failed files/2 tests, both races with the parallel agent's
+files mid-edit (container-computer's daemon test among them); an
+immediate captured re-run was 325/0 with zero FAIL lines — reported as
+observed, not as a flake dismissal.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

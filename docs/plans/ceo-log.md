@@ -7575,3 +7575,57 @@ Verdict table, full Sep-22 list:
 No open failure remains on `main`; no workflow touched; automation left
 paused. Owner gates unchanged (Actions billing legs, `APPLE_CERTIFICATE`,
 VPS SSH, Apple review, physical-device acceptance).
+
+## Loop173 — `list_sessions`: the discovery read ranked slice 2 always named (22 Sep 2026)
+
+**What was actually open.** Auditing the Astra brief's ranked list against
+the tree instead of trusting the snapshot: item 1 (eval harness as
+product) is fully shipped — playbook, `muster eval`, capture harness,
+trending + nightly schedule (Loop157). Item 3 (cross-fleet delegation)
+ships as `send_task` `receiptRef` + `attachReceipt`. Item 5's driver
+breadth is 20+ providers. Item 4's Watch approval cards exist with their
+coordinator and haptics (this round's Loop169 built the vocabulary). The
+genuine hole was item 2's `list_sessions`-style read: `get_why_journal`
+and `get_scorecard` had landed, but an external agent still could not
+enumerate a bot's threads — all seven `/api/threads/...` routes are
+per-thread, and no list route exists.
+
+**The slice (11th bounded tool, no new server route).** `GET
+/api/bots/:id?messages=0` already serializes `tasks` through `wireTask`
+with `threadId`, `title`, `createdAt` and `usage` intact, so
+`list_sessions` is a pure MCP projection: one GET, sessions mapped with
+an `active` flag against the bot's current thread, top-level
+`activeThreadId`, `cwd` stripped (a local folder is not a trust
+artifact), per-session usage preserved (precedent: `lastTask.usage` in
+`fleet_status`). A record that predates per-task metadata answers as its
+one active session rather than an empty list — an honest list never
+lies by omission. Strict `botId` arguments reject extras before any
+fetch; a 404 stops before projection. `get_receipt`'s description now
+points at the tools that actually carry thread ids — it credited
+`fleet_status`, which never emitted one. Header contract line updated;
+count drift fixed in AGENTS repo map (8→11), brief capability table
+(8→11, 73 tests) with ranked item 2 marked shipped, and the public
+agents page, which still said "Six" and omitted five already-shipped
+tools.
+
+**Gates (real numbers):** fleet-mcp **73/73** (+6: three behaviors —
+active-flag projection incl. cwd stripping, taskless legacy fallback,
+inaccessible-bot stop — and three malformed rows); delegation 6/6,
+evidence 7/7 (86 across the three files); full suite **325 files,
+4876 passed, 8 skipped, 0 failed** (488.00s — +9 over today's 4867:
+my +6, parallel-WIP tests landing live +3); server `tsc` exit 0 after the
+edits; app tsc clean of this slice (its 3 current errors are all in the
+parallel agent's in-flight `SocialView.tsx` — TS6133/TS2304, preserved,
+not staged); oxlint on touched files **0/0**. Repo-wide lint reads 1 error + 2
+warnings — all in the parallel agent's uncommitted WIP (`social.ts`,
+`container-computer.ts`, `env-path.ts`), preserved and not staged.
+
+**Honest incident:** the first full-suite run reported 2 failed files /
+2 tests. Both were races with the parallel agent's files being edited
+during the run (container-computer's daemon-honesty test confirmed);
+an immediate full re-run with a captured log read 325/0 and zero FAIL
+lines. Reported as observed — mid-flight WIP, not mine, not staged.
+
+**Not claimed:** a live MCP session against a running server (fixture
+fetch stubs only), e2e (not re-run; no app surface touched), any
+security posture, or deployment. Nothing pushed this slice.
