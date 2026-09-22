@@ -2,11 +2,9 @@ import { ChevronDown, ChevronLeft, Crown, FolderOpen, Globe, MousePointerClick, 
 import { useEffect, useState } from "react";
 import { api, useStore, type Bot } from "@/state/store";
 import { AgentAvatar } from "./Avatar";
-import { setCalmMascot, useCalmMascot } from "@/lib/mascot/calm";
-import { FlowerCharacter } from "./FlowerCharacter";
+import { AgentBotAvatar } from "./AgentBotAvatar";
 import {
   AGENT_CHARACTERS,
-  PICKABLE_STATES,
   stateForBot,
   AGENT_COLORS,
   AGENT_COLOR_NAMES,
@@ -586,7 +584,6 @@ function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
 
 export function SettingsPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
-  const calmMascot = useCalmMascot();
   const [voices, setVoices] = useState<Array<{ id: string; label: string; description?: string }>>([]);
   const [voicesLoading, setVoicesLoading] = useState(false);
   const patch = (
@@ -616,7 +613,6 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
     >,
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
   const activeState = stateForBot(bot);
-  const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
   const canUseConnectedApps = engine?.capabilities?.composioMcp === true;
@@ -660,16 +656,13 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 pb-5">
-        <div className="flex justify-center py-5">
-          <FlowerCharacter
+        <div className="flex justify-center py-5" data-testid="bot-avatar-preview">
+          <AgentBotAvatar
             character={bot.character ?? "star"}
             color={bot.color}
             state={activeState}
             size={112}
-            motion={mascotMotion?.kind ?? "none"}
-            motionKey={mascotMotion?.nonce ?? 0}
             label={bot.name}
-            calm={calmMascot}
           />
         </div>
 
@@ -710,54 +703,6 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                       size={42}
                       animated={character === "cursor" ? false : true}
                     />
-                  </button>
-                ))}
-              </div>
-
-              <div className="mt-4 flex items-center justify-between">
-                <div>
-                  <div className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-                    Calm mascot
-                  </div>
-                  <p className="mt-0.5 text-[12px] text-ink-secondary">
-                    The mascot keeps its honest status faces but never plays: no pokes, no antics.
-                  </p>
-                </div>
-                <button
-                  role="switch"
-                  aria-checked={calmMascot}
-                  aria-label="Calm mascot"
-                  onClick={() => setCalmMascot(!calmMascot)}
-                  className={cn(
-                    "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors",
-                    calmMascot ? "bg-accent" : "bg-raised",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "absolute top-[3px] size-5 rounded-full bg-white transition-all",
-                      calmMascot ? "left-[21px]" : "left-[3px]",
-                    )}
-                  />
-                </button>
-              </div>
-
-              <div className="mb-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-                Expression
-              </div>
-              <div className="grid grid-cols-5 gap-2">
-                {PICKABLE_STATES.map((expression) => (
-                  <button
-                    key={expression}
-                    onClick={() => patch({ mascotExpression: expression })}
-                    className={cn(
-                      "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-raised",
-                      activeState === expression && "ring-2 ring-accent-border",
-                    )}
-                    title={expression}
-                    aria-label={`Use ${expression} expression`}
-                  >
-                    <AgentAvatar color={bot.color} state={expression} size={42} animated={false} />
                   </button>
                 ))}
               </div>

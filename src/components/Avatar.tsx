@@ -1,312 +1,132 @@
-// Bot avatar — the Blob Studio "Cursor" mascot (CursorAvatar.tsx), wrapped
-// in the app's historical AgentAvatar API so no call site changes: per-bot
-// color becomes a body gradient, the app's one-shot motion beats borrow the
-// face/state for a moment, and the eyes follow the pointer. The previous
-// hand-built Agent body + face engine (agent-engine/face/driver) is gone;
-// CursorAvatar owns morphing, blinking, drift, body motion and effects.
-import {
-  forwardRef,
-  memo,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
-import { AGENT_COLORS, type AgentCharacter, type AgentColor, type AgentMotion, type AgentState } from "@/lib/mascot";
-import { TEAMMATE_BODY_SILHOUETTES } from "@/lib/avatar-shapes";
-import { BlobBot, FlowerBot, MUSTERBOT_ORANGE } from "@/lib/musterbot";
-import { LottieCharacter } from "./LottieCharacter";
-import { StarTeammate } from "./StarTeammate";
-import {
-  CursorAvatar,
-  DEFAULT_SILHOUETTE,
-  type CursorAvatarHandle,
-  type CursorSilhouette,
-} from "./CursorAvatar";
+// AgentAvatar — the app's historical avatar API, now a thin funnel over the
+// one renderer: bot-avatars, through AgentBotAvatar. Call sites keep passing
+// color, character, state, motion, pointer and animation preferences exactly
+// as before; the hand-built body/face engines behind this file are gone.
+//
+// The legacy face-placement knobs (expression, turn, gaze, spring, the FACE_*
+// geometry) stay on the props type so old call sites keep compiling, but
+// nothing renders them — bot-avatars owns the face now.
+import { memo, useEffect, useState, type CSSProperties } from "react";
+import type { AgentCharacter, AgentColor, AgentMotion, AgentState } from "@/lib/mascot";
+import { AgentBotAvatar } from "./AgentBotAvatar";
 
 /**
- * The pack's baked-in silhouette was exported with the body fill hardcoded
- * to black instead of the {{GRADIENT}} placeholder the component
- * substitutes, which painted every bot the same. Restore the slot so the
- * per-bot gradient actually lands on the body.
+ * The one-shot motions that borrow the `working` state for a beat, so a poke,
+ * a launch or a celebration is visible on the body. `blink` and `failure` are
+ * deliberately absent: the library blinks on its own and has no sad state, so
+ * forcing one would only invent a mood the renderer cannot draw.
  */
-const GRADIENT_SILHOUETTE: CursorSilhouette = {
-  ...DEFAULT_SILHOUETTE,
-  body: DEFAULT_SILHOUETTE.body.replace(/fill="#000000"/g, 'fill="{{GRADIENT}}"'),
-};
+const MOTION_BEATS: ReadonlySet<Exclude<AgentMotion, "none">> = new Set([
+  "arrive",
+  "switch",
+  "customize",
+  "alert",
+  "thinking",
+  "working",
+  "launch",
+  "success",
+  "celebrate",
+  "surprise",
+]);
 
-/**
- * Legacy face-placement knobs from the Agent body era. The cursor mascot
- * places its own face; these remain only so the preview harness's sliders
- * keep compiling — the matching props are accepted and ignored.
- */
-export const FACE_X = 80;
-export const FACE_Y = 102;
-export const FACE_SCALE = 0.47;
-export const EYE_SCALE = 1.12;
-export const MOUTH_WEIGHT = 11;
-
-/**
- * How far the pointer may pull the eyes. Facing forward the full range is
- * safe; with the expressions' authored gaze they already start off-centre.
- */
-const POINTER_GAZE = { forward: 1, authored: 0.25 };
-
-/**
- * What a one-shot motion does while it plays: CursorAvatar animates the body
- * per state, so borrowing the state for a beat moves body and face together.
- */
-interface MotionFaces
-  extends Partial<
-    Record<Exclude<AgentMotion, "none">, { state?: AgentState; blink?: boolean; spin?: number }>
-  > {}
-
-const MOTION_FACE: MotionFaces = {
-  arrive: { state: "spawning", spin: 900 },
-  switch: { state: "waking", spin: 620 },
-  customize: { state: "proud", blink: true },
-  alert: { state: "alerting" },
-  thinking: { state: "thinking" },
-  working: { state: "working" },
-  launch: { state: "loading" },
-  success: { state: "happy", blink: true },
-  celebrate: { state: "celebrate", spin: 700 },
-  blink: { blink: true },
-  surprise: { state: "surprised", blink: true },
-  failure: { state: "sad" },
-};
-
-/** How long a one-shot motion holds its state before the bot's own returns. */
-const MOTION_FACE_MS = 1400;
-
-/** Channel-wise mix of a hex color toward another, t in 0..1. */
-function mix(hex: string, toward: string, t: number): string {
-  const a = Number.parseInt(hex.slice(1), 16);
-  const b = Number.parseInt(toward.slice(1), 16);
-  const channel = (shift: number) => {
-    const va = (a >> shift) & 0xff;
-    const vb = (b >> shift) & 0xff;
-    return Math.round(va + (vb - va) * t);
-  };
-  return `#${[channel(16), channel(8), channel(0)]
-    .map((part) => part.toString(16).padStart(2, "0"))
-    .join("")}`;
-}
-
-/**
- * Bot color -> the mascot's three-stop body gradient (highlight, base,
- * shadow), with the same light/dark spread as the pack's default green
- * ["#9FE6B5", "#3FAE6E", "#1C7A4C"].
- */
-const gradientFor = (color: AgentColor): [string, string, string] => {
-  const fill = AGENT_COLORS[color] ?? AGENT_COLORS.green;
-  return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
-};
-
-export type AgentAvatarHandle = CursorAvatarHandle;
+/** How long a one-shot motion holds `working` before the bot's own state returns. */
+const MOTION_BEAT_MS = 1400;
 
 export type AgentAvatarProps = {
   color: AgentColor;
-  /** Which mascot body renders: the procedural cursor or the .lottie character. */
+  /** Which body the picker chose; the brand flower is the default. */
   character?: AgentCharacter;
-  /** Named behaviour — drives the expression pool, its cadence and blinking. */
+  /** Named behaviour — mapped onto the library's three states. */
   state?: AgentState;
-  /** Pin one of the 25 faces and stop the state's own drift. */
-  expression?: number;
   size?: number;
   label?: string;
-  /** Identity for the blob character — any string; stable per value. */
+  /** Identity for the body choice and blink phase — any string, stable per value. */
   seed?: string;
+  /** One-shot beat. Activity motions borrow `working` for a moment. */
   motion?: AgentMotion;
+  /** Bump to replay the same motion. */
   motionKey?: number;
-  /** Head turn in degrees. */
-  turn?: number;
-  gaze?: { x?: number; y?: number };
-  spring?: number;
-  eyeScale?: number;
-  showMouth?: boolean;
-  mouthStroke?: number;
-  /**
-   * Face the viewer at turn 0, cancelling each expression's authored gaze
-   * direction. Off restores the engine's own drawn-in directions.
-   */
-  forward?: boolean;
-  /** Let the eyes follow the pointer across this avatar. */
+  /** Let the eyes and head follow a pointer that comes near. */
   trackPointer?: boolean;
-  /** Run the animation. Off renders the state's resting face. */
+  /** Run the animation. Off renders the resting frame. */
   animated?: boolean;
-  /** Legacy Agent face-placement knobs — accepted, ignored. */
+  // Legacy face-placement knobs from the hand-built engines — accepted and
+  // ignored, so call sites written against them keep compiling unchanged.
+  /** @ignored The library picks the face; pinned expressions no longer apply. */
+  expression?: number;
+  /** @ignored Head turn is drawn by the library's own motion. */
+  turn?: number;
+  /** @ignored Pointer gaze rides `trackPointer` instead. */
+  gaze?: { x?: number; y?: number };
+  /** @ignored Spring tuning belonged to the retired body engine. */
+  spring?: number;
+  /** @ignored Legacy face geometry — accepted, ignored. */
+  eyeScale?: number;
+  /** @ignored Legacy mouth toggle — accepted, ignored. */
+  showMouth?: boolean;
+  /** @ignored Legacy mouth weight — accepted, ignored. */
+  mouthStroke?: number;
+  /** @ignored Authored gaze direction — accepted, ignored. */
+  forward?: boolean;
+  /** @ignored Legacy face geometry — accepted, ignored. */
   eyeSpacing?: number;
+  /** @ignored Legacy face geometry — accepted, ignored. */
   faceX?: number;
+  /** @ignored Legacy face geometry — accepted, ignored. */
   faceY?: number;
+  /** @ignored Legacy face geometry — accepted, ignored. */
   faceScale?: number;
 };
 
-function AgentAvatarComponent(
-  {
-    color,
-    // The app-icon flower is the default teammate body — every bot wears
-    // the brand mark unless the user explicitly picks the star, blob,
-    // cursor mascot or a lottie character in settings.
-    character = "flower",
-    state = "idle",
-    expression,
-    size = 44,
-    label,
-    seed,
-    motion = "none",
-    motionKey = 0,
-    turn,
-    gaze,
-    spring,
-    eyeScale,
-    showMouth,
-    mouthStroke,
-    forward = true,
-    trackPointer = true,
-    animated = true,
-  }: AgentAvatarProps,
-  ref: React.Ref<AgentAvatarHandle>,
-) {
-  const inner = useRef<CursorAvatarHandle>(null);
-  useImperativeHandle(ref, () => ({
-    blink: () => inner.current?.blink(),
-    spin: (durationMs?: number) => inner.current?.spin(durationMs),
-    setExpression: (index: number) => inner.current?.setExpression(index),
-  }));
-
-  // A one-shot motion borrows the state for a moment, then hands it back.
-  const [motionState, setMotionState] = useState<AgentState | null>(null);
+function AgentAvatarComponent({
+  color,
+  // The app-icon flower is the default teammate body — every bot wears the
+  // brand mark unless the user picks another character in settings.
+  character = "flower",
+  state = "idle",
+  size = 44,
+  label,
+  seed,
+  motion = "none",
+  motionKey = 0,
+  trackPointer = true,
+  animated = true,
+}: AgentAvatarProps) {
+  // A one-shot motion borrows `working` for a beat, then hands the state back.
+  const [beating, setBeating] = useState(false);
   useEffect(() => {
-    if (motion === "none" || !animated) return;
-    const beat = MOTION_FACE[motion];
-    if (!beat) return;
-    if (beat.blink) inner.current?.blink();
-    if (beat.spin) inner.current?.spin(beat.spin);
-    if (!beat.state) return;
-    setMotionState(beat.state);
-    const timer = setTimeout(() => setMotionState(null), MOTION_FACE_MS);
+    if (motion === "none" || !animated || !MOTION_BEATS.has(motion)) return;
+    setBeating(true);
+    const timer = setTimeout(() => setBeating(false), MOTION_BEAT_MS);
     return () => clearTimeout(timer);
   }, [motion, motionKey, animated]);
 
-  // Pointer-follow gaze, composed with any gaze the caller pins.
-  const [pointer, setPointer] = useState({ x: 0, y: 0 });
-  const range = forward ? POINTER_GAZE.forward : POINTER_GAZE.authored;
-  const onPointerMove = (event: ReactPointerEvent<HTMLSpanElement>) => {
-    if (!trackPointer || !animated) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    setPointer({
-      x: Math.max(-1, Math.min(1, ((event.clientX - rect.left) / rect.width) * 2 - 1)) * range,
-      y: Math.max(-1, Math.min(1, ((event.clientY - rect.top) / rect.height) * 2 - 1)) * range,
-    });
-  };
-  const onPointerLeave = () => setPointer({ x: 0, y: 0 });
+  // SAFETY: CSS custom properties are outside React's style typings; the
+  // value is a 0|1 number consumed only as a CSS variable.
+  const hostStyle = {
+    "--bot-gaze-on": trackPointer && animated ? 1 : 0,
+  } as CSSProperties;
 
-  if (character === "lottie") {
-    return (
-      <LottieCharacter
-        state={motionState ?? state}
-        size={size}
-        animated={animated}
-        label={label}
-      />
-    );
-  }
-
-  if (character === "blob") {
-    return (
-      <BlobBot
-        seed={seed ?? label ?? `blob-${color}`}
-        color={AGENT_COLORS[color] ?? AGENT_COLORS.green}
-        state={motionState ?? state}
-        size={size}
-        label={label}
-        animated={animated}
-        gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
-      />
-    );
-  }
-
-  if (character === "flower") {
-    // pointer-follow is the CSS-variable gaze tracker's job (data-gaze on
-    // the FlowerBot root); only a caller-PINNED gaze rides the prop.
-    return (
-      <FlowerBot
-        state={motionState ?? state}
-        color={AGENT_COLORS[color] ?? MUSTERBOT_ORANGE}
-        size={size}
-        label={label}
-        animated={animated}
-        gaze={gaze}
-      />
-    );
-  }
-
-  if (character === "star") {
-    // the flower IS the star now: full pose expressions, and the old star's
-    // slow idle spin whenever the avatar is animated
-    return (
-      <StarTeammate
-        color={color}
-        state={motionState ?? state}
-        size={size}
-        label={label}
-        animated={animated}
-        spin={animated}
-      />
-    );
-  }
-
+  /** Every avatar lives inside a .bot-host: the gaze kill-switch (who may
+   * track the cursor at all) and the CSS hook for the poke squash hang here,
+   * so the ~20 render sites stay untouched. */
   return (
-    <span
-      className="inline-flex shrink-0"
-      onPointerMove={trackPointer && animated ? onPointerMove : undefined}
-      onPointerLeave={trackPointer && animated ? onPointerLeave : undefined}
-    >
-      <CursorAvatar
-        ref={inner}
-        state={motionState ?? state}
-        expression={expression}
+    <span className="bot-host inline-flex shrink-0" style={hostStyle}>
+      <AgentBotAvatar
+        color={color}
+        character={character}
+        state={beating ? "working" : state}
         size={size}
-        silhouette={
-          character in TEAMMATE_BODY_SILHOUETTES
-            ? // SAFETY: the `in` guard proves the key is one of the shape pack's.
-              TEAMMATE_BODY_SILHOUETTES[character as keyof typeof TEAMMATE_BODY_SILHOUETTES]
-            : GRADIENT_SILHOUETTE
-        }
-        gradient={gradientFor(color)}
-        title={label ?? null}
-        lookAround={forward ? 0 : 1}
-        gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
-        turn={turn}
-        spring={spring}
-        eyeScale={eyeScale}
-        showMouth={showMouth}
-        mouthStroke={mouthStroke}
-        paused={!animated}
+        label={label}
+        seed={seed}
+        animated={animated}
+        interactive={trackPointer && animated}
       />
     </span>
   );
 }
 
-const AgentAvatarInner = forwardRef(AgentAvatarComponent);
-
-/** Every avatar lives inside a .bot-host: the gaze kill-switch (who may
- * track the cursor at all) and the CSS hook for the poke squash hang here,
- * so the ~20 render sites stay untouched. */
-export const AgentAvatar = memo(forwardRef(function AgentAvatar(props: AgentAvatarProps, ref: React.Ref<AgentAvatarHandle>) {
-  // SAFETY: CSS custom properties are outside React's style typings; the
-  // value is a 0|1 number consumed only as a CSS variable.
-  const hostStyle = {
-    "--bot-gaze-on": props.trackPointer !== false && props.animated !== false ? 1 : 0,
-  } as React.CSSProperties;
-  return (
-    <span className="bot-host inline-flex shrink-0" style={hostStyle}>
-      <AgentAvatarInner {...props} ref={ref} />
-    </span>
-  );
-}));
+export const AgentAvatar = memo(AgentAvatarComponent);
 
 export function InitialsAvatar({
   initials,

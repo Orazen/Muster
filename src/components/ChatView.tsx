@@ -52,7 +52,6 @@ import {
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
 import { AgentAvatar } from "./Avatar";
-import { FlowerCharacter } from "./FlowerCharacter";
 import { stateForBot } from "@/lib/mascot";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { canRegenerateSavedTurn } from "@/lib/seed-turn-retry";
@@ -862,7 +861,7 @@ const MessagesList = memo(function MessagesList({
     <>
       {messages.length === 0 && !bot.busy && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
-          <FlowerCharacter
+          <AgentAvatar
             character={bot.character ?? "flower"}
             color={bot.color}
             state="idle"
@@ -1004,7 +1003,6 @@ export function ChatView({ bot }: { bot: Bot }) {
   const streaming = stream.streaming[bot.threadId];
   const reasoning = stream.reasoning[bot.threadId];
   const provisioning = state.provisioning[bot.id];
-  const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
 
   // only the active branch is rendered; forks stay reachable via ‹ › nav
   const messages = useMemo(() => visibleMessages(bot), [bot]);
@@ -1172,27 +1170,6 @@ export function ChatView({ bot }: { bot: Bot }) {
   const isWin = window.ogb?.platform === "win32";
   const [receiptOpen, setReceiptOpen] = useState(false);
   const receiptButtonRef = useRef<HTMLButtonElement>(null);
-  const [watermark, setWatermark] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      try {
-        // SAFETY: tier endpoint is optional; a failed read just hides the badge.
-        const r = await fetch("/api/tier");
-        if (!r.ok) return;
-        // SAFETY: wire JSON is untyped; only the boolean flag is consumed.
-        const data: unknown = await r.json();
-        // SAFETY: single-line container-shape assertion for the tier payload.
-        const raw = (data ?? {}) as { watermark?: unknown };
-        if (alive) setWatermark(raw.watermark === true);
-      } catch {
-        /* badge stays hidden offline */
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   return (
     <main className="glass-shell-main relative flex h-full min-w-0 flex-1 flex-col bg-app">
@@ -1211,8 +1188,6 @@ export function ChatView({ bot }: { bot: Bot }) {
               color={bot.color}
               state={stateForBot({ ...bot, messages })}
               size={28}
-              motion={mascotMotion?.kind ?? "none"}
-              motionKey={mascotMotion?.nonce ?? 0}
             />
           </button>
           <RenameTitle
@@ -1224,11 +1199,6 @@ export function ChatView({ bot }: { bot: Bot }) {
           {bot.chiefOfStaff && (
             <span title="Chief of Staff" className="flex shrink-0 items-center gap-1 rounded-full bg-accent/12 px-2 py-0.5 text-[11px] font-medium text-accent">
               <Crown size={11} /><span className="conversation-chief-label">Chief of Staff</span>
-            </span>
-          )}
-          {watermark && (
-            <span className="rounded-full bg-raised px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary" title="Muster Free — upgrade to Pro to remove">
-              Free
             </span>
           )}
           {bot.busy && <Loader2 size={14} className="animate-spin text-ink-secondary" />}
@@ -1412,8 +1382,6 @@ export function ChatView({ bot }: { bot: Bot }) {
                       color={bot.color}
                       state="working"
                       size={24}
-                      motion="none"
-                      motionKey={0}
                     />
                   </span>
                   <span className="thinking-shimmer text-[13px] font-medium">Working</span>

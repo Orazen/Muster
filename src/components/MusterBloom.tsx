@@ -4,6 +4,7 @@
 // Orazen/musterbot repo).
 import { forwardRef, useState } from "react";
 import { MusterBotMark, MUSTERBOT_ORANGE } from "@/lib/musterbot";
+import "./muster-mascot.css";
 
 export type BloomMood = "idle" | "working" | "thinking" | "happy";
 

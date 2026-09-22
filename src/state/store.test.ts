@@ -202,7 +202,7 @@ describe("duplicate message acknowledgements", () => {
     expect(visibleMessages(retried.bots[0])).toEqual([request, reply]);
   });
 
-  it("does not switch branches or replay mascot motion when an existing bot response is redelivered", () => {
+  it("does not switch branches or replay state when an existing bot response is redelivered", () => {
     const answered = reducer({ ...initialState, bots: [{ ...bot, messages: [request, reply], activeLeafId: reply.id }] }, {
       type: "threadActive", threadId: bot.threadId, activeLeafId: request.id,
     });

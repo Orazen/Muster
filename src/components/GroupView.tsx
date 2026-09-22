@@ -14,7 +14,7 @@ import {
   type GroupDefaultResponder,
   type Message,
 } from "@/state/store";
-import { AgentAvatar } from "./Avatar";
+import { AgentBotAvatar } from "./AgentBotAvatar";
 import { normalizeState } from "@/lib/mascot";
 import { effectiveDefaultResponder, groupResponseHint } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
@@ -58,13 +58,12 @@ function ClusterLabel({ bot, name, color }: { bot?: Bot; name: string; color: st
   const avatarColor = (bot?.color ?? color) as Bot["color"];
   return (
     <div className="mt-1 flex items-center gap-1.5 pl-0.5">
-      <AgentAvatar
+      <AgentBotAvatar
         character={bot?.character}
+        seed={bot?.id}
         color={avatarColor}
         state={normalizeState(bot?.mascotExpression) ?? "happy"}
         size={16}
-        motion="none"
-        motionKey={0}
         animated={false}
       />
       <span className="text-[11px] font-medium text-ink-secondary">{name}</span>
@@ -513,8 +512,9 @@ export function GroupView({ group }: { group: Group }) {
                 group.busyBotId === b.id && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
               )}
             >
-              <AgentAvatar
+              <AgentBotAvatar
                 character={b.character}
+                seed={b.id}
                 color={b.color}
                 state={normalizeState(b.mascotExpression) ?? "happy"}
                 size={24}
@@ -612,14 +612,13 @@ export function GroupView({ group }: { group: Group }) {
             <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
               <div className="flex -space-x-2">
                 {members.slice(0, 3).map((b) => (
-                  <AgentAvatar
+                  <AgentBotAvatar
                     key={b.id}
                     character={b.character}
+                    seed={b.id}
                     color={b.color}
                     state="happy"
                     size={44}
-                    motion="none"
-                    motionKey={0}
                     animated={false}
                   />
                 ))}

@@ -691,7 +691,6 @@ function BotListItem({
   const { state, dispatch } = useStore();
   const [renaming, setRenaming] = useState(false);
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
-  const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   // the visible branch, so a version switch changes the row with the chat
   const visible = visibleMessages(bot);
   const last = visible.at(-1);
@@ -714,11 +713,9 @@ function BotListItem({
         color={bot.color}
         state={stateForBot({ ...bot, messages: visible })}
         size={DENSITY_AVATAR[density]}
-        motion={mascotMotion?.kind ?? "none"}
-        motionKey={mascotMotion?.nonce ?? 0}
         /* Benchmark cost discipline: a resting row is a single static frame —
            animation runs only where something is actually happening. */
-        animated={selected || Boolean(bot.busy) || Boolean(bot.unread) || Boolean(mascotMotion)}
+        animated={selected || Boolean(bot.busy) || Boolean(bot.unread)}
       />
       <PresenceDot activity={bot.activity} />
     </div>

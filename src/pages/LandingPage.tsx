@@ -3,6 +3,7 @@ import { Cpu, Monitor, Shield, Plug, Users, Key } from "lucide-react";
 import { motion, useReducedMotion, useScroll, useSpring, type Variants } from "framer-motion";
 import { useAuth } from "@/lib/auth";
 import { MusterbotMark } from "@/components/MusterbotMark";
+import { AgentBotAvatar } from "@/components/AgentBotAvatar";
 
 export function StarLogo({ size = 24 }: { size?: number }) {
   return (
@@ -103,64 +104,30 @@ function Float({ children, duration = 6, delay = 0 }: { children: React.ReactNod
   );
 }
 
-/** Five-point star body with capsule eyes — same silhouette family as the
- * in-app StarTeammate mascot, standalone so the marketing page stays free of
- * app imports. */
-function CrowdStar({ color, size }: { color: string; size: number }) {
-  const gradId = `crowd-${color.slice(1)}`;
-  return (
-    <svg width={size} height={size} viewBox="-48 -48 96 96" aria-hidden="true" className="block">
-      <defs>
-        <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0" stopColor={color} stopOpacity="0.72" />
-          <stop offset="1" stopColor={color} />
-        </linearGradient>
-      </defs>
-      <path d={CROWD_STAR_PATH} fill={`url(#${gradId})`} />
-      <rect x="-10.1" y="-6.2" width="5.2" height="8.4" rx="2.6" fill="#111" />
-      <rect x="4.9" y="-6.2" width="5.2" height="8.4" rx="2.6" fill="#111" />
-    </svg>
-  );
-}
-
-// Same rounded-star math the app's StarTeammate uses (starRadius curve,
-// Catmull-Rom through 128 samples), precomputed to a static path string.
-function computeCrowdStarPath(): string {
-  const STEPS = 128;
-  const TAU = Math.PI * 2;
-  const radius = (theta: number) => 0.62 + 0.38 * Math.abs(Math.cos(2.5 * theta + Math.PI / 4)) ** 0.6;
-  const raw = Array.from({ length: STEPS }, (_, i) => {
-    const a = (i / STEPS) * TAU;
-    return { x: Math.cos(a) * radius(a), y: Math.sin(a) * radius(a) };
-  });
-  const maxR = Math.max(...raw.map((p) => Math.hypot(p.x, p.y)));
-  const pts = raw.map((p) => ({ x: (p.x / maxR) * 44, y: (p.y / maxR) * 44 }));
-  const tension = 1 / 6;
-  let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
-  for (let i = 0; i < STEPS; i++) {
-    const p0 = pts[(i - 1 + STEPS) % STEPS];
-    const p1 = pts[i];
-    const p2 = pts[(i + 1) % STEPS];
-    const p3 = pts[(i + 2) % STEPS];
-    d += ` C ${(p1.x + (p2.x - p0.x) * tension).toFixed(2)} ${(p1.y + (p2.y - p0.y) * tension).toFixed(2)}, ${(p2.x - (p3.x - p1.x) * tension).toFixed(2)} ${(p2.y - (p3.y - p1.y) * tension).toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
-  }
-  return `${d} Z`;
-}
-const CROWD_STAR_PATH = computeCrowdStarPath();
-
-/** The vellum.ai moment, in our own skin: a scroll-revealed crowd of star
+/** The vellum.ai moment, in our own skin: a scroll-revealed crowd of agent
  * teammates in engine colors, springing in with stagger, then idle-floating.
- * Static under reduced motion. */
-const CROWD: { color: string; size: number; left: number; top: number; rot: number; dur: number }[] = [
-  { color: "#f0460e", size: 88, left: 3, top: 24, rot: -8, dur: 5.4 },
-  { color: "#377FE6", size: 62, left: 16, top: 58, rot: 7, dur: 6.2 },
-  { color: "#E78531", size: 96, left: 28, top: 12, rot: -5, dur: 5.8 },
-  { color: "#D84F8B", size: 56, left: 42, top: 54, rot: 9, dur: 6.6 },
-  { color: "#8057C8", size: 76, left: 52, top: 18, rot: -7, dur: 5.2 },
-  { color: "#0EA5C6", size: 64, left: 64, top: 56, rot: 6, dur: 6.8 },
-  { color: "#D8A729", size: 84, left: 74, top: 14, rot: -6, dur: 5.6 },
-  { color: "#D94B52", size: 60, left: 86, top: 52, rot: 8, dur: 6.4 },
-  { color: "#01A492", size: 70, left: 92, top: 26, rot: -4, dur: 6.0 },
+ * Static under reduced motion. Bodies come from `bot-avatars` via the shared
+ * adapter — the marketing crowd is the same avatar system as the app. */
+type CrowdKind = "star" | "flower" | "blob" | "circle" | "hexagon" | "drop" | "pebble" | "cloud";
+
+const CROWD: {
+  color: string;
+  size: number;
+  left: number;
+  top: number;
+  rot: number;
+  dur: number;
+  body: CrowdKind;
+}[] = [
+  { color: "#f0460e", size: 88, left: 3, top: 24, rot: -8, dur: 5.4, body: "star" },
+  { color: "#377FE6", size: 62, left: 16, top: 58, rot: 7, dur: 6.2, body: "flower" },
+  { color: "#E78531", size: 96, left: 28, top: 12, rot: -5, dur: 5.8, body: "star" },
+  { color: "#D84F8B", size: 56, left: 42, top: 54, rot: 9, dur: 6.6, body: "blob" },
+  { color: "#8057C8", size: 76, left: 52, top: 18, rot: -7, dur: 5.2, body: "circle" },
+  { color: "#0EA5C6", size: 64, left: 64, top: 56, rot: 6, dur: 6.8, body: "drop" },
+  { color: "#D8A729", size: 84, left: 74, top: 14, rot: -6, dur: 5.6, body: "hexagon" },
+  { color: "#D94B52", size: 60, left: 86, top: 52, rot: 8, dur: 6.4, body: "pebble" },
+  { color: "#01A492", size: 70, left: 92, top: 26, rot: -4, dur: 6.0, body: "cloud" },
 ];
 
 function StarCrowdSection() {
@@ -177,7 +144,15 @@ function StarCrowdSection() {
         </Reveal>
         <div className="relative mx-auto mt-4 h-[190px] max-w-3xl max-sm:h-[140px]">
           {CROWD.map((s, i) => {
-            const star = <CrowdStar {...s} />;
+            const star = (
+              <AgentBotAvatar
+                type={s.body}
+                fill={s.color}
+                size={s.size}
+                seed={`crowd-${i}`}
+                animated={!reduced}
+              />
+            );
             return (
               <div key={s.color} className="absolute" style={{ left: `${s.left}%`, top: `${s.top}%` }}>
                 {reduced ? (
@@ -238,7 +213,7 @@ function HeroMock() {
               Scout — check the deploy logs and tell me what broke.
             </div>
             <div className="flex items-start gap-2.5 self-start">
-              <CrowdStar color="#E78531" size={26} />
+              <AgentBotAvatar type="flower" fill="#E78531" size={26} seed="hero-scout" animated={false} />
               <div className="rounded-2xl rounded-bl-md bg-white/[0.05] px-4 py-2.5 text-[13px] leading-relaxed text-[#e5e5e5] max-w-[80%]">
                 Found it — the build failed on a missing env var. Two tests also need a re-run; everything else is green.
               </div>
@@ -542,8 +517,7 @@ export function LandingPage() {
                   <ul className="mt-5 space-y-2 text-[13.5px] text-[#a1a1a6]">
                     <li>✓ Everything in Monthly</li>
                     <li>✓ Locked-in rate for the year</li>
-                    <li>✓ Cancel anytime from the billing portal</li>
-                  </ul>
+                      </ul>
                   <Link to={user ? "/app" : "/sign-up"} className="mt-6 inline-flex justify-center rounded-xl border border-white/[0.08] bg-white/[0.02] px-5 py-2.5 text-[14px] font-semibold text-[#f5f5f5] transition-all hover:border-white/20">Go annual</Link>
                 </div>
               </Reveal>

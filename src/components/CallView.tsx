@@ -32,7 +32,7 @@ import { useSpeech } from "@/lib/tts/useSpeech";
 import { roomToneForColor, voiceRoomVars } from "@/lib/voice-surface";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { startBargeInMonitor, type EnergyMonitor } from "@/lib/barge-in-monitor";
-import { AgentAvatar } from "./Avatar";
+import { AgentBotAvatar } from "./AgentBotAvatar";
 import { SpeechControlChips } from "./SpeechControlChips";
 import { VoiceCaption } from "./VoiceCaption";
 import { WaveSpinner } from "./ui/wave-spinner";
@@ -617,7 +617,15 @@ function Call({ bot }: { bot: Bot }) {
         className="flex size-[260px] items-center justify-center rounded-full"
         style={{ background: "var(--room-bubble)" }}
       >
-        <AgentAvatar character={bot.character} color={bot.color} state={mascotState} size={220} animated trackPointer />
+        <AgentBotAvatar
+          character={bot.character}
+          seed={bot.id}
+          color={bot.color}
+          state={mascotState}
+          size={220}
+          animated
+          interactive
+        />
       </div>
 
       <div className="flex flex-col items-center gap-1.5 text-center">

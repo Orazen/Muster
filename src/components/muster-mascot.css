@@ -1,9 +1,5 @@
-.muster-mascot {
-  display: block;
-  flex: none;
-  max-width: 100%;
-  overflow: visible;
-}
+/* Bloom mascot host styles. The flower itself is drawn by `bot-avatars`
+   (canvas) — only the host + wave halo + wordmark remain. */
 
 .muster-bloom {
   display: flex;
@@ -32,56 +28,10 @@
   outline-offset: 4px;
 }
 
-.muster-mascot__float,
-.muster-mascot__reaction {
-  transform-origin: 0 0;
-}
-
-.muster-mascot__eye {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.muster-mascot[data-animated="true"] .muster-mascot__float {
-  animation: muster-mascot-float 6s ease-in-out infinite;
-}
-
-.muster-mascot[data-animated="true"] .muster-mascot__eye {
-  animation: muster-mascot-blink 5.7s ease-in-out infinite;
-}
-
-.muster-mascot[data-animated="true"] .muster-mascot__reaction[data-wave] {
-  animation: muster-mascot-wave 560ms ease-in-out;
-}
-
-@keyframes muster-mascot-float {
-  0%, 100% { transform: translateY(0) rotate(-0.6deg); }
-  50% { transform: translateY(-2px) rotate(0.6deg); }
-}
-
-@keyframes muster-mascot-blink {
-  0%, 45%, 49%, 100% { transform: scaleY(1); }
-  47% { transform: scaleY(0.08); }
-}
-
-@keyframes muster-mascot-wave {
-  0%, 100% { transform: rotate(0) scale(1); }
-  22% { transform: rotate(-8deg) scale(1.04, 0.96); }
-  48% { transform: rotate(7deg) scale(0.98, 1.02); }
-  73% { transform: rotate(-3deg) scale(1); }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .muster-mascot,
-  .muster-mascot *,
+  .muster-bloom,
   .muster-bloom__button {
     animation: none !important;
     transition: none !important;
-  }
-
-  .muster-mascot__float,
-  .muster-mascot__reaction,
-  .muster-mascot__eye {
-    transform: none !important;
   }
 }

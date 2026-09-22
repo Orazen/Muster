@@ -25,7 +25,7 @@ import {
 } from "@/lib/voice-first-run";
 import { normalizeState } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
-import { AgentAvatar } from "./Avatar";
+import { AgentBotAvatar } from "./AgentBotAvatar";
 import {
   Dialog,
   DialogContent,
@@ -105,8 +105,9 @@ export function VoiceFirstRunCard({
             <DialogHeader>
               <div className="flex items-center gap-3">
                 <span className="shrink-0">
-                  <AgentAvatar
+                  <AgentBotAvatar
                     character={bot.character}
+                    seed={bot.id}
                     color={bot.color}
                     state={normalizeState(bot.mascotExpression) ?? "happy"}
                     size={44}

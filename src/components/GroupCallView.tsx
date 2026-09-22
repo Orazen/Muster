@@ -18,7 +18,7 @@ import { roomToneForColor, voiceRoomVars } from "@/lib/voice-surface";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { useStore, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
-import { AgentAvatar } from "./Avatar";
+import { AgentBotAvatar } from "./AgentBotAvatar";
 import { CallTargetButton } from "./CallView";
 import { SpeechControlChips } from "./SpeechControlChips";
 import { VoiceCaption } from "./VoiceCaption";
@@ -491,14 +491,13 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
                 )}
                 style={focused ? { background: "var(--room-bubble)" } : undefined}
               >
-                <AgentAvatar
+                <AgentBotAvatar
                   character={member.character}
+                  seed={member.id}
                   color={member.color}
                   state={state}
                   size={94}
                   animated
-                  motion={workingMember?.id === member.id ? "working" : "none"}
-                  motionKey={workingMember?.id === member.id ? 1 : 0}
                 />
                 <span
                   className={cn("text-[13px] font-medium", focused ? "text-[var(--room-fg)]" : "text-[var(--room-fg-muted)]")}
