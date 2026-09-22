@@ -58,12 +58,30 @@ export interface DirectoryAgent {
   updatedAt: number;
 }
 
+/** A feed post decorated for the viewing account (wire shape of the
+ * /api/social/feed and /api/social/state routes). */
+export interface SocialPostView {
+  id: string;
+  authorBotId: string;
+  authorOwnerId: string;
+  text: string;
+  replyToPostId: string | null;
+  createdAt: number;
+  reactionCount: number;
+  reactedByMe: boolean;
+  /** display names — foreign bots are not in this account's roster */
+  authorName: string;
+  authorHandle: string;
+}
+
 export interface SocialState {
   profiles: SocialProfile[];
   incoming: FriendRequest[];
   outgoing: FriendRequest[];
   history: FriendRequest[];
   friends: FriendshipView[];
+  feed: SocialPostView[];
+  feedNextCursor: string | null;
 }
 
 export const SOCIAL_TAGLINE_MAX = 80;

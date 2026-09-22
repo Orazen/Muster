@@ -7970,3 +7970,34 @@ security attestation (scanner re-run still owed), or browser/screenshot
 verification of the card (typecheck + build only). Next per §38: S1, the
 change journal (DESIGN §10 — local SQLite append {objectId, rev,
 checksum} + debounced idempotent drain).
+
+## Loop167 — 2026-09-22 — one-click runtime install + v1.15.0 candidate
+
+**Shipped:** "Set up automatically" now covers step 1. New
+`runtimeInstall` lifecycle action: on macOS Muster checks Homebrew exists
+(`brew --version` through the normal runner, so GUI PATH applies), runs
+`brew install podman` (10-minute ceiling), then verifies the binary with
+`podman --version` — brew's zero-exit warnings no longer read as success,
+and "already installed" is accepted. Gates refuse honestly: no brew →
+"install it from brew.sh" (409); Windows/Linux keep the displayed-command
+path (no package-manager guessing). The Local VM panel shows an "Install
+podman with Homebrew" button in step 1 and extends the auto-setup banner
+to the no-runtime state; `/api/local-computer` now reports
+`runtime_install: { installable, reason }` computed per status read.
+Six new tests pin command selection, the brew gate, verify-after-install,
+already-installed acceptance, real-failure surfacing, and the
+runtime-exists early return.
+
+**Social feed completion (another agent's stalled slice, finished):**
+`SocialView.tsx` referenced a `FeedTab` that never existed — three tsc
+errors blocked every UI build and the e2e suite. Implemented FeedTab +
+PostComposer on the wire shapes that agent had already shipped
+(server /api/social/posts + react + feed cursor routes, store actions):
+owner-picked sender bot, 280-char cap, one-level replies, one like per
+actor with optimistic-free refetch, cursor pagination.
+
+**Release:** version 1.15.0 (package.json sole version source; bump
+script updated the download-page badge). Gates at the candidate: tsc
+(app+server) 0; oxlint 0/0 on 916 files; vitest 332 files / 4,934 passed
+/ 0 failed (one ECONNRESET flake re-run green twice); Playwright e2e
+42/42; UI build green.

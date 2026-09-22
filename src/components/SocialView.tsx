@@ -4,10 +4,10 @@
 // Deliberately calm and honest: nothing here is public until an owner says
 // so, and every edge in the graph is a human action on both ends.
 import { useEffect, useMemo, useState } from "react";
-import { Globe, Inbox, Search, Send, UserPlus, Users } from "lucide-react";
+import { Globe, Heart, Inbox, ScrollText, Search, Send, UserPlus, Users } from "lucide-react";
 import { api, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
-import { SOCIAL_BIO_MAX, SOCIAL_MESSAGE_MAX, SOCIAL_TAGLINE_MAX, type DirectoryAgent, type SocialProfile } from "@/lib/social";
+import { SOCIAL_BIO_MAX, SOCIAL_MESSAGE_MAX, SOCIAL_TAGLINE_MAX, type DirectoryAgent, type SocialPostView, type SocialProfile } from "@/lib/social";
 
 const TINTS = {
   orange: "#f08a24", green: "#38d591", blue: "#1084fe", red: "#ff5667",
@@ -32,7 +32,7 @@ function BotDot({ color, name, size = 36 }: { color: string; name: string; size?
   );
 }
 
-type Tab = "friends" | "requests" | "directory" | "profiles";
+type Tab = "feed" | "friends" | "requests" | "directory" | "profiles";
 
 export function SocialView() {
   const { state } = useStore();
@@ -58,6 +58,7 @@ export function SocialView() {
   const openRequests = (social?.incoming.length ?? 0) + (social?.outgoing.length ?? 0);
 
   const tabs: { id: Tab; label: string; icon: typeof Users; badge?: number }[] = [
+    { id: "feed", label: "Feed", icon: ScrollText },
     { id: "requests", label: "Requests", icon: Inbox, badge: social?.incoming.length },
     { id: "friends", label: "Friends", icon: Users },
     { id: "directory", label: "Directory", icon: Globe },
@@ -92,6 +93,7 @@ export function SocialView() {
         </div>
       </div>
       <div className="mx-auto w-full max-w-[720px] flex-1 px-6 py-5">
+        {tab === "feed" && <FeedTab />}
         {tab === "requests" && <RequestsTab />}
         {tab === "friends" && <FriendsTab />}
         {tab === "directory" && <DirectoryTab initialQuery={addIntent ?? ""} />}
@@ -103,6 +105,148 @@ export function SocialView() {
 
 function Empty({ children }: { children: string }) {
   return <p className="rounded-xl bg-inset px-4 py-6 text-center text-[13px] text-ink-secondary">{children}</p>;
+}
+
+// ── feed ────────────────────────────────────────────────────────────────
+// Posts are composed by the sender's OWNER picking one of their bots — the
+// same consent shape as friend requests. One like per actor, one reply
+// level; the store refetches after every action so the count never lies.
+function FeedTab() {
+  const { state, dispatch } = useStore();
+  const social = state.social;
+  const myBots = state.bots.filter((b) => !b.hidden);
+  const [composerFor, setComposerFor] = useState<"new" | { replyTo: SocialPostView } | null>(null);
+  useEffect(() => {
+    dispatch({ type: "socialRefresh" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the refresh is a mount-time sync, not a per-render loop
+  }, []);
+  if (!social) return <Empty>Loading the feed…</Empty>;
+  if (myBots.length === 0) return <Empty>Muster a teammate first — posts belong to bots.</Empty>;
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <button
+          onClick={() => setComposerFor(composerFor === "new" ? null : "new")}
+          className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:opacity-90"
+        >
+          <Send size={13} /> Post to the feed
+        </button>
+      </div>
+      {composerFor === "new" && (
+        <PostComposer
+          myBots={myBots.map((b) => ({ id: b.id, name: b.name }))}
+          onDone={() => setComposerFor(null)}
+        />
+      )}
+      {social.feed.length === 0 && (
+        <Empty>
+          The feed is quiet. Post something as one of your teammates, or befriend people in the Directory — friends'
+          posts show up here.
+        </Empty>
+      )}
+      {social.feed.map((p) => (
+        <article key={p.id} className="rounded-xl bg-inset px-4 py-3">
+          <p className="text-[14px] text-ink">
+            <strong>{p.authorName}</strong>
+            {p.authorHandle && <span className="text-ink-secondary"> @{p.authorHandle}</span>}
+            {p.replyToPostId && <span className="text-ink-secondary"> · reply</span>}
+          </p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-ink">{p.text}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              onClick={() => dispatch({ type: "reactSocialPost", postId: p.id, botId: myBots[0]!.id })}
+              disabled={composerFor !== null}
+              className={cn(
+                "flex items-center gap-1 rounded-lg px-2 py-1 text-[12.5px] hover:bg-raised disabled:opacity-40",
+                p.reactedByMe ? "text-accent" : "text-ink-secondary",
+              )}
+              title={p.reactedByMe ? "Take back your like" : "Like as your first teammate"}
+            >
+              <Heart size={13} fill={p.reactedByMe ? "currentColor" : "none"} /> {p.reactionCount}
+            </button>
+            <button
+              onClick={() => setComposerFor({ replyTo: p })}
+              disabled={composerFor !== null}
+              className="rounded-lg px-2 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
+            >
+              Reply
+            </button>
+          </div>
+          {composerFor !== null && composerFor !== "new" && composerFor.replyTo.id === p.id && (
+            <PostComposer
+              myBots={myBots.map((b) => ({ id: b.id, name: b.name }))}
+              replyTo={p}
+              onDone={() => setComposerFor(null)}
+            />
+          )}
+        </article>
+      ))}
+      {social.feedNextCursor && (
+        <button
+          onClick={() => {
+            const next = social.feedNextCursor;
+            if (!next) return;
+            dispatch({ type: "loadMoreSocialPosts", cursor: next });
+          }}
+          className="w-full rounded-xl bg-inset px-4 py-2.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          Load older posts
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PostComposer({
+  myBots,
+  replyTo,
+  onDone,
+}: {
+  myBots: { id: string; name: string }[];
+  replyTo?: SocialPostView;
+  onDone: () => void;
+}) {
+  const { dispatch } = useStore();
+  const [fromBotId, setFromBotId] = useState(myBots[0]?.id ?? "");
+  const [text, setText] = useState("");
+  return (
+    <div className="mt-3 space-y-2 rounded-lg bg-panel px-3 py-3">
+      <div className="flex items-center gap-2">
+        <select
+          value={fromBotId}
+          onChange={(e) => setFromBotId(e.target.value)}
+          className="rounded-lg bg-inset px-2 py-1.5 text-[13px] text-ink outline-none"
+          aria-label="Which teammate posts"
+        >
+          {myBots.map((b) => (
+            <option key={b.id} value={b.id}>{b.name}</option>
+          ))}
+        </select>
+        {replyTo && <span className="text-[13px] text-ink-secondary">→ replying to {replyTo.authorName}</span>}
+      </div>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value.slice(0, SOCIAL_MESSAGE_MAX))}
+        rows={2}
+        placeholder={`What's happening? (max ${SOCIAL_MESSAGE_MAX})`}
+        className="w-full resize-none rounded-lg bg-inset px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-secondary/60"
+      />
+      <div className="flex justify-end gap-2">
+        <button onClick={onDone} className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised">Cancel</button>
+        <button
+          onClick={() => {
+            const trimmed = text.trim();
+            if (!fromBotId || !trimmed) return;
+            dispatch({ type: "sendSocialPost", input: { botId: fromBotId, text: trimmed, replyToPostId: replyTo?.id } });
+            onDone();
+          }}
+          className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white hover:opacity-90"
+        >
+          <Send size={13} /> {replyTo ? "Send reply" : "Post"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ── requests ───────────────────────────────────────────────────────────

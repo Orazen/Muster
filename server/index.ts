@@ -92,6 +92,7 @@ import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import {
   SHARED_LOCAL_VM_TARGET,
+  canAutoInstallRuntime,
   containerComputerAction,
   containerComputerMcp,
   containerComputerScreenshot,
@@ -279,7 +280,7 @@ import { LocalVmLeasePool } from "./local-vm-lease.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { GoalManager } from "./goals.ts";
-import { SocialManager, socialProfileInputSchema, friendRequestInputSchema } from "./social.ts";
+import { SocialManager, socialProfileInputSchema, friendRequestInputSchema, socialPostInputSchema, socialReactInputSchema } from "./social.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchLibraryTeamReadme, fetchTeamCatalog } from "./team-library.ts";
 import { parseTeamMarkdown, renderTeamMarkdown } from "./team-markdown.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
@@ -6522,12 +6523,24 @@ let requestUserEmail = "";
             theirTagline: theirProfile?.tagline ?? "",
           };
         });
+      const decorate = (p: ReturnType<SocialManager["feedForOwner"]>["posts"][number]) => {
+        const bot = store.bot(p.authorBotId);
+        const profile = social!.profileFor(p.authorBotId);
+        return {
+          ...p,
+          authorName: bot?.name ?? "Removed teammate",
+          authorHandle: profile?.handle ?? "",
+        };
+      };
+      const feedPage = social!.feedForOwner(uid);
       return json(res, 200, {
         profiles: social!.profilesForOwner(uid),
         incoming: social!.requestsForOwner(uid).incoming.map(withNames),
         outgoing: social!.requestsForOwner(uid).outgoing.map(withNames),
         history: social!.historyForOwner(uid).map(withNames),
         friends: friendsView(),
+        feed: feedPage.posts.map(decorate),
+        feedNextCursor: feedPage.nextCursor,
       });
     }
     if (path === "/api/social/profile" && method === "PUT") {
@@ -6605,6 +6618,60 @@ let requestUserEmail = "";
         return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
       }
     }
+    // ── feed (plan S5): default-private posts, one-level replies, one like
+    // per actor. Same ownership choke point as the identity routes.
+    if (path === "/api/social/posts" && method === "POST") {
+      const body = await readBody(req);
+      const parsed = socialPostInputSchema.safeParse(body);
+      if (!parsed.success) {
+        return json(res, 400, { error: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ") });
+      }
+      const bot = store.bot(parsed.data.botId);
+      if (!bot || !ownsRecord(bot)) return json(res, 404, { error: "no such bot" });
+      try {
+        const post = social!.createPost(
+          { authorBotId: bot.id, authorOwnerId: requestUserId ?? "local", text: parsed.data.text, replyToPostId: parsed.data.replyToPostId },
+          bot.name,
+        );
+        return json(res, 201, { post });
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    const socialReactMatch = path.match(/^\/api\/social\/posts\/([\w-]+)\/react$/);
+    if (socialReactMatch && method === "POST") {
+      const body = await readBody(req);
+      const parsed = socialReactInputSchema.safeParse(body);
+      if (!parsed.success) {
+        return json(res, 400, { error: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ") });
+      }
+      const bot = store.bot(parsed.data.botId);
+      if (!bot || !ownsRecord(bot)) return json(res, 404, { error: "no such bot" });
+      try {
+        return json(res, 200, social!.toggleReaction(socialReactMatch[1]!, bot.id, requestUserId ?? "local"));
+      } catch (error) {
+        return json(res, 404, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    if (path === "/api/social/feed" && method === "GET") {
+      const uid = requestUserId ?? "local";
+      const url = new URL(req.url ?? "http://local", "http://localhost");
+      const cursor = url.searchParams.get("cursor") ?? undefined;
+      const limitRaw = Number(url.searchParams.get("limit"));
+      const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+      const decorate = (p: ReturnType<SocialManager["feedForOwner"]>["posts"][number]) => {
+        const bot = store.bot(p.authorBotId);
+        const profile = social!.profileFor(p.authorBotId);
+        return {
+          ...p,
+          authorName: bot?.name ?? "Removed teammate",
+          authorHandle: profile?.handle ?? "",
+        };
+      };
+      const page = social!.feedForOwner(uid, { cursor, limit });
+      return json(res, 200, { posts: page.posts.map(decorate), nextCursor: page.nextCursor });
+    }
+
     if (path === "/api/directory/agents" && method === "GET") {
       // Public by design (allowlisted): only profiles their owner set to
       // public, and only the fields the owner chose to share.
@@ -7697,15 +7764,19 @@ let requestUserEmail = "";
     // its daemon is up, and whether the desktop image and container exist
     if (method === "GET" && path === "/api/local-computer") {
       const status = await containerComputerStatus();
+      // The one-click install offer is computed per status read: brew may
+      // have been installed since boot (resetPathCache runs on re-probe).
+      const installGate = status.runtime ? { installable: false, reason: "A container runtime is already installed." } : await canAutoInstallRuntime();
       return json(res, 200, {
         ...status,
         commands: setupCommands(status.runtime),
+        runtime_install: installGate,
         idle_timeout_ms: LOCAL_VM_IDLE_MS,
         mode: localVmMode(cfg),
         max_instances: localVmMaxInstances(cfg),
       });
     }
-    m = path.match(/^\/api\/local-computer\/(pull|run|start|stop|remove|runtimeStart)$/);
+    m = path.match(/^\/api\/local-computer\/(pull|run|start|stop|remove|runtimeStart|runtimeInstall)$/);
     if (m && method === "POST") {
       // Requiring JSON makes these localhost lifecycle mutations non-simple
       // browser requests. A hostile web page cannot submit them with a form,

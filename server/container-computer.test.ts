@@ -25,6 +25,9 @@ import {
   containerComputerScreenshot,
   containerComputerStatus,
   canAutoStartRuntime,
+  canAutoInstallRuntime,
+  installContainerRuntime,
+  runtimeInstallCommand,
   startContainerRuntime,
   managedImageDockerfile,
   setupCommands,
@@ -555,6 +558,93 @@ describe("containerComputerAction", () => {
     // Nothing beyond the status probes docker info/inspect already needs —
     // no attempt to (re-)start a daemon that's already answering.
     expect(fake.calls.every((call) => call.startsWith("docker info") || call.includes("inspect") || call.startsWith("/usr/bin/which"))).toBe(true);
+  });
+});
+
+describe("runtime install", () => {
+  it("offers a Homebrew command on macOS and nothing elsewhere", () => {
+    expect(runtimeInstallCommand("darwin")).toEqual({ command: "brew install podman", manager: "Homebrew" });
+    expect(runtimeInstallCommand("win32")).toBeNull();
+    expect(runtimeInstallCommand("linux")).toBeNull();
+  });
+
+  it("gates the install on the package manager being present", async () => {
+    const brewUp: CommandRunner = async (cmd, args) => {
+      expect(cmd).toBe("brew");
+      expect(args).toEqual(["--version"]);
+      return { stdout: "Homebrew 4.0\n" };
+    };
+    await expect(canAutoInstallRuntime("darwin", brewUp)).resolves.toEqual({ installable: true });
+    const brewDown: CommandRunner = async () => {
+      throw new Error("command not found");
+    };
+    const gate = await canAutoInstallRuntime("darwin", brewDown);
+    expect(gate.installable).toBe(false);
+    expect(gate.reason).toMatch(/Homebrew is not installed/);
+  });
+
+  it("runs brew install podman and verifies the binary landed", async () => {
+    const shells: string[] = [];
+    // The runner doubles as the brew gate: one call for `brew --version`,
+    // one for `podman --version` after the shell ran.
+    const verifier: CommandRunner = async (cmd, args) => {
+      expect(args).toEqual(["--version"]);
+      return { stdout: cmd === "brew" ? "Homebrew 4.0\n" : "5.2.0\n" };
+    };
+    await expect(
+      installContainerRuntime("podman", "darwin", verifier, async (cmd) => {
+        shells.push(cmd);
+      }),
+    ).resolves.toBeUndefined();
+    expect(shells).toEqual(["brew install podman"]);
+  });
+
+  it("reports honestly when brew finishes but the binary is still absent", async () => {
+    // brew gate passes; the post-install podman --version is what fails.
+    const gateOnly: CommandRunner = async (cmd) => {
+      if (cmd === "brew") return { stdout: "Homebrew 4.0\n" };
+      throw new Error("command not found");
+    };
+    await expect(
+      installContainerRuntime("podman", "darwin", gateOnly, async () => undefined),
+    ).rejects.toThrow(/finished but podman still is not answering/);
+  });
+
+  it("surfaces real install failures and accepts already-installed as success", async () => {
+    const gateOk: CommandRunner = async (cmd) => {
+      if (cmd === "brew") return { stdout: "Homebrew 4.0\n" };
+      return { stdout: "5.2.0\n" };
+    };
+    await expect(
+      installContainerRuntime("podman", "darwin", gateOk, async () => {
+        throw new Error("brew: formulae require Xcode CLT");
+      }),
+    ).rejects.toThrow(/Could not install podman.*Xcode CLT/s);
+    await expect(
+      installContainerRuntime("podman", "darwin", gateOk, async () => {
+        throw new Error("Warning: podman 5.2.0 already installed");
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses to install on platforms without a supported command", async () => {
+    let shellTouched = false;
+    await expect(
+      installContainerRuntime("podman", "linux", async () => ({ stdout: "" }), async () => {
+        shellTouched = true;
+      }),
+    ).rejects.toThrow(/does not have a one-click install for this platform/);
+    expect(shellTouched).toBe(false);
+  });
+
+  it("action skips install when a runtime already exists", async () => {
+    const daemonUp: CommandRunner = async () => ({ stdout: "6.1.1\n" });
+    // containerComputerAction uses the real installContainerRuntime; the
+    // existing-runtime early return must fire before any shell call. The
+    // runner's `podman info` response means status resolves runtime=docker.
+    const before = await containerComputerStatus(daemonUp, "darwin");
+    expect(before.runtime).toBe("docker");
+    await expect(containerComputerAction("runtimeInstall", daemonUp, "darwin", SHARED_LOCAL_VM_TARGET)).resolves.toBeDefined();
   });
 });
 

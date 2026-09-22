@@ -17,7 +17,7 @@ import { Card, CommandLine } from "./SettingsPrimitives";
 import { RaisedButton } from "./ui/raised-button";
 import { cn } from "@/lib/cn";
 
-type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate" | "runtimeStart";
+type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate" | "runtimeStart" | "runtimeInstall";
 
 interface Status {
   platform: string;
@@ -45,6 +45,9 @@ interface Status {
   idle_timeout_ms: number;
   mode?: "shared" | "perBot";
   max_instances?: number;
+  /** One-click install offer, computed per status read. Absent on older
+   * servers — the optional chain in the UI keeps that rendering. */
+  runtime_install?: { installable: boolean; reason?: string };
   commands: {
     install: string | null;
     runtimeStart: string | null;
@@ -468,6 +471,18 @@ export function LocalComputerSection() {
     setError(null);
     try {
       let current = status;
+      // Step 1, when the gate allows it: install the runtime itself. Only
+      // offered where the command is plain and user-level (Homebrew); the
+      // gate's reason is the honest message when it isn't.
+      if (current && !current.runtime) {
+        if (current.runtime_install?.installable) {
+          await post("runtimeInstall");
+          current = await (await fetch("/api/local-computer")).json();
+          setStatus(current);
+        } else if (current.runtime_install?.reason) {
+          throw new Error(current.runtime_install.reason);
+        }
+      }
       if (current?.runtime && !current.daemonUp) {
         if (current.runtime === "docker" && current.platform === "linux") {
           throw new Error("Starting docker on Linux needs sudo — run the command shown below yourself, then continue.");
@@ -555,6 +570,21 @@ export function LocalComputerSection() {
 
       <Card title="Setup" subtitle="Once a container runtime is open, Muster prepares Cua and the VM for you.">
         <div className="flex flex-col gap-4">
+          {status?.runtime_install?.installable && !status?.runtime && (
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-accent/25 bg-accent/5 px-3.5 py-3">
+              <div className="text-[13px] text-ink-secondary">
+                No runtime installed — Muster can install podman via Homebrew, then prepare the desktop and create the VM.
+              </div>
+              <button
+                onClick={() => void runAutoSetup()}
+                disabled={autoSetupRunning || pending !== null}
+                className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+              >
+                {autoSetupRunning && <Loader2 size={13} className="animate-spin" />}
+                Set up automatically
+              </button>
+            </div>
+          )}
           {status?.runtime && !status.ready && !needsRecreate && (
             <div className="flex items-center justify-between gap-3 rounded-xl border border-accent/25 bg-accent/5 px-3.5 py-3">
               <div className="text-[13px] text-ink-secondary">
@@ -574,6 +604,16 @@ export function LocalComputerSection() {
             <div className="text-[13px] leading-relaxed text-ink-secondary">
               Podman and Colima are free. Docker Desktop may require a paid licence for larger companies and government use.
             </div>
+            {status?.runtime_install?.installable && !status?.runtime && (
+              <div className="flex items-center gap-2">
+                <ActionButton action="runtimeInstall" pending={pending} onClick={() => void act("runtimeInstall")}>
+                  Install podman with Homebrew
+                </ActionButton>
+              </div>
+            )}
+            {!status?.runtime && status?.runtime_install?.reason && !status.runtime_install.installable && (
+              <div className="text-[12.5px] text-ink-secondary">{status.runtime_install.reason}</div>
+            )}
             {c?.install ? (
               <CommandLine command={c.install} />
             ) : (

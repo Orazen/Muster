@@ -17,7 +17,7 @@ import {
 import type { EffortLevel } from "../../server/contracts.ts";
 import type { AgentCharacter, AgentColor, AgentMotion } from "@/lib/mascot";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
-import type { SocialProfile, SocialState } from "@/lib/social";
+import type { SocialProfile, SocialPostView, SocialState } from "@/lib/social";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
 import { soulMdFor, type AgentTemplate } from "@/lib/agent-templates";
@@ -482,6 +482,10 @@ export type Action =
   | { type: "socialProfileDeleted"; botId: string }
   | { type: "socialRefresh" }
   | { type: "setSocialProfile"; input: { botId: string; tagline?: string; bio?: string; visibility: "private" | "public"; handle?: string } }
+  | { type: "sendSocialPost"; input: { botId: string; text: string; replyToPostId?: string } }
+  | { type: "reactSocialPost"; postId: string; botId: string }
+  | { type: "loadMoreSocialPosts"; cursor: string }
+  | { type: "socialFeedLoaded"; posts: SocialPostView[]; nextCursor: string | null }
   | { type: "sendFriendRequest"; input: { fromBotId: string; toHandle: string; message?: string } }
   | { type: "acceptFriendRequest"; requestId: string }
   | { type: "declineFriendRequest"; requestId: string }
@@ -650,6 +654,16 @@ export function reducer(state: AppState, action: Action): AppState {
     case "socialProfileDeleted":
       if (!state.social) return state;
       return { ...state, social: { ...state.social, profiles: state.social.profiles.filter((p) => p.botId !== action.botId) } };
+    case "socialFeedLoaded":
+      if (!state.social) return state;
+      return {
+        ...state,
+        social: {
+          ...state.social,
+          feed: [...state.social.feed, ...action.posts.filter((p) => !state.social!.feed.some((f) => f.id === p.id))],
+          feedNextCursor: action.nextCursor,
+        },
+      };
     case "routinesHydrated":
       return { ...state, routines: action.routines, routineRuns: action.runs };
     case "routinePatched": {
@@ -1080,6 +1094,9 @@ export function reducer(state: AppState, action: Action): AppState {
     case "stopGoal":
     case "socialRefresh":
     case "setSocialProfile":
+    case "sendSocialPost":
+    case "reactSocialPost":
+    case "loadMoreSocialPosts":
     case "sendFriendRequest":
     case "acceptFriendRequest":
     case "declineFriendRequest":
@@ -1293,6 +1310,22 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
           api("/api/social/state")
             .then((social: SocialState) => rawDispatch({ type: "socialHydrated", social }))
             .catch(() => {});
+          break;
+        case "sendSocialPost":
+          api("/api/social/posts", { method: "POST", body: JSON.stringify(action.input) })
+            .then(() => rawDispatch({ type: "socialRefresh" }))
+            .catch(showError);
+          break;
+        case "reactSocialPost":
+          api(`/api/social/posts/${action.postId}/react`, { method: "POST", body: JSON.stringify({ botId: action.botId }) })
+            .then(() => rawDispatch({ type: "socialRefresh" }))
+            .catch(showError);
+          break;
+        case "loadMoreSocialPosts":
+          api(`/api/social/feed?cursor=${encodeURIComponent(action.cursor)}`)
+            .then(({ posts, nextCursor }: { posts: SocialPostView[]; nextCursor: string | null }) =>
+              rawDispatch({ type: "socialFeedLoaded", posts, nextCursor }))
+            .catch(showError);
           break;
         case "setSocialProfile":
           api("/api/social/profile", { method: "PUT", body: JSON.stringify(action.input) })
@@ -1820,6 +1853,9 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
         case "social.friendRequest":
         case "social.friendship":
         case "social.friendship.deleted":
+        case "social.post":
+        case "social.post.reaction":
+        case "social.post.deleted":
           rawDispatch({ type: "socialRefresh" });
           break;
         case "webhook":

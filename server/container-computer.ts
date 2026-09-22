@@ -60,7 +60,7 @@ export const CUA_EXECUTABLE = "/usr/local/libexec/muster/cua-driver";
 
 const RUNTIMES = ["docker", "podman", "container"] as const;
 export type Runtime = (typeof RUNTIMES)[number];
-export type LifecycleAction = "pull" | "run" | "start" | "stop" | "remove" | "runtimeStart";
+export type LifecycleAction = "pull" | "run" | "start" | "stop" | "remove" | "runtimeStart" | "runtimeInstall";
 
 /** Set when a runtime refused --memory/--cpus outright and the container was
  * started without resource caps instead of failing the desktop entirely. */
@@ -933,6 +933,11 @@ export async function containerComputerAction(
   // The one action that runs BEFORE the daemon is up — that is the whole
   // point of it, so it has to be checked ahead of the daemonUp gate below,
   // not after it.
+  if (action === "runtimeInstall") {
+    if (before.runtime) return before; // nothing to install
+    await installContainerRuntime("podman", platform, runner);
+    return containerComputerStatus(runner, platform, target);
+  }
   if (action === "runtimeStart") {
     if (before.daemonUp) return before;
     await startContainerRuntime(runtime, platform, runner);
@@ -1367,6 +1372,77 @@ export async function startContainerRuntime(
     throw Object.assign(new Error(`Could not start ${runtime}: the command finished but ${runtime} is not answering yet — try Re-check in a moment`), {
       status: 500,
     });
+  }
+}
+
+/** The package-manager install command per platform, or null where Muster
+ * ships no one-click install. Installation is new software on the user's
+ * machine — the same category as developer accounts elsewhere in this app —
+ * so the auto-setup button appears ONLY where the command is plain,
+ * user-level and well-known: Homebrew on macOS. Windows' winget shim is
+ * offered as a displayed command, never run from the app; Linux has too
+ * many package managers to guess. */
+export function runtimeInstallCommand(platform: NodeJS.Platform = process.platform): { command: string; manager: string } | null {
+  if (platform === "darwin") return { command: "brew install podman", manager: "Homebrew" };
+  return null;
+}
+
+/** Whether the install action can run from the app: a package manager must
+ * exist on the augmented PATH (the GUI-launch fix), and the platform must
+ * be one with a supported command. Detection runs `brew --version` style
+ * probes through the normal runner so tests can stub availability. */
+export async function canAutoInstallRuntime(
+  platform: NodeJS.Platform = process.platform,
+  runner: CommandRunner = sh,
+): Promise<{ installable: boolean; reason?: string }> {
+  const install = runtimeInstallCommand(platform);
+  if (!install) return { installable: false, reason: "Muster does not have a one-click install for this platform — use the command shown in step 1." };
+  try {
+    const manager = install.manager === "Homebrew" ? "brew" : install.manager.toLowerCase();
+    await runner(manager, ["--version"], 15_000);
+    return { installable: true };
+  } catch {
+    return { installable: false, reason: `${install.manager} is not installed — install it from brew.sh, or run the command in step 1 yourself.` };
+  }
+}
+
+/** Run the runtime install command, then verify the binary actually landed.
+ * Brew can exit 0 while warning (a cask already installed, a skipped
+ * formula), so the verification is `runtime --version` through the runner —
+ * the same binary the rest of the panel will use. */
+export async function installContainerRuntime(
+  runtime: Runtime,
+  platform: NodeJS.Platform = process.platform,
+  runner: CommandRunner = sh,
+  shell?: (command: string) => Promise<void>,
+): Promise<void> {
+  const install = runtimeInstallCommand(platform);
+  if (!install) {
+    throw Object.assign(new Error("Muster does not have a one-click install for this platform — use the command shown in step 1."), { status: 409 });
+  }
+  const gate = await canAutoInstallRuntime(platform, runner);
+  if (!gate.installable) throw Object.assign(new Error(gate.reason ?? "install unavailable"), { status: 409 });
+  const shellRun = promisify(execFile);
+  const runShell = shell ?? (async (cmd: string) => {
+    // Package downloads dwarf VM starts — brew's own progress and the
+    // image-prepare budget both argue for the 10-minute ceiling.
+    await shellRun("/bin/sh", ["-c", cmd], { timeout: 10 * 60_000, env: { ...process.env, PATH: augmentedPath() } });
+  });
+  try {
+    await runShell(install.command);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // Brew exits non-zero with "already installed" in some flows; verify
+    // before believing either direction.
+    if (!/already installed/i.test(message)) throw Object.assign(new Error(`Could not install ${runtime}: ${message}`), { status: 500 });
+  }
+  try {
+    await runner(runtime, ["--version"], 20_000);
+  } catch {
+    throw Object.assign(
+      new Error(`The ${install.manager} command finished but ${runtime} still is not answering — try Re-check, or install it manually: ${install.command}`),
+      { status: 500 },
+    );
   }
 }
 

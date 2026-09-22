@@ -32,6 +32,10 @@ const REQUESTS_PER_HOUR_PER_OWNER = 10;
 // a modest per-owner budget stops both without hurting real users
 const HANDLE_CLAIMS_PER_HOUR_PER_OWNER = 10;
 const HOUR_MS = 60 * 60_000;
+// feed paging is opaque-cursor based; page size is server-clamped
+const FEED_PAGE_DEFAULT = 20;
+const FEED_PAGE_MAX = 50;
+const POSTS_PER_HOUR_PER_OWNER = 20;
 
 export type SocialVisibility = "private" | "public";
 
@@ -69,6 +73,29 @@ export interface Friendship {
   createdAt: number;
 }
 
+export interface SocialPost {
+  id: string;
+  authorBotId: string;
+  authorOwnerId: string;
+  text: string;
+  /** canonical order: roots only — threads are one level deep */
+  replyToPostId: string | null;
+  createdAt: number;
+}
+
+export interface SocialReaction {
+  postId: string;
+  /** one like per actor per post; a second toggle removes the first */
+  actorBotId: string;
+  actorOwnerId: string;
+  createdAt: number;
+}
+
+export interface FeedPage {
+  posts: Array<SocialPost & { reactionCount: number; reactedByMe: boolean }>;
+  nextCursor: string | null;
+}
+
 export type SocialEvent =
   | { kind: "social.profile"; profile: SocialProfile; socialOwnerIds: string[] }
   | { kind: "social.profile.deleted"; botId: string; socialOwnerIds: string[] }
@@ -90,7 +117,21 @@ export type SocialEvent =
       bHandle: string;
       socialOwnerIds: string[];
     }
-  | { kind: "social.friendship.deleted"; friendshipId: string; socialOwnerIds: string[] };
+  | { kind: "social.friendship.deleted"; friendshipId: string; socialOwnerIds: string[] }
+  | {
+      kind: "social.post";
+      post: SocialPost;
+      authorName: string;
+      authorHandle: string;
+      socialOwnerIds: string[];
+    }
+  | {
+      kind: "social.post.reaction";
+      postId: string;
+      reactionCount: number;
+      socialOwnerIds: string[];
+    }
+  | { kind: "social.post.deleted"; postId: string; socialOwnerIds: string[] };
 
 export const socialProfileInputSchema = z.object({
   botId: z.string().min(1),
@@ -100,6 +141,13 @@ export const socialProfileInputSchema = z.object({
   handle: z.string().optional(),
 });
 export type SocialProfileInput = z.infer<typeof socialProfileInputSchema>;
+
+export const socialPostInputSchema = z.object({
+  botId: z.string().min(1),
+  text: z.string().min(1).max(SOCIAL_MESSAGE_MAX),
+  replyToPostId: z.string().optional(),
+});
+export const socialReactInputSchema = z.object({ botId: z.string().min(1) });
 
 export const friendRequestInputSchema = z.object({
   fromBotId: z.string().min(1),
@@ -128,7 +176,12 @@ interface SocialFile {
   profiles: SocialProfile[];
   requests: FriendRequest[];
   friendships: Friendship[];
+  posts: SocialPost[];
+  reactions: SocialReaction[];
 }
+
+/** Posts and reactions age out exactly like resolved requests. */
+const SOCIAL_SOCIAL_TTL_MS = 30 * 24 * HOUR_MS;
 
 export class SocialManager {
   private readonly file: string;
@@ -138,6 +191,8 @@ export class SocialManager {
   private profiles = new Map<string, SocialProfile>();
   private requests: FriendRequest[] = [];
   private friendships: Friendship[] = [];
+  private posts: SocialPost[] = [];
+  private reactions: SocialReaction[] = [];
   /** per-owner rolling request-creation timestamps for the hourly bucket */
   private readonly creationTimes = new Map<string, number[]>();
 
@@ -158,19 +213,29 @@ export class SocialManager {
       this.profiles = new Map((disk.profiles ?? []).map((p) => [p.botId, p]));
       this.requests = Array.isArray(disk.requests) ? disk.requests : [];
       this.friendships = Array.isArray(disk.friendships) ? disk.friendships : [];
+      this.posts = Array.isArray(disk.posts) ? disk.posts : [];
+      this.reactions = Array.isArray(disk.reactions) ? disk.reactions : [];
     } catch {
       this.profiles = new Map();
       this.requests = [];
       this.friendships = [];
+      this.posts = [];
+      this.reactions = [];
     }
   }
 
   private save(): void {
+    const now = this.now();
+    const live = this.posts.filter((p) => now - p.createdAt < SOCIAL_SOCIAL_TTL_MS);
+    const liveIds = new Set(live.map((p) => p.id));
     const body: SocialFile = {
       profiles: [...this.profiles.values()],
       // resolved requests age out; pending ones always survive
-      requests: this.requests.filter((r) => r.status === "pending" || this.now() - r.createdAt < 30 * 24 * HOUR_MS),
+      requests: this.requests.filter((r) => r.status === "pending" || now - r.createdAt < 30 * 24 * HOUR_MS),
       friendships: this.friendships,
+      // replies age out with their roots
+      posts: live.filter((p) => !p.replyToPostId || liveIds.has(p.replyToPostId)),
+      reactions: this.reactions.filter((r) => liveIds.has(r.postId)),
     };
     mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
     const tmp = `${this.file}.tmp`;
@@ -363,6 +428,128 @@ export class SocialManager {
     this.emit?.({ kind: "social.friendship.deleted", friendshipId: id, socialOwnerIds: [edge.ownerAId, edge.ownerBId] });
   }
 
+  // ── feed (plan S5) ──────────────────────────────────────────────────────
+  // Default private: a post is visible to its author's owner and to the
+  // owners whose own bot is befriended with the author — the same audience
+  // the friend frames already compute. Replies inherit the root's reach plus
+  // the replier themselves. Social content stays untrusted: text is clamped
+  // here and never adopted anywhere.
+
+  /** Owners who may see a root post: the author's owner plus the owners
+   * befriended with the author's bot. */
+  private ownersAudience(authorBotId: string, authorOwnerId: string): string[] {
+    const audience = new Set<string>([authorOwnerId]);
+    for (const f of this.friendships) {
+      if (f.botAId === authorBotId) audience.add(f.ownerBId);
+      if (f.botBId === authorBotId) audience.add(f.ownerAId);
+    }
+    return [...audience];
+  }
+
+  /** Visibility of any post for a viewing owner: own authors always; cross
+   * authors only when befriended. A reply is visible where its root is,
+   * plus the replier themselves. */
+  private visibleTo(post: SocialPost, ownerId: string): boolean {
+    if (post.authorOwnerId === ownerId) return true;
+    if (!post.replyToPostId) {
+      return this.ownersAudience(post.authorBotId, post.authorOwnerId).includes(ownerId);
+    }
+    const root = this.posts.find((p) => p.id === post.replyToPostId);
+    if (!root) return false;
+    // the replier's own friends reach the reply too — but only where the
+    // root itself is visible, so a thread never leaks past its author
+    return this.visibleTo(root, ownerId);
+  }
+
+  private reactionCount(postId: string): number {
+    return this.reactions.filter((r) => r.postId === postId).length;
+  }
+
+  createPost(args: { authorBotId: string; authorOwnerId: string; text: string; replyToPostId?: string }, authorName: string): SocialPost {
+    const text = args.text.slice(0, SOCIAL_MESSAGE_MAX).trim();
+    if (!text) throw new Error("a post needs something to say");
+    let replyToPostId: string | null = null;
+    let replyRoot: SocialPost | null = null;
+    if (args.replyToPostId !== undefined) {
+      const root = this.posts.find((p) => p.id === args.replyToPostId);
+      if (!root) throw new Error("no such post"); // 404-shaped
+      if (root.replyToPostId) throw new Error("replies are one level deep — reply to the original post");
+      if (!this.visibleTo(root, args.authorOwnerId)) throw new Error("no such post"); // 404-shaped
+      replyToPostId = root.id;
+      replyRoot = root;
+    }
+    const recent = (this.creationTimes.get(`posts:${args.authorOwnerId}`) ?? []).filter((t) => this.now() - t < HOUR_MS);
+    if (recent.length >= POSTS_PER_HOUR_PER_OWNER) throw new Error("slow down — a maximum of 20 posts per hour");
+    recent.push(this.now());
+    this.creationTimes.set(`posts:${args.authorOwnerId}`, recent);
+    const post: SocialPost = {
+      id: randomUUID(),
+      authorBotId: args.authorBotId,
+      authorOwnerId: args.authorOwnerId,
+      text,
+      replyToPostId,
+      createdAt: this.now(),
+    };
+    this.posts.push(post);
+    this.save();
+    this.emit?.({
+      kind: "social.post",
+      post: { ...post },
+      authorName,
+      authorHandle: this.profiles.get(post.authorBotId)?.handle ?? "",
+      socialOwnerIds: replyRoot
+        ? [...new Set([...this.ownersAudience(replyRoot.authorBotId, replyRoot.authorOwnerId), post.authorOwnerId])]
+        : this.ownersAudience(post.authorBotId, post.authorOwnerId),
+    });
+    return post;
+  }
+
+  toggleReaction(postId: string, actorBotId: string, actorOwnerId: string): { count: number; active: boolean } {
+    const post = this.posts.find((p) => p.id === postId);
+    if (!post) throw new Error("no such post"); // 404-shaped
+    if (!this.visibleTo(post, actorOwnerId)) throw new Error("no such post"); // strangers can't probe or like
+    const existing = this.reactions.find((r) => r.postId === postId && r.actorBotId === actorBotId);
+    let active: boolean;
+    if (existing) {
+      this.reactions = this.reactions.filter((r) => r !== existing);
+      active = false;
+    } else {
+      this.reactions.push({ postId, actorBotId, actorOwnerId, createdAt: this.now() });
+      active = true;
+    }
+    this.save();
+    this.emit?.({
+      kind: "social.post.reaction",
+      postId: post.id,
+      reactionCount: this.reactionCount(post.id),
+      socialOwnerIds: [...new Set([...this.ownersAudience(post.authorBotId, post.authorOwnerId), actorOwnerId])],
+    });
+    return { count: this.reactionCount(post.id), active };
+  }
+
+  /** Newest-first page of visible posts. The cursor is opaque: it carries the
+   * boundary item's key so re-reads never skip or repeat on a tie. */
+  feedForOwner(ownerId: string, options: { cursor?: string; limit?: number } = {}): FeedPage {
+    const limit = Math.min(Math.max(1, options.limit ?? FEED_PAGE_DEFAULT), FEED_PAGE_MAX);
+    const boundary = options.cursor ? options.cursor.split(":") : null;
+    const boundaryAt = boundary ? Number(boundary[0]) : null;
+    const ordered = this.posts
+      .filter((p) => this.visibleTo(p, ownerId))
+      .filter((p) => {
+        if (boundaryAt === null || boundary === null) return true;
+        if (p.createdAt < boundaryAt) return true;
+        if (p.createdAt > boundaryAt) return false;
+        return p.id > (boundary[1] ?? "");
+      })
+      .sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id));
+    const page = ordered.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      posts: page.map((p) => ({ ...p, reactionCount: this.reactionCount(p.id), reactedByMe: this.reactions.some((r) => r.postId === p.id && r.actorOwnerId === ownerId) })),
+      nextCursor: ordered.length > page.length && last ? `${last.createdAt}:${last.id}` : null,
+    };
+  }
+
   /** A deleted bot leaves the network entirely: profile, edges, open requests. */
   forgetBot(botId: string): void {
     const profile = this.profiles.get(botId);
@@ -379,6 +566,11 @@ export class SocialManager {
         r.resolvedAt = this.now();
       }
     }
+    // their posts leave the feed; replies to them age out with the roots
+    const goneIds = new Set(this.posts.filter((p) => p.authorBotId === botId).map((p) => p.id));
+    this.posts = this.posts.filter((p) => p.authorBotId !== botId && !(p.replyToPostId && goneIds.has(p.replyToPostId)));
+    const liveIds = new Set(this.posts.map((p) => p.id));
+    this.reactions = this.reactions.filter((r) => r.actorBotId !== botId && liveIds.has(r.postId));
     this.save();
     if (profile) this.emit?.({ kind: "social.profile.deleted", botId, socialOwnerIds: [profile.ownerId] });
   }
