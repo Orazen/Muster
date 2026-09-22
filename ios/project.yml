@@ -381,6 +381,12 @@ schemes:
       config: Debug
     archive:
       config: Release
+  MusterWatch:
+    build:
+      targets:
+        MusterWatch: all
+    run:
+      config: Debug
   MusterOwnedAcceptance:
     build:
       targets:

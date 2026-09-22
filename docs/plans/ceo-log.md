@@ -7151,3 +7151,46 @@ that people read/edit and the app installs.
   body, hand-written members, rejections); index.test.ts exercises the live
   Markdown export -> preview -> import path (60/60); team-library URL
   normalization covers the .md candidates.
+
+## Loop166 — Watch crown fleet scrolling (musterwatch plan §3.6 #4) + the missing MusterWatch scheme
+
+Owner-directed mobile/Watch round. Answers locked first: Watch+iPhone+Android
+surfaces; crown = row-by-row detents + focus highlight; haptics = reply-arrives /
+answered-distinct / bot-finished; phone dictation = SFSpeechRecognizer; Android =
+deep-link + QR; gate = swift test + both simulator builds; one commit per slice;
+hardware acceptance owner-held; full ledger per slice.
+
+**Slice 1 (this entry): crown-driven fleet scrolling.** The ranked #4 feature was
+absent — no `digitalCrown`/`focusable`/`FocusState` anywhere in `ios/` before this
+slice (grep-verified). Built as focus-crown detents rather than a second scroll
+implementation:
+
+- `CompanionCore/FleetFocus.swift` (new): `FleetFocusRow` (mascot/approval/bot/
+  room/settings) + `FocusDetentTracker`, a pure struct owning the "when does a
+  focus change deserve a click" rule. Entering a screen is silent (watchOS focuses
+  the top row on appear), each move between distinct rows clicks once, losing focus
+  resets instead of replaying — the rule that was previously nowhere.
+- `Watch/WatchViews.swift` (edited): every fleet row now carries a `.focused`
+  binding to one `@FocusState`, an `onChange` that asks the tracker and plays
+  `.click` when it says yes, and a `.listRowBackground` tint on the focused row so
+  the crown's position is shown and not only felt. No route, approval ordering or
+  content change — additive header/row modifiers only.
+- `project.yml` (repaired): the `schemes:` block never declared `MusterWatch`, so
+  a regenerated project had no such scheme and the README's documented
+  `xcodebuild -scheme MusterWatch` exited 65. The plist still references a
+  hand-written `MusterWatch.xcscheme` that generation cannot recreate; the 09-19
+  call-calendar audit hit this same wall. Declared the scheme so `xcodegen
+  generate` reproduces it.
+
+**Gates (real numbers):** `cd ios && swift test` → **407 tests, 0 failures**
+(baseline 399, +8 from FleetFocusTests). iOS simulator `xcodebuild … -scheme
+MusterCompanion -destination 'generic/platform=iOS Simulator'` → **BUILD
+SUCCEEDED**. watchOS simulator `xcodebuild … -scheme MusterWatch -destination
+'generic/platform=watchOS Simulator'` → **BUILD SUCCEEDED**. xcodegen regenerated
+the project first (project is gitignored).
+
+**Not claimed:** physical Watch hardware, real crown-detent feel, or observed
+focus-highlight behavior — compile + unit + simulator-build evidence only. The
+crown detent is a pure-function decision proven by 8 tests; the SwiftUI focus
+wiring and haptic are compile-verified, not driven on a wrist. Unrelated working-
+tree edits (PortableBackupCard, account-drive tests, www/*) preserved untouched.

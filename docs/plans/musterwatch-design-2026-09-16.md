@@ -212,7 +212,11 @@ re-examine only if a *push-to-talk-anywhere* gesture is ever wanted.
    answered, reply-arrives. Cheap, high feel. *Partially present already
    (`.notification` on new approvals, `.success` on confirmed answer).*
 4. **Crown-driven fleet scrolling** — from codex-apple-watch. Low risk, real
-   ergonomic gain with many bots.
+   ergonomic gain with many bots. *Built (Loop166): focus-crown detents via
+   `CompanionCore/FleetFocus.swift` (`FocusDetentTracker`, pure rule — silent on
+   appear, one `.click` per distinct row) wired to `.focused` + a visible focus
+   tint on every fleet row in `WatchViews.swift`. Gate: swift test 407/0, iOS +
+   watchOS simulator builds. Crown detent feel on hardware still open.*
 5. **Complication** — show pending-approval count on the watch face. Needs a
    widget extension target; a distribution-shaped change, not a UI one.
 6. **Rejected for now:** on-device inference (harness is the host),

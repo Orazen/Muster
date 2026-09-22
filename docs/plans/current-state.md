@@ -19,6 +19,25 @@ CI runs succeeded; do not claim every build failed. Release workflows remain
 the other agent's responsibility. Automation stays paused; production receipt,
 real Google/hardware, hosted recovery/sync and15 tester-days remain outstanding.
 
+### Mobile/Watch round — Slice 1: Watch crown scrolling (22 September 2026, Loop166)
+
+Owner-directed mobile+Watch round, questions locked before building. Slice 1 ships
+crown-driven fleet scrolling (musterwatch plan §3.6 #4), which was absent — no
+`FocusState`/`focusable`/`digitalCrown` in `ios/` before it. A pure
+`FocusDetentTracker` in CompanionCore owns the detent rule (entering a screen is
+silent, each move between distinct rows clicks once, focus loss resets); every
+fleet row carries a focus binding, a `.click` when the tracker says yes, and a
+visible focus tint. Also repaired `ios/project.yml`: its `schemes:` block never
+declared `MusterWatch`, so the README's documented watch build exited 65.
+
+**Verified this slice:** `cd ios && swift test` **407 tests / 0 failures**
+(baseline 399, +8); iOS simulator build **BUILD SUCCEEDED**; watchOS simulator
+build **BUILD SUCCEEDED**. Compile + unit + simulator-build evidence only — no
+physical Watch, no observed crown-detent feel. Remaining in this round, all
+designed-not-built: reply-arrives/answered/bot-finished Watch haptics, phone
+SFSpeechRecognizer dictation, Android deep-link + QR pairing. Owner-held hardware
+acceptance still open. Unrelated working-tree edits preserved untouched.
+
 # Current Muster state — read before editing
 
 **Latest verified slice: Loop144 Drive consent isolation.**

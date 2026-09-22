@@ -217,6 +217,17 @@ struct PairingView: View {
 struct FleetView: View {
     @EnvironmentObject private var session: WatchSession
     @State private var buzzedForCount = 0
+    /// The row the Digital Crown is resting on. Each transition to a new row
+    /// is one detent (a `.click`), decided by `FocusDetentTracker` in
+    /// CompanionCore so the "entering a screen is silent" rule is tested.
+    @FocusState private var focusedRow: FleetFocusRow?
+    @State private var detents = FocusDetentTracker()
+
+    /// The focused row gets a visible tint so the crown's position is shown,
+    /// not just felt. Rows that are not focused are untouched.
+    private func focusHighlight(_ row: FleetFocusRow) -> Color {
+        focusedRow == row ? Color.accentColor.opacity(0.22) : .clear
+    }
 
     private var approvals: [PendingApproval] {
         session.state.pendingApprovals.map {
@@ -255,8 +266,9 @@ struct FleetView: View {
                 // scrolled. Tapping it reads the state aloud.
                 Section {
                     FleetHeader()
+                        .focused($focusedRow, equals: .mascot)
                         .listRowInsets(EdgeInsets(top: 10, leading: 0, bottom: 6, trailing: 0))
-                        .listRowBackground(Color.clear)
+                        .listRowBackground(focusHighlight(.mascot))
                 }
 
                 if case let .offline(reason) = session.status {
@@ -272,6 +284,14 @@ struct FleetView: View {
                             )) {
                                 ApprovalRow(approval: approval)
                             }
+                            .focused($focusedRow, equals: .approval(
+                                threadId: approval.threadId,
+                                messageId: approval.message.id
+                            ))
+                            .listRowBackground(focusHighlight(.approval(
+                                threadId: approval.threadId,
+                                messageId: approval.message.id
+                            )))
                             .accessibilityIdentifier("watch-approval-row-\(approval.message.id)")
                         }
                     }
@@ -282,6 +302,8 @@ struct FleetView: View {
                         NavigationLink(value: WatchRoute.bot(id: bot.id)) {
                             BotRow(bot: bot)
                         }
+                        .focused($focusedRow, equals: .bot(bot.id))
+                        .listRowBackground(focusHighlight(.bot(bot.id)))
                         .accessibilityIdentifier("watch-chat-bot-\(bot.id)")
                     }
                 }
@@ -292,6 +314,8 @@ struct FleetView: View {
                             NavigationLink(value: WatchRoute.room(id: room.id)) {
                                 RoomRow(room: room)
                             }
+                            .focused($focusedRow, equals: .room(room.id))
+                            .listRowBackground(focusHighlight(.room(room.id)))
                             .accessibilityIdentifier("watch-chat-room-\(room.id)")
                         }
                     }
@@ -303,6 +327,8 @@ struct FleetView: View {
                     } label: {
                         Label("Settings", systemImage: "gearshape")
                     }
+                    .focused($focusedRow, equals: .settings)
+                    .listRowBackground(focusHighlight(.settings))
                 }
             }
             .navigationTitle("Muster")
@@ -332,6 +358,16 @@ struct FleetView: View {
                 WKInterfaceDevice.current().play(.notification)
                 buzzedForCount = count
             }
+            .onChange(of: focusedRow) { _, row in
+                // One detent per row the crown crosses. The tracker decides
+                // (entering the screen is silent), so the haptic here is just
+                // the sound of that decision.
+                if detents.focus(row) {
+                    WKInterfaceDevice.current().play(.click)
+                }
+            }
+            .onAppear { detents.reset() }
+            .onDisappear { detents.reset() }
         }
     }
 }
