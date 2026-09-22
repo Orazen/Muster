@@ -220,3 +220,97 @@ export async function downloadBundle(token: string, fileId: string): Promise<str
   if (!binRes.ok) throw new Error(`Telegram download failed: HTTP ${binRes.status}`);
   return await binRes.text();
 }
+
+// ── Chat channel (server-side of the Telegram bot channel) ──────────────
+// The workspace-sync half above moves FILES; these primitives let a chat
+// message ride the same transport: parse an inbound update for text, send
+// the bot's reply back, and keep one stable thread key per chat so the
+// bot's conversation context survives across messages (the same persistent-
+// thread contract the WhatsApp channel runs on, via whatsapp-threads.ts).
+
+/** Stable thread key per chat: same chat → same thread. The prefix keeps
+ * Telegram threads separate from WhatsApp's and the local thread ids. */
+export function chatThreadKey(chatId: number): string {
+  return `tg:${chatId}`;
+}
+
+const messageSentSchema = apiResponseSchema.extend({
+  result: z.object({ message_id: z.number().int() }),
+});
+
+/** Send one text message into a chat. Returns the Telegram message id. */
+export async function sendChatText(token: string, chatId: number, text: string): Promise<number> {
+  const sent = await callTelegram(
+    token, "sendMessage", META_TIMEOUT, messageSentSchema, "Telegram message send failed",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    },
+  );
+  return sent.result.message_id;
+}
+
+/** One inbound chat text message, extracted from a getUpdates update. */
+export interface InboundChatMessage {
+  chatId: number;
+  /** Display name for the task title: chat title, else username, else
+   * first_name. */
+  from: string;
+  text: string;
+  updateId: number;
+}
+
+const chatSchema = z.object({
+  id: z.number(),
+  title: z.string().optional(),
+  username: z.string().optional(),
+  first_name: z.string().optional(),
+});
+
+const inboundSchema = apiResponseSchema.extend({
+  result: z.array(z.object({
+    update_id: z.number(),
+    message: z.object({
+      chat: chatSchema,
+      text: z.string().optional(),
+    }).optional(),
+  })),
+});
+
+/** Parse raw getUpdates output into inbound chat text messages. Zod parses
+ * at the boundary: malformed updates yield nothing instead of throwing. */
+export function parseChatUpdates(
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- I/O boundary: raw Bot API JSON, parsed by inboundSchema immediately below
+  raw: unknown,
+): InboundChatMessage[] {
+  const parsed = inboundSchema.safeParse(raw);
+  if (!parsed.success) return [];
+  const out: InboundChatMessage[] = [];
+  for (const update of parsed.data.result) {
+    const message = update.message;
+    if (!message?.text?.trim()) continue;
+    const chat = message.chat;
+    out.push({
+      chatId: chat.id,
+      from: chat.title ?? chat.username ?? chat.first_name ?? String(chat.id),
+      text: message.text.trim(),
+      updateId: update.update_id,
+    });
+  }
+  return out;
+}
+
+/** Fetch and parse pending chat updates via getUpdates with an offset so
+ * acknowledged updates are never re-delivered. */
+export async function pollChatUpdates(token: string, offset: number): Promise<InboundChatMessage[]> {
+  const updates = await callTelegram(
+    token, "getUpdates", META_TIMEOUT, inboundSchema, "Telegram would not list chat updates",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(offset > 0 ? { offset, timeout: 0 } : { timeout: 0 }),
+    },
+  );
+  return parseChatUpdates(updates);
+}

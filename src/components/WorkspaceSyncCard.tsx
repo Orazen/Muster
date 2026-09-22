@@ -16,12 +16,75 @@ import {
   type WorkspaceRequest,
 } from "@/lib/workspace-capability";
 import type { WorkspaceBackupCapability } from "../../server/contracts";
+import { api } from "@/state/store";
 
 type SyncStep =
   | { kind: "idle" }
   | { kind: "busy"; label: string }
   | { kind: "done"; message: string }
   | { kind: "error"; message: string };
+
+const channelStatusReply = z.object({ available: z.boolean(), enabled: z.boolean(), chat: z.string() });
+
+/** The Telegram chat channel: chat with your bots from the same Telegram chat
+ * that receives workspace backups. Rides the bot connected above — a toggle,
+ * not a second bot setup. */
+export function TelegramChatChannelCard() {
+  const [status, setStatus] = useState<{ available: boolean; enabled: boolean; chat: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    api("/api/telegram-channel")
+      .then((v) => setStatus(channelStatusReply.parse(v)))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, []);
+  useLayoutEffect(refresh, [refresh]);
+
+  const toggle = () => {
+    if (!status?.available || busy) return;
+    setBusy(true);
+    setError(null);
+    api("/api/telegram-channel", { method: "POST", body: JSON.stringify({ enabled: !status.enabled }) })
+      .then((v) => setStatus(channelStatusReply.parse(v)))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <section aria-label="Telegram chat channel" className="rounded-xl border border-hairline/40 bg-card p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[13px] font-medium text-ink">Telegram chat channel</div>
+        {status?.available && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={status.enabled}
+            aria-label="Enable Telegram chat channel"
+            disabled={busy}
+            onClick={toggle}
+            className={cn(
+              "relative h-5.5 w-10 shrink-0 rounded-full transition-colors disabled:opacity-40",
+              status.enabled ? "bg-accent" : "bg-hairline",
+            )}
+          >
+            <span
+              className={cn(
+                "absolute top-0.5 size-4.5 rounded-full bg-white transition-transform",
+                status.enabled ? "translate-x-5" : "translate-x-0.5",
+              )}
+            />
+          </button>
+        )}
+      </div>
+      <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+        Message your bots from the Telegram chat connected for backups — each message opens a
+        job in Muster and the reply lands back in the chat. {status?.chat ? `Bound to ${status.chat}.` : "Connect the backup bot above first."}
+      </div>
+      {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
+    </section>
+  );
+}
 
 const exportReply = z.object({ payload: z.string().min(1) });
 const restoreReply = z.object({ restored: z.object({ botsRestored: z.number().int().nonnegative(), memoryFilesRestored: z.number().int().nonnegative() }) });

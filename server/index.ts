@@ -43,6 +43,7 @@ import {
   type WhatsAppConfig,
 } from "./whatsapp.ts";
 import { mapCustomerReply, registerCustomerThread, resolveCustomerThread } from "./whatsapp-threads.ts";
+import { chatThreadKey, pollChatUpdates, sendChatText, type InboundChatMessage } from "./telegram-sync.ts";
 import { appendWhy, extractWhyFromReply, listWhy, WHY_MARKER, type WhyEntry } from "./why-journal.ts";
 import { clearOnboardingStatus, readOnboardingStatus, setOnboardingStatus } from "./onboarding-gate.ts";
 import { SeedAnswerDispatcher, seedAnswerInputSchema, seedStartInputSchema, seedStatusInputSchema } from "./seed-answer-dispatch.ts";
@@ -1646,6 +1647,18 @@ bus.subscribe((event: RuntimeEvent) => {
           whatsappReplies.delete(event.threadId);
           void sendWhatsAppText(whatsappConfig, waReply.to, reply || "I finished, but had nothing to report.");
         }
+        // Telegram chat channel: same contract — the reply rides the Bot API
+        // back to the chat that asked. The persistent-threads registry is
+        // authoritative; the in-memory map is the boot-time fallback.
+        const tgMapped = mapCustomerReply(DATA_DIR, event.threadId);
+        const tgChat = (tgMapped?.key.startsWith("tg:")
+          ? { chatId: Number(tgMapped.key.slice(3)), botId: tgMapped.botId }
+          : undefined) ?? telegramChatReplies.get(event.threadId);
+        const tgToken = cfg.telegramSync?.botToken?.trim();
+        if (tgChat && Number.isFinite(tgChat.chatId) && tgToken) {
+          telegramChatReplies.delete(event.threadId);
+          void sendChatText(tgToken, tgChat.chatId, reply || "I finished, but had nothing to report.").catch(() => {});
+        }
         // Why-journal: bots that answer the WHY prompt get their decisions
         // banked next to the receipt — the "why" layer of the audit trail.
         // Hypothesis/findings ride along when the bot states them (the ARC
@@ -2881,6 +2894,74 @@ const whatsappReplies = new Map<string, { to: string; botId: string }>();
 if (whatsappConfig) {
   console.log(`whatsapp channel active (phone id ${whatsappConfig.phoneNumberId})`);
 }
+
+// ── Telegram chat channel (the Channels surface's Telegram leg) ────────────
+// Same persistent-thread model as WhatsApp: every message from a chat lands
+// in ONE thread for a bot, so context survives; the reply goes back over the
+// Bot API when the turn completes. Config rides the existing telegramSync
+// section (botToken) + the chat the workspace sync is already bound to, so a
+// self-host binds ONE BotFather bot for both sync and chat. Off unless
+// TELEGRAM_CHANNEL_BOT_ID names a bot — the chat targets that bot, else the
+// first visible one, exactly like WhatsApp's WHATSAPP_BOT_ID.
+const telegramChatReplies = new Map<string, { chatId: number; botId: string }>();
+let telegramChatOffset = 0;
+let telegramChatTimer: ReturnType<typeof setTimeout> | undefined;
+function startTelegramChatLoop(): void {
+  const token = cfg.telegramSync?.botToken?.trim();
+  if (!token || process.env.TELEGRAM_CHANNEL_BOT_ID === "") {
+    return;
+  }
+  const tick = async (): Promise<void> => {
+    const botToken = cfg.telegramSync?.botToken?.trim();
+    if (!botToken || cfg.telegramSync?.chatEnabled === false) return;
+    let messages: InboundChatMessage[] = [];
+    try {
+      messages = await pollChatUpdates(botToken, telegramChatOffset);
+    } catch {
+      // Transient network/API failures just wait for the next tick; the
+      // offset only advances on parse, so nothing is lost.
+      return;
+    }
+    for (const message of messages) {
+      if (message.updateId >= telegramChatOffset) telegramChatOffset = message.updateId + 1;
+      const target =
+        (process.env.TELEGRAM_CHANNEL_BOT_ID ? store.bot(process.env.TELEGRAM_CHANNEL_BOT_ID) : undefined) ??
+        store.bots.find((b) => !b.hidden) ??
+        null;
+      if (!target) continue;
+      const threadKey = chatThreadKey(message.chatId);
+      const resolved = resolveCustomerThread(DATA_DIR, threadKey, target.id, {
+        findOpenThread: (searchedBotId, searchedKey) =>
+          store.tasks(searchedBotId).find((t) => t.title === `Telegram: ${searchedKey}`)?.threadId ?? null,
+      });
+      let replyThreadId: string;
+      if (resolved.fresh) {
+        const created = store.createTask(target.id, `Telegram: ${threadKey}`, false);
+        if (!created) continue;
+        replyThreadId = created.threadId;
+        registerCustomerThread(DATA_DIR, { key: threadKey, threadId: replyThreadId, botId: target.id });
+      } else {
+        replyThreadId = resolved.threadId;
+      }
+      telegramChatReplies.set(replyThreadId, { chatId: message.chatId, botId: target.id });
+      void startTurn(target.id, message.text, {
+        threadId: replyThreadId,
+        automationSource: "webhook",
+        onDispatchError: (errorMessage) => {
+          telegramChatReplies.delete(replyThreadId);
+          void sendChatText(botToken, message.chatId, `I couldn't start that job: ${errorMessage}`).catch(() => {});
+        },
+      });
+    }
+  };
+  const loop = (): void => {
+    telegramChatTimer = setTimeout(() => {
+      void tick().finally(loop);
+    }, 3_000);
+  };
+  loop();
+}
+startTelegramChatLoop();
 
 // ── viral loop state (server/viral.ts) ─────────────────────────────────
 // Public share tokens + their payloads. Tokens are unguessable and carry
@@ -8219,6 +8300,31 @@ let requestUserEmail = "";
       Object.assign(cfg, loadConfig());
       return json(res, 200, { connected: false });
     }
+    // ── Telegram chat channel (Channels surface, Telegram leg) ──────────
+    // Status for the UI: the chat channel reuses the workspace-sync bot
+    // token and chat binding; it is off unless both exist and chatEnabled
+    // is not explicitly false.
+    if (path === "/api/telegram-channel" && method === "GET") {
+      const token = cfg.telegramSync?.botToken?.trim();
+      const chatId = cfg.telegramSync?.chatId;
+      return json(res, 200, {
+        available: Boolean(token && chatId),
+        enabled: Boolean(token && chatId) && cfg.telegramSync?.chatEnabled !== false,
+        chat: cfg.telegramSync?.chatLabel ?? "",
+      });
+    }
+    if (path === "/api/telegram-channel" && method === "POST") {
+      const body = await readBody(req);
+      const token = cfg.telegramSync?.botToken?.trim();
+      const chatId = cfg.telegramSync?.chatId;
+      if (!token || !chatId) {
+        return json(res, 400, { error: "connect the workspace Telegram bot first — the chat channel rides the same bot" });
+      }
+      const enabled = body?.enabled !== false;
+      saveConfig({ telegramSync: { ...cfg.telegramSync, chatEnabled: enabled } });
+      Object.assign(cfg, loadConfig());
+      return json(res, 200, { enabled });
+    }
     if (path === "/api/workspace/telegram/push" && method === "POST") {
       const body = await readBody(req);
       const passphrase = isText(body?.passphrase) ? body.passphrase : "";
@@ -9081,6 +9187,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     reaper.stop();
     routines?.stop();
     webhookIngress?.server.close();
+    if (telegramChatTimer) clearTimeout(telegramChatTimer);
     // panel browsers are harness children, not registry agents — without
     // this every restart leaks a headless Chromium plus its guest profile
     browserPanel.stopAllPanels();

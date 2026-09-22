@@ -7009,3 +7009,26 @@ Plan section 3/7: the readiness-grouped engine list existed but a row showing
   same EngineSetup sign-in card the model picker uses — one account flow,
   two surfaces, no drift.
 - Tests: rowAction pins in EngineSetup.test.ts (5/5). tsc + oxlint clean.
+## Loop160 — Telegram chat channel (Channels UI, Telegram leg)
+
+The Channels surface from the remaining-work plan (#6, OMB parity). Telegram was
+workspace-file-sync only; now the same BotFather bot carries chat:
+
+- `server/telegram-sync.ts`: chat primitives — `sendChatText` (Bot API
+  sendMessage), `parseChatUpdates` (zod boundary, text-only), `pollChatUpdates`
+  (offset-acked getUpdates, no long-poll so the loop stays responsive to
+  config changes), `chatThreadKey` (`tg:<chatId>`).
+- `server/index.ts`: 3s poll loop reusing the workspace-sync botToken, gated by
+  `chatEnabled` + `TELEGRAM_CHANNEL_BOT_ID` (target bot pin, WhatsApp-style).
+  Each message → persistent thread via the whatsapp-threads registry (same
+  bot+key → same thread, context survives), turn starts with
+  `automationSource: "webhook"`, reply folded back to the chat on completion.
+  Routes: GET/POST `/api/telegram-channel` (status + toggle, below the session
+  gate like the rest of the family, reject 400 when no bot is bound). Timer
+  cleared on SIGINT/SIGTERM.
+- `server/config.ts`: `telegramSync.chatEnabled` in type + zod schema.
+- UI: `TelegramChatChannelCard` in Settings → Connections, under workspace
+  backup — toggle only, rides the backup bot; explains the binding inline.
+- Tests: 7 new primitives tests (parse/send/poll contract incl. transport-
+  failure semantics); full 72/72 telegram suite + 239 across the auth harness.
+

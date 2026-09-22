@@ -2,8 +2,8 @@ import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
-  discoverChat, downloadBundle, pushBundle, resolveLatestFileId, telegramConnectionMatches, telegramFileIdAfterConnect,
-  telegramRestoreConnectionMatches, verifyBot,
+  discoverChat, downloadBundle, parseChatUpdates, pollChatUpdates, pushBundle, resolveLatestFileId, sendChatText,
+  telegramConnectionMatches, telegramFileIdAfterConnect, telegramRestoreConnectionMatches, verifyBot,
 } from "./telegram-sync.ts";
 import type { TelegramFileBinding } from "./telegram-sync.ts";
 
@@ -336,5 +336,75 @@ describe("telegramFileIdAfterConnect", () => {
     { chatId: 42, lastFileId: "ORPHAN" },
   ])("does not preserve cached files without a complete prior binding: %j", (binding) => {
     expect(telegramFileIdAfterConnect(binding, TOKEN, 42)).toBe("");
+  });
+});
+
+describe("chat channel primitives", () => {
+  const originalFetch = global.fetch;
+  const fetchMock = vi.fn<typeof fetch>();
+  beforeEach(() => {
+    fetchMock.mockReset().mockRejectedValue(new Error("Unexpected Telegram fixture request"));
+    global.fetch = fetchMock;
+  });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  it("parses text updates with sender + chat id, dropping empty and non-text updates", () => {
+    const updates = parseChatUpdates({
+      ok: true,
+      result: [
+        { update_id: 10, message: { chat: { id: 700, username: "tr", first_name: "Tharun" }, text: "  hi  " } },
+        { update_id: 11, message: { chat: { id: 700 }, text: "   " } },
+        { update_id: 12, message: { chat: { id: 700 }, document: { file_id: "f" } } },
+        { update_id: 13 },
+      ],
+    });
+    expect(updates).toEqual([
+      { chatId: 700, from: "tr", text: "hi", updateId: 10 },
+    ]);
+  });
+
+  it("prefers chat title over username over first name as the sender label", () => {
+    const updates = parseChatUpdates({
+      ok: true,
+      result: [{ update_id: 1, message: { chat: { id: 5, title: "Ops", username: "tr", first_name: "T" }, text: "x" } }],
+    });
+    expect(updates[0].from).toBe("Ops");
+  });
+
+  it("yields nothing for malformed provider payloads", () => {
+    expect(parseChatUpdates(null)).toEqual([]);
+    expect(parseChatUpdates({ ok: false })).toEqual([]);
+    expect(parseChatUpdates({ ok: true, result: "nope" })).toEqual([]);
+  });
+
+  it("sends a message through the Bot API and returns the message id", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, result: { message_id: 9 } }));
+    await expect(sendChatText(TOKEN, 700, "Job done")).resolves.toBe(9);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`https://api.telegram.org/bot${TOKEN}/sendMessage`);
+    expect(JSON.parse(String(init?.body))).toEqual({ chat_id: 700, text: "Job done" });
+  });
+
+  it("rejects when the send fails (caller decides how to surface it)", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: false, description: "chat not found" }, 400));
+    await expect(sendChatText(TOKEN, 700, "x")).rejects.toThrow("Telegram message send failed");
+  });
+
+  it("polls getUpdates with the offset for acknowledgement, no long-poll hang", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ok: true,
+      result: [{ update_id: 41, message: { chat: { id: 700, username: "tr" }, text: "run" } }],
+    }));
+    await expect(pollChatUpdates(TOKEN, 40)).resolves.toEqual([
+      { chatId: 700, from: "tr", text: "run", updateId: 41 },
+    ]);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe(`https://api.telegram.org/bot${TOKEN}/getUpdates`);
+    expect(JSON.parse(String(init?.body))).toEqual({ offset: 40, timeout: 0 });
+  });
+
+  it("lets poll transport failures reject (the loop catches per tick)", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("offline"));
+    await expect(pollChatUpdates(TOKEN, 0)).rejects.toThrow("offline");
   });
 });
