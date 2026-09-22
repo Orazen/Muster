@@ -408,6 +408,54 @@ test("connect my Google Drive issues a consent redirect from a real button click
   expect(fixture.drive.entries()).toEqual([]);
 });
 
+test("account Drive restore can target an older snapshot, not only the newest", async ({ fixture, guarded }) => {
+  const { page } = guarded;
+  await signIn(page, fixture);
+  // Seed the grant the real consent flow would have written — same shape the
+  // hosted fixture seeds at startup — so the account transport is connected
+  // without fabricating any successful product response.
+  const db = new DatabaseSync(join(fixture.directory, "data", "auth.db"));
+  try {
+    // SAFETY: better-auth schema: user.id TEXT PRIMARY KEY, read by email.
+    const user = db.prepare(`SELECT "id" FROM "user" WHERE "email" = ?`).get(fixture.email) as { id: string };
+    const pending = createDriveState(db, { userId: user.id, sessionId: "owned-previous-consent" });
+    saveDriveGrant(db, { userId: user.id, googleSub: fixture.drive.googleSubject, expectedGeneration: pending.generation,
+      accessToken: fixture.drive.accessToken, refreshToken: fixture.drive.refreshToken, expiresAt: Date.now() + 3600000, scopes: [DRIVE_APPDATA_SCOPE] });
+  } finally { db.close(); }
+
+  await openBackup(page);
+  const portable = page.getByRole("region", { name: "Full portable backup", exact: true });
+  await portable.getByLabel("Portable backup passphrase", { exact: true }).fill("Owned browser backup passphrase");
+  const push = portable.getByRole("button", { name: "My Google Drive", exact: true });
+  await push.click();
+  await expect(portable.getByText(/Your Drive holds it now/)).toBeVisible();
+  await push.click();
+  await expect(portable.getByText(/Your Drive holds it now/)).toBeVisible();
+
+  // The picker lists the real snapshots, newest first, newest unselected.
+  await portable.getByRole("button", { name: "Choose older backup…", exact: true }).click();
+  await expect(portable.getByText(/2 backups found/)).toBeVisible();
+  const select = portable.getByLabel("Restore which backup? Leave unset for the newest.", { exact: true });
+  const options = select.locator("option");
+  await expect(options).toHaveCount(3); // default + two snapshots
+  const oldest = await options.nth(2).getAttribute("value");
+  expect(oldest).toBeTruthy();
+  await select.selectOption(oldest ?? "");
+
+  // Restoring pins the chosen id on the wire — the picker drives the real
+  // pull route, and the staging receipt answers through the server.
+  const pullRequest = page.waitForRequest((r) => r.url() === `${fixture.url}/api/workspace/google/pull` && r.method() === "POST");
+  await portable.getByRole("button", { name: "Restore from my Drive", exact: true }).click();
+  const body = z.object({ passphrase: z.string(), snapshotId: z.string() }).parse(JSON.parse((await pullRequest).postData() ?? "{}"));
+  expect(body.snapshotId).toBe(oldest);
+  // refreshStatus replaces the transient receipt with the pending banner.
+  await expect(portable.getByText(/A restore staged from google-account .* is waiting/)).toBeVisible();
+  expect(guarded.writes).toEqual([
+    "POST /api/workspace/google/push", "POST /api/workspace/google/push",
+    "POST /api/workspace/google/pull",
+  ]);
+});
+
 test("configured local backup reports transport failure, then explicitly retries the real installation route", async ({ fixture, guarded }, testInfo) => {
   const { page } = guarded;
   await signIn(page, fixture);

@@ -8,7 +8,7 @@
 // Restores stage while Muster runs and apply at the next launch — the
 // server replaces the whole covered set atomically at boot, with a safety
 // copy of what was there before.
-import { CloudUpload, Download, HardDriveDownload, Loader2, RotateCcw, Send, ShieldCheck, Upload, X } from "lucide-react";
+import { ChevronDown, CloudUpload, Download, HardDriveDownload, Loader2, RotateCcw, Send, ShieldCheck, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 
@@ -64,6 +64,16 @@ const v2StatusReply = z.object({
 const connectUrlReply = z.object({ url: z.string().url() });
 const uploadedReply = z.object({ uploaded: z.string().min(1), counts: countsSchema.nullable().optional() });
 
+const snapshotsReply = z.object({
+  snapshots: z.array(z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    createdTime: z.string().min(1),
+    size: z.string().optional(),
+  })).default([]),
+});
+type SnapshotInfo = z.infer<typeof snapshotsReply>["snapshots"][number];
+
 type Step =
   | { kind: "idle" }
   | { kind: "busy"; label: string }
@@ -82,6 +92,8 @@ export function PortableBackupCard() {
   const [status, setStatus] = useState<z.infer<typeof v2StatusReply> | null>(null);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [snapshots, setSnapshots] = useState<SnapshotInfo[] | null>(null);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState<string | null>(null);
   const busyRef = useRef(false);
   const [requests] = useState(createWorkspaceRequestScope);
   const busy = step.kind === "busy";
@@ -224,13 +236,42 @@ export function PortableBackupCard() {
       return `Your Drive holds it now: ${data.counts?.threads ?? "?"} threads, ${data.counts?.messages ?? "?"} messages.`;
     });
 
+  // Newest-first by Drive modified time — the server's own ordering. A stale
+  // install cannot clobber the newest backup on push, but only an explicit
+  // choice recovers an older snapshot after a bad restore or a lost machine.
+  const chosenSnapshot = () => {
+    const wanted = new Set((snapshots ?? []).map((s) => s.id));
+    const selected = selectedSnapshotId;
+    return selected !== null && wanted.has(selected) ? selected : undefined;
+  };
+
   const accountPull = () =>
     run("Pulling the bundle from your Google Drive…", async (request) => {
       needPassphrase();
-      const data = await readWorkspaceReply(request, "/api/workspace/google/pull", JSON.stringify({ passphrase }), v2StageReply);
+      const snapshotId = chosenSnapshot();
+      const data = await readWorkspaceReply(
+        request, "/api/workspace/google/pull", JSON.stringify({ passphrase, snapshotId }), v2StageReply,
+      );
       if (!data) return null;
       return stageResult(data);
     });
+
+  const loadSnapshots = () =>
+    run("Listing your backups…", async (request) => {
+      const data = await readWorkspaceReply(request, "/api/workspace/google/snapshots", undefined, snapshotsReply);
+      if (!data) return null;
+      request.commit(() => setSnapshots(data.snapshots));
+      return data.snapshots.length
+        ? `${data.snapshots.length} backup${data.snapshots.length === 1 ? "" : "s"} found.`
+        : "No backups in your Drive yet — push one first.";
+    });
+
+  const snapshotLabel = (s: SnapshotInfo) => {
+    const day = new Date(s.createdTime);
+    const when = Number.isFinite(day.getTime()) ? day.toLocaleString() : s.createdTime;
+    const size = s.size ? ` · ${(Number(s.size) / 1024).toFixed(0)} KB` : "";
+    return `${when}${size}`;
+  };
 
   const telegramPush = () =>
     run("Sending your full backup to Telegram…", async (request) => {
@@ -333,7 +374,7 @@ export function PortableBackupCard() {
         <button type="button" disabled={busy} onClick={() => void drivePull()} className={accent}>
           <HardDriveDownload size={13} /> Restore from Drive
         </button>
-        {accountDrive?.available && (
+        {          accountDrive?.available && (
           accountDrive.connected ? (
             <>
               <button type="button" disabled={busy} onClick={() => void accountPush()} className={accent}>
@@ -341,6 +382,9 @@ export function PortableBackupCard() {
               </button>
               <button type="button" disabled={busy} onClick={() => void accountPull()} className={accent}>
                 <HardDriveDownload size={13} /> Restore from my Drive
+              </button>
+              <button type="button" disabled={busy} onClick={() => void loadSnapshots()} className={button} title="List every backup in your Drive so you can restore an older one">
+                <ChevronDown size={13} /> Choose older backup…
               </button>
             </>
           ) : (
@@ -356,6 +400,26 @@ export function PortableBackupCard() {
           <HardDriveDownload size={13} /> Restore from Telegram
         </button>
       </div>
+
+      {snapshots !== null && snapshots.length > 0 && (
+        <div className="mt-2">
+          <label htmlFor="account-snapshot-select" className="text-[12px] text-ink-secondary">
+            Restore which backup? Leave unset for the newest.
+          </label>
+          <select
+            id="account-snapshot-select"
+            value={selectedSnapshotId ?? ""}
+            disabled={busy}
+            onChange={(e) => setSelectedSnapshotId(e.target.value === "" ? null : e.target.value)}
+            className={cn(input, "mt-1")}
+          >
+            <option value="">Newest backup (default)</option>
+            {snapshots.map((s) => (
+              <option key={s.id} value={s.id}>{snapshotLabel(s)}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {pendingFile && (
         <div className="mt-2 rounded-lg border border-danger/40 bg-danger/10 p-2.5 text-[12px] leading-relaxed text-ink">

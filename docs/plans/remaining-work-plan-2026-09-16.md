@@ -334,3 +334,19 @@ Status changes since the ranked list above — all committed and gated:
 7. **Gate evidence (2026-09-22):** tsc (app + server tsconfigs) 0 errors,
    oxlint 0/895-file repo, vitest 324 files / 4,845 passed / 0 failed,
    Playwright e2e 41/41.
+
+### Continuation status (2026-09-22, later — backup snapshot picker)
+
+8. **Account-Drive restore selection: done (Loop165).** The snapshots list
+   route and the `snapshotId` pull parameter existed server-side but no UI
+   reached them — every restore silently took the newest snapshot. The
+   portable-backup card now has a "Choose older backup…" action that lists
+   the real Drive snapshots (newest first, from `/api/workspace/google/
+   snapshots`) and a select that pins the chosen id on the pull wire;
+   leaving it unset keeps the newest-default. Pinned by a live round-trip
+   test that pushes two distinguishable bundles and proves the staged bytes
+   come from the FIRST push (`server/account-drive-roundtrip.test.ts`), and
+   a browser acceptance that drives the real buttons and asserts the
+   snapshotId on the wire (`e2e/workspace-backup.e2e.spec.ts`). Gate
+   evidence: tsc both configs 0; oxlint 0/901 files; vitest 325 files /
+   4,856 passed / 0 failed; Playwright e2e 42/42.

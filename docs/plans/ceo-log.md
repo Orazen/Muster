@@ -7323,3 +7323,28 @@ acceptance checklist follows at round end. Parallel-agent commits landing during
 this slice (`3c659cc`, `693bba3`) touched only `.deploy-trigger` and the ledger —
 gates re-checked against that tip, unchanged. Unrelated working-tree edits
 (PortableBackupCard, account-drive/e2e, www/*) preserved untouched, not staged.
+
+## Loop165 — 2026-09-22 — portable-backup snapshot picker
+
+**Shipped:** Restore from your own Google Drive can now target an OLDER
+snapshot, not only the newest. The server already listed snapshots
+(GET /api/workspace/google/snapshots) and accepted snapshotId on the pull
+route — but nothing in the UI called either, so every restore silently took
+the newest bundle and an older good backup was unreachable after a bad
+restore or a lost machine. The portable-backup card (Settings → Connections
+→ Full portable backup) gains "Choose older backup…", which lists the real
+snapshots newest-first with local timestamps and sizes, and a select whose
+choice rides the pull request; unset keeps the newest-default. Recovery from
+a staged restore goes through the shipped discard route in tests, never raw
+disk.
+
+**Pinned:** round-trip test pushes two distinguishable bundles (canary
+rewritten between pushes) and proves the staged bytes come from the FIRST
+push when its id is chosen — operations journal exactly ["download"] for an
+explicit id, ["list"] for the listing; browser acceptance seeds the real
+grant, pushes twice through the actual buttons, drives the picker, and
+asserts the chosen snapshotId on the POST body plus the staged-restore
+banner.
+
+**Gates:** tsc (app + server) 0 errors; oxlint 0/0 on 901 files; vitest 325
+files / 4,856 passed / 0 failed; Playwright e2e 42/42 (4.1m).

@@ -230,6 +230,54 @@ describe.skipIf(process.platform === "win32")("account-linked Google Drive round
     expect(await status.json()).toMatchObject({ pending: { source: "google-account" } });
   });
 
+  it("lists snapshots and restores an explicitly chosen older one, not the newest", async () => {
+    // The default pull always restores the newest snapshot. Recovery from a
+    // bad restore or a lost machine needs the older one — so this drives the
+    // real picker route with two distinguishable pushes and asserts the
+    // staged bytes come from the FIRST push, not the second.
+    const originalCanary = readFileSync(memoryCanaryFile, "utf8");
+    // Earlier tests staged a restore that no restart applied — recovery from
+    // a staged restore goes through the shipped discard route, not raw disk.
+    const discard = await api("/api/workspace/v2/restore/discard", { method: "POST", headers: { "content-type": "application/json", cookie }, body: "{}" });
+    expect(discard.status).toBe(200);
+    const firstPush = await api("/api/workspace/google/push", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ passphrase }) });
+    expect(firstPush.status).toBe(200);
+    // SAFETY: the push receipt shape is pinned by the toMatchObject below.
+    const firstId = ((await firstPush.json()) as { uploaded?: string }).uploaded ?? "";
+    expect(firstId).toMatch(/^snap-[0-9a-f]+$/);
+
+    // Make the newest snapshot carry different workspace bytes.
+    const newerCanary = `newer-${randomBytes(8).toString("hex")}`;
+    writeFileSync(memoryCanaryFile, newerCanary, { mode: 0o600 });
+    try {
+      const secondPush = await api("/api/workspace/google/push", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ passphrase }) });
+      expect(secondPush.status).toBe(200);
+      // SAFETY: same receipt shape as the first push, asserted directly below.
+      const secondId = ((await secondPush.json()) as { uploaded?: string }).uploaded ?? "";
+      expect(secondId).not.toBe(firstId);
+
+      const listOffset = transport.entries().length;
+      const snapshots = await api("/api/workspace/google/snapshots", { headers: { cookie } });
+      expect(snapshots.status).toBe(200);
+      // SAFETY: the list shape is the server's SnapshotInfo contract.
+      const listed = (await snapshots.json()) as { snapshots: Array<{ id: string; name: string; createdTime: string }> };
+      expect(listed.snapshots.map((s) => s.id)).toContain(firstId);
+      expect(listed.snapshots[0].id).toBe(secondId); // newest first
+      expect(operationsSince(listOffset)).toEqual(["list"]);
+
+      // Restore the OLDER snapshot explicitly.
+      const pullOffset = transport.entries().length;
+      const pull = await api("/api/workspace/google/pull", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ passphrase, snapshotId: firstId }) });
+      expect(pull.status).toBe(200);
+      expect(await pull.json()).toMatchObject({ staged: true, restartRequired: true });
+      expect(operationsSince(pullOffset)).toEqual(["download"]); // no list needed for an explicit id
+      const stagedCanary = readFileSync(join(`${dataDirectory}.restore-staging`, "memory", "canary.md"), "utf8");
+      expect(stagedCanary).toBe(originalCanary);
+    } finally {
+      writeFileSync(memoryCanaryFile, originalCanary, { mode: 0o600 });
+    }
+  });
+
   it("refreshes an expired access token once and persists the new one for reuse", async () => {
     // Simulate the stored token aging out: the next operation must pay
     // exactly one refresh grant and store the new token's expiry — before
