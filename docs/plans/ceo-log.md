@@ -8441,3 +8441,65 @@ the icon); doubled-height + mask emits 270,376 B with `biH=512` → 256 rows
 even after the little-endian fix. Artifact regenerated (372,526 B; every entry
 `40 + w*h*4 + mask` and ending exactly at EOF), guard test extended to assert
 the doubled height and mask bytes, 5/5 green, lint and typecheck clean.
+
+## Loop187 — web-app feature audit against an owned isolated instance (22 Sep 2026)
+
+Owner asked for a full web-app feature test with browser + Google login. Two
+environment limits, stated plainly rather than worked around:
+
+1. **The embedded browser is unavailable in this session.** `open_in_browser`
+   timed out on the local app *and* on a public URL (`https://muster.today/`),
+   and `browser_list_tabs` stayed empty — so no click-through UI pass and no
+   interactive Google sign-in was possible. Reported to the owner; the test was
+   run instead against the exact HTTP endpoints the UI calls.
+2. **Google OAuth is not configured in this checkout.** No `.env` exists (only
+   `.env.example`), and `/api/auth-capabilities` returns
+   `socialProviders: []`, `googleOnlySignup: false`. Google login therefore
+   cannot be exercised here without the owner's `GOOGLE_CLIENT_ID` /
+   `GOOGLE_CLIENT_SECRET`. The local email path covered the rest.
+
+Method: an owned, isolated instance — temp `HOME` + data dir + companion dir,
+probed free ports, `OMB_STATIC_DIR=dist`, one instance pointed at the repo's
+`server/testing/fake-acp-cli.ts`. Never touched the user's installed app on
+8799-8811 or any other service.
+
+**Verified working** (all against the live owned instance):
+- Auth: sign-up creates a session and an org; self-hosted gate returns **401**
+  with no bot/message leak (loopback implicit trust at `server/index.ts:4955` is
+  by design and correctly scoped to `SELF_HOSTED=false`).
+- Chat end-to-end: bot created, pointed at the fake engine, message accepted
+  (202), engine replied ("hello from fake acp"), activity frame present.
+- Onboarding card: answering it immediately succeeds; answering after newer
+  work returns **409 "this conversation already contains newer work"** — correct
+  defensive behavior, not a bug.
+- Skills: `PUT/GET/DELETE /api/bots/:id/skills/:name` all work; `../evil.md`
+  rejected **404** (no path traversal).
+- Social feed (the S5 slice): profile, post, one-level reply, reaction
+  (`count:1 active:true`), and feed paging shape all correct — newest-first,
+  `repliedToPostId` nested, `reactionCount`/`reactedByMe` accurate.
+
+**Not defects** (my first probes were wrong, not the app): `POST .../skills`
+404s because writes are `PUT`; `GET /api/bots/:id` 404s because there is no
+per-bot GET (data rides the list); the 92-path GET sweep's 404s are POST-only
+routes, since the server answers unregistered methods with 404 rather than 405.
+
+**Open item for the owner:** nothing in the web app is broken in this pass.
+The two real gaps are the missing Google OAuth config in this checkout and the
+unavailable embedded browser for interactive testing.
+
+## Loop170 — v1.15.0: the first fully-green CI release, end to end (23 September 2026)
+
+**The release shipped.** Run 35787841535 completed all seven jobs: Pin → Windows x64 (NSIS) ✓ → macOS arm64 (sign, notarize, staple) ✓ → macOS x64/Intel (sign, notarize, staple) ✓ → Linux (deb + AppImage) ✓ → Verify feeds and publish ✓ → Deploy downloads to VPS ✓. Release v1.15.0 is public (not draft) with the complete asset set (dmg/zip/exe/deb/AppImage + blockmaps + all three update feeds + CLI + five SHA256SUMS), Apple-accepted notarization on all four macOS artifacts (notarytool history: 1.15.0 dmg/zip/intel/arm64 all Accepted), and the public mirror at muster.orazen.online/downloads now serves 1.15.0 (latest.json, versioned binaries, stable aliases all probe 200). The in-app updater has a live 1.15.0 feed for the first time since 1.13.0.
+
+**Three release-pipeline defects found and fixed, each only visible once the previous one was fixed:**
+1. *ASC secrets were the wrong key pair.* The repo stored a key that 401s against Apple; the working key (U2545GA6J4 / issuer 9b225f90-…, documented in this ledger's TestFlight loop) was verified via `notarytool history` and pushed to the secrets. CI notarization then worked for the first time ever — every prior release was notarized by hand on the Mac.
+2. *Intel leg never notarized (by design) and stapled the zip.* The macOS-x64 job now imports the Developer ID cert, builds signed, and notarizes+staples like arm64 — with the stapler-exits-66-on-zips lesson encoded (submit dmg+zip, staple dmg only). A credential preflight (read-only history call) fails in seconds instead of after the 17-minute build. `scripts/notarize-draft-dmg.sh` is the manual fallback when secrets are unset.
+3. *The payload validator rejected the main dmg's blockmap.* `Muster-<version>.dmg.blockmap` wasn't in the versioned-name allowlist (the test fixture never modeled blockmaps), so the first all-green platform run failed at publish. Allowlist extended + pinned.
+
+The Windows leg's icon crash (resedit vs big-endian/PNG-entry ico) was fixed in f326ede/9028336; this loop's runs were the first ever to reach the packaging step and pass it.
+
+**VPS mirror repaired (the standing "SSH denied" blocker is gone).** CI's ssh-key deploy worked, but promotion failed twice on legacy data: the mirror's `latest.json` (v1.13.0 era) carried a 7-char sha and lacked the `checksums` dict, and its file list referenced zips not on disk. Repaired in place from actual on-disk bytes (hashes recomputed, sha cross-checked against the v1.13.0 tag, backups at /tmp/latest.json.bak*), after which promotion migrated the root into the `.generations`/`.current` layout and published 1.15.0.
+
+**Verification.** tsc 0 errors; oxlint 0/0; vitest 338 files / 5,036 passed / 0 failed; Playwright e2e 42/42; release-workflow verifier green (mutationSteps 9) with three new regression mutations pinned (Intel notarize guards, checksums-after-stapling). Commits this loop: a7dfce4 (Intel notarization + preflight + draft script), 1630e9a (staple dmg only), 29d228f (blockmap allowlist), pushed to main; tag v1.15.0 → a799970.
+
+**Still open.** Xcode Cloud pin to stable Xcode (iOS), Apple/VPS secret rotation cadence, and the www/* edits visible in the tree belong to another thread. No security claim.
