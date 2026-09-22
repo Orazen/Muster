@@ -7265,3 +7265,61 @@ convention, but never staged or claimed; the morning handoff's autodeploy
 failure (`35469518670` at "Bump .deploy-trigger") predates the successful
 autodeploy chain visible on every executed run since `36d0e6d` — no trigger
 defect reproduced on current runs. Automation left paused.
+
+## Loop169 — Watch haptic vocabulary: one owner per felt event (musterwatch plan §3.6 #3)
+
+Slice 2 of the owner-directed mobile/Watch round (answers locked in Loop166).
+Ranked #3 shipped; the defect it fixes was reproduced in the shipped code
+before building.
+
+**What was wrong.** Three sites owned fleet haptics between them — `WatchSession`'s
+mood transition, `FleetView`'s `onChange(of: approvals.count)`, and
+`ApprovalActionCoordinator`'s `confirmed:` callback — and none of them owned an
+*event*. Consequences, all in shipped code: one approval arriving played
+`.notification` twice (mood→needsYou *and* the count change); a new reply played
+mood→unread = the **same** `.notification`, so a reply was physically
+indistinguishable from an approval; and a bot finishing (mood→idle) played
+nothing. Three owners could not agree, so one event spoke twice — or not at all.
+
+- `CompanionCore/FleetHaptics.swift` (new): `FleetHapticEvent` (approvalArrived,
+  approvalAnswered, replyArrived, settled, startedWorking) + `FleetHapticPlanner`,
+  the single pure decision. First observation after `init`/`reset` records a
+  baseline (hydrates are history, never buzz); approval count up/down is
+  arrival/resolution; replies are counted settled bot text across held
+  transcripts (a batch = one buzz, trim/replay-shrink = silence, unread flags
+  deliberately unused — they clear when a thread is read); working edges are
+  fleet-level (0→n start, n→0 settle — a second bot joining a busy fleet is not
+  wrist news); and a frame carrying two changes returns exactly one event under
+  a fixed priority: approvals > replies > work edges (a reply landing as the bot
+  finishes *is* the reply).
+- `Watch/WatchSession.swift` (edited): events map to pulses — arrival
+  `.notification`, answered `.stop`, reply `.success`, settled `.directionUp`,
+  started `.start` — at most one pulse per frame and only while `.live`.
+  Offline frames reset rather than baseline, so reconnect catch-up compares
+  against pre-gap state; hydrate lands before `.live` in `run()` (453 before
+  456) and never buzzes; `client.didSet` resets the planner, and every pairing
+  path (pair/adoptHandoff/signOut) reassigns `client` *before* wiping `state`,
+  so a wiped fleet reads as a new silent baseline, never as "approvals settled".
+  The coordinator's `confirmed:` buzz is gone: answered now fires with the same
+  frame that resolves the card instead of a second, earlier pulse.
+- `Watch/WatchViews.swift` (edited): fleet-view count buzz + `buzzedForCount`
+  removed — the second half of the arrival double-buzz. Crown detent `.click`
+  and pairing handoff `.notification` untouched (different owners, different
+  events).
+
+**Gates (real numbers):** `cd ios && swift test` → **417 tests, 0 failures**
+(407 at Slice 1, +10 FleetHapticsTests). iOS simulator `xcodebuild … -scheme
+MusterCompanion -destination 'generic/platform=iOS Simulator'` → **BUILD
+SUCCEEDED**. watchOS simulator `xcodebuild … -scheme MusterWatch -destination
+'generic/platform=watchOS Simulator'` → **BUILD SUCCEEDED**. No project.yml
+change this slice, so no xcodegen re-run was needed.
+
+**Not claimed:** hardware feel. The vocabulary is compile + unit evidence — the
+event decision is proven by 10 tests, the `WKInterfaceDevice` mapping and the
+on-wrist distinctness of `.stop` vs `.notification` vs `.success` vs
+`.directionUp` are not observed, and `.directionUp`'s separation from the crown's
+`.click` is a code-level assumption, not a felt one. Owner-held Watch/iPhone
+acceptance checklist follows at round end. Parallel-agent commits landing during
+this slice (`3c659cc`, `693bba3`) touched only `.deploy-trigger` and the ledger —
+gates re-checked against that tip, unchanged. Unrelated working-tree edits
+(PortableBackupCard, account-drive/e2e, www/*) preserved untouched, not staged.

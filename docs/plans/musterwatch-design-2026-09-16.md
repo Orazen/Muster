@@ -209,9 +209,14 @@ re-examine only if a *push-to-talk-anywhere* gesture is ever wanted.
    verify, no new permission, no new transport. *Built in this slice.*
 2. **Spoken replies** — the "can talk" half. *Built in this slice.*
 3. **Haptic vocabulary** — distinct haptics for approval-arrives, approval-
-   answered, reply-arrives. Cheap, high feel. *Partially present already
-   (`.notification` on new approvals, `.success` on confirmed answer).*
-4. **Crown-driven fleet scrolling** — from codex-apple-watch. Low risk, real
+   answered, reply-arrives. Cheap, high feel. *Built (Loop169): one pure
+   `FleetHapticPlanner` in `CompanionCore/FleetHaptics.swift` is the single
+   owner of every fleet pulse — `.notification` arrival, `.stop` answered,
+   `.success` reply, `.directionUp` settled, `.start` working — one event per
+   frame by fixed priority; removed the fleet-view count buzz (the second
+   `.notification` in the arrival double-buzz) and the coordinator's confirm
+   buzz. Gate: swift test 417/0, iOS + watchOS simulator builds. Pulse
+   distinctness on hardware still open.*4. **Crown-driven fleet scrolling** — from codex-apple-watch. Low risk, real
    ergonomic gain with many bots. *Built (Loop166): focus-crown detents via
    `CompanionCore/FleetFocus.swift` (`FocusDetentTracker`, pure rule — silent on
    appear, one `.click` per distinct row) wired to `.focused` + a visible focus

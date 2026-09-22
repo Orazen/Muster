@@ -38,6 +38,31 @@ designed-not-built: reply-arrives/answered/bot-finished Watch haptics, phone
 SFSpeechRecognizer dictation, Android deep-link + QR pairing. Owner-held hardware
 acceptance still open. Unrelated working-tree edits preserved untouched.
 
+### Mobile/Watch round — Slice 2: Watch haptic vocabulary (22 September 2026, Loop169)
+
+Slice 2 ships ranked #3: a distinct felt event for approval arrival, approval
+resolution, reply arrival and bot-finished. Reproduced defect first: three sites
+owned fleet haptics between them (session mood transition, fleet-view count
+change, coordinator confirm) and none owned an event — one approval played
+`.notification` twice, a new reply played that *same* `.notification`, and a bot
+finishing played nothing. Now one pure `FleetHapticPlanner` in CompanionCore
+decides which single event each frame is (arrival `.notification`, answered
+`.stop`, reply `.success`, settled `.directionUp`, started `.start`), priority-
+ordered so one frame makes one pulse; the watch maps events to
+`WKInterfaceDevice`. Fleet-view count buzz and coordinator confirm buzz removed —
+an answer now pulses with the frame that resolves the card — and a live-guard
+plus a `client.didSet` reset make hydrate, pairing wipes and sign-out silent
+baselines.
+
+**Verified this slice:** `cd ios && swift test` **417 tests / 0 failures**
+(Slice 1 baseline 407, +10 FleetHapticsTests); iOS simulator build **BUILD
+SUCCEEDED**; watchOS simulator build **BUILD SUCCEEDED**. Unit + simulator
+evidence only — no hardware, no observed pulse, no claim that `.directionUp`
+reads distinctly from `.click` on a wrist. Remaining this round: phone
+SFSpeechRecognizer dictation, Android deep-link + QR pairing. Owner-held
+hardware acceptance still open (haptic acceptance checklist to follow at round
+end). Unrelated working-tree edits preserved untouched.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

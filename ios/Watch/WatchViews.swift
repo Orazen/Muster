@@ -216,7 +216,6 @@ struct PairingView: View {
 /// Approvals first — the screen the companion exists for — then the fleet.
 struct FleetView: View {
     @EnvironmentObject private var session: WatchSession
-    @State private var buzzedForCount = 0
     /// The row the Digital Crown is resting on. Each transition to a new row
     /// is one detent (a `.click`), decided by `FocusDetentTracker` in
     /// CompanionCore so the "entering a screen is silent" rule is tested.
@@ -348,15 +347,6 @@ struct FleetView: View {
                         Text("That message is gone.").foregroundStyle(.secondary)
                     }
                 }
-            }
-            .onChange(of: approvals.count) { _, count in
-                // One buzz when work arrives that only the wrist can settle.
-                // Counting rather than comparing contents: approvals resolve
-                // by dropping below the previous count, and a second request
-                // arriving while one is open deserves its own tap.
-                guard session.status == .live, count > buzzedForCount else { return }
-                WKInterfaceDevice.current().play(.notification)
-                buzzedForCount = count
             }
             .onChange(of: focusedRow) { _, row in
                 // One detent per row the crown crosses. The tracker decides

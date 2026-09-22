@@ -44,7 +44,7 @@ final class WatchSession: ObservableObject {
         didSet {
             approvalCoordinator.reconcile()
             composerCoordinator.reconcile()
-            hapticOnFleetChange()
+            emitFleetHaptic()
             publishSnapshot()
             if let target = callTarget, state.bot(target.botId)?.threadId != target.threadId {
                 calendarCoordinator.reset()
@@ -76,31 +76,45 @@ final class WatchSession: ObservableObject {
     /// Transient, user-facing failures from an action they just took.
     @Published var actionError: String?
 
-    /// Haptic on fleet state transitions (musterwatch plan §3.1): a wrist
-    /// should feel the fleet change while the mascot shows it. Only real
-    /// transitions fire — not every transcript delta — and .success/.failure
-    /// haptics stay owned by the approval coordinator.
-    private var lastHapticMood: FleetMood?
-    private func hapticOnFleetChange() {
-        var isOffline = false
-        if case .offline = status { isOffline = true }
-        if case .unpaired = status { isOffline = true }
-        let mood = FleetMood.from(
-            isOffline: isOffline,
+    /// Haptic vocabulary (musterwatch plan §3.6 #3): the planner owns
+    /// *which* event a frame is — one pure, tested decision replacing the
+    /// old mood transition, the fleet-view count buzz and the approval
+    /// coordinator's confirmation, which between them could buzz the same
+    /// arrival twice and could not tell a reply from an approval. This
+    /// side owns the hardware: at most one pulse per frame, and only while
+    /// `.live`. Offline frames are refused rather than baselined, so a
+    /// reconnect compares against its pre-gap state — work missed while
+    /// away buzzes on catch-up — while hydrate, which lands before
+    /// `.live` (`run()` hydrates, *then* goes live), never does. The cost
+    /// of the guard is conservative: the very first frame after going
+    /// live records the baseline silently, so a single event arriving in
+    /// that exact frame is swallowed rather than risked as a false buzz.
+    private var haptics = FleetHapticPlanner()
+    private func emitFleetHaptic() {
+        guard case .live = status else { haptics.reset(); return }
+        // Settled bot text, not unread flags: the flags clear when a thread
+        // is viewed (and are pushed by the phone), which would either eat a
+        // real reply or buzz for someone else's read receipt.
+        let replies = state.messages.values.reduce(0) { count, thread in
+            count + thread.filter { $0.role == .bot && $0.kind == .text }.count
+        }
+        let event = haptics.observe(
             approvals: state.pendingApprovals.count,
             working: state.bots.filter { $0.busy == true }.count,
-            unread: state.bots.filter(\.unread).count + state.rooms.filter(\.unread).count
+            replies: replies
         )
-        defer { lastHapticMood = mood }
-        guard let previous = lastHapticMood, previous != mood else { return }
-        switch mood {
-        case .needsYou:
-            WKInterfaceDevice.current().play(.notification)
-        case .working:
+        switch event {
+        case .approvalArrived:
+            WKInterfaceDevice.current().play(.notification) // needs you
+        case .approvalAnswered:
+            WKInterfaceDevice.current().play(.stop) // request settled
+        case .replyArrived:
+            WKInterfaceDevice.current().play(.success) // good news
+        case .settled:
+            WKInterfaceDevice.current().play(.directionUp) // work ended, quiet
+        case .startedWorking:
             WKInterfaceDevice.current().play(.start)
-        case .unread:
-            WKInterfaceDevice.current().play(.notification)
-        case .idle, .offline:
+        case nil:
             break
         }
     }
@@ -138,6 +152,12 @@ final class WatchSession: ObservableObject {
             streamGeneration += 1
             streamTask?.cancel()
             streamTask = nil
+            // Every pairing change reassigns `client` *before* wiping
+            // `state` (pair/adoptHandoff/signOut all do), so resetting the
+            // haptic baseline here means a wiped fleet reads as a new
+            // silent start — never as "approvals settled" or "replies
+            // trimmed".
+            haptics.reset()
             approvalSessionId = UUID()
             approvalCoordinator.bind(sessionId: approvalSessionId, transport: client)
             composerCoordinator.bind(sessionId: approvalSessionId, transport: client)
@@ -151,8 +171,11 @@ final class WatchSession: ObservableObject {
     private lazy var approvalCoordinator = ApprovalActionCoordinator(
         readState: { [weak self] in self?.state ?? CompanionState() },
         changed: { [weak self] in self?.approvalActions = $0 },
-        unauthorized: { [weak self] in self?.status = .unauthorized },
-        confirmed: { _, _ in WKInterfaceDevice.current().play(.success) }
+        unauthorized: { [weak self] in self?.status = .unauthorized }
+        // No `confirmed:` buzz here on purpose: the answer's haptic is the
+        // planner seeing approvals leave `pending`, so the pulse fires with
+        // the same frame that resolves the card instead of a second, earlier
+        // one. Arrival, resolution and replies are one vocabulary now.
     )
     private lazy var composerCoordinator = ComposerCoordinator(
         readState: { [weak self] in self?.state ?? CompanionState() },
