@@ -188,6 +188,43 @@ export async function downloadBundle(accessToken: string, fileName = BUNDLE_NAME
   return await res.text();
 }
 
+/** A file's identity for optimistic concurrency. Drive v3 has no If-Match
+ * header, so `modifiedTime` is the strongest guard the API offers: callers
+ * stat BEFORE download (so the guard predates the bytes they hold) and
+ * re-stat BEFORE writing (so a stale guard cannot overwrite newer content).
+ * The stat→write window that remains is real — see sync-wiring, which
+ * documents it rather than pretending the header exists. */
+export interface BundleFileStat {
+  id: string;
+  modifiedTime: string;
+}
+
+const driveStatSchema = z.object({
+  files: z
+    .array(z.object({ id: driveFileIdSchema, modifiedTime: z.string().min(1) }))
+    .default([]),
+}).strict();
+
+export async function statBundleFile(
+  accessToken: string,
+  fileName = BUNDLE_NAME,
+  guard: () => Promise<void> = async () => {},
+): Promise<BundleFileStat | null> {
+  const query = new URLSearchParams({
+    spaces: APPDATA_FOLDER,
+    q: `name = '${fileName}' and trashed = false`,
+    orderBy: "modifiedTime desc",
+    pageSize: "1",
+    fields: "files(id,modifiedTime)",
+  });
+  const res = await driveFetch(accessToken, `${LIST_URL}?${query}`, undefined, guard);
+  if (!res.ok) throw new Error(`Drive list failed: HTTP ${res.status}`);
+  const parsed = driveStatSchema.safeParse(await res.json().catch(() => null));
+  if (!parsed.success) throw new Error("Drive returned an unreadable file stat");
+  const file = parsed.data.files[0];
+  return file === undefined ? null : { id: file.id, modifiedTime: file.modifiedTime };
+}
+
 /** Immutable v2 backups each live in their own uniquely-named file. The suffix is
  * the upload's wall-clock time plus a random token so that two devices (or two
  * pushes from a stale device) can never collide onto the same file id. The dash

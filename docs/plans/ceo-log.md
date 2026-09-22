@@ -8228,3 +8228,43 @@ stat-BEFORE-download modifiedTime guard and verify-before-write save
 (Drive v3 has no If-Match — TOCTOU window documented, not hidden),
 base64 byte bridge for the binary envelope, a persisted local-manifest
 store, and the first producer at workspace.ts writeMemoryFile.
+
+## Loop183 — S2c-i: Drive transport, the local manifest store, and the engine (22 Sep 2026)
+
+First half of S2c, split to keep the slice honest: transport + store +
+engine only (producers/apply/boot wiring/route are S2c-ii).
+**driveSyncTransport** bridges the binary pack over Drive's text-only
+files: strict base64 re-encode check, else the raw utf8 is passed to the
+pack's OWN gates untouched (no second, divergent validation). The
+conflict guard is Drive's `modifiedTime`, read with the new
+`statBundleFile` **before** the download — a guard must predate the
+bytes it protects — and every save re-stats before writing (verify-
+before-write); Drive v3 exposes no If-Match, so the stat→write TOCTOU
+window is documented in the code, not papered over. First-run create
+refuses if the file appeared meanwhile; update refuses on guard mismatch
+or a vanished file. **localSyncManifestStore** keeps the local manifest
+as plain JSON validated through the now-exported `manifestDocSchema` —
+a corrupt file fails LOUDLY rather than syncing from a guess.
+**startSyncEngine** runs a debounced (250ms, mirroring S1's
+DEFAULT_DEBOUNCE_MS) single-flight pass where **the pass is the ONLY
+journal claimant** (S1's drainer is deliberately NOT wired here: two
+consumers would either mark rows drained-unpushed or burn retry
+attempts); `passphrase: null` holds the queue (§11's flagged
+passphrase-store gate), a throwing pass lands as a reported error
+result, and the engine is inert after `stop()`.
+
+Lint/tsc fixes were structural, no suppressions: dropped an unused
+`SyncJournalRow` import, `manifestDocSchema.parse(JSON.parse(...))`
+instead of an `as` assertion, object-identity checks instead of
+`typeof`, and the type-valid/schema-invalid case now drives `checksum:
+"zz"` + an `existsSync` false assertion.
+
+**Gates:** red 1 file (module absent) → **21/21**; sync cluster
+(objects/pass/journal) **54/54**; oxlint 2 files **0/0**; server tsc
+**exit 0**; full suite **336 files / 5009 passed / 8 skipped / 0
+failed** (467.38s = Loop181's 4988 + exactly these 21, no decrease).
+**Not claimed:** a live Drive round-trip (transport is exercised
+against injected deps, not Google's API), any producer (none exists
+until S2c-ii), security attestation, deployment. Next: S2c-ii — the
+memory producer at writeMemoryFile, workspace apply, boot wiring and
+the manual sync route.

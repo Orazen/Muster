@@ -40,6 +40,9 @@ import {
 /** Reserved path of the single file inside a packed object / manifest. */
 export const SYNC_OBJECT_PATH = "object.json";
 export const SYNC_MANIFEST_PATH = "manifest.json";
+/** §9's Drive-side file name for the sealed object index — distinct from
+ * SYNC_MANIFEST_PATH, which is the reserved path INSIDE the envelope. */
+export const SYNC_MANIFEST_FILE_NAME = "muster-manifest.json";
 
 const HEX64 = /^[a-f0-9]{64}$/u;
 const printable = (value: string): boolean =>
@@ -104,7 +107,9 @@ const manifestEntrySchema = z
 
 export type SyncManifestEntry = z.infer<typeof manifestEntrySchema>;
 
-const manifestDocSchema = z
+/** Exported for the local (unpacked) mirror of this index in sync-wiring —
+ * the same strict shape on both sides, one schema. */
+export const manifestDocSchema = z
   .object({
     schema: z.literal(1),
     updatedAt: timeSchema,

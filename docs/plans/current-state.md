@@ -440,6 +440,32 @@ modifiedTime guard + verify-before-write — no If-Match in Drive v3,
 window documented; base64 byte bridge; persisted local manifest;
 writeMemoryFile = first producer).
 
+### S2c-i: Drive transport + local store + engine (22 September 2026, Loop183)
+
+First half of S2c (producers/apply/boot/route = S2c-ii).
+**driveSyncTransport:** strict base64 re-encode else raw utf8 to the
+pack's own gates; guard = Drive `modifiedTime` via `statBundleFile`
+**before** download (a guard must predate its bytes) + re-stat
+verify-before-write on save (no If-Match in Drive v3 — stat→write
+TOCTOU window documented, not hidden); first-run create refuses a file
+that appeared meanwhile, update refuses mismatch/vanish.
+**localSyncManifestStore:** plain JSON through the exported
+`manifestDocSchema`; corrupt fails LOUDLY. **startSyncEngine:**
+debounced (250ms) single-flight where **the pass is the ONLY journal
+claimant** (S1's drainer deliberately not wired — two consumers would
+drain-unpush or burn attempts); passphrase `null` = hold queue (§11
+flagged gate), throwing pass → reported error result, inert after
+`stop()`.
+
+**Gates:** red 1 → **21/21**; sync cluster (objects/pass/journal)
+**54/54**; oxlint **0/0** (5 errors + 1 warning fixed structurally:
+unused import, `manifestDocSchema.parse(JSON.parse)` over `as`,
+identity over `typeof` checks); tsc **exit 0**; full suite **336 files
+/ 5009 passed / 8 skipped / 0 failed** (467.38s = 4988 + exactly these
+21, no decrease). **Not claimed:** live Drive round-trip (injected
+deps), producers (S2c-ii), security attestation. Next: S2c-ii, then
+push (owner authorized) + CI watch.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`
