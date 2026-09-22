@@ -34,6 +34,7 @@ import {
 import { ChatFindBar } from "./ChatFindBar";
 import { buildRunWaterfall, formatStepDuration, stepLabel } from "@/lib/run-waterfall";
 import { ConversationHeader } from "./ConversationHeader";
+import { nextHeaderCollapse } from "@/lib/header-collapse";
 import { TaskUsageStats } from "./TaskUsageStats";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { costCaption, formatTokens, formatUsd, usageChip } from "@/lib/usage";
@@ -1077,6 +1078,10 @@ export function ChatView({ bot }: { bot: Bot }) {
   const followRef = useRef(true);
   const previousScrollTop = useRef(0);
   const touchY = useRef(0);
+  // Header collapse (U3): the header reclaims its chrome reading DOWN the
+  // transcript and returns on the way up — the same scroll stream that
+  // drives bottom-follow already knows the direction.
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
 
   const setBottomFollow = useCallback((next: boolean) => {
     followRef.current = next;
@@ -1194,7 +1199,7 @@ export function ChatView({ bot }: { bot: Bot }) {
       {/* Call mode covers the thread while the bot is on the line */}
       <CallOverlay bot={bot} />
       {/* Header */}
-      <ConversationHeader windows={isWin}
+      <ConversationHeader windows={isWin} collapsed={headerCollapsed}
         identity={<>
           <button
             onClick={() => dispatch({ type: "toggleSettings" })}
@@ -1337,6 +1342,9 @@ export function ChatView({ bot }: { bot: Bot }) {
             scrollTop,
             distanceFromBottom: el.scrollHeight - scrollTop - el.clientHeight,
           });
+          setHeaderCollapsed((collapsed) =>
+            nextHeaderCollapse({ collapsed, previousScrollTop: previousScrollTop.current, scrollTop }),
+          );
           previousScrollTop.current = scrollTop;
           if (resume) setBottomFollow(true);
         }}

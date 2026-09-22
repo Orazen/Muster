@@ -7767,3 +7767,69 @@ W1 c40ba38, W2 `speech-text.ts`, W3 `word-cursor.ts`, W4 this loop,
 W5 `session-controls.ts` — DESIGN §38 row and the voice plan updated.
 Next per §38 order: U1–U5 (source audits located; drag-reorder sub-item
 defers — `store.tsx` is social-WIP-owned).
+
+## Loop176 — U-row: the agent-row menu, the scroll-collapsing header, and typed composer commands (22 Sep 2026)
+
+**Trigger:** owner chose "continue §38 in order" after Loop175. The U-row
+origin was traced first (`git log -S "agent-row menu gaps"` → `ccbba1f`,
+the commit that created DESIGN.md wholesale) — so the five names are
+literal, with no hidden audit behind them. Three were grounded in the
+tree and shipped; two were deferred with reasons instead of invented.
+
+**Red first:** `src/lib/composer-commands.test.ts` + header-collapse test
+file written against absent modules (2 failed files), then built.
+Shipped: **U1** — `BotContextMenu` gains "New task", dispatching the
+existing `newTask` with TaskPicker's exact busy rule and hint ("Let this
+turn finish first"); no store change, the row's unit of work finally has
+its own door. **U3** — `src/lib/header-collapse.ts`, a pure
+`nextHeaderCollapse` (top rule: ≤64px always expanded; directional with
+a ±4px dead-zone so momentum jitter can't flicker), wired into
+ChatView's EXISTING `onScroll` between the resume calc and the
+`previousScrollTop` assignment (reads the old value, same as
+bottom-follow); `ConversationHeader` takes `collapsed`, sets
+`data-collapsed`, and closes the tools drawer when it shrinks; CSS hides
+the task/model/tools row and tightens padding — identity and interrupt
+never hide (the interrupt is the emergency control; with the middle
+cells gone it jumps to the last grid column so it stays right-aligned at
+every width). **U4** — `src/lib/composer-commands.ts`:
+`commandQueryAt` mirrors `mentionQueryAt` semantics on purpose (slash
+must START a word — `https://…`, `a/b`, `rate/limit` stay literal; ≤24,
+no newline or inner slash; caret-bounded), `matchCommands`
+(case-insensitive id/label, six-row cap like the mention picker), and a
+closed `ComposerCommandId` union so table, commands, and availability
+cannot drift. The command set is deliberately the composer's OWN
+actions — voice, goal, new task, stop, settings — each gated by the
+exact rule its button uses (`satisfies Record<ComposerCommandId,
+boolean>`: voice=availability probe, goal/new=!busy, stop=busy,
+settings=always). Picker rows mirror the mention rows (disabled +
+"not available right now" hint); Enter on an unavailable command
+consumes the key and keeps the text so "/goal" can never be sent as
+literal words; a picked command dispatches the real action and clears
+the input. Rooms don't get commands (bot-scoped only) and the two
+pickers never share the caret.
+
+**Deferred, honestly, with reasons on the board:** U2 drag-reorder —
+row order lives in `store.tsx`, which the parallel social WIP owns;
+ordering the sidebar from a divergent local source would lie. U5
+activity panel — a name-only row item: no source spec exists anywhere
+(the origin commit added DESIGN.md in full, no audit text), and the
+closest artifact (FleetOrb's status dropdown) was unmounted by explicit
+owner direction — resurrecting it is an owner call, not an agent's.
+
+**Gates (real numbers):** red 2 failed files → green **15/15** (8
+command parsing + 4 matching + 5 collapse); focused lib run **25/25**
+with barge-in; oxlint on all eight touched files **0 warnings 0 errors**
+(first pass: 1 `no-known-value-widening` on `Record<string, boolean>` —
+fixed by promoting ids to a closed union + `satisfies`, not
+suppressed); app tsc **0 errors for my files** (SocialView's 3 remain
+the parallel agent's uncommitted WIP, untouched); `vite build` ✓ 14.72s;
+full suite **329 files / 4908 passed / 8 skipped / 0 failed**
+(427.48s; +2 files/+15 tests vs Loop175's 327/4893 = exactly this
+slice's tests, no decrease, zero FAIL lines). `npm run build` (tsc leg)
+stays red only on SocialView WIP.
+
+**Not claimed:** visual/browser verification of the collapse (no
+chat-scroll e2e exists; the behavior is unit-tested pure logic plus CSS,
+not screenshot-verified this loop), or e2e coverage of the command
+picker. DESIGN §38 U-row split: shipped U1/U3/U4 row + a U2/U5 defers
+row. Next per §38 order: P1 per-bot approval levels.

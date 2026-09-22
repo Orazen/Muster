@@ -221,6 +221,42 @@ agent's uncommitted `SocialView.tsx` (3 errors) — theirs, untouched.
 no audio), native-path barge-in, e2e (no call e2e exists). Voice row
 W1–W5 is now code-complete.
 
+### U-row: agent-row New task · header collapse-on-scroll · composer /commands (22 September 2026, Loop176)
+
+Three of the five U items shipped; two deferred with reasons instead of
+invented. **U1:** `BotContextMenu` gains "New task" — existing `newTask`
+dispatch, TaskPicker's busy rule and hint, no store edit. **U3:**
+`src/lib/header-collapse.ts` pure `nextHeaderCollapse` (≤64px always
+open · directional ±4px dead-zone) wired into ChatView's existing
+`onScroll` before the `previousScrollTop` assignment;
+`ConversationHeader` takes `collapsed` → `data-collapsed`, closes the
+tools drawer on collapse; CSS hides the task/model/tools row and
+tightens padding — identity + interrupt never hide and the interrupt
+stays right-aligned via the last grid column. **U4:**
+`src/lib/composer-commands.ts` — `commandQueryAt` mirrors
+`mentionQueryAt` (word-start slash only, so URLs/paths stay literal),
+`matchCommands` (six-row cap), closed `ComposerCommandId` union;
+the commands are the composer's OWN actions (voice/goal/new/stop/
+settings) each gated by its button's rule via `satisfies
+Record<ComposerCommandId, boolean>`; unavailable Enter consumes the key
+without sending literal words; rooms don't get commands.
+
+**Deferred:** U2 drag-reorder — `store.tsx` is social-WIP-owned;
+ordering the sidebar from divergent local state would lie. U5 activity
+panel — name-only row, no source spec anywhere (U-row traced to
+`ccbba1f`, which created DESIGN.md wholesale), and the nearest artifact
+(FleetOrb dropdown) was unmounted by explicit owner direction — needs
+owner shape first.
+
+**Gates:** red 2 files → **15/15**; focused **25/25**; oxlint 8 files
+**0/0** (1 `no-known-value-widening` fixed via union + `satisfies`, not
+suppressed); app tsc **0 errors for my files**; `vite build` ✓ 14.72s;
+full suite **329 files / 4908 passed / 8 skipped / 0 failed** (427.48s;
++2 files/+15 tests vs Loop175 = exactly this slice, no decrease).
+**Not claimed:** browser/screenshot verification of the collapse or the
+command picker (no chat-scroll e2e exists — pure-logic tests + CSS
+only). Next per §38: P1 per-bot approval levels.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

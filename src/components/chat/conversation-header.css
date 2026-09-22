@@ -61,3 +61,11 @@
   .conversation-header [data-model-picker-content] { left: auto; right: 0; width: 380px; }
   .conversation-header [data-task-picker-content] { left: auto; right: 0; width: 300px; }
 }
+/* Header collapse (U3): scroll-down reclaims the task/model/tools row and
+   tightens the padding. Identity and interrupt stay — the interrupt is the
+   emergency control; with the middle cells gone, the interrupt jumps to the
+   last grid column so it remains right-aligned at every width. */
+.conversation-header[data-collapsed] .conversation-primary { display: none; }
+.conversation-header[data-collapsed] .conversation-tools { display: none; }
+.conversation-header[data-collapsed] .conversation-header-layout { padding-top: 6px; padding-bottom: 6px; }
+.conversation-header[data-collapsed] .conversation-header-interrupt { grid-column: -2 / -1; }

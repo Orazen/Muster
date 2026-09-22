@@ -517,6 +517,12 @@ function BotContextMenu({
         item(<BellDot size={16} className="text-ink-secondary" />, "Mark as Unread", () =>
           dispatch({ type: "markUnread", botId: bot.id }),
         ),
+        // The row's unit of work deserves its own door: the same newTask
+        // TaskPicker offers in the header, with TaskPicker's busy rule.
+        item(<Plus size={16} className="text-ink-secondary" />, "New task", () =>
+          dispatch({ type: "newTask", botId: bot.id }),
+          { disabled: bot.busy, hint: bot.busy ? "Let this turn finish first" : undefined },
+        ),
         divider("d1"),
         item(<Pencil size={16} className="text-ink-secondary" />, "Edit Profile", () => {
           dispatch({ type: "select", id: bot.id });

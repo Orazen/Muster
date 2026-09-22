@@ -1,17 +1,25 @@
-import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/cn";
 import "./chat/conversation-header.css";
 
 /** Controls respond to the conversation column, including beside a desktop panel. */
-export function ConversationHeader({ identity, primary, tools, interrupt, windows = false }: {
+export function ConversationHeader({ identity, primary, tools, interrupt, windows = false, collapsed = false }: {
   identity: ReactNode;
   primary: ReactNode;
   tools: ReactNode;
   interrupt?: ReactNode;
   windows?: boolean;
+  /** Scroll-collapsed: chrome reclaims while reading down; identity and
+   *  the interrupt control never hide (the interrupt is the emergency). */
+  collapsed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  // A drawer hanging off a shrunk header looks detached — collapsing
+  // closes it along with the row it belongs to.
+  useEffect(() => {
+    if (collapsed) setOpen(false);
+  }, [collapsed]);
   const toolsId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
   const closeWithEscape = (event: KeyboardEvent) => {
@@ -22,7 +30,7 @@ export function ConversationHeader({ identity, primary, tools, interrupt, window
   };
 
   return (
-    <header className={cn("conversation-header", windows && "conversation-header--windows")} aria-label="Conversation controls">
+    <header className={cn("conversation-header", windows && "conversation-header--windows")} data-collapsed={collapsed || undefined} aria-label="Conversation controls">
       <div className="conversation-header-layout">
         <div className="conversation-header-identity">{identity}</div>
         <div className="conversation-header-interrupt">{interrupt}</div>

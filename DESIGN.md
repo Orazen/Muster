@@ -574,7 +574,8 @@ release pipeline.
 | L102 | threads-under-bots + orb removal + mascot expression pass (IN FLIGHT) | — |
 | S5 | social feed (posts/reactions, rate limits) | social |
 | S6 | bot social tools (loopback API, socialEnabled) | S5 |
-| U1–U5 | agent-row menu gaps · drag-reorder · header collapse · composer /commands · activity panel | — |
+| ✔ | U1 agent-row menu (New task) · U3 header collapse-on-scroll · U4 composer /commands — shipped Loop176 | — |
+| U2, U5 | drag-reorder (DEFERRED: row order lives in `store.tsx`, social-WIP-owned) · activity panel (DEFERRED: name-only row, no source spec; FleetOrb unmounted by owner direction — needs owner shape first) | social, owner |
 | P1 | per-bot approval levels (provider-native) | — |
 | K1 | v2 recovery codes (MEK wrap) | v2 |
 | S0–S3 | devices table → journal → per-object incremental sync → selective restore | K1, v2 |

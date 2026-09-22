@@ -16,6 +16,7 @@ import {
   pasteAttachment,
   type Attachment,
 } from "@/lib/composer-attachments";
+import { commandQueryAt, matchCommands, type ComposerCommand, type ComposerCommandId } from "@/lib/composer-commands";
 import { MAX_IMAGE_BYTES, uploadImageAttachment } from "@/lib/image-upload";
 import { normalizeState } from "@/lib/mascot";
 import { groupComposerHint } from "@/lib/group-routing";
@@ -158,6 +159,10 @@ export function Composer({
 
   // ── @mention picker (tag another bot; the agent reaches it via ask_bot) ──
   const mention = mentionQueryAt(text, caret);
+  // ── /command picker (U4): the composer's own actions, typed. `command`
+  // is null in rooms and after an @ — every command is a bot-scoped action,
+  // and the two pickers never share the caret. ──
+  const command = bot && !group && !mention ? commandQueryAt(text, caret) : null;
   const candidates = useMemo(() => {
     if (!mention || mention.start === dismissedAt) return [];
     const pool: MentionChoice[] = group
@@ -176,7 +181,7 @@ export function Composer({
   }, [mention, dismissedAt, state.bots, bot?.id, group, members]);
   const pickerOpen = candidates.length > 0;
 
-  useEffect(() => setHighlight(0), [mention?.start, mention?.query]);
+  useEffect(() => setHighlight(0), [mention?.start, mention?.query, command?.start, command?.query]);
 
   // grow the textarea with its content (capped by max-h in the className)
   useEffect(() => {
@@ -244,6 +249,43 @@ export function Composer({
     }
     track("voice_mode_started", { botId: bot.id });
     startCall(bot.id);
+  };
+  // ── /command matching: each command gated by the exact rule its button
+  // uses (voice: availability probe; goal/new: not while a turn runs;
+  // stop: only while one runs). `command` implies bot && !group. ──
+  // `satisfies Record<ComposerCommandId, boolean>` is the contract: every
+  // command must have an availability rule, and no drift is possible.
+  const commandAvailability = {
+    voice: voiceModeAvailable,
+    goal: !busy,
+    new: !busy,
+    stop: busy,
+    settings: true,
+  } satisfies Record<ComposerCommandId, boolean>;
+  const commandMatches: Array<ComposerCommand & { available: boolean }> =
+    !command || command.start === dismissedAt
+      ? []
+      : matchCommands(command.query).map((c) => ({ ...c, available: commandAvailability[c.id] }));
+  const commandOpen = commandMatches.length > 0;
+  const anyPickerOpen = pickerOpen || commandOpen;
+  const runCommand = (chosen: (ComposerCommand & { available: boolean }) | undefined) => {
+    if (!chosen) return;
+    if (!chosen.available) {
+      // Consume the key without running: close the menu and keep the text —
+      // Enter must never fall through and send "/goal" as literal words.
+      setDismissedAt(command?.start ?? null);
+      return;
+    }
+    if (bot) {
+      if (chosen.id === "voice") startVoiceMode();
+      else if (chosen.id === "goal") setGoalMode(true);
+      else if (chosen.id === "new") dispatch({ type: "newTask", botId: bot.id });
+      else if (chosen.id === "stop") dispatch({ type: "interrupt", botId: bot.id });
+      else if (chosen.id === "settings") dispatch({ type: "toggleSettings", open: true });
+    }
+    setText("");
+    setCaret(0);
+    track("composer_command_used", { command: chosen.id });
   };
   const send = () => {
     const t = composeMessage(text, attachments);
@@ -382,6 +424,33 @@ export function Composer({
             ))}
           </div>
         )}
+        {commandOpen && (
+          <div
+            role="listbox"
+            aria-label="Composer commands"
+            className="absolute bottom-full left-2 z-20 mb-2 w-72 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
+          >
+            {commandMatches.map((c, i) => (
+              <button
+                key={c.id}
+                role="option"
+                aria-selected={i === highlight}
+                disabled={!c.available}
+                onClick={() => runCommand(c)}
+                onMouseEnter={() => setHighlight(i)}
+                title={c.available ? c.hint : `${c.hint} — not available right now`}
+                className={cn(
+                  "flex w-full items-center gap-2.5 px-3 py-2 text-left",
+                  i === highlight ? "bg-raised-hover" : "",
+                  c.available ? "text-ink" : "cursor-default opacity-40",
+                )}
+              >
+                <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{c.label}</span>
+                <span className="shrink-0 text-xs text-ink-secondary">/{c.id}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {/* An approval takes over the composer: you answer it before you
             can type again, so a waiting bot is impossible to miss. */}
         {approval && (
@@ -451,21 +520,23 @@ export function Composer({
           onKeyUp={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
           onClick={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
           onKeyDown={(e) => {
-            if (pickerOpen) {
+            if (anyPickerOpen) {
+              const rowCount = pickerOpen ? candidates.length : commandMatches.length;
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 const delta = e.key === "ArrowDown" ? 1 : -1;
-                setHighlight((h) => (h + delta + candidates.length) % candidates.length);
+                setHighlight((h) => (h + delta + rowCount) % rowCount);
                 return;
               }
               if (e.key === "Enter" || e.key === "Tab") {
                 e.preventDefault();
-                pickMention(candidates[highlight]);
+                if (pickerOpen) pickMention(candidates[highlight]);
+                else runCommand(commandMatches[highlight]);
                 return;
               }
               if (e.key === "Escape") {
                 e.preventDefault();
-                setDismissedAt(mention?.start ?? null);
+                setDismissedAt((pickerOpen ? mention?.start : command?.start) ?? null);
                 return;
               }
             }
