@@ -121,6 +121,7 @@ const stageV2Restore = (
   payloadText: string,
   source: string,
   dataDir: string,
+  categories: readonly bundleV2.RestoreCategory[] | undefined,
 ): { ok: true; body: StageOkBody } | { ok: false; status: number; body: StageErrBody } => {
   const bytes = Buffer.from(payloadText, "utf8");
   const decrypt = bundleV2.decryptBundleV2(bytes, { passphrase });
@@ -137,10 +138,9 @@ const stageV2Restore = (
   // ids are KEPT (remapIds: false): the commit replaces the covered files
   // wholesale, so there is nothing to merge with — and routines, goals,
   // decisions and social rows all reference bots by id.
-  const staged = bundleV2.stageRestoreV2(decrypt.payload, {
-    stagingDir: stagingPathFor(dataDir),
-    remapIds: false,
-  });
+  const stageOptions: bundleV2.StageRestoreV2Options = { stagingDir: stagingPathFor(dataDir), remapIds: false };
+  if (categories !== undefined) stageOptions.categories = categories;
+  const staged = bundleV2.stageRestoreV2(decrypt.payload, stageOptions);
   if (staged.status !== "staged") {
     return { ok: false, status: 400, body: { status: staged.status, error: staged.error ?? "the restore was refused", blocked: staged.blocked } };
   }
@@ -335,7 +335,9 @@ const routes: BackupRoute[] = [
       const payload = payloadOf(body);
       if (!payload) return json(res, 400, { error: "payload is required" });
       if (body?.confirm !== true) return json(res, 400, { error: "restoring replaces the current fleet — send confirm: true to proceed" });
-      const out = stageV2Restore(passphrase, payload, "file", ctx.dataDir());
+      const selected = bundleV2.parseRestoreCategories(body ?? {});
+      if (selected.error !== undefined) return json(res, 400, { error: selected.error });
+      const out = stageV2Restore(passphrase, payload, "file", ctx.dataDir(), selected.categories);
       json(res, out.ok ? 200 : out.status, out.body);
     },
   },
@@ -394,7 +396,9 @@ const routes: BackupRoute[] = [
           : await accountDrive.drivePullFor(accessToken, access.assertCurrent);
         await access.assertCurrent();
         if (!payloadText) return json(res, 404, { error: "no portable backup exists in your Google Drive yet — push from the other device first" });
-        const out = stageV2Restore(passphrase, payloadText, "google-account", ctx.dataDir());
+        const selected = bundleV2.parseRestoreCategories(body ?? {});
+        if (selected.error !== undefined) return json(res, 400, { error: selected.error });
+        const out = stageV2Restore(passphrase, payloadText, "google-account", ctx.dataDir(), selected.categories);
         if (out.ok) syncState.stampSync("local", "pull", "google-account");
         json(res, out.ok ? 200 : out.status, out.body);
       } catch (e) {
@@ -450,7 +454,9 @@ const routes: BackupRoute[] = [
           return json(res, 409, { error: "Google Drive connection changed during download — check the connection and try again." });
         }
         if (!payload) return json(res, 404, { error: "no portable backup exists in Drive yet — push from the other device first" });
-        const out = stageV2Restore(passphrase, payload, "google-drive", ctx.dataDir());
+        const selected = bundleV2.parseRestoreCategories(body ?? {});
+        if (selected.error !== undefined) return json(res, 400, { error: selected.error });
+        const out = stageV2Restore(passphrase, payload, "google-drive", ctx.dataDir(), selected.categories);
         if (out.ok) syncState.stampSync("local", "pull", "google-drive");
         json(res, out.ok ? 200 : out.status, out.body);
       } catch (e) {

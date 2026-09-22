@@ -9396,6 +9396,15 @@ server.listen(PORT, HOST, () => {
   console.log(`muster server on http://${HOST}:${PORT}`);
 });
 
+// Node's default server keep-alive cap is 5s, while the clients' fetch pools
+// hold sockets for ~4s: under load the client's timer lags, the server
+// FINs a socket the client is about to reuse, and the next request on it
+// dies with ECONNRESET instead of the client's quiet close (the API smoke
+// suite has eaten exactly this flake). 65s — the value Node's own docs and
+// load balancers standardize on — makes the client always the side that
+// ends an idle connection.
+server.keepAliveTimeout = 65_000;
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     localVmIdles.cancelAll();

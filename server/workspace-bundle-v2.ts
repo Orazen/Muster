@@ -1256,17 +1256,156 @@ export interface RestorePlanV2 {
   writesNothing: true;
 }
 
+// ---------------------------------------------------------------------------
+// Restore — selective categories (§12)
+// ---------------------------------------------------------------------------
+
+/** The eight categories the Restore Center may select (§12). `settings` and
+ * `attachments` are the bundle's OWN exclusions — config.json and the
+ * attachment tree never enter a payload — so they classify no file today, and
+ * a selection of only one of them is a refusal below rather than a silent
+ * no-op restore. `conversations` is the transcript: a payload block, not a
+ * file. */
+export const RESTORE_CATEGORIES = [
+  "agents",
+  "conversations",
+  "memory",
+  "settings",
+  "workspaces",
+  "automations",
+  "social",
+  "attachments",
+] as const;
+
+export type RestoreCategory = (typeof RESTORE_CATEGORIES)[number];
+
+/** Which category one payload path belongs to, decided by prefix. Every file
+ * the v2 subset can produce classifies — SUBSET_ROOT_FILES, MEMORY.md,
+ * `memory/**` and `workspaces/**` — and the exhaustiveness case in the
+ * restore suite pins this classifier against the real scan, so a future
+ * subset addition cannot be silently dropped by a partial restore. A path
+ * that classifies null rides only a full restore. `decisions.json` is the
+ * approval ledger and rides automations with routines and goals: §11 covers
+ * the three in one sentence. */
+export function restoreCategoryOf(path: string): RestoreCategory | null {
+  if (path === BOTS_FILE_NAME || path === GROUPS_FILE_NAME) return "agents";
+  if (path === "routines.json" || path === "goals.json" || path === "decisions.json") return "automations";
+  if (path === "social.json") return "social";
+  if (path === "MEMORY.md" || path.startsWith("memory/")) return "memory";
+  if (path.startsWith(WORKSPACES_PREFIX)) return "workspaces";
+  return null;
+}
+
+/** A payload projected down to the selected categories. */
+interface ProjectedRestore {
+  payload: BundlePayloadV2;
+  /** was `conversations` among the selection? The stage writes the transcript
+   * only when this is true. */
+  includeTranscript: boolean;
+}
+
+/** Keep only the files that classify into `categories`, recomputing every
+ * field the payload checker cross-validates (counts.files, counts.totalBytes,
+ * manifestSha256) so the projection still describes itself as if it were a
+ * bundle payload. counts.threads, counts.messages and the transcript block
+ * stay untouched because they still describe the transcript; counts.bots is
+ * never cross-validated — the staged receipt recomputes it from what is
+ * actually staged. Selecting every category returns the payload unchanged, so
+ * a full restore is byte for byte today's. The transcript is NOT zeroed here:
+ * whether it is written is carried by `includeTranscript`, because zeroing
+ * would make a conversations-less projection indistinguishable from a bundle
+ * that genuinely holds no threads. */
+function projectCategories(
+  payload: BundlePayloadV2,
+  categories: readonly RestoreCategory[],
+): { ok: true; value: ProjectedRestore } | { ok: false; error: string } {
+  const schema = bundlePayloadSchema.safeParse(payload);
+  if (!schema.success) return { ok: false, error: "the payload does not match the v2 schema" };
+  const selected: RestoreCategory[] = [];
+  for (const raw of categories) {
+    if (!RESTORE_CATEGORIES.includes(raw)) {
+      return { ok: false, error: `unknown restore category: ${JSON.stringify(raw)}` };
+    }
+    if (!selected.includes(raw)) selected.push(raw);
+  }
+  if (selected.length === 0) return { ok: false, error: "no restore category was selected" };
+  const includeTranscript = selected.includes("conversations");
+  if (selected.length === RESTORE_CATEGORIES.length) {
+    return { ok: true, value: { payload: schema.data, includeTranscript: true } };
+  }
+  const files = schema.data.files.filter((file) => {
+    const category = restoreCategoryOf(file.path);
+    return category !== null && selected.includes(category);
+  });
+  if (files.length === 0 && !includeTranscript) {
+    return { ok: false, error: "the selected categories match nothing in this bundle" };
+  }
+  return {
+    ok: true,
+    value: {
+      payload: {
+        ...schema.data,
+        files,
+        counts: {
+          ...schema.data.counts,
+          files: files.length,
+          totalBytes: files.reduce((total, file) => total + file.size, 0),
+        },
+        manifestSha256: manifestDigest(files),
+      },
+      includeTranscript,
+    },
+  };
+}
+
+/** The wire body a restore selection is parsed from: `categories` arrives
+ * unvalidated beside the other request fields, and this module is where it
+ * stops being unvalidated. */
+export interface RestoreSelectionWire {
+  categories?: unknown;
+}
+
+/** A parsed restore selection. Absent `categories` is the full restore of
+ * today; `error` names exactly why a selection was refused. */
+export interface RestoreSelectionParse {
+  categories?: RestoreCategory[];
+  error?: string;
+}
+
+/** Parse the restore selection off a wire body: absent is the full restore of
+ * today, everything else must be a non-empty array of known categories. The
+ * vocabulary lives here, beside the classifier that gives it meaning, so
+ * every route parses it the same way. */
+export function parseRestoreCategories(body?: RestoreSelectionWire): RestoreSelectionParse {
+  const raw = body?.categories;
+  if (raw === undefined) return {};
+  if (!Array.isArray(raw)) return { error: "categories must be an array of restore categories" };
+  if (raw.length === 0) return { error: "categories must select at least one category" };
+  const categories: RestoreCategory[] = [];
+  for (const entry of raw) {
+    if (!RESTORE_CATEGORIES.includes(entry)) {
+      return { error: `unknown restore category: ${JSON.stringify(entry)}` };
+    }
+    if (!categories.includes(entry)) categories.push(entry);
+  }
+  return { categories };
+}
+
 export interface PlanRestoreV2Options {
   dataDir: string;
+  /** Restore only these categories (§12). Absent, or all of them, plans the
+   * full restore — byte for byte the plan of today. */
+  categories?: readonly RestoreCategory[];
 }
 
 /** Diff a payload against a target directory without touching it.
  *
  * This does not open the target database even read-only: SQLite creates
  * `-shm`/`-wal` sidecars next to a WAL database, and a dry run that writes
- * those has already written to the target. Transcript threads are therefore
- * always reported as creates — deciding merge-versus-insert is exactly the
- * decision that needs the staged writer, not a plan. */
+ * those has already written to the target. Transcript threads — when
+ * `conversations` is among the categories — are therefore always reported as
+ * creates: deciding merge-versus-insert is exactly the decision that needs
+ * the staged writer, not a plan. */
 export function planRestoreV2(payload: BundlePayloadV2, options: PlanRestoreV2Options): RestorePlanV2 {
   const plan: RestorePlanV2 = { creates: [], conflicts: [], unchanged: [], blocked: [], writesNothing: true };
   const parsed = bundlePayloadSchema.safeParse(payload);
@@ -1274,7 +1413,17 @@ export function planRestoreV2(payload: BundlePayloadV2, options: PlanRestoreV2Op
     plan.blocked.push({ kind: "file", path: "-", detail: "the payload does not match the v2 schema" });
     return plan;
   }
-  for (const file of parsed.data.files) {
+  const projection: { ok: true; value: ProjectedRestore } | { ok: false; error: string } =
+    options.categories === undefined
+      ? { ok: true, value: { payload: parsed.data, includeTranscript: true } }
+      : projectCategories(parsed.data, options.categories);
+  if (!projection.ok) {
+    plan.blocked.push({ kind: "file", path: "-", detail: projection.error });
+    return plan;
+  }
+  const data = projection.value.payload;
+  const includeTranscript = projection.value.includeTranscript;
+  for (const file of data.files) {
     const target = confinedTarget(options.dataDir, file.path);
     if (target === null) {
       plan.blocked.push({ kind: "file", path: file.path, detail: "unsafe-path" });
@@ -1300,8 +1449,10 @@ export function planRestoreV2(payload: BundlePayloadV2, options: PlanRestoreV2Op
       detail: existing === null ? "the target exists and could not be read" : "the target holds different bytes",
     });
   }
-  for (const thread of parsed.data.transcripts.threads) {
-    plan.creates.push({ kind: "thread", path: thread.threadId, detail: `${thread.messages.length} messages, head ${thread.activeLeafId ?? "none"}` });
+  if (includeTranscript) {
+    for (const thread of data.transcripts.threads) {
+      plan.creates.push({ kind: "thread", path: thread.threadId, detail: `${thread.messages.length} messages, head ${thread.activeLeafId ?? "none"}` });
+    }
   }
   return plan;
 }
@@ -1714,7 +1865,12 @@ function restorePayloadProblems(payload: BundlePayloadV2, stagingDir: string): R
 /** Decide every byte a stage would write, and every id it would issue, without
  * touching the filesystem. Refusals here leave nothing behind because nothing
  * has been created yet. */
-function buildStagedPlan(payload: BundlePayloadV2, stagingDir: string, remapIds: boolean): PlanOutcome {
+function buildStagedPlan(
+  payload: BundlePayloadV2,
+  stagingDir: string,
+  remapIds: boolean,
+  includeTranscript: boolean,
+): PlanOutcome {
   const blocked = restorePayloadProblems(payload, stagingDir);
   if (blocked.length > 0) return { ok: false, blocked };
   const botsFile = payload.files.find((file) => file.path === BOTS_FILE_NAME);
@@ -1758,10 +1914,12 @@ function buildStagedPlan(payload: BundlePayloadV2, stagingDir: string, remapIds:
     if (remapIds) mapping.push({ kind: "bot", from, to });
   }
   const threadIdMap = new Map<string, string>();
-  for (const thread of payload.transcripts.threads) {
-    const to = remapIds ? randomUUID() : thread.threadId;
-    threadIdMap.set(thread.threadId, to);
-    if (remapIds) mapping.push({ kind: "thread", from: thread.threadId, to });
+  if (includeTranscript) {
+    for (const thread of payload.transcripts.threads) {
+      const to = remapIds ? randomUUID() : thread.threadId;
+      threadIdMap.set(thread.threadId, to);
+      if (remapIds) mapping.push({ kind: "thread", from: thread.threadId, to });
+    }
   }
   const reconsent: ReconsentEntry[] = [...botIds].sort().map((botId) => ({
     botId,
@@ -1792,17 +1950,19 @@ function buildStagedPlan(payload: BundlePayloadV2, stagingDir: string, remapIds:
     files.push({ path: stagedPath, body: staged });
   }
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  const transcript: BundleTranscript = {
-    method: payload.transcripts.method,
-    threads: payload.transcripts.threads.map((thread) => ({
-      threadId: threadIdMap.get(thread.threadId) ?? thread.threadId,
-      activeLeafId: thread.activeLeafId,
-      messages: thread.messages.map((message) =>
-        remapIds ? { ...message, json: remapMessageJson(message.json, botIdMap) } : message,
-      ),
-    })),
-    counts: { ...payload.transcripts.counts },
-  };
+  const transcript: BundleTranscript = includeTranscript
+    ? {
+        method: payload.transcripts.method,
+        threads: payload.transcripts.threads.map((thread) => ({
+          threadId: threadIdMap.get(thread.threadId) ?? thread.threadId,
+          activeLeafId: thread.activeLeafId,
+          messages: thread.messages.map((message) =>
+            remapIds ? { ...message, json: remapMessageJson(message.json, botIdMap) } : message,
+          ),
+        })),
+        counts: { ...payload.transcripts.counts },
+      }
+    : { method: payload.transcripts.method, threads: [], counts: { threads: 0, messages: 0 } };
   const messages = transcript.threads.reduce((total, thread) => total + thread.messages.length, 0);
   return {
     ok: true,
@@ -1812,7 +1972,7 @@ function buildStagedPlan(payload: BundlePayloadV2, stagingDir: string, remapIds:
       mapping,
       reconsent,
       counts: {
-        files: files.length + 1,
+        files: files.length + (includeTranscript ? 1 : 0),
         messages,
         threads: transcript.threads.length,
         bots: botIds.size,
@@ -1882,6 +2042,9 @@ export interface StageRestoreV2Options {
   /** Issue fresh bot and thread ids (default), or keep the bundle's. Grants
    * and connection switches are dropped either way. */
   remapIds?: boolean;
+  /** Restore only these categories (§12). Absent, or all of them, stages the
+   * full bundle — byte for byte the stage of today. */
+  categories?: readonly RestoreCategory[];
   /** Test seam, called before each step. A throw cleans the staging tree up
    * and returns `failed`; nothing outside `stagingDir` is touched. */
   onStage?: (event: RestoreEvent) => void;
@@ -1919,6 +2082,13 @@ export function stageRestoreV2(payload: BundlePayloadV2, options: StageRestoreV2
     reconsentRequired: [],
     files: [],
   });
+  const projection: { ok: true; value: ProjectedRestore } | { ok: false; error: string } =
+    options.categories === undefined
+      ? { ok: true, value: { payload, includeTranscript: true } }
+      : projectCategories(payload, options.categories);
+  if (!projection.ok) return refuse([{ path: "-", detail: projection.error }]);
+  const plannedPayload = projection.value.payload;
+  const includeTranscript = projection.value.includeTranscript;
   const existing = lstatOrNull(stagingDir);
   if (existing !== null) {
     if (!existing.isDirectory()) {
@@ -1939,7 +2109,7 @@ export function stageRestoreV2(payload: BundlePayloadV2, options: StageRestoreV2
       return refuse([{ path: stagingDir, detail: "the staging directory exists and is not empty" }]);
     }
   }
-  const outcome = buildStagedPlan(payload, stagingDir, remapIds);
+  const outcome = buildStagedPlan(plannedPayload, stagingDir, remapIds, includeTranscript);
   if (!outcome.ok) return refuse(outcome.blocked);
   const plan = outcome.plan;
   const files: string[] = [];
@@ -1956,26 +2126,28 @@ export function stageRestoreV2(payload: BundlePayloadV2, options: StageRestoreV2
       writeFileAtomic(target, file.body);
       files.push(file.path);
     }
-    report({ step: "transcript", path: STAGED_TRANSCRIPT });
-    const transcriptPath = join(stagingDir, STAGED_TRANSCRIPT);
-    writeStagedTranscript(transcriptPath, plan.transcript);
-    const transcriptBody = readFileSync(transcriptPath);
     const entries: Array<{ path: string; sha256: string; size: number }> = plan.files.map((file) => ({
       path: file.path,
       sha256: sha256Hex(file.body),
       size: file.body.byteLength,
     }));
-    entries.push({
-      path: STAGED_TRANSCRIPT,
-      sha256: sha256Hex(transcriptBody),
-      size: transcriptBody.byteLength,
-    });
+    if (includeTranscript) {
+      report({ step: "transcript", path: STAGED_TRANSCRIPT });
+      const transcriptPath = join(stagingDir, STAGED_TRANSCRIPT);
+      writeStagedTranscript(transcriptPath, plan.transcript);
+      const transcriptBody = readFileSync(transcriptPath);
+      entries.push({
+        path: STAGED_TRANSCRIPT,
+        sha256: sha256Hex(transcriptBody),
+        size: transcriptBody.byteLength,
+      });
+      files.push(STAGED_TRANSCRIPT);
+    }
     entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    files.push(STAGED_TRANSCRIPT);
     files.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    // the counts describe the staging tree that now exists, transcript
-    // included: a `files` that counted it beside a `bytes` that did not would
-    // be two different claims about one directory
+    // the counts describe the staging tree that now exists, the transcript
+    // counted only when it was staged: a `files` that counted it beside a
+    // `bytes` that did not would be two different claims about one directory
     const counts: StagedCounts = {
       files: entries.length,
       messages: plan.counts.messages,
@@ -2457,6 +2629,8 @@ export interface RestoreBundleV2Options {
   backupDir: string;
   confirm: boolean;
   remapIds?: boolean;
+  /** Restore only these categories (§12); absent is the full restore. */
+  categories?: readonly RestoreCategory[];
   onStage?: (event: RestoreEvent) => void;
   onCommit?: (event: RestoreEvent) => void;
 }
@@ -2498,6 +2672,7 @@ export function restoreBundleV2(bytes: Buffer, options: RestoreBundleV2Options):
   }
   const stageOptions: StageRestoreV2Options = { stagingDir: options.stagingDir };
   if (options.remapIds !== undefined) stageOptions.remapIds = options.remapIds;
+  if (options.categories !== undefined) stageOptions.categories = options.categories;
   if (options.onStage !== undefined) stageOptions.onStage = options.onStage;
   const staged = stageRestoreV2(decrypt.payload, stageOptions);
   if (staged.status !== "staged") {

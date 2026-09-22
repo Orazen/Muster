@@ -27,6 +27,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "./testing/cleanup.ts";
 import {
+  RESTORE_CATEGORIES,
   RESTORE_DISABLED_BOT_FIELDS,
   RESTORE_DROPPED_BOT_FIELDS,
   RESTORE_DROPPED_GROUP_FIELDS,
@@ -34,10 +35,14 @@ import {
   commitRestoreV2,
   decryptBundleV2,
   encryptBundleV2,
+  parseRestoreCategories,
+  planRestoreV2,
   restoreBundleV2,
+  restoreCategoryOf,
   stageRestoreV2,
   verifyBundleV2,
   type BundlePayloadV2,
+  type RestoreCategory,
   type RestoreEvent,
   type StagedRestoreResult,
 } from "./workspace-bundle-v2.ts";
@@ -1452,7 +1457,251 @@ describe("workspace bundle v2 restore", () => {
       expect(body.byteLength).toBe(entry.size);
     }
   });
+
+  // --- selective restore by category (§12) -----------------------------
+
+  it("classifies every file the subset can produce into a known category", () => {
+    const root = makeRoot();
+    const fixture = withAutomationFiles(writeFixture(root));
+    const payload = openPayload(exportBundle(fixture));
+    expect(payload.files.length).toBeGreaterThan(8);
+    for (const file of payload.files) {
+      const category = restoreCategoryOf(file.path);
+      expect(category, `${file.path} must classify into a category`).not.toBeNull();
+      if (category === null) continue;
+      expect(RESTORE_CATEGORIES.includes(category)).toBe(true);
+    }
+    // the eight categories the spec names, in the spec's order (§12)
+    expect([...RESTORE_CATEGORIES]).toEqual([
+      "agents",
+      "conversations",
+      "memory",
+      "settings",
+      "workspaces",
+      "automations",
+      "social",
+      "attachments",
+    ]);
+    // the excluded pair never enters a bundle, so it classifies nothing
+    expect(restoreCategoryOf("config.json")).toBeNull();
+    expect(restoreCategoryOf("auth.secret")).toBeNull();
+  });
+
+  it("stages exactly the selected categories, the transcript included only when asked", () => {
+    const root = makeRoot();
+    const fixture = withAutomationFiles(writeFixture(root));
+    const payload = openPayload(exportBundle(fixture));
+    const stagingDir = join(root, "staging");
+    const staged = stageRestoreV2(payload, {
+      stagingDir,
+      remapIds: false,
+      categories: ["agents", "automations"],
+    });
+    expect(staged.status).toBe("staged");
+    expect(staged.files).toEqual([
+      "bots.json",
+      "decisions.json",
+      "goals.json",
+      "groups.json",
+      "routines.json",
+    ]);
+    expect(existsSync(join(stagingDir, "messages.db"))).toBe(false);
+    expect(staged.counts?.messages).toBe(0);
+    expect(staged.counts?.threads).toBe(0);
+    expect(staged.counts?.bots).toBe(2);
+    const manifest = readStagingManifest(stagingDir);
+    expect(manifest.files.map((entry) => entry.path)).toEqual(staged.files);
+    expect(manifest.counts.files).toBe(5);
+    expect(manifest.counts.bytes).toBe(
+      manifest.files.reduce((total, entry) => total + entry.size, 0),
+    );
+    for (const entry of manifest.files) {
+      const body = readFileSync(join(stagingDir, ...entry.path.split("/")));
+      expect(sha256(body)).toBe(entry.sha256);
+      expect(body.byteLength).toBe(entry.size);
+    }
+  });
+
+  it("restores the selected categories over a live install and leaves every other path exactly as it was", () => {
+    const root = makeRoot();
+    const fixture = withAutomationFiles(writeFixture(root));
+    const sealed = exportBundle(fixture);
+    const install = localInstall(root);
+    // this installation's own transcript, which no agents-only restore may touch
+    writeTranscript(join(install, "messages.db"), [
+      {
+        threadId: "thread-local-only",
+        messages: [{ id: "l1", role: "user", kind: "text", text: "local", parentId: null }],
+        activeLeafId: "l1",
+      },
+    ]);
+    const localBots = readFileSync(join(install, "bots.json"));
+    const localMemory = readFileSync(join(install, "MEMORY.md"));
+
+    const result = restoreBundleV2(sealed, {
+      passphrase: PASSPHRASE,
+      stagingDir: join(root, "staging"),
+      dataDir: install,
+      backupDir: join(root, "backup"),
+      confirm: true,
+      remapIds: false,
+      categories: ["agents"],
+    });
+    expect(result.status).toBe("committed");
+    expect(result.stoppedAt).toBe("done");
+
+    // agents came from the bundle: the roster replaced, the room created
+    expect(readFileSync(join(install, "bots.json"))).not.toEqual(localBots);
+    expect(readRecords(join(install, "bots.json")).map((bot) => bot.id)).toEqual([BOT_ONE, BOT_TWO]);
+    expect(existsSync(join(install, "groups.json"))).toBe(true);
+
+    // every other category: this installation's own bytes, or its own absence
+    expect(readFileSync(join(install, "MEMORY.md"))).toEqual(localMemory);
+    expect(readFileSync(join(install, "memory", "rota.md"), "utf8")).toBe("local rota\n");
+    expect(readFileSync(join(install, "workspaces", BOT_ONE, "MEMORY.md"), "utf8")).toBe(
+      "local bot one notes\n",
+    );
+    expect(existsSync(join(install, "routines.json"))).toBe(false);
+    expect(existsSync(join(install, "goals.json"))).toBe(false);
+    expect(existsSync(join(install, "decisions.json"))).toBe(false);
+    expect(existsSync(join(install, "social.json"))).toBe(false);
+
+    // conversations was not selected: the live transcript is untouched
+    const threads = readTranscript(join(install, "messages.db"));
+    expect(threads.map((thread) => thread.threadId)).toEqual(["thread-local-only"]);
+  });
+
+  it("restores conversations alone: the transcript comes back and no file does", () => {
+    const root = makeRoot();
+    const fixture = withAutomationFiles(writeFixture(root));
+    const sealed = exportBundle(fixture);
+    const install = localInstall(root);
+    const localBots = readFileSync(join(install, "bots.json"));
+    const localMemory = readFileSync(join(install, "MEMORY.md"));
+
+    const result = restoreBundleV2(sealed, {
+      passphrase: PASSPHRASE,
+      stagingDir: join(root, "staging"),
+      dataDir: install,
+      backupDir: join(root, "backup"),
+      confirm: true,
+      remapIds: false,
+      categories: ["conversations"],
+    });
+    expect(result.status).toBe("committed");
+    expect(result.staged?.counts).toMatchObject({
+      files: 1,
+      messages: 6,
+      threads: 2,
+      bots: 0,
+    });
+
+    const threads = readTranscript(join(install, "messages.db"));
+    expect(threads.map((thread) => thread.threadId).sort()).toEqual(
+      [BOT_THREAD, ROOM_THREAD].sort(),
+    );
+
+    // no file traveled with it
+    expect(readFileSync(join(install, "bots.json"))).toEqual(localBots);
+    expect(readFileSync(join(install, "MEMORY.md"))).toEqual(localMemory);
+    expect(existsSync(join(install, "routines.json"))).toBe(false);
+  });
+
+  it("refuses empty, unknown and never-present selections before it writes anything", () => {
+    const root = makeRoot();
+    const fixture = withAutomationFiles(writeFixture(root));
+    const payload = openPayload(exportBundle(fixture));
+    const stagingDir = join(root, "staging");
+
+    const empty = stageRestoreV2(payload, { stagingDir, categories: [] });
+    expect(empty.status).toBe("refused");
+    expect(empty.blocked[0]?.detail).toMatch(/no restore category/i);
+    expect(existsSync(stagingDir)).toBe(false);
+
+    // SAFETY: the wire hands this option unknown values at runtime, and this
+    // case exists to pin the guard against that typed-as-impossible input
+    const unknown = stageRestoreV2(payload, {
+      stagingDir,
+      categories: ["nope" as RestoreCategory],
+    });
+    expect(unknown.status).toBe("refused");
+    expect(unknown.blocked[0]?.detail).toContain("nope");
+    expect(existsSync(stagingDir)).toBe(false);
+
+    // settings and attachments are the bundle's own exclusions: a selection
+    // of only those matches nothing and must say so — never stage an empty
+    // restore that would still swap the transcript
+    for (const absent of ["settings", "attachments"] as const) {
+      const refused = stageRestoreV2(payload, { stagingDir, categories: [absent] });
+      expect(refused.status).toBe("refused");
+      expect(refused.blocked[0]?.detail).toContain("match nothing");
+      expect(existsSync(stagingDir)).toBe(false);
+    }
+
+    // the wire parser: absent is the full restore, duplicates collapse, and
+    // anything else is refused with the offending value named
+    expect(parseRestoreCategories(undefined)).toEqual({});
+    expect(parseRestoreCategories({ categories: ["agents", "agents"] })).toEqual({
+      categories: ["agents"],
+    });
+    expect(parseRestoreCategories({ categories: [] }).error).toBeDefined();
+    expect(parseRestoreCategories({ categories: "agents" }).error).toMatch(/array/);
+    expect(parseRestoreCategories({ categories: ["agents", "bogus"] }).error).toContain("bogus");
+    expect(parseRestoreCategories({ categories: [7] }).error).toContain("7");
+    expect(RESTORE_CATEGORIES.includes("agents")).toBe(true);
+    expect(RESTORE_CATEGORIES.includes("attachments")).toBe(true);
+  });
+
+  it("plans only the selected paths, and the full selection plans exactly like no selection", () => {
+    const root = makeRoot();
+    const fixture = withAutomationFiles(writeFixture(root));
+    const payload = openPayload(exportBundle(fixture));
+    const install = join(root, "target");
+    mkdirSync(install, { recursive: true });
+
+    const full = planRestoreV2(payload, { dataDir: install });
+    const allCategories = planRestoreV2(payload, {
+      dataDir: install,
+      categories: [...RESTORE_CATEGORIES],
+    });
+    expect(allCategories).toEqual(full);
+    expect(full.creates.filter((entry) => entry.kind === "thread")).toHaveLength(2);
+
+    const memoryOnly = planRestoreV2(payload, { dataDir: install, categories: ["memory"] });
+    expect(memoryOnly.blocked).toEqual([]);
+    expect(memoryOnly.creates.every((entry) => entry.kind === "file")).toBe(true);
+    expect(memoryOnly.creates.map((entry) => entry.path).sort()).toEqual([
+      "MEMORY.md",
+      "memory/decisions.md",
+      "memory/rota.md",
+    ]);
+
+    const withoutConversations = planRestoreV2(payload, {
+      dataDir: install,
+      categories: ["agents"],
+    });
+    expect(withoutConversations.creates.some((entry) => entry.kind === "thread")).toBe(false);
+
+    const none = planRestoreV2(payload, { dataDir: install, categories: ["settings"] });
+    expect(none.blocked.map((entry) => entry.detail)).toContain(
+      "the selected categories match nothing in this bundle",
+    );
+    expect(none.creates).toEqual([]);
+  });
 });
+
+/** The fixture plus the automation/history roots the base fixture leaves out,
+ * so a category selection can be checked against every file-backed family. */
+function withAutomationFiles(fixture: Fixture): Fixture {
+  writeFileSync(join(fixture.dataDir, "routines.json"), JSON.stringify([{ id: "routine-1", enabled: true }]));
+  writeFileSync(join(fixture.dataDir, "goals.json"), JSON.stringify([{ id: "goal-1", status: "open" }]));
+  writeFileSync(
+    join(fixture.dataDir, "decisions.json"),
+    JSON.stringify({ version: 1, decisions: [{ id: "d-1", botId: "bot-1" }] }),
+  );
+  writeFileSync(join(fixture.dataDir, "social.json"), JSON.stringify({ handles: [] }));
+  return fixture;
+}
 
 /** Stage a bundle's payload and insist it staged, so a case can read the tree
  * rather than unwrap a status first. */
