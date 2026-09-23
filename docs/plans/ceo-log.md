@@ -8882,3 +8882,13 @@ multi-range/malformed units. HTML stays out of the path (verification meta
 never desynchronizes). Five route-level regression tests in
 server/docs-static.test.ts pin all of it; the 1.17.0→1.18.0 delta path is now
 real end to end.
+
+### Delta-path end-to-end proof (v1.17.0 loop, closing receipt)
+
+Deploy propagated; the public edge now returns `HTTP/2 206 + content-range`
+for range probes (3/3 consecutive). Live-mirror proof with blockmap-declared
+chunk boundaries: the real 1.17.0 arm64 blockmap (8,724 chunks) was pulled
+from the edge, then 64 chunks of the installer were fetched as 64 separate
+`Range` requests — every one answered 206 with byte-exact slices, 1MB
+assembled instead of one 183MB full download. That is the exact wire pattern
+electron-updater's differential downloader uses on 1.18.0.
