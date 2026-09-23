@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { DesktopCapabilitySession, type DesktopCapabilityState } from "@/lib/desktop";
+import { DesktopCapabilitySession, initialDesktopCapabilities, permissionRequestPresentationDestination, type DesktopCapabilityState, type PrivacyPane } from "@/lib/desktop";
 import { ComputerAccessView, DesktopCapabilitiesProvider } from "./DesktopCapabilities";
 
 const base = new DesktopCapabilitySession({ platform: "darwin", enableComputerAccess: async () => ({ mode: "embedded" }) }).getSnapshot();
@@ -59,5 +59,112 @@ describe("computer access consent rendering (SSR)", () => {
     renderToStaticMarkup(createElement(DesktopCapabilitiesProvider, null,
       createElement(ComputerAccessView, { state: base, onEnable, onRefresh: vi.fn() })));
     expect(onEnable).not.toHaveBeenCalled();
+  });
+});
+
+// Permission presentation destination (tiptour integration study, slice 4):
+// one path per tap — the session's own request first, System Settings after,
+// nothing at all once the host reports access.
+describe("permission presentation destination", () => {
+  it("sequences systemPrompt → systemSettings, and short-circuits when already granted", () => {
+    expect(permissionRequestPresentationDestination({ hasPermissionNow: false, hasAttemptedSystemPrompt: false })).toBe("systemPrompt");
+    expect(permissionRequestPresentationDestination({ hasPermissionNow: false, hasAttemptedSystemPrompt: true })).toBe("systemSettings");
+    // granted wins over every prior attempt — never re-request a grant
+    expect(permissionRequestPresentationDestination({ hasPermissionNow: true, hasAttemptedSystemPrompt: false })).toBe("alreadyGranted");
+    expect(permissionRequestPresentationDestination({ hasPermissionNow: true, hasAttemptedSystemPrompt: true })).toBe("alreadyGranted");
+  });
+
+  const bridgeWith = (panes: PrivacyPane[], granted = false) => {
+    // no assertion: the literal is chosen here and typed where it is chosen
+    const support: "supported" | "unsupported" = granted ? "supported" : "unsupported";
+    return {
+      platform: "darwin" as const,
+      enableComputerAccess: vi.fn(async () => ({ mode: "embedded" as const })),
+      getCapabilities: async () => ({
+        ...initialDesktopCapabilities({ platform: "darwin" as const }),
+        localComputer: { available: granted, support },
+      }),
+      permOpenSettings: async (pane: PrivacyPane) => { panes.push(pane); },
+    };
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("reports the prompt destination before any request and opens nothing", async () => {
+    const panes: PrivacyPane[] = [];
+    const bridge = bridgeWith(panes);
+    const session = new DesktopCapabilitySession(bridge);
+    session.attach();
+    await settle();
+    expect(session.getSnapshot().permissionRequestAttempted).toBe(false);
+    expect(session.openPrivacySettings("accessibility")).toBe("systemPrompt");
+    expect(panes).toEqual([]);
+    expect(bridge.enableComputerAccess).not.toHaveBeenCalled(); // the request control owns that tap
+  });
+
+  it("after the session's request, the same tap deep-links to System Settings", async () => {
+    const panes: PrivacyPane[] = [];
+    const bridge = bridgeWith(panes);
+    const session = new DesktopCapabilitySession(bridge);
+    session.attach();
+    await settle();
+    await session.enable();
+    expect(session.getSnapshot().permissionRequestAttempted).toBe(true);
+    expect(session.openPrivacySettings("accessibility")).toBe("systemSettings");
+    expect(panes).toEqual(["accessibility"]);
+    // a second tap repeats the Settings path — never a second prompt attempt
+    expect(session.openPrivacySettings("accessibility")).toBe("systemSettings");
+    expect(panes).toEqual(["accessibility", "accessibility"]);
+    expect(bridge.enableComputerAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("never re-requests or deep-links a permission the host reports granted", async () => {
+    const panes: PrivacyPane[] = [];
+    const bridge = bridgeWith(panes, true);
+    const session = new DesktopCapabilitySession(bridge);
+    session.attach();
+    await settle();
+    expect(session.getSnapshot().capabilities.localComputer.available).toBe(true);
+    expect(session.openPrivacySettings("screen")).toBe("alreadyGranted");
+    expect(panes).toEqual([]);
+  });
+
+  it("claims no grant of its own: the repair path only ever reports the host's state", async () => {
+    const panes: PrivacyPane[] = [];
+    const session = new DesktopCapabilitySession(bridgeWith(panes));
+    session.attach();
+    await settle();
+    await session.enable();
+    session.openPrivacySettings("accessibility");
+    // the enable attempt failed to produce access (no real permissions here),
+    // and the destination said Settings — the state still reads "off"
+    expect(session.getSnapshot().capabilities.localComputer.available).toBe(false);
+    expect(session.getSnapshot().permissionRequestAttempted).toBe(true);
+  });
+
+  const renderRepair = (patch: Partial<DesktopCapabilityState> = {}, onOpenSettings = vi.fn()) =>
+    renderToStaticMarkup(createElement(ComputerAccessView, {
+      state: { ...base, ready: true, ...patch }, onEnable: vi.fn(), onRefresh: vi.fn(), onOpenSettings,
+    }));
+
+  it("offers the repair path only after this session's request", () => {
+    expect(renderRepair()).not.toContain("Open Privacy Settings");
+    const html = renderRepair({ permissionRequestAttempted: true });
+    expect(html.match(/Open Privacy Settings/g)).toHaveLength(1);
+    expect(html).toContain("Enable for this session");
+  });
+
+  it("withholds the repair path while a request is in flight or access is on", () => {
+    expect(renderRepair({ permissionRequestAttempted: true, enabling: true })).not.toContain("Open Privacy Settings");
+    expect(renderRepair({ permissionRequestAttempted: true, refreshing: true })).not.toContain("Open Privacy Settings");
+    expect(renderRepair({ permissionRequestAttempted: true, capabilities: { ...base.capabilities, localComputer: { available: true, support: "supported" } } }))
+      .not.toContain("Open Privacy Settings");
+  });
+
+  it("renders no dead control on a surface that never offered the handler", () => {
+    const html = renderToStaticMarkup(createElement(ComputerAccessView, {
+      state: { ...base, ready: true, permissionRequestAttempted: true }, onEnable: vi.fn(), onRefresh: vi.fn(),
+    }));
+    expect(html).not.toContain("Open Privacy Settings");
   });
 });

@@ -10,9 +10,10 @@ import { createBuildDiagnostics } from "./build-identity.ts";
 // Muster server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { readFileSync, statSync, unlinkSync } from "node:fs";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { readFileSync, statSync, unlinkSync, type Stats } from "node:fs";
 import { writeFileAtomic } from "./atomic.ts";
+import { retainForReplay } from "./sse-replay.ts";
 import { pickSeedEngine } from "./model-selection.ts";
 import { createServer, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
@@ -147,6 +148,8 @@ import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
 import { DecisionLog, queryAudit } from "./decision-log.ts";
 import { approvalWhy } from "./approval-why.ts";
 import { currentPlan, rehearsePlan } from "./plan-rehearsal.ts";
+import { desktopElementsFor, groundDesktopSuggestions, suggestionCardPatch } from "./desktop-suggestions.ts";
+import { DESKTOP_ACTION_BUDGET, DesktopActionBudget, budgetStop, isDesktopActionTool } from "./desktop-guardrails.ts";
 import { approvalHistory } from "./approval-history.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
@@ -1021,7 +1024,7 @@ function broadcast<P extends FrameIdentity>(payload: P) {
   // Live desktop captures can each be hundreds of kilobytes and become stale
   // as soon as the next one arrives. Keep their sequence slots so resume-gap
   // detection stays honest, but never retain their base64 payloads.
-  replayBuffer.push({ seq, kind, frame, payload });
+  replayBuffer.push(retainForReplay(seq, kind, frame, payload));
   if (replayBuffer.length > REPLAY_MAX) replayBuffer.shift();
   for (const client of sseClients) {
     if (!wants(client, kind) || !visibleToClient(client, payload)) continue;
@@ -1156,6 +1159,14 @@ const turnProvenance = new Map<string, { instanceId: string; model: string; effo
 // the same class of stuck-loop detection; retaining an unlimited set of
 // unique arguments would let one pathological turn grow the server forever.
 const repeats = new RepeatDetector({ thresholds: [5, 10, 20], maxKeysPerThread: 256 });
+
+// Per-turn screen-action budget (tiptour integration study, slice 3): a
+// turn gets DESKTOP_ACTION_BUDGET desktop actions before every further one
+// stops back at the human. Bounds autonomy without granting any — the
+// ledger only ever REMOVES an unattended answer (see `budgetStop` at the
+// permission fold), never adds one. Counted from executed tool calls, one
+// integer per thread, dropped when the turn settles.
+const desktopBudget = new DesktopActionBudget();
 
 // ── stall watchdog ─────────────────────────────────────────────────────
 // ask_bot has a 4-minute ceiling and channel turns a configurable one
@@ -1525,11 +1536,39 @@ bus.subscribe((event: RuntimeEvent) => {
           if (plan) rehearsal = rehearsePlan(plan, events);
         } catch { /* the approval remains available without evidence */ }
       }
-      const settled = permission && asker && event.requestId
+      const autoApproved = permission && asker && event.requestId
         ? autoDecision(asker, event.tool, event.summary, {
             unattended: isUnattended(asker.id),
           })
         : null;
+      // Turn-scoped screen-action budget (study slice 3): once the turn has
+      // spent DESKTOP_ACTION_BUDGET desktop actions, an action auto mode
+      // would have waved through stops on the card instead. It only ever
+      // REMOVES an unattended answer — a request `autoDecision` already
+      // refused keeps its own reason, and a bot with no unattended answer
+      // sees exactly the card it always saw.
+      const budget = budgetStop({
+        autoApproved,
+        desktopAsk: permission && isDesktopActionTool(event.tool),
+        exhausted: desktopBudget.exhausted(event.threadId),
+      });
+      const settled = budget.settled;
+      // Grounded suggested-action list (tiptour integration study slice 2):
+      // for a pointer-step desktop ask, resolve the bot's proposed step
+      // against the controls detection actually found and attach them as
+      // evidence + a human choice list on the card. Candidates are never
+      // invented — with no detected elements this spreads NOTHING and the
+      // card is byte-identically today's. The card stays the only actuator:
+      // these are options the human taps, never an action anyone runs, and
+      // `autoDecision` above is unchanged (still the only non-human answer,
+      // still scoped to routine tool-permission cards).
+      const suggestions = permission
+        ? suggestionCardPatch(groundDesktopSuggestions({
+            tool: event.tool,
+            summary: event.summary,
+            elements: desktopElementsFor(event.threadId),
+          }))
+        : {};
       if (settled && asker && event.requestId) {
         const instance = event.providerInstanceId
           ? registry.get(event.providerInstanceId)
@@ -1562,6 +1601,7 @@ bus.subscribe((event: RuntimeEvent) => {
               card: {
                 rehearsal,
                 why,
+                ...suggestions,
                 title: "Approval needed",
                 subtitle: summary,
                 options: ["Allow", "Deny"],
@@ -1582,6 +1622,7 @@ bus.subscribe((event: RuntimeEvent) => {
         card: {
           rehearsal,
           why,
+          ...suggestions,
           title: permission ? "Approval needed" : "Your bot has a question",
           subtitle: event.summary,
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
@@ -1597,7 +1638,8 @@ bus.subscribe((event: RuntimeEvent) => {
             ? approvalHistory(decisions, asker.id, event.tool)
             : undefined,
           // in auto mode a card can only mean the guard stopped it — say so
-          held: permission && asker?.autoApprove ? "This looked destructive, so auto mode stopped to ask." : undefined,
+          // (the budget's own line wins: it is the more precise reason)
+          held: budget.held ?? (permission && asker?.autoApprove ? "This looked destructive, so auto mode stopped to ask." : undefined),
         },
       });
       if (event.requestId) askMessageByRequest.set(`${event.threadId}:${event.requestId}`, message.id);
@@ -1800,6 +1842,20 @@ function finalizeDelegationWatch(
   else mirrorActivity(commsBus, target, channel, failureName, false);
   return true;
 }
+
+// The screen-action budget's own subscriber, kept out of the main fold the
+// same way the repeat observer below is: turn starts reset the count, every
+// executed desktop action consumes one, turn ends drop it. Registered after
+// the fold, so a `turn.started` has already been folded before this reset —
+// and `request.opened` is always folded BEFORE the action it proposes runs,
+// which is exactly the order the guard needs (the 13th action finds 12).
+bus.subscribe((event: RuntimeEvent) => {
+  if (event.type === "turn.started") return void desktopBudget.reset(event.threadId);
+  if (event.type === "turn.completed" || event.type === "session.exited") return void desktopBudget.settle(event.threadId);
+  if (event.type === "item.started" && event.itemType === "tool" && isDesktopActionTool(event.title ?? "")) {
+    desktopBudget.record(event.threadId);
+  }
+});
 
 // A bot going in circles — the same call with the same arguments, over and
 // over in one turn — gets a chip at 5, 10 and 20 repeats. Observe and say
@@ -2783,7 +2839,7 @@ async function startTurn(
               ? " You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
               : "") +
           (computerKind
-            ? " At a sign-in, password, MFA, CAPTCHA, or other protected-input step, stop and ask the user to complete it on the visible computer. Never type their password or ask them to paste a password or one-time code into chat."
+            ? ` At a sign-in, password, MFA, CAPTCHA, or other protected-input step, stop and ask the user to complete it on the visible computer. Never type their password or ask them to paste a password or one-time code into chat. Screen actions (click, type, key, scroll, open, batch) are capped at ${DESKTOP_ACTION_BUDGET} per turn: once that cap is spent, each further screen action stops for the user's approval on the card instead of continuing unattended — read the screen, take the fewest steps, and stop when the task is done.`
             : "") +
           // gated on the integration, not the key: the guidance only goes to
           // a bot whose driver actually mounted the tools, or an honest
@@ -4402,6 +4458,70 @@ function isAllowedOrigin(origin: string | undefined | null, host: string | undef
 function isAllowedHost(host: string | undefined): boolean {
   if (isLoopbackHost(host)) return true;
   return SELF_HOSTED;
+}
+
+// ── static cache policy ──────────────────────────────────────────────
+// Content-addressed build output (hashed /assets/*) is immutable for a
+// year; every other static file revalidates through a content ETag, so a
+// repeat visit costs a 304 instead of the whole body; HTML keeps the
+// no-cache line it already had (pages change between deploys and
+// crawlers must never see a stale shell). Headers only — bytes on the
+// wire and body transforms are untouched.
+const IMMUTABLE_CACHE = "public, max-age=31536000, immutable";
+/** file path → {mtime, size, etag}: hash each version of a file once,
+ * not on every request. Bounded by the served trees; cleared if a
+ * pathological tree ever grows past the cap. */
+const staticEtags = new Map<string, { mtimeMs: number; size: number; etag: string }>();
+
+/** Strong ETag over the exact bytes being served. */
+function staticEtag(file: string, stat: Stats | undefined, data: Buffer): string {
+  if (stat) {
+    const hit = staticEtags.get(file);
+    if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.etag;
+  }
+  const etag = `"${createHash("sha256").update(data).digest("base64url")}"`;
+  if (stat) {
+    if (staticEtags.size > 4096) staticEtags.clear();
+    staticEtags.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, etag });
+  }
+  return etag;
+}
+
+/** If-None-Match is compared weakly (RFC 7232): W/"x" and "x" are the
+ * same tag, and "*" matches any current representation. */
+function etagUnchanged(header: string | string[] | undefined, etag: string): boolean {
+  const raw = header === undefined ? "" : Array.isArray(header) ? header.join(",") : header;
+  return raw
+    .split(",")
+    .some((candidate) => candidate.trim() === "*" || candidate.trim().replace(/^W\//, "") === etag);
+}
+
+/** Cache headers for one static file body: HTML is the caller's own
+ * no-cache line (left alone); other files get a content ETag plus either
+ * the immutable year (content-addressed build output) or no-cache
+ * revalidation. Returns true when the request's If-None-Match already
+ * matches — the 304 is written here and the caller must skip the body. */
+function staticCache(
+  res: ServerResponse,
+  req: IncomingMessage,
+  headers: OutgoingHttpHeaders,
+  file: string,
+  type: string,
+  data: Buffer,
+  immutable = false,
+): boolean {
+  if (type === "text/html") return false;
+  const stat = statSync(file, { throwIfNoEntry: false });
+  const etag = staticEtag(file, stat, data);
+  const cache = immutable ? IMMUTABLE_CACHE : "no-cache";
+  headers["cache-control"] = cache;
+  headers.etag = etag;
+  if (etagUnchanged(req.headers["if-none-match"], etag)) {
+    res.writeHead(304, { "cache-control": cache, etag });
+    res.end();
+    return true;
+  }
+  return false;
 }
 
 const server = createServer(async (req, res) => {
@@ -7155,8 +7275,17 @@ let requestUserEmail = "";
       // Why-journal read side (server/why-journal.ts): this bot's settled
       // runs with their stated intent and key decisions, newest first. Same
       // auth/owner guards as the audit route above.
-      const limitRaw = Number(url.searchParams.get("limit") ?? "");
-      const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 100) : undefined;
+      const rawLimit = url.searchParams.get("limit");
+      const limitRaw = Number(rawLimit ?? "");
+      // No ?limit used to mean "the whole journal". Bound the default the
+      // same way a present param already is (≤100); ?limit=N is unchanged,
+      // including a present-but-unusable value falling back to no cap.
+      const limit =
+        rawLimit === null
+          ? 100
+          : Number.isFinite(limitRaw) && limitRaw > 0
+            ? Math.min(Math.floor(limitRaw), 100)
+            : undefined;
       return json(res, 200, { entries: listWhy(DATA_DIR, { botId: bot.id, limit }) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)$/);
@@ -8373,6 +8502,41 @@ let requestUserEmail = "";
       );
     }
 
+    // ── Browser takeover console (opt-in) ──────────────────────────────
+    // Interactive controls over the SAME per-bot CDP session the preview
+    // above already drives, plus the signed screenshot link the console
+    // renders. OFF by default: without MUSTER_BROWSER_TAKEOVER both routes
+    // refuse with 404 before touching the session, panelState reports
+    // takeoverEnabled=false (no Take control affordance in the UI), and
+    // the existing /frame route is unaffected. Same per-bot ownership
+    // choke point as the panel routes above.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/browser-panel\/takeover$/);
+    if (m && method === "POST") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      if (!browserPanel.takeoverEnabled()) {
+        return json(res, 404, { error: "browser takeover is not enabled on this deployment (set MUSTER_BROWSER_TAKEOVER=1)" });
+      }
+      const body = await readBody(req);
+      const action = browserPanel.takeoverActionSchema.safeParse(body);
+      if (!action.success) return json(res, 400, { error: "unsupported browser takeover input" });
+      try {
+        return json(res, 200, await browserPanel.takeoverInput(m[1], action.data));
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/browser-panel\/preview$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      if (!browserPanel.takeoverEnabled()) {
+        return json(res, 404, { error: "browser takeover is not enabled on this deployment (set MUSTER_BROWSER_TAKEOVER=1)" });
+      }
+      const frame = browserPanel.previewFrame(m[1], url.searchParams.get("sig") ?? "");
+      if (!frame) return json(res, 404, { error: "invalid or expired preview link" });
+      res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "no-store" });
+      return res.end(frame);
+    }
+
     // ── Legacy local workspace bundle + provider transports ────────────
     // Hosted routes are rejected earlier: this format contains global
     // workspace state and derives its key using the deployment secret.
@@ -9261,6 +9425,7 @@ let requestUserEmail = "";
           // (Google's OAuth review) must never see a stale shell.
           const headers: OutgoingHttpHeaders = { "content-type": type };
           if (type === "text/html") headers["cache-control"] = "no-cache";
+          if (staticCache(res, req, headers, file, type, data)) return;
           res.writeHead(200, headers);
           return res.end(data);
         } catch {
@@ -9316,6 +9481,7 @@ let requestUserEmail = "";
         const body = type === "text/html" ? Buffer.from(withVerificationMeta(data.toString())) : data;
         const headers: OutgoingHttpHeaders = { "content-type": type, "content-length": body.length };
         if (type === "text/html") headers["cache-control"] = "no-cache";
+        if (staticCache(res, req, headers, file, type, body)) return;
         res.writeHead(200, headers);
         return res.end(body);
       } catch {
@@ -9373,6 +9539,9 @@ let requestUserEmail = "";
           const type = MIME.get(extname(file).toLowerCase()) ?? "application/octet-stream";
           const headers: OutgoingHttpHeaders = { "content-type": type, "x-content-type-options": "nosniff" };
           if (type === "text/html") headers["cache-control"] = "no-cache";
+          // Vite content-hashes everything it emits into /assets, so the
+          // path itself is the cache key — a new build is a new URL.
+          if (staticCache(res, req, headers, file, type, data, decodedPath.startsWith("/assets/"))) return;
           res.writeHead(200, headers);
           return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
         }

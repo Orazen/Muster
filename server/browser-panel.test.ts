@@ -16,19 +16,42 @@ import {
   freeCdpPort,
   isNavigableUrl,
   latestFrame,
+  mintPreviewSignature,
   navigatePanel,
   panelState,
+  PREVIEW_SIGNATURE_TTL_MS,
+  previewFrame,
   resolveChrome,
   startPanel,
   stopPanel,
+  takeoverActionSchema,
+  takeoverEnabled,
+  takeoverInput,
   toNavigableUrl,
+  verifyPreviewSignature,
   type BrowserPanelLauncher,
 } from "./browser-panel.ts";
 
 interface FakeCdpCommand {
   id?: number;
   method: string;
-  params?: { url?: string; sessionId?: string | number };
+  params?: {
+    url?: string;
+    sessionId?: string | number;
+    type?: string;
+    x?: number;
+    y?: number;
+    button?: string;
+    clickCount?: number;
+    text?: string;
+    key?: string;
+    code?: string;
+    windowsVirtualKeyCode?: number;
+    nativeVirtualKeyCode?: number;
+    modifiers?: number;
+    deltaX?: number;
+    deltaY?: number;
+  };
 }
 
 interface FakeNavigationResult {
@@ -210,6 +233,148 @@ describe("browser panel CDP bridge", () => {
     expect(socket.emitFrame(0, "reopened session preview")).toBe(true);
     expect(latestFrame(botId)?.toString()).toBe("reopened session preview");
     expect(launcher.spawn).toHaveBeenCalledTimes(2);
+  });
+
+  // ── Takeover console gating (S1) ─────────────────────────────────────
+
+  it("keeps takeover inert with no flag set: no gate, no preview link, no CDP input", async () => {
+    expect(takeoverEnabled()).toBe(false);
+    expect(socket.emitFrame(0, "gate-off frame")).toBe(true);
+    expect(panelState(botId)).toMatchObject({ takeoverEnabled: false, previewLink: null });
+    expect(previewFrame(botId, "anything.at-all")).toBeNull();
+    const commandsBefore = socket.commands.length;
+    await expect(takeoverInput(botId, { type: "text", text: "hi" })).rejects.toThrow(/not enabled/);
+    // inert: the refusal happens before any CDP traffic
+    expect(socket.commands.length).toBe(commandsBefore);
+  });
+
+  it("drives click, text, key and scroll through the session's CDP socket once explicitly enabled", async () => {
+    vi.stubEnv("MUSTER_BROWSER_TAKEOVER", "1");
+    // preview-link signing reads the deployment secret (env/persisted — a
+    // fixture value here, never a literal in committed source)
+    vi.stubEnv("BETTER_AUTH_SECRET", "fixture-signing-secret");
+    expect(takeoverEnabled()).toBe(true);
+    expect(panelState(botId).takeoverEnabled).toBe(true);
+
+    await takeoverInput(botId, { type: "click", x: 12, y: 34 });
+    await takeoverInput(botId, { type: "text", text: "hello" });
+    await takeoverInput(botId, { type: "key", key: "Enter" });
+    await takeoverInput(botId, { type: "key", key: "Control+a" });
+    await takeoverInput(botId, { type: "scroll", deltaY: 600 });
+
+    const input = socket.commands.filter((command) => command.method.startsWith("Input."));
+    expect(input.map((command) => command.method)).toEqual([
+      "Input.dispatchMouseEvent", "Input.dispatchMouseEvent",
+      "Input.insertText",
+      "Input.dispatchKeyEvent", "Input.dispatchKeyEvent",
+      "Input.dispatchKeyEvent", "Input.dispatchKeyEvent",
+      "Input.dispatchMouseEvent",
+    ]);
+    expect(input[0].params).toMatchObject({ type: "mousePressed", x: 12, y: 34, button: "left", clickCount: 1 });
+    expect(input[1].params).toMatchObject({ type: "mouseReleased", x: 12, y: 34, button: "left", clickCount: 1 });
+    expect(input[2].params).toEqual({ text: "hello" });
+    expect(input[3].params).toMatchObject({ type: "keyDown", key: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
+    expect(input[4].params).toMatchObject({ type: "keyUp", key: "Enter" });
+    expect(input[5].params).toMatchObject({ type: "keyDown", key: "a", modifiers: 2, text: "a" });
+    expect(input[7].params).toMatchObject({ type: "mouseWheel", deltaX: 0, deltaY: 600 });
+    expect(panelState(botId)).toMatchObject({ takeControl: true, takeoverEnabled: true });
+  });
+
+  it("mints a signed preview link that resolves this bot's frame only, and dies with the gate", async () => {
+    vi.stubEnv("MUSTER_BROWSER_TAKEOVER", "1");
+    vi.stubEnv("BETTER_AUTH_SECRET", "fixture-signing-secret");
+    // no frame yet → nothing to preview
+    expect(panelState(botId).previewLink).toBeNull();
+    expect(socket.emitFrame(0, "takeover frame")).toBe(true);
+    const state = panelState(botId);
+    expect(state.previewLink).toMatch(new RegExp(`^/api/bots/${botId}/browser-panel/preview\\?sig=`));
+    const token = new URL(state.previewLink!, "http://fixture.invalid").searchParams.get("sig")!;
+    expect(previewFrame(botId, token)?.toString()).toBe("takeover frame");
+    // bound to this bot id
+    expect(previewFrame("some-other-bot", token)).toBeNull();
+    // tampered signature refuses
+    const tampered = token.slice(0, -1) + (token.endsWith("A") ? "B" : "A");
+    expect(previewFrame(botId, tampered)).toBeNull();
+    expect(previewFrame(botId, "")).toBeNull();
+    // gate off → even a valid, unexpired link does not resolve
+    vi.stubEnv("MUSTER_BROWSER_TAKEOVER", "0");
+    expect(takeoverEnabled()).toBe(false);
+    expect(previewFrame(botId, token)).toBeNull();
+  });
+});
+
+describe("takeover gate ordering (no session)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("refuses a disabled deployment before any session lookup", async () => {
+    vi.stubEnv("MUSTER_BROWSER_TAKEOVER", "0");
+    await expect(takeoverInput("no-such-bot", { type: "text", text: "hi" })).rejects.toThrow(/not enabled/);
+  });
+
+  it("reports a missing session only once the gate is on", async () => {
+    vi.stubEnv("MUSTER_BROWSER_TAKEOVER", "on");
+    await expect(takeoverInput("no-such-bot", { type: "text", text: "hi" })).rejects.toThrow("no browser session open");
+  });
+});
+
+describe("takeoverActionSchema", () => {
+  it("accepts bounded click, text, key and scroll actions", () => {
+    expect(takeoverActionSchema.safeParse({ type: "click", x: 0, y: 799 }).success).toBe(true);
+    expect(takeoverActionSchema.safeParse({ type: "click", x: 1279, y: 0 }).success).toBe(true);
+    expect(takeoverActionSchema.safeParse({ type: "text", text: "typed" }).success).toBe(true);
+    expect(takeoverActionSchema.safeParse({ type: "key", key: "Shift+Tab" }).success).toBe(true);
+    expect(takeoverActionSchema.safeParse({ type: "scroll", deltaY: -5000 }).success).toBe(true);
+  });
+
+  it.each([
+    { type: "click", x: 1280, y: 0 },
+    { type: "click", x: -1, y: 0 },
+    { type: "click", x: 1.5, y: 0 },
+    { type: "click", x: 0 },
+    { type: "text", text: "" },
+    { type: "text", text: "x".repeat(10_001) },
+    { type: "key", key: "F12" },
+    { type: "key", key: "javascript:alert(1)" },
+    { type: "scroll", deltaY: 5001 },
+    { type: "refresh" },
+    {},
+  ])("rejects %j", (bad) => {
+    expect(takeoverActionSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+describe("preview signature", () => {
+  const secret = "fixture-signing-secret";
+  const t0 = 1_700_000_000_000;
+
+  it("round-trips within its TTL and renews without breaking the previous link", () => {
+    const first = mintPreviewSignature("bot-a", secret, t0);
+    expect(first.expiresAt).toBe(t0 + PREVIEW_SIGNATURE_TTL_MS);
+    expect(verifyPreviewSignature("bot-a", first.token, secret, t0)).toBe(true);
+    expect(verifyPreviewSignature("bot-a", first.token, secret, first.expiresAt)).toBe(true);
+    expect(verifyPreviewSignature("bot-a", first.token, secret, first.expiresAt + 1)).toBe(false);
+    const renewed = mintPreviewSignature("bot-a", secret, t0 + 60_000);
+    expect(renewed.token).not.toBe(first.token);
+    expect(verifyPreviewSignature("bot-a", first.token, secret, t0 + 60_000)).toBe(true);
+  });
+
+  it("binds the token to one bot id", () => {
+    const { token } = mintPreviewSignature("bot-a", secret, t0);
+    expect(verifyPreviewSignature("bot-a", token, secret, t0)).toBe(true);
+    expect(verifyPreviewSignature("bot-b", token, secret, t0)).toBe(false);
+  });
+
+  it("refuses a tampered, extended, empty or differently-secreted token", () => {
+    const { token, expiresAt } = mintPreviewSignature("bot-a", secret, t0);
+    const tampered = token.slice(0, -1) + (token.endsWith("A") ? "B" : "A");
+    expect(verifyPreviewSignature("bot-a", tampered, secret, t0)).toBe(false);
+    const extended = `${expiresAt + 60_000}.${token.slice(token.indexOf(".") + 1)}`;
+    expect(verifyPreviewSignature("bot-a", extended, secret, t0)).toBe(false);
+    expect(verifyPreviewSignature("bot-a", "", secret, t0)).toBe(false);
+    expect(verifyPreviewSignature("bot-a", "not-a-token", secret, t0)).toBe(false);
+    expect(verifyPreviewSignature("bot-a", token, "another-secret", t0)).toBe(false);
   });
 });
 

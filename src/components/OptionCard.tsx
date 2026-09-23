@@ -92,6 +92,13 @@ function LiveOptionCard({
       {card.rehearsal && (
         <p className="mt-2 text-[12px] text-ink-secondary">{card.rehearsal.summary}</p>
       )}
+      {/* grounded controls are evidence here; live permission asks (the only
+          cards that carry them) answer through the composer's choice list */}
+      {card.suggestions?.length ? (
+        <p className="mt-2 text-[12px] text-ink-secondary">
+          Grounded controls: {card.suggestions.map((s) => s.label).join(" · ")}
+        </p>
+      ) : null}
       <div className="mt-3 overflow-hidden rounded-lg border border-hairline/40">
         {card.options.map((opt, i) => (
           <button

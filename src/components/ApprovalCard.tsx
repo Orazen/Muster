@@ -63,6 +63,19 @@ export function ApprovalCard({
         {card.subtitle}
       </pre>
 
+      {/* Grounded controls (tiptour integration): what detection actually
+          found on screen, ranked. Evidence here — the tappable choice list
+          lives in the composer, the one place a decision is made, so this
+          transcript card never grows a second set of actions. */}
+      {card.suggestions?.length ? (
+        <div className="mt-2 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
+          <span className="font-medium text-ink">Grounded controls</span>
+          {": "}
+          {card.suggestions.map((s) => `${s.label} (${s.source} · ${s.actionKind})`).join(" · ")}
+          {" — "}choose in the composer; a failed exact ID must not fall back to a nearby label.
+        </div>
+      ) : null}
+
       {card.held && (
         <div className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12.5px] text-warning">
           {card.held}

@@ -560,6 +560,54 @@ provider choice, retention counts 7/7/4/6 (owner-confirmable), the
 pre-upgrade electron hook (deferred to protect the fresh updater fix),
 `queryAudit` default-limit quirk (`decision-log.ts` out of slice).
 
+### Batch 2 — decision seam Slice 0, desktop grounding, browser takeover, heavy-user perf (23 September 2026, Loop189)
+
+Four streams dispatched from the batch-1 studies; all landed together.
+**Shipped:** (1) decision seam Slice 0 — `decision-client.ts`,
+rules-only by default, env-gated provider hook, fail-open on every
+rung; the model never decides; `auto-approve.ts`/`memory-grants.ts`
+untouched (source-pin test); verification harness 47/47 checks; 31
+tests. (2) TipTour grounding — `desktop-grounding/guardrails/
+suggestions` + tests (53 tests), OptionCard renders grounded controls
+as evidence only (human tap on the existing respond path), paired
+store `suggestions` types, slice-4 permission repair path
+(`permissionRequestPresentationDestination`, accessibility pane — MIT
+attribution in-file); DesktopCapabilities/ApprovalCard/PendingApproval
++12 tests. (3) OpenMuse S1 — browser takeover round-trip OFF by
+default (`MUSTER_BROWSER_TAKEOVER`; routes 404 before touching a
+session when unset), HMAC preview signatures (TTL 10 min, bot-bound),
+zod action schema, CDP dispatch only when enabled, MIT attribution
+headers; +21 tests across touched files. (4) Heavy-user perf A1–A4 —
+ETag/conditional 304 with `immutable` under `/assets/`, tray 3s poll
+drops transcripts (`messages=0`, multi-MB → KB), SSE replay keeps seq
+slots but not frame payloads (new `sse-replay.ts`), why-route default
+limit 100 with the present-param path byte-identical; 18 new tests;
+do-not-touch suites (docs-static 40, why-journal 17, index.test 60)
+pass unedited. A5 deferred (investigate-first).
+
+**Disclosed:** main entry bundle +13,461 B vs the pre-batch build —
+attributed to in-flight parallel main-bundle edits, NOT A1–A4 (the
+only src edit there is the separate tray entry); takeover and
+suggestion surfaces stay inert unless env/server attach them; the
+decision harness is not registered in package.json scripts (run
+`node scripts/test-decision-layer.mjs`); the six files without a
+subagent claim self-identify via in-file tiptour provenance (origin
+established before staging).
+
+**Gates:** `tsc -p tsconfig.server.json` 0 · `-p tsconfig.json` 0 ·
+`oxlint .` 0/0 (967 files) · full vitest **363 files / 5407 passed /
+8 skipped / 0 failed** (531.59s, exit 0; baseline 354/5250/8/0, +9
+files / +157 tests, no decrease) · `pnpm test:updater` 21/21 ·
+`pnpm check:electron` 0 · `npm run build` 0 · `npx playwright test`
+**40/40** (4.1m, exit 0).
+
+**Not claimed:** deployment (batch-1's Dokploy trigger succeeded but
+GET-only probes ~50 min later still serve the pre-batch build —
+rollout unverified, Dokploy-side owner-held), security (scanner
+re-run outstanding), the Jev-vs-Laya-remote provider choice (owner),
+A5, the decision-request size cap (follow-up before any call site is
+wired).
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

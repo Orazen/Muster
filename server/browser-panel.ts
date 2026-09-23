@@ -25,7 +25,22 @@
 // data dir. The auto-install fetches only from Google's fixed CfT endpoints
 // (https, version strings validated to digits-and-dots — no user input ever
 // reaches a URL).
+//
+// Takeover console (opt-in, OFF by default): a human-handoff layer over the
+// SAME CDP session — click-to-select, type-into-field, key chips, scroll,
+// plus a short-lived signed link for the console's screenshot image. All of
+// it is inert unless the operator sets MUSTER_BROWSER_TAKEOVER=1: without
+// the flag the takeover endpoints refuse, no preview signature is minted,
+// panelState reports takeoverEnabled=false (so the UI shows no Take control
+// affordance), and nothing here contacts anything at boot — frames and
+// links are produced only for an already-open session.
+//
+// Adapted from OpenMuse (github.com/CopilotKit/OpenMuse), MIT License,
+// Copyright (c) 2026 OpenMuse contributors — the takeover console's
+// interaction model, its fixed 1280×800 click-coordinate bounds and the
+// input whitelist below.
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { chmodSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { homedir, tmpdir } from "node:os";
@@ -35,6 +50,7 @@ import { pipeline } from "node:stream/promises";
 
 import { z } from "zod";
 
+import { deploymentSigningSecret } from "./auth.ts";
 import { DATA_DIR } from "./config.ts";
 
 export interface BrowserPanelState {
@@ -45,6 +61,11 @@ export interface BrowserPanelState {
   takeControl: boolean;
   startedAt: number | null;
   error: string | null;
+  /** False unless MUSTER_BROWSER_TAKEOVER is explicitly enabled. */
+  takeoverEnabled: boolean;
+  /** Short-lived signed screenshot link for the takeover console; only
+   * minted while the gate is on and a frame exists, renewed every poll. */
+  previewLink: string | null;
 }
 
 interface Session {
@@ -554,9 +575,167 @@ async function attach(session: Session): Promise<void> {
 
 // (string decoding lives in str()/decodeTargets()/decodeScreencastFrame())
 
-export function panelState(botId: string): BrowserPanelState {
+// ── Takeover console (opt-in via MUSTER_BROWSER_TAKEOVER) ─────────────
+
+/** Takeover is inert unless the operator explicitly enables it. Absent,
+ * empty, or any unrecognized value keeps the whole section below off. */
+export function takeoverEnabled(): boolean {
+  const flag = (process.env.MUSTER_BROWSER_TAKEOVER ?? "").trim().toLowerCase();
+  return flag === "1" || flag === "true" || flag === "on" || flag === "yes";
+}
+
+/** Short-lived by construction: an expired console preview link stops
+ * resolving on its own, and panelState renews it on every frame poll. */
+export const PREVIEW_SIGNATURE_TTL_MS = 10 * 60_000;
+
+function previewHmac(secret: string, botId: string, expiresAt: number): string {
+  return createHmac("sha256", secret).update(`${botId}.${expiresAt}`).digest("base64url");
+}
+
+/** Token payload: `<expiresAt>.<hmac>`. The expiry is inside the signed
+ * payload, so a holder cannot extend its own link, and the bot id is in
+ * the payload too, so one bot's link never resolves another bot's frames. */
+export function mintPreviewSignature(botId: string, secret: string, issuedAt: number) {
+  const expiresAt = issuedAt + PREVIEW_SIGNATURE_TTL_MS;
+  return { token: `${expiresAt}.${previewHmac(secret, botId, expiresAt)}`, expiresAt };
+}
+
+export function verifyPreviewSignature(botId: string, token: string, secret: string, now: number): boolean {
+  if (!token) return false;
+  const dot = token.indexOf(".");
+  if (dot < 1) return false;
+  const expiresAt = Number(token.slice(0, dot));
+  if (!Number.isFinite(expiresAt) || now > expiresAt) return false;
+  const expected = previewHmac(secret, botId, expiresAt);
+  const provided = token.slice(dot + 1);
+  if (expected.length !== provided.length) return false;
+  return timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(provided, "utf8"));
+}
+
+/** The console's key whitelist — navigation and editing keys only, bounded
+ * at the wire (near-verbatim bound from the OpenMuse worker's input
+ * validation; attribution in the file header). */
+export const TAKEOVER_KEYS = [
+  "Enter", "Tab", "Escape", "Backspace", "Delete",
+  "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+  "Home", "End", "PageUp", "PageDown",
+  "Control+a", "Meta+a", "Shift+Tab",
+] as const;
+export type TakeoverKey = (typeof TAKEOVER_KEYS)[number];
+
+/** Bounds mirror the fixed 1280×800 viewport the screencast frames are
+ * captured at: clicks outside it are rejected, not silently clamped. */
+export const takeoverActionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("click"), x: z.number().int().min(0).max(1279), y: z.number().int().min(0).max(799) }),
+  z.object({ type: z.literal("text"), text: z.string().min(1).max(10_000) }),
+  z.object({ type: z.literal("key"), key: z.enum(TAKEOVER_KEYS) }),
+  z.object({ type: z.literal("scroll"), deltaY: z.number().min(-5000).max(5000) }),
+]);
+export type TakeoverAction = z.infer<typeof takeoverActionSchema>;
+
+interface TakeoverKeyEvent {
+  key: string;
+  code: string;
+  keyCode: number;
+  text?: string;
+  modifiers?: number;
+}
+
+type TakeoverKeyEventTable = { [Key in TakeoverKey]: TakeoverKeyEvent };
+
+// CDP modifier bitmask: Alt=1, Ctrl=2, Meta=4, Shift=8.
+const TAKEOVER_KEY_EVENTS: TakeoverKeyEventTable = {
+  Enter: { key: "Enter", code: "Enter", keyCode: 13, text: "\r" },
+  Tab: { key: "Tab", code: "Tab", keyCode: 9 },
+  Escape: { key: "Escape", code: "Escape", keyCode: 27 },
+  Backspace: { key: "Backspace", code: "Backspace", keyCode: 8, text: "\b" },
+  Delete: { key: "Delete", code: "Delete", keyCode: 46 },
+  ArrowUp: { key: "ArrowUp", code: "ArrowUp", keyCode: 38 },
+  ArrowDown: { key: "ArrowDown", code: "ArrowDown", keyCode: 40 },
+  ArrowLeft: { key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 },
+  ArrowRight: { key: "ArrowRight", code: "ArrowRight", keyCode: 39 },
+  Home: { key: "Home", code: "Home", keyCode: 36 },
+  End: { key: "End", code: "End", keyCode: 35 },
+  PageUp: { key: "PageUp", code: "PageUp", keyCode: 33 },
+  PageDown: { key: "PageDown", code: "PageDown", keyCode: 34 },
+  "Control+a": { key: "a", code: "KeyA", keyCode: 65, text: "a", modifiers: 2 },
+  "Meta+a": { key: "a", code: "KeyA", keyCode: 65, text: "a", modifiers: 4 },
+  "Shift+Tab": { key: "Tab", code: "Tab", keyCode: 9, modifiers: 8 },
+};
+
+/** Resolve a signed preview link to the current frame. Refuses when the
+ * gate is off, the session is gone, the token is stale, or the signature
+ * does not match THIS bot. */
+export function previewFrame(botId: string, token: string): Buffer | null {
+  try {
+    if (!takeoverEnabled()) return null;
+    const s = sessions.get(botId);
+    if (!s || !s.frame) return null;
+    if (!verifyPreviewSignature(botId, token, deploymentSigningSecret(), Date.now())) return null;
+    return s.frame;
+  } catch {
+    return null; // signing secret unavailable → the link simply does not resolve
+  }
+}
+
+/** One console action over the panel's own CDP session. The gate is
+ * checked before anything else — an inert deployment never reaches the
+ * browser, and the response frame keeps flowing as before. */
+export async function takeoverInput(botId: string, action: TakeoverAction): Promise<BrowserPanelState> {
+  if (!takeoverEnabled()) {
+    throw new Error("browser takeover is not enabled on this deployment (set MUSTER_BROWSER_TAKEOVER=1)");
+  }
   const s = sessions.get(botId);
-  if (!s) return { running: false, url: null, title: null, profile: "bot", takeControl: false, startedAt: null, error: null };
+  if (!s) throw new Error("no browser session open");
+  s.takeControl = true; // human is driving
+  if (action.type === "click") {
+    const base = { x: action.x, y: action.y, button: "left", clickCount: 1 };
+    await cdp(s, "Input.dispatchMouseEvent", { ...base, type: "mousePressed" });
+    await cdp(s, "Input.dispatchMouseEvent", { ...base, type: "mouseReleased" });
+  } else if (action.type === "text") {
+    await cdp(s, "Input.insertText", { text: action.text });
+  } else if (action.type === "key") {
+    const binding = TAKEOVER_KEY_EVENTS[action.key];
+    const shared = {
+      key: binding.key,
+      code: binding.code,
+      windowsVirtualKeyCode: binding.keyCode,
+      nativeVirtualKeyCode: binding.keyCode,
+      modifiers: binding.modifiers ?? 0,
+    };
+    const down: Json = { ...shared, type: "keyDown" };
+    if (binding.text !== undefined) down.text = binding.text;
+    await cdp(s, "Input.dispatchKeyEvent", down);
+    await cdp(s, "Input.dispatchKeyEvent", { ...shared, type: "keyUp" });
+  } else {
+    // wheel at the viewport center — a headless session has no hover point
+    await cdp(s, "Input.dispatchMouseEvent", { type: "mouseWheel", x: 640, y: 400, deltaX: 0, deltaY: action.deltaY });
+  }
+  return panelState(botId);
+}
+
+/** Signed console preview link, or null while the gate is off / no frame
+ * exists / the deployment signing secret is unavailable (then the console
+ * falls back to the polled frame payload). */
+function previewLinkFor(botId: string): string | null {
+  if (!takeoverEnabled()) return null;
+  try {
+    const { token } = mintPreviewSignature(botId, deploymentSigningSecret(), Date.now());
+    return `/api/bots/${encodeURIComponent(botId)}/browser-panel/preview?sig=${encodeURIComponent(token)}`;
+  } catch {
+    return null;
+  }
+}
+
+export function panelState(botId: string): BrowserPanelState {
+  const enabled = takeoverEnabled();
+  const s = sessions.get(botId);
+  if (!s) {
+    return {
+      running: false, url: null, title: null, profile: "bot", takeControl: false,
+      startedAt: null, error: null, takeoverEnabled: enabled, previewLink: null,
+    };
+  }
   return {
     running: true,
     url: s.url,
@@ -565,6 +744,8 @@ export function panelState(botId: string): BrowserPanelState {
     takeControl: s.takeControl,
     startedAt: s.startedAt,
     error: s.error,
+    takeoverEnabled: enabled,
+    previewLink: s.frame ? previewLinkFor(botId) : null,
   };
 }
 

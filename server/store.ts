@@ -72,6 +72,11 @@ export interface OptionCardData {
     lastDecision: "approved" | "denied" | "auto" | null;
     summary: string | null;
   };
+  /** Grounded desktop controls for this ask — a ranked, human-only choice
+   * list plus evidence of what was detected on screen. Built by
+   * server/desktop-suggestions.ts from real detections; never an answer,
+   * never executed without a human tap on the existing respond path. */
+  suggestions?: Array<{ id: string; label: string; source: string; actionKind: string }>;
 }
 
 export interface ConnectorCardData {

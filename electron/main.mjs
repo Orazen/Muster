@@ -677,6 +677,9 @@ ipcMain.handle("perm:open-settings", (_event, pane) => {
     mic: "Privacy_Microphone",
     screen: "Privacy_ScreenCapture",
     speech: "Privacy_SpeechRecognition",
+    // This-Mac control permission — the repair path after a denied
+    // Accessibility grant (tiptour integration study, slice 4).
+    accessibility: "Privacy_Accessibility",
   };
   // own-property lookup only — a renderer-supplied "__proto__"/"constructor"
   // would otherwise resolve up the prototype chain to a truthy object

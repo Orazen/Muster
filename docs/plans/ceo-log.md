@@ -8602,3 +8602,49 @@ network round trip), the `queryAudit` quirk. Parallel-session context:
 in-tree mid-batch and is included; `www/*`, `.commandcode/`,
 `.freebuff/`, `.zcode/`, `docs/research/glm/*` and `marketing-video/`
 are deliberately excluded from this commit.
+
+## Loop189 — batch 2: the seam ships empty, the takeover ships off, desktop grounding ships as evidence (23 September 2026)
+
+Four study-driven streams, one commit, owner-gated the same way as
+batch 1.
+
+1. **Decision seam Slice 0** (jev + laya studies). Rules-only by
+   default, one env var opens the provider hook, fail-open every rung;
+   the model may suggest/route/score/flag and never decides — pinned
+   by a test that fails if the module ever imports an
+   authority-bearing one. Harness `scripts/test-decision-layer.mjs`
+   47/47 against injected fetch doubles; 31 unit tests. Owner decision
+   still open: Jev hosted vs Laya-remote vs staying rules-only.
+2. **TipTour grounding** (tiptour study). New-file desktop
+   grounding/guardrails/suggestions (53 tests); grounded controls
+   render on permission cards as evidence, never auto-executed;
+   slice-4 permission repair path keeps upstream's one-path-per-tap
+   rule verbatim (MIT attribution in-file). +12 tests on existing
+   approval/desktop surfaces.
+3. **OpenMuse S1** (openmuse study). Browser takeover round-trip —
+   ships default OFF: env absent means both routes 404 before touching
+   a session and no Take control button renders. HMAC-signed previews
+   (10 min, bot-bound), zod-bounded actions, CDP input only when
+   enabled. MIT attribution headers; +21 tests.
+4. **Heavy-user perf A1–A4** (perf study). ETag/conditional 304 with
+   `immutable` under `/assets/`; tray's 3s poll drops transcripts
+   (`messages=0`); SSE replay keeps seq slots but not frame payloads
+   (multi-MB → KB); why-route default limit 100 with the quirky
+   present-param path byte-identical by design. A5 deferred
+   (investigate-first).
+
+**Gates (real numbers):** tsc server 0 · tsc web 0 · oxlint 0/0 (967
+files) · full vitest **363 / 5407 / 8 skipped / 0 failed** (531.59s,
+exit 0 — prior baseline 354/5250/8/0: +9 files, +157 tests, no
+decrease) · updater 21/21 · check:electron 0 · build 0 · playwright
+**40/40** (4.1m, exit 0).
+
+**Disclosed:** main bundle +13,461 B — parallel main-bundle edits,
+not A1–A4. **Not claimed:** batch-1 deployment — the Dokploy trigger
+succeeded but GET-only probes at ~50 min still serve the pre-batch
+build (`index-Lx0UAW6c.js`); rollout stays unverified and
+Dokploy-side is owner-held. Security, the provider choice, A5 and the
+decision-request size cap remain open. Excluded set unchanged:
+`www/*`, `.commandcode/`, `.freebuff/`, `.zcode/`,
+`docs/research/glm/*`, `marketing-video/`, `www/fonts/`,
+`www/templates.html`.

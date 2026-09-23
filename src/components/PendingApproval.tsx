@@ -28,6 +28,8 @@ export interface Pending {
   why?: NonNullable<Message["card"]>["why"];
   rehearsal?: NonNullable<Message["card"]>["rehearsal"];
   history?: NonNullable<Message["card"]>["history"];
+  /** grounded desktop controls: the human's tappable choice list */
+  suggestions?: NonNullable<Message["card"]>["suggestions"];
 }
 
 /** Open approvals on a thread, oldest first — answered/dismissed drop out. */
@@ -44,7 +46,38 @@ export function pendingApprovals(messages: Message[]): Pending[] {
       history: m.card!.history,
       rehearsal: m.card!.rehearsal,
       why: m.card!.why,
+      suggestions: m.card!.suggestions,
     }));
+}
+
+/** The ONE action a grounded-suggestion tap dispatches — a named contract,
+ * so the "tap = the existing respond route" claim is checkable at the type
+ * level and not just at run time. */
+export interface GroundedSuggestionAction {
+  type: "decideRequest";
+  threadId: string;
+  requestId: string;
+  behavior: "allow";
+  message: string;
+}
+
+/** The respond action a grounded-suggestion tap produces: the SAME existing
+ * decideRequest path Allow uses, carrying the exact target the human chose.
+ * Their agent-contract rule, kept — "a failed exact ID must not fall back to
+ * a nearby label". Exported so the "tap = existing respond path, never a new
+ * execution route" contract is unit-testable without a DOM. */
+export function suggestionAction(
+  suggestion: NonNullable<Pending["suggestions"]>[number],
+  threadId: string,
+  requestId: string,
+): GroundedSuggestionAction {
+  return {
+    type: "decideRequest",
+    threadId,
+    requestId,
+    behavior: "allow",
+    message: `Grounded target chosen by the human: ${suggestion.id} — ${suggestion.label} [${suggestion.source}] (${suggestion.actionKind}). Act on this exact target; a failed exact ID must not fall back to a nearby label.`,
+  };
 }
 
 function label(tool: string): string {
@@ -99,6 +132,11 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
       {pending.rehearsal && (
         <p className="mt-2 text-[12px] text-ink-secondary">{pending.rehearsal.summary}</p>
       )}
+      {pending.suggestions?.length ? (
+        <p className="mt-2 text-[12px] text-ink-secondary">
+          Grounded controls detected on screen are offered below — pick the exact target you want; a failed exact ID must not fall back to a nearby label.
+        </p>
+      ) : null}
       {pending.held && <div className="mt-2 text-[12px] text-warning">{pending.held}</div>}
     </div>
   );
@@ -128,34 +166,56 @@ export function PendingApprovalActions({
       message: behavior === "deny" ? "Denied by the user." : undefined,
       alwaysAllow: always && bot && pending.allowKey ? { botId: bot.id, key: pending.allowKey } : undefined,
     });
+  // A grounded suggestion is a CHOICE, not an auto-allow: the human taps the
+  // exact control they want, and the answer travels the same respond route
+  // Allow does. Nothing here runs the action itself.
+  const suggest = (suggestion: NonNullable<Pending["suggestions"]>[number]) =>
+    dispatch(suggestionAction(suggestion, threadId, pending.requestId));
 
   const base = "rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors";
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2 px-2 py-2">
-      <button onClick={onCancelTurn} disabled={cancelPending} aria-busy={cancelPending} className={cn(base, "text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50")}>
-        Cancel turn
-      </button>
-      <button
-        onClick={() => decide("deny")}
-        className={cn(base, "border border-danger/40 text-danger hover:bg-danger/10")}
-      >
-        Deny
-      </button>
-      {bot && pending.allowKey && (
-        <button
-          onClick={() => decide("allow", true)}
-          title={`Stop asking ${bot.name} about ${pending.allowKey}`}
-          className={cn(base, "border border-hairline/50 text-ink hover:bg-raised")}
-        >
-          Always allow
+    <div className="flex flex-col items-end gap-1 px-2 py-2">
+      {pending.suggestions?.length ? (
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <span className="text-[11px] uppercase tracking-[0.14em] text-ink-secondary">Grounded controls</span>
+          {pending.suggestions.map((suggestion) => (
+            <button
+              key={suggestion.id}
+              onClick={() => suggest(suggestion)}
+              title={`${suggestion.source} · ${suggestion.actionKind} — answers this ask and names the exact target`}
+              className={cn(base, "border border-accent/40 text-ink hover:bg-raised")}
+            >
+              {suggestion.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <button onClick={onCancelTurn} disabled={cancelPending} aria-busy={cancelPending} className={cn(base, "text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50")}>
+          Cancel turn
         </button>
-      )}
-      <button
-        onClick={() => decide("allow")}
-        className={cn(base, "bg-accent font-medium text-white hover:brightness-110")}
-      >
-        Allow once
-      </button>
+        <button
+          onClick={() => decide("deny")}
+          className={cn(base, "border border-danger/40 text-danger hover:bg-danger/10")}
+        >
+          Deny
+        </button>
+        {bot && pending.allowKey && (
+          <button
+            onClick={() => decide("allow", true)}
+            title={`Stop asking ${bot.name} about ${pending.allowKey}`}
+            className={cn(base, "border border-hairline/50 text-ink hover:bg-raised")}
+          >
+            Always allow
+          </button>
+        )}
+        <button
+          onClick={() => decide("allow")}
+          className={cn(base, "bg-accent font-medium text-white hover:brightness-110")}
+        >
+          Allow once
+        </button>
+      </div>
     </div>
   );
 }

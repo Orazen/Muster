@@ -25,7 +25,31 @@ const browserCapabilities: DesktopCapabilities = {
 };
 
 export type DesktopBridge = Pick<NonNullable<Window["ogb"]>, "platform"> &
-  Partial<Pick<NonNullable<Window["ogb"]>, "getCapabilities" | "enableComputerAccess" | "onComputerAccessChanged">>;
+  Partial<Pick<NonNullable<Window["ogb"]>, "getCapabilities" | "enableComputerAccess" | "onComputerAccessChanged" | "permOpenSettings">>;
+
+/** Privacy panes the repair path can open. `accessibility` is the This-Mac
+ * control permission; mic/screen/speech are the voice and preview panes. */
+export type PrivacyPane = NonNullable<Parameters<NonNullable<DesktopBridge["permOpenSettings"]>>[0]>;
+
+// ── permission presentation destination ───────────────────────────────
+// Adapted from tiptour-macos (github.com/milind-soni/tiptour-macos), MIT
+// License — Copyright (c) 2026 Milind Soni, Portions Copyright (c) 2025
+// Farza (Clicky): `TipTour/Utilities/WindowPositionManager.swift`
+// (`PermissionRequestPresentationDestination` +
+// `permissionRequestPresentationDestination(hasPermissionNow:hasAttemptedSystemPrompt:)`),
+// provenance in docs/plans/tiptour-integration-study.md (row 15, slice 4).
+// Their rule, kept verbatim: ONE permission path per tap — never the system
+// prompt and the System Settings pane at the same time.
+
+export type PermissionRequestDestination = "alreadyGranted" | "systemPrompt" | "systemSettings";
+
+export function permissionRequestPresentationDestination(input: {
+  hasPermissionNow: boolean;
+  hasAttemptedSystemPrompt: boolean;
+}): PermissionRequestDestination {
+  if (input.hasPermissionNow) return "alreadyGranted";
+  return input.hasAttemptedSystemPrompt ? "systemSettings" : "systemPrompt";
+}
 
 export function browserDesktopCapabilities(): DesktopCapabilities {
   return browserCapabilities;
@@ -70,6 +94,12 @@ export interface DesktopCapabilityState {
   canEnable: boolean;
   error: string | null;
   enableError: string | null;
+  /** This session has already made its host permission request (the `enable`
+   * tap). Upstream's once-per-launch prompt flag, mapped onto the one tap
+   * Muster owns: after it, a permission still off is repaired in System
+   * Settings instead of being asked for again. Never reset — a new session
+   * object is a new "launch". */
+  permissionRequestAttempted: boolean;
 }
 
 /** State shared by all desktop surfaces. Only an explicit enable() call may
@@ -88,6 +118,7 @@ export class DesktopCapabilitySession {
       refreshing: false, enabling: false,
       canEnable: bridge?.platform === "darwin" && !!bridge.enableComputerAccess,
       error: null, enableError: null,
+      permissionRequestAttempted: false,
     };
   }
 
@@ -145,6 +176,11 @@ export class DesktopCapabilitySession {
     // boundary, so two surfaces cannot start the same session concurrently.
     const operation = Promise.resolve().then(async () => {
       if (!this.current(epoch)) return;
+      // The one prompt attempt for this session (upstream's
+      // `hasAttempted…DuringCurrentLaunch`): record it BEFORE the request
+      // crosses the bridge, so a tap that lands mid-flight can never queue a
+      // second one. Everything after this tap repairs through System Settings.
+      this.update({ permissionRequestAttempted: true });
       let enableError: string | null = null;
       try {
         const result = await enable.call(this.bridge);
@@ -173,5 +209,35 @@ export class DesktopCapabilitySession {
     };
     void operation.then(settle, settle);
     return operation;
+  };
+
+  /** Report — and act on — where a permission tap goes this time.
+   *
+   * `alreadyGranted` and `systemPrompt` are reported only: the request
+   * itself stays the panel's own control, so this method can never put the
+   * prompt and the Settings pane in front of the user together (upstream's
+   * one-path-per-tap rule). Only `systemSettings` opens anything.
+   *
+   * NO last-known-granted fallback is adopted here, deliberately, and the
+   * reason is Muster's own documented one rather than an oversight:
+   * `electron/main.mjs` records that every pre-grant mechanism for Screen
+   * Recording is broken on macOS 15+ (`getMediaAccessStatus("screen")`
+   * caches per-process and stays "denied" for the whole session after a
+   * grant), so `permStatus` reports `mic` only and `src/types/ogb.d.ts`
+   * says the screen status is deliberately absent. There is no
+   * false-negative API to fall back FROM — and inventing a remembered
+   * "granted" flag would claim access the platform has not confirmed,
+   * which this project does not do. Reported state stays what the host
+   * reports; the copy still says macOS MAY ask. */
+  openPrivacySettings = (pane: PrivacyPane): PermissionRequestDestination => {
+    const destination = permissionRequestPresentationDestination({
+      hasPermissionNow: this.state.capabilities.localComputer.available,
+      hasAttemptedSystemPrompt: this.state.permissionRequestAttempted,
+    });
+    if (destination !== "systemSettings") return destination;
+    try {
+      void this.bridge?.permOpenSettings?.(pane)?.catch(() => { /* reported either way */ });
+    } catch { /* an older shell may throw synchronously — nothing opened */ }
+    return destination;
   };
 }

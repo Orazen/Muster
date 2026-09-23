@@ -113,4 +113,24 @@ describe("persisted evidence on the permission transcript card", () => {
   it("renders nothing for a message without a card", () => {
     expect(render({ id: "text-message", at: 0, role: "bot", kind: "text", text: "A normal reply" })).toBe("");
   });
+
+  it("shows grounded controls as evidence without ever adding a button", () => {
+    const markup = render(approval({
+      suggestions: [
+        { id: "b1", label: "Save", source: "browser", actionKind: "click" },
+        { id: "b3", label: "<Save drafts>", source: "browser", actionKind: "click" },
+      ],
+    }));
+    expect(markup).toContain("Grounded controls");
+    expect(markup).toContain("Save (browser · click)");
+    expect(markup).toContain("&lt;Save drafts&gt;");
+    expect(markup).toContain("must not fall back to a nearby label");
+    // the transcript stays a record: the choice list is the composer's
+    expect(markup).not.toContain("<button");
+  });
+
+  it("omits the grounded block entirely when there is nothing grounded", () => {
+    const markup = render(approval());
+    expect(markup).not.toContain("Grounded controls");
+  });
 });

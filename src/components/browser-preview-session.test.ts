@@ -149,4 +149,23 @@ describe("browser preview request lifecycle", () => {
     await h.session.pull();
     expect(h.latest().error).toBe("That address is not allowed");
   });
+
+  it("issues no poll requests while the document is hidden and resumes when visible", async () => {
+    const h = harness();
+    await h.session.pull();
+    const published = h.snapshots.length;
+
+    vi.stubGlobal("document", { hidden: true });
+    await h.session.pull();
+    await h.session.pull();
+    expect(h.request).toHaveBeenCalledTimes(1);
+    expect(h.snapshots).toHaveLength(published);
+
+    vi.stubGlobal("document", { hidden: false });
+    h.request.mockResolvedValueOnce({ state: running, frame: "resumed-frame" });
+    await h.session.pull();
+    expect(h.request).toHaveBeenCalledTimes(2);
+    expect(h.latest()).toMatchObject({ frame: "resumed-frame", pollError: null });
+    vi.unstubAllGlobals();
+  });
 });

@@ -39,7 +39,7 @@ async function boxJson(cfg: AppConfig, path: string, opts: RequestInit = {}) {
 }
 
 // deterministic per-bot name; the hash kills truncated-uuid collisions
-async function boxNameFor(botId: string) {
+export async function boxNameFor(botId: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(botId));
   const hash = [...new Uint8Array(digest)]
     .map((b) => b.toString(16).padStart(2, "0"))

@@ -4,6 +4,11 @@ export type BrowserPreviewState = {
   title: string | null;
   profile: "bot" | "guest";
   error: string | null;
+  /** Server gate: true only when MUSTER_BROWSER_TAKEOVER is enabled.
+   * Absent/undefined keeps every takeover affordance off. */
+  takeoverEnabled?: boolean;
+  /** Short-lived signed screenshot link for the takeover console. */
+  previewLink?: string | null;
 };
 
 export type BrowserPreviewAction = "start" | "stop" | "navigate" | "profile";
@@ -43,6 +48,9 @@ export function createBrowserPreviewSession(
   };
 
   const pull = async () => {
+    // Visibility-aware polling: a hidden document gets no requests at all;
+    // the interval above resumes the feed when the tab comes back.
+    if (globalThis.document?.hidden) return;
     if (disposed || polling || snapshot.busy) return;
     polling = true;
     const requestedRevision = revision;

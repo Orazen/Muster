@@ -11,6 +11,12 @@ import { MUSTER_BODY } from "@/components/MusterMascot";
 import { FLOWER_POSES, poseFor, type FlowerPose } from "@/lib/musterbot/flower";
 import { resolveTrayView, type TrayBotInput } from "@/lib/mascot/tray-state";
 
+/** Slim roster poll: the tray draws only names, status lines and focus
+ * (src/lib/mascot/tray-state.ts), never transcripts — messages=0 keeps
+ * the 3-second tick at KB scale instead of re-downloading the fleet's
+ * history every pass while visible. */
+export const TRAY_BOTS_URL = "/api/bots?messages=0";
+
 const flowerBody = document.querySelector<SVGGElement>(".flower-body");
 const flowerSvg = document.querySelector<SVGSVGElement>("#flower");
 const flowerPath = document.querySelector<SVGPathElement>("#flower-path");
@@ -92,7 +98,7 @@ function render(bots: TrayBotInput[]): void {
 async function poll(): Promise<void> {
   if (stopped) return;
   try {
-    const response = await fetch("/api/bots", { headers: { accept: "application/json" } });
+    const response = await fetch(TRAY_BOTS_URL, { headers: { accept: "application/json" } });
     if (response.ok) {
       // SAFETY: the /api/bots feed is our own local server's JSON; the tray
       // renders only the fields typed below and tolerates absence of the rest.

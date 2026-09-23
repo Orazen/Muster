@@ -1,8 +1,9 @@
 import { Children, createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { BrowserPanelView, BrowserPreviewSurface, restoreBrowserPreviewFocus } from "./BrowserPanel";
+import { BrowserPanelView, BrowserPreviewSurface, BrowserTakeoverConsole, restoreBrowserPreviewFocus } from "./BrowserPanel";
 import { emptyBrowserPreview, type BrowserPreviewSnapshot, type BrowserPreviewState } from "./browser-preview-session";
+import { emptyBrowserTakeover, type BrowserTakeoverSnapshot } from "./browser-takeover-session";
 
 const idle: BrowserPreviewState = { running: false, url: null, title: null, profile: "bot", error: null };
 const running = { ...idle, running: true, url: "https://example.com/confirmed", title: "Confirmed page", takeControl: true };
@@ -155,5 +156,125 @@ describe("Browser preview rendered states (SSR, not browser execution)", () => {
     expect(html).toContain(botName.replace("<script>", "&lt;script&gt;"));
     expect(button(html, "&#x27;s profile")).toContain("&lt;script&gt;&#x27;s profile");
     expect(html).not.toContain("<script>");
+  });
+});
+
+describe("Take control gate (server-controlled, default off)", () => {
+  it("shows no takeover affordance while the deployment gate is off", () => {
+    const html = renderToStaticMarkup(createElement(BrowserPanelView, {
+      ...props({ state: { ...running, takeoverEnabled: false } }),
+      onTakeControl: vi.fn(),
+    }));
+    expect(html).not.toContain("Take control");
+    expect(html).not.toContain('aria-label="Take control of the browser preview"');
+  });
+
+  it("shows no takeover affordance when no handler is wired even if the gate reports on", () => {
+    const html = render({ state: { ...running, takeoverEnabled: true } });
+    expect(html).not.toContain("Take control");
+  });
+
+  it("offers Take control only for a running session with the gate on, and it fires", () => {
+    const onTakeControl = vi.fn();
+    const html = renderToStaticMarkup(createElement(BrowserPanelView, {
+      ...props({ state: { ...running, takeoverEnabled: true } }),
+      onTakeControl,
+    }));
+    expect(html).toContain("Take control");
+    expect(html).toContain("Opens the interactive console");
+    const click = findClick(BrowserPanelView({
+      ...props({ state: { ...running, takeoverEnabled: true } }),
+      onTakeControl,
+    }), "Take control of the browser preview");
+    expect(click).toBeTypeOf("function");
+    click!();
+    expect(onTakeControl).toHaveBeenCalledTimes(1);
+  });
+
+  it("never offers Take control for a non-running session", () => {
+    const html = renderToStaticMarkup(createElement(BrowserPanelView, {
+      ...props({ state: { ...idle, takeoverEnabled: true } }),
+      onTakeControl: vi.fn(),
+    }));
+    expect(html).not.toContain("Take control");
+    expect(html).toContain("Open preview");
+  });
+});
+
+describe("Browser takeover console (SSR, screenshot only)", () => {
+  type ConsoleProps = Parameters<typeof BrowserTakeoverConsole>[0];
+  const consoleProps = (takeover: Partial<BrowserTakeoverSnapshot>, patch: Partial<ConsoleProps> = {}): ConsoleProps => ({
+    botName: "Basil",
+    state: { ...running, takeoverEnabled: true, previewLink: null },
+    frame: "fixture-jpeg",
+    busy: null,
+    address: "",
+    takeover: { ...emptyBrowserTakeover(), ...takeover },
+    onAddressChange: vi.fn(), onNavigate: vi.fn(), onRefresh: vi.fn(), onClose: vi.fn(),
+    onAction: vi.fn(), onTextChange: vi.fn(), onFrameLoad: vi.fn(), onFrameError: vi.fn(),
+    ...patch,
+  });
+  const renderConsole = (takeover: Partial<BrowserTakeoverSnapshot> = {}, patch: Partial<ConsoleProps> = {}) =>
+    renderToStaticMarkup(createElement(BrowserTakeoverConsole, consoleProps(takeover, patch)));
+
+  it("renders the reference control order with the host from the confirmed URL", () => {
+    const html = renderConsole();
+    expect(html).toContain('data-testid="browser-takeover-console"');
+    expect(html).toContain("example.com");
+    expect(html).toContain("Connecting…");
+    const order = ["Website address", "Text to type", "Enter ↵", "Live browser page image", "you are in control"];
+    let cursor = -1;
+    for (const needle of order) {
+      const at = html.indexOf(needle);
+      expect(at, `Missing or out of order: ${needle}`).toBeGreaterThan(cursor);
+      cursor = at;
+    }
+    expect(html).not.toContain("iframe");
+  });
+
+  it("prefers the signed preview link and falls back to the polled frame", () => {
+    const withLink = renderConsole({}, {
+      state: { ...running, takeoverEnabled: true, previewLink: "https://preview.local/frame.jpg?sig=abc123" },
+      frame: null,
+    });
+    expect(withLink).toContain("https://preview.local/frame.jpg?sig=abc123");
+    expect(withLink).not.toContain("data:image/jpeg");
+
+    const fallback = renderConsole();
+    expect(fallback).toContain('src="data:image/jpeg;base64,fixture-jpeg"');
+  });
+
+  it("shows the waiting state when no frame or link has arrived", () => {
+    const html = renderConsole({}, { frame: null, state: { ...running, takeoverEnabled: true, previewLink: null } });
+    expect(html).toContain("Waiting for a page preview…");
+    expect(html).not.toContain("<img");
+  });
+
+  it("enables input only while live and idle", () => {
+    const live = renderConsole({ status: "live", text: "hello" }, { address: "https://example.com" });
+    expect(live).toContain("Live");
+    expect(live).not.toContain('disabled=""');
+    expect(live).toContain('cursor-crosshair');
+
+    const busy = renderConsole({ status: "updating", busy: true, text: "hello" }, { address: "https://example.com" });
+    expect(busy).toContain('disabled=""');
+    expect(busy).not.toContain('cursor-crosshair');
+  });
+
+  it("keeps the typed draft and surfaces the error when a send fails", () => {
+    const html = renderConsole({
+      status: "disconnected",
+      error: "takeover action failed (HTTP 502)",
+      text: "Hello world",
+    });
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("takeover action failed (HTTP 502)");
+    expect(html).toContain('value="Hello world"');
+    expect(html).toContain("Disconnected");
+  });
+
+  it("falls back to the bot name when the URL has no parseable host", () => {
+    const html = renderConsole({}, { state: { ...running, url: "not a url", takeoverEnabled: true } });
+    expect(html).toContain("Basil");
   });
 });
