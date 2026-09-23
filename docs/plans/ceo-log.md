@@ -8503,3 +8503,32 @@ The Windows leg's icon crash (resedit vs big-endian/PNG-entry ico) was fixed in 
 **Verification.** tsc 0 errors; oxlint 0/0; vitest 338 files / 5,036 passed / 0 failed; Playwright e2e 42/42; release-workflow verifier green (mutationSteps 9) with three new regression mutations pinned (Intel notarize guards, checksums-after-stapling). Commits this loop: a7dfce4 (Intel notarization + preflight + draft script), 1630e9a (staple dmg only), 29d228f (blockmap allowlist), pushed to main; tag v1.15.0 → a799970.
 
 **Still open.** Xcode Cloud pin to stable Xcode (iOS), Apple/VPS secret rotation cadence, and the www/* edits visible in the tree belong to another thread. No security claim.
+
+## Loop 178 — 2026-09-23 ~02:30 — verification pass: two local-flake root causes closed
+
+Full-tree verification while parallel agents ship the Email-OTP and memory-retrieval slices.
+Gates: vitest 342 files / 5,094 passed / 0 failed; Playwright e2e 40/40 on a fresh build;
+my files lint- and tsc-clean. The 26 lint errors + 1 tsc error present in the tree are all in
+**untracked in-flight files owned by another agent** (EmailOtpSignIn*, memory-grants.ts,
+memory-retrieval.ts) — not touched.
+
+Fixed while chasing the server/index.test.ts ECONNRESET flake (failed 4 of 9 local runs,
+every run a different test, CI green throughout — local rapid-spawn artifact plus one real
+server-side race):
+
+1. `server/http-helpers.ts` — readBody's >1MB guard paused the request then destroyed the
+   socket after **1s**. Under load the client can still be draining the 413 when the destroy
+   lands, so undici surfaces "other side closed"/UND_ERR_SOCKET instead of the 413
+   (bytesWritten 1,024,830 in the failing socket confirms the oversized-body path).
+   Window widened to 5s — the 1MB cap already bounds the resource cost; the destroy still
+   fires long before any meaningful abuse.
+2. `server/index.test.ts` — api() helper retries an idempotent GET once on ECONNRESET only
+   (keep-alive FIN racing the client pool on a busy dev box). Mutating calls still surface
+   failure honestly. 6/6 consecutive green after both fixes; 60/60 each run.
+3. `e2e/onboarding-draft.e2e.spec.ts` — another agent's AgentBotAvatar migration left a
+   stale `svg[data-pose="thinking"]` selector; replaced with the component's real
+   `canvas[data-state="working"]` (botAvatarState maps "thinking" → "working") and moved the
+   face-check ahead of the long alert waits so the wizard can't navigate away mid-assertion.
+
+Release state: v1.15.0 published end-to-end yesterday (7/7 jobs, all platforms notarized,
+mirror live). CI on main green through 35796618067.

@@ -465,12 +465,14 @@ test("template needs explicit finish and a failed send retains the draft for man
     && new URL(response.url()).origin === harness.desktopUrl && /\/api\/bots\/[^/]+\/messages$/.test(new URL(response.url()).pathname), { timeout: 15_000 });
   await page.getByRole("button", { name: "Muster Template Scout →", exact: true }).click();
   expect((await failed).status()).toBe(503);
+  // The guide's face reads the failure as its honest beat: the component's
+  // "thinking" prop maps to the bot-avatars canvas' "working" draw state.
+  await expect(setupShell(page).locator('.onboarding-guide-flower canvas[data-bot-avatar][data-state="working"]')).toHaveCount(1);
   const alert = setupShell(page).getByRole("alert");
   await expect(alert).toHaveText("Owned fixture: first task was not sent. Please retry.");
   // These checks precede any test scrolling, focus call or draft edit.
   // Full text and its alert box must already be visible in the short viewport.
   await expect(alert).toBeFocused();
-  await expect(setupShell(page).locator('.onboarding-guide-flower svg[data-pose="thinking"]')).toHaveCount(1);
   await expectUncovered(alert);
   await expectUncovered(alert.getByText("Owned fixture: first task was not sent. Please retry.", { exact: true }));
   await captureWizard(page, testInfo, "first-task-failed-send-auto-reveal-320.png");

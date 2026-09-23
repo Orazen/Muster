@@ -30,13 +30,29 @@ let home: string;
 let staticDir: string;
 let stderr = "";
 
+// One transparent retry for idempotent GETs only: on a busy dev machine
+// (several agents running suites at once) the server's FIN of an idle
+// keep-alive socket can occasionally race the client's pool and surface as
+// ECONNRESET. GETs are safe to replay; mutating calls must surface their
+// failure honestly. CI never sees this — local rapid-spawn churn does.
 const api = async (method: string, path: string, body?: JsonValue): Promise<{ status: number; body: any }> => {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: body ? { "content-type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return { status: res.status, body: await res.json() };
+  const send = async (): Promise<{ status: number; body: any }> => {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: body ? { "content-type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: res.status, body: await res.json() };
+  };
+  if (method !== "GET") return send();
+  try {
+    return await send();
+  } catch (e) {
+    if (!(e instanceof Error) || !("cause" in e)) throw e;
+    const cause = e.cause as { code?: string };
+    if (cause?.code !== "ECONNRESET") throw e;
+    return send();
+  }
 };
 
 const statusWithHeaders = (headers: Record<string, string>): Promise<number> =>

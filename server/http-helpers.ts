@@ -66,12 +66,16 @@ export function readBody(req: IncomingMessage): Promise<any> {
       bytes += Buffer.isBuffer(c) ? c.length : Buffer.byteLength(c);
       if (bytes > 1_000_000) {
         // Stop retaining attacker-controlled bytes and stop draining: pause
-        // the stream just long enough for the caller's 413 to flush, then
-        // destroy so an unauthenticated peer can't stream forever on a
-        // rejected body (mirrors companion/src/proxy.ts, which destroys
-        // outright).
+        // the stream so the caller's 413 can flush, then destroy so an
+        // unauthenticated peer can't stream forever on a rejected body
+        // (mirrors companion/src/proxy.ts, which destroys outright). The
+        // delay must comfortably outlast the client reading the 413 — under
+        // load a fast destroy can RST before the client's socket drains,
+        // which surfaces as "other side closed" instead of the 413. The
+        // cap itself already bounds this at ~1MB, so a few seconds only
+        // matters for a peer that keeps pushing bytes.
         req.pause();
-        setTimeout(() => req.destroy(), 1_000).unref();
+        setTimeout(() => req.destroy(), 5_000).unref();
         return fail(413, "body too large");
       }
       data += c;
