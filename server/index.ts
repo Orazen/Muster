@@ -4504,6 +4504,60 @@ function etagUnchanged(header: string | string[] | undefined, etag: string): boo
     .some((candidate) => candidate.trim() === "*" || candidate.trim().replace(/^W\//, "") === etag);
 }
 
+/** Serve one single-part `Range` request (RFC 9110 §14) against a fully
+ * buffered static body. Returns false when the request carries no usable
+ * Range so the caller answers 200 normally.
+ *
+ * Why this exists: electron-updater's differential downloader fetches the
+ * byte ranges a blockmap declares unchanged between two versions. A server
+ * that answers every Range with a full 200 body still updates — the updater
+ * hash-checks the assembled file and falls back — but the "delta" silently
+ * costs a full re-download. 206 + Content-Range is what makes the delta real.
+ * Scope is deliberately narrow: single range, bytes unit only, sliced from
+ * the same Buffer the 200 path would send — so ETag, content-type and every
+ * cache header stay identical across the 200/206 pair and the blockmap's
+ * strong ETag remains a valid If-Range validator. Multi-range requests are
+ * intentionally unsupported (the updater never sends them); they fall back
+ * to a full 200, which the RFC permits and the updater handles. */
+function serveStaticRange(
+  req: IncomingMessage,
+  res: ServerResponse,
+  headers: OutgoingHttpHeaders,
+  body: Buffer,
+): boolean {
+  const raw = req.headers.range;
+  if (!raw || Array.isArray(raw)) return false;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(raw.trim());
+  if (!match || (match[1] === "" && match[2] === "")) return false;
+  let start: number;
+  let end: number;
+  if (match[1] === "") {
+    // suffix form: last N bytes
+    const suffix = Number(match[2]);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return false;
+    start = Math.max(body.length - suffix, 0);
+    end = body.length - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] === "" ? body.length - 1 : Number(match[2]);
+  }
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= body.length) {
+    res.writeHead(416, { "content-range": `bytes */${body.length}` });
+    res.end();
+    return true;
+  }
+  end = Math.min(end, body.length - 1);
+  const slice = body.subarray(start, end + 1);
+  res.writeHead(206, {
+    ...headers,
+    "content-length": slice.length,
+    "content-range": `bytes ${start}-${end}/${body.length}`,
+    "accept-ranges": "bytes",
+  });
+  res.end(slice);
+  return true;
+}
+
 /** Cache headers for one static file body: HTML is the caller's own
  * no-cache line (left alone); other files get a content ETag plus either
  * the immutable year (content-addressed build output) or no-cache
@@ -9573,6 +9627,13 @@ let requestUserEmail = "";
         const headers: OutgoingHttpHeaders = { "content-type": type, "content-length": body.length };
         if (type === "text/html") headers["cache-control"] = "no-cache";
         if (staticCache(res, req, headers, file, type, body)) return;
+        // Ranged reads serve electron-updater's differential downloader: it
+        // fetches blockmap-declared byte ranges of the installers with
+        // `Range` requests and needs 206 + Content-Range to assemble a delta.
+        // A full-body 200 (the old behavior) forces the fallback full
+        // download every time. Only binary (non-HTML) bodies, which never
+        // pass through withVerificationMeta, are sliceable.
+        if (type !== "text/html" && serveStaticRange(req, res, headers, body)) return;
         res.writeHead(200, headers);
         return res.end(body);
       } catch {

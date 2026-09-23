@@ -236,6 +236,48 @@ posixOnly("docs pretty-URL serving", () => {
     expect(served.equals(UPDATE_ZIP)).toBe(true);
   });
 
+  it("answers a single Range request with 206 + Content-Range so the differential downloader can fetch blockmap slices", async () => {
+    const res = await fetch(`${BASE}/downloads/Muster-owned.zip`, { headers: { Range: "bytes=2-6" } });
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-range")).toBe(`bytes 2-6/${UPDATE_ZIP.length}`);
+    expect(res.headers.get("accept-ranges")).toBe("bytes");
+    expect(res.headers.get("content-length")).toBe("5");
+    const served = Buffer.from(await res.arrayBuffer());
+    expect(served.equals(UPDATE_ZIP.subarray(2, 7))).toBe(true);
+  });
+
+  it("supports open-ended and suffix ranges exactly as the RFC and updater clients use them", async () => {
+    const open = await fetch(`${BASE}/downloads/Muster-owned.zip`, { headers: { Range: "bytes=18-" } });
+    expect(open.status).toBe(206);
+    expect(open.headers.get("content-range")).toBe(`bytes 18-${UPDATE_ZIP.length - 1}/${UPDATE_ZIP.length}`);
+    expect(Buffer.from(await open.arrayBuffer()).equals(UPDATE_ZIP.subarray(18))).toBe(true);
+    const suffix = await fetch(`${BASE}/downloads/Muster-owned.zip`, { headers: { Range: "bytes=-7" } });
+    expect(suffix.status).toBe(206);
+    expect(suffix.headers.get("content-range")).toBe(`bytes ${UPDATE_ZIP.length - 7}-${UPDATE_ZIP.length - 1}/${UPDATE_ZIP.length}`);
+    expect(Buffer.from(await suffix.arrayBuffer()).equals(UPDATE_ZIP.subarray(-7))).toBe(true);
+  });
+
+  it("replies 416 with the complete size for an out-of-bounds range", async () => {
+    const res = await fetch(`${BASE}/downloads/Muster-owned.zip`, { headers: { Range: `bytes=${UPDATE_ZIP.length + 10}-` } });
+    expect(res.status).toBe(416);
+    expect(res.headers.get("content-range")).toBe(`bytes */${UPDATE_ZIP.length}`);
+  });
+
+  it("falls back to a full 200 for multi-range or malformed Range headers (RFC-permitted, updater-safe)", async () => {
+    for (const range of ["bytes=0-1,5-9", "bytes=abc", "chunks=0-5", "bytes=-"]) {
+      const res = await fetch(`${BASE}/downloads/Muster-owned.zip`, { headers: { Range: range } });
+      expect(res.status, range).toBe(200);
+      expect(res.headers.get("content-length"), range).toBe(String(UPDATE_ZIP.length));
+      expect(Buffer.from(await res.arrayBuffer()).equals(UPDATE_ZIP), range).toBe(true);
+    }
+  });
+
+  it("keeps HTML out of the range path so the verification meta never desynchronizes the 200 body", async () => {
+    const res = await fetch(`${BASE}/`, { headers: { Range: "bytes=0-9" } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-range")).toBeNull();
+  });
+
   it("sizes marketing HTML with a content-length that matches the bytes actually served", async () => {
     const res = await fetch(`${BASE}/`);
     expect(res.status).toBe(200);
