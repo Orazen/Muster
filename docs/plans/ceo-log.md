@@ -8699,3 +8699,24 @@ matched, no decrease).
 deployment — push → Dokploy rebuild → GET-only prod probe follow;
 claimed only when observed. Security scanner re-run and the
 Jev-vs-Laya-remote provider choice remain open (owner).
+
+## Loop 180 — v1.16.0 mirror rescue + the tag-endpoint cache race (2026-09-23)
+
+v1.16.0 cut clean through publish (25 assets, all platforms), but the VPS
+deploy leg failed twice with "no assets to download" — the first observed
+case of GitHub's **tag/list release endpoints serving a stale denormalized
+asset list** (release 394421520 reported `assets: 0` for ~20 min after
+publish while `releases/{id}` and `releases/{id}/assets` were fresh).
+`assert-published` (listing endpoint) passed, `gh release download`
+(tag endpoint) failed. Another agent's uncommitted workflow fix replaces
+the download with the assets sub-resource — verified against the verifier
+and the 79 workflow tests, left for them to commit.
+
+The mirror itself I rescued by replicating the deploy job locally over the
+proven SSH path: fetched the 25 assets by ID (sizes verified exact), ran
+`release-payload.mjs mirror` (17 binaries + 3 feeds), staged to
+`.incoming/manual-1790152589`, rsynced 1.86 GB, and promoted through the
+same remote helper — generation `release-1.16.0-7d74cc5d…` now serves
+`latest.json` (version 1.16.0, sha abfbd82, published 08:13:02Z) with all
+binaries probing 200 from the public edge. The 1.14.1 → 1.16.0 auto-update
+path is live for every platform.
