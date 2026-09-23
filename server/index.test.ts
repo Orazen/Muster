@@ -49,6 +49,9 @@ const api = async (method: string, path: string, body?: JsonValue): Promise<{ st
     return await send();
   } catch (e) {
     if (!(e instanceof Error) || !("cause" in e)) throw e;
+    // SAFETY: undici wraps network failures as `cause` on the fetch TypeError;
+    // the cause is the raw errno error whose only field this file reads is
+    // `code`, the errno string ("ECONNRESET"). Anything else rethrows below.
     const cause = e.cause as { code?: string };
     if (cause?.code !== "ECONNRESET") throw e;
     return send();
