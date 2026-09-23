@@ -8820,3 +8820,36 @@ decision-harness script registration, the live Google round-trip
 re-run (sealed, reported, still inconclusive — no security claim) and
 the Google OAuth credentials (console URIs plus local env, values
 never in the repository).
+
+## Loop 196 — 2026-09-23: completed other agents' stopped work + delta-update readiness
+
+Context: multiple agents stopped mid-work, leaving four finished-but-uncommitted
+slices and one open engineering item (blockmap mirror copy). All closed this loop.
+
+**Orphaned slices committed** (each verified before commit):
+- `marketing-video/` — Remotion launch-film package (sources, assets, render receipt).
+- `docs/research/glm/` — GLM research series (7 docs, ends cleanly, research-only).
+- `www/` redesign — cinematic control-room pages + template gallery + self-hosted
+  fonts; verified with a headless click-through (hero + terminal hooks render on
+  every page; the only 404s were version-fetch calls a toy server can't serve).
+- Release blockmap slice (validator adoption + CI checksum coverage + workflow pins).
+
+**Delta-update (blockmap) work, continued and corrected:**
+- Verified v1.16.0's three blockmaps against their binaries: zip + exe pair
+  byte-exact; the **dmg blockmap is stale by 2,131 bytes** — electron-builder
+  cuts it before stapler rewrites the DMG's koly trailer, so it can never pair.
+  Root-cause finding, not a one-off: every shipped dmg blockmap is stale.
+- Validator now **rejects any blockmap whose chunk total ≠ its binary's size**
+  (`blockmapChunkTotal`), plus regression tests. A stale pair fails packaging
+  rather than shipping a blockmap whose deltas always fall back to full.
+- Workflow: mac legs now checksum/upload only `*.zip.blockmap` (deltas ride the
+  zip channel; the dmg is first-install only). Verifier + 181 tests green.
+- Attempted to backfill the two verified 1.16.0 blockmaps into the live mirror
+  via the normal staging+promote path; **the promote helper refused with
+  "Same version has different published bytes"** — correct behavior: a
+  published generation's bytes are immutable. Staging removed, state intact.
+  Consequence: 1.17.0+ ships deltas from day one; 1.16.0→1.17.0 is one full
+  download, then deltas.
+
+**Gates on the final tree:** tsc 0 · oxlint 0 · vitest 369 files / 5,573 passed ·
+build ✓ · e2e 40/40 · CI green on main.
