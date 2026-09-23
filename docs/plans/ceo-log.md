@@ -8892,3 +8892,45 @@ from the edge, then 64 chunks of the installer were fetched as 64 separate
 `Range` requests — every one answered 206 with byte-exact slices, 1MB
 assembled instead of one 183MB full download. That is the exact wire pattern
 electron-updater's differential downloader uses on 1.18.0.
+
+## Loop197 — 2026-09-23 — conversations learn to sync: per-thread objects, tombstones, and one seam that never grew a second engine (23 September 2026)
+
+Memory had a producer; conversations did not, so a phone could see a
+thread the computer had already pushed but no second install could ever
+receive one. P4 closes that with the same three-part shape the memory
+producer established, and deliberately no new engine: the sync pass is
+untouched, still the sequence-diagram pass its tests pin, and a four-line
+router decides by object type who serializes and who applies. A thread is
+one object named `chat:<threadId>`, and its payload is the transcript
+itself — every message re-serialized from the stored json, so cards,
+activity chips, compaction summaries and privacy counts ride across byte
+for byte, branch head included. The round trip is asserted as byte
+equality after install A reads, loses the thread, and install B applies.
+
+Two decisions earned their keep here. First, a delete is data: deleting a
+thread publishes the canonical tombstone object, so the other install
+removes the conversation instead of watching it come back from a stale
+manifest — and installing a peer's tombstone is silent, because a
+notification there would ping-pong the deletion between two installs
+forever. Second, the producer fires after the commit and never inside the
+transaction, so a rollback can never publish a rev for a write that did
+not happen. The incrementality the plan demanded is not a promise here
+but a measurement: appending to one thread leaves the other thread's rev,
+checksum and payload byte-identical, and the test says so.
+
+Gates: tsc server 0, tsc web 0, oxlint 0/0 on 983 files, check:electron
+exit 0, P4 regression 359/359 across the fifteen suites that touch sync or
+transcripts, and the full run at 371 files / 5612 passed / 8 skipped / 0
+failed — no decrease against the 369/5562/8/0 baseline. The three
+subagents meant for this batch were killed twice by a provider rate limit
+before writing a line, so the server slice was built in-session instead
+of waiting; the desktop and iOS surfaces went out to fresh builders after
+the limit cleared and land in their own commit with their own receipts.
+
+The boot wiring shared `server/index.ts` with a foreign routines stream,
+so its three hunks were staged as a filtered patch and the routines hunk
+left where its owner put it. P5 — typed event receipts, a stable
+device_id, key envelopes, real device revocation — is untouched and
+still owes its multi-device gate. Push, CI, autodeploy and the GET-only
+production probe follow this entry; deployment is claimed only once
+observed.

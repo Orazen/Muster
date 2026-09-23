@@ -17,6 +17,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import { DATA_DIR } from "./config.ts";
 import { SeedAnswerError } from "./seed-card.ts";
+import { chatWasDeleted, chatWasWritten } from "./sync-hooks.ts";
 import type { DelegationSnapshot } from "./delegations.ts";
 import type { StopCleanupDurableState, StopCleanupJournal, StopCleanupReceiptRecord } from "./stop-cleanup.ts";
 import { stopCleanupSnapshotsSchema } from "./stop-cleanup.ts";
@@ -166,12 +167,15 @@ export function appendMessage(threadId: string, message: Message): void {
   database.exec("BEGIN IMMEDIATE");
   try {
     insertMessage(threadId, message);
-    setActiveLeaf(threadId, message.id);
+    setActiveLeafQuiet(threadId, message.id);
     database.exec("COMMIT");
   } catch (error) {
     database.exec("ROLLBACK");
     throw error;
   }
+  // P4: one durable change -> one producer notification, after the commit
+  // (never inside it, so a rollback cannot publish a rev for nothing).
+  chatWasWritten(threadId);
 }
 
 /** Recover missing ancestors and their selected leaf as one mutation.
@@ -232,18 +236,20 @@ export function persistMessagePath(threadId: string, ancestors: Message[], leafI
     if (!leafRow) throw new Error("Message recovery leaf is missing from this thread");
     const leaf = rowToMessage(leafRow);
     checkParent(leafId, leaf.parentId === undefined ? inferredParent(leafRow.rowid) : leaf.parentId);
-    setActiveLeaf(threadId, leafId);
+    setActiveLeafQuiet(threadId, leafId);
     database.exec("COMMIT");
   } catch (error) {
     database.exec("ROLLBACK");
     throw error;
   }
+  chatWasWritten(threadId);
 }
 
 export function updateMessage(threadId: string, message: Message): void {
   db()
     .prepare("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ? WHERE thread_id = ? AND id = ?")
     .run(message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), threadId, message.id);
+  chatWasWritten(threadId);
 }
 
 /** Seed recording/dispatch receipts have stricter durability than ordinary turn folding. */
@@ -385,7 +391,10 @@ export function stopCleanupJournal(): StopCleanupJournal {
   };
 }
 
-export function setActiveLeaf(threadId: string, leafId: string | null): void {
+/** The branch-head write itself, quiet: the two transactional callers
+ * (append / persist) announce once after their own commit, and a standalone
+ * move is the one public case that owns its notification. */
+function setActiveLeafQuiet(threadId: string, leafId: string | null): void {
   db()
     .prepare(
       "INSERT INTO thread_state (thread_id, active_leaf_id) VALUES (?, ?) " +
@@ -394,15 +403,101 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
     .run(threadId, leafId);
 }
 
-export function deleteThread(threadId: string): void {
-  // Both deletes are one mutation: a thread whose rows died but whose
-  // branch head survived would resurrect an empty transcript on the next
-  // read instead of disappearing cleanly.
+export function setActiveLeaf(threadId: string, leafId: string | null): void {
+  setActiveLeafQuiet(threadId, leafId);
+  chatWasWritten(threadId);
+}
+
+/** The delete mutation itself, quiet — the local delete (which then
+ * announces the tombstone) and the sync applier's tombstone install share
+ * it. Both deletes stay ONE mutation: a thread whose rows died but whose
+ * branch head survived would resurrect an empty transcript on the next read
+ * instead of disappearing cleanly. */
+function deleteThreadQuiet(threadId: string): void {
   const database = db();
   database.exec("BEGIN IMMEDIATE");
   try {
     database.prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
     database.prepare("DELETE FROM thread_state WHERE thread_id = ?").run(threadId);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function deleteThread(threadId: string): void {
+  deleteThreadQuiet(threadId);
+  // P4: a deletion is data — the producer publishes the tombstone object so
+  // a pull on another install removes the thread instead of resurrecting it.
+  chatWasDeleted(threadId);
+}
+
+/** The applier's side: install another install's tombstone with NO
+ * notification, or the two installs would ping-pong the deletion forever. */
+export function deleteThreadSilently(threadId: string): void {
+  deleteThreadQuiet(threadId);
+}
+
+/** The minimal shape a synced transcript row must carry: the four columns
+ * the tables key on. Everything else a message holds (cards, screen pngs,
+ * compaction, privacy counts, tool chips) is preserved by the round trip
+ * because the JSON cell is re-serialized verbatim, not because this type
+ * enumerates fields it does not read. */
+export interface ThreadMessageInput {
+  id: string;
+  at: number;
+  role: string;
+  kind: string;
+  text?: string;
+}
+
+/** Read a thread from the DB only — deliberately NOT readThread: the sync
+ * side must see exactly what sync carries, never a one-time lazy import of
+ * a legacy flat file that would change the payload between two reads. */
+export function readThreadRows(threadId: string): ThreadRows {
+  const database = db();
+  // SAFETY: the select lists only the json column of the messages table,
+  // restricted to this thread id.
+  const rows = database
+    .prepare("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid")
+    .all(threadId) as Array<{ json: string }>;
+  // SAFETY: the select lists only the active_leaf_id column of the
+  // thread_state table, restricted to this thread id.
+  const state = database
+    .prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?")
+    .get(threadId) as { active_leaf_id: string | null } | undefined;
+  return { messages: rows.map((row) => rowToMessage(row)), activeLeafId: state?.active_leaf_id ?? null };
+}
+
+/** Install another install's verified transcript in ONE transaction and
+ * with NO producer notification (P4's no-ping-pong rule): rows first,
+ * branch head last, so an interrupted install leaves either the old thread
+ * or the new one — never half of each. */
+export function replaceThreadFromSync(
+  threadId: string,
+  messages: ThreadMessageInput[],
+  activeLeafId: string | null,
+): void {
+  const database = db();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
+    const insert = database.prepare(
+      "INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    for (const message of messages) {
+      insert.run(
+        threadId,
+        message.id,
+        message.at,
+        message.role,
+        message.kind,
+        message.text ?? null,
+        JSON.stringify(message),
+      );
+    }
+    setActiveLeafQuiet(threadId, activeLeafId);
     database.exec("COMMIT");
   } catch (error) {
     database.exec("ROLLBACK");

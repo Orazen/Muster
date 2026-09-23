@@ -280,8 +280,10 @@ import * as driveSync from "./drive-sync.ts";
 import * as accountDrive from "./account-drive.ts";
 import * as telegramSync from "./telegram-sync.ts";
 import * as syncState from "./sync-state.ts";
-import { setMemoryWriteListener } from "./sync-hooks.ts";
-import { applyMemoryObject, createMemoryProducer, readMemoryObject } from "./sync-memory.ts";
+import { setChatChangeListener, setMemoryWriteListener } from "./sync-hooks.ts";
+import { createChatProducer } from "./sync-chats.ts";
+import { createObjectApply, createObjectRead } from "./sync-dispatch.ts";
+import { createMemoryProducer } from "./sync-memory.ts";
 import { runSyncPass, type SyncPassDeps } from "./sync-pass.ts";
 import { snapshotPassphraseStore } from "./snapshot-runner.ts";
 import { driveSyncTransport, localSyncManifestStore, startSyncEngine } from "./sync-wiring.ts";
@@ -425,8 +427,10 @@ const syncPassDeps = (passphrase: string): SyncPassDeps => ({
   db: getDb(),
   transport: syncTransport,
   local: syncLocalManifest,
-  readObject: readMemoryObject(),
-  applyObject: applyMemoryObject(),
+  // P4: one seam, two producers — the router picks memory vs chat by
+  // objectType so the pass itself never learned about conversations.
+  readObject: createObjectRead(),
+  applyObject: createObjectApply(),
   passphrase,
   appVersion: appVersion(),
 });
@@ -434,13 +438,17 @@ const syncEngine = startSyncEngine({
   db: getDb(),
   transport: syncTransport,
   local: syncLocalManifest,
-  readObject: readMemoryObject(),
-  applyObject: applyMemoryObject(),
+  readObject: createObjectRead(),
+  applyObject: createObjectApply(),
   passphrase: () => process.env.MUSTER_SYNC_PASSPHRASE ?? snapshotPassphraseStore().getSync(),
   appVersion: appVersion(),
 });
 setMemoryWriteListener(
   createMemoryProducer({ db: getDb(), local: syncLocalManifest, notify: () => syncEngine.notify() }),
+);
+// P4: one durable transcript change -> one journal row (write or tombstone).
+setChatChangeListener(
+  createChatProducer({ db: getDb(), local: syncLocalManifest, notify: () => syncEngine.notify() }),
 );
 // rows enqueued before the restart: run the pass now — held harmlessly
 // to a reported result while the passphrase gate is closed

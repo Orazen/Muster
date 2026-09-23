@@ -18,3 +18,29 @@ export function setMemoryWriteListener(next: MemoryWriteListener | null): void {
 export function memoryWasWritten(botId: string, text: string): void {
   listener?.(botId, text);
 }
+
+// P4 (local-first plan §8 P4 "Conversation sync", R4) — the same leaf seam
+// for transcripts: message-db fires AFTER the transcript mutation commits,
+// and the boot-registered producer turns one durable change into exactly
+// one journal row (rev +1, live checksum). "delete" is carried as its own
+// kind so the producer can publish the tombstone object the pass already
+// knows how to carry — a deletion is data too, and silently dropping it
+// would resurrect the thread on the next pull.
+type ChatChangeListener = (threadId: string, kind: "write" | "delete") => void;
+
+let chatListener: ChatChangeListener | null = null;
+
+/** Boot wiring registers the real chat producer here; null unregisters. */
+export function setChatChangeListener(next: ChatChangeListener | null): void {
+  chatListener = next;
+}
+
+/** Fired by message-db.ts AFTER an append/update/leaf move is durable. */
+export function chatWasWritten(threadId: string): void {
+  chatListener?.(threadId, "write");
+}
+
+/** Fired by message-db.ts AFTER a thread delete commits. */
+export function chatWasDeleted(threadId: string): void {
+  chatListener?.(threadId, "delete");
+}
