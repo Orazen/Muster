@@ -8648,3 +8648,16 @@ decision-request size cap remain open. Excluded set unchanged:
 `www/*`, `.commandcode/`, `.freebuff/`, `.zcode/`,
 `docs/research/glm/*`, `marketing-video/`, `www/fonts/`,
 `www/templates.html`.
+
+## Loop 179 — 2026-09-23 ~04:00 — full-tree certification and v1.16.0 cut
+
+All gates on the merged tree (including every parallel agent's landed slice):
+tsc 0 errors; oxlint 0/967 files; vitest 363 files / 5,407 passed / 0 failed;
+production build OK; Playwright e2e 40/40. Landed since v1.15.0 and now
+certified: stalled-updater fix with honest download progress, OpenMausBot
+parity on desktop and iOS, passwordless email-OTP sign-in, automatic workspace
+snapshots behind a macOS Keychain gate with a retention ladder, default-deny
+provenance-gated memory retrieval, browser-panel and approval-card work.
+
+Version bumped 1.15.0 → 1.16.0 (package.json is the sole version source) and
+tagged; release run monitored below.
