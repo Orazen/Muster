@@ -8862,3 +8862,23 @@ rejects stale blockmap↔binary pairs, and the mirror deploy stages blockmaps
 from this release forward. Expected receipt: 1.16.0 → 1.17.0 updates download
 the full installer once (1.16.0's mirror generation predates blockmap staging);
 1.18.0+ ships true deltas.
+
+### v1.17.0 receipt + the range gap it exposed (same loop)
+
+v1.17.0 shipped **7/7 green** (run 35885762598, release 394836714, published,
+25 assets): exactly three blockmaps — arm64.zip, x64.zip, setup.exe — all
+checksum-covered, no stale dmg blockmap (the Loop 196 exclusion worked). The
+VPS mirror generation `release-1.17.0-c64b9bc7…` carries the blockmaps, and
+`latest-mac.yml`/`latest.yml` on the edge serve 1.17.0 with correct sha512/size.
+
+**Gap the end-to-end check exposed:** the mirror's edge answered every `Range`
+probe with a full 200 — Traefik streams faithfully, but the marketing/downloads
+static handler in server/index.ts never implemented ranged requests, so the
+differential downloader would always fall back to a full download. Fix: single
+-part RFC 9110 §14 `bytes=` ranges sliced from the same buffered body the 200
+path serves (strong ETag stays a valid If-Range validator), 416 with
+`bytes */<size>` on out-of-bounds, deliberate full-200 fallback for
+multi-range/malformed units. HTML stays out of the path (verification meta
+never desynchronizes). Five route-level regression tests in
+server/docs-static.test.ts pin all of it; the 1.17.0→1.18.0 delta path is now
+real end to end.
