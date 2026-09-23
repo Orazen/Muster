@@ -833,11 +833,32 @@ jobs:
           set -euo pipefail
           node scripts/release-state.mjs assert-published
           mkdir -p artifacts
-          gh release download "v$RELEASE_VERSION" --dir artifacts --clobber --repo "$GITHUB_REPOSITORY"
           PUBLISHED_AT="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$RELEASE_VERSION" --jq .published_at)"
           [[ "$PUBLISHED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]] || {
             echo "::error::published release timestamp is missing or invalid"; exit 1; }
           printf 'published_at=%s\n' "$PUBLISHED_AT" >> "$GITHUB_OUTPUT"
+          # Download via the assets sub-resource, never `gh release download`: the
+          # tag/list endpoints embed a denormalized `assets` array that is untrusted.
+          # Observed 2026-09-23: release 394421520 (tag v1.16.0) reported `assets: 0`
+          # from the tag/list endpoints while the authoritative assets sub-resource
+          # (releases/394421520/assets) listed 25 assets, all state=uploaded and created
+          # before this job ran, so `gh release download` failed with "no assets to
+          # download". The tag endpoint's `.id` is still correct, so resolve the release
+          # id there and drive the download from the assets sub-resource.
+          REL_ID="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$RELEASE_VERSION" --jq .id)"
+          [[ "$REL_ID" =~ ^[0-9]+$ ]] || { echo "::error::release id for v$RELEASE_VERSION is missing or invalid"; exit 1; }
+          UPLOADED_ASSETS="$(gh api "repos/$GITHUB_REPOSITORY/releases/$REL_ID/assets" --paginate --jq '.[] | select(.state=="uploaded") | .name + "\t" + .url')"
+          if [[ -z "$UPLOADED_ASSETS" ]]; then
+            echo "::error::release v$RELEASE_VERSION published with zero uploaded assets; the platform build legs (macos, macos-x64, windows, linux) and the publish upload step produced nothing to mirror"
+            exit 1
+          fi
+          while IFS=$'\t' read -r asset_name asset_url; do
+            [[ -n "$asset_name" && -n "$asset_url" ]] || { echo "::error::release asset entry is missing a name or URL"; exit 1; }
+            asset_file="$(basename "$asset_name")"
+            [[ -n "$asset_file" && "$asset_file" != */* ]] || { echo "::error::release asset name '$asset_name' does not resolve to a flat filename"; exit 1; }
+            gh api -H "Accept: application/octet-stream" "$asset_url" > "artifacts/$asset_file"
+            [[ -s "artifacts/$asset_file" ]] || { echo "::error::release asset '$asset_file' downloaded zero bytes"; rm -f "artifacts/$asset_file"; exit 1; }
+          done <<< "$UPLOADED_ASSETS"
 
       - name: Validate complete mirror payload and write manifests
         id: payload

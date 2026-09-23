@@ -13,7 +13,7 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-function fixture(platform = "darwin") {
+function fixture(platform = "darwin", runtimeOptions = {}) {
   const directory = fs.mkdtempSync(path.join(tmpdir(), "muster-cua-session-"));
   const counts = { resolve: 0, sdk: 0, permissions: 0, socket: 0, constructed: 0, starts: 0, stops: 0, destroyed: 0 };
   const control = {
@@ -57,6 +57,7 @@ function fixture(platform = "darwin") {
     wantEmbedded: () => control.embedded,
     standaloneSocket: "/owned-fixture/standalone.sock",
     socketAlive(socket) { expect(socket).toBe("/owned-fixture/standalone.sock"); counts.socket++; return control.alive(); },
+    ...runtimeOptions,
   });
   const result = { runtime, control, counts, persisted, diskStore, directory,
     disk: () => JSON.parse(fs.readFileSync(path.join(directory, "cua-connection.json"), "utf8")),
@@ -208,6 +209,82 @@ describe("session computer access runtime", () => {
     await start; await stop;
     expect(f.disk().reason).toBe("desktop-host-stopped");
     expect(f.persisted.every((entry) => entry.mode === "unavailable")).toBe(true);
+  });
+});
+
+describe("desktop permission probe overriding a stale SDK preflight", () => {
+  it("starts the embedded host when fresh evidence proves both permissions the preflight denies", async () => {
+    const f = fixture("darwin", {
+      requestDesktopPermissions: async () => ({ accessibility: true, screenRecording: true }),
+    });
+    f.runtime.initialize();
+    // macOS 15+: the Screen Recording preflight caches per-process and stays
+    // denied for the whole session after the user grants, so this read never flips.
+    f.control.permissions = { accessibility: false, screenRecording: false };
+    const connection = await f.runtime.start();
+    expect(connection.mode).toBe("embedded");
+    expect(f.disk()).toEqual(connection);
+    expect(f.counts).toMatchObject({ permissions: 2, starts: 1 });
+  });
+  it("keeps the exact legacy message when the fresh evidence also proves nothing", async () => {
+    const f = fixture("darwin", {
+      requestDesktopPermissions: async () => ({ accessibility: false, screenRecording: false }),
+    });
+    f.runtime.initialize();
+    f.control.permissions = { accessibility: false, screenRecording: false };
+    const connection = await f.runtime.start();
+    expect(connection).toEqual({
+      mode: "unavailable",
+      reason: "embedded host failed: Accessibility and Screen Recording required; grant access in System Settings, then try again",
+    });
+    expect(f.counts.starts).toBe(0);
+  });
+  it("names only the permission neither source has proven", async () => {
+    const f = fixture("darwin", {
+      requestDesktopPermissions: async () => ({ accessibility: true, screenRecording: false }),
+    });
+    f.runtime.initialize();
+    f.control.permissions = { accessibility: false, screenRecording: false };
+    expect((await f.runtime.start()).reason).toBe(
+      "embedded host failed: Screen Recording required; grant access in System Settings, then try again",
+    );
+  });
+  it("fails byte-identically to the legacy path when no probe is injected", async () => {
+    const f = fixture();
+    f.runtime.initialize();
+    f.control.permissions = { accessibility: false, screenRecording: false };
+    const connection = await f.runtime.start();
+    expect(connection.reason).toBe(
+      "embedded host failed: Accessibility and Screen Recording required; grant access in System Settings, then try again",
+    );
+    expect(f.counts).toMatchObject({ permissions: 1, starts: 0 });
+  });
+  it("never consults an injected probe when the preflight already reports both", async () => {
+    let probeCalls = 0;
+    const f = fixture("darwin", {
+      requestDesktopPermissions: async () => { probeCalls++; return { accessibility: false, screenRecording: false }; },
+    });
+    f.runtime.initialize();
+    expect((await f.runtime.start()).mode).toBe("embedded");
+    expect(probeCalls).toBe(0);
+    expect(f.counts.permissions).toBe(1);
+  });
+  it("lets a retry succeed after the user grants without quitting the session", async () => {
+    let granted = false;
+    const f = fixture("darwin", {
+      requestDesktopPermissions: async () => (granted
+        ? { accessibility: true, screenRecording: true }
+        : { accessibility: false, screenRecording: false }),
+    });
+    f.runtime.initialize();
+    f.control.permissions = { accessibility: false, screenRecording: false }; // stale all session — only the probe can see the grant
+    expect((await f.runtime.start()).reason).toBe(
+      "embedded host failed: Accessibility and Screen Recording required; grant access in System Settings, then try again",
+    );
+    granted = true;
+    const connection = await f.runtime.start();
+    expect(connection.mode).toBe("embedded");
+    expect(f.counts).toMatchObject({ permissions: 4, constructed: 1, starts: 1 });
   });
 });
 

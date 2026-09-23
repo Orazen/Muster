@@ -23,6 +23,16 @@ export interface TrayBotInput {
   lastToolFailed?: boolean;
 }
 
+/** How many bots are waiting on a human — the count behind the tray
+ * window's badge line. The menu-bar status item counts the same fact for
+ * the same feed in electron/tray-badge.mjs; the two are pinned together by
+ * electron/tray-badge.test.mjs so the icon and the window can never
+ * disagree. Hidden bots are filtered at the call site (the renderer drops
+ * them before render), matching resolveTrayView's inputs. */
+export function countWaitingOnYou(bots: TrayBotInput[]): number {
+  return bots.filter((bot) => bot.activity === "waiting-on-you").length;
+}
+
 export interface TrayBotView {
   id: string;
   name: string;

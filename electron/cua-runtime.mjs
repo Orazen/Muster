@@ -1,9 +1,11 @@
 // Session orchestration only. Native imports and permission APIs are injected
 // by the Electron adapter, and are never consulted during initialization.
+import { combinePermissionRead } from "./desktop-permission-probe.mjs";
+
 const HOST_BUNDLE_ID = "com.muster.app";
 const CUA_ENV = { CUA_DRIVER_RS_TELEMETRY_ENABLED: "0" };
 
-export function createCuaRuntime({ connectionStore, resolveDriverBinary, loadEmbeddedSdk, wantEmbedded, standaloneSocket, socketAlive, platform = process.platform }) {
+export function createCuaRuntime({ connectionStore, resolveDriverBinary, loadEmbeddedSdk, wantEmbedded, standaloneSocket, socketAlive, platform = process.platform, requestDesktopPermissions = null }) {
   let connection = { mode: "unavailable", reason: "computer-access-off" };
   let initialized = false;
   let stopped = false;
@@ -54,8 +56,20 @@ export function createCuaRuntime({ connectionStore, resolveDriverBinary, loadEmb
         if (!active(attempt)) return connection;
         const permissions = sdk.requestMacOSPermissions();
         if (!sdk.hasRequiredMacOSPermissions(permissions)) {
-          const missing = [!permissions.accessibility && "Accessibility", !permissions.screenRecording && "Screen Recording"].filter(Boolean).join(" and ");
-          throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings, then try again`);
+          // macOS 15+ preflights cache per-process and keep reporting denied
+          // after a mid-session grant (the Screen Recording comment in
+          // main.mjs), so an injected probe takes fresh evidence and the SDK
+          // is re-read before failing closed. Without a probe, the legacy
+          // read above decides exactly as it always has.
+          const empirical = requestDesktopPermissions ? await requestDesktopPermissions() : null;
+          if (!active(attempt)) return connection;
+          const combined = requestDesktopPermissions
+            ? combinePermissionRead({ sdk: sdk.requestMacOSPermissions(), empirical })
+            : { granted: false, reason: [!permissions.accessibility && "Accessibility", !permissions.screenRecording && "Screen Recording"].filter(Boolean).join(" and ") };
+          if (!combined.granted) {
+            const missing = combined.reason;
+            throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings, then try again`);
+          }
         }
         if (!active(attempt)) return connection;
         partialHost = new sdk.EmbeddedCuaDriverHost(binary, HOST_BUNDLE_ID);

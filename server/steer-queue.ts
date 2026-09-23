@@ -18,7 +18,13 @@
 // Stop is a safety property), but these are the user's own words —
 // stop-then-steer (queue a correction, hit Stop, the correction runs) is
 // the feature.
+//
+// The user can also HOLD that queue from the composer strip (pause and
+// explicit "resume queued messages"): a held entry is skipped by drain —
+// the words wait, visibly, until resumed. Hold is opt-in; the default
+// stays the stop-then-steer above, unchanged.
 
+import type { QueuedSendMessage, SteerQueueSnapshot } from "./contracts.ts";
 import type { BotRecord, Message } from "./store.ts";
 
 /** The slice of Store this module needs — narrow so tests can fake it. */
@@ -34,6 +40,11 @@ interface QueueEntry {
    * queue's bot is idle now", which needs the bot, not the settling thread. */
   botId: string;
   items: Array<{ messageId: string; text: string }>;
+  /** The user's hold (composer strip's pause): while true, drain skips
+   * this entry even when the bot is idle — the words wait for an explicit
+   * resume instead of spending themselves on a turn the user held them
+   * back from. */
+  paused?: boolean;
   /** Failed dispatches already spent on this entry (see MAX_REQUEUES). */
   attempts?: number;
 }
@@ -69,6 +80,69 @@ export function queueSteeredMessage(store: SteerStore, bot: BotRecord, text: str
   return message;
 }
 
+/** Every queue entry this bot owns — a bot can hold entries across a
+ * thread switch, so the queue controls address the BOT, not one thread. */
+function entriesFor(botId: string): Array<[string, QueueEntry]> {
+  return [...queues.entries()].filter(([, entry]) => entry.botId === botId);
+}
+
+function snapshotOf(botId: string): SteerQueueSnapshot | null {
+  const entries = entriesFor(botId);
+  if (!entries.length) return null;
+  const items: QueuedSendMessage[] = entries.flatMap(([threadId, entry]) =>
+    entry.items.map((item) => ({ messageId: item.messageId, threadId, text: item.text })),
+  );
+  // Held only when every entry waits: a mixed state self-heals through the
+  // strip (the next hold/release applies to all of them).
+  return { botId, paused: entries.every(([, entry]) => entry.paused === true), items };
+}
+
+/** Everything this bot has waiting, as the composer strip renders it.
+ * null when nothing waits: a queue that drained — or died with a restart —
+ * shows NO strip, the same honesty as a stranded `queued` flag. */
+export function steerQueueSnapshot(botId: string): SteerQueueSnapshot | null {
+  return snapshotOf(botId);
+}
+
+/** Per-item remove: take ONE send off the queue. The words stay in the
+ * transcript — removing cancels the auto-run intent, never the record (the
+ * durability rule this module's header already promises). `removed:false`
+ * means the queue already moved on, so a double-click can never remove
+ * twice or remove someone else's message. */
+/** Result of removing one queued send: whether it was found, plus the
+ * post-removal snapshot so the caller can re-render without a refetch. */
+export interface RemoveQueuedSendResult {
+  removed: boolean;
+  queue: SteerQueueSnapshot | null;
+}
+
+export function removeQueuedSend(
+  store: SteerStore,
+  botId: string,
+  messageId: string,
+): RemoveQueuedSendResult {
+  for (const [threadId, entry] of entriesFor(botId)) {
+    const at = entry.items.findIndex((item) => item.messageId === messageId);
+    if (at === -1) continue;
+    entry.items.splice(at, 1);
+    // the transcript's "will send" affordance leaves with the queue item
+    store.patchMessage(threadId, messageId, { queued: undefined });
+    if (!entry.items.length) queues.delete(threadId); // no empty shells behind
+    return { removed: true, queue: snapshotOf(botId) };
+  }
+  return { removed: false, queue: snapshotOf(botId) };
+}
+
+/** Hold (or release) every queue entry for a bot. A held entry is skipped
+ * by drain — even while the bot is idle — until an explicit resume. False
+ * when this bot has nothing waiting: there is no queue to hold. */
+export function setSteerQueuePaused(botId: string, paused: boolean): boolean {
+  const entries = entriesFor(botId);
+  if (!entries.length) return false;
+  for (const [, entry] of entries) entry.paused = paused;
+  return true;
+}
+
 /** Drain every queue whose bot is idle: one run per thread, prompt = the
  * queued texts joined with newlines. `userMessage` is the last queued
  * message so the caller's startTurn appends nothing new — the messages are
@@ -92,6 +166,9 @@ export function drainSteeredMessages(
       queues.delete(threadId);
       continue;
     }
+    // held by the user: wait for an explicit resume — even an idle bot
+    // must not spend words the strip is still promising to send later
+    if (entry.paused) continue;
     if (bot.busy) continue; // still working — the next settle tries again
     // committed to draining: the entry leaves the map before anything runs,
     // so a settle racing another settle can never fire the same queue twice

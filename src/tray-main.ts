@@ -9,7 +9,7 @@
 // draws exactly the character the web app draws, one source of truth.
 import { MUSTER_BODY } from "@/components/MusterMascot";
 import { FLOWER_POSES, poseFor, type FlowerPose } from "@/lib/musterbot/flower";
-import { resolveTrayView, type TrayBotInput } from "@/lib/mascot/tray-state";
+import { countWaitingOnYou, resolveTrayView, type TrayBotInput } from "@/lib/mascot/tray-state";
 
 /** Slim roster poll: the tray draws only names, status lines and focus
  * (src/lib/mascot/tray-state.ts), never transcripts — messages=0 keeps
@@ -21,6 +21,7 @@ const flowerBody = document.querySelector<SVGGElement>(".flower-body");
 const flowerSvg = document.querySelector<SVGSVGElement>("#flower");
 const flowerPath = document.querySelector<SVGPathElement>("#flower-path");
 const statusEl = document.querySelector<HTMLDivElement>("#status");
+const badgeEl = document.querySelector<HTMLDivElement>("#badge");
 const linesEl = document.querySelector<HTMLDivElement>("#lines");
 const quietEl = document.querySelector<HTMLDivElement>("#quiet");
 const eyes = document.querySelectorAll<SVGRectElement>(".flower-eye");
@@ -78,6 +79,14 @@ function render(bots: TrayBotInput[]): void {
       : mood === "working" ? "Agents working"
       : mood === "settled" ? "Work settled"
       : "All quiet";
+  }
+  // The badge line (slice 5): the count behind "Waiting on you", the same
+  // number the menu-bar status item shows. Presentation only — it renders
+  // a number and never acts on one; the human answers on the card.
+  const waiting = countWaitingOnYou(bots);
+  if (badgeEl) {
+    badgeEl.hidden = waiting === 0;
+    badgeEl.textContent = waiting > 0 ? `${waiting} waiting on you` : "";
   }
   if (linesEl) {
     linesEl.replaceChildren(

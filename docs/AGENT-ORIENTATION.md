@@ -52,6 +52,7 @@ so you never repeat work.
 | How should agents behave on this codebase? (per-slice rules) | `skills/mascot/SKILL.md`, this file |
 | Where did the mascot references come from? (Novra GrokBot, botato, LaoA…) | `docs/research/mascot-character-study-2026-09-18.md` |
 | Release process, mirror, signing, who is blocked on what | `docs/release-mirror.md`, remaining-work-plan §4/§8 |
+| App Store Connect / Xcode Cloud / TestFlight access (auth is set up) | `docs/guides/asc-cli.md` |
 | Backup/Drive boundary, what never gets claimed | `docs/plans/portable-backup-contract-2026-09-12.md` |
 | OpenMausBot / Grok Bot competitive gaps | `docs/plans/competitive-landscape.md`, `docs/plans/landing-reference-study-2026-09-10.md` |
 | What production serves right now (verified GET receipts) | ceo-log Loop116, current-state Loop116 |

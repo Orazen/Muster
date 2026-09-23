@@ -408,3 +408,24 @@ export interface WorkspaceBackupCapability {
 let eventCounter = 0;
 export const newEventId = () => `ev-${Date.now().toString(36)}-${(eventCounter++).toString(36)}`;
 export const newId = () => crypto.randomUUID();
+
+// ── follow-up queue snapshot (the composer's multi-item strip) ─────────
+// The steer-queue's wire shape. The client renders ONLY this snapshot:
+// what drained, was removed, or died with a restart is absent, never
+// re-promised.
+
+/** One send waiting for a busy bot: its persisted message id, the thread
+ * it landed in, and the words (already visible in the transcript). */
+export interface QueuedSendMessage {
+  messageId: string;
+  threadId: ThreadId;
+  text: string;
+}
+
+export interface SteerQueueSnapshot {
+  botId: string;
+  /** The user's hold: a held queue is skipped by the drain until an
+   * explicit resume releases it. */
+  paused: boolean;
+  items: QueuedSendMessage[];
+}

@@ -15,7 +15,7 @@
 // The resulting connection descriptor is written to
 // <userData>/cua-connection.json for the harness server to hand to drivers.
 
-import { app, ipcMain } from "electron";
+import { app, desktopCapturer, ipcMain, systemPreferences } from "electron";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import fs from "node:fs";
@@ -23,6 +23,7 @@ import net from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createCuaRuntime, registerCuaRuntimeIpc } from "./cua-runtime.mjs";
+import { thumbnailIndicatesCapture } from "./desktop-permission-probe.mjs";
 
 const require = createRequire(import.meta.url);
 const { createCuaConnectionStore } = require("./cua-connection.cjs");
@@ -85,10 +86,39 @@ async function loadEmbeddedSdk() {
   return import(pathToFileURL(path.join(process.resourcesPath, "cua-sdk", "cua-sdk.mjs")).href);
 }
 
+// Fresh desktop-permission evidence for the runtime's stale-preflight retry.
+// WHY: the Screen Recording comment in main.mjs documents that on macOS 15+
+// every pre-grant/preflight mechanism caches per-process — the SDK's check
+// wraps CGPreflightScreenCaptureAccess, which stays denied for the whole
+// session after the user grants and may never prompt. The reliable paths are
+// the real Accessibility prompt and the first real in-process capture, so
+// measure those instead of trusting the preflight.
+async function requestDesktopPermissions() {
+  let accessibility = false;
+  try {
+    // prompt: true fires the reliable Accessibility prompt on first need;
+    // the false read afterwards observes what the prompt just produced.
+    systemPreferences.isTrustedAccessibilityClient(true);
+    accessibility = systemPreferences.isTrustedAccessibilityClient(false);
+    // One real capture: on macOS 15+ this is the only reliable Screen
+    // Recording request and evidence path (main.mjs's screen:frame does the
+    // same); the first source's thumbnail proves pixels actually came back.
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width: 64, height: 64 },
+    });
+    return { accessibility, screenRecording: thumbnailIndicatesCapture(sources[0]?.thumbnail) };
+  } catch {
+    // Fail closed: keep the accessibility state already read, and never
+    // claim Screen Recording from a capture that produced no usable pixels.
+    return { accessibility, screenRecording: false };
+  }
+}
+
 const runtime = createCuaRuntime({
   connectionStore, resolveDriverBinary, loadEmbeddedSdk,
   wantEmbedded: () => app.isPackaged || process.env.MUSTER_CUA_EMBEDDED === "1",
-  standaloneSocket: STANDALONE_SOCKET, socketAlive,
+  standaloneSocket: STANDALONE_SOCKET, socketAlive, requestDesktopPermissions,
 });
 
 export const initializeCua = () => runtime.initialize();

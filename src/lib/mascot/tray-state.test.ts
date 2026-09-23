@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveTrayView, trayStatusFor, type TrayBotInput } from "./tray-state";
+import { countWaitingOnYou, resolveTrayView, trayStatusFor, type TrayBotInput } from "./tray-state";
 import { statusForBotActivity } from "./character";
 
 function bot(overrides: Partial<TrayBotInput> = {}): TrayBotInput {
@@ -62,5 +62,28 @@ describe("resolveTrayView — one bot in focus, the rest in sight", () => {
       if (view.status === "idle") expect(view.line).toBe("");
       else expect(view.line.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("countWaitingOnYou — the badge line's number", () => {
+  it("counts every waiting bot and nothing else", () => {
+    expect(
+      countWaitingOnYou([
+        bot({ id: "a", activity: "waiting-on-you" }),
+        bot({ id: "b", busy: true }),
+        bot({ id: "c", activity: "waiting-on-you" }),
+        bot({ id: "d" }),
+      ]),
+    ).toBe(2);
+    expect(countWaitingOnYou([])).toBe(0);
+  });
+
+  it("matches resolveTrayView's attention mood: waiting ⇒ count ≥ 1", () => {
+    const waiting = resolveTrayView([bot({ id: "a" }), bot({ id: "b", activity: "waiting-on-you" })]);
+    expect(waiting.mood).toBe("attention");
+    expect(countWaitingOnYou([bot({ id: "a" }), bot({ id: "b", activity: "waiting-on-you" })])).toBe(1);
+    const quiet = resolveTrayView([bot({ id: "a" })]);
+    expect(quiet.mood).not.toBe("attention");
+    expect(countWaitingOnYou([bot({ id: "a" })])).toBe(0);
   });
 });

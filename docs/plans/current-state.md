@@ -664,6 +664,20 @@ test 9m12s · build 49s, all green, exit 0. Local full suite after the fix: **36
 deployment — the fix's push, Dokploy rebuild and GET-only prod probe
 follow this entry; deployment is claimed only once observed.
 
+### Combined batch — release asset repair, desktop permission loop, composer queue parity, tray badge, four documents, readme media (23 September 2026, Loop191)
+
+**Verified gates (fresh full run, all green):** `tsc` server 0 / web 0; oxlint **0 warnings, 0 errors** (972 files); vitest **366 files / 5462 passed / 8 skipped / 0 failed** (532.2s — up from the 363/5407/8/0 baseline, no decrease); updater node-test exit 0; desktop-lifecycle exit 0; broker 1 file / 2 passed exit 0; packaged-server smoke **14/14** exit 0; Playwright **40/40** (3.9m) exit 0.
+
+- **Release asset download repaired** — `deploy-downloads` resolves the release id, lists the sub-resource (`/releases/:id/assets`, `state=uploaded`), downloads each asset by its own upload URL, and fails loud on zero assets or zero bytes; `release-payload.mjs mirror` remains the completeness gate. Root cause reproduced: tag/list endpoints denormalized `assets: 0` while the sub-resource held 25 uploaded for release 394421520 (v1.16.0). 226/226 across the three release test files + mocked shell paths 3/3 (happy / empty / zero-byte). The already-rescued 1.16.0 mirror (external Loop 180 receipt) needs no re-run; the fix carries the next tag.
+- **Desktop computer-access enable loop closed** — new pure `electron/desktop-permission-probe.mjs` (BGRA bitmap walk + fail-closed PNG decode) plus an injected `requestDesktopPermissions` (AX prompt + one real `desktopCapturer` capture) whose empirical evidence can override the SDK's stale cached preflight; legacy error strings, standalone branch and IPC names untouched. 89/89 across 4 files incl. the fail → grant → same-session retry regression.
+- **Composer queue parity (OpenMuse S2)** — `SteerQueueSnapshot` wire type + GET/PATCH queue + DELETE entry routes; `QueuedSendStrip` with per-item remove and opt-in Hold/Resume; stop-then-steer auto-drain stays the default (X1 e2e intact); words remain in the transcript on remove. 29/29 touched tests.
+- **Tray badge (TipTour S5)** — read-only menu-bar badge (new badge module + Tray wiring + tray surface + mascot tray-state); 22/22; no answer/decline paths.
+- **Documents** — `openbot-integration-study` (522 lines: CopilotKit/openbot **MIT** vs nightly-labs/openbot **PolyForm Noncommercial** → semantics-only re-implementation; email-OTP already ~70% shipped → slices S1–S3), `pocketctrl-integration-study` (600 lines), `iphone-duo-skills-integration-study` (~410 lines), `local-first-architecture-plan-2026-09-23` (**996 lines**, all 13 required sections, cloud-relay reconciliation, P0–P9 phased plan with P1 = `StorageProvider` seam; dual data roots and the web-surface gap flagged), asc-cli guide + orientation doc-map row. README hero/tagline rewrite verified present (swept into external `f63396e`); its six `readme-*` captures land in this commit.
+- **Concurrency/attribution** — external docs stream committed status-page/AGENTS/mirror-ledger reconciliations (`f63396e`) plus remote bot trigger `3b7305c` mid-batch; staging was explicit-paths only; excluded set (`www/*`, `.commandcode/`, `.freebuff/`, `.zcode/`, `docs/research/glm/*`, `marketing-video/`, `www/fonts/`, `www/templates.html`) untouched.
+- **A5** closed with evidence, zero source edits (WAL plateaus at SQLite's 1000-page autocheckpoint).
+
+**Owner-held gates unchanged:** Jev provider choice; Actions billing (Windows/Linux legs); Xcode Cloud auto-cancel start condition (App Store Connect setting); Mimosa scanner re-run outstanding — no security claims; Google OAuth/Drive credentials; App Store/TestFlight submission via `asc` stays gated; retention 7/7/4/6 confirmations; decision-harness script registration.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

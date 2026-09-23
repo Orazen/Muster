@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { drainSteeredMessages, queueSteeredMessage, _queuedCount, type SteerStore } from "./steer-queue.ts";
+import { drainSteeredMessages, queueSteeredMessage, removeQueuedSend, setSteerQueuePaused, steerQueueSnapshot, _queuedCount, type SteerStore } from "./steer-queue.ts";
 import type { BotRecord, Message } from "./store.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -205,6 +205,95 @@ describe("steer-queue module", () => {
   });
 });
 
+describe("steer-queue snapshot, per-item remove, and hold", () => {
+  it("snapshots every waiting send for the bot, in queue order", () => {
+    const bot = fakeBot("bot-snap", "thread-snap", true);
+    const store = fakeStore([bot]);
+    const first = queueSteeredMessage(store, bot, "first note");
+    const second = queueSteeredMessage(store, bot, "second note");
+    expect(steerQueueSnapshot("bot-snap")).toEqual({
+      botId: "bot-snap",
+      paused: false,
+      items: [
+        { messageId: first.id, threadId: "thread-snap", text: "first note" },
+        { messageId: second.id, threadId: "thread-snap", text: "second note" },
+      ],
+    });
+    // nothing waiting for anyone else — the strip renders NOTHING, not an
+    // empty promise (a flag stranded by a restart looks the same)
+    expect(steerQueueSnapshot("bot-elsewhere")).toBeNull();
+    // consume so module state never leaks into another test
+    bot.busy = false;
+    drainSteeredMessages(store, () => {});
+    expect(_queuedCount("thread-snap")).toBe(0);
+  });
+
+  it("removes ONE send: words stay in the thread, the rest still drain joined", () => {
+    const bot = fakeBot("bot-rm", "thread-rm", true);
+    const store = fakeStore([bot]);
+    const keepA = queueSteeredMessage(store, bot, "keep a");
+    const dropB = queueSteeredMessage(store, bot, "drop b");
+    const keepC = queueSteeredMessage(store, bot, "keep c");
+    const result = removeQueuedSend(store, "bot-rm", dropB.id);
+    expect(result.removed).toBe(true);
+    expect(result.queue?.items.map((item) => item.text)).toEqual(["keep a", "keep c"]);
+    // the survivors (keep a / keep c) are still the ones waiting to send
+    expect(result.queue?.items.map((item) => item.messageId)).toEqual([keepA.id, keepC.id]);
+    // the words are never deleted — only the auto-run intent leaves with it
+    expect(store.messages.find((m) => m.id === dropB.id)).toMatchObject({ text: "drop b" });
+    expect(store.messages.find((m) => m.id === dropB.id)?.queued).toBeUndefined();
+    expect(store.messages.find((m) => m.id === keepA.id)?.queued).toBe(true);
+    // a double-click (or a drain that already ran) can never remove twice
+    expect(removeQueuedSend(store, "bot-rm", dropB.id).removed).toBe(false);
+    expect(removeQueuedSend(store, "bot-nobody", keepA.id).removed).toBe(false);
+    bot.busy = false;
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0][2]).toBe("keep a\nkeep c");
+    expect(store.messages.filter((m) => m.queued)).toHaveLength(0);
+  });
+
+  it("drops the queue entry when its last send is removed", () => {
+    const bot = fakeBot("bot-last", "thread-last", true);
+    const store = fakeStore([bot]);
+    const only = queueSteeredMessage(store, bot, "only note");
+    expect(removeQueuedSend(store, "bot-last", only.id)).toEqual({ removed: true, queue: null });
+    expect(_queuedCount("thread-last")).toBe(0);
+    bot.busy = false;
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("holds a paused queue across a settle and resumes into one joined turn", () => {
+    const bot = fakeBot("bot-hold", "thread-hold", true);
+    const store = fakeStore([bot]);
+    queueSteeredMessage(store, bot, "held one");
+    queueSteeredMessage(store, bot, "held two");
+    expect(setSteerQueuePaused("bot-hold", true)).toBe(true);
+    // the settle arrives — the hold wins over the default drain
+    bot.busy = false;
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(run).not.toHaveBeenCalled();
+    expect(_queuedCount("thread-hold")).toBe(2);
+    expect(store.messages.every((m) => m.queued)).toBe(true);
+    expect(steerQueueSnapshot("bot-hold")).toMatchObject({
+      paused: true,
+      items: [{ text: "held one" }, { text: "held two" }],
+    });
+    // resume releases the hold: the next drain spends them together
+    expect(setSteerQueuePaused("bot-hold", false)).toBe(true);
+    drainSteeredMessages(store, run);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0][2]).toBe("held one\nheld two");
+    expect(_queuedCount("thread-hold")).toBe(0);
+    // nothing waiting — holding a queue that does not exist says so
+    expect(setSteerQueuePaused("bot-hold", true)).toBe(false);
+  });
+});
+
 // ── e2e: the real server on the gated fake ACP fleet ───────────────────
 describe("steer-queue e2e (fake ACP fleet)", () => {
   let child: ChildProcess;
@@ -213,6 +302,8 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
   let drainGate: string;
   let stopGate: string;
   let stopRpcDump: string;
+  let holdGate: string;
+  let holdRpcDump: string;
 
   /** the flat command payloads these tests POST/PATCH */
   type ApiBody = Record<string, string | boolean | { instanceId: string; model: string }>;
@@ -255,6 +346,8 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
     drainGate = join(home, "gates", "drain.gate");
     stopGate = join(home, "gates", "stop.gate");
     stopRpcDump = join(home, "gates", "stop.rpc");
+    holdGate = join(home, "gates", "hold.gate");
+    holdRpcDump = join(home, "gates", "hold.rpc");
     writeFileSync(
       join(home, ".muster", "config.json"),
       JSON.stringify({
@@ -273,6 +366,17 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
               FAKE_ACP_MODE: "echo-gated",
               FAKE_ACP_GATE_FILE: stopGate,
               FAKE_ACP_RPC_DUMP: stopRpcDump,
+            },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
+          // its own gate + RPC dump for the hold/resume e2e, so the gates
+          // earlier tests open cannot leak into this one's busy window
+          steerHold: {
+            driver: "grokAgent",
+            environment: {
+              FAKE_ACP_MODE: "echo-gated",
+              FAKE_ACP_GATE_FILE: holdGate,
+              FAKE_ACP_RPC_DUMP: holdRpcDump,
             },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
@@ -420,6 +524,78 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
       const replies = echoes(snapshot);
       expect(replies).toHaveLength(1);
       expect(replies[0].text).toContain("after stop please");
+    },
+    60_000,
+  );
+
+  it(
+    "holds the queue across an interrupt and resumes it into one joined turn",
+    async () => {
+      const bot = await newBot("steerHold", "Holdable");
+
+      const first = await api("POST", `/api/bots/${bot.id}/messages`, { text: "job to stop" });
+      expect(first.status).toBe(202);
+      expect((await botById(bot.id)).busy).toBe(true);
+
+      const one = await api("POST", `/api/bots/${bot.id}/messages`, { text: "hold entry" });
+      const two = await api("POST", `/api/bots/${bot.id}/messages`, { text: "survivor note" });
+      expect(one.body.queued).toBe(true);
+      expect(two.body.queued).toBe(true);
+
+      // the strip's snapshot: both waiting, not held
+      let queue = (await api("GET", `/api/bots/${bot.id}/queue`)).body.queue;
+      expect(queue.paused).toBe(false);
+      expect(queue.items.map((i: any) => i.text)).toEqual(["hold entry", "survivor note"]);
+
+      // per-item remove: one send leaves the queue, its words stay put
+      const removed = await api("DELETE", `/api/bots/${bot.id}/queue/${one.body.messageId}`);
+      expect(removed.status).toBe(200);
+      expect(removed.body.queue.items.map((i: any) => i.text)).toEqual(["survivor note"]);
+      let snapshot = await botById(bot.id);
+      const dropped = snapshot.messages.find((m: any) => m.id === one.body.messageId);
+      expect(dropped.text).toBe("hold entry");
+      expect(dropped.queued).toBeUndefined();
+
+      // hold the survivor, then stop the turn mid-flight
+      const held = await api("PATCH", `/api/bots/${bot.id}/queue`, { paused: true });
+      expect(held.status).toBe(200);
+      expect(held.body.queue.paused).toBe(true);
+
+      // wait for the prompt to be genuinely in flight before stopping it
+      await until(async () => {
+        try {
+          return readFileSync(holdRpcDump, "utf8").includes("session/prompt");
+        } catch {
+          return false;
+        }
+      }, "the hung prompt");
+      expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+
+      // AFTER STOP the hold wins: the bot settles idle and the survivor
+      // still waits — exactly what the strip's resume chip acts on
+      await until(async () => !(await botById(bot.id)).busy, "the interrupt to settle");
+      snapshot = await botById(bot.id);
+      expect(snapshot.messages.find((m: any) => m.id === two.body.messageId).queued).toBe(true);
+      queue = (await api("GET", `/api/bots/${bot.id}/queue`)).body.queue;
+      expect(queue.paused).toBe(true);
+      expect(echoes(snapshot)).toHaveLength(0);
+
+      // resume releases the hold AND drains at once (the bot is idle — no
+      // settle is coming), then let the joined turn finish
+      expect((await api("PATCH", `/api/bots/${bot.id}/queue`, { paused: false })).status).toBe(200);
+      writeFileSync(holdGate, "open");
+      await until(async () => {
+        snapshot = await botById(bot.id);
+        return !snapshot.busy && echoes(snapshot).length >= 1;
+      }, "the resumed turn");
+
+      const replies = echoes(snapshot);
+      // ONE joined turn for the survivor; the removed send never ran
+      expect(replies).toHaveLength(1);
+      expect(replies[0].text).toContain("survivor note");
+      expect(replies[0].text).not.toContain("hold entry");
+      // consumed: the snapshot the strip renders is gone, not stale
+      expect((await api("GET", `/api/bots/${bot.id}/queue`)).body.queue).toBeNull();
     },
     60_000,
   );

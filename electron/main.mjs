@@ -1,7 +1,7 @@
 // Configure an explicitly selected profile before any dependency captures
 // Electron paths or creates credentials, logs, sockets or child processes.
 import { desktopProfile } from "./profile-paths.mjs";
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, MenuItem, safeStorage, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, MenuItem, nativeImage, safeStorage, session, shell, systemPreferences, Tray, utilityProcess } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ import { openBlankTerminal } from "./terminal-launch.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 import { createServerLifecycle } from "./server-lifecycle.mjs";
+import { badgeText, countWaitingOnYou, pendingMenuLabel, trayTooltip } from "./tray-badge.mjs";
 
 const { desktopCapabilities } = capabilitiesModule;
 
@@ -80,11 +81,111 @@ function registerTrayIpc() {
   });
   // The tray page asks the main process to reveal a bot in the main window.
   ipcMain.handle("tray:focus-app", () => {
-    const win = BrowserWindow.getAllWindows().find((candidate) => candidate !== trayWindow && !candidate.isDestroyed());
-    if (!win) return;
-    win.show();
-    win.focus();
+    focusAppWindow();
   });
+}
+
+/** Focus the app window a human decides in (never the tray companion).
+ * Answers false when every window is closed — the caller decides whether
+ * that means "open a fresh one". */
+function focusAppWindow() {
+  const win = BrowserWindow.getAllWindows().find((candidate) => candidate !== trayWindow && !candidate.isDestroyed());
+  if (!win) return false;
+  win.show();
+  win.focus();
+  return true;
+}
+
+// ── menu-bar status item ───────────────────────────────────────────────
+// A tray icon beside the mascot window (tiptour study, slice 5): it shows
+// how many bots are waiting on a human, so pending approvals are visible
+// without opening anything. Presentation only — the badge reads, it never
+// answers a card: a click opens the window where the human decides, and
+// the context menu runs the SAME functions the tray:* IPC handlers run
+// (one path, no second behavior). The count polls the same slim roster
+// feed the tray window uses (no transcripts), from the main process so it
+// keeps ticking while that window is hidden.
+const STATUS_POLL_MS = 10_000;
+const STATUS_FETCH_TIMEOUT_MS = 4_000;
+let statusItem = null;
+let statusCount = 0;
+let statusPollTimer = null;
+let statusPollBusy = false;
+
+function statusMenuTemplate() {
+  return [
+    { label: "Open Muster", click: () => openAppWindow() },
+    { label: "Mascot Companion", click: () => toggleTrayWindow() },
+    { type: "separator" },
+    // A disabled read-out, not an action: approving stays on the card.
+    { label: pendingMenuLabel(statusCount), enabled: false },
+    { type: "separator" },
+    { label: "Quit Muster", click: () => app.quit() },
+  ];
+}
+
+function openAppWindow() {
+  // macOS keeps running with every window closed — "Open Muster" must
+  // never be a dead click from the menu bar.
+  if (!focusAppWindow()) createWindow();
+}
+
+function applyPendingCount(count) {
+  if (!statusItem || statusItem.isDestroyed() || count === statusCount) return;
+  statusCount = count;
+  statusItem.setToolTip(trayTooltip(count));
+  // setTitle draws the badge line beside the icon; it is a macOS API.
+  if (process.platform === "darwin") statusItem.setTitle(badgeText(count));
+  statusItem.setContextMenu(Menu.buildFromTemplate(statusMenuTemplate()));
+  slog(`status item waiting=${count}`);
+}
+
+async function pollPendingCount() {
+  if (statusPollBusy || !statusItem || statusItem.isDestroyed()) return;
+  // Packaged: while the embedded server is down there is nothing to read —
+  // keep the last count instead of flashing zero over a restart.
+  if (app.isPackaged && !serverReady) return;
+  statusPollBusy = true;
+  try {
+    const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/bots?messages=0`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(STATUS_FETCH_TIMEOUT_MS),
+    });
+    if (response.ok) applyPendingCount(countWaitingOnYou(await response.json()));
+  } catch {
+    // A restarting server answers with a dead socket; the next tick re-reads.
+  } finally {
+    statusPollBusy = false;
+  }
+}
+
+function startStatusItem() {
+  try {
+    // The window icon ships at 512px; the menu bar wants a small one.
+    const icon = nativeImage.createFromPath(APP_ICON).resize({ width: 32, height: 32 });
+    statusItem = new Tray(icon.isEmpty() ? APP_ICON : icon);
+  } catch (error) {
+    // A host without a system tray (some Linux sessions) simply runs
+    // without a status item — the View-menu toggle still reaches the tray.
+    slog(`status item unavailable: ${error instanceof Error ? error.message : error}`);
+    return;
+  }
+  statusItem.setToolTip(trayTooltip(statusCount));
+  if (process.platform === "darwin") statusItem.setTitle(badgeText(statusCount));
+  statusItem.setContextMenu(Menu.buildFromTemplate(statusMenuTemplate()));
+  // Left click opens the app window: the badge marks work waiting on a
+  // human, so it goes where that human decides — the mascot companion
+  // stays one menu item away.
+  statusItem.on("click", () => openAppWindow());
+  void pollPendingCount();
+  statusPollTimer = setInterval(() => void pollPendingCount(), STATUS_POLL_MS);
+}
+
+function stopStatusItem() {
+  if (statusPollTimer !== null) {
+    clearInterval(statusPollTimer);
+    statusPollTimer = null;
+  }
 }
 
 // GNOME groups the window with its installed desktop entry only when both
@@ -798,6 +899,7 @@ app.whenReady().then(async () => {
   });
   registerUpdaterIpc();
   registerTrayIpc();
+  startStatusItem();
   // View menu gains the tray companion toggle (all platforms). A hidden
   // tray window is reachable again from here even after it was closed.
   const menu = Menu.getApplicationMenu();
@@ -857,6 +959,7 @@ const CUA_STOP_TIMEOUT_MS = 2500;
 let cuaCleanedUp = false;
 let quitCleanupStarted = false;
 app.on("before-quit", (e) => {
+  stopStatusItem();
   if (cuaCleanedUp) { slog("desktop shutdown final quit accepted"); return; }
   e.preventDefault();
   if (quitCleanupStarted) return;

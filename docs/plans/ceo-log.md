@@ -8720,3 +8720,47 @@ same remote helper — generation `release-1.16.0-7d74cc5d…` now serves
 `latest.json` (version 1.16.0, sha abfbd82, published 08:13:02Z) with all
 binaries probing 200 from the public edge. The 1.14.1 → 1.16.0 auto-update
 path is live for every platform.
+
+## Loop191 — 2026-09-23 — six agents, one batch: a release endpoint that lied, a permission prompt that never fired, and the local-first plan (23 September 2026)
+
+The v1.16.0 `deploy-downloads` failure was a denormalization race: the tag/list
+endpoints reported `assets: 0` while the release sub-resource listed all 25
+uploads as `state=uploaded`, so `gh release download` faithfully answered "no
+assets to download" for a fully published release. The step now resolves the
+release id, lists `/releases/:id/assets`, downloads each uploaded asset by its
+own URL, and refuses loudly on an empty list or a zero-byte file — the mirror
+completeness check stays with `release-payload.mjs`. Reproduced locally first,
+then mocked through all three paths (happy, empty, zero-byte); 226/226 across
+the three release suites. The already-rescued 1.16.0 mirror needs no re-run of
+the old attempt; the next tag simply cannot hit this.
+
+The desktop computer-access loop — "Accessibility and Screen Recording
+required…" forever — was the SDK trusting a per-process preflight cache that
+never invalidated after a mid-session grant, so no prompt could ever fire. The
+fix adds a pure probe module (bitmap walk + fail-closed PNG decode) and an
+injected empirical request: one AX trust prompt plus one real `desktopCapturer`
+capture; when both prove access, the fresh evidence overrides the stale read
+and the embedded host starts. The exact fail → grant → retry loop is now a
+regression test (89/89 across four files); error strings, the standalone
+branch, and every IPC name are unchanged.
+
+Between them the batch shipped composer queue parity (the study's queue strip
+with per-item remove and an opt-in Hold that respects the stop-then-steer
+auto-drain contract instead of breaking it), the read-only tray badge, four
+documents — three integration studies plus the 996-line local-first
+architecture plan that reconciles the owner's new brief with the locked
+cloud-relay strategy — and the asc guide. The README rewrite was verified
+present after the external docs stream swept it into f63396e; its six fresh
+screenshots commit here.
+
+Gates, fresh and full: tsc 0/0, lint 0/0 (972 files), vitest 366 files / 5462
+passed / 8 skipped / 0 failed, updater/lifecycle/broker/packaged all exit 0
+(14/14 smoke), Playwright 40/40 — no decrease from the 363/5407/8/0
+baseline. Staging was explicit-paths only: the excluded parallel set (www,
+scratch dirs, glm research, marketing-video) stayed untouched while the
+concurrent stream committed its own docs and a bot trigger landed on the
+remote; the push merged them with --no-rebase.
+
+Owner gates remain: Jev provider choice, Actions billing, the App Store
+Connect auto-cancel toggle, OAuth credentials, and the Mimosa re-run (which
+still forbids any security claim).

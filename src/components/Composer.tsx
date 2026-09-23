@@ -1,7 +1,7 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, AudioLines, Clock, Mic, Square, Target, Users, X } from "lucide-react";
-import { useStore, useStopCleanup, visibleMessages, type Bot, type Group } from "@/state/store";
+import { useStore, useStopCleanup, visibleMessages, api, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { startCall } from "@/lib/call";
 import { getDictation } from "@/lib/dictation";
@@ -20,7 +20,7 @@ import { commandQueryAt, matchCommands, type ComposerCommand, type ComposerComma
 import { MAX_IMAGE_BYTES, uploadImageAttachment } from "@/lib/image-upload";
 import { normalizeState } from "@/lib/mascot";
 import { groupComposerHint } from "@/lib/group-routing";
-import { modelAcceptsImages } from "../../server/contracts";
+import { modelAcceptsImages, type SteerQueueSnapshot } from "../../server/contracts";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 
@@ -41,6 +41,67 @@ function mentionQueryAt(text: string, caret: number): { start: number; query: st
 }
 
 type MentionChoice = { id: string; name: string; bot?: Bot };
+
+/** The 1:1 follow-up queue as a strip above the composer: every send the
+ * busy bot is holding, each one removable, all of them behind the
+ * hold/resume chip — OpenMuse's multi-item queue adapted onto Muster's
+ * persisted messages (the same words still live in the transcript above).
+ * Pure by design: it renders the server's snapshot and never acts on its
+ * own, so server-rendered tests can pin the markup without a store. */
+export function QueuedSendStrip({
+  queue,
+  busyName,
+  onRemove,
+  onSetPaused,
+}: {
+  queue: SteerQueueSnapshot | null;
+  busyName: string;
+  onRemove: (messageId: string) => void;
+  onSetPaused: (paused: boolean) => void;
+}) {
+  if (!queue || !queue.items.length) return null;
+  const { items, paused } = queue;
+  return (
+    <div className="mb-2 overflow-hidden rounded-lg border border-hairline/40 bg-panel text-[12.5px] text-ink-secondary">
+      <div className="flex items-center gap-2 border-b border-hairline/30 px-3 py-2">
+        <Clock size={13} className="shrink-0" />
+        <span className="min-w-0 flex-1 truncate">
+          {paused
+            ? `Queue paused — ${items.length} ${items.length === 1 ? "message holds" : "messages hold"}, nothing sends until you resume`
+            : `Queued — sends when ${busyName} finishes · ${items.length}`}
+        </span>
+        <button
+          onClick={() => onSetPaused(!paused)}
+          aria-label={paused ? "Resume queued messages" : "Hold the queue"}
+          title={paused ? "Release the hold — the queue drains as one turn" : "Hold the queue — nothing sends until you resume"}
+          className={cn(
+            "shrink-0 rounded-full border px-2.5 py-1 text-[11.5px] font-medium transition-colors",
+            paused
+              ? "border-accent/50 bg-accent/10 text-accent hover:bg-accent/20"
+              : "border-hairline/40 hover:bg-raised hover:text-ink",
+          )}
+        >
+          {paused ? "Resume queued messages" : "Hold"}
+        </button>
+      </div>
+      <ul>
+        {items.map((item) => (
+          <li key={item.messageId} className="flex items-center gap-2 px-3 py-1.5">
+            <span className="min-w-0 flex-1 truncate">{item.text}</span>
+            <button
+              onClick={() => onRemove(item.messageId)}
+              aria-label="Remove queued message"
+              title="Take this message off the queue"
+              className="shrink-0 rounded p-0.5 hover:bg-raised hover:text-ink"
+            >
+              <X size={13} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function Composer({
   bot,
@@ -224,6 +285,59 @@ export function Composer({
     if (value) queuedSends.set(group.id, value);
     else queuedSends.delete(group.id);
   };
+  // ── 1:1 follow-up queue (S2): the server's steer-queue, as a strip ──
+  // Rooms keep their single parked strip below; a 1:1 thread shows every
+  // send the busy bot is holding — each removable, held and resumed
+  // together behind the chip. The snapshot is the ONLY queue state the
+  // strip renders: what drained (or what a restart stranded) is absent
+  // rather than re-promised. Refetches ride the same SSE patches that
+  // update the transcript's queued flags: any flag-count change or busy
+  // edge means the queue itself may have moved.
+  const [queue, setQueue] = useState<SteerQueueSnapshot | null>(null);
+  const botId = bot?.id;
+  const isRoom = Boolean(group);
+  const queuedFlags = bot && !group ? bot.messages.filter((m) => m.role === "user" && m.queued).length : 0;
+  const refreshQueue = useCallback(async () => {
+    if (isRoom || !botId) return;
+    try {
+      // SAFETY: GET /api/bots/:id/queue always answers {queue} — the route's
+      // only other reply shapes are 4xx errors, which api() throws on.
+      const body = (await api(`/api/bots/${botId}/queue`)) as { queue: SteerQueueSnapshot | null };
+      setQueue(body.queue);
+    } catch {
+      // the strip is advisory: keep the last snapshot instead of flicker
+    }
+  }, [botId, isRoom]);
+  useEffect(() => {
+    void refreshQueue();
+  }, [refreshQueue, queuedFlags, busy]);
+  const removeQueued = async (messageId: string) => {
+    if (!botId) return;
+    try {
+      // SAFETY: DELETE /api/bots/:id/queue/:messageId answers {queue} on
+      // success; 404 "not queued" and other 4xxs are thrown by api().
+      const body = (await api(`/api/bots/${botId}/queue/${messageId}`, { method: "DELETE" })) as {
+        queue: SteerQueueSnapshot | null;
+      };
+      setQueue(body.queue);
+    } catch {
+      void refreshQueue(); // already drained elsewhere — resync, don't lie
+    }
+  };
+  const holdQueue = async (paused: boolean) => {
+    if (!botId) return;
+    try {
+      // SAFETY: PATCH /api/bots/:id/queue answers {queue} on success; a
+      // 400/404 reply is a 4xx, which api() throws before this runs.
+      const body = (await api(`/api/bots/${botId}/queue`, {
+        method: "PATCH",
+        body: JSON.stringify({ paused }),
+      })) as { queue: SteerQueueSnapshot | null };
+      setQueue(body.queue);
+    } catch {
+      void refreshQueue();
+    }
+  };
   // a chip on its own is a message: the send control has to appear for it
   const hasContent = Boolean(text.trim()) || attachments.length > 0;
   // Goal mode: the next send starts a bounded autonomy loop instead of a
@@ -373,6 +487,14 @@ export function Composer({
         </div>
       )}
       <div className="relative mx-auto max-w-[900px]">
+        {bot && !group && (
+          <QueuedSendStrip
+            queue={queue}
+            busyName={busyName}
+            onRemove={(messageId) => void removeQueued(messageId)}
+            onSetPaused={(paused) => void holdQueue(paused)}
+          />
+        )}
         {queued && (
           <div className="mb-2 flex items-center gap-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[12.5px] text-ink-secondary">
             <Clock size={13} className="shrink-0" />

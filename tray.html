@@ -38,6 +38,14 @@
       #flower.breathe { animation: breathe 2.8s ease-in-out infinite; }
       @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
       #status { font-weight: 600; font-size: 13px; letter-spacing: 0.01em; }
+      /* The badge line (slice 5): a count of who waits on you. Reports
+       * only — it is not a button, and answering stays on the card. */
+      #badge {
+        font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+        color: #141414; background: #f08a24;
+        border-radius: 999px; padding: 2px 9px;
+      }
+      #badge[hidden] { display: none; }
       #lines { display: flex; flex-direction: column; gap: 3px; align-items: center; max-width: 240px; }
       .line { color: var(--ink-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
       .line:focus { outline: none; }
@@ -53,6 +61,7 @@
       </g>
     </svg>
     <div id="status" role="status" aria-live="polite"></div>
+    <div id="badge" hidden></div>
     <div id="lines"></div>
     <div id="quiet" hidden>Open Muster to meet your team.</div>
     <script type="module" src="/src/tray-main.ts"></script>

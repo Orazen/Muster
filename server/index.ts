@@ -144,7 +144,7 @@ import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages, stopCleanupJournal } from "./message-db.ts";
 import { _loadPending, discardDelegations, discardDelegationSnapshot, snapshotDelegations, drainDelegations, pendingThreads, queueDelegation, type DelegationSnapshot } from "./delegations.ts";
-import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
+import { drainSteeredMessages, queueSteeredMessage, removeQueuedSend, setSteerQueuePaused, steerQueueSnapshot } from "./steer-queue.ts";
 import { DecisionLog, queryAudit } from "./decision-log.ts";
 import { approvalWhy } from "./approval-why.ts";
 import { currentPlan, rehearsePlan } from "./plan-rehearsal.ts";
@@ -7716,6 +7716,40 @@ let requestUserEmail = "";
       if (message) return json(res, 202, { ok: true, threadId, message });
       return json(res, 202, { ok: true, threadId });
     }
+
+    // ── follow-up queue controls: the composer's multi-item strip ──────
+    // The snapshot is the ONE queue state a client renders: what drained,
+    // was removed, or died with a restart is simply absent, never
+    // re-promised. Ownership already ran through the /api/bots/:id choke
+    // point above, so these handlers only check existence.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/queue$/);
+    if (m && method === "GET") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { ok: true, queue: steerQueueSnapshot(bot.id) });
+    }
+    if (m && method === "PATCH") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const body = await readBody(req);
+      if (body.paused !== true && body.paused !== false) return json(res, 400, { error: "paused must be true or false" });
+      if (!setSteerQueuePaused(bot.id, body.paused)) return json(res, 404, { error: "nothing queued for this bot" });
+      // Resume releases the hold AND drains at once: with the bot idle no
+      // settle is coming, so nothing else would ever run the held words.
+      if (!body.paused) drainQueuedSends();
+      return json(res, 200, { ok: true, queue: steerQueueSnapshot(bot.id) });
+    }
+    if (m) return json(res, 405, { error: "Use GET for the queue snapshot or PATCH {paused} to hold/resume it." });
+
+    m = path.match(/^\/api\/bots\/([\w-]+)\/queue\/([\w-]+)$/);
+    if (m && method === "DELETE") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const removed = removeQueuedSend(store, bot.id, m[2]);
+      if (!removed.removed) return json(res, 404, { error: "not queued" });
+      return json(res, 200, { ok: true, queue: removed.queue });
+    }
+    if (m) return json(res, 405, { error: "Use DELETE to take one message off the queue." });
 
     // start a goal on this bot: round 1 dispatches now, the loop continues
     // across turns until the marker, the round budget, or Stop
