@@ -121,6 +121,9 @@ describe("RoutineManager", () => {
   it("reuses a dedicated destination thread across runs and falls back when it dies", async () => {
     let liveThread: string | null = "fixed-thread";
     const h = harness();
+    // SAFETY: harness() always returns a manager built from these exact
+    // options, so widening the handle to RoutineManagerOptions exposes the
+    // taskThread seam the test overrides — no other shape is possible here.
     (h.options as RoutineManagerOptions).taskThread = (_botId, threadId) =>
       liveThread === threadId ? threadId : null;
     const routine = h.manager.create({
