@@ -8853,3 +8853,12 @@ slices and one open engineering item (blockmap mirror copy). All closed this loo
 
 **Gates on the final tree:** tsc 0 · oxlint 0 · vitest 369 files / 5,573 passed ·
 build ✓ · e2e 40/40 · CI green on main.
+
+## Loop 197 — 2026-09-23: cut v1.17.0 — first release with verified delta-update blockmaps
+
+Version bump 1.16.0 → 1.17.0. This tag carries the Loop 196 blockmap work: mac
+legs upload only `*.zip.blockmap` (pairing byte-exact), the payload validator
+rejects stale blockmap↔binary pairs, and the mirror deploy stages blockmaps
+from this release forward. Expected receipt: 1.16.0 → 1.17.0 updates download
+the full installer once (1.16.0's mirror generation predates blockmap staging);
+1.18.0+ ships true deltas.
