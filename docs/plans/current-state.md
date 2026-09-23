@@ -608,6 +608,43 @@ re-run outstanding), the Jev-vs-Laya-remote provider choice (owner),
 A5, the decision-request size cap (follow-up before any call site is
 wired).
 
+### Deploy pipeline repair — the image build context learns about the tray entry (23 September 2026, Loop190)
+
+**Reported:** the owner's Dokploy dashboard shows the last 10
+deployments all `error` (~4–5 min each, spanning `6e2fc90`,
+`46d8115`, `6801b16` and the batch-2 push `2608ccf`); production
+still serves the pre-batch build.
+
+**Root cause (reproduced, not guessed):** `f889c54` (18 Sep)
+registered `tray: "tray.html"` as Vite's second rollup input, but the
+image build stage only `COPY`d `index.html`. A local `docker build`
+of the exact pushed tree (`git archive 2608ccf`) failed `exit 1` at
+`pnpm build` with `Could not resolve entry module "tray.html"` —
+matching Dokploy's uniform failure duration. CI never caught it: CI
+checks out the full tree; only the Docker context was short one file.
+The breaking change dates to 18 Sep; the dashboard's last-10 window
+only reaches ~6 hours back, so the full failure history isn't
+observable there.
+
+**Fix:** `Dockerfile` and `Dockerfile.cloud` now copy `tray.html`;
+`Dockerfile.cloud` also gains the missing `COPY e2e e2e` (server
+tests import the e2e harness — the same TS2307 the main file already
+documents).
+
+**Verification (real numbers):** post-fix repro of the same context
+**passed `exit 0`** (`muster-repro:trayfix`): vite emitted both
+entries (`dist/index.html`, `dist/tray.html`), `build:server` green
+(dist-server bundles + better-sqlite3 prebuilt), runtime stage
+exported. Batch-2 CI run `35832895983`: lint 24s · typecheck 40s ·
+test 9m12s · build 49s, all green, exit 0. Local full suite after the fix: **363 files / 5407 passed / 8 skipped /
+0 failed** (514.85s, exit 0 — matches the accepted batch-2 baseline
+363/5407/8/0, no decrease).
+
+**Disclosed:** the in-image build runs node 22 against
+`engines >=23.4` (WARN only, pre-existing). **Not claimed:**
+deployment — the fix's push, Dokploy rebuild and GET-only prod probe
+follow this entry; deployment is claimed only once observed.
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

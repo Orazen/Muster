@@ -8661,3 +8661,41 @@ provenance-gated memory retrieval, browser-panel and approval-card work.
 
 Version bumped 1.15.0 → 1.16.0 (package.json is the sole version source) and
 tagged; release run monitored below.
+
+## Loop190 — 2026-09-23 — the deploy pipeline learns about the tray: Dokploy's error streak, root cause, fix, local repro (23 September 2026)
+
+The owner surfaced the Dokploy deployments page: the last ten
+deployments all `error`, ~4–5 min each, across both batch pushes
+(`6e2fc90`/`46d8115`/`6801b16` and batch-2's `2608ccf`) — which is
+why GET-only probes kept seeing the pre-batch build. Diagnosis ran
+repo-side because no Dokploy API key exists in env and the webhook
+must not be re-poked: tsconfigs, manifests and CI all looked clean,
+so the exact pushed tree was reproduced with `git archive 2608ccf`
+into a clean context and a local `docker build`.
+
+**Reproduced failure (exit 1):** `Could not resolve entry module
+"tray.html"` at `pnpm build` — `f889c54` (18 Sep) added `tray` as
+Vite's second rollup input in `vite.config.ts`, but the build stage
+only ever copied `index.html`. CI never sees this (full checkout);
+only the Docker context was short the file, so every image build
+died at the same step — the uniform 4–5 min Dokploy failures.
+
+**Fix:** both `Dockerfile` and `Dockerfile.cloud` now copy
+`tray.html`; `Dockerfile.cloud` additionally gains the missing
+`COPY e2e e2e` (server tests import the harness — the same TS2307
+the main file already documents).
+
+**Verification (real numbers):** post-fix repro **exit 0**
+(`muster-repro:trayfix`) — vite built both entries
+(`dist/index.html`, `dist/tray.html`), `build:server` green,
+runtime image exported. Batch-2 CI run `35832895983` all green
+(lint 24s · typecheck 40s · test 9m12s · build 49s, exit 0).
+Local full suite after the fix: **363 files / 5407 passed / 8 skipped /
+0 failed** (514.85s, exit 0 — accepted batch-2 baseline 363/5407/8/0
+matched, no decrease).
+
+**Disclosed:** in-image build runs node 22 against
+`engines >=23.4` (WARN only, pre-existing). **Not claimed:**
+deployment — push → Dokploy rebuild → GET-only prod probe follow;
+claimed only when observed. Security scanner re-run and the
+Jev-vs-Laya-remote provider choice remain open (owner).

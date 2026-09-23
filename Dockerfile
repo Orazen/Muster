@@ -26,7 +26,9 @@ RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-COPY tsconfig.json tsconfig.server.json tsconfig.server.build.json vite.config.ts index.html ./
+# tray.html is the second rollup input in vite.config.ts — without it the
+# in-image vite build dies on "Could not resolve entry module tray.html".
+COPY tsconfig.json tsconfig.server.json tsconfig.server.build.json vite.config.ts index.html tray.html ./
 COPY src src
 COPY server server
 # server tests import the browser harness from e2e/, and pnpm build
