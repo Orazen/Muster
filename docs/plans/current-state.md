@@ -1,5 +1,24 @@
 
 
+### Status of record — 23 September 2026 (automation resumed; two full releases shipped)
+
+The 19 September owner stop below is historical; the owner resumed work on
+20 September and every claim in this header carries a run receipt. The release
+pipeline is fully unblocked and has shipped twice end to end: **v1.15.0**
+(run 35787841535, 2026-09-22) and **v1.16.0** (run 35833992110, 2026-09-23) —
+each with all seven jobs green (pin, four platform legs, publish, VPS deploy),
+notarized macOS artifacts, and the download mirror at
+muster.orazen.online/downloads serving the release (dot-directories 404,
+feeds `no-cache`; verified 2026-09-23). The former blockers are closed:
+Actions billing is resolved, ASC secrets were repaired (CI notarization now
+passes; all prior releases were stapled locally), VPS SSH works from CI and
+locally, and the Windows icon fix landed the first green Windows leg.
+Known incident, fixed: GitHub's tag/list release endpoints served a stale
+asset list for ~20 min after publish (release 394421520), so the deploy
+workflow now downloads via the assets sub-resource. CI on main is green and
+the 23 September local gate held: 365 files / 5,430 tests passed / 8 skipped,
+e2e 40/40, both typechecks and oxlint clean.
+
 ### Owner stop / superseding Loop144 handoff — 19 September 2026
 
 Goal PAUSED at owner's request. Loop144 remains UNCOMMITTED; no product push or

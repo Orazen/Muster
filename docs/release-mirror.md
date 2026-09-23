@@ -131,31 +131,36 @@ client behavior and release state.
 ## Production acceptance still required
 
 The repository does not contain the actual download server's route or mount
-configuration. Before executing the first migration, establish a trusted VPS
-connection and verify its real directory, mount and serving configuration.
-The local read-only SSH preflight on 2026-09-11 stopped at unknown host-key
-verification; it did not execute remote code or change trust settings.
-The latest release run inspected at that time, `34470403198`, failed before
-builds started with GitHub's account-payment/spending-limit annotation. There
-was no newer successful run. Codex subscription allowance is separate; no
-release retry or billing change was made by this slice.
+configuration. The production acceptance below was executed against the real
+mirror, not assumed from local fixtures.
 
-The serving configuration must allow the public aliases to resolve inside the
-mounted root, while denying direct URL access to internal dot directories and
-state. Check cache behavior for mutable feeds and aliases. Four public metadata
-GETs on 2026-09-11 returned 200 and version 1.10.4 with versioned updater targets,
-but had no `Cache-Control` header; that is not proof of the underlying cache
-configuration. Validate GET responses and their versioned target hashes through
-the actual server after a candidate is approved for publication.
+- 2026-09-22 (v1.15.0, run 35787841535): first complete pipeline release —
+  pin, four platform legs, publish and VPS deploy all green; the legacy flat
+  metadata was migrated in place from actual on-disk bytes, with the short
+  sha and file hashes cross-checked against the v1.13.0 tag before promotion.
+- 2026-09-23 (v1.16.0, run 35833992110): second complete release. The deploy
+  leg initially failed because GitHub's tag/list release endpoints served a
+  stale denormalized asset list for ~20 minutes after publish while
+  `releases/{id}` and the assets sub-resource were fresh; the workflow now
+  downloads through the assets sub-resource, and the mirror was promoted
+  through the same remote helper (generation `release-1.16.0-7d74cc5d…`).
+
+Serving configuration verified from the public edge on 2026-09-23: internal
+dot directories and state (`.incoming`, `.generations`, `.current`,
+`.promotion.lock`, `.mirror-state.json`) are not served (404), and mutable
+feeds plus stable binaries return `cache-control: no-cache`, so every client
+revalidates aliases while versioned targets stay hash-verified through the
+feeds.
 
 Local tests use inert installer bytes, owned temporary roots, actual subprocess
 interruption/locking and an ephemeral loopback HTTP server. Native updater,
 installer, signing and platform acceptance gates remain separate. The mirror
 does not yet copy uploaded blockmaps, so full-download fallback is expected;
 successful differential updating has not been verified. CLI build/verification
-is now in the source release workflow, but public downloads remain 1.10.4 until
-a new candidate actually passes release and deployment acceptance. A source
-version bump or locally built candidate does not publish an installer.
+runs in the source release workflow, and the mirror currently serves 1.16.0
+(two consecutive candidates have passed release and deployment acceptance).
+A source version bump or locally built candidate still does not publish an
+installer.
 
 References: [GitHub concurrency behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
 does not guarantee release dispatch ordering; filesystem promotion therefore

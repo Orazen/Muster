@@ -356,3 +356,31 @@ Status changes since the ranked list above — all committed and gated:
    snapshotId on the wire (`e2e/workspace-backup.e2e.spec.ts`). Gate
    evidence: tsc both configs 0; oxlint 0/901 files; vitest 325 files /
    4,856 passed / 0 failed; Playwright e2e 42/42.
+
+### Continuation status (2026-09-23 — release pipeline certified twice; docs reconciled)
+
+9. **Release pipeline: the §4/§8 "release identity" item is closed in
+   practice.** v1.15.0 (run 35787841535, 09-22) and v1.16.0 (run
+   35833992110, 09-23) both shipped with all seven jobs green — pin,
+   Windows, macOS arm64, macOS Intel (now sign+notarize parity with arm64),
+   Linux, publish, VPS deploy. ASC secrets repaired (CI notarization passes
+   for the first time; all 1.14.x releases were stapled locally); the
+   Windows icon that broke resedit was fixed (f326ede); the mirror serves
+   1.16.0 with dot-directories 404 and `no-cache` feeds (edge-verified
+   09-23). New failure mode found and fixed in the deploy workflow: GitHub's
+   tag/list release endpoints served a stale asset list for ~20 min after
+   publish, so downloads now go through the assets sub-resource.
+10. **Docs reconciled to shipped reality (this loop).**
+    `docs/release-mirror.md` "Production acceptance still required" replaced
+    with the two executed production migrations + serving-contract
+    verification; `docs/plans/current-state.md` got a 09-23 status-of-record
+    header (the 19-09 owner-stop text below it is preserved as history);
+    README/AGENTS.md no longer describe Actions as blocked or automation as
+    paused. Gate evidence on the merged tree: tsc (both configs) 0,
+    oxlint 0, vitest 365 files / 5,430 passed / 8 skipped, e2e 40/40,
+    CI green on main (84f07b3).
+
+Still open, unchanged: blockmap copy to the mirror (differential updates
+unverified), owner-gated Xcode Cloud pin to stable Xcode, physical-device
+acceptance (iPhone/Watch/Android hardware), hosted recovery/sync and
+multi-tenant hardening.

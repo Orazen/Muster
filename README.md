@@ -3,16 +3,17 @@
 
 # Muster
 
-**A workspace for your team of AI agents.**
+**A local-first workspace for your roster of named AI teammates — the decisions stay human.**
 
 [Open Muster](https://muster.orazen.online/app) · [Desktop downloads](https://muster.orazen.online/download.html) · [Product docs](https://muster.orazen.online/docs)
 
-<img src="docs/screenshots/app-chat.png" alt="Muster workspace: a conversation with a named AI teammate streaming a reply" width="820">
+<img src="docs/screenshots/readme-workspace.png" alt="Muster workspace: a named AI teammate mid-turn, Stop control live, streaming its reply" width="820">
 
 </div>
 
 Muster brings named AI teammates, conversations, tools and human decisions into one workspace.
-Use the desktop or web interface to give work to a bot, follow its progress, and respond when a supported engine requests a decision.
+Hand a teammate a task from the desktop or web interface, follow its reply as it streams, and answer when a supported engine asks for a decision — allow once, always allow, or deny.
+The roster, threads and history live with your own copy of the server, so the team is yours to run.
 
 This is Muster's **private product repository**, maintained by Tharun Ramagiri at Orazen.
 It contains the desktop application, server, web interface, CLI and companion clients.
@@ -21,14 +22,16 @@ Repository access is for authorized development and operation of Muster.
 ## The product, in screenshots
 
 All images below are real repository-owned captures (`docs/screenshots/`); none are mockups or stock media.
+They were taken from a local run of this checkout against the repository's own test fixtures, so short fixture
+replies such as `hello from fake acp` and the `echo hi` approval are fixture output.
 
-| Muster OS desktop shell | Human approval moment |
+| Human approval moment | Why-journal reply |
 |---|---|
-| <img src="docs/screenshots/os-desktop.png" alt="Muster OS desktop surface" width="480"> | <img src="docs/screenshots/approval-card.png" alt="An OptionCard approval waiting on a human decision" width="480"> |
+| <img src="docs/screenshots/readme-approval.png" alt="An OptionCard approval waiting on a human decision" width="480"><br><sub>Zephyr asks before running a command: the plan is rehearsed, the evidence sits on the card, and Deny / Always allow / Allow once stay your call.</sub> | <img src="docs/screenshots/readme-why-journal.png" alt="A why-journal reply with WHY, DECISIONS, HYPOTHESIS and FINDINGS" width="480"><br><sub>Once allowed, the turn closes with a why-journal reply — WHY, DECISIONS, HYPOTHESIS, FINDINGS — plus the tools it used and the model it ran on.</sub> |
 
-| Connected apps | Per-bot model choice | Bot settings | Computer surface | iOS companion |
-|---|---|---|---|---|
-| <img src="docs/screenshots/marketplace.png" alt="Connected apps marketplace" width="190"> | <img src="docs/screenshots/model-picker.png" alt="Per-bot model picker" width="190"> | <img src="docs/screenshots/bot-settings.png" alt="Bot configuration panel" width="190"> | <img src="docs/screenshots/computer-panel.png" alt="Bot computer-use panel" width="190"> | <img src="docs/screenshots/iphone-roster.png" alt="MusterMobile roster on iPhone" width="190"> |
+| Per-bot model picker | Bot settings | Phone width |
+|---|---|---|
+| <img src="docs/screenshots/readme-model-picker.png" alt="Per-bot model picker with cloud and local engines" width="320"><br><sub>Each teammate picks its own engine and model — cloud engines and local models in one picker.</sub> | <img src="docs/screenshots/readme-bot-settings.png" alt="Bot settings panel with character, color and name" width="320"><br><sub>Character, color and name, per teammate.</sub> | <img src="docs/screenshots/readme-phone.png" alt="The Muster workspace at phone width" width="150"><br><sub>The same workspace at phone width.</sub> |
 
 ## Product surfaces
 
@@ -112,7 +115,7 @@ Per-role benchmark grading runs offline via `muster bench capture.json scorecard
 - [Desktop and CLI publication contract](docs/release-mirror.md)
 - [Release workflow](.github/workflows/release.yml) and [CI workflow](.github/workflows/ci.yml)
 - [Install on your own iPhone and Watch](docs/guides/personal-iphone-watch-install.md) using a Personal Team
-- [Verification while GitHub Actions is blocked](docs/guides/verification-without-actions.md)
+- [Verification without GitHub Actions](docs/guides/verification-without-actions.md)
 - [iOS and Watch testing](ios/TESTING.md), [mobile release](docs/mobile-release.md), [Android release](docs/android-release.md)
 - [Android companion development](android-companion/README.md)
 
