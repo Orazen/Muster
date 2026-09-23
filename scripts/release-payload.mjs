@@ -1,7 +1,8 @@
 // Validate downloaded release bytes before publishing or copying a feed.
 // This is a local filesystem gate; release/draft provenance stays in CI.
 import { createHash } from "node:crypto";
-import { constants, createReadStream } from "node:fs";
+import { constants, createReadStream, readFileSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
 import { lstat, readdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -54,6 +55,29 @@ async function inventory(assetsDir, version) {
     files.set(name, await regularFile(join(assetsDir, name)));
   }
   return files;
+}
+
+// Parse an electron-builder blockmap: gzip JSON whose outermost file entry
+// carries chunk sizes summing to the paired binary's byte length when the
+// pair is in sync.
+function blockmapChunkTotal(path) {
+  let raw;
+  try {
+    raw = gunzipSync(readFileSync(path));
+  } catch {
+    return fail(`Blockmap is not valid gzip: ${path}`);
+  }
+  let doc;
+  try {
+    doc = JSON.parse(raw.toString("utf8"));
+  } catch {
+    return fail(`Blockmap is not valid JSON: ${path}`);
+  }
+  const sizes = doc?.files?.[0]?.sizes;
+  if (!Array.isArray(sizes) || !sizes.every((entry) => Number.isSafeInteger(entry) && entry > 0)) {
+    return fail(`Blockmap has no chunk sizes: ${path}`);
+  }
+  return { chunkTotal: sizes.reduce((total, entry) => total + entry, 0) };
 }
 
 function parseFeed(text, name) {
@@ -186,6 +210,13 @@ export async function validateReleasePayload(options) {
   // every delta update falls back to a full re-download. Adopt any blockmap
   // whose binary is already mirrored and whose bytes are covered by that
   // platform's checksum file, so only verified bytes reach the inventory.
+  // The blockmap must also describe its binary exactly: the differ asserts
+  // downloadSize+copySize === new-file size and aborts on mismatch, and a
+  // blockmap generated before a later rewrite of the binary (e.g. stapler
+  // touching the DMG's koly trailer) desynchronizes chunk offsets — the
+  // delta then always falls back to a full download. Pairing drift is a
+  // packaging bug, so it fails validation rather than shipping a blockmap
+  // that can never produce a delta.
   if (requireComplete) {
     const binaryOf = (name) => name.slice(0, -".blockmap".length);
     for (const name of files.keys()) {
@@ -194,6 +225,12 @@ export async function validateReleasePayload(options) {
       if (!selected.has(binary)) continue;
       const checksumsFile = CHECKSUMS.find((item) => checksumEntries.get(item)?.has(name));
       if (!checksumsFile) fail(`Unverified blockmap cannot be mirrored: ${name}`);
+      await digest(name);
+      const { size: binarySize } = await digest(binary);
+      const { chunkTotal } = blockmapChunkTotal(join(assetsDir, name));
+      if (chunkTotal !== binarySize) {
+        fail(`Stale blockmap for ${binary}: covers ${chunkTotal} bytes but the binary is ${binarySize} bytes — regenerate the binary before staging (blockmap is emitted before late rewrites like codesign stapling)`);
+      }
       selected.add(name);
     }
   }

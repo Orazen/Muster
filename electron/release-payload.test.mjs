@@ -1,10 +1,11 @@
 // Owned byte fixtures exercise release metadata; no installers are executed.
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { stringify } from "yaml";
+import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { prepareMirrorPayload, runReleasePayload, validateReleasePayload } from "../scripts/release-payload.mjs";
 
@@ -26,6 +27,15 @@ function feed(name, names, overrides = {}) {
 function checksums(name, names) {
   put(name, names.map((item) => `${hash(bytes(item), "sha256", "hex")}  ${item}`).join("\n") + "\n");
 }
+// electron-builder's blockmap: gzip JSON whose outermost file entry carries
+// chunk sizes summing to the paired binary's byte length.
+const putBlockmap = (name, binaryName) => {
+  const total = bytes(binaryName).length;
+  const chunk = 64 * 1024;
+  const sizes = Array.from({ length: Math.ceil(total / chunk) }, (_, index) => Math.min(chunk, total - index * chunk));
+  const contents = gzipSync(JSON.stringify({ version: "2", files: [{ name: "file", offset: 0, checksums: sizes.map(() => "x".repeat(68)), sizes }] }));
+  return put(name, contents);
+};
 function complete(intel = false, archNames = ["amd64", "x86_64"]) {
   const dmg = `Muster-${version}.dmg`, zip = `Muster-${version}-arm64.zip`, exe = `Muster-${version}-setup.exe`;
   const deb = `Muster-${version}-${archNames[0]}.deb`, appimage = `Muster-${version}-${archNames[1]}.AppImage`;
@@ -119,7 +129,7 @@ describe("release payload validation", () => {
     // the allowlist once missed it and the first complete CI release failed
     // publish with "Stale or unexpected versioned asset".
     const { dmg } = complete();
-    put(`${dmg}.blockmap`);
+    putBlockmap(`${dmg}.blockmap`, dmg);
     await expect(validateReleasePayload(options(false))).resolves.toBeTruthy();
   });
 
@@ -307,7 +317,7 @@ describe("release mirror and CLI", () => {
     const { dmg, zip, exe } = complete(true);
     // electron-builder's actual emission: the main DMG's blockmap plus a blockmap
     // beside every Windows exe and each mac zip. Linux ships none.
-    put(`${dmg}.blockmap`); put(`${zip}.blockmap`); put(`${exe}.blockmap`);
+    putBlockmap(`${dmg}.blockmap`, dmg); putBlockmap(`${zip}.blockmap`, zip); putBlockmap(`${exe}.blockmap`, exe);
     checksums("SHA256SUMS-macos-arm64.txt", [dmg, zip, "Muster.dmg", `${dmg}.blockmap`, `${zip}.blockmap`]);
     checksums("SHA256SUMS-macos-x64.txt", [`Muster-${version}-intel.dmg`, `Muster-${version}-x64.zip`, "Muster-intel.dmg"]);
     checksums("SHA256SUMS-windows-x64.txt", [exe, `${exe}.blockmap`]);
@@ -320,6 +330,20 @@ describe("release mirror and CLI", () => {
     // latest.json stays installer-only: differential downloads fetch blockmaps by
     // convention, so the manifest contract is unchanged.
     expect(Object.keys(result.latest.files)).not.toContain(`${dmg}.blockmap`);
+  });
+
+  it("refuses a blockmap whose chunk total no longer matches its binary (stale pairing)", async () => {
+    // electron-builder emits the DMG blockmap before stapler rewrites the
+    // koly trailer, so a blockmap can describe bytes that no longer exist.
+    // The differ would abort on its size assertion and fall back to a full
+    // download every time, so the pair must fail validation, not the delta.
+    const { zip } = complete(true);
+    const stale = putBlockmap(`${zip}.blockmap`, zip);
+    appendFileSync(join(assetsDir, zip), Buffer.alloc(2048, 0)); // binary grows after the blockmap was cut
+    checksums("SHA256SUMS-macos-arm64.txt", [`Muster-${version}.dmg`, zip, "Muster.dmg", `${zip}.blockmap`]);
+    feed("latest-mac.yml", [zip]);
+    await expect(prepareMirrorPayload(options())).rejects.toThrow(/Stale blockmap/);
+    expect(stale).toBeTruthy();
   });
 
   it("refuses to mirror a blockmap whose bytes no checksum file covers", async () => {
