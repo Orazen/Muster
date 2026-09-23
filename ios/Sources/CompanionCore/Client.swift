@@ -2,9 +2,10 @@
 //
 // Everything the phone can do to the harness, in one place. The rules it
 // encodes come from the default-deny policy in `companion/src/routes.ts`: a
-// paired phone may chat, answer approvals, and read rooms — it may not touch
-// credentials, pairing, or the Local VM. Those routes are simply absent here
-// rather than present and failing at runtime.
+// paired phone may chat, answer approvals, read rooms, and read the computer's
+// storage/snapshot status — it may not touch credentials, pairing, backup
+// settings, or the Local VM. Those routes are simply absent here rather than
+// present and failing at runtime.
 import Foundation
 
 public enum APIError: Error, LocalizedError, Sendable {
@@ -204,6 +205,46 @@ public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport, A
 
     public func config() async throws -> ConfigStatus {
         try await send(try makeRequest("GET", "/api/config"), as: ConfigStatus.self)
+    }
+
+    // MARK: - Local-first status (read-only)
+
+    private func statusRequest(_ path: String) throws -> URLRequest {
+        var request = try makeRequest("GET", path)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+        return request
+    }
+
+    public func workspaceBackupCapability() async throws -> WorkspaceBackupCapability {
+        try await send(try statusRequest("/api/workspace/google/status"), as: WorkspaceBackupCapability.self)
+    }
+
+    public func localSnapshotStatus() async throws -> LocalSnapshotStatus {
+        try await send(try statusRequest("/api/workspace/snapshots/policy"), as: LocalSnapshotStatus.self)
+    }
+
+    /// Read the computer's current storage and automatic-snapshot facts. A
+    /// missing snapshot view is deliberately a partial report rather than a
+    /// failed whole-card read: the capability answer is still useful, and the
+    /// phone can say that snapshot details were not reported.
+    public func localFirstStatus() async throws -> LocalFirstStatus {
+        let capability = try await workspaceBackupCapability()
+        try Task.checkCancellation()
+
+        guard capability.workspaceBackupAvailable == true else {
+            return LocalFirstStatus(capability: capability)
+        }
+
+        do {
+            let snapshot = try await localSnapshotStatus()
+            try Task.checkCancellation()
+            return LocalFirstStatus(capability: capability, snapshot: snapshot)
+        } catch {
+            try Task.checkCancellation()
+            if let apiError = error as? APIError, apiError.isUnauthorized { throw apiError }
+            return LocalFirstStatus(capability: capability, snapshotStatusUnavailable: true)
+        }
     }
 
     /// The pixels of one screen message.

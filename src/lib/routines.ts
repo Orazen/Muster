@@ -53,6 +53,9 @@ export interface Routine {
   notesFile?: string;
   /** Scorecard assertions evaluated against each run's output. */
   checks?: RoutineCheck[];
+  /** Dedicated results thread: every run dispatches into this task so
+   * results accumulate in one continuous log. */
+  destination?: string;
 }
 
 export interface RoutineRun {
@@ -102,4 +105,6 @@ export interface RoutineInput {
   notesFile?: string;
   /** Scorecard assertions (1-3) evaluated against each run's output. */
   checks?: RoutineCheck[];
+  /** Dedicated results thread id: reuse that task for every run. */
+  destination?: string;
 }

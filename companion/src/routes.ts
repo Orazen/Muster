@@ -81,6 +81,11 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // configured-or-not booleans. The write side is refused below: reading
   // which providers are set up is not reading their keys.
   { method: "GET", path: /^\/api\/config$/ },
+  // Read-only facts about the computer's own workspace storage. The phone may
+  // mirror these, but every backup policy change, run, passphrase decision,
+  // restore and export verb remains absent from this surface.
+  { method: "GET", path: /^\/api\/workspace\/google\/status$/ },
+  { method: "GET", path: /^\/api\/workspace\/snapshots\/policy$/ },
   { method: "GET", path: /^\/api\/events$/ },
   { method: "GET", path: /^\/api\/instances$/ },
 

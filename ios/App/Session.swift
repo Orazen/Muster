@@ -45,7 +45,16 @@ final class Session: ObservableObject {
     @Published private(set) var composerDrafts: [ComposerContext: ComposerDraft] = [:]
     @Published private(set) var approvalActions: [ApprovalActionKey: ApprovalActionState] = [:]
     @Published private(set) var connection: Connection?
-    @Published private(set) var status: Status = .unpaired
+    /// The latest read-only storage report from the paired computer. This is
+    /// memory-only: opening Settings may replace it, but no view persists it.
+    @Published private(set) var localFirstStatus: LocalFirstStatus?
+    @Published private(set) var localFirstStatusLoading = false
+    @Published private(set) var localFirstStatusFailed = false
+    @Published private(set) var status: Status = .unpaired {
+        didSet {
+            if status != .live { clearLocalFirstStatus() }
+        }
+    }
     /// Transient, user-facing failures from an action they just took.
     @Published var actionError: String?
     /// One exact message the next opened chat should reveal.
@@ -74,6 +83,12 @@ final class Session: ObservableObject {
     /// first frame that carries it satisfies the request and clears it.
     @Published var pendingOpenThreadId: String?
 
+    private func clearLocalFirstStatus() {
+        localFirstStatus = nil
+        localFirstStatusLoading = false
+        localFirstStatusFailed = false
+    }
+
     private var client: CompanionClient? {
         didSet {
             streamGeneration += 1
@@ -83,6 +98,7 @@ final class Session: ObservableObject {
             composerCoordinator.bind(sessionId: seedSessionId, transport: client)
             approvalViewLease = nil
             approvalCoordinator.bind(sessionId: seedSessionId, transport: client)
+            clearLocalFirstStatus()
         }
     }
     private var pairingGeneration = 0
@@ -305,6 +321,38 @@ final class Session: ObservableObject {
         let deadline = Date().addingTimeInterval(10)
         while status == .connecting, !Task.isCancelled, Date() < deadline {
             try? await Task.sleep(nanoseconds: 120_000_000)
+        }
+    }
+
+    var loadedDataSummary: LocalDataSummary {
+        LocalDataSummary(state: state)
+    }
+
+    /// Read the computer's storage and snapshot status when Settings appears.
+    /// This is deliberately independent of the event stream: a backup can
+    /// finish without producing a fleet frame, and a read-only card must never
+    /// invent a local database or persist the report on the device.
+    func refreshLocalFirstStatus() async {
+        guard status == .live, let client, !localFirstStatusLoading else { return }
+        let identity = seedSessionId
+        localFirstStatus = nil
+        localFirstStatusLoading = true
+        localFirstStatusFailed = false
+        defer { if owns(identity) { localFirstStatusLoading = false } }
+
+        do {
+            let report = try await client.localFirstStatus()
+            guard owns(identity), status == .live, !Task.isCancelled else { return }
+            localFirstStatus = report
+        } catch is CancellationError {
+            // Leaving Settings cancels the read; a replacement task owns the
+            // next one. Do not turn an expected lifecycle event into an error.
+        } catch let error as APIError where error.isUnauthorized {
+            guard owns(identity), !Task.isCancelled else { return }
+            status = .unauthorized
+        } catch {
+            guard owns(identity), status == .live, !Task.isCancelled else { return }
+            localFirstStatusFailed = true
         }
     }
 

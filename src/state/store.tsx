@@ -361,6 +361,7 @@ export interface InstanceInfo {
 export type AppSettingsSection =
   | "general"
   | "workspaces"
+  | "localFirst"
   | "organisation"
   | "brain"
   | "appearance"

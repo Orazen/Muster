@@ -57,8 +57,14 @@ final class WatchSession: ObservableObject {
     @Published private(set) var approvalActions: [ApprovalActionKey: ApprovalActionState] = [:]
     @Published private(set) var composerDrafts: [ComposerContext: ComposerDraft] = [:]
     @Published private(set) var connection: Connection?
+    /// Latest read-only storage facts reported by the paired computer. The
+    /// watch keeps no second copy; opening Settings may replace this report.
+    @Published private(set) var localFirstStatus: LocalFirstStatus?
+    @Published private(set) var localFirstStatusLoading = false
+    @Published private(set) var localFirstStatusFailed = false
     @Published private(set) var status: Status = .unpaired {
         didSet {
+            if status != .live { clearLocalFirstStatus() }
             if status != .live {
                 approvalCoordinator.connectionChanged()
                 composerCoordinator.connectionChanged()
@@ -147,6 +153,12 @@ final class WatchSession: ObservableObject {
         FleetSnapshotStore.publish(fleetSnapshot(state: state, mood: fleetMood))
     }
 
+    private func clearLocalFirstStatus() {
+        localFirstStatus = nil
+        localFirstStatusLoading = false
+        localFirstStatusFailed = false
+    }
+
     private var client: CompanionClient? {
         didSet {
             streamGeneration += 1
@@ -165,6 +177,7 @@ final class WatchSession: ObservableObject {
             calendarBoundContext = nil
             callTarget = nil
             callCoordinator.bind(sessionId: approvalSessionId, transport: client)
+            clearLocalFirstStatus()
         }
     }
     private var pairingGeneration = 0
@@ -438,6 +451,32 @@ final class WatchSession: ObservableObject {
         composerCoordinator.connectionChanged()
         streamTask?.cancel()
         streamTask = nil
+    }
+
+    /// Mirror the paired computer's read-only storage status when the wrist
+    /// opens Settings. There is no watch-owned workspace, policy editor or
+    /// background cache behind this row.
+    func refreshLocalFirstStatus() async {
+        guard status == .live, let client, !localFirstStatusLoading else { return }
+        let identity = approvalSessionId
+        localFirstStatus = nil
+        localFirstStatusLoading = true
+        localFirstStatusFailed = false
+        defer { if approvalSessionId == identity { localFirstStatusLoading = false } }
+
+        do {
+            let report = try await client.localFirstStatus()
+            guard approvalSessionId == identity, status == .live, !Task.isCancelled else { return }
+            localFirstStatus = report
+        } catch is CancellationError {
+            // Leaving Settings ends the wrist-side read; no status error is due.
+        } catch let error as APIError where error.isUnauthorized {
+            guard approvalSessionId == identity, !Task.isCancelled else { return }
+            status = .unauthorized
+        } catch {
+            guard approvalSessionId == identity, status == .live, !Task.isCancelled else { return }
+            localFirstStatusFailed = true
+        }
     }
 
     func setForeground(_ active: Bool) {

@@ -66,6 +66,12 @@ export interface Routine {
   notesFile?: string;
   /** Scorecard assertions evaluated against the settled output. */
   checks?: RoutineCheck[];
+  /** Dedicated results thread: when set, every run of this routine
+   * dispatches into THIS task instead of spawning a fresh one, so the
+   * transcript becomes one continuous log with dated runs. A thread that
+   * was deleted (or that the bot never owned) falls back to a fresh task
+   * for that run — the routine never stalls on a missing destination. */
+  destination?: string;
 }
 
 /** One evaluated assertion on a settled run. */
@@ -131,6 +137,8 @@ export interface RoutineInput {
   notesFile?: string;
   /** Scorecard assertions (1-3) evaluated against each run's output. */
   checks?: RoutineCheck[];
+  /** Dedicated results thread id: reuse that task for every run. */
+  destination?: string;
 }
 
 interface RoutineFile {
@@ -153,6 +161,11 @@ export interface RoutineManagerOptions {
   emit?: (payload: RoutineEvent) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
   createTask: (botId: string, title: string, activate?: boolean) => { threadId: string } | null;
+  /** Liveness probe for a dedicated destination thread: returns the thread
+   * id when that bot owns this task right now, else null. Dispatch reuses
+   * the destination only on a live answer — the stored id is never trusted
+   * on its own. */
+  taskThread?: (botId: string, threadId: string) => string | null | undefined;
   startTurn: (
     botId: string,
     threadId: string,
@@ -229,6 +242,7 @@ function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | 
     iterations: input.iterations === undefined ? undefined : Math.min(12, Math.max(1, Math.round(Number(input.iterations) || 1))),
     notesFile: input.notesFile?.trim().slice(0, 300) || undefined,
     checks: sanitizeChecks(input.checks),
+    destination: input.destination?.trim().slice(0, 64) || undefined,
   };
 }
 
@@ -401,6 +415,7 @@ export class RoutineManager {
       iterations: patch.iterations ?? routine.iterations,
       notesFile: patch.notesFile ?? routine.notesFile,
       checks: patch.checks ?? routine.checks,
+      destination: patch.destination ?? routine.destination,
     });
     if (this.options.botState(clean.botId) === "missing") throw new Error("That bot no longer exists");
     Object.assign(routine, clean, {
@@ -605,7 +620,19 @@ export class RoutineManager {
         }
         // A webhook is an incoming message, so make its task the bot's live
         // chat immediately. Scheduled work remains detached and unobtrusive.
-        const task = this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook");
+        // Dedicated destination: a routine pointed at a specific task
+        // dispatches every run into THAT thread instead of spawning a fresh
+        // one, so its results accumulate in one continuous log. Liveness is
+        // re-checked at dispatch — the task may have been deleted since the
+        // routine was saved — and a dead or foreign thread falls back to a
+        // fresh task for this run rather than stalling the routine.
+        const routineDef = this.routines.find((r) => r.id === run.routineId);
+        const destThread = routineDef?.destination
+          ? this.options.taskThread?.(run.botId, routineDef.destination)
+          : undefined;
+        const task = destThread
+          ? { threadId: destThread }
+          : this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook");
         if (!task) {
           run.status = "failed";
           run.error = "Could not create a task for this run";
@@ -620,7 +647,6 @@ export class RoutineManager {
         this.save();
         this.emitRun(run);
         try {
-          const routineDef = this.routines.find((r) => r.id === run.routineId);
           const basePrompt = run.prompt ?? routineDef?.prompt;
           if (!basePrompt) {
             this.failThread(task.threadId, "The routine was deleted before it could start");

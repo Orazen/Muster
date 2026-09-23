@@ -43,6 +43,19 @@ struct SettingsView: View {
                 }
             }
 
+            if session.connection != nil {
+                Section {
+                    LabeledContent("Computer storage", value: localFirstStorageText)
+                        .accessibilityIdentifier("settings-workspace-storage")
+                    LabeledContent("Loaded on this phone", value: loadedDataText)
+                    LabeledContent("Backup", value: localFirstBackupText)
+                } header: {
+                    Text("Workspace data")
+                } footer: {
+                    Text("Read-only status from your computer. This phone shows the fleet pages it has loaded; the computer remains the workspace source of truth.")
+                }
+            }
+
             Section {
                 if notificationsAreEnabled {
                     notificationRow
@@ -97,7 +110,10 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await session.refreshNotificationAuthorization() }
+        .task(id: session.status) {
+            await session.refreshNotificationAuthorization()
+            await session.refreshLocalFirstStatus()
+        }
         .confirmationDialog(
             "Unpair this phone?",
             isPresented: $confirmingSignOut,
@@ -137,6 +153,43 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var localFirstStorageText: String {
+        if let status = session.localFirstStatus {
+            return status.storageDestination.displayName
+        }
+        if session.localFirstStatusFailed { return "Not reported" }
+        if session.localFirstStatusLoading || session.status == .live { return "Checking…" }
+        return "Not reported"
+    }
+
+    private var loadedDataText: String {
+        let summary = session.loadedDataSummary
+        guard summary.botCount + summary.roomCount + summary.messageCount > 0 else {
+            return "Nothing loaded yet"
+        }
+        return "\(summary.botCount) bots · \(summary.roomCount) rooms · \(summary.messageCount) messages"
+    }
+
+    private var localFirstBackupText: String {
+        guard let snapshot = session.localFirstStatus?.snapshot,
+              session.localFirstStatus?.snapshotStatusUnavailable != true
+        else { return "Not reported" }
+
+        if snapshot.lastOutcome == .failed { return "Last attempt failed" }
+        if let verified = session.localFirstStatus?.lastVerifiedSnapshotAt {
+            return "Verified \(snapshotDate(verified))"
+        }
+        if let success = session.localFirstStatus?.lastSuccessfulSnapshotAt {
+            return "Last successful \(snapshotDate(success))"
+        }
+        return "No snapshot reported"
+    }
+
+    private func snapshotDate(_ milliseconds: Double) -> String {
+        Date(timeIntervalSince1970: milliseconds / 1000)
+            .formatted(date: .abbreviated, time: .shortened)
     }
 
     private var statusText: String {

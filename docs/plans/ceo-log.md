@@ -8934,3 +8934,47 @@ device_id, key envelopes, real device revocation — is untouched and
 still owes its multi-device gate. Push, CI, autodeploy and the GET-only
 production probe follow this entry; deployment is claimed only once
 observed.
+
+## Loop198 — 2026-09-23 — the feature finally shows up where people are: a settings section on the desktop, a read-only truth on the phone and the watch (23 September 2026)
+
+The web wasm-SQLite spike died so this feature could live where the data
+actually is. The desktop gets a Local-first section inside the settings
+surface it already had — no new route, no layout change, invisible in the
+browser build — and it tells the truth it can actually know: data lives
+on this computer by default, Drive is optional and currently connected or
+not, the storage gate is satisfied or not. It does not claim a last-sync
+time or a per-conversation progress bar, because the endpoints it reads
+do not report those, and a progress bar that cannot move is a lie with a
+spinner. Seven tests pin the endpoint contract and the rendering; no
+storage key, no IPC, no server file.
+
+The phone and the watch got the harder brief and the better result. The
+interrupted builder's orphan status file was adopted and then corrected
+where it had guessed: the Telegram destination it advertised has no
+capability field that could ever report it, so it is gone; a connected
+account Drive now outranks the installation backup flag instead of both
+being inferred; raw errors became a boolean "status unavailable"; and the
+file that could present a last success as a completed verification now
+keeps verified and successful timestamps apart. Nothing in the model can
+hold a path, a provider name, a token, a passphrase or history — the
+model is the policy. The watch reads from the computer it is directly
+paired to rather than trusting whatever the phone happens to be holding.
+The companion's route list grew by exactly two read-only GETs, and the
+boundary tests prove that snapshot runs, passphrase writes, workspace
+export and Drive push all stay denied to full and approvals-only devices
+alike.
+
+Receipts, since this is the part that is easy to wave at: swift test 463
+passed with zero failures against a 457 baseline, the parse check is
+clean across all seven Swift files, and a real XcodeGen plus xcodebuild
+run for the generic iOS Simulator succeeded with the app, the embedded
+watch app, the complication, the widget and CompanionCore all compiled
+unsigned. A foreign routines stream is mid-flight in the same tree and
+currently carries one typecheck and one lint error in its own test file;
+they were reported, left alone, and excluded from this commit.
+
+What is deliberately missing is also on the record: nothing tells the
+phone when conversations last synced, so the phone does not say they
+did. That receipt is a bounded server route and it is the next slice, not
+a client-side guess. Push, CI, autodeploy and the GET-only production
+probe follow this entry; deployment is claimed only once observed.

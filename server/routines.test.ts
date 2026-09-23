@@ -118,6 +118,58 @@ describe("RoutineManager", () => {
     expect(h.taskActivations).toEqual([false]);
   });
 
+  it("reuses a dedicated destination thread across runs and falls back when it dies", async () => {
+    let liveThread: string | null = "fixed-thread";
+    const h = harness();
+    (h.options as RoutineManagerOptions).taskThread = (_botId, threadId) =>
+      liveThread === threadId ? threadId : null;
+    const routine = h.manager.create({
+      name: "Standing log",
+      prompt: "Log the state",
+      botId: "agent-2",
+      schedule: { type: "daily", time: "08:01", weekdays: [0, 1, 2, 3, 4, 5, 6] },
+      destination: "fixed-thread",
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    expect(h.started).toEqual([{ botId: "agent-2", threadId: "fixed-thread", prompt: `Log the state${whyPromptSuffix()}` }]);
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", threadId: "fixed-thread" });
+    // No fresh task was spawned for a live destination.
+    expect(h.taskActivations).toEqual([]);
+
+    // Run 2: destination still alive → same thread again.
+    h.setBot("busy");
+    h.setNow(new Date(2026, 7, 18, 8, 1).getTime());
+    await h.manager.tick();
+    h.setBot("ready");
+    await h.manager.tick();
+    expect(h.started[1]!.threadId).toBe("fixed-thread");
+
+    // Run 3: destination deleted → fresh detached task, run still dispatches.
+    liveThread = null;
+    h.setBot("busy");
+    h.setNow(new Date(2026, 7, 19, 8, 1).getTime());
+    await h.manager.tick();
+    h.setBot("ready");
+    await h.manager.tick();
+    expect(h.started[2]!.threadId).toBe("thread-1");
+    // listRuns is newest-first.
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", threadId: "thread-1" });
+  });
+
+  it("keeps the destination in the persisted definition", () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Dated digest",
+      prompt: "Digest the day",
+      botId: "agent-2",
+      schedule: { type: "daily", time: "08:01", weekdays: [1] },
+      destination: "thread-abc",
+    });
+    const reloaded = new RoutineManager(h.options);
+    expect(reloaded.listRoutines()[0]).toMatchObject({ id: routine.id, destination: "thread-abc" });
+  });
+
   it("cancels queued work when a routine is paused", async () => {
     const h = harness();
     h.setBot("busy");

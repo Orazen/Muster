@@ -972,6 +972,16 @@ struct WatchSettingsView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                Section {
+                    LabeledContent("Storage", value: workspaceStorageText)
+                        .accessibilityIdentifier("watch-workspace-storage")
+                    LabeledContent("Backup", value: workspaceBackupText)
+                } header: {
+                    Text("Workspace data")
+                } footer: {
+                    Text("Read-only status from your computer.")
+                }
             }
             if let error = session.actionError {
                 Section { Text(error).foregroundStyle(.red) }
@@ -981,5 +991,36 @@ struct WatchSettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .task(id: session.status) { await session.refreshLocalFirstStatus() }
+    }
+
+    private var workspaceStorageText: String {
+        if let status = session.localFirstStatus {
+            return status.storageDestination.displayName
+        }
+        if session.localFirstStatusFailed { return "Not reported" }
+        if session.localFirstStatusLoading || session.status == .live { return "Checking…" }
+        return "Not reported"
+    }
+
+    private var workspaceBackupText: String {
+        guard let report = session.localFirstStatus,
+              !report.snapshotStatusUnavailable,
+              let snapshot = report.snapshot
+        else { return "Not reported" }
+
+        if snapshot.lastOutcome == .failed { return "Last attempt failed" }
+        if let verified = report.lastVerifiedSnapshotAt {
+            return "Verified \(snapshotDate(verified))"
+        }
+        if let success = report.lastSuccessfulSnapshotAt {
+            return "Last successful \(snapshotDate(success))"
+        }
+        return "No snapshot reported"
+    }
+
+    private func snapshotDate(_ milliseconds: Double) -> String {
+        Date(timeIntervalSince1970: milliseconds / 1000)
+            .formatted(date: .abbreviated, time: .shortened)
     }
 }

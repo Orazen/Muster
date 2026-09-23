@@ -2953,6 +2953,9 @@ routines = new RoutineManager({
     if (task && bot) broadcast({ kind: "bot", bot: publicBot(bot) });
     return task;
   },
+  // A dedicated results destination is honored only when the bot still owns
+  // that task at dispatch time — taskByThread IS the liveness probe.
+  taskThread: (botId, threadId) => store.taskByThread(botId, threadId)?.threadId ?? null,
   startTurn: (botId, threadId, prompt, runOn, triggerSource, onDispatchError) =>
     startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError }),
   interruptTurn: async (botId, threadId, runOn) => {

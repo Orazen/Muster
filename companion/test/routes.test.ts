@@ -32,6 +32,8 @@ describe("what the app may do", () => {
   const calls: Array<[string, string]> = [
     ["GET", "/api/health"],
     ["GET", "/api/config"],
+    ["GET", "/api/workspace/google/status"],
+    ["GET", "/api/workspace/snapshots/policy"],
     ["GET", "/api/events"],
     ["GET", "/api/instances"],
     ["GET", "/api/bots"],
@@ -80,6 +82,8 @@ describe("the chats-and-approvals scope", () => {
   // the opposite of what the setting is for.
   const responsive: Array<[string, string]> = [
     ["GET", "/api/health"],
+    ["GET", "/api/workspace/google/status"],
+    ["GET", "/api/workspace/snapshots/policy"],
     ["GET", "/api/events"],
     ["GET", "/api/bots"],
     ["POST", "/api/bots/bot_123/cards/card_456/answer"],
@@ -178,6 +182,24 @@ describe("what it may not", () => {
       const denial = ask(method, path);
       expect(denial?.status, `${method} ${path}`).toBe(403);
       expect(denial?.error, `${method} ${path}`).toMatch(/on your computer/);
+    }
+  });
+
+  it("keeps every workspace-storage verb on the computer except two GETs", () => {
+    expect(allowed("GET", "/api/workspace/google/status")).toBe(true);
+    expect(allowed("GET", "/api/workspace/snapshots/policy")).toBe(true);
+
+    for (const [method, path] of [
+      ["POST", "/api/workspace/google/status"],
+      ["PUT", "/api/workspace/google/status"],
+      ["POST", "/api/workspace/snapshots/policy"],
+      ["POST", "/api/workspace/snapshots/run"],
+      ["POST", "/api/workspace/snapshots/passphrase"],
+      ["DELETE", "/api/workspace/snapshots/passphrase"],
+      ["POST", "/api/workspace/v2/export"],
+      ["POST", "/api/workspace/google/push"],
+    ]) {
+      expect(allowed(method, path), `${method} ${path}`).toBe(false);
     }
   });
 

@@ -5,12 +5,13 @@
 // The General/Appearance parity rows below adapt OpenMausBot settings
 // (© OpenMausBot contributors, Apache License 2.0).
 import { useEffect, useRef, useState } from "react";
-import { Brain, Building2, Coins, Download, FlaskConical, KeyRound, Monitor, Network, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
+import { Brain, Building2, Coins, Download, FlaskConical, HardDrive, KeyRound, Monitor, Network, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { clearOnboardingGate, analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
 import { TelegramChatChannelCard, WorkspaceSyncCard } from "./WorkspaceSyncCard";
+import { LocalFirstSection } from "./LocalFirstSection";
 import { PortableBackupCard } from "./PortableBackupCard";
 import { SnapshotsCard } from "./SnapshotsCard";
 import { useUpdaterState } from "@/lib/updater";
@@ -38,6 +39,7 @@ import "./settings-modal.css";
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User; keywords: string[] }> = [
   { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "account", "updates", "turn cap", "diagnostics"] },
   { id: "workspaces", label: "Connected workspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "connect", "pair", "switch", "local", "address"] },
+  { id: "localFirst", label: "Local-first", icon: HardDrive, keywords: ["local", "data", "drive", "sync", "storage", "offline"] },
   { id: "organisation", label: "Organisation", icon: Building2, keywords: ["company", "team", "org", "models", "gateway", "policy", "members"] },
   { id: "brain", label: "Brain", icon: Brain, keywords: ["brain", "team context", "shared knowledge", "memory", "brief", "goals"] },
   { id: "appearance", label: "Appearance", icon: Palette, keywords: ["skin", "theme", "colors", "dark mode"] },
@@ -641,7 +643,8 @@ export function SettingsModal() {
 
   // Audit sits before Billing; present whenever the endpoint answers — an
   // empty ledger shows its honest empty state instead of hiding the feature.
-  const sections = [...SECTIONS];
+  // The browser build is a thin client; the Electron preload is the desktop marker.
+  const sections = SECTIONS.filter((entry) => entry.id !== "localFirst" || Boolean(globalThis.window?.ogb));
   if (audit.reachable && auditBotId) {
     sections.splice(sections.length - 1, 0, { id: "audit", label: "Audit", icon: ShieldCheck, keywords: ["decisions", "ledger", "history"] });
     sections.splice(sections.length - 1, 0, { id: "why", label: "Why", icon: NotebookPen, keywords: ["journal", "decisions", "intent", "reasoning", "runs"] });
@@ -814,6 +817,7 @@ export function SettingsModal() {
               </>
             )}
             {section === "workspaces" && <ConnectedWorkspacesSection />}
+            {section === "localFirst" && globalThis.window?.ogb && <LocalFirstSection />}
 
             {section === "organisation" && (
               <Card title="Organisation" subtitle="Company-wide defaults shared by everyone on this workspace.">

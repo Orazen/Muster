@@ -340,6 +340,7 @@ export function RoutineEditor({
   const [overnightIterations, setOvernightIterations] = useState(routine?.iterations ?? 3);
   const [notesFile, setNotesFile] = useState(routine?.notesFile ?? "");
   const [checks, setChecks] = useState<RoutineCheck[]>(routine?.checks ?? []);
+  const [destination, setDestination] = useState(routine?.destination ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const cloudInstance = state.instances.find((instance) => instance.driverKind === "boxAgent");
@@ -354,6 +355,10 @@ export function RoutineEditor({
   const opensandboxReady = Boolean(
     state.config?.opensandbox?.configured && selectedBotInstance?.capabilities?.computerMcp === true,
   );
+  // Dedicated results destination: the chosen bot's own tasks are the only
+  // valid targets. Filtering at save (not just render) means switching the
+  // bot silently drops a destination that belonged to the previous one.
+  const botTasks = bots.find((b) => b.id === botId)?.tasks ?? [];
 
   const save = async () => {
     const input: RoutineInput = {
@@ -367,6 +372,7 @@ export function RoutineEditor({
       iterations: overnight && overnightIterations > 1 ? overnightIterations : undefined,
       notesFile: overnight ? notesFile.trim() || undefined : undefined,
       checks: checks.length > 0 ? checks : undefined,
+      destination: botTasks.some((t) => t.threadId === destination) ? destination : undefined,
       schedule:
         kind === "once"
           ? { type: "once", at: new Date(at).getTime() }
@@ -585,6 +591,26 @@ export function RoutineEditor({
               ))}
             </div>
           </div>
+          <label className="block">
+            <span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">Where do results go?</span>
+            <select
+              value={destination}
+              onChange={(event) => setDestination(event.target.value)}
+              className="w-full rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none focus:border-accent/70"
+            >
+              <option value="">A new task each run (fresh context)</option>
+              {botTasks.map((t) => (
+                <option key={t.threadId} value={t.threadId}>
+                  Continue in “{t.title || "Untitled task"}”
+                </option>
+              ))}
+            </select>
+            <span className="mt-1.5 block text-[11.5px] text-ink-secondary">
+              {destination
+                ? "Every run continues this conversation, building one dated log."
+                : "Each run starts clean, so one job never contaminates the next."}
+            </span>
+          </label>
           <label className="block">
             <span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">What should this teammate do?</span>
             <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={6} placeholder="Check the latest project activity, summarize what changed, and call out anything that needs my attention…" className="w-full resize-y rounded-xl border border-hairline/60 bg-inset px-3.5 py-3 text-[14px] leading-relaxed text-ink outline-none placeholder:text-ink-secondary/60 focus:border-accent/70" />
