@@ -14,13 +14,17 @@ import {
   Copy,
   Cpu,
   Crown,
+  Download,
+  Braces,
   Folder,
   Globe,
   Hand,
   Loader2,
+  MessageSquareText,
   Monitor,
   Pencil,
   RefreshCw,
+  Reply,
   Search,
   ShieldCheck,
   Square,
@@ -76,6 +80,8 @@ import { cn } from "@/lib/cn";
 import { useFocusMessage } from "@/lib/focus-message";
 import { webhookMessageView } from "@/lib/webhook-message";
 import { describeProviderError, providerErrorView } from "@/lib/provider-error";
+import { downloadTranscript, replyQuote, transcriptHeader, transcriptLine } from "@/lib/chat-affordances";
+import { appendDraft } from "@/lib/drafts";
 import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "@/lib/bottom-follow";
 import {
   TRANSCRIPT_WINDOW_SIZE,
@@ -396,6 +402,7 @@ function Bubble({
   onCancelEdit,
   onSubmitEdit,
   onRegenerate,
+  onReply,
 }: {
   bot: Bot;
   message: Message;
@@ -407,10 +414,14 @@ function Bubble({
   onCancelEdit: () => void;
   onSubmitEdit: (text: string) => void;
   onRegenerate?: () => void;
+  onReply: (text: string) => void;
 }) {
   const { state, dispatch } = useStore();
   const user = message.role === "user";
   const [expanded, setExpanded] = useState(false);
+  // Raw-markdown view: the OMB parity affordance — one click shows the exact
+  // bytes the model wrote, per message, instead of the rendered markdown.
+  const [raw, setRaw] = useState(false);
   const via = !user && message.kind === "text" ? message.via : undefined;
   const viaInstance = via ? state.instances.find((i) => i.instanceId === via.instanceId) : undefined;
   const text = message.text ?? "";
@@ -490,11 +501,32 @@ function Bubble({
             </>
           ) : (
             <MessageBoundary fallbackText={displayText}>
-              <MessageBody text={displayText} markdown />
+              {raw ? <span className="whitespace-pre-wrap font-mono text-[13px]">{displayText}</span> : <MessageBody text={displayText} markdown />}
             </MessageBoundary>
           )}
         </div>
         <div className={cn("conversation-message-actions flex max-w-full flex-wrap items-center gap-0.5", user && "justify-end")}>
+          {message.kind === "text" && !webhookView && (
+            <button
+              onClick={() => onReply(message.text ?? "")}
+              aria-label="Reply to message"
+              title="Reply to message"
+              className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+            >
+              <Reply size={14} />
+            </button>
+          )}
+          {!user && message.kind === "text" && (
+            <button
+              onClick={() => setRaw((r) => !r)}
+              aria-label={raw ? "Show rendered markdown" : "Show raw markdown"}
+              aria-pressed={raw}
+              title={raw ? "Show rendered markdown" : "Show raw markdown"}
+              className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+            >
+              {raw ? <MessageSquareText size={14} className="text-accent" /> : <Braces size={14} />}
+            </button>
+          )}
           {user && message.kind === "text" && !webhookView && !bot.busy && (
             <button onClick={onStartEdit} aria-label="Edit message" title="Edit message"
               className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100">
@@ -830,6 +862,7 @@ const MessagesList = memo(function MessagesList({
   onCancelEdit,
   onSubmitEdit,
   onRegenerate,
+  onReply,
 }: {
   bot: Bot;
   messages: Message[];
@@ -842,6 +875,7 @@ const MessagesList = memo(function MessagesList({
   onCancelEdit: () => void;
   onSubmitEdit: (id: string, text: string) => void;
   onRegenerate?: () => void;
+  onReply: (text: string) => void;
 }) {
   const { dispatch } = useStore();
   const runPositions = useMemo(() => bubbleRunPositions(messages), [messages]);
@@ -959,6 +993,7 @@ const MessagesList = memo(function MessagesList({
                   onCancelEdit={onCancelEdit}
                   onSubmitEdit={(text) => onSubmitEdit(m.id, text)}
                   onRegenerate={onRegenerate}
+                  onReply={onReply}
                 />
               );
           }
@@ -1066,6 +1101,29 @@ export function ChatView({ bot }: { bot: Bot }) {
       dispatch({ type: "editMessage", botId: bot.id, messageId: lastUserMessage.id, text: lastUserMessage.text });
     }
   }, [lastUserMessage, canRegenerateLast, bot.id, dispatch]);
+
+  // Reply-quote: prefill the composer draft with a collapsed blockquote of
+  // the original, then focus the composer — the user types under the quote.
+  // Rides the per-thread draft store (seedDraft), so a thread switch keeps
+  // it like any typed draft; appendDraft merges with existing text.
+  const reply = useCallback(
+    (original: string) => {
+      appendDraft(bot.threadId, replyQuote(original));
+      window.dispatchEvent(new CustomEvent("muster:composer-focus", { detail: { threadId: bot.threadId } }));
+    },
+    [bot.threadId],
+  );
+
+  // Transcript export: shape the full active branch into Markdown and
+  // download it — the OMB parity affordance, client-side only.
+  const exportTranscript = useCallback(() => {
+    const who = (m: Message) => (m.role === "user" ? "You" : m.from?.name ? `${m.from.name} (bot)` : bot.name);
+    const lines = messages
+      .map((m) => transcriptLine(m, new Date(m.at), who(m)))
+      .filter((line): line is string => line !== null);
+    const task = bot.tasks?.find((t) => t.threadId === bot.threadId)?.title;
+    downloadTranscript([transcriptHeader(bot.name, task ?? ""), ...lines].join("\n"), bot.name);
+  }, [messages, bot.name, bot.threadId]);
 
   // Scroll pinning: follow the bottom while the user hasn't scrolled away.
   // Follow breaks ONLY on an upward user gesture (wheel/touch), never on
@@ -1260,6 +1318,14 @@ export function ChatView({ bot }: { bot: Bot }) {
             <Search size={17} /><span className="conversation-tool-label">Search</span>
           </button>
           <button
+            onClick={exportTranscript}
+            aria-label="Export transcript"
+            className={cn(iconToggleClasses, "text-ink-secondary hover:bg-raised hover:text-ink")}
+            title="Export this conversation as Markdown"
+          >
+            <Download size={17} /><span className="conversation-tool-label">Export</span>
+          </button>
+          <button
             onClick={() => dispatch({ type: "toggleInspector" })}
             aria-label="Inspector"
             aria-pressed={state.inspectorOpen}
@@ -1345,6 +1411,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             onStartEdit={startEdit}
             onCancelEdit={cancelEdit}
             onSubmitEdit={submitEdit}
+            onReply={reply}
             onRegenerate={canRegenerateLast ? regenerate : undefined}
           />
           {laterCount > 0 && (

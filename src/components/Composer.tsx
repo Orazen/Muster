@@ -252,6 +252,29 @@ export function Composer({
     el.style.height = `${el.scrollHeight}px`;
   }, [text]);
 
+  // Reply-quote handshake: ChatView prefills this thread's draft (appendDraft)
+  // and asks for focus. The draft store notifies the hook, so by the time this
+  // runs the quoted text is already in the textarea — only the caret is ours.
+  const composerThreadId = group ? `group:${group.id}` : `bot:${bot?.id ?? ""}`;
+  useEffect(() => {
+    const onFocus = (event: Event) => {
+      // SAFETY: the only emitter is ChatView's reply handler, which always
+      // attaches `{ threadId }`; an alien event without detail fails the
+      // guard below and is ignored.
+      const detail = (event as CustomEvent<{ threadId: string }>).detail;
+      if (detail?.threadId !== threadId) return;
+      requestAnimationFrame(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        const end = el.value.length;
+        el.setSelectionRange(end, end);
+      });
+    };
+    window.addEventListener("muster:composer-focus", onFocus);
+    return () => window.removeEventListener("muster:composer-focus", onFocus);
+  }, [threadId, composerThreadId]);
+
   const pickMention = (peer: MentionChoice) => {
     if (!mention) return;
     const after = text.slice(caret);
