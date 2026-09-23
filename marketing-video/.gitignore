@@ -1,0 +1,5 @@
+node_modules/
+out/*.mp4
+out/*.jpg
+public/voice.aiff
+public/voice.wav

@@ -1,0 +1,26 @@
+{
+  "name": "muster-launch-film",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "studio": "remotion studio src/index.ts",
+    "render": "node render.mjs",
+    "voice": "say -v 'Tara (English (India))' -r 158 -o public/voice.aiff -f narration.txt",
+    "voice:encode": "ffmpeg -y -i public/voice.aiff -ar 48000 -ac 2 -c:a pcm_s16le public/voice.wav"
+  },
+  "dependencies": {
+    "@remotion/bundler": "^4.0.226",
+    "@remotion/cli": "^4.0.226",
+    "@remotion/media": "^4.0.226",
+    "@remotion/renderer": "^4.0.226",
+    "remotion": "^4.0.226",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "typescript": "^5.8.3"
+  }
+}

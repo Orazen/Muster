@@ -1,0 +1,18 @@
+{
+  "policy": "Every visual is copied from the Muster repository. Device shells are neutral presentation frames only.",
+  "urlPolicy": "The film uses muster.today only.",
+  "assets": [
+    {"file":"public/assets/app-chat.png","source":"docs/screenshots/app-chat.png","status":"shipped screenshot","use":"desktop/web chat"},
+    {"file":"public/assets/approval-card.png","source":"docs/screenshots/approval-card.png","status":"shipped screenshot","use":"human approval moment"},
+    {"file":"public/assets/bot-settings.png","source":"docs/screenshots/bot-settings.png","status":"shipped screenshot","use":"bot configuration"},
+    {"file":"public/assets/computer-panel.png","source":"docs/screenshots/computer-panel.png","status":"shipped screenshot","use":"real computer surface"},
+    {"file":"public/assets/model-picker.png","source":"docs/screenshots/model-picker.png","status":"shipped screenshot","use":"per-bot model choice"},
+    {"file":"public/assets/os-desktop.png","source":"docs/screenshots/os-desktop.png","status":"shipped screenshot","use":"desktop OS surface"},
+    {"file":"public/assets/marketplace.png","source":"docs/screenshots/marketplace.png","status":"shipped screenshot","use":"connected apps / roster context"},
+    {"file":"public/assets/iphone-roster.png","source":"ios/AppStore/screenshots/iPhone-6.9-roster.png","status":"App Store screenshot","use":"MusterMobile roster"},
+    {"file":"public/assets/muster-mobile-recording.mp4","source":".omb-scratch/verification/loop58-native-mascot/tour-attachments/70F99F75-A52D-4338-B474-C7D7ACD43030.mp4","status":"recorded acceptance evidence","use":"mobile companion montage"},
+    {"file":"public/assets/muster-watch-recording.mp4","source":".omb-scratch/verification/loop49-watch/native-pairing-slow-all/29F18AD2-D356-4A2F-ADFD-BDF6390C41F1.mp4","status":"recorded acceptance evidence","use":"Watch/companion evidence; not presented as approval feature proof"},
+    {"file":"public/assets/native-approval-recording.mp4","source":".omb-scratch/verification/loop48-native-approval/native-initial-attachments/849EC696-7C2E-498D-8EF5-83BFBB4D852D.mp4","status":"recorded acceptance evidence","use":"native approval context"},
+    {"file":"public/assets/muster-mascot.svg","source":"public/app-icon.svg","status":"brand asset","use":"mascot reveal and end card"}
+  ]
+}

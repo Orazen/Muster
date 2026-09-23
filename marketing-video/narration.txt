@@ -1,0 +1,13 @@
+The work keeps moving.
+But the decisions stay human.
+Muster is your own team of AI agents, in a chat app.
+See the whole idea at muster.today: real computers, persistent memory, human approvals, and receipts.
+Each teammate has a name, a model, and a desk of its own.
+Not one agent. A workforce.
+Give the fleet a task. Watch it work.
+When a bot reaches an approval gate, Muster waits for you.
+Allow. Deny. Or answer in the thread.
+Every task leaves a trace: duration, tokens, final word, and approval history.
+The same workforce follows you to desktop, web, phone, and Watch companion.
+Muster your agents.
+muster.today
