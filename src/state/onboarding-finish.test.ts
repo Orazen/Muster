@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOnboardingFinishSession, type FirstTaskAcceptance, type OnboardingFinishInput } from "./onboarding-finish";
+import { readOnboardingCompletion, writeOnboardingCompletion } from "@/lib/onboarding-chat";
 import type { Bot, Message } from "./store";
 
 const greeter: Bot = {
@@ -213,6 +214,54 @@ describe("onboarding finish lifecycle", () => {
     response.resolve([]);
     expect(await old).toBeNull();
     expect(input.createBot).not.toHaveBeenCalled();
+    expect(input.sendTask).toHaveBeenCalledOnce();
+  });
+});
+
+// Wizard completion record: the page's finish() writes it beside the gate
+// after acceptance, and a retry replaying completion must be idempotent.
+describe("wizard completion record", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  function stubStorage() {
+    const store = new Map<string, string>();
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => void store.set(k, v),
+        removeItem: (k: string) => void store.delete(k),
+      },
+    });
+    return store;
+  }
+
+  it("replaying completion after acceptance stamps the wizard record once, beside the gate", async () => {
+    stubStorage();
+    const { input, session } = fixture();
+    const accepted = await session.finish(input);
+
+    // First completion bookkeeping run (as Onboarding.finish() does after PUT).
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+    writeOnboardingCompletion("wizard");
+    // Retry replays completion after an earlier bookkeeping failure; the
+    // accepted result is returned again and the original stamp must survive.
+    expect(await session.finish(input)).toBe(accepted);
+    vi.setSystemTime(1_800_000_000_000);
+    writeOnboardingCompletion("wizard");
+    vi.useRealTimers();
+
+    expect(readOnboardingCompletion()).toEqual({
+      version: 1,
+      completedAt: 1_700_000_000_000,
+      surface: "wizard",
+    });
+    // Replaying completion never re-does the accepted side effects.
+    expect(input.createBot).not.toHaveBeenCalled();
+    expect(input.patchBot).toHaveBeenCalledOnce();
     expect(input.sendTask).toHaveBeenCalledOnce();
   });
 });

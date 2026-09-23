@@ -47,6 +47,7 @@ import type { AppConfig } from "./config.ts";
 import { getDb, forwardedProtoOf, SELF_HOSTED } from "./auth.ts";
 import { json, readBody, isText } from "./http-helpers.ts";
 import * as accountDrive from "./account-drive.ts";
+import { googleDriveConnectConfigured } from "./google-auth.ts";
 import { consumeDriveState } from "./drive-grants.ts";
 import * as bundleV2 from "./workspace-bundle-v2.ts";
 import {
@@ -268,12 +269,16 @@ const routes: BackupRoute[] = [
       // install it has always been available; on hosted it is the
       // storage-sovereignty connect (decision 14): the user's own Drive
       // becomes their storage home, so the capability advertises availability
-      // whenever a session exists. `connected` reports the per-user token row.
+      // whenever a session exists — but only while this install holds the
+      // GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET pair that has to finish that
+      // consent: advertising `available` without credentials renders a
+      // connect button that can only fail (capability off hides the
+      // feature). `connected` reports the per-user token row.
       // The push/pull transports stay behind the installation wall below
       // until a per-user bundle builder exists.
       let accountDriveReady = false;
       let accountDriveConnected = false;
-      if (ctx.requestUserId) {
+      if (ctx.requestUserId && googleDriveConnectConfigured()) {
         const tokens = accountDrive.googleTokensFor(getDb(), ctx.requestUserId);
         accountDriveConnected = Boolean(tokens?.refreshToken);
         accountDriveReady = true;
@@ -300,6 +305,9 @@ const routes: BackupRoute[] = [
     match: (method, path) => method === "GET" && path === "/api/workspace/google/connect",
     handle: async (req, res, ctx) => {
       if (!ctx.requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
+      // Capability off (no credential pair on this install): the same
+      // unavailable answer, before any state row or consent URL can exist.
+      if (!googleDriveConnectConfigured()) return json(res, 501, ACCOUNT_DRIVE_OFF);
       res.setHeader("Cache-Control", "no-store");
       res.setHeader("Referrer-Policy", "no-referrer");
       try {

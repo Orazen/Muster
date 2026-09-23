@@ -1,7 +1,19 @@
 // Pins for the conversational onboarding beats engine. No I/O.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { beatAt, beatCount, ONBOARDING_CHAT_BEATS, planCrew, type Turn } from "./onboarding-chat";
+import {
+  beatAt,
+  beatCount,
+  markOnboardingChatDone,
+  ONBOARDING_CHAT_BEATS,
+  ONBOARDING_CHAT_DONE_KEY,
+  ONBOARDING_COMPLETION_KEY,
+  onboardingChatDone,
+  planCrew,
+  readOnboardingCompletion,
+  writeOnboardingCompletion,
+  type Turn,
+} from "./onboarding-chat";
 
 describe("onboarding chat beats", () => {
   it("orders the flow and clamps the index", () => {
@@ -42,5 +54,131 @@ describe("onboarding chat beats", () => {
       { who: "user", text: "Marketing" },
     ];
     expect(turns.every((t) => t.who === "assistant" || t.who === "user")).toBe(true);
+  });
+});
+
+// Versioned completion record (openbot study §5, S1): additive `{version,
+// completedAt, surface}` written beside the bare flag, never replacing it.
+function stubStorage(initial: Record<string, string> = {}) {
+  const store = new Map(Object.entries(initial));
+  vi.stubGlobal("window", {
+    localStorage: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    },
+  });
+  return store;
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+describe("onboarding completion record", () => {
+  it("returns null when nothing was completed", () => {
+    stubStorage();
+    expect(readOnboardingCompletion()).toBeNull();
+  });
+
+  it("reads a wizard record even without the chat flag (the flag is the chat surface's)", () => {
+    stubStorage({
+      [ONBOARDING_COMPLETION_KEY]: JSON.stringify({ version: 1, completedAt: 123, surface: "wizard" }),
+    });
+    expect(onboardingChatDone()).toBe(false);
+    expect(readOnboardingCompletion()).toEqual({
+      version: 1,
+      completedAt: 123,
+      surface: "wizard",
+    });
+  });
+
+  it("treats a legacy bare flag as version 1 with unknown completedAt", () => {
+    stubStorage({ [ONBOARDING_CHAT_DONE_KEY]: "1" });
+    expect(onboardingChatDone()).toBe(true);
+    expect(readOnboardingCompletion()).toEqual({
+      version: 1,
+      completedAt: null,
+      surface: "chat",
+    });
+  });
+
+  it("writes the record with the given surface, leaving the flag beside it untouched", () => {
+    const store = stubStorage({ [ONBOARDING_CHAT_DONE_KEY]: "1" });
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+    writeOnboardingCompletion("chat");
+    expect(readOnboardingCompletion()).toEqual({
+      version: 1,
+      completedAt: 1_700_000_000_000,
+      surface: "chat",
+    });
+    expect(store.get(ONBOARDING_CHAT_DONE_KEY)).toBe("1");
+  });
+
+  it("keeps the first stamp when written again (first write wins)", () => {
+    const store = stubStorage();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_700_000_000_000);
+    writeOnboardingCompletion("chat");
+    vi.setSystemTime(1_800_000_000_000);
+    writeOnboardingCompletion("wizard");
+    const record = store.get(ONBOARDING_COMPLETION_KEY)!;
+    expect(record).toContain('"completedAt":1700000000000');
+    expect(record).toContain('"surface":"chat"');
+  });
+
+  it("never lets a malformed record block the bare flag", () => {
+    stubStorage({
+      [ONBOARDING_CHAT_DONE_KEY]: "1",
+      [ONBOARDING_COMPLETION_KEY]: "{not json",
+    });
+    expect(onboardingChatDone()).toBe(true);
+    expect(readOnboardingCompletion()).toEqual({
+      version: 1,
+      completedAt: null,
+      surface: "chat",
+    });
+  });
+
+  it("repairs a malformed record in place on the next write, keeping the flag", () => {
+    const store = stubStorage({
+      [ONBOARDING_CHAT_DONE_KEY]: "1",
+      [ONBOARDING_COMPLETION_KEY]: "{not json",
+    });
+    writeOnboardingCompletion("wizard");
+    expect(readOnboardingCompletion()).toEqual({
+      version: 1,
+      completedAt: expect.any(Number),
+      surface: "wizard",
+    });
+    expect(store.get(ONBOARDING_CHAT_DONE_KEY)).toBe("1");
+  });
+
+  it("never throws when storage is blocked (private mode)", () => {
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: () => {
+          throw new Error("SecurityError");
+        },
+        setItem: () => {
+          throw new Error("SecurityError");
+        },
+      },
+    });
+    expect(() => writeOnboardingCompletion("chat")).not.toThrow();
+    expect(() => markOnboardingChatDone()).not.toThrow();
+    expect(() => readOnboardingCompletion()).not.toThrow();
+    expect(onboardingChatDone()).toBe(false);
+    expect(readOnboardingCompletion()).toBeNull();
+  });
+
+  it("markOnboardingChatDone writes the flag first, then the chat record", () => {
+    const store = stubStorage();
+    markOnboardingChatDone();
+    expect(store.get(ONBOARDING_CHAT_DONE_KEY)).toBe("1");
+    expect(readOnboardingCompletion()).toMatchObject({ version: 1, surface: "chat" });
+    expect(readOnboardingCompletion()?.completedAt).toBeTypeOf("number");
   });
 });

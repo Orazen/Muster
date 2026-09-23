@@ -9,9 +9,7 @@ import "./onboarding-chat.css";
 
 import { AgentBotAvatar } from "@/components/AgentBotAvatar";
 import { api, useStore } from "@/state/store";
-import { beatAt, beatCount, onboardingChatDone, planCrew, type Turn } from "@/lib/onboarding-chat";
-
-const DONE_KEY = "muster.onboarding-chat.done";
+import { beatAt, beatCount, markOnboardingChatDone, onboardingChatDone, planCrew, type Turn } from "@/lib/onboarding-chat";
 
 export function OnboardingChat() {
   const { state } = useStore();
@@ -97,7 +95,7 @@ export function OnboardingChat() {
             await api(`/api/bots/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(member) });
           }
         }
-        try { window.localStorage.setItem(DONE_KEY, "1"); } catch { /* private mode */ }
+        markOnboardingChatDone();
         setDismissed(true);
         setHired(true);
       } catch {
@@ -180,7 +178,7 @@ export function OnboardingChat() {
                   <button
                     className="continue-pill"
                     onClick={() => {
-                      try { window.localStorage.setItem(DONE_KEY, "1"); } catch { /* private mode */ }
+                      markOnboardingChatDone();
                       setDismissed(true);
                       setHired(true);
                     }}

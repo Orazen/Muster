@@ -8764,3 +8764,59 @@ remote; the push merged them with --no-rebase.
 Owner gates remain: Jev provider choice, Actions billing, the App Store
 Connect auto-cancel toggle, OAuth credentials, and the Mimosa re-run (which
 still forbids any security claim).
+
+## Loop192 — 2026-09-23 — five builders, one batch: the onboarding record, the idempotent code, the storage seam, the task machine, and Google's front door (23 September 2026)
+
+The second batch ran exactly like the first: five subagents built in
+disjoint zones, the owner agent ran every gate once at the end, and one
+pathless commit carries the whole batch. S1 stamped a versioned
+completion record that reads the legacy bare flag as v1 and repairs
+malformed records without ever blocking the flag. S2 gave every OTP
+rejection one integer `retryAfterSeconds` in body and both headers, and
+S3 made send idempotent under `Idempotency-Key` with replay priced at
+the OTP's own lifetime — the UI retransmits with the same key, so a
+dropped packet no longer costs a user a minute of cooldown. Phase 1
+extracted the local-first storage seam by mirroring the transport
+interface byte-for-byte: the Drive bodies moved verbatim, three
+pre-existing suites stayed byte-identical, and the wiring never needed
+to open the giant route file. S4 built the durable task machine —
+nine states, two-layer legality so `retry` and `resume` are different
+verbs, leases that expire into a sweeper, and a transaction frame that
+either writes and publishes or rolls memory back and publishes nothing.
+Google sign-in and Drive connect now hang off one module that pins the
+scope split: sign-in gets `[openid, email, profile]`, consent gets
+`[drive.appdata, openid]`, and a shared test helper fails the whole
+desktop suite if either ever bleeds into the other.
+
+The secret itself never crossed a chat: it was lifted from the
+production container's environment straight into a gitignored file and
+validated by Google's own token endpoint, which answered
+`invalid_grant: Malformed auth code` — wrong dummy code, right
+credentials. The console's redirect list went from four to eleven and
+survived a reload. Mid-batch, the Dokploy dashboard started serving 502
+because its self-update left a replacement task stuck in Preparing
+while traefik waited for a healthy backend it would never see; a forced
+service update restored it in one step and muster-prod never noticed.
+Mimosa's deep re-run sealed 3747 findings over 2332 files and then
+declared itself inconclusive with verdict effect none and zero
+validated findings — mostly static candidates against generated release
+bundles — so the no-security-claims rule stands on the scanner's own
+authority now, not just ours.
+
+Gates for the record: tsc server 0, tsc web 0, oxlint 0/0 on 978
+files, check:electron exit 0, and the full suite at 369 files / 5568
+passed / 8 skipped / 0 failed — up from the 366/5462/8/0 baseline with
+no decrease anywhere. Two builders briefly misattributed the S4 zone's
+mid-edit typecheck noise as an unknown concurrent editor and did the
+right thing: reported it, preserved it, left it alone. The excluded
+parallel set never entered staging; the staging area was explicit
+paths only. Push, CI, autodeploy and the GET-only production probe
+follow this entry — deployment is claimed only once observed.
+
+Owner gates: Jev provider choice, Actions billing, the App Store
+Connect auto-cancel toggle, asc submission, retention 7/7/4/6,
+decision-harness script registration, the live Google round-trip
+(P2) and storage-gate decision 14. Closed this loop: the Mimosa
+re-run (sealed, reported, still inconclusive — no security claim) and
+the Google OAuth credentials (console URIs plus local env, values
+never in the repository).

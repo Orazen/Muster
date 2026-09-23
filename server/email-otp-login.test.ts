@@ -6,8 +6,14 @@
 // codes fail with the plugin's own error codes, a password account keeps
 // its password after an OTP sign-in (the revokeUnprovenAccountAccess
 // hazard the policy wrapper exists to prevent), and both the per-mailbox
-// cooldown and the per-IP send budget hold. Boot pattern mirrors
-// server/workspace-brain-harness.test.ts.
+// cooldown and the per-IP send budget hold — now uniformly priced in
+// machine-readable `retryAfterSeconds` on every send rejection, with an
+// Idempotency-Key replaying its accepted send instead of tripping the
+// cooldown (study §5 S2/S3). Boot pattern mirrors
+// server/workspace-brain-harness.test.ts; the gated describe mirrors
+// server/email-otp-signup-gates.test.ts (its own child because the gate is
+// read per-request from env); the otpSendPolicy describe runs on an
+// injected clock with no server at all.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync } from "node:fs";
@@ -15,8 +21,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
+import { otpSendPolicy } from "./email-otp-login.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
@@ -34,18 +41,27 @@ describe.skipIf(process.platform === "win32")("email one-time-code sign-in over 
 
   const uniqueEmail = (label: string) => `${label}-${randomBytes(5).toString("hex")}@example.test`;
 
-  const api = (path: string, method: string, body?: Record<string, string>, cookie = "") => {
+  const api = (
+    path: string,
+    method: string,
+    body?: Record<string, string>,
+    cookie = "",
+    extraHeaders: Record<string, string> = {},
+  ) => {
     const request: RequestInit = {
       method,
       redirect: "error",
       signal: AbortSignal.timeout(15_000),
-      headers: { "content-type": "application/json", origin: url, cookie },
+      headers: { "content-type": "application/json", origin: url, cookie, ...extraHeaders },
     };
     if (body !== undefined) request.body = JSON.stringify(body);
     return fetch(`${url}${path}`, request);
   };
 
-  const sendCode = (email: string) => api(SEND_PATH, "POST", { email, type: "sign-in" }, "");
+  // `idempotencyKey` rides the optional `Idempotency-Key` header — absent
+  // for callers that do not pass one, exactly like a pre-S3 client.
+  const sendCode = (email: string, idempotencyKey?: string) =>
+    api(SEND_PATH, "POST", { email, type: "sign-in" }, "", idempotencyKey ? { "idempotency-key": idempotencyKey } : {});
   // `name` is only read when verify creates the account (first-time
   // sign-in); omitting it entirely matches Better Auth's own contract.
   const verifyCode = (email: string, otp: string, name?: string) =>
@@ -116,9 +132,13 @@ describe.skipIf(process.platform === "win32")("email one-time-code sign-in over 
     await removeTempDir(dir);
   });
 
-  // Shared hand-off: the code harvested here is what the next test verifies.
+  // Shared hand-offs: the code harvested here is what the next test
+  // verifies; the cooldown triple is what the replay test replays against.
   let firstSendEmail = "";
   let firstSendCode = "";
+  let cooldownEmail = "";
+  let cooldownKey = "";
+  let cooldownCode = "";
 
   it("sends a six-digit code and logs it under the [otp] prefix when no mailer is configured", async () => {
     firstSendEmail = uniqueEmail("send");
@@ -296,25 +316,95 @@ describe.skipIf(process.platform === "win32")("email one-time-code sign-in over 
     }
   }, 30_000);
 
-  it("enforces the per-mailbox resend cooldown with 429 RESEND_COOLDOWN", async () => {
-    const email = uniqueEmail("cooldown");
-    const first = await sendCode(email);
+  it("enforces the per-mailbox resend cooldown with 429 RESEND_COOLDOWN priced in seconds", async () => {
+    cooldownEmail = uniqueEmail("cooldown");
+    cooldownKey = `k-${randomBytes(8).toString("hex")}`;
+    const since = output.length;
+    const first = await sendCode(cooldownEmail, cooldownKey);
     expect(first.status).toBe(200);
-    const second = await sendCode(email);
+    cooldownCode = await harvestCode(cooldownEmail, since);
+    expect(cooldownCode).toMatch(/^\d{6}$/);
+
+    // No key on the repeat: there is no replay to serve, so the cooldown
+    // must answer — with machine-readable seconds in body and both headers.
+    const second = await sendCode(cooldownEmail);
     expect(second.status).toBe(429);
-    // SAFETY: the cooldown gate answers { code, message } like the other gates.
-    const body = (await second.json()) as { code?: string; message?: string };
+    // SAFETY: the cooldown gate answers { code, message, retryAfterSeconds }.
+    const body = (await second.json()) as { code?: string; message?: string; retryAfterSeconds?: number };
     expect(body.code).toBe("RESEND_COOLDOWN");
     expect(String(body.message)).toMatch(/already sent/i);
+    const seconds = Number(body.retryAfterSeconds);
+    expect(Number.isInteger(seconds)).toBe(true);
+    expect(seconds).toBeGreaterThanOrEqual(1);
+    expect(seconds).toBeLessThanOrEqual(60);
+    expect(second.headers.get("retry-after")).toBe(String(seconds));
+    expect(second.headers.get("x-retry-after")).toBe(String(seconds));
+  }, 30_000);
+
+  it("replays an accepted send for its Idempotency-Key instead of tripping the cooldown", async () => {
+    // Same (email, key) as the cooldown test's first send, still inside the
+    // cooldown that send armed — a bare repeat would 429 here.
+    const replayed = await sendCode(cooldownEmail, cooldownKey);
+    expect(replayed.status).toBe(200);
+    expect(replayed.headers.get("x-otp-replay")).toBe("1");
+    expect(replayed.headers.get("idempotency-replayed")).toBe("true");
+    // SAFETY: the plugin's send route answers { success: true } on
+    // acceptance — the replay serves the recorded answer as-is.
+    expect(await replayed.json()).toEqual({ success: true });
+
+    // Nothing new went out: the original code still verifies.
+    expect((await verifyCode(cooldownEmail, cooldownCode)).status).toBe(200);
+
+    // A NEW key is a NEW attempt — it still pays the cooldown in full.
+    const fresh = await sendCode(cooldownEmail, `k-${randomBytes(8).toString("hex")}`);
+    expect(fresh.status).toBe(429);
+    // SAFETY: as above — { code, message, retryAfterSeconds }.
+    const body = (await fresh.json()) as { code?: string; retryAfterSeconds?: number };
+    expect(body.code).toBe("RESEND_COOLDOWN");
+    expect(Number(body.retryAfterSeconds)).toBeGreaterThanOrEqual(1);
+  }, 30_000);
+
+  it("answers every non-rate send rejection with the uniform retryAfterSeconds field", async () => {
+    // Wrapper-side validation (empty email): field present as 0, no wait headers.
+    const empty = await sendCode("");
+    expect(empty.status).toBe(400);
+    // SAFETY: the wrapper's send rejections answer { message, code, retryAfterSeconds }.
+    const emptyBody = (await empty.json()) as { code?: string; retryAfterSeconds?: number };
+    expect(emptyBody.code).toBe("INVALID_EMAIL");
+    expect(emptyBody.retryAfterSeconds).toBe(0);
+    expect(empty.headers.get("retry-after")).toBeNull();
+
+    // A malformed body is rejected before any window is consulted.
+    const malformed = await fetch(`${url}${SEND_PATH}`, {
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+      headers: { "content-type": "application/json", origin: url },
+      body: "{not-json",
+    });
+    expect(malformed.status).toBe(400);
+    // SAFETY: the readBody rejection passes through the same uniform shape.
+    expect(((await malformed.json()) as { retryAfterSeconds?: number }).retryAfterSeconds).toBe(0);
+
+    // A DELEGATED rejection — the plugin's own email validation — comes back
+    // through the same shape: the backend's 400 relayed with seconds
+    // injected as 0 (this send is accepted into the per-IP budget: the 7th).
+    const junk = await sendCode("not-an-email");
+    expect(junk.status).toBe(400);
+    // SAFETY: the injected uniform shape on delegated send rejections.
+    expect(((await junk.json()) as { retryAfterSeconds?: number }).retryAfterSeconds).toBe(0);
+    expect(junk.headers.get("retry-after")).toBeNull();
   }, 30_000);
 
   it("stops a send burst at the per-IP rate-limit budget (the last request 429s)", async () => {
-    // Budget: 8 sends / 60s per IP (server/auth.ts customRules). Six sends
-    // went out in the tests above (the cooldown rejection never reaches the
-    // limiter), so the burst's first send is still inside the window at
-    // most the 7th attempt — and even if the window rolled mid-suite, nine
-    // back-to-back sends exceed eight on their own, so the last one must
-    // trip the limiter in either timeline.
+    // Budget: 8 sends / 60s per IP — the wrapper's tracked window answers
+    // first (server/email-otp-login.ts), mirroring Better Auth's own send
+    // rule (server/auth.ts customRules). Seven sends went out in the tests
+    // above (cooldown rejection, keyed replay, verify and the validation
+    // rejection never spend it), so the burst's first send is still inside
+    // the window — at most the 8th accepted attempt — and even if the
+    // window rolled mid-suite, nine back-to-back sends exceed eight on
+    // their own, so the last one must trip the window in either timeline.
     const responses: Response[] = [];
     for (let index = 0; index < 9; index++) {
       responses.push(await sendCode(uniqueEmail(`burst${index}`)));
@@ -322,8 +412,199 @@ describe.skipIf(process.platform === "win32")("email one-time-code sign-in over 
     expect(responses[0].status).toBe(200);
     const last = responses[responses.length - 1];
     expect(last.status).toBe(429);
-    // SAFETY: Better Auth's rate limiter answers this exact message + header.
-    expect(String(((await last.json()) as { message?: string }).message)).toMatch(/too many requests/i);
+    // SAFETY: the wrapper's per-IP window answers this shape on the send route.
+    const body = (await last.json()) as { code?: string; message?: string; retryAfterSeconds?: number };
+    expect(body.code).toBe("RATE_LIMITED");
+    expect(String(body.message)).toMatch(/too many code requests/i);
+    const seconds = Number(body.retryAfterSeconds);
+    expect(Number.isInteger(seconds)).toBe(true);
+    expect(seconds).toBeGreaterThanOrEqual(1);
+    expect(seconds).toBeLessThanOrEqual(60);
+    expect(last.headers.get("retry-after")).toBe(String(seconds));
     expect(last.headers.get("x-retry-after")).not.toBeNull();
   }, 30_000);
+});
+
+// Gate parity for the new windows on a CLOSED deployment (own child: the
+// gate is read per-request from env). The invariant under test: gates run
+// before any window bookkeeping, so a stored Idempotency-Key can never
+// answer for an address the gate closes — the gate's 403 comes back in the
+// uniform shape (retryAfterSeconds 0, no wait headers) no matter what key
+// rides the request.
+describe.skipIf(process.platform === "win32")("OTP send windows never answer across a sign-up gate", () => {
+  let dir = "";
+  let url = "";
+  const children: ChildProcess[] = [];
+  let output = "";
+  const ALLOWLISTED = "allow-send@example.test";
+
+  const api = (
+    path: string,
+    method: string,
+    body?: Record<string, string>,
+    cookie = "",
+    extraHeaders: Record<string, string> = {},
+  ) => {
+    const request: RequestInit = {
+      method,
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+      headers: { "content-type": "application/json", origin: url, cookie, ...extraHeaders },
+    };
+    if (body !== undefined) request.body = JSON.stringify(body);
+    return fetch(`${url}${path}`, request);
+  };
+
+  const sendCode = (email: string, idempotencyKey?: string) =>
+    api(SEND_PATH, "POST", { email, type: "sign-in" }, "", idempotencyKey ? { "idempotency-key": idempotencyKey } : {});
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), "muster-otp-gated-"));
+    const dataDirectory = join(dir, "data");
+    const home = join(dir, "home");
+    const companion = join(dir, "companion");
+    const ui = join(dir, "ui");
+    for (const path of [dataDirectory, home, companion, ui]) {
+      mkdirSync(path, { recursive: true, mode: 0o700 });
+    }
+    const port = await freePortBlock([0, 1, 2], 46000, 9000);
+    const env = pairingServerEnvironment({
+      home,
+      dataDirectory,
+      companionDirectory: companion,
+      staticDir: ui,
+      port,
+      webhookPort: port + 1,
+      secret: randomBytes(32).toString("hex"),
+    });
+    Object.assign(env, {
+      OMB_ALLOW_SIGNUPS: "true",
+      OMB_SIGNUPS_CLOSED: "true",
+      OMB_SIGNUP_ALLOWLIST: ALLOWLISTED,
+    });
+    const child = spawn(
+      process.execPath,
+      ["--experimental-strip-types", join(ROOT, "server/index.ts")],
+      { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    children.push(child);
+    const append = (chunk: Buffer | string) => {
+      output += String(chunk);
+    };
+    child.stdout?.on("data", append);
+    child.stderr?.on("data", append);
+    url = `http://127.0.0.1:${port}`;
+    await waitForOwnedServer(child, url);
+  }, 30_000);
+
+  afterAll(async () => {
+    await Promise.all(children.map((child) => waitForExit(child, { signal: "SIGTERM" })));
+    await removeTempDir(dir);
+  });
+
+  it("replays the allowlisted mailbox's key while the gate keeps closing blocked ones", async () => {
+    const key = `k-${randomBytes(8).toString("hex")}`;
+    const first = await sendCode(ALLOWLISTED, key);
+    expect(first.status).toBe(200);
+    const replayed = await sendCode(ALLOWLISTED, key);
+    expect(replayed.status).toBe(200);
+    expect(replayed.headers.get("x-otp-replay")).toBe("1");
+
+    // The SAME key on a gated address must not answer: the gate runs
+    // before the replay map is consulted, and the map is keyed per mailbox
+    // anyway — either way this is a 403 in the uniform shape, not a replay.
+    const blocked = await sendCode("blocked-outside@example.test", key);
+    expect(blocked.status).toBe(403);
+    // SAFETY: the gate answers { message, code } plus the injected retryAfterSeconds.
+    const body = (await blocked.json()) as { code?: string; message?: string; retryAfterSeconds?: number };
+    expect(body.code).toBe("SIGNUPS_CLOSED");
+    expect(body.message).toBe("Sign-ups are closed on this deployment.");
+    expect(body.retryAfterSeconds).toBe(0);
+    expect(blocked.headers.get("retry-after")).toBeNull();
+
+    // Repeating with the same key changes nothing — a key can never turn a
+    // gated address into an accepted one.
+    const blockedAgain = await sendCode("blocked-outside@example.test", key);
+    expect(blockedAgain.status).toBe(403);
+    // SAFETY: same gate shape as above.
+    expect(((await blockedAgain.json()) as { retryAfterSeconds?: number }).retryAfterSeconds).toBe(0);
+  }, 30_000);
+});
+
+// The S2/S3 bookkeeping on an injected clock — window edges, TTL edges and
+// the keyed independence of the three maps, provable without sleeping or a
+// server (every otpSendPolicy function takes `now` explicitly).
+describe("otpSendPolicy (deterministic clock)", () => {
+  const T0 = 1_700_000_000_000;
+  const EMAIL = "clocked@example.test";
+  const NEIGHBOR = "neighbor@example.test";
+  const IP = "203.0.113.7";
+  const OTHER_IP = "198.51.100.23";
+
+  beforeEach(() => {
+    otpSendPolicy.reset();
+  });
+  afterAll(() => {
+    otpSendPolicy.reset();
+  });
+
+  it("prices the per-mailbox cooldown to the second with an exact 60s boundary", () => {
+    otpSendPolicy.armCooldown(EMAIL, T0);
+    expect(otpSendPolicy.cooldownRemainingMs(EMAIL, T0)).toBe(60_000);
+    expect(otpSendPolicy.cooldownRemainingMs(EMAIL, T0 + 59_999)).toBe(1);
+    expect(otpSendPolicy.cooldownRemainingMs(EMAIL, T0 + 60_000)).toBe(0);
+    // Per-mailbox, not per-IP: a neighbor never inherits the wait.
+    expect(otpSendPolicy.cooldownRemainingMs(NEIGHBOR, T0 + 1_000)).toBe(0);
+  });
+
+  it("lets the per-IP window take exactly SEND_WINDOW_MAX sends, then waits the window out", () => {
+    for (let sent = 0; sent < otpSendPolicy.SEND_WINDOW_MAX; sent++) {
+      expect(otpSendPolicy.ipWindowRemainingMs(IP, T0)).toBe(0);
+      otpSendPolicy.spendIpSend(IP, T0);
+    }
+    const blocked = otpSendPolicy.ipWindowRemainingMs(IP, T0);
+    expect(blocked).toBeGreaterThan(0);
+    expect(blocked).toBeLessThanOrEqual(otpSendPolicy.SEND_WINDOW_MS);
+    expect(otpSendPolicy.ipWindowRemainingMs(IP, T0 + blocked - 1)).toBeGreaterThan(0);
+    // A different source IP keeps its own budget — reads never create entries.
+    expect(otpSendPolicy.ipWindowRemainingMs(OTHER_IP, T0)).toBe(0);
+    expect(otpSendPolicy.sizes().ipWindows).toBe(1);
+    // The window expires exactly at SEND_WINDOW_MS and drops out.
+    expect(otpSendPolicy.ipWindowRemainingMs(IP, T0 + otpSendPolicy.SEND_WINDOW_MS)).toBe(0);
+    expect(otpSendPolicy.sizes().ipWindows).toBe(0);
+  });
+
+  it("replays only a live (email, key) pair, scoped per mailbox and per key", () => {
+    const recorded = JSON.stringify({ success: true });
+    otpSendPolicy.rememberAcceptedSend(EMAIL, "key-a", 200, recorded, "application/json", [], T0);
+    const replay = otpSendPolicy.replayOf(EMAIL, "key-a", T0);
+    expect(replay?.status).toBe(200);
+    expect(replay?.body).toBe(recorded);
+    // Key scoping: another key for the same mailbox never answers.
+    expect(otpSendPolicy.replayOf(EMAIL, "key-b", T0)).toBeNull();
+    // Mailbox scoping: the same key never answers for a different address —
+    // half of why "gate first" is safe even if ordering ever drifts.
+    expect(otpSendPolicy.replayOf(NEIGHBOR, "key-a", T0)).toBeNull();
+    // Live right up to the code's TTL boundary, dead one ms past it — and
+    // the TTL outlives the cooldown, so a replay can never die before the
+    // wait it is meant to replace.
+    expect(otpSendPolicy.IDEMPOTENCY_TTL_MS).toBeGreaterThan(otpSendPolicy.RESEND_COOLDOWN_MS);
+    expect(otpSendPolicy.replayOf(EMAIL, "key-a", T0 + otpSendPolicy.IDEMPOTENCY_TTL_MS)).not.toBeNull();
+    expect(otpSendPolicy.replayOf(EMAIL, "key-a", T0 + otpSendPolicy.IDEMPOTENCY_TTL_MS + 1)).toBeNull();
+    // The expired entry was dropped with the lookup — the map stays bounded.
+    expect(otpSendPolicy.sizes().replays).toBe(0);
+  });
+
+  it("arms only what was spent, and prunes every map past its window", () => {
+    otpSendPolicy.armCooldown(EMAIL, T0);
+    otpSendPolicy.spendIpSend(IP, T0);
+    otpSendPolicy.rememberAcceptedSend(EMAIL, "key-a", 200, "{}", "application/json", [], T0);
+    expect(otpSendPolicy.sizes()).toEqual({ cooldowns: 1, ipWindows: 1, replays: 1 });
+    // One prune past the longest window (the replay TTL) clears everything.
+    otpSendPolicy.prune(T0 + otpSendPolicy.IDEMPOTENCY_TTL_MS + 1);
+    expect(otpSendPolicy.sizes()).toEqual({ cooldowns: 0, ipWindows: 0, replays: 0 });
+    expect(otpSendPolicy.cooldownRemainingMs(EMAIL, T0)).toBe(0);
+    expect(otpSendPolicy.ipWindowRemainingMs(IP, T0)).toBe(0);
+    expect(otpSendPolicy.replayOf(EMAIL, "key-a", T0)).toBeNull();
+  });
 });

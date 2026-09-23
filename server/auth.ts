@@ -7,6 +7,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { DATA_DIR } from "./config.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { GOOGLE_SIGNIN_SCOPES, googleCredentials } from "./google-auth.ts";
 import {
   isEmailConfigured,
   sendLoginCodeEmail,
@@ -399,21 +400,24 @@ function socialProviders() {
     providers.github = { clientId: githubId, clientSecret: githubSecret };
   }
 
-  const googleId = process.env.GOOGLE_CLIENT_ID?.trim();
-  const googleSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
-  if (googleId && googleSecret) {
+  // One credential pair serves both Google surfaces (this sign-in config
+  // and the account-linked Drive connect), so capability-on/off can never
+  // disagree between them; a half pair counts as absent.
+  const google = googleCredentials();
+  if (google) {
     providers.google = {
-      clientId: googleId,
-      clientSecret: googleSecret,
-      // Sign-in stays basic-scope on purpose: drive.appdata is a RESTRICTED
-      // scope, and requesting it at login makes Google show every new user
-      // the "Google hasn't verified this app" interstitial (scope
-      // verification is separate from branding — restricted scopes need a
-      // security assessment). Accounts that granted Drive earlier keep
-      // their stored refresh token, so workspace Drive backup still works
-      // for them; a separate opt-in Drive connect is the follow-up for
-      // everyone else.
-      scope: ["openid", "email", "profile"],
+      clientId: google.clientId,
+      clientSecret: google.clientSecret,
+      // Sign-in stays basic-scope on purpose (GOOGLE_SIGNIN_SCOPES in
+      // server/google-auth.ts is the one home for that list): drive.appdata
+      // is a RESTRICTED scope, and requesting it at login makes Google show
+      // every new user the "Google hasn't verified this app" interstitial
+      // (scope verification is separate from branding — restricted scopes
+      // need a security assessment). Accounts that granted Drive earlier
+      // keep their stored refresh token, so workspace Drive backup still
+      // works for them; a separate opt-in Drive connect is the follow-up
+      // for everyone else.
+      scope: [...GOOGLE_SIGNIN_SCOPES],
     };
   }
 

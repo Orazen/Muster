@@ -6,6 +6,8 @@
 // The flow only runs on hosted deployments (storageGate.required) after the
 // storage gate opens; desktop keeps the classic wizard untouched.
 
+import { z } from "zod";
+
 export interface ChatBeatOption {
   id: string;
   label: string;
@@ -97,9 +99,92 @@ export const ONBOARDING_CHAT_DONE_KEY = "muster.onboarding-chat.done";
 
 /** True when the conversational first-run has finished (or been dismissed).
  * The classic wizard's auto-open waits for this so both surfaces never fight
- * over the first-run moment or the focus. */
+ * over the first-run moment or the focus. Reads ONLY the bare flag — every
+ * current read of the flag keeps working, record or no record. */
 export function onboardingChatDone(): boolean {
   try { return window.localStorage.getItem(ONBOARDING_CHAT_DONE_KEY) === "1"; } catch { return false; }
+}
+
+/** Which first-run surface a completion record belongs to. */
+export type OnboardingSurface = "chat" | "wizard";
+
+/** The versioned completion record (openbot's setup-v2 artifact, adapted):
+ * written BESIDE the existing flags, never replacing them. */
+export const ONBOARDING_COMPLETION_KEY = "muster.onboarding-done:v1";
+
+export interface OnboardingCompletionRecord {
+  version: number;
+  /** epoch ms of the FIRST recorded completion; null when unknown — the
+   * legacy bare flag predates the record and carries no timestamp. */
+  completedAt: number | null;
+  surface: OnboardingSurface;
+}
+
+/** Strict parse of the record itself. Anything malformed reads as absent —
+ * a corrupt record can only fall back to the legacy flag, never block it. */
+const completionSchema = z.object({
+  version: z.number(),
+  completedAt: z.number().nullable(),
+  surface: z.enum(["chat", "wizard"]),
+});
+
+function parseCompletion(raw: string | null): OnboardingCompletionRecord | null {
+  if (!raw) return null;
+  try {
+    // Same stored-JSON discipline as onboarding-draft: schema at the boundary,
+    // malformed input fails closed to "absent" instead of blocking the flag.
+    const parsed = completionSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The completion record with the backwards-compatible read: an install that
+ * only carries the bare `"1"` flag counts as version 1 with an unknown
+ * completion time and the chat surface (the flag is the chat surface's). */
+export function readOnboardingCompletion(): OnboardingCompletionRecord | null {
+  try {
+    const record = parseCompletion(window.localStorage.getItem(ONBOARDING_COMPLETION_KEY));
+    if (record) return record;
+    if (window.localStorage.getItem(ONBOARDING_CHAT_DONE_KEY) === "1") {
+      return { version: 1, completedAt: null, surface: "chat" };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Write the record for a surface. The FIRST completion wins: a later write
+ * never re-stamps completedAt (or the surface) — a replay or review is not a
+ * new onboarding. A malformed record is repaired in place. Never throws:
+ * blocked storage loses only the record, the bare flags still guard the flow. */
+export function writeOnboardingCompletion(surface: OnboardingSurface): void {
+  try {
+    if (parseCompletion(window.localStorage.getItem(ONBOARDING_COMPLETION_KEY))) return;
+    window.localStorage.setItem(ONBOARDING_COMPLETION_KEY, JSON.stringify({
+      version: 1,
+      completedAt: Date.now(),
+      surface,
+    } satisfies OnboardingCompletionRecord));
+  } catch {
+    // Private mode / quota: the flags beside this record still count as done.
+  }
+}
+
+/** The chat surface's finish-or-dismiss write: the bare flag AND the versioned
+ * record, together. Flag first — the record is only ever written BESIDE a flag
+ * that landed, so every existing read of the flag keeps working unchanged.
+ * Never throws: blocked storage loses only the persistence, callers continue
+ * exactly as they did with the previous inline flag write. */
+export function markOnboardingChatDone(): void {
+  try {
+    window.localStorage.setItem(ONBOARDING_CHAT_DONE_KEY, "1");
+  } catch {
+    return; // private mode: no flag → no record beside it
+  }
+  writeOnboardingCompletion("chat");
 }
 
 /** A chat turn for the transcript: who said it and what. */

@@ -429,3 +429,176 @@ export interface SteerQueueSnapshot {
   paused: boolean;
   items: QueuedSendMessage[];
 }
+
+// ── task plans: ordered checkpoints the client can steer ───────────────
+// The wire shape of the durable task engine. A plan is an ordered list of
+// at most twelve steps; a step can block on typed input or on a human
+// approval, and both waits are persisted so a restart resumes exactly
+// where the plan stopped instead of losing the question.
+
+/** Plan lifecycle. Terminal: succeeded | cancelled. `failed` is resting
+ * but retryable until the attempt budget runs out. */
+export type TaskPlanStatus =
+  | "queued"
+  | "running"
+  | "waiting_input"
+  | "waiting_approval"
+  | "paused"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+/** What a step is for. An `input` step collects a typed answer, an
+ * `approval` step stops for a human decision, and a `checkpoint` is
+ * ordered progress a worker reports as it goes. */
+export type TaskStepKind = "checkpoint" | "input" | "approval";
+
+export type TaskStepStatus = "pending" | "active" | "done" | "skipped" | "failed";
+
+export interface TaskPlanStep {
+  /** 1-based position; steps never renumber, so an answer or a
+   * checkpoint can always name the exact step it belongs to. */
+  n: number;
+  title: string;
+  kind: TaskStepKind;
+  status: TaskStepStatus;
+  startedAt?: number;
+  finishedAt?: number;
+}
+
+/** One declared field of an input request: the typed shape an answer has
+ * to satisfy, so a wrong answer is rejected instead of stored. */
+export interface TaskPlanInputField {
+  name: string;
+  label: string;
+  type: "text" | "number" | "boolean" | "select";
+  /** Required unless the author says otherwise — an unanswered required
+   * field is what makes the wait a wait. */
+  required: boolean;
+  options?: string[];
+}
+
+export interface TaskPlanInputRequest {
+  prompt: string;
+  fields: TaskPlanInputField[];
+  /** The `n` of the step blocked on this answer. */
+  step: number;
+  askedAt: number;
+}
+
+export interface TaskPlanApprovalRequest {
+  title: string;
+  step: number;
+  askedAt: number;
+  by?: string;
+}
+
+/** At most one worker holds a running plan; the lease is what lets a
+ * second claimant be refused rather than race the first. */
+export interface TaskPlanLease {
+  holder: string;
+  expiresAt: number;
+}
+
+export interface TaskPlanAnswer {
+  name: string;
+  value: string | number | boolean;
+  at: number;
+}
+
+export interface TaskPlanRecord {
+  id: string;
+  botId: string;
+  ownerId?: string;
+  threadId?: string;
+  title: string;
+  status: TaskPlanStatus;
+  steps: TaskPlanStep[];
+  /** The `n` of the step the plan is on, or null before anything ran. */
+  currentStep: number | null;
+  /** What the plan was doing when it was paused, so resume restores the
+   * wait instead of quietly dropping the question that caused it. */
+  pausedFrom?: TaskPlanStatus;
+  lease?: TaskPlanLease;
+  /** Failures so far; a plan refuses another retry at `maxAttempts`. */
+  attempts: number;
+  maxAttempts: number;
+  inputRequest?: TaskPlanInputRequest;
+  approvalRequest?: TaskPlanApprovalRequest;
+  /** Typed answers collected so far, oldest first. */
+  inputAnswers: TaskPlanAnswer[];
+  lastError?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Client control verbs. `start` exists because recovery requeues work
+ * that no worker is holding — without it a plan recovered from a restart
+ * could never be picked up again. */
+export type TaskControlAction = "start" | "pause" | "resume" | "cancel" | "retry";
+
+export interface TaskControlBody {
+  action: TaskControlAction;
+  actorId?: string;
+  reason?: string;
+}
+
+export interface TaskInputBody {
+  /** One declared field, one primitive value: the engine coerces each
+   * answer against its field's type before anything is stored. */
+  answers: Record<string, string | number | boolean | null>;
+  actorId?: string;
+}
+
+export interface TaskApprovalBody {
+  decision: "approve" | "reject";
+  actorId?: string;
+  reason?: string;
+}
+
+/** One legal status move, kept in a bounded ring next to the plans so
+ * "who moved this and when" survives the same restart the plan does. */
+export interface TaskTransitionEvent {
+  planId: string;
+  botId: string;
+  from: TaskPlanStatus;
+  to: TaskPlanStatus;
+  at: number;
+  /** The verb that caused the move: start, pause, resume, cancel, retry,
+   * complete, fail, request-input, submit-input, request-approval,
+   * approve, reject, recover. */
+  action: string;
+  step?: number;
+  actorId?: string;
+  reason?: string;
+}
+
+/** A step as it arrives on the wire: a bare title, or an object the
+ * engine validates, clamps and numbers. */
+export type TaskPlanStepEntry = string | { title?: string; kind?: string };
+
+/** One field of an input request as it arrives: the engine checks the
+ * name, type and options against its own tables before asking anything. */
+export interface TaskPlanFieldEntry {
+  name?: string;
+  label?: string;
+  type?: string;
+  required?: boolean;
+  options?: string[];
+}
+
+/** POST /api/task-plans. Steps arrive as loose entries — a bare title or
+ * an object with `title`/`kind` — because the engine is what validates,
+ * clamps and numbers them; nothing on the wire is trusted as ordered. */
+export interface TaskPlanCreateInput {
+  botId: string;
+  title?: string;
+  steps: TaskPlanStepEntry[];
+  ownerId?: string;
+  threadId?: string;
+  /** Leave false to hold the plan queued instead of starting it at once. */
+  start?: boolean;
+  /** Who the running plan is leased to. */
+  actorId?: string;
+  maxAttempts?: number;
+}

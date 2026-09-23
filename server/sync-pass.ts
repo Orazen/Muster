@@ -41,7 +41,12 @@ import {
 } from "./sync-objects.ts";
 
 /** The remote side, opaque to the engine: file bytes by canonical name and
- * one optimistic-concurrency guard that comes back from the load. */
+ * one optimistic-concurrency guard that comes back from the load.
+ * P1 (local-first plan §13/R1): StorageProvider (server/storage-provider.ts)
+ * is the provider-neutral superset of exactly this shape — a StorageProvider
+ * satisfies SyncTransportDeps structurally, so implementations (Drive's
+ * googleDriveStorageProvider, the filesystem localStorageProvider) inject
+ * here with no adapter. */
 export interface SyncTransportDeps {
   upload(fileName: string, bytes: Buffer): Promise<void>;
   download(fileName: string): Promise<Buffer | null>;

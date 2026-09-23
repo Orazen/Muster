@@ -28,6 +28,7 @@ import { AgentBotAvatar } from "@/components/AgentBotAvatar";
 import { speaker } from "@/lib/tts";
 import { AgentAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, consumeTourReplay, track } from "@/lib/analytics";
+import { writeOnboardingCompletion } from "@/lib/onboarding-chat";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
 import { ProviderMark } from "./ProviderIcons";
@@ -849,6 +850,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       });
       if (!finishSession.active) return;
       clearOnboardingDraft(user?.id);
+      // The versioned completion record sits BESIDE the gate writes above —
+      // the gate stays the source of truth, this record is additive metadata.
+      // First write wins inside, so this retry re-running completion (and any
+      // replay) never clobbers the original completedAt or surface.
+      writeOnboardingCompletion("wizard");
       try {
         track("onboarding_completed", {
           engines_available: instances?.filter((i) => i.snapshot.state === "available").length ?? -1,

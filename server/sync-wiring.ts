@@ -2,8 +2,10 @@
 // external edge injectable so the logic is testable without Drive or a
 // passphrase store:
 //
-//   1. driveSyncTransport — the SyncTransportDeps the pass expects, over
-//      Drive's uploadBundle/downloadBundle/statBundleFile. Two decisions
+//   1. googleDriveStorageProvider — StorageProvider implementation #1 (P1,
+//      local-first plan §13): the SyncTransportDeps the pass expects, over
+//      Drive's uploadBundle/downloadBundle/statBundleFile; the boot path's
+//      driveSyncTransport delegates to it. Two decisions
 //      are load-bearing and deliberate:
 //        - BYTE BRIDGE: the envelope is binary, Drive's multipart body is
 //          a UTF-8 string, so objects ride base64. Decoding is strict
@@ -41,6 +43,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { writeFileAtomic } from "./atomic.ts";
 import * as driveSync from "./drive-sync.ts";
 import { startSnapshotScheduler } from "./snapshot-scheduler.ts";
+import { asStorageProvider, type StorageProvider } from "./storage-provider.ts";
 import { runSyncPass, type SyncPassDeps, type SyncPassResult, type SyncTransportDeps } from "./sync-pass.ts";
 import { SYNC_MANIFEST_FILE_NAME, manifestDocSchema, type SyncManifestDoc } from "./sync-objects.ts";
 
@@ -79,13 +82,30 @@ const drivePayloadBytes = (text: string): Buffer => {
   return decoded.toString("base64") === text ? decoded : Buffer.from(text, "utf8");
 };
 
-export function driveSyncTransport(options: DriveTransportOptions): SyncTransportDeps {
+/** The boot-path factory (server/index.ts:415). P1: delegates to
+ * googleDriveStorageProvider — the four seam bodies did not move, and the
+ * return type widens from SyncTransportDeps to its structural superset
+ * StorageProvider, so the boot path carries implementation #1 with no edit to
+ * index.ts. The driveSyncTransport suite below pins this unchanged behavior. */
+export function driveSyncTransport(options: DriveTransportOptions): StorageProvider {
+  return googleDriveStorageProvider(options);
+}
+
+/** Drive as StorageProvider implementation #1 (plan §13/R1) — a pure wrap of
+ * the transport this module always built: the four seam methods keep their
+ * exact bodies (base64 byte bridge, stat-BEFORE-download modifiedTime guard
+ * with its documented residual stat→write window, verify-before-write
+ * manifest save), and asStorageProvider aliases the §13 names 1:1 over them —
+ * so the object injects at the pass's SyncTransportDeps seam with zero
+ * adaptation and zero behavior change. The base64 bridge stays a Drive-only
+ * detail inside this provider, as P1's risk notes require. */
+export function googleDriveStorageProvider(options: DriveTransportOptions): StorageProvider {
   const drive: DriveTransportFns = options.drive ?? {
     uploadBundle: driveSync.uploadBundle,
     downloadBundle: driveSync.downloadBundle,
     statBundleFile: driveSync.statBundleFile,
   };
-  return {
+  const transport: SyncTransportDeps = {
     async upload(fileName: string, bytes: Buffer): Promise<void> {
       const token = await options.getAccessToken();
       await drive.uploadBundle(token, bytes.toString("base64"), fileName);
@@ -125,6 +145,7 @@ export function driveSyncTransport(options: DriveTransportOptions): SyncTranspor
       await drive.uploadBundle(token, bytes.toString("base64"), SYNC_MANIFEST_FILE_NAME);
     },
   };
+  return asStorageProvider(transport);
 }
 
 export interface LocalManifestStore {

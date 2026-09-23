@@ -1,11 +1,24 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { EmailOtpCodeForm, otpDigits, otpErrorMessage, type OtpErrorBody } from "./EmailOtpSignIn";
+import {
+  EmailOtpCodeForm,
+  attemptOtpSend,
+  newOtpIdempotencyKey,
+  otpDigits,
+  otpErrorMessage,
+  otpRetryAfterSeconds,
+  otpSendFallback,
+  type OtpErrorBody,
+  type OtpPost,
+  type OtpPostResult,
+} from "./EmailOtpSignIn";
 
 // SSR/markup + pure-helper contracts for the one-time-code panel; the
 // two-stage wiring on the login page itself is pinned in
-// src/pages/AuthPages.test.ts.
+// src/pages/AuthPages.test.ts. attemptOtpSend drives a fake post() so the
+// one-attempt + one-transport-retry contract (same Idempotency-Key across
+// the retry) is provable without a browser.
 
 describe("otpDigits", () => {
   it("reduces any paste to at most six digits", () => {
@@ -29,6 +42,13 @@ describe("otpErrorMessage", () => {
       { code: "RESEND_COOLDOWN", message: "A code was already sent to this address. Try again in 42 seconds." },
       /Try again in 42 seconds/,
     ],
+    // No message on the body: the priced seconds still make the copy.
+    [{ code: "RESEND_COOLDOWN", retryAfterSeconds: 17 }, /Wait 17 seconds/],
+    [{ code: "RESEND_COOLDOWN" }, /Wait a moment/],
+    // The wrapper's per-IP window quotes its own seconds…
+    [{ code: "RATE_LIMITED", retryAfterSeconds: 42 }, /wait 42 seconds/i],
+    // …and still reads sanely if a 429 arrives bare.
+    [{ code: "RATE_LIMITED" }, /Too many code requests/],
     [{ code: "SIGNUPS_CLOSED" }, /closed/i],
     [{ code: "GOOGLE_ONLY_SIGNUP" }, /Google/i],
     [{ code: "INVALID_EMAIL" }, /valid email/i],
@@ -40,6 +60,110 @@ describe("otpErrorMessage", () => {
   ];
   it.each(cases)("maps %j to readable copy", (body, expected) => {
     expect(otpErrorMessage(body, "fallback copy")).toMatch(expected);
+  });
+});
+
+describe("otpRetryAfterSeconds", () => {
+  const cases: Array<[OtpErrorBody | null, number]> = [
+    [{ retryAfterSeconds: 42 }, 42],
+    [{ retryAfterSeconds: 1 }, 1],
+    [{ retryAfterSeconds: 0 }, 0],
+    // Negative waits clamp to "go now"; fractions round UP — a wait must
+    // never round the client into an early retry.
+    [{ retryAfterSeconds: -5 }, 0],
+    [{ retryAfterSeconds: 12.4 }, 13],
+    // Strings and junk read as no countdown (checked, never trusted).
+    [{ retryAfterSeconds: "60" }, 0],
+    [{ retryAfterSeconds: "soon" }, 0],
+    [{ retryAfterSeconds: null }, 0],
+    [{ code: "RESEND_COOLDOWN" }, 0],
+    [null, 0],
+  ];
+  it.each(cases)("reads %j as %i seconds", (body, expected) => {
+    expect(otpRetryAfterSeconds(body)).toBe(expected);
+  });
+});
+
+describe("otpSendFallback", () => {
+  it("quotes the server's priced wait on a 429 and stays generic otherwise", () => {
+    expect(otpSendFallback(429, 42)).toMatch(/wait 42 seconds/i);
+    // A bare plugin 429 carries no seconds — honest wording, no fake minute.
+    expect(otpSendFallback(429, 0)).toBe("Too many code requests. Please wait and try again.");
+    expect(otpSendFallback(400, 0)).toMatch(/could not send/i);
+    expect(otpSendFallback(502, 0)).toMatch(/could not send/i);
+  });
+});
+
+describe("attemptOtpSend", () => {
+  const accepted: OtpPostResult = { ok: true, status: 200, json: null };
+
+  it("sends exactly one keyed request per attempt", async () => {
+    const calls: Array<{ path: string; body: Record<string, string>; headers?: Record<string, string> }> = [];
+    const post: OtpPost = async (path, body, headers) => {
+      calls.push({ path, body, headers });
+      return accepted;
+    };
+    const result = await attemptOtpSend(post, "dev@example.test", "key-1");
+    expect(result).toBe(accepted);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].path).toBe("/api/auth/email-otp/send-verification-otp");
+    expect(calls[0].body).toEqual({ email: "dev@example.test", type: "sign-in" });
+    expect(calls[0].headers).toEqual({ "idempotency-key": "key-1" });
+  });
+
+  it("retries a transport failure once with the SAME key", async () => {
+    const keysSeen: Array<string | undefined> = [];
+    let calls = 0;
+    const post: OtpPost = async (_path, _body, headers) => {
+      keysSeen.push(headers?.["idempotency-key"]);
+      calls += 1;
+      if (calls === 1) throw new Error("network dropped mid-flight");
+      return accepted;
+    };
+    const result = await attemptOtpSend(post, "dev@example.test", "key-2");
+    expect(result).toBe(accepted);
+    expect(calls).toBe(2);
+    // Both attempts carried ONE key — the server can replay instead of double-send.
+    expect(keysSeen).toEqual(["key-2", "key-2"]);
+  });
+
+  it("never retries an answered rejection — the server priced that wait", async () => {
+    const limited: OtpPostResult = {
+      ok: false,
+      status: 429,
+      json: { code: "RATE_LIMITED", retryAfterSeconds: 42 },
+    };
+    let calls = 0;
+    const post: OtpPost = async () => {
+      calls += 1;
+      return limited;
+    };
+    const result = await attemptOtpSend(post, "dev@example.test", "key-3");
+    expect(result).toBe(limited);
+    expect(result.status).toBe(429);
+    expect(calls).toBe(1);
+  });
+
+  it("propagates a second transport failure instead of looping", async () => {
+    let calls = 0;
+    const post: OtpPost = async () => {
+      calls += 1;
+      throw new Error("still down");
+    };
+    await expect(attemptOtpSend(post, "dev@example.test", "key-4")).rejects.toThrow("still down");
+    expect(calls).toBe(2);
+  });
+});
+
+describe("newOtpIdempotencyKey", () => {
+  it("mints a fresh key per user-initiated attempt", () => {
+    const first = newOtpIdempotencyKey();
+    const second = newOtpIdempotencyKey();
+    expect(first.length).toBeGreaterThan(0);
+    expect(second.length).toBeGreaterThan(0);
+    expect(first).not.toBe(second);
+    // Within the server's accepted bound (oversized keys read as "no key").
+    expect(first.length).toBeLessThanOrEqual(128);
   });
 });
 

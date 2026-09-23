@@ -9,10 +9,12 @@ export function otpDigits(value: string): string {
 }
 
 /** The error body shape Better Auth and the Muster gates both answer:
- * every field read from it is checked before use, never trusted. */
+ * every field read from it is checked before use, never trusted. The
+ * wrapper's send rejections additionally carry `retryAfterSeconds` (S2). */
 export interface OtpErrorBody {
   code?: unknown;
   message?: unknown;
+  retryAfterSeconds?: unknown;
 }
 
 /** True only for primitive strings — the same trick server/http-helpers'
@@ -20,13 +22,27 @@ export interface OtpErrorBody {
  * source of these values, and String(v) === v holds for strings alone. */
 const isStr = <T,>(value: T): value is T & string => String(value) === value;
 
+/** The server's machine-priced wait, clamped to a usable integer: a finite
+ * positive number of seconds, fractional values rounded up (a wait must
+ * never round a client INTO a retry), strings and junk read as 0 — no
+ * countdown, exactly the pre-S2 behaviour. */
+export function otpRetryAfterSeconds(body: OtpErrorBody | null | undefined): number {
+  const value = body?.retryAfterSeconds;
+  if (value === null || value === undefined || isStr(value)) return 0;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+  return Math.ceil(seconds);
+}
+
 /** Map a server error body to what the user should read. The server answers
  * Better Auth plugin errors as { message, code } and Muster gate errors in
  * the same shape; anything unrecognised falls back to the server's own
- * message, then to `fallback`. */
+ * message, then to `fallback`. 429 codes prefer the server's own copy (it
+ * quotes the wait) and only fall back to a seconds-aware line. */
 export function otpErrorMessage(body: OtpErrorBody | null | undefined, fallback: string): string {
   const record = body ?? {};
   const code = isStr(record.code) ? record.code : "";
+  const seconds = otpRetryAfterSeconds(record);
   switch (code) {
     case "OTP_EXPIRED":
       return "That code expired. Request a new one.";
@@ -35,7 +51,14 @@ export function otpErrorMessage(body: OtpErrorBody | null | undefined, fallback:
     case "TOO_MANY_ATTEMPTS":
       return "Too many attempts. Request a new code.";
     case "RESEND_COOLDOWN":
-      return isStr(record.message) ? record.message : "A code was just sent. Wait a moment before requesting another.";
+      if (isStr(record.message) && record.message) return record.message;
+      return seconds > 0
+        ? `A code was just sent. Wait ${seconds} seconds before requesting another.`
+        : "A code was just sent. Wait a moment before requesting another.";
+    case "RATE_LIMITED":
+      return seconds > 0
+        ? `Too many code requests. Please wait ${seconds} seconds and try again.`
+        : "Too many code requests. Please wait and try again.";
     case "SIGNUPS_CLOSED":
       return "Sign-ups are closed on this deployment.";
     case "GOOGLE_ONLY_SIGNUP":
@@ -47,6 +70,54 @@ export function otpErrorMessage(body: OtpErrorBody | null | undefined, fallback:
   }
   if (isStr(record.message) && record.message) return record.message;
   return fallback;
+}
+
+/** Copy for a failed send whose body carried nothing usable: a 429 quotes
+ * the priced wait when the server sent seconds (the wrapper always does;
+ * a bare plugin 429 has none), anything else gets the generic send-failed
+ * line. The old bare-429 "wait a minute" guess is gone — the wait is the
+ * server's to price, not ours to assume. */
+export function otpSendFallback(status: number, seconds: number): string {
+  if (status !== 429) return "Could not send the code. Please try again.";
+  if (seconds > 0) return `Too many code requests. Please wait ${seconds} seconds and try again.`;
+  return "Too many code requests. Please wait and try again.";
+}
+
+/** One send attempt's answer — what post() (and any test double) returns. */
+export interface OtpPostResult {
+  ok: boolean;
+  status: number;
+  json: OtpErrorBody | null;
+}
+
+export type OtpPost = (
+  path: string,
+  body: Record<string, string>,
+  headers?: Record<string, string>,
+) => Promise<OtpPostResult>;
+
+const OTP_SEND_ROUTE = "/api/auth/email-otp/send-verification-otp";
+
+/** One user-initiated send: exactly one request carrying the caller's
+ * Idempotency-Key, retried ONCE only when the transport itself throws —
+ * with the SAME key, so the server replays the accepted response instead
+ * of double-sending or tripping the cooldown (study §5 S3). An answered
+ * response (4xx/5xx included) is returned as-is: the server priced that
+ * wait, and retrying it would only burn the window. */
+export async function attemptOtpSend(post: OtpPost, email: string, key: string): Promise<OtpPostResult> {
+  const payload = { email, type: "sign-in" };
+  const headers = { "idempotency-key": key };
+  try {
+    return await post(OTP_SEND_ROUTE, payload, headers);
+  } catch {
+    return post(OTP_SEND_ROUTE, payload, headers);
+  }
+}
+
+/** One key per user-initiated attempt — randomUUID with the house fallback
+ * (composer-attachments' newId pattern) for contexts lacking it. */
+export function newOtpIdempotencyKey(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `otp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /** The second stage as its own presentational form: the six-digit input and
@@ -146,14 +217,15 @@ export function EmailOtpSignIn({ next }: { next: string }) {
     };
   }, [resendIn]);
 
-  async function post(path: string, body: Record<string, string>): Promise<{ ok: boolean; status: number; json: OtpErrorBody | null }> {
+  async function post(path: string, body: Record<string, string>, headers: Record<string, string> = {}): Promise<OtpPostResult> {
     const response = await fetch(path, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...headers },
       body: JSON.stringify(body),
     });
     // Any-typed at the I/O boundary on purpose: otpErrorMessage reads only
-    // the optional code/message fields and checks both before use.
+    // the optional code/message/retryAfterSeconds fields and checks each
+    // before use.
     const json: OtpErrorBody | null = await response.json().catch(() => null);
     return { ok: response.ok, status: response.status, json };
   }
@@ -162,18 +234,13 @@ export function EmailOtpSignIn({ next }: { next: string }) {
     setError("");
     setBusy(true);
     try {
-      const result = await post("/api/auth/email-otp/send-verification-otp", {
-        email: target.trim(),
-        type: "sign-in",
-      });
+      const result = await attemptOtpSend(post, target.trim(), newOtpIdempotencyKey());
       if (!result.ok) {
-        // 429 with no cooldown code is Better Auth's per-IP window.
-        setError(
-          otpErrorMessage(
-            result.json,
-            result.status === 429 ? "Too many code requests. Please wait a minute and try again." : "Could not send the code. Please try again.",
-          ),
-        );
+        const seconds = otpRetryAfterSeconds(result.json);
+        setError(otpErrorMessage(result.json, otpSendFallback(result.status, seconds)));
+        // Arm the resend countdown from the server's own seconds (S2) —
+        // every wrapper 429 carries them; a bare answer arms nothing new.
+        if (seconds > 0) setResendIn(seconds);
         return;
       }
       setStage("code");

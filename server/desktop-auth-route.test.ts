@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { isDriveScope } from "./google-auth.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const posixOnly = describe.skipIf(process.platform === "win32");
@@ -127,6 +128,13 @@ function authorization(response: Response, fixture: Fixture) {
   expect(location.origin).toBe("https://accounts.google.com");
   expect(location.searchParams.get("client_id")).toBe(fixture.googleId);
   expect(location.searchParams.get("redirect_uri")).toBe(`${fixture.base}/api/auth/callback/google`);
+  // This is Better Auth's sign-in redirect, so it must carry exactly the
+  // basic identity scopes and never a Drive scope: drive.appdata is asked
+  // for only by the separate account connect consent (server/drive-oauth.ts).
+  // Deduped set: the provider appends its defaults to the configured list.
+  const scopes = [...new Set((location.searchParams.get("scope") ?? "").split(/\s+/).filter(Boolean))].sort();
+  expect(scopes).toEqual(["email", "openid", "profile"]);
+  expect(scopes.some((scope) => isDriveScope(scope))).toBe(false);
   const state = location.searchParams.get("state") ?? "";
   expect(state.length).toBeGreaterThan(20);
   const cookies = response.headers.getSetCookie();

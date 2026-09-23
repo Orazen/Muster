@@ -145,6 +145,7 @@ import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type C
 import { searchMessages, stopCleanupJournal } from "./message-db.ts";
 import { _loadPending, discardDelegations, discardDelegationSnapshot, snapshotDelegations, drainDelegations, pendingThreads, queueDelegation, type DelegationSnapshot } from "./delegations.ts";
 import { drainSteeredMessages, queueSteeredMessage, removeQueuedSend, setSteerQueuePaused, steerQueueSnapshot } from "./steer-queue.ts";
+import { TaskPlanEngine } from "./task-engine.ts";
 import { DecisionLog, queryAudit } from "./decision-log.ts";
 import { approvalWhy } from "./approval-why.ts";
 import { currentPlan, rehearsePlan } from "./plan-rehearsal.ts";
@@ -1327,6 +1328,7 @@ function isUnattended(botId?: string | null): boolean {
 let routines: RoutineManager | null = null;
 let goals: GoalManager | null = null;
 let social: SocialManager | null = null;
+let taskPlans: TaskPlanEngine | null = null;
 // Desktop isolation: "shared" keeps one visible desktop every bot leases
 // one at a time; "perBot" gives each bot its own container, workspace,
 // viewer port and lease/idle lanes. All lanes live in pools keyed by the
@@ -3000,6 +3002,12 @@ goals = new GoalManager({
   },
 });
 goals.start();
+
+// Task plans keep their own file and sweep their own leases; the only seam
+// into the harness is the broadcast, which carries botId so the stream
+// filter drops foreign plans the same way it drops foreign bot frames.
+taskPlans = new TaskPlanEngine({ emit: (payload) => broadcast(payload) });
+taskPlans.start();
 
 // Webhook definitions are independent from calendar schedules, but every
 // delivery joins the same RoutineManager queue. That keeps unattended work
@@ -7916,6 +7924,55 @@ let requestUserEmail = "";
       }
       if (interruptError) throw interruptError;
       return json(res, 200, { ok: true });
+    }
+
+    // ── task plans: durable checkpoints the client can steer ───────────
+    // A plan belongs to whoever owns its bot, guarded exactly like the
+    // routines and goals above: a foreign or unknown id answers 404 in
+    // both directions, so another account's plan is indistinguishable from
+    // one that never existed.
+    const ownsPlan = (p: { botId: string }) => {
+      const b = store.bot(p.botId);
+      return !b || ownsRecord(b);
+    };
+    const planMatch = path.match(/^\/api\/task-plans(?:\/([\w-]+)(?:\/(control|input|approval))?)?$/);
+    if (planMatch) {
+      const planId = planMatch[1];
+      const planAction = planMatch[2];
+      if (!planId) {
+        if (method === "GET") return json(res, 200, { plans: taskPlans!.listPlans().filter(ownsPlan) });
+        if (method === "POST") {
+          const body = await readBody(req);
+          const bot = store.bot(isText(body.botId) ? body.botId : "");
+          // Ownership runs through the bot the plan is being created for.
+          if (!bot || !ownsRecord(bot)) return json(res, 404, { error: "no such bot" });
+          const plan = taskPlans!.create({
+            botId: bot.id,
+            ownerId: bot.ownerId,
+            // The plan runs on the conversation its bot was in when it was
+            // made; a client cannot aim one at someone else's thread.
+            threadId: bot.threadId,
+            title: isText(body.title) ? body.title : undefined,
+            steps: body.steps,
+            start: body.start !== false,
+            actorId: requestUserId,
+            maxAttempts: body.maxAttempts,
+          });
+          return json(res, 201, { plan });
+        }
+      }
+      const target = planId ? taskPlans!.plan(planId) : null;
+      if (planId && (!target || !ownsPlan(target))) return json(res, 404, { error: "no such plan" });
+      if (target && !planAction && method === "GET") return json(res, 200, { plan: target });
+      if (target && planAction === "control" && method === "POST") {
+        return json(res, 200, { plan: taskPlans!.control(target.id, await readBody(req)) });
+      }
+      if (target && planAction === "input" && method === "POST") {
+        return json(res, 200, { plan: taskPlans!.submitInput(target.id, await readBody(req)) });
+      }
+      if (target && planAction === "approval" && method === "POST") {
+        return json(res, 200, { plan: taskPlans!.decideApproval(target.id, await readBody(req)) });
+      }
     }
 
     // ── tasks: a bot's separate contexts ────────────────────────────────
