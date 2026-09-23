@@ -179,6 +179,24 @@ export async function validateReleasePayload(options) {
       if (!feeds.get(name).files.some((entry) => targets.includes(entry.url))) fail(`Missing platform update target in ${name}`);
     }
   }
+  // Blockmaps ride alongside their binaries for electron-updater's differential
+  // (delta) downloads, which fetch `<installer-url>.blockmap` by convention —
+  // the feeds never reference them. Without this, the platform legs upload
+  // blockmaps to the release but the mirror silently ships without them and
+  // every delta update falls back to a full re-download. Adopt any blockmap
+  // whose binary is already mirrored and whose bytes are covered by that
+  // platform's checksum file, so only verified bytes reach the inventory.
+  if (requireComplete) {
+    const binaryOf = (name) => name.slice(0, -".blockmap".length);
+    for (const name of files.keys()) {
+      if (!name.endsWith(".blockmap")) continue;
+      const binary = binaryOf(name);
+      if (!selected.has(binary)) continue;
+      const checksumsFile = CHECKSUMS.find((item) => checksumEntries.get(item)?.has(name));
+      if (!checksumsFile) fail(`Unverified blockmap cannot be mirrored: ${name}`);
+      selected.add(name);
+    }
+  }
   // Feeds themselves are transferred too. Bind their bytes, not only the
   // installer hashes they contain, to the later remote promotion gate.
   for (const name of selected) await digest(name);

@@ -11,6 +11,15 @@ describe('release control decision matrix', () => {
     expect(verifyReleaseWorkflow(original)).toEqual({ platformUploads: 4, mutationSteps: 9 });
   });
 
+  it('covers blockmaps in platform checksums and uploads so differential updates can use the mirror', () => {
+    for (const [platform, sums] of [['macos', '> SHA256SUMS-macos-arm64.txt'], ['macos-x64', '> SHA256SUMS-macos-x64.txt'], ['windows', '> SHA256SUMS-windows-x64.txt']]) {
+      const sumsStep = step(original, platform, sums);
+      expect(sumsStep.run).toMatch(/blockmap/);
+      expect(sumsStep.run).toMatch(/shopt -s nullglob/);
+      expect(upload(original, platform).run).toMatch(/blockmap/);
+    }
+  });
+
   it.each(['macos', 'macos-x64', 'windows', 'linux'])('catches an unguarded %s upload', (platform) => {
     const workflow = copy();
     delete upload(workflow, platform).if;

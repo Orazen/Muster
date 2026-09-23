@@ -303,6 +303,36 @@ describe("release mirror and CLI", () => {
     expect(result.mirrorFiles).toContain(`Muster-${version}-x64.zip`);
   });
 
+  it("mirrors verified blockmaps riding alongside selected binaries", async () => {
+    const { dmg, zip, exe } = complete(true);
+    // electron-builder's actual emission: the main DMG's blockmap plus a blockmap
+    // beside every Windows exe and each mac zip. Linux ships none.
+    put(`${dmg}.blockmap`); put(`${zip}.blockmap`); put(`${exe}.blockmap`);
+    checksums("SHA256SUMS-macos-arm64.txt", [dmg, zip, "Muster.dmg", `${dmg}.blockmap`, `${zip}.blockmap`]);
+    checksums("SHA256SUMS-macos-x64.txt", [`Muster-${version}-intel.dmg`, `Muster-${version}-x64.zip`, "Muster-intel.dmg"]);
+    checksums("SHA256SUMS-windows-x64.txt", [exe, `${exe}.blockmap`]);
+    const result = await prepareMirrorPayload(options());
+    for (const name of [`${dmg}.blockmap`, `${zip}.blockmap`, `${exe}.blockmap`]) {
+      expect(result.mirrorFiles).toContain(name);
+      expect(result.hashes[name]).toEqual({ size: bytes(name).length, sha256: hash(bytes(name), "sha256", "hex"), sha512: hash(bytes(name), "sha512") });
+    }
+    expect(result.mirrorFiles).toEqual(expect.arrayContaining([dmg, zip, exe, `${dmg}.blockmap`]));
+    // latest.json stays installer-only: differential downloads fetch blockmaps by
+    // convention, so the manifest contract is unchanged.
+    expect(Object.keys(result.latest.files)).not.toContain(`${dmg}.blockmap`);
+  });
+
+  it("refuses to mirror a blockmap whose bytes no checksum file covers", async () => {
+    const { dmg } = complete(true);
+    put(`${dmg}.blockmap`, "tampered-or-unknown-provenance bytes");
+    await expect(prepareMirrorPayload(options())).rejects.toThrow(/Unverified blockmap cannot be mirrored/);
+  });
+
+  it("accepts a complete payload with no blockmaps at all", async () => {
+    complete(); const result = await prepareMirrorPayload(options());
+    expect(result.mirrorFiles.some((name) => name.endsWith(".blockmap"))).toBe(false);
+  });
+
   it("refuses partial mirror mode before producing output", async () => {
     partial(); await expect(prepareMirrorPayload(options(false))).rejects.toThrow(/REQUIRE_COMPLETE=true/);
     expect(existsSync(join(assetsDir, "latest.json"))).toBe(false);

@@ -365,7 +365,7 @@ jobs:
           [ -f "release/Muster-${VERSION}.dmg" ] || {
             echo "::error::expected release/Muster-${VERSION}.dmg (electron-builder.yml dmg.artifactName)"; exit 1; }
           cp "release/Muster-${VERSION}.dmg" release/Muster.dmg
-          (cd release && shasum -a 256 *.dmg *.zip > SHA256SUMS-macos-arm64.txt)
+          (cd release && shopt -s nullglob && shasum -a 256 *.dmg *.zip *.blockmap > SHA256SUMS-macos-arm64.txt)
 
       - name: Verify artifacts
         run: |
@@ -539,7 +539,7 @@ jobs:
           [ -f "release/Muster-${VERSION}-intel.dmg" ] || {
             echo "::error::expected release/Muster-${VERSION}-intel.dmg (package:mac:x64 override)"; exit 1; }
           cp "release/Muster-${VERSION}-intel.dmg" release/Muster-intel.dmg
-          (cd release && shasum -a 256 *.dmg *.zip > SHA256SUMS-macos-x64.txt)
+          (cd release && shopt -s nullglob && shasum -a 256 *.dmg *.zip *.blockmap > SHA256SUMS-macos-x64.txt)
 
       - name: "Attach macOS x64 assets to draft release"
         if: ${{ success() && needs.prepare.outputs.dry_run == 'false' }}
@@ -549,8 +549,9 @@ jobs:
           RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
         run: |
           set -euo pipefail
+          shopt -s nullglob
           node scripts/release-state.mjs assert-draft
-          gh release upload "v$RELEASE_VERSION" release/*.dmg release/*.zip release/SHA256SUMS-macos-x64.txt --clobber
+          gh release upload "v$RELEASE_VERSION" release/*.dmg release/*.zip release/*.blockmap release/SHA256SUMS-macos-x64.txt --clobber
 
   # ── Windows ───────────────────────────────────────────────────────────────
   windows:
@@ -633,7 +634,7 @@ jobs:
             exit 1
           }
           cp "$src" release/Muster-setup.exe
-          (cd release && sha256sum *.exe > SHA256SUMS-windows-x64.txt)
+          (cd release && shopt -s nullglob && sha256sum *.exe *.exe.blockmap > SHA256SUMS-windows-x64.txt)
 
       - name: "Attach Windows assets to draft release"
         if: ${{ success() && needs.prepare.outputs.dry_run == 'false' }}
