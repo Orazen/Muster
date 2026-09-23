@@ -7,7 +7,72 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  @font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("/fonts/inter-latin-100-normal.woff2") format("woff2");
+    font-weight: 100;
+  }
+  @font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 200;
+    font-display: swap;
+    src: url("/fonts/inter-latin-200-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 300;
+    font-display: swap;
+    src: url("/fonts/inter-latin-300-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/fonts/inter-latin-400-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url("/fonts/inter-latin-500-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("/fonts/inter-latin-600-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("/fonts/inter-latin-700-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url("/fonts/inter-latin-800-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Inter";
+    font-style: normal;
+    font-weight: 900;
+    font-display: swap;
+    src: url("/fonts/inter-latin-900-normal.woff2") format("woff2");
+  }
+</style>
 <title>Muster — Muster your agents</title>
 <meta name="description" content="AI agents with real computers. Privacy Shield scrubs emails and secrets before any cloud model sees them. Self-host free — or hosted from $20/mo."/>
 <link rel="canonical" href="https://muster.today/" />
@@ -94,26 +159,38 @@
 <link rel="icon" type="image/svg+xml" href="/app-icon.svg" />
 <style>
   :root {
-    --page: #0a0a0a;
-    --surface: #131314;
-    --surface-soft: #101011;
-    --surface-raised: #1a1a1c;
+    --app: #0a0a0a;
+    --panel: #131314;
+    --inset: #18181a;
+    --card: #1e1e21;
+    --raised: #2a2a2e;
+    --raised-hover: #343438;
     --ink: #f6f6f7;
-    --body: #cfcfd2;
-    --muted: #98989e;
-    --muted-2: #75757b;
-    --line: rgba(255, 255, 255, 0.08);
-    --line-2: rgba(255, 255, 255, 0.16);
-    --accent: #f0460e;
-    --accent-soft: #ff7a45;
-    --accent-line: rgba(240, 70, 14, 0.34);
+    --body: #d0d0d2;
+    --secondary: rgba(246, 246, 247, 0.60);
+    --muted: rgba(246, 246, 247, 0.42);
+    --muted-2: rgba(246, 246, 247, 0.28);
+    --hairline: #4a4a4e;
+    --hairline-paint: rgba(74, 74, 78, 0.40);
+    --line: var(--hairline-paint);
+    --line-2: rgba(74, 74, 78, 0.62);
+    --accent: #c93a0b;
+    --accent-strong: #f0460e;
+    --accent-border: #ff7a45;
     --accent-wash: rgba(240, 70, 14, 0.09);
     --accent-wash-2: rgba(240, 70, 14, 0.16);
-    --shadow-soft: 0 2px 16px rgba(0, 0, 0, 0.35);
-    --radius-card: 20px;
-    /* editorial system: serif for statements, mono for labels, sans for prose */
-    --font-display: "Fraunces", ui-serif, Georgia, "Times New Roman", serif;
-    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --accent-line: rgba(240, 70, 14, 0.34);
+    --shadow-soft: 0 1px 1px rgba(255,255,255,0.05), 0 22px 60px rgba(0,0,0,0.10);
+    --radius-row: 8px;
+    --radius-card: 12px;
+    --radius-frame: 20px;
+    --radius-pill: 999px;
+    --ease: cubic-bezier(0.22,1,0.36,1);
+    --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --lede: 17px;
+    --lede-line: 1.6;
+    --section-rhythm: 96px;
   }
 
   * { box-sizing: border-box; }
@@ -121,15 +198,19 @@
   body {
     margin: 0;
     min-width: 320px;
-    background: var(--page);
+    background:
+      radial-gradient(80% 50% at 50% -10%, rgba(240, 70, 14, 0.08), transparent 70%),
+      var(--app);
     color: var(--body);
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: var(--font-sans);
     font-size: 16px;
     line-height: 1.6;
+    letter-spacing: -0.012em;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
   }
+  ::selection { background: rgba(240, 70, 14, 0.24); color: var(--ink); }
   a { color: inherit; text-decoration: none; }
   img { display: block; max-width: 100%; }
   button { font: inherit; cursor: pointer; }
@@ -140,7 +221,7 @@
 
   .skip-link {
     position: absolute; left: 16px; top: -48px; z-index: 60;
-    border-radius: 10px; background: var(--surface-raised);
+    border-radius: 10px; background: var(--raised);
     padding: 8px 12px; color: var(--ink); box-shadow: var(--shadow-soft);
   }
   .skip-link:focus { top: 16px; }
@@ -152,10 +233,10 @@
     position: sticky; top: 0; z-index: 50;
     display: flex; align-items: center; justify-content: space-between;
     gap: 24px; padding: 14px 0;
-    background: color-mix(in srgb, var(--page) 82%, transparent);
+    background: color-mix(in srgb, var(--app) 82%, transparent);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
-    border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+    border-bottom: 1px solid var(--line);
   }
   .site-header__left, .site-header__right, .site-nav { display: flex; align-items: center; }
   .site-header__left { gap: 40px; }
@@ -174,7 +255,7 @@
     display: inline-flex; align-items: center; gap: 7px;
     min-height: 42px; padding: 0 14px;
     border: 1px solid var(--line); border-radius: 999px;
-    background: var(--surface); color: var(--muted);
+    background: var(--card); color: var(--muted);
     font-size: 14px; font-weight: 500;
     transition: border-color 180ms ease, color 180ms ease;
   }
@@ -184,7 +265,7 @@
   .site-menu__toggle {
     display: inline-flex; align-items: center; justify-content: center;
     width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 12px;
-    background: var(--surface); color: var(--ink); list-style: none;
+    background: var(--card); color: var(--ink); list-style: none;
   }
   .site-menu__toggle::-webkit-details-marker { display: none; }
   .site-menu__icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
@@ -196,29 +277,28 @@
     display: flex; flex-direction: column; width: min(240px, calc(100vw - 32px));
     max-height: calc(100dvh - 96px); overflow-y: auto; overscroll-behavior: contain;
     border: 1px solid var(--line-2); border-radius: 16px;
-    background: var(--surface-raised); padding: 8px;
+    background: var(--raised); padding: 8px;
     box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
   }
   .site-menu__panel a { border-radius: 10px; padding: 11px 12px; color: var(--body); font-size: 15.5px; }
-  .site-menu__panel a:hover, .site-menu__panel a:focus-visible { background: var(--surface); color: var(--ink); }
+  .site-menu__panel a:hover, .site-menu__panel a:focus-visible { background: var(--card); color: var(--ink); }
 
   /* ---------- buttons ---------- */
   .button {
     display: inline-flex; align-items: center; justify-content: center; gap: 10px;
     min-height: 48px; max-width: 100%; padding: 10px 22px; text-align: center;
-    border: 1px solid transparent; border-radius: 14px;
+    border: 1px solid transparent; border-radius: 8px;
     font-size: 16px; font-weight: 500;
-    transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease, border-color 180ms ease, color 180ms ease;
+    transition: transform 120ms var(--ease), box-shadow 120ms var(--ease), background 120ms ease, border-color 120ms ease, color 120ms ease;
+    will-change: transform;
   }
   .button--primary {
-    /* the reference CTA: solid accent, half-alpha border, color-matched
-       glow, glossy top edge — scale, never lift, on hover */
     position: relative; overflow: hidden;
     color: #fff;
-    background: var(--accent);
+    background: var(--accent-strong);
     border-color: rgba(240, 70, 14, 0.5);
     box-shadow: 0 4px 5px 0 rgba(240, 70, 14, 0.2);
-    transition: transform 400ms ease-out, box-shadow 400ms ease-out;
+    transition: transform 200ms var(--ease), box-shadow 200ms var(--ease);
   }
   .button--primary::before {
     content: ""; position: absolute; inset: 0; pointer-events: none;
@@ -226,16 +306,16 @@
     background: linear-gradient(to bottom, rgba(255, 255, 255, 0.3), transparent);
   }
   .button--primary:hover, .button--primary:focus-visible {
-    transform: scale(1.10);
+    transform: scale(1.04);
     box-shadow: 0 8px 18px 0 rgba(240, 70, 14, 0.28);
   }
   .button--primary:active { transform: scale(0.96); }
   .button--secondary {
-    color: var(--body); background: var(--surface);
+    color: var(--body); background: var(--card);
     border-color: var(--line); box-shadow: var(--shadow-soft);
   }
   .button--secondary:hover, .button--secondary:focus-visible {
-    background: var(--surface-raised); border-color: var(--line-2); color: var(--ink);
+    background: var(--raised); border-color: var(--line-2); color: var(--ink);
   }
   .button--small { min-height: 42px; padding: 0 18px; font-size: 14px; }
 
@@ -246,7 +326,7 @@
     margin-bottom: 30px; padding: 6px 14px 6px 8px;
     border: 1px solid var(--accent-line); border-radius: 999px;
     background: linear-gradient(to bottom, var(--accent-wash), var(--accent-wash-2));
-    color: var(--accent-soft); font-size: 13px; line-height: 1.4; text-align: left;
+    color: var(--accent-border); font-size: 13px; line-height: 1.4; text-align: left;
   }
   .hero__badge {
     flex: none; border-radius: 999px; background: rgba(255, 255, 255, 0.08);
@@ -273,14 +353,69 @@
     font-size: clamp(3rem, 7vw, 62px); line-height: 1.05;
   }
   .hero h1 .accent {
-    background: linear-gradient(105deg, var(--accent-soft), var(--accent) 55%, #c93a0b);
+    background: linear-gradient(105deg, var(--accent-border), var(--accent) 55%, #c93a0b);
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
 
   .lead {
-    max-width: 660px; margin: 22px auto 0;
-    color: var(--muted); font-size: 19px; line-height: 1.55; text-wrap: pretty;
+    max-width: 46rem; margin: 22px auto 0;
+    color: var(--muted); font-size: 17.5px; line-height: 1.6; text-wrap: pretty;
   }
+
+  .hero__actions, .cta-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+  .hero__actions { justify-content: center; margin-top: 34px; }
+  .cta-actions { margin-top: 26px; }
+  .hero__dl-version {
+    padding: 2px 8px; border-radius: 999px;
+    background: rgba(255, 255, 255, 0.18); font-size: 13px; font-weight: 600;
+  }
+  .hero__platforms {
+    margin-top: 14px; color: var(--muted); font-size: 13.5px;
+  }
+  .hero__platforms a { color: var(--muted); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 0.2em; transition: color 120ms var(--ease); }
+  .hero__platforms a:hover, .hero__platforms a:focus-visible { color: var(--ink); }
+
+  /* trust strip — three flat tiles, hairline borders, no lift */
+  .trust-strip {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;
+    max-width: 860px; margin: 34px auto 0; text-align: left;
+  }
+  .trust-tile {
+    border: 1px solid var(--line); border-radius: var(--radius-card);
+    background: var(--card); padding: 16px 20px;
+  }
+  .trust-tile__title { color: var(--ink); font-size: 14.5px; font-weight: 600; letter-spacing: -0.012em; }
+  .trust-tile__copy { margin-top: 4px; color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+
+  /* team strip — the six flowers above the shot */
+  .hero__teamstrip {
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    margin: 48px auto 12px;
+  }
+  .hero__teamstrip .hero__face { width: 34px; height: 34px; filter: none; }
+  .hero__teamlabel {
+    margin-left: 8px; color: var(--muted-2); font-size: 13px;
+    font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;
+  }
+
+  /* shot-frame — the one framed screenshot */
+  .shot-frame {
+    margin: 40px auto 0; max-width: 980px; padding: 0;
+    border: 1px solid var(--line); border-radius: var(--radius-frame); overflow: hidden;
+    box-shadow: 0 1px 1px rgba(255,255,255,0.05), 0 22px 60px rgba(0,0,0,0.10);
+  }
+  .shot-frame figcaption {
+    padding: 12px 18px; border-top: 1px solid var(--line);
+    background: var(--panel); color: var(--muted); font-size: 13px; line-height: 1.5; text-align: left;
+  }
+
+  .stat-row {
+    display: flex; justify-content: center; flex-wrap: wrap; gap: 12px 40px;
+    margin-top: 34px;
+  }
+  .stat-row__item { display: flex; align-items: baseline; gap: 8px; }
+  .stat-row__value { color: var(--ink); font-size: 22px; font-weight: 600; letter-spacing: -0.035em; font-variant-numeric: tabular-nums; }
+  .stat-row__label { color: var(--muted); font-size: 13px; }
 
   .hero__actions, .cta-actions { display: flex; flex-wrap: wrap; gap: 12px; }
   .hero__actions { justify-content: center; margin-top: 34px; }
@@ -295,44 +430,37 @@
     letter-spacing: -0.02em;
     transition: color 150ms ease;
   }
-  .setup-copy:hover { color: var(--accent-soft); }
+  .setup-copy:hover { color: var(--accent-border); }
   .setup-copy__prefix { color: var(--muted-2); }
   .setup-copy__icon {
     width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor;
     stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8;
   }
 
-  .hero__visual {
-    margin: 56px auto 0; max-width: 980px;
-    border: 1px solid var(--line); border-radius: 22px; overflow: hidden;
-    box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.8);
-  }
+  .hero__visual { display: none; }
 
   /* ---------- sections ---------- */
-  .section { padding-top: 110px; }
+  .section { padding-top: var(--section-rhythm); }
   .section-intro { max-width: 660px; }
   .eyebrow {
-    margin-bottom: 12px; color: var(--accent-soft);
+    margin-bottom: 12px; color: var(--accent-border);
     font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
   }
   .section-heading { font-size: clamp(2.25rem, 5vw, 42px); line-height: 1.1; }
   .section-copy { margin-top: 16px; color: var(--muted); font-size: 18px; line-height: 1.55; text-wrap: pretty; }
 
-  .card-grid-3, .card-grid-4, .comparison-grid, .stats-grid { display: grid; gap: 20px; }
+  .card-grid-3, .card-grid-4, .comparison-grid, .stats-grid { display: grid; gap: 16px; }
   .card-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 44px; }
   .card-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 44px; }
 
-  .feature-card, .roster-card, .comparison-card {
-    border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-soft);
-    /* Gaia design system: generous radius, subtle lift on hover. */
-    border-radius: 16px; transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    .feature-card, .roster-card, .comparison-card {
+    border: 1px solid var(--line); background: var(--card); box-shadow: var(--shadow-soft);
+    border-radius: var(--radius-card); transition: border-color 120ms var(--ease), background 120ms var(--ease);
   }
   .feature-card:hover, .roster-card:hover, .comparison-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 12px 32px -14px rgba(0, 0, 0, 0.55);
-    border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+    border-color: var(--line-2);
   }
-  .feature-card { border-radius: 16px; padding: 26px; }
+  .feature-card { border-radius: var(--radius-card); padding: 24px; }
   .feature-card h3, .comparison-card h3 {
     color: var(--ink); font-size: 20px; font-weight: 500; letter-spacing: -0.02em;
   }
@@ -345,34 +473,34 @@
   }
 
   .roster-card {
-    border-radius: 18px; padding: 20px;
-    transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+    border-radius: 12px; padding: 20px;
+    transition: border-color 120ms var(--ease), box-shadow 120ms var(--ease);
   }
   .roster-card:hover, .roster-card:focus-within {
-    transform: translateY(-2px); border-color: var(--line-2);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+    border-color: var(--line-2);
+    box-shadow: 0 1px 1px rgba(255,255,255,0.05), 0 22px 60px rgba(0,0,0,0.10);
   }
   .roster-card h3 { margin-top: 14px; color: var(--ink); font-size: 15.5px; font-weight: 600; }
   .roster-card p { margin-top: 6px; font-size: 14px; line-height: 1.55; color: var(--muted); }
   .roster-bot-avatar {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 56px; height: 56px; border-radius: 16px;
+    width: 56px; height: 56px; border-radius: 12px;
     font-size: 24px; line-height: 1;
-    border: 1px solid var(--line); background: var(--surface-raised);
+    border: 1px solid var(--line); background: var(--raised);
   }
 
   .engine-tags { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 40px; }
   .engine-tag {
-    border: 1px solid var(--line); background: var(--surface-raised); color: var(--body);
-    padding: 8px 16px; max-width: 100%; overflow-wrap: anywhere; border-radius: 999px; font-size: 13.5px; font-weight: 500;
-    transition: border-color 180ms ease, color 180ms ease;
+    border: 1px solid var(--line); background: var(--raised); color: var(--body);
+    padding: 8px 16px; max-width: 100%; overflow-wrap: anywhere; border-radius: 8px; font-size: 13.5px; font-weight: 500;
+    transition: border-color 120ms var(--ease), color 120ms var(--ease);
   }
   .engine-tag:hover { border-color: var(--accent-line); color: var(--ink); }
 
   /* ---------- comparison ---------- */
   .comparison-grid { grid-template-columns: 1.15fr 1fr; align-items: stretch; margin-top: 40px; }
-  .comparison-card { display: flex; flex-direction: column; border-radius: 22px; padding: 30px; }
-  .comparison-card--muted { background: var(--surface-soft); box-shadow: none; }
+  .comparison-card { display: flex; flex-direction: column; border-radius: 12px; padding: 24px; }
+  .comparison-card--muted { background: var(--inset); box-shadow: none; }
   .comparison-meta { margin-top: 6px; color: var(--muted); font-size: 14.5px; }
   .comparison-list {
     display: flex; flex-direction: column; gap: 9px; margin-top: 22px;
@@ -382,7 +510,7 @@
   .comparison-list div { position: relative; padding-left: 22px; }
   .comparison-list div::before {
     content: ""; position: absolute; left: 4px; top: 9px;
-    width: 6px; height: 6px; border-radius: 999px; background: var(--accent);
+    width: 6px; height: 6px; border-radius: 999px; background: var(--accent-strong);
   }
   .comparison-list--muted div::before { background: var(--muted-2); }
   .comparison-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: auto; padding-top: 26px; }
@@ -391,13 +519,13 @@
     display: inline-flex; align-items: center; border-radius: 999px;
     border: 1px solid var(--accent-line);
     background: linear-gradient(to bottom, var(--accent-wash), var(--accent-wash-2));
-    padding: 5px 11px; color: var(--accent-soft); font-size: 12px; font-weight: 600;
+    padding: 5px 11px; color: var(--accent-border); font-size: 12px; font-weight: 600;
   }
 
   /* ---------- terminal ---------- */
   .term {
     max-width: 780px; margin: 44px auto 0;
-    background: #0d0d0f; border: 1px solid var(--line); border-radius: 18px;
+    background: #0d0d0f; border: 1px solid var(--line); border-radius: 12px;
     box-shadow: var(--shadow-soft); overflow: hidden; text-align: left;
   }
   .term__bar {
@@ -406,29 +534,29 @@
     background: rgba(255, 255, 255, 0.02);
   }
   .term__dot { width: 11px; height: 11px; border-radius: 50%; background: var(--line-2); }
-  .term__dot--accent { background: var(--accent); }
-  .term__title { margin-left: 8px; color: var(--muted-2); font-size: 12.5px; font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; }
+  .term__dot--accent { background: var(--accent-strong); }
+  .term__title { margin-left: 8px; color: var(--muted-2); font-size: 12.5px; font-family: var(--font-mono); }
   .term__body {
     margin: 0; padding: 20px 22px; overflow-x: auto;
-    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-mono);
     font-size: 13.5px; line-height: 1.75; color: var(--muted);
     white-space: pre;
   }
-  .term__body .p { color: var(--accent-soft); font-weight: 600; }
+  .term__body .p { color: var(--accent-border); font-weight: 600; }
   .term__body .c { color: var(--ink); }
   .term__body .ok { color: #4ade80; }
   .term__body .dim { color: var(--muted-2); }
   .install-line {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     max-width: 780px; margin: 18px auto 0; padding: 14px 18px;
-    border: 1px dashed var(--line-2); border-radius: 14px; background: var(--surface);
-    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; font-size: 13.5px;
+    border: 1px dashed var(--line-2); border-radius: 8px; background: var(--card);
+    font-family: var(--font-mono); font-size: 13.5px;
   }
   .install-line code { min-width: 0; overflow-wrap: anywhere; background: transparent; color: var(--ink); padding: 0; font-size: 13.5px; }
   .install-line button {
-    margin-left: auto; border: 1px solid var(--line); border-radius: 10px;
+    margin-left: auto; border: 1px solid var(--line); border-radius: 8px;
     background: transparent; color: var(--muted); font-size: 12.5px; padding: 6px 12px;
-    transition: color 150ms ease, border-color 150ms ease;
+    transition: color 120ms var(--ease), border-color 120ms var(--ease);
   }
   .install-line button:hover, .install-line button:focus-visible { color: var(--ink); border-color: var(--line-2); }
 
@@ -438,8 +566,8 @@
   .faq-list { max-width: 760px; margin-top: 40px; display: grid; gap: 12px; }
   .faq-item {
     border: 1px solid var(--line);
-    background: var(--surface-soft, #101011);
-    border-radius: 14px;
+    background: var(--inset);
+    border-radius: 8px;
     padding: 0;
     overflow: hidden;
   }
@@ -461,24 +589,24 @@
   .faq-item .faq-a { padding: 0 22px 18px; color: var(--muted); font-size: 14.5px; line-height: 1.6; }
   .download-row {
     display: flex; align-items: center; justify-content: space-between; gap: 20px;
-    border: 1px solid var(--line); border-radius: 16px; padding: 20px 24px;
-    background: var(--surface); transition: border-color 180ms ease, transform 180ms ease;
+    border: 1px solid var(--line); border-radius: 8px; padding: 20px 24px;
+    background: var(--card); transition: border-color 120ms var(--ease);
   }
-  .download-row:hover { border-color: var(--accent-line); transform: translateY(-1px); }
+  .download-row:hover { border-color: var(--accent-line); }
   .download-row__os { color: var(--ink); font-weight: 600; }
   .download-row__meta { margin-top: 2px; color: var(--muted); font-size: 13.5px; }
-  .download-row a { color: var(--accent-soft); font-weight: 600; white-space: nowrap; }
+  .download-row a { color: var(--accent-border); font-weight: 600; white-space: nowrap; }
 
   /* ---------- stats band ---------- */
   .stats-band {
     display: flex; align-items: center; justify-content: space-between; gap: 40px;
-    margin-top: 110px; padding: 54px;
-    border: 1px solid var(--line); border-radius: 26px; background: var(--surface-soft);
+    margin-top: 96px; padding: 40px;
+    border: 1px solid var(--line); border-radius: 12px; background: var(--inset);
   }
   .stats-band h2 { font-size: clamp(2rem, 4vw, 38px); line-height: 1.1; }
   .stats-band p { margin-top: 14px; color: var(--muted); font-size: 17px; line-height: 1.55; }
   .stats-grid { grid-template-columns: repeat(2, minmax(120px, auto)); gap: 26px 44px; }
-  .stat-value { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }
+  .stat-value { color: var(--ink); font-size: 30px; font-weight: 600; letter-spacing: -0.035em; }
   .stat-label { margin-top: 6px; color: var(--muted); font-size: 13.5px; }
 
   /* ---------- footer ---------- */
@@ -487,11 +615,9 @@
     display: flex; justify-content: space-between; gap: 24px;
     margin-top: 70px; padding: 60px 0 70px; border-top: 1px solid var(--line);
   }
-  /* footer glow — the reference site closes every page with a soft
-     accent wash rising from the bottom edge */
   .site-footer::before {
     content: ""; position: absolute; left: 0; right: 0; top: -140px; height: 140px;
-    background: radial-gradient(60% 100% at 50% 100%, rgba(240, 70, 14, 0.12), transparent 70%);
+    background: radial-gradient(60% 100% at 50% 100%, rgba(240, 70, 14, 0.08), transparent 70%);
     pointer-events: none;
   }
   .site-footer__brand, .site-footer__links {
@@ -503,6 +629,74 @@
   .site-footer__links { color: var(--muted); font-size: 14px; }
   .site-footer__links a:hover, .site-footer__links a:focus-visible { color: var(--ink); }
 
+
+  /* ---------- statement card ---------- */
+  .statement-card {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 24px;
+    margin-top: var(--section-rhythm);
+    border: 1px solid var(--line); border-radius: var(--radius-frame);
+    background: var(--card); padding: 40px 48px;
+  }
+  .statement-card__copy h2 { max-width: 620px; }
+  .statement-card__copy p { margin-top: 14px; max-width: 560px; color: var(--muted); font-size: 16.5px; line-height: 1.6; }
+  .statement-card__panel {
+    display: flex; align-items: center; justify-content: center; flex: none;
+    width: 180px; height: 180px; border-radius: var(--radius-frame);
+    border: 1px solid var(--line); background: var(--inset);
+  }
+
+  /* ---------- tables ---------- */
+  .table-frame {
+    border: 1px solid var(--line); border-radius: var(--radius-card);
+    background: var(--card); overflow-x: auto; box-shadow: var(--shadow-soft);
+  }
+  .table-frame table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 14.5px; line-height: 1.5; text-align: left; }
+  .table-frame th, .table-frame td { padding: 13px 18px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+  .table-frame thead th { color: var(--ink); font-weight: 600; font-size: 14px; border-top: 0; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .table-frame tbody th { color: var(--ink); font-weight: 600; white-space: nowrap; }
+  .table-frame td { color: var(--body); }
+  .table-frame td a { color: var(--accent-border); text-decoration: underline; text-underline-offset: 0.2em; }
+  .table-caption { caption-side: top; text-align: left; color: var(--muted); font-size: 13px; padding: 12px 14px 0; }
+  .honesty-callout {
+    margin-top: 28px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius-row);
+    background: var(--inset); color: var(--muted); font-size: 13.5px; line-height: 1.5;
+  }
+
+  /* ---------- releases band ---------- */
+  .releases { max-width: 780px; margin-top: 36px; display: grid; gap: 10px; }
+  .releases__loading { color: var(--muted-2); font-size: 14px; }
+  .release-row {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 14px;
+    border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px;
+    background: var(--card);
+  }
+  .release-row__ver { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .release-row__date { color: var(--muted-2); font-size: 13px; }
+  .release-row__changes { color: var(--muted); font-size: 13.5px; }
+  .release-row a { color: var(--accent-border); font-weight: 600; font-size: 13.5px; }
+
+  /* ---------- faq two-column ---------- */
+  .faq-cols { display: grid; gap: 40px; max-width: 900px; margin: 0 auto; }
+  @media (min-width: 900px) {
+    .faq-cols { grid-template-columns: 1fr 1.6fr; gap: 48px; align-items: start; }
+    .faq-cols .faq-heading { position: sticky; top: 96px; }
+  }
+  .faq-list { max-width: none; margin-top: 0; }
+
+  @media (max-width: 760px) {
+    .statement-card { padding: 24px; }
+    .statement-card__panel { display: none; }
+    .faq-cols { grid-template-columns: minmax(0, 1fr); }
+  }
+
+
+  .footer-download {
+    color: var(--ink); font-weight: 600;
+    padding: 6px 14px; border: 1px solid var(--line-2); border-radius: 999px;
+    background: var(--card);
+  }
+  .footer-download:hover, .footer-download:focus-visible { border-color: var(--accent-line); color: var(--accent-border); }
+
   /* ---------- responsive ---------- */
   @media (max-width: 1100px) {
     .site-nav, .site-header__cta .button--secondary { display: none; }
@@ -512,7 +706,7 @@
   @media (max-width: 1000px) {
     .card-grid-3, .comparison-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .card-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .stats-band { flex-direction: column; align-items: flex-start; padding: 40px; }
+    .stats-band { flex-direction: column; align-items: flex-start; padding: 32px; }
   }
   @media (max-width: 760px) {
     .container { width: calc(100% - 32px); }
@@ -521,7 +715,7 @@
     .site-header__right { gap: 8px; }
     .site-header__right .star-pill { display: none; }
     .site-header__cta .button--small { padding-inline: 12px; }
-    .section { padding-top: 76px; }
+    .section { padding-top: 64px; --section-rhythm: 64px; }
     .hero { padding-top: 32px; }
     .hero__pill { font-size: 12.5px; }
     .hero__pill-tail { display: none; }
@@ -533,17 +727,21 @@
     .stat-value { font-size: clamp(24px, 5vw, 30px); overflow-wrap: anywhere; }
     .download-row { flex-direction: column; align-items: flex-start; gap: 12px; }
     .download-row a { white-space: normal; }
+    .trust-strip { grid-template-columns: minmax(0, 1fr); }
+    .stat-row { gap: 12px 24px; }
     .site-footer { flex-direction: column; }
     .site-footer__brand, .site-footer__links { padding-top: 0; }
   }
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
-    * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    .hero h1 .w, .hero__terminal li, .roster-marquee__track, .promo-banner__dot, .hero__terminal-bar::before {
+      opacity: 1 !important; transform: none !important; animation: none !important; transition: none !important;
+    }
   }
-  .room-card { background: var(--card, #101018); border: 1px solid rgba(255,255,255,.09); border-radius: 14px; padding: 18px; }
+  .room-card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
   .room-card h3 { margin: 6px 0 4px; font-size: 15px; }
   .room-card p { margin: 0; color: var(--muted-2); font-size: 13px; line-height: 1.5; }
-  .room-kind { display: inline-block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #ff9800; border: 1px solid rgba(255,152,0,.35); border-radius: 6px; padding: 2px 7px; margin-bottom: 8px; }
+  .room-kind { display: inline-block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-border); border: 1px solid var(--accent-line); border-radius: 6px; padding: 2px 7px; margin-bottom: 8px; }
 
   /* ---------- approval simulation (static demo) ---------- */
   .apx { margin-top: 44px; max-width: 760px; }
@@ -551,18 +749,18 @@
     display: inline-flex; align-items: center; gap: 8px;
     font-size: 12.5px; color: var(--muted);
     border: 1px solid var(--line-2); border-radius: 999px;
-    padding: 6px 12px; margin: 0 0 14px; background: var(--surface-soft);
+    padding: 6px 12px; margin: 0 0 14px; background: var(--inset);
   }
   .apx-sim-badge::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
   .apx-card {
-    background: var(--surface); border: 1px solid var(--line);
+    background: var(--card); border: 1px solid var(--line);
     border-radius: var(--radius-card); box-shadow: var(--shadow-soft);
     overflow: hidden;
   }
   .apx-head {
     display: flex; align-items: center; gap: 10px;
     padding: 14px 18px; border-bottom: 1px solid var(--line);
-    background: var(--surface-soft);
+    background: var(--inset);
   }
   .apx-head img { border-radius: 8px; flex: none; }
   .apx-head__name { color: var(--ink); font-weight: 600; font-size: 14px; }
@@ -578,7 +776,7 @@
   .apx-pick { margin: 0; color: var(--muted); font-size: 14px; }
   .apx-tasks { display: grid; gap: 10px; }
   .apx-task {
-    text-align: left; background: var(--surface-raised); color: var(--body);
+    text-align: left; background: var(--raised); color: var(--body);
     border: 1px solid var(--line-2); border-radius: 12px;
     padding: 12px 14px; min-height: 44px; font-size: 15px; line-height: 1.45;
   }
@@ -593,12 +791,12 @@
   .apx-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
   .apx-allow, .apx-deny, .apx-reset { min-height: 44px; border-radius: 10px; padding: 10px 20px; font-size: 14px; font-weight: 600; border: 1px solid transparent; }
   .apx-allow { background: var(--accent); color: #fff; }
-  .apx-allow:hover { background: var(--accent-soft); }
+  .apx-allow:hover { background: var(--accent-border); }
   .apx-deny { background: transparent; color: var(--body); border-color: var(--line-2); }
   .apx-deny:hover { border-color: #f87171; color: #f87171; }
   .apx-reset { justify-self: start; background: transparent; color: var(--muted); border-color: var(--line-2); }
   .apx-reset:hover { color: var(--ink); }
-  .apx-receipt { border: 1px solid var(--line-2); border-radius: 12px; padding: 14px; background: var(--surface-raised); }
+  .apx-receipt { border: 1px solid var(--line-2); border-radius: 12px; padding: 14px; background: var(--raised); }
   .apx-receipt__label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted-2); margin-bottom: 10px; }
   .apx-kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; margin: 0; font-size: 13.5px; }
   .apx-kv dt { color: var(--muted-2); }
@@ -619,25 +817,26 @@
     .apx-body > * { animation: apx-in .18s ease-out; }
   }
   /* ================================================================
-     EDITORIAL SYSTEM — dark-glass manifesto pass (2026-09-15)
-     Serif statements, mono labels, one orange, hairline chrome.
+     EDITORIAL SYSTEM — Inter manifesto pass (2026-09-20)
+     Inter statements, mono labels, one orange, hairline chrome.
      Everything here intentionally overrides the rules above; the
      page stays readable with JS off and under reduced motion. */
   .hero h1, .section-heading, .stats-band h2 {
-    font-family: var(--font-display);
-    font-weight: 400;
-    letter-spacing: -0.01em;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    letter-spacing: -0.035em;
   }
-  .hero h1 { font-size: clamp(3rem, 8vw, 6.2rem); line-height: 1.02; }
-  .section-heading { font-size: clamp(2.4rem, 6vw, 4.2rem); line-height: 1.06; }
-  .stats-band h2 { font-size: clamp(2rem, 4.5vw, 3.4rem); }
-  .hero h1 .accent { background: none; -webkit-background-clip: initial; background-clip: initial; color: var(--accent); }
+  .hero h1 { font-size: clamp(2.75rem, 7vw, 5.2rem); line-height: 1.04; }
+  .section-heading { font-size: clamp(2.25rem, 5.5vw, 3.6rem); line-height: 1.06; }
+  .stats-band h2 { font-size: clamp(2rem, 4.5vw, 3.2rem); }
+  .hero h1 .accent { background: none; -webkit-background-clip: initial; background-clip: initial; color: var(--accent-border); }
   .eyebrow {
     font-family: var(--font-mono);
     color: var(--muted);
-    font-size: var(--mono-label);
-    font-weight: 500;
-    letter-spacing: var(--mono-tracking);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
   }
   .hero__micro, .button { font-variant-numeric: tabular-nums; }
   .button--primary { border-radius: 999px; }
@@ -647,7 +846,7 @@
   .promo-banner {
     display: flex; align-items: center; justify-content: center; gap: 10px;
     min-height: 34px; padding: 7px 44px 7px 16px;
-    background: var(--accent); color: #0a0a0a;
+    background: var(--accent-strong); color: #0a0a0a;
     font: 500 11px/1.4 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;
     text-align: center; position: relative;
   }
@@ -669,127 +868,88 @@
     width: min(100% - 24px, 1080px); margin: 0 auto;
     background: rgba(19, 19, 20, 0.72);
     -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2);
-    border: 1px solid var(--line); border-radius: 34px;
+    border: 1px solid var(--line); border-radius: 999px;
     padding-left: 18px; padding-right: 18px;
     box-shadow: 0 8px 30px -18px rgba(0, 0, 0, 0.9);
   }
-  @supports not (backdrop-filter: blur(2px)) { .site-header { background: var(--surface); } }
+  @supports not (backdrop-filter: blur(2px)) { .site-header { background: var(--panel); } }
   .site-nav { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.04em; }
 
   /* live agent-log terminal — the fleet talking to itself, sample data */
   .hero__terminal {
     margin: 44px auto 0; max-width: 640px; text-align: left;
-    border: 1px solid var(--line); border-radius: 14px;
+    border: 1px solid var(--line); border-radius: 12px;
     background: rgba(10, 10, 10, 0.7);
-    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.06), 0 24px 60px -30px rgba(0, 0, 0, 0.9);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.06), 0 22px 60px rgba(0, 0, 0, 0.10);
     padding: 14px 18px; min-height: 176px;
   }
   .hero__terminal-bar {
     display: flex; align-items: center; gap: 6px; margin-bottom: 10px;
-    font: 500 10px/1 var(--font-mono); letter-spacing: var(--mono-tracking);
+    font: 500 10px/1 var(--font-mono); letter-spacing: 0.12em;
     color: var(--muted-2); text-transform: uppercase;
   }
   .hero__terminal-bar::before {
     content: ""; width: 9px; height: 9px; border-radius: 50%;
-    background: var(--accent); margin-right: 6px;
+    background: var(--accent-strong); margin-right: 6px;
     animation: promo-pulse 2.4s ease-in-out infinite;
   }
   .hero__terminal ol { list-style: none; margin: 0; padding: 0; }
   .hero__terminal li {
     font: 400 12.5px/1.9 var(--font-mono); color: var(--muted);
     opacity: 0; transform: translateY(6px);
-    transition: opacity 300ms ease, transform 300ms ease;
+    transition: opacity 240ms var(--ease), transform 240ms var(--ease);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .hero__terminal li.on { opacity: 1; transform: none; }
   .hero__terminal li .t-ok { color: #38d591; }
-  .hero__terminal li .t-red { color: var(--accent-soft); }
+  .hero__terminal li .t-red { color: var(--accent-border); }
   .hero__terminal li .t-dim { color: var(--muted-2); }
 
-  /* per-letter headline reveal — the reference landing's signature move:
-     soft-blur-in, 500ms, cubic-bezier(0.22,1,0.36,1), 40ms stagger. Each
-     letter clips its own white→grey gradient (per-element background-clip
-     is the robust form; ancestor-clip + descendant filters is not). */
+  /* per-letter headline reveal — entrance is never from zero: 10px rise +
+     fade on the same curve, 40ms stagger. Each letter clips its own
+     white→grey gradient (per-element background-clip is the robust form). */
   .hero h1 .wr { display: inline-block; }
   .hero h1 .w {
     display: inline-block; opacity: 0;
     background: linear-gradient(to bottom, #ffffff, #dbdbdb);
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
-  .hero h1 .accent .w { background: none; -webkit-background-clip: initial; background-clip: initial; color: var(--accent); }
+  .hero h1 .accent .w { background: none; -webkit-background-clip: initial; background-clip: initial; color: var(--accent-border); }
   .hero h1.revealed .w {
-    animation: soft-blur-in 500ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation: soft-blur-in 240ms var(--ease) backwards;
     animation-delay: var(--d, 0ms);
   }
   @keyframes soft-blur-in {
-    from { opacity: 0; filter: blur(12px); transform: translateY(16px); }
+    from { opacity: 0; filter: blur(10px); transform: translateY(10px); }
     to { opacity: 1; filter: none; transform: none; }
   }
 
-  /* manifesto — three scroll-snap statements with a dot rail */
-  .manifesto {
-    position: relative; margin-top: 110px;
-    border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
-  }
-  .manifesto__rail {
-    position: absolute; right: 18px; top: 50%; transform: translateY(-50%);
-    display: flex; flex-direction: column; gap: 14px; z-index: 5;
-  }
-  .manifesto__rail i {
-    width: 8px; height: 8px; border-radius: 50%;
-    border: 1px solid var(--line-2); background: transparent; transition: background 200ms ease;
-  }
-  .manifesto__rail i.on { background: var(--accent); border-color: var(--accent); }
-  .manifesto__panel {
-    min-height: 74vh; display: flex; flex-direction: column; justify-content: center;
-    padding: 64px 4px; border-top: 1px solid var(--line);
-  }
-  .manifesto__panel:first-of-type { border-top: 0; }
-  .manifesto__num { font: 500 var(--mono-label)/1 var(--font-mono); letter-spacing: var(--mono-tracking); color: var(--muted-2); }
-  .manifesto__line {
-    margin: 18px 0 0; max-width: 900px;
-    font-family: var(--font-display); font-weight: 300;
-    font-size: clamp(2.2rem, 6.5vw, 5rem); line-height: 1.08; color: var(--ink);
-    text-wrap: balance;
-  }
-  .manifesto__line em { font-style: normal; color: var(--accent); }
-  .manifesto__sub { margin: 18px 0 0; max-width: 560px; color: var(--muted); font-size: 17px; line-height: 1.6; }
-  @media (min-width: 900px) {
-    .manifesto { scroll-snap-type: y proximity; }
-    .manifesto__panel { scroll-snap-align: center; }
-  }
-
-  /* roster marquee — the named cast, sintra's idea in our glass */
+  /* roster marquee — the named cast, one row that drifts */
   .roster-marquee { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
   .roster-marquee__track { display: flex; gap: 14px; width: max-content; animation: roster-scroll 46s linear infinite; }
   .roster-marquee:hover .roster-marquee__track { animation-play-state: paused; }
   @keyframes roster-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
   .roster-card {
     display: flex; align-items: center; gap: 12px; flex: none;
-    border: 1px solid var(--line); border-radius: 16px; padding: 12px 18px 12px 12px;
-    background: var(--surface-soft); transition: transform 200ms cubic-bezier(0.24, 1, 0.4, 1), border-color 200ms ease;
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px 18px 12px 12px;
+    background: var(--inset); transition: border-color 120ms var(--ease);
   }
-  .roster-card:hover { transform: translateY(-2px) rotate(-0.6deg); border-color: var(--line-2); }
-  .roster-card__name { font-family: var(--font-display); font-size: 17px; color: var(--ink); }
-  .roster-card__role { font: 500 10px/1.4 var(--font-mono); letter-spacing: var(--mono-tracking); color: var(--accent-soft); text-transform: uppercase; }
+  .roster-card:hover { border-color: var(--line-2); }
+  .roster-card__name { font-family: var(--font-sans); font-weight: 600; font-size: 17px; color: var(--ink); letter-spacing: -0.012em; }
+  .roster-card__role { font: 500 10px/1.4 var(--font-mono); letter-spacing: 0.12em; color: var(--accent-border); text-transform: uppercase; }
 
-  /* bento tilt — two cards out of alignment on purpose */
-  .feature-card:nth-child(3n + 1) { transform: rotate(-0.5deg); }
-  .feature-card:nth-child(4n + 2) { transform: rotate(0.4deg); }
-  .feature-card { transition: transform 250ms cubic-bezier(0.24, 1, 0.4, 1); }
-  .feature-card:hover { transform: none; }
+  /* feature cards sit flat — no tilt, borders brighten on hover */
+  .feature-card { transition: border-color 120ms var(--ease), background 120ms var(--ease); }
 
   /* engine wordmarks */
   .engine-row { display: flex; flex-wrap: wrap; gap: 10px 26px; font: 500 13px/1 var(--font-mono); letter-spacing: 0.06em; color: var(--muted); }
-  .engine-row span::before { content: "▸ "; color: var(--accent); }
+  .engine-row span::before { content: "▸ "; color: var(--accent-strong); }
 
   @media (prefers-reduced-motion: reduce) {
     .promo-banner__dot, .hero__terminal-bar::before { animation: none; }
     .roster-marquee__track { animation: none; flex-wrap: wrap; width: auto; }
     .hero h1 .w { opacity: 1; filter: none; transform: none; transition: none; animation: none; }
     .hero__terminal li { opacity: 1; transform: none; transition: none; }
-    .feature-card { transform: none !important; }
-    .manifesto { scroll-snap-type: none; }
   }
 </style>
 </head>
@@ -813,9 +973,10 @@
       </a>
       <nav class="site-nav" aria-label="Primary">
         <a href="#download">Download</a>
-        <a href="#features">Features</a>
+        <a href="#scenes">Scenes</a>
         <a href="#use-cases">Use cases</a>
         <a href="#how">How it works</a>
+        <a href="#trust">Trust</a>
         <a href="#pricing">Pricing</a>
         <a href="#faq">FAQ</a>
       </nav>
@@ -835,21 +996,18 @@
           <svg class="site-menu__icon site-menu__icon--close" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" /></svg>
         </summary>
         <nav class="site-menu__panel" aria-label="Site">
-          <a href="#how">How it works</a>
-          <a href="#features">Product</a>
+          <a href="#scenes">Scenes</a>
           <a href="#ecosystem">Ecosystem</a>
           <a href="#roster">Bots</a>
-          <a href="#coding">Coding</a>
-          <a href="#cli">CLI</a>
-          <a href="#local-first">Local-first</a>
-          <a href="#privacy">Privacy</a>
+          <a href="#how">How it works</a>
+          <a href="#trust">Trust</a>
           <a href="#engines">Engines</a>
+          <a href="#cli">CLI</a>
           <a href="#pricing">Pricing</a>
           <a href="/teams.html">Teams</a>
           <a href="/switch.html">Switch</a>
-          <a href="#compare">Compare</a>
-          <a href="#download">Download</a>
           <a href="/docs">Docs</a>
+          <a href="#download">Download</a>
           <a href="/app">Open Muster</a>
         </nav>
       </details>
@@ -866,25 +1024,63 @@
           <rect id="hero-face-eye" x="-10.5" y="-22" width="21" height="44" rx="10.5" />
         </defs>
       </svg>
-      <div class="hero__faces" aria-hidden="true">
-        <svg class="hero__face" viewBox="-112 -112 224 224"><use href="#hero-face-body" fill="#009957" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
-        <svg class="hero__face" viewBox="-112 -112 224 224"><use href="#hero-face-body" fill="#377FE6" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
-        <svg class="hero__face" viewBox="-112 -112 224 224"><use href="#hero-face-body" fill="#f08a24" /><g transform="translate(-15 -2) rotate(-4)"><path d="M -9 4 Q 0 -6 9 4" stroke="#f9f9f9" stroke-width="7" stroke-linecap="round" fill="none" /></g><g transform="translate(38 -6) rotate(-4)"><path d="M -9 4 Q 0 -6 9 4" stroke="#f9f9f9" stroke-width="7" stroke-linecap="round" fill="none" /></g></svg>
-        <svg class="hero__face" viewBox="-112 -112 224 224"><use href="#hero-face-body" fill="#D94B52" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
-        <svg class="hero__face" viewBox="-112 -112 224 224"><use href="#hero-face-body" fill="#8057C8" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
-        <svg class="hero__face" viewBox="-112 -112 224 224"><use href="#hero-face-body" fill="#0EA5C6" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
-      </div>
-      <p class="eyebrow" style="text-align:center; margin-bottom:18px;">AI agents · real computers · your keys</p>
+      <p class="eyebrow" style="text-align:center; margin-bottom:18px;">Local-first agent workforce</p>
       <h1 id="hero-title">Your own team of AI agents, <span class="accent">in a chat app.</span></h1>
       <p class="lead">
-        Muster your agents — bring Claude, Codex, Grok or Gemini, give each one a name,
-        a memory and a computer, and run real work from one chat. Local-first, on keys you already own.
+        Every bot you hire is a real agent on your machine — running on the model you already pay
+        for, with its own name, memory, and a Linux desktop it drives. Talk to them like contacts.
+        Watch them work. Approve what matters.
       </p>
       <div class="hero__actions">
-        <a class="button button--primary" href="#download">⌘ Download for macOS</a>
+        <a class="button button--primary" id="hero-dl" href="https://muster.today/downloads/Muster.dmg">
+          <span id="hero-dl-label">Download for macOS (Apple silicon)</span>
+          <span class="hero__dl-version" id="hero-dl-version"></span>
+        </a>
         <a class="button button--secondary" href="/app">Open the web app</a>
       </div>
+      <p class="hero__platforms">
+        Also on <a href="https://muster.today/downloads/Muster-intel.dmg" data-also="mac-x64">macOS Intel</a> ·
+        <a href="https://muster.today/downloads/Muster-setup.exe" data-also="windows">Windows</a> ·
+        <a href="https://muster.today/downloads/Muster.deb" data-also="linux">Ubuntu/Debian</a> ·
+        <a href="https://muster.today/downloads/Muster.AppImage" data-also="linux">Linux AppImage</a> ·
+        <a href="/download.html#docker">Docker</a> ·
+        <a href="/download.html#cli">CLI</a> ·
+        <a href="/download.html#ios">iPhone</a>
+      </p>
+      <div class="trust-strip" role="list" aria-label="Why Muster is safe to run">
+        <div class="trust-tile" role="listitem">
+          <div class="trust-tile__title">Runs on your machine</div>
+          <div class="trust-tile__copy">One harness on 127.0.0.1. Transcripts and keys stay in ~/.muster.</div>
+        </div>
+        <div class="trust-tile" role="listitem">
+          <div class="trust-tile__title">Your own models</div>
+          <div class="trust-tile__copy">Runs on the CLIs and keys you already pay for. No proxy in the middle.</div>
+        </div>
+        <div class="trust-tile" role="listitem">
+          <div class="trust-tile__title">Self-host free</div>
+          <div class="trust-tile__copy">Every feature, unlimited bots, no license keys — BSL 1.1 source-available.</div>
+        </div>
+      </div>
+      <div class="hero__teamstrip" aria-label="Your roster, the way the app draws it">
+        <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#009957" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
+        <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#377FE6" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
+        <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#f08a24" /><g transform="translate(-15 -2) rotate(-4)"><path d="M -9 4 Q 0 -6 9 4" stroke="#f9f9f9" stroke-width="7" stroke-linecap="round" fill="none" /></g><g transform="translate(38 -6) rotate(-4)"><path d="M -9 4 Q 0 -6 9 4" stroke="#f9f9f9" stroke-width="7" stroke-linecap="round" fill="none" /></g></svg>
+        <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#D94B52" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
+        <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#8057C8" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
+        <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#0EA5C6" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
+        <span class="hero__teamlabel">Hire a cast, not a chatbot</span>
+      </div>
+      <figure class="shot-frame">
+        <img src="/hero.png" alt="Muster — a chat app where every conversation is a real AI agent" width="980" height="613" />
+        <figcaption>The web console: a roster of named agents on the left, each conversation a real worker with its own model, computer, and approval cards.</figcaption>
+      </figure>
       <p class="hero__micro">Free to self-host · BSL 1.1 source-available · your own API keys · iOS app with Apple Watch companion</p>
+      <div class="stat-row" role="list" aria-label="Platform facts">
+        <div class="stat-row__item" role="listitem"><span class="stat-row__value">10+</span><span class="stat-row__label">engines</span></div>
+        <div class="stat-row__item" role="listitem"><span class="stat-row__value">8</span><span class="stat-row__label">platforms</span></div>
+        <div class="stat-row__item" role="listitem"><span class="stat-row__value">500+</span><span class="stat-row__label">connected apps</span></div>
+        <div class="stat-row__item" role="listitem"><span class="stat-row__value">0</span><span class="stat-row__label">license keys</span></div>
+      </div>
       <div class="hero__terminal" aria-hidden="true">
         <div class="hero__terminal-bar">muster · live fleet (sample data)</div>
         <ol id="term-lines">
@@ -906,115 +1102,31 @@
           </svg>
         </button>
       </div>
-      <div class="hero__visual">
-        <img src="/hero.png" alt="Muster — a chat app where every conversation is a real AI agent" width="980" height="613" />
-      </div>
     </section>
-
-    <!-- Manifesto — three statements, scroll-snap with a dot rail -->
-    <div class="manifesto" aria-label="What Muster believes">
-      <div class="manifesto__rail" aria-hidden="true"><i class="on"></i><i></i><i></i></div>
-      <div class="manifesto__panel">
-        <p class="manifesto__num">01 / THE COMPUTER IS YOURS</p>
-        <h2 class="manifesto__line">Agents that <em>actually do</em> the work — on a computer you own.</h2>
-        <p class="manifesto__sub">Not a chatbot with screenshots pasted in. Each teammate gets a real desktop, a real browser and a workspace folder — and stops at your approval gate before anything irreversible.</p>
-      </div>
-      <div class="manifesto__panel">
-        <p class="manifesto__num">02 / YOUR DATA, THEIR HANDS</p>
-        <h2 class="manifesto__line">Your bots see your data. <em>Cloud models don't have to.</em></h2>
-        <p class="manifesto__sub">The on-device Privacy Shield scrubs emails, keys and names into deterministic tokens before any API call — the model keeps working context, never your secrets. A counts-only receipt proves it every turn.</p>
-      </div>
-      <div class="manifesto__panel">
-        <p class="manifesto__num">03 / A TEAM, NOT A TAB</p>
-        <h2 class="manifesto__line">Persistent agents. <em>Human</em> decisions. Verifiable receipts.</h2>
-        <p class="manifesto__sub">They keep memory, wear expressions, file friend requests to other people's bots, and sign receipts for what they did. When the laptop closes, <code>muster up -d</code> keeps them working.</p>
-      </div>
-    </div>
-
-    <!-- How it works (numbered walkthrough) -->
-    <section id="how" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">How it works</div>
-        <h2 class="section-heading">Four steps from install to a working team</h2>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:40px;">
-        <div class="feature-card">
-          <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">01</span>
-          <h3>Boot the harness</h3>
-          <p>Install the desktop app, or run <code>muster up</code>. Your local server manages the bots; you choose their engines and connected services.</p>
+    <!-- Statement card — one belief, one panel -->
+    <section id="statement" class="section" aria-label="What Muster believes">
+      <div class="statement-card">
+        <div class="statement-card__copy">
+          <h2 class="section-heading">Message your agents like teammates.</h2>
+          <p>
+            Give tasks to bots the way you'd hand work to a teammate — on desktop, web or phone.
+            They take a job from start to finish, keep context on how you work, and come back when
+            your approval is the next step.
+          </p>
         </div>
-        <div class="feature-card">
-          <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">02</span>
-          <h3>Hire your bots</h3>
-          <p>Start from 13 teammate shapes or 15 finished team packs. Each bot interviews you, then gets a name, a personality, and a memory.</p>
-        </div>
-        <div class="feature-card">
-          <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">03</span>
-          <h3>Give them hands</h3>
-          <p>Every bot drives its own Linux desktop in the cloud — or your Mac — and asks before anything ships. You Allow or Deny, inline.</p>
-        </div>
-        <div class="feature-card">
-          <span style="display:block;font-size:26px;font-weight:700;color:rgba(240,70,14,.35);margin-bottom:10px;">04</span>
-          <h3>Run the team</h3>
-          <p>Chat from desktop, web, phone, or terminal. Routines put work on a schedule; receipts and scorecards help you review the results.</p>
+        <div class="statement-card__panel" aria-hidden="true">
+          <svg viewBox="-112 -112 224 224" width="120" height="120"><use href="#hero-face-body" fill="#f08a24"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9"/></g></svg>
         </div>
       </div>
     </section>
 
-    <!-- Use cases: real jobs on a schedule -->
-    <section id="use-cases" class="section">
+    <section id="scenes" class="section">
       <div class="section-intro">
-        <div class="eyebrow">Use cases</div>
-        <h2 class="section-heading">Real jobs, on a schedule, while you do something else</h2>
-        <p class="section-copy">Every job below is one bot with one routine. Set the schedule once; the result lands in your chat with a receipt.</p>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin-top:40px;">
-        <div class="feature-card"><h3>📮 Inbox sweep</h3><p>A bot triages your inbox every morning and drafts replies for the three that matter. You approve before anything sends.</p></div>
-        <div class="feature-card"><h3>🧾 Invoice chaser</h3><p>Checks your billing dashboard for overdue invoices and writes the follow-up email in your tone, on your cadence.</p></div>
-        <div class="feature-card"><h3>🔍 Competitor watch</h3><p>Reads rival landing pages and changelogs weekly, then posts a diff summary of what actually changed.</p></div>
-        <div class="feature-card"><h3>📊 Weekly numbers</h3><p>Pulls your analytics and payments every Friday and leaves one plain-English summary in your team room.</p></div>
-        <div class="feature-card"><h3>🧪 Release QA</h3><p>Before every deploy, a bot walks the critical path in a real browser and files anything that regressed.</p></div>
-        <div class="feature-card"><h3>🔀 PR review</h3><p>A reviewer bot reads each new pull request, checks the diff against your conventions, and leaves the first pass.</p></div>
-        <div class="feature-card"><h3>🎯 Lead research</h3><p>Overnight, a bot researches new prospects and queues a brief on each one — you wake up to a shortlist.</p></div>
-        <div class="feature-card"><h3>📅 Personal bookings</h3><p>A booking bot answers your WhatsApp, offers slots, takes the deposit and fills your calendar while you work.</p></div>
-      </div>
-    </section>
-
-    <!-- Approval simulation: static sample data, no network or model calls -->
-    <section id="approvals" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Approvals</div>
-        <h2 class="section-heading">You decide what your bots may do</h2>
+        <div class="eyebrow">Scenes</div>
+        <h2 class="section-heading">Six scenes from a working roster</h2>
         <p class="section-copy">
-          Before a bot touches your mail, your files, or anything that can't be undone, it stops
-          and asks. This is the loop, with sample data: pick a task, review the proposed action,
-          then Allow or Deny.
-        </p>
-      </div>
-      <div class="apx">
-        <p class="apx-sim-badge" role="note">Simulation — sample data only. Nothing real runs, no model is called, nothing leaves this page.</p>
-        <div class="apx-card">
-          <div class="apx-head">
-            <img src="/app-icon.svg" width="28" height="28" alt="" aria-hidden="true" />
-            <div>
-              <div class="apx-head__name" data-apx-agent>Scout</div>
-              <div class="apx-head__role" data-apx-role>Sample bot · Inbox Manager</div>
-            </div>
-            <span class="apx-head__state" data-apx-state>Sample</span>
-          </div>
-          <div class="apx-body" data-apx-body aria-live="polite"></div>
-        </div>
-      </div>
-    </section>
-
-    <section id="features" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Product</div>
-        <h2 class="section-heading">Agents that behave like a team</h2>
-        <p class="section-copy">
-          One assistant in one box is the wrong shape for agents. Muster treats AI the way a real team
-          works — a roster you chat with like contacts, each with its own personality, memory, model,
-          computer, and connected apps.
+          Every chat is a real agent. They have hands. Set it and forget it. Put bots in a room.
+          The whole product, scene by scene.
         </p>
       </div>
       <div class="card-grid-3">
@@ -1065,7 +1177,6 @@
         </article>
       </div>
     </section>
-
     <!-- Ecosystem showcase — everything shipped, one grid -->
     <section id="ecosystem" class="section">
       <div class="section-intro">
@@ -1159,58 +1270,24 @@
         </article>
       </div>
     </section>
-
-    <section id="local-first" class="section">
+    <!-- Use cases: real jobs on a schedule -->
+    <section id="use-cases" class="section">
       <div class="section-intro">
-        <div class="eyebrow">Local-first</div>
-        <h2 class="section-heading">The computer is yours</h2>
-        <p class="section-copy">
-          One small harness server on <code>127.0.0.1</code> owns every agent process. Transcripts, keys,
-          and events live in <code>~/.muster</code> — not in a cloud, not behind a seat count.
-        </p>
+        <div class="eyebrow">Use cases</div>
+        <h2 class="section-heading">Real jobs, on a schedule, while you do something else</h2>
+        <p class="section-copy">Every job below is one bot with one routine. Set the schedule once; the result lands in your chat with a receipt.</p>
       </div>
-      <div class="card-grid-3">
-        <article class="feature-card">
-          <h3>Any model, your key</h3>
-          <p>Bots run on the AI CLIs already installed and logged in on your machine. Your existing subscriptions, no proxy in the middle.</p>
-        </article>
-        <article class="feature-card">
-          <h3>Choose what you connect</h3>
-          <p>Run the server locally and choose your model engines and integrations. Cloud models, connected apps, backups, and other online features can send requests to external services.</p>
-        </article>
-        <article class="feature-card">
-          <h3>An audit log you own</h3>
-          <p>Every action a bot takes lands in a local event log you can read, grep, and keep. Plain files, not a dashboard.</p>
-        </article>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin-top:40px;">
+        <div class="feature-card"><h3>📮 Inbox sweep</h3><p>A bot triages your inbox every morning and drafts replies for the three that matter. You approve before anything sends.</p></div>
+        <div class="feature-card"><h3>🧾 Invoice chaser</h3><p>Checks your billing dashboard for overdue invoices and writes the follow-up email in your tone, on your cadence.</p></div>
+        <div class="feature-card"><h3>🔍 Competitor watch</h3><p>Reads rival landing pages and changelogs weekly, then posts a diff summary of what actually changed.</p></div>
+        <div class="feature-card"><h3>📊 Weekly numbers</h3><p>Pulls your analytics and payments every Friday and leaves one plain-English summary in your team room.</p></div>
+        <div class="feature-card"><h3>🧪 Release QA</h3><p>Before every deploy, a bot walks the critical path in a real browser and files anything that regressed.</p></div>
+        <div class="feature-card"><h3>🔀 PR review</h3><p>A reviewer bot reads each new pull request, checks the diff against your conventions, and leaves the first pass.</p></div>
+        <div class="feature-card"><h3>🎯 Lead research</h3><p>Overnight, a bot researches new prospects and queues a brief on each one — you wake up to a shortlist.</p></div>
+        <div class="feature-card"><h3>📅 Personal bookings</h3><p>A booking bot answers your WhatsApp, offers slots, takes the deposit and fills your calendar while you work.</p></div>
       </div>
     </section>
-
-    <!-- Privacy Shield (the on-device scrubber; headline differentiator) -->
-    <section id="privacy" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Privacy Shield</div>
-        <h2 class="section-heading">Your bots see your data. Cloud models don't have to.</h2>
-        <p class="section-copy">
-          When a transcript is replayed to a cloud model, Muster scrubs it first — deterministic,
-          local, and reversible only by you. On by default for every new bot.
-        </p>
-      </div>
-      <div class="card-grid-3">
-        <article class="feature-card">
-          <h3>Emails, phones, secrets</h3>
-          <p>Addresses become <code>[EMAIL_1]</code>, phones become <code>[PHONE_2]</code>, and API keys are redacted with the same patterns that guard your own logs.</p>
-        </article>
-        <article class="feature-card">
-          <h3>Deterministic, not probabilistic</h3>
-          <p>The same text always masks the same way, so a model keeps context across turns instead of watching identifiers shuffle every message.</p>
-        </article>
-        <article class="feature-card">
-          <h3>You see what left</h3>
-          <p>Every turn posts a counts-only receipt — how many emails, phones, and secrets were masked. No content copy, just numbers.</p>
-        </article>
-      </div>
-    </section>
-
     <section id="roster" class="section">
       <div class="section-intro">
         <div class="eyebrow">The Agent Hub</div>
@@ -1243,40 +1320,43 @@
         </div>
       </div>
     </section>
-
-
-    <!-- Why Muster (problem-first, agent-reach clarity) -->
-    <section class="section" style="padding-top:80px;">
-      <div style="max-width:660px;">
-        <div class="eyebrow">Why Muster</div>
-        <h2 class="section-heading">AI agents can write code. Ask one to check your inbox, and it's blind.</h2>
-        <p class="section-copy">Chat apps rent you a model. Muster gives each agent a name, a memory that persists between tasks, and a real Linux desktop it drives — so "check my mail and draft the reply" is a job, not a wish.</p>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:36px;">
-        <div class="feature-card"><h3>One chat tab per task</h3><p>Twelve browser tabs of half-finished prompts. No memory between them, no handoffs.</p></div>
-        <div class="feature-card"><h3>Agents with no hands</h3><p>Models that can reason but can't click, type, or run anything — so nothing actually gets done.</p></div>
-        <div class="feature-card"><h3>Lock-in by subscription</h3><p>Renting someone else's key and their sandbox, with your data on their servers.</p></div>
-      </div>
-    </section>
-
-    <!-- Capability two-tier (agent-reach pattern) -->
-    <section class="section">
+    <!-- How the pieces fit — two tables, zero adjectives -->
+    <section id="how" class="section">
       <div class="section-intro">
-        <div class="eyebrow">Capability</div>
-        <h2 class="section-heading">Works out of the box. Unlocks on demand.</h2>
+        <div class="eyebrow">How the pieces fit</div>
+        <h2 class="section-heading">Every piece, what it does, where you set it up</h2>
       </div>
-      <div class="card-grid-3" style="grid-template-columns:1fr 1fr;">
-        <div class="feature-card" style="border-color:rgba(240,70,14,.3);background:rgba(240,70,14,.05);">
-          <span style="display:inline-block;border-radius:999px;background:rgba(240,70,14,.12);padding:4px 10px;font-size:11px;font-weight:600;color:#ff7a45;margin-bottom:12px;">Right now · zero config</span>
-          <p>✦ Sign in with Google — one tap<br/>✦ Chat with 10+ CLI engines already installed<br/>✦ Pick from 13 teammate shapes<br/>✦ Desktop app with auto-update</p>
-        </div>
-        <div class="feature-card">
-          <span style="display:inline-block;border-radius:999px;border:1px solid rgba(255,255,255,.12);padding:4px 10px;font-size:11px;font-weight:600;color:#a1a1a6;margin-bottom:12px;">Paste a key · one field</span>
-          <p>→ OpenAI · Anthropic · Google · DeepSeek · Groq +5 more<br/>→ Free models built in via OpenRouter (incl. Nex AGI)<br/>→ Cloud Linux desktop per bot<br/>→ 500+ apps via Composio OAuth<br/>→ Voice mode: free built-in voice, or ElevenLabs</p>
-        </div>
+      <div class="table-frame" style="margin-top:40px;">
+        <table>
+          <thead>
+            <tr><th scope="col">Piece</th><th scope="col">What it does</th><th scope="col">Where you set it up</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Bot</th><td>A named, persistent agent with its own persona, memory, model and approvals. It interviews you, then works.</td><td>Sidebar → New bot, or hire a pack from <a href="/teams.html">the team library</a></td></tr>
+            <tr><th scope="row">Engine</th><td>Which AI CLI the bot runs on — Claude Code, Codex, Grok, Gemini, Ollama, any OpenAI-compatible endpoint.</td><td>Settings → Engines, or per-bot in Bot settings</td></tr>
+            <tr><th scope="row">Computer</th><td>The Linux desktop the bot drives — cloud or your own machine. Where files get moved and pages get clicked.</td><td>Bot settings → Computer</td></tr>
+            <tr><th scope="row">Approvals</th><td>Shell commands, file edits and questions stop at an inline card until you Allow or Deny. Every decision is logged.</td><td>Inline in the thread; patterns in Bot settings → Permissions</td></tr>
+            <tr><th scope="row">Routines</th><td>Any task on a schedule, or a sentry that watches a condition and speaks up. Scorecards grade each run.</td><td>Automations tab → New routine</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="table-frame" style="margin-top:16px;">
+        <table>
+          <caption class="table-caption">Choose your path — each link opens the matching guide.</caption>
+          <thead>
+            <tr><th scope="col">If you want to…</th><th scope="col">Start here</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Hire your first bot and give it a task</td><td><a href="/docs/quick-start">Quick start</a></td></tr>
+            <tr><td>Install the desktop app or self-host</td><td><a href="/docs/install">Install</a></td></tr>
+            <tr><td>Bring your own model or key</td><td><a href="/docs/engines">Engines</a></td></tr>
+            <tr><td>Review what a bot is allowed to do</td><td><a href="/docs/approvals">Approvals</a></td></tr>
+            <tr><td>Put work on a schedule</td><td><a href="/docs/automation">Automation</a></td></tr>
+            <tr><td>Run the whole thing on your own server</td><td><a href="/docs/self-host">Self-host</a></td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
-
     <section id="engines" class="section">
       <div class="section-intro">
         <div class="eyebrow">Engines</div>
@@ -1300,7 +1380,6 @@
         <span class="engine-tag">OpenCode Go</span>
       </div>
     </section>
-
     <!-- Coding agents (what they're actually for) -->
     <section id="coding" class="section">
       <div class="section-intro">
@@ -1345,7 +1424,6 @@
         </article>
       </div>
     </section>
-
     <!-- CLI (the fifth surface) -->
     <section id="cli" class="section">
       <div class="section-intro">
@@ -1405,14 +1483,75 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
         Every command works against your local harness or Muster Cloud. The desktop app bundles the same server; the CLI is just another window into it.
       </p>
     </section>
+    <!-- Trust — what runs where, your responsibility, honesty callout -->
+    <section id="trust" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">Trust</div>
+        <h2 class="section-heading">What runs where — and what you decide</h2>
+        <p class="section-copy">Local-first does not mean risk-free. Here are the boundaries, stated plainly.</p>
+      </div>
+      <div class="card-grid-3">
+        <article class="feature-card">
+          <h3>The harness is loopback</h3>
+          <p>One small server on <code>127.0.0.1</code> owns every agent process. Transcripts, keys, and events live in <code>~/.muster</code> — not in a cloud, not behind a seat count.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Keys stay put</h3>
+          <p>Credentials persist in <code>~/.muster</code>; the API exposes configured-or-not flags, never values. Secrets are write-only.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Devices are allowlisted</h3>
+          <p>Only devices you approve can connect to your harness. Everything else is denied by default.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Privacy Shield masks before models see</h3>
+          <p>Emails become <code>[EMAIL_1]</code>, phones <code>[PHONE_2]</code> — deterministic, local, reversible only by you, with a counts-only receipt every turn.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Choose what you connect</h3>
+          <p>Cloud models, connected apps, backups and other online features send requests to external services — you choose which, per bot.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Your responsibility</h3>
+          <p>You own the keys, the passphrase, and the approval decisions. Keep your recovery passphrase safe — without it, a lost machine loses your backup.</p>
+        </article>
+      </div>
+      <p class="honesty-callout" role="note">This page describes shipped releases — features in review or on a branch are not listed.</p>
+    </section>
 
+    <!-- Approval simulation: static sample data, no network or model calls -->
+    <section id="approvals" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">Approvals</div>
+        <h2 class="section-heading">You decide what your bots may do</h2>
+        <p class="section-copy">
+          Before a bot touches your mail, your files, or anything that can't be undone, it stops
+          and asks. This is the loop, with sample data: pick a task, review the proposed action,
+          then Allow or Deny.
+        </p>
+      </div>
+      <div class="apx">
+        <p class="apx-sim-badge" role="note">Simulation — sample data only. Nothing real runs, no model is called, nothing leaves this page.</p>
+        <div class="apx-card">
+          <div class="apx-head">
+            <img src="/app-icon.svg" width="28" height="28" alt="" aria-hidden="true" />
+            <div>
+              <div class="apx-head__name" data-apx-agent>Scout</div>
+              <div class="apx-head__role" data-apx-role>Sample bot · Inbox Manager</div>
+            </div>
+            <span class="apx-head__state" data-apx-state>Sample</span>
+          </div>
+          <div class="apx-body" data-apx-body aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
     <section id="pricing" class="section">
       <div class="section-intro">
         <div class="eyebrow">Pricing</div>
         <h2 class="section-heading">Free to self-host. Pay for the hands.</h2>
         <p class="section-copy">
-          Bots are free and unlimited. The metered unit is the cloud computer — the Linux desktop your
-          bot actually drives — so you only pay when a bot gets real work done.
+          Bots are free and unlimited on every plan. The metered unit is the cloud computer — the
+          Linux desktop your bot actually drives.
         </p>
       </div>
       <div class="comparison-grid">
@@ -1457,9 +1596,8 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
           </div>
         </article>
       </div>
-      <p style="margin-top:22px;text-align:center;color:var(--muted-2);font-size:13px;">Checkout and card data are handled entirely by Stripe. Cancel anytime from the self-serve billing portal.</p>
+      <p style="margin-top:22px;text-align:center;color:var(--muted-2);font-size:13px;">Checkout and card data are handled entirely by Stripe. No trial to cancel, no seat license, export anytime — cancel from the self-serve billing portal.</p>
     </section>
-
     <!-- Rooms (multiplayer agent spaces) -->
     <section id="rooms" class="section">
       <div class="section-intro">
@@ -1474,14 +1612,10 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
       </div>
       <p style="margin-top:18px;text-align:center;"><a class="button button--secondary button--small" href="/app">Open Muster to see your rooms</a></p>
     </section>
-
-    <!-- FAQ (objection handling before download) -->
     <section id="faq" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">FAQ</div>
+      <div class="faq-cols">
         <h2 class="section-heading">Questions, answered plainly</h2>
-      </div>
-      <div class="faq-list">
+        <div class="faq-list">
         <details class="faq-item" open>
           <summary>What exactly is a “cloud computer”?</summary>
           <div class="faq-a">A small Linux desktop in our cloud that your bot drives like a person would — real browser, real files, real apps. It's the metered unit because it's the only part of Muster that costs us compute. Bots themselves are free and unlimited on every plan.</div>
@@ -1506,9 +1640,17 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
           <summary>Where does my data actually live?</summary>
           <div class="faq-a">On your machine, by default — transcripts, keys, and memories in <code>~/.muster</code>. If you want sync across devices, Muster pushes one AES-256-encrypted bundle to storage <em>you</em> own: your Google Drive or a private Telegram chat with a bot you create via @BotFather. Both hold ciphertext only — your passphrase never leaves you, and neither service can read a byte.</div>
         </details>
+        <details class="faq-item">
+          <summary>Do you train on my data or sell it?</summary>
+          <div class="faq-a">No. Muster trains no model and sells no data. When a bot's transcript goes to a cloud model, it goes masked by Privacy Shield, on your own API keys — the provider's terms apply to that call, and there is no Muster-side training pipeline.</div>
+        </details>
+        <details class="faq-item">
+          <summary>Does the unsigned build phone home?</summary>
+          <div class="faq-a">There are no license keys and no phone-home. The one outbound call the app makes on its own is a static <code>latest.json</code> fetch to check for updates. macOS shows "unidentified developer" on unsigned builds — right-click the app → Open, then Open again; the steps are on the <a href="/download.html">download page</a>.</div>
+        </details>
+      </div>
       </div>
     </section>
-
     <section id="download" class="section">
       <div class="section-intro">
         <div class="eyebrow">Download</div>
@@ -1519,7 +1661,7 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
         <div class="download-row">
           <div>
             <div class="download-row__os">macOS</div>
-            <div class="download-row__meta">Apple silicon · unsigned build · one-click .dmg — <a href="/#local-first" style="color:var(--accent-soft);">right-click → Open</a></div>
+            <div class="download-row__meta">Apple silicon · unsigned build · one-click .dmg — <a href="/#local-first" style="color:var(--accent-border);">right-click → Open</a></div>
           </div>
           <a href="https://muster.today/downloads/Muster.dmg">Download .dmg</a>
         </div>
@@ -1573,218 +1715,20 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
           <a href="/download.html#ios">iOS beta →</a>
         </div>
       </div>
-      <p style="margin-top:18px;text-align:center;"><a href="/download.html" style="color:var(--accent-soft);font-weight:500;font-size:15px;">All platforms + checksums →</a></p>
+      <p style="margin-top:18px;text-align:center;"><a href="/download.html" style="color:var(--accent-border);font-weight:500;font-size:15px;">All platforms + checksums →</a></p>
     </section>
-
-
-    <!-- Design Philosophy (agent-reach trust builder) -->
-    <section class="section">
-      <div class="section-intro" style="max-width:100%;text-align:center;">
-        <div class="eyebrow">Design Philosophy</div>
-        <h2 class="section-heading">Why Muster is built this way</h2>
+    <!-- Releases band — newest first, from /downloads/releases.json -->
+    <section id="releases" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">Releases</div>
+        <h2 class="section-heading">Shipped, newest first</h2>
+        <p class="section-copy">Changes merged into main after a release are not listed as shipped. Checksums live on <a href="/download.html">the download page</a>.</p>
       </div>
-      <div style="max-width:660px;margin:36px auto 0;">
-        <div style="display:flex;gap:14px;margin-bottom:22px;">
-          <span style="font-size:22px;font-weight:bold;color:rgba(255,255,255,.08);flex-shrink:0;">01</span>
-          <div><strong style="color:#f6f6f7;font-size:15px;">Choose where the server runs</strong><p style="margin-top:4px;color:#98989e;font-size:13.5px;line-height:1.6;">A local install stores Muster's data in ~/.muster by default. Keep track of your bots' working folders too, and choose which model providers and online services they connect to.</p></div>
-        </div>
-        <div style="display:flex;gap:14px;margin-bottom:22px;">
-          <span style="font-size:22px;font-weight:bold;color:rgba(255,255,255,.08);flex-shrink:0;">02</span>
-          <div><strong style="color:#f6f6f7;font-size:15px;">Secrets are write-only</strong><p style="margin-top:4px;color:#98989e;font-size:13.5px;line-height:1.6;">Keys go in once and never come back out through the API. The UI shows configured-or-not flags, never values.</p></div>
-        </div>
-        <div style="display:flex;gap:14px;margin-bottom:22px;">
-          <span style="font-size:22px;font-weight:bold;color:rgba(255,255,255,.08);flex-shrink:0;">03</span>
-          <div><strong style="color:#f6f6f7;font-size:15px;">Bots ask before they act</strong><p style="margin-top:4px;color:#98989e;font-size:13.5px;line-height:1.6;">Shell commands and file edits surface as inline cards. You Allow or Deny per action.</p></div>
-        </div>
-        <div style="display:flex;gap:14px;">
-          <span style="font-size:22px;font-weight:bold;color:rgba(255,255,255,.08);flex-shrink:0;">04</span>
-          <div><strong style="color:#f6f6f7;font-size:15px;">Bring your own model, always</strong><p style="margin-top:4px;color:#98989e;font-size:13.5px;line-height:1.6;">Muster ships no model of its own — your bots run on CLIs already installed on your machine, using your existing subscriptions.</p></div>
-        </div>
+      <div class="releases" id="releases-list" aria-live="polite">
+        <p class="releases__loading">Loading releases…</p>
       </div>
     </section>
 
-    <section class="stats-band">
-      <div>
-        <h2>Meet your first bot</h2>
-        <p>Install the app, point it at an engine you already pay for, and hand it something you have been putting off.</p>
-        <div class="cta-actions">
-          <a class="button button--primary" href="/app">Open Muster</a>
-          <a class="button button--secondary" href="/download.html">Download for desktop</a>
-        </div>
-      </div>
-      <div class="stats-grid">
-        <div>
-          <div class="stat-value">16</div>
-          <div class="stat-label">Surfaces &amp; systems shipped</div>
-        </div>
-        <div>
-          <div class="stat-value">BSL 1.1</div>
-          <div class="stat-label">License</div>
-        </div>
-        <div>
-          <div class="stat-value">10+</div>
-          <div class="stat-label">Engines supported</div>
-        </div>
-        <div>
-          <div class="stat-value">Local-first</div>
-          <div class="stat-label">Your machine</div>
-        </div>
-      </div>
-    </section>
-
-<!-- ============================================================
-     Competitor comparison section for the Muster landing page.
-     Drop inside <main><div class="container"> next to the other
-     <section class="section"> blocks. Uses the page's :root vars
-     (--line, --ink, --muted, --accent-*) and existing utility
-     classes (.section, .section-intro, .eyebrow, .section-heading,
-     .section-copy). Every data cell carries a comment citing the
-     exact source line it was verified against.
-     ============================================================ -->
-<section id="compare" class="section">
-  <div class="section-intro">
-    <div class="eyebrow">Compare</div>
-    <h2 class="section-heading">Compare the documented features.</h2>
-    <p class="section-copy">
-      This table summarizes an August 2026 snapshot of public READMEs.
-      A dash means the feature was not documented in that snapshot, not that the product lacks it.
-    </p>
-  </div>
-
-  <div style="margin-top:40px;overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--surface);box-shadow:var(--shadow-soft);">
-    <table style="min-width:900px;width:100%;border-collapse:collapse;font-size:14.5px;line-height:1.5;text-align:left;">
-      <thead>
-        <tr>
-          <!-- Column label cell -->
-          <th scope="col" aria-label="Feature" style="padding:16px 18px;border-bottom:1px solid var(--line);"></th>
-          <!-- Source: muster-audit/README.md L5 (# Muster) -->
-          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--accent-line);background:linear-gradient(to bottom, var(--accent-wash), var(--accent-wash-2));color:var(--accent-soft);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Muster</th>
-          <!-- Source: rival-osaurus/README.md L5 (<h1>Osaurus</h1>) -->
-          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--line);color:var(--ink);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Osaurus</th>
-          <!-- Source: rival-rakazo/README.md L1 (# Rakazo) -->
-          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--line);color:var(--ink);font-weight:600;font-size:15px;letter-spacing:-0.01em;">Rakazo</th>
-          <!-- Source: rival-openbot/README.md L3 (# OpenBot) -->
-          <th scope="col" style="padding:16px 18px;border-bottom:1px solid var(--line);color:var(--ink);font-weight:600;font-size:15px;letter-spacing:-0.01em;">OpenBot</th>
-        </tr>
-      </thead>
-      <tbody>
-
-        <tr>
-          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Platforms</th>
-          <!-- Source: muster-audit/README.md L257-L263 (macOS/Windows/Linux downloads), L313-L319 (self-host web via Docker) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">macOS · Windows · Ubuntu · Web (self-host)</td>
-          <!-- Source: rival-osaurus/README.md L24 (badge “Platform macOS (Apple Silicon)”), L49, L69 (requires macOS 15.5+ Apple Silicon) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">macOS (Apple Silicon)</td>
-          <!-- Source: rival-rakazo/README.md L8-L10 (“available on the web, as an Electron desktop app, and through an Expo mobile app”) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Web · Desktop (Electron) · Mobile (Expo)</td>
-          <!-- Source: rival-openbot/README.md L34 (“runs inside your own infrastructure. Docker Compose brings up every part”), L95 (web UI on localhost:3010) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Web, self-hosted (Docker)</td>
-        </tr>
-
-        <tr>
-          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">License</th>
-          <!-- Source: muster-audit/README.md L23 (BSL 1.1 badge), L398-L405 (Business Source License 1.1, converts to Apache 2.0 after 2030-08-19) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">BSL 1.1 (source-available)</td>
-          <!-- Source: rival-osaurus/README.md L53 (“MIT licensed”), L359-L361 (License: MIT) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">MIT</td>
-          <!-- Source: rival-rakazo/README.md L145 (“licensed under the Apache License 2.0”) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Apache-2.0</td>
-          <!-- Source: rival-openbot/README.md L11 (License: MIT badge), L345-L347 (MIT © CopilotKit) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">MIT</td>
-        </tr>
-
-        <tr>
-          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Self-host free</th>
-          <!-- Source: muster-audit/README.md L326-L329 (“Self-hosting stays free forever”), L312-L319 (Docker self-host guide) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Yes — free forever</td>
-          <!-- Source: rival-osaurus/README.md L9 (“Fully offline. Open source.”), L53 (free local Mac app, MIT) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Yes — free local app</td>
-          <!-- Source: rival-rakazo/README.md L42-L72 (Docker Compose + pnpm quick start), L78/L131 (self-hosting guide) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Yes (Docker Compose)</td>
-          <!-- Source: rival-openbot/README.md L30 (single-user env admits admin on fresh clone), L53-L55 (Docker requirements; Intelligence free plan available) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Yes (Docker Compose)</td>
-        </tr>
-
-        <tr>
-          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Hosted tier available</th>
-          <!-- Source: muster-audit/README.md L326-L329 (Muster Cloud hosted tier at muster.today) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Yes — Muster Cloud</td>
-          <!-- Source: rival-osaurus/README.md L151 (“Osaurus Router is the hosted path — pay-as-you-go with credits”; hosted model routing, not a hosted app) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Model routing only (Router, pay-as-you-go)</td>
-          <!-- Not stated: rival-rakazo/README.md links rakazo.com (L12) but describes no hosted tier or plans -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
-          <!-- Not stated: rival-openbot/README.md describes self-hosted deployment only; no hosted tier mentioned -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
-        </tr>
-
-        <tr>
-          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Price</th>
-          <!-- Source: muster-audit/README.md L327-L328 (“from $20/month per cloud computer”); www/index.html L694 ($20/mo), L706 ($192/yr annual) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Published: $20/mo per cloud computer · $192/yr · self-host free</td>
-          <!-- Source: rival-osaurus/README.md L53 (MIT, free app), L151 (Router: “pay-as-you-go with credits”) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Free app; Router pay-as-you-go credits</td>
-          <!-- Not stated: rival-rakazo/README.md contains no pricing; self-host is free under Apache-2.0 (L145) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
-          <!-- Not stated: rival-openbot/README.md states no product price; CopilotKit Intelligence dependency has a free plan (L55) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
-        </tr>
-
-        <tr>
-          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Privacy tech</th>
-          <!-- Source: muster-audit/www/index.html L531-L553 (Privacy Shield: on-device scrubbing of emails/phones/secrets before cloud models, deterministic masking, counts-only receipt per turn) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">On-device Privacy Shield — scrubs emails, phones, secrets before any cloud model sees them; counts-only receipts per turn</td>
-          <!-- Source: rival-osaurus/README.md L107 (on-device privacy filter: classifier + regex scrubbing, fail-closed send block, wire-level verification in Insights panel) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">On-device privacy filter (classifier + regex), fail-closed scrubbing, wire-level verification</td>
-          <!-- Source: rival-rakazo/README.md L52 (ENCRYPTION_KEY), L58-L59 (“Connector credentials are encrypted on the server and are never returned by the API”) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Connector credentials encrypted server-side, never returned by the API</td>
-          <!-- Source: rival-openbot/README.md L143-L156 (gateway decides + records every action, CEL policy fail-closed, readable audit trail, credentials encrypted at rest, secrets never enter transcript) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Policy gateway + audit trail, fail-closed CEL rules, encrypted credentials, secrets kept out of transcripts</td>
-        </tr>
-
-        <tr>
-          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Computer providers</th>
-          <!-- Source: muster-audit/README.md L60-L61 (cloud Linux desktop or your own Mac), L186 (Box / box.ascii.dev cloud computer agent) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Cloud Linux desktop per bot (Box) or your own machine</td>
-          <!-- Source: rival-osaurus/README.md L83-L99 (local sandbox Linux VM via Apple Containerization), L127 (per-agent WebKit browser session) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Local sandbox VM (Apple Containerization) + per-agent browser</td>
-          <!-- Source: rival-rakazo/README.md L23 (“Docker, E2B, Daytona, and trusted local-computer support”) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Docker · E2B · Daytona · local machines</td>
-          <!-- Source: rival-openbot/README.md L141 (one container per Bot with own /workspace and browser profile; COMPUTER_RUNTIME=runsc for gVisor) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">One container per bot (browser + workspace), optional gVisor</td>
-        </tr>
-
-        <tr>
-          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Voice mode</th>
-          <!-- Source: muster-audit/README.md L134-L141 (read replies aloud, calls, BYO ElevenLabs key), L143-L145 (native on-device dictation, macOS) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Spoken replies + bot calls (free built-in voice; ElevenLabs optional); on-device dictation</td>
-          <!-- Source: rival-osaurus/README.md L205 (on-device transcription via FluidAudio, voice input, VAD wake-word, global hotkey; “No audio leaves your Mac”) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">On-device voice input — transcription, wake word, global hotkey</td>
-          <!-- Source: rival-rakazo/README.md L17 (“Voice mode: speak replies, dictate, and call a bot. Bring your own ElevenLabs, OpenAI, or Cartesia key”) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Speak replies, dictate, call bots — BYO ElevenLabs / OpenAI / Cartesia</td>
-          <!-- Not mentioned: rival-openbot/README.md has no voice/audio feature -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
-        </tr>
-
-        <tr>
-          <th scope="row" style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted);font-weight:500;white-space:nowrap;">Mobile apps</th>
-          <!-- Source: muster-audit/README.md L346-L364 (iOS and Android apps built; App Store / Play listings pending developer accounts) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--accent-line);background:rgba(240,70,14,0.05);color:var(--body);vertical-align:top;">Built — store listings pending</td>
-          <!-- Not mentioned: rival-osaurus/README.md covers macOS only; no mobile app referenced -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
-          <!-- Source: rival-rakazo/README.md L9 (“through an Expo mobile app”), L80-L90 (Desktop and mobile section, docs/mobile-release.md) -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--body);vertical-align:top;">Yes — Expo app</td>
-          <!-- Not mentioned: rival-openbot/README.md references no mobile app -->
-          <td style="padding:13px 18px;border-top:1px solid var(--line);color:var(--muted-2);vertical-align:top;">—</td>
-        </tr>
-
-      </tbody>
-    </table>
-  </div>
-
-  <!-- Required footnote -->
-  <p style="margin-top:16px;color:var(--muted-2);font-size:13px;">README comparison, August 2026. Features and availability may have changed; this is not a runtime benchmark.</p>
-  <p style="margin-top:10px;color:var(--muted-2);font-size:13px;">Start with the workflows you need: setting up a bot, reviewing an approval, and checking the result. The <a href="/docs" style="color:var(--accent-soft);">Muster guides</a> explain how to try them.</p>
-</section>
 
   </main>
 
@@ -1804,14 +1748,14 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
       </span>
     </div>
     <nav class="site-footer__links" aria-label="Footer">
-      <a href="/bots">Teams</a>
       <a href="/docs">Docs</a>
-      <a href="/download.html">Download</a>
+      <a href="/#releases">Changelog</a>
+      <a class="footer-download" href="/download.html">Download</a>
       <a href="/docs/security">Security &amp; license</a>
-      <a href="/privacy-policy">Privacy policy</a>
-      <a href="/Terms-of-Service">Terms of service</a>
-      <a href="https://www.linkedin.com/in/ramagiritharun" target="_blank" rel="noreferrer">LinkedIn</a>
-    </nav>
+      <a href="/privacy-policy">Privacy</a>
+      <a href="/Terms-of-Service">Terms</a>
+      <a href="/teams.html">Teams</a>
+ &nbsp;·&nbsp; <a href="https://www.linkedin.com/in/ramagiritharun" target="_blank" rel="noreferrer">LinkedIn</a>    </nav>
   </footer>
 
 </div>
@@ -2196,19 +2140,119 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
     window.setInterval(tick, 1600);
   })();
 
-  // Manifesto dot rail: light the dot of the panel in view.
+
+  // Releases band: render /downloads/releases.json newest-first. The band
+  // renders nothing until the file parses — no fabricated rows.
   (function () {
-    var panels = document.querySelectorAll(".manifesto__panel");
-    var dots = document.querySelectorAll(".manifesto__rail i");
-    if (!panels.length || !dots.length || !("IntersectionObserver" in window)) return;
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        if (!entry.isIntersecting) return;
-        var idx = Array.prototype.indexOf.call(panels, entry.target);
-        dots.forEach(function (d, i) { d.classList.toggle("on", i === idx); });
+    var list = document.getElementById("releases-list");
+    if (!list) return;
+    fetch("/downloads/releases.json").then(function (r) {
+      if (!r.ok) throw 0;
+      return r.json();
+    }).then(function (data) {
+      var rows = Array.isArray(data) ? data : (data && Array.isArray(data.releases) ? data.releases : []);
+      if (!rows.length) throw 0;
+      list.textContent = "";
+      rows.slice(0, 8).forEach(function (rel) {
+        var row = document.createElement("div");
+        row.className = "release-row";
+        var ver = document.createElement("span");
+        ver.className = "release-row__ver";
+        ver.textContent = "v" + (rel.version || "");
+        var date = document.createElement("span");
+        date.className = "release-row__date";
+        date.textContent = rel.date || "";
+        var changes = document.createElement("span");
+        changes.className = "release-row__changes";
+        changes.textContent = rel.changes != null ? rel.changes + " changes" : "";
+        row.appendChild(ver); row.appendChild(date); row.appendChild(changes);
+        var dmg = document.createElement("a");
+        dmg.href = "https://muster.today/downloads/Muster.dmg";
+        dmg.textContent = ".dmg";
+        row.appendChild(dmg);
+        var exe = document.createElement("a");
+        exe.href = "https://muster.today/downloads/Muster-setup.exe";
+        exe.textContent = ".exe";
+        row.appendChild(exe);
+        var sums = document.createElement("a");
+        sums.href = "/download.html#checksums";
+        sums.textContent = "checksums";
+        row.appendChild(sums);
+        list.appendChild(row);
       });
-    }, { threshold: 0.55 });
-    panels.forEach(function (p) { io.observe(p); });
+    }).catch(function () {
+      list.textContent = "Release history is not available right now.";
+    });
+  })();
+
+  // Hero download CTA: detect the OS, point the primary button at the right
+  // artifact, and label it with the live version from /downloads/latest.json
+  // (same consumption pattern as download.html). Falls back to the static
+  // macOS label when the fetch fails.
+  (function () {
+    var ua = navigator.userAgent;
+    var plat = navigator.platform || "";
+    var macLike = /Mac/i.test(plat) || /Mac OS X/i.test(ua);
+    var isWindows = /Win/i.test(ua);
+    var isLinux = /Linux/i.test(ua) && !/Android/i.test(ua);
+    var detected = null;
+
+    var link = document.getElementById("hero-dl");
+    var label = document.getElementById("hero-dl-label");
+    var version = document.getElementById("hero-dl-version");
+    if (!link || !label) return;
+
+    // WebKit reports platform "MacIntel" even on Apple silicon, so the
+    // platform string cannot distinguish the two. Trust the GPU renderer
+    // string (Apple M-series names never appear on Intel Macs) and default
+    // to Apple silicon when in doubt.
+    function macArch() {
+      if (typeof navigator.userAgentData !== "undefined" && navigator.userAgentData.getHighEntropyValues) {
+        return navigator.userAgentData.getHighEntropyValues(["architecture"]).then(function (h) {
+          return h && h.architecture === "arm" ? "arm" : "x86";
+        }).catch(function () { return glGuess(); });
+      }
+      return Promise.resolve(glGuess());
+    }
+    function glGuess() {
+      try {
+        var canvas = document.createElement("canvas");
+        var gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+        if (!gl) return "arm";
+        var ext = gl.getExtension("WEBGL_debug_renderer_info");
+        var renderer = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : "";
+        if (/Apple M\d|apple silicon/i.test(renderer)) return "arm";
+        if (/Intel|AMD/i.test(renderer)) return "x86";
+        return "arm";
+      } catch (e) { return "arm"; }
+    }
+
+    var artifact = null;
+    if (isWindows) { artifact = "Muster-setup.exe"; label.textContent = "Download for Windows"; detected = "windows"; }
+    else if (isLinux) { artifact = "Muster.AppImage"; label.textContent = "Download for Linux"; detected = "linux"; }
+    else if (macLike) { artifact = "Muster.dmg"; label.textContent = "Download for macOS (Apple silicon)"; detected = "mac-arm64"; }
+    if (macLike) {
+      // refine the mac artifact once the architecture is known
+      macArch().then(function (arch) {
+        if (arch === "x86") {
+          document.getElementById("hero-dl").href = "https://muster.today/downloads/Muster-intel.dmg";
+          document.getElementById("hero-dl-label").textContent = "Download for macOS (Intel)";
+          hideAlso("mac-arm64"); showAlso("mac-x64");
+          detected = "mac-x64";
+        }
+      });
+    }
+    if (artifact) link.href = "https://muster.today/downloads/" + artifact;
+    function hideAlso(d) { var els = document.querySelectorAll('[data-also="' + d + '"]'); for (var i = 0; i < els.length; i++) els[i].style.display = "none"; }
+    function showAlso(d) { var els = document.querySelectorAll('[data-also="' + d + '"]'); for (var i = 0; i < els.length; i++) els[i].style.display = ""; }
+    if (detected) hideAlso(detected);
+
+    fetch("/downloads/latest.json").then(function (r) {
+      if (!r.ok) throw 0;
+      return r.json();
+    }).then(function (meta) {
+      if (version && meta.version) version.textContent = "v" + meta.version;
+    }).catch(function () { /* keep the CTA without a version chip */ });
   })();
 </script>
 
