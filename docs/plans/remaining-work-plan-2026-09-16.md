@@ -384,3 +384,19 @@ Still open, unchanged: blockmap copy to the mirror (differential updates
 unverified), owner-gated Xcode Cloud pin to stable Xcode, physical-device
 acceptance (iPhone/Watch/Android hardware), hosted recovery/sync and
 multi-tenant hardening.
+
+### Continuation status (2026-09-23, later — OMB parity slices)
+
+11. **Differential updates: the "still open" blockmap item above is CLOSED.**
+    Loop197 cut v1.17.0 with verified blockmaps (the stale dmg blockmap is
+    excluded by construction and the validator rejects any blockmap whose
+    chunk total ≠ its binary's size), and the mirror now answers ranged
+    requests (`206`) — proven live by fetching installer chunks along the
+    blockmap's own boundaries. 1.16.0→1.17.0 was the one full download;
+    1.17.0→next ships real deltas.
+12. **OMB parity slices shipped** (see ceo-log Loop198): chat
+    reply/quote + raw-markdown toggle + transcript export; routines
+    dedicated results destination. Pairing scope (chat-and-approvals-only)
+    verified already enforced end to end — study doc item stands corrected.
+    Next-ranked gaps: custom-domain guidance in Remote access (#5), remote
+    client mode (#6), computer sharing grants (#7).

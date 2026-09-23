@@ -8978,3 +8978,36 @@ phone when conversations last synced, so the phone does not say they
 did. That receipt is a bounded server route and it is the next slice, not
 a client-side guess. Push, CI, autodeploy and the GET-only production
 probe follow this entry; deployment is claimed only once observed.
+
+## Loop 198 — 2026-09-23: OMB parity slices — chat affordances shipped, pairing scope re-audited, routines destination built
+
+The OpenMausBot parity study (`docs/research/omb-desktop-parity-study-2026-09-23.md`,
+built from the repo, the shipped screenshots, and the installed 0.1.85 Mac app)
+ranked the remaining gaps. Two shipped this loop, one re-audited:
+
+1. **Chat affordances (gap #2, commit 721b25d, CI 35918854384 green):**
+   reply-quote (hover action → collapsed blockquote prefill via the per-thread
+   draft store + composer-focus event), raw-markdown toggle (per-message,
+   aria-pressed), and transcript export (header action → Markdown of the full
+   active branch; activity as tool lines, cards as existence lines). The
+   affordances lib carries a structural `TranscriptMessage` — importing the
+   server's store type from src drags node-flavored server files into the web
+   `tsc -b` graph (50 TS5097s).
+2. **Pairing scope (gap #4): re-audited, already enforced end to end.** The
+   study understated this: scope is fixed at code creation
+   (`electron/companion.mjs` `POST /pairing?access=`), stored per device
+   (`companion/src/devices.ts`), and enforced by the default-deny route
+   classifier (`companion/src/routes.ts` denyReason) with the user-facing
+   403 naming the setting that changes it. No work needed; study matrix
+   stands corrected by this entry.
+3. **Routines destination (gap #3, commit 0133824):** `Routine.destination`
+   — pick one of the bot's tasks in the editor ("Where do results go?") and
+   every run dispatches into that thread, building one dated log instead of
+   scattering fresh tasks. Dispatch re-checks liveness via a `taskThread`
+   probe (store.taskByThread); a deleted/foreign thread falls back to a
+   fresh detached task for that run, never stalling the routine. Tests pin
+   same-thread reuse, dead-destination fallback, and persistence.
+
+Gate evidence: tsc -b 0, tsconfig.server.json 0, oxlint 0, vitest 372 files
+/ 5,619 passed / 8 skipped; CI green on the merged head (35924299241) with
+both commits contained in origin/main.
