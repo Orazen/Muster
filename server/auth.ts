@@ -1,13 +1,18 @@
 import { DatabaseSync } from "node:sqlite";
 import { betterAuth } from "better-auth";
-import { organization } from "better-auth/plugins";
+import { emailOTP, organization } from "better-auth/plugins";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
 import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { DATA_DIR } from "./config.ts";
 import { writeFileAtomic } from "./atomic.ts";
-import { isEmailConfigured, sendPasswordResetEmail, sendVerificationEmail } from "./email.ts";
+import {
+  isEmailConfigured,
+  sendLoginCodeEmail,
+  sendPasswordResetEmail,
+  sendVerificationEmail,
+} from "./email.ts";
 
 /**
  * Self-hosting is opt-in and mirrors the same signal server/index.ts uses:
@@ -426,6 +431,11 @@ export function pairCloudUrl(): string | null {
   return SELF_HOSTED ? null : "https://muster.today";
 }
 
+/** Lifetime of a sign-in one-time code, in seconds (10 minutes). One value,
+ * consumed by the emailOTP plugin below (code expiry) and by the dev-mode
+ * delivery log in server/email.ts so the message can restate it. */
+export const OTP_TTL_SECONDS = 600;
+
 export function authCapabilities() {
   const pairingCloudUrl = pairCloudUrl();
   return {
@@ -443,6 +453,12 @@ export function authCapabilities() {
     cloudPairing: Boolean(pairingCloudUrl),
     desktopOAuth: Boolean(pairingCloudUrl),
     pairingCloudUrl,
+    // Email + 6-digit one-time-code sign-in (better-auth's emailOTP plugin,
+    // policy-wrapped by server/email-otp-login.ts). Always available: with
+    // no mailer configured the code is logged for local finishing rather
+    // than dropped, so this does not depend on RESEND_API_KEY the way
+    // passwordReset does.
+    emailOtp: true,
   };
 }
 
@@ -600,6 +616,16 @@ export const auth = betterAuth({
     customRules: {
       "/sign-in/email": { window: 60, max: 5 },
       "/sign-up/email": { window: 3600, max: 10 },
+      // Email one-time codes (keys are relative to /api/auth, same as every
+      // rule above): send is the expensive one — it writes a verification
+      // row and, when a mailer is configured, an outbound email — so it
+      // gets the tightest per-IP budget; check (non-consuming validation)
+      // and the OTP sign-in itself sit comfortably above it so a legitimate
+      // user retrying a typo'd code is never locked out by the IP window
+      // before their attempt budget (3, in the plugin) can speak.
+      "/email-otp/send-verification-otp": { window: 60, max: 8 },
+      "/email-otp/check-verification-otp": { window: 60, max: 15 },
+      "/sign-in/email-otp": { window: 60, max: 15 },
     },
   },
   // Verification links, reset links, and OAuth callbacks are absolute URLs, so
@@ -648,7 +674,23 @@ export const auth = betterAuth({
   // module-level singletons they already are. This deliberately does NOT
   // claim to fix the tenant-isolation bug that design doc documents; it's
   // the identity foundation the real scoping work builds on next.
-  plugins: [organization()],
+  plugins: [
+    organization(),
+    // Email + 6-digit one-time-code sign-in. The plugin owns code
+    // generation/hash/expiry/attempt budgeting and mints the SAME session
+    // every other sign-in path mints; Muster-specific policy (sign-up
+    // gates, resend cooldown, and the unverified-user promotion that keeps
+    // password accounts intact) lives in server/email-otp-login.ts, which
+    // intercepts the two public routes before Better Auth sees them.
+    emailOTP({
+      expiresIn: OTP_TTL_SECONDS,
+      allowedAttempts: 3,
+      storeOTP: "hashed",
+      sendVerificationOTP: async ({ email, otp }) => {
+        await sendLoginCodeEmail(email, otp, OTP_TTL_SECONDS);
+      },
+    }),
+  ],
 });
 
 /** The request scheme behind a reverse proxy: the first entry of

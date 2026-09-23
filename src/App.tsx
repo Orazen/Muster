@@ -36,7 +36,7 @@ import { ProjectScout } from "@/components/ProjectScout";
 import { SignupPage } from "@/pages/SignupPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
-import { emailGateDone, serverGateDone } from "@/lib/analytics";
+import { emailGateDone, serverGateDone, initAnalytics } from "@/lib/analytics";
 import { installGazeTracking } from "@/lib/musterbot/gaze";
 import { PairPage } from "@/pages/PairPage";
 import { ClaimPage } from "@/pages/ClaimPage";
@@ -330,6 +330,11 @@ function RootRoute() {
 }
 
 export default function App() {
+  // Product analytics start once per app load; a Settings opt-out is honoured
+  // inside initAnalytics (posthog never loads when the key says off).
+  useEffect(() => {
+    initAnalytics();
+  }, []);
   return (
     <BrowserRouter>
       <AuthProvider>

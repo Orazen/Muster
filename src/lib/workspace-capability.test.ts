@@ -220,6 +220,17 @@ describe("workspace account/session request retirement", () => {
     await expect(workspaceResponse(request, "/api/workspace/export", "{}", vi.fn<typeof fetch>().mockResolvedValue(Response.json({ error: "Please sign in again." }, { status: 401 })))).rejects.toThrow("Please sign in again.");
   });
 
+  it("sends an explicit bodyless DELETE when the caller names the method", async () => {
+    const request = scope().beginOperation()!;
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ cleared: true }));
+    const response = await workspaceResponse(request, "/api/workspace/snapshots/passphrase", undefined, fetcher, "DELETE");
+    expect(response).not.toBeNull();
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith(
+      "/api/workspace/snapshots/passphrase",
+      expect.objectContaining({ method: "DELETE", credentials: "include", cache: "no-store", body: undefined, signal: request.signal }),
+    );
+  });
+
   it("validates current operation replies before permitting caller effects", async () => {
     const request = scope().beginOperation()!;
     await expect(readWorkspaceReply(request, "/api/workspace/export", "{}", z.object({ payload: z.string() }), vi.fn<typeof fetch>().mockResolvedValue(Response.json({ payload: false })))).rejects.toThrow("invalid backup response");

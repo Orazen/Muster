@@ -8532,3 +8532,73 @@ server-side race):
 
 Release state: v1.15.0 published end-to-end yesterday (7/7 jobs, all platforms notarized,
 mirror live). CI on main green through 35796618067.
+
+## Loop188 — combined batch: the updater actually updates, OpenMausBot parity on desktop and iOS, sign-in without a password, snapshots behind a Keychain gate (23 September 2026)
+
+Every stream of the owner's combined program landed in one commit by
+owner direction (11 subagent streams implemented; gates, wiring, commit
+and push owned centrally).
+
+1. **Updater repair.** Error routing/dedup, a 120s stall watchdog, a
+   stderr logger and an honest "Starting download…" label — 21/21 in
+   its node test file, `check:electron` 0.
+2. **Static content-length.** The marketing bytes path computes the
+   body before writing headers, so downloads get a real
+   `content-length` (docs-static 40/40).
+3. **OpenMausBot desktop parity.** Settings primitives, real analytics
+   opt-out + init, five settings rows, searchable shortcuts sheet;
+   window default 1440×920 → 1220×820 (disclosed).
+4. **OpenMausBot iOS parity.** Settings rework, updates pill/sheet,
+   quick replies, typing indicator — `swift test` **457/0** (baseline
+   435, +22); bundle IDs, entitlements, App Groups, project.yml
+   untouched. Five owner-gated items queued, not taken.
+5. **Email-OTP sign-in everywhere.** better-auth `emailOTP` plus a
+   wrapper that keeps account links/sessions for pre-existing
+   unverified users; dev mode prints the code when no mailer is
+   configured. Owner env decision: set `RESEND_API_KEY` + `EMAIL_FROM`
+   or codes stay log-only.
+6. **B1 snapshots + Keychain.** Retention ladder 7/7/4/6 (≤24 remote
+   files; owner-confirmable), never-delete-last-healthy invariant
+   attacked by adversarial tests, argv-array Keychain store, nightly
+   scheduler with attempt budget, pre-migration/pre-restore captures.
+   Central wiring: SnapshotsCard mounted above PortableBackupCard (the
+   card's own copy points restores "below") and the sync-queue
+   passphrase provider now falls back env → Keychain → null.
+7. **Memory M1–M2.** BM25 retrieval with provenance, default-deny
+   grants (revoke/expiry immediate), four session-gated routes on a
+   2-line mount. Surfaced: `queryAudit` with a missing `limit` pages 1
+   instead of 50 (`Number(null ?? "")` → clamp 1) — owner decision
+   queued; `decision-log.ts` out of slice.
+8. **Mascot/backlog + AGENTS domain → muster.today.**
+9–13. **Five studies, docs only:** openmuse (13 slices; top = browser
+   takeover), tiptour (best first = new-file-only grounding module),
+   jev (5 slices; the model may suggest/route/score/flag, never
+   decide), laya (rules-only default + Slice 0 seam; provider choice
+   is an owner decision), heavy-user performance (top = A1 cache
+   headers; prod entry JS 1,887,015 B uncompressed).
+
+**Two integration-side catches this batch's green depends on:** the OTP
+email field duplicated the exact "Email address" label (strict-mode
+violated every sign-in fixture — label made distinct), and live PostHog
+fired external requests in e2e (the shipped opt-out key is now set
+before any app script runs, try/catch-wrapped for opaque-origin
+documents). Workspace-backup's exact status counts moved 4→5 and 5→7
+with the third Settings consumer documented in-comment.
+
+**Gates (real numbers):** `tsc -p tsconfig.server.json` 0 ·
+`-p tsconfig.json` 0 · `oxlint .` 0/0 (951 files) · full `vitest run`
+**354 / 5250 / 8 skipped / 0 failed** (480.03s, exit 0; prior accepted
+baseline 344/5114/8/0 — increase, no decrease) · updater 21/21 ·
+`check:electron` 0 · `npm run build` 0 · `npx playwright test`
+**40/40** (3.7m, exit 0; suite size 40 predates this batch) ·
+`cd ios && swift test` 457/0.
+
+**Not claimed:** deployment or notarization (push is not a receipt;
+GET-only verify still owed), security (scanner re-run outstanding),
+email delivery, the Jev/Laya provider decision, retention counts,
+pre-upgrade electron hook (deferred — never gate update-apply on a
+network round trip), the `queryAudit` quirk. Parallel-session context:
+`5ab3af5` (ECONNRESET both ends + stale onboarding selector) arrived
+in-tree mid-batch and is included; `www/*`, `.commandcode/`,
+`.freebuff/`, `.zcode/`, `docs/research/glm/*` and `marketing-video/`
+are deliberately excluded from this commit.

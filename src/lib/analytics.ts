@@ -9,11 +9,59 @@ import posthog from "posthog-js";
 import { z } from "zod";
 
 const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
+const OPT_OUT_KEY = "muster:analytics-opt-out";
 
+// ready = capturing is live this session; initialized = the SDK has been
+// loaded at all (an opt-out stops captures without unloading it).
+// sessionChoice = the user's most recent toggle, held in memory so it wins
+// for this session even when storage is blocked and cannot round-trip it.
 let ready = false;
+let initialized = false;
+let sessionChoice: boolean | null = null;
+
+/** Has the user turned analytics off? The in-session choice wins; otherwise
+ * the stored marker is read fresh on every check so a Settings change applies
+ * to the very next event. Unreadable storage with no session choice resolves
+ * to "enabled": there is no stored choice to honor, and this is the
+ * pre-existing default for builds shipped before the toggle existed. */
+export function analyticsEnabled(): boolean {
+  if (sessionChoice !== null) return sessionChoice;
+  try {
+    return localStorage.getItem(OPT_OUT_KEY) !== "1";
+  } catch {
+    return true;
+  }
+}
+
+/** Persist the user's choice and apply it immediately. Opting out halts
+ * capturing for this session even when the write cannot be persisted
+ * (blocked storage); opting back in re-arms the tracker. Deliberately sends
+ * no final event — once the switch is off, nothing leaves the client. */
+export function setAnalyticsEnabled(enabled: boolean): void {
+  sessionChoice = enabled;
+  try {
+    if (enabled) localStorage.removeItem(OPT_OUT_KEY);
+    else localStorage.setItem(OPT_OUT_KEY, "1");
+  } catch {
+    // storage-blocked: the choice cannot persist, but the session gate still applies
+  }
+  if (enabled) {
+    initAnalytics();
+  } else {
+    if (initialized) posthog.opt_out_capturing();
+    ready = false;
+  }
+}
 
 export function initAnalytics() {
-  if (ready) return;
+  if (ready || !analyticsEnabled()) return;
+  if (initialized) {
+    // Re-enabled after an opt-out: PostHog keeps its own persisted opt-out
+    // flag, so clear it or every later capture would be dropped again.
+    posthog.opt_in_capturing();
+    ready = true;
+    return;
+  }
   posthog.init(TOKEN, {
     api_host: "https://us.i.posthog.com",
     autocapture: false, // never capture clicked-element text (conversation leak)
@@ -21,6 +69,11 @@ export function initAnalytics() {
     person_profiles: "identified_only",
     persistence: "localStorage",
   });
+  initialized = true;
+  // PostHog persists its own opt-out flag: after a restart (our marker
+  // cleared, its flag still present) a fresh init would silently drop every
+  // capture. We only get here when analyticsEnabled() says on, so clear it.
+  if (posthog.has_opted_out_capturing()) posthog.opt_in_capturing();
   ready = true;
   const platform = navigator.userAgent.includes("Electron") ? "desktop" : "browser";
   // one-time install marker — app_first_open counts installs (the closest
@@ -38,12 +91,12 @@ export function initAnalytics() {
 export type AnalyticsProps = Record<string, string | number | boolean | null | undefined>;
 
 export function track(event: string, props?: AnalyticsProps) {
-  if (!ready) return;
+  if (!ready || !analyticsEnabled()) return;
   posthog.capture(event, props);
 }
 
 export function identifyEmail(email: string) {
-  if (!ready) return;
+  if (!ready || !analyticsEnabled()) return;
   posthog.identify(email, { email });
   posthog.capture("email_submitted");
 }

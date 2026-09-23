@@ -59,6 +59,11 @@ const test = baseTest.extend<Fixture>({
     const unexpected: string[] = [];
     const open = async () => {
       const context = await browser.newContext(); contexts.push(context);
+      // E2E must never emit third-party requests: the shipped analytics
+      // opt-out key, set before any app script runs (posthog never loads).
+      await context.addInitScript(() => {
+        try { localStorage.setItem("muster:analytics-opt-out", "1"); } catch { /* no storage in this document */ }
+      });
       await context.route("**/*", async (route) => {
         const url = new URL(route.request().url());
         if (![harness.cloudUrl, harness.desktopUrl].includes(url.origin)) {

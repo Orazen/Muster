@@ -26,6 +26,14 @@ const test = baseTest.extend<Fixtures>({
     const allowedOrigins = new Set([harness.cloudUrl, harness.desktopUrl]);
     const open = async (expectedFailure: PageFailure = false) => {
       const context = await browser.newContext();
+      // E2E must never emit third-party requests: set the shipped analytics
+      // opt-out key before any app script runs, so posthog never loads
+      // (analytics.ts reads this key fresh on every check).
+      await context.addInitScript(() => {
+        // Opaque-origin documents (about:blank) deny storage — the app's own
+        // origin does not; never log an error there.
+        try { localStorage.setItem("muster:analytics-opt-out", "1"); } catch { /* no storage in this document */ }
+      });
       contexts.push(context);
       const expectedPairFailure = expectedFailure === true;
       const failedSend: MessageSendFailure | null = expectedFailure && expectedFailure !== true

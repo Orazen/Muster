@@ -1,7 +1,8 @@
 // The workspace-backup route family, extracted from server/index.ts behind
 // an ordered route table: capability advertisement, the hosted installation
-// wall, account-linked Google Drive connect/callback, and the v2 portable
-// bundles (file, installation Drive, account Drive).
+// wall, account-linked Google Drive connect/callback, the v2 portable
+// bundles (file, installation Drive, account Drive), and the snapshot-
+// automation entries (policy, run, passphrase store).
 //
 // POSITION CONTRACT — this family is order-sensitive inside index.ts's
 // request handler:
@@ -26,6 +27,11 @@
 //   5. nothing before the family's registration in index.ts may match a
 //      family path (verified: every matcher above the registration point is
 //      an exact path outside `/api/workspace` + `/api/vault`).
+//   6. the snapshot-automation entries (policy / run / passphrase store) are
+//      installation-scoped like the v2 bundles, so they sit AFTER the wall
+//      and carry NO session check — exact parity with the installation
+//      push/pull siblings: the desktop-only 403 is the wall's answer, and a
+//      passphrase-store question never depends on which account is signed in.
 //
 // `match` and `handle` are separated so the table stays declarative: match
 // sees only the request line and the per-request context, handle does the
@@ -34,6 +40,8 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { rmSync } from "node:fs";
+
+import { z } from "zod";
 
 import type { AppConfig } from "./config.ts";
 import { getDb, forwardedProtoOf, SELF_HOSTED } from "./auth.ts";
@@ -54,6 +62,20 @@ import * as driveSync from "./drive-sync.ts";
 import * as syncState from "./sync-state.ts";
 import type { WorkspaceBackupCapability } from "./contracts.ts";
 import { devicesForUser } from "./devices.ts";
+import { KEYCHAIN_MIN_PASSPHRASE_LENGTH } from "./keychain-store.ts";
+import {
+  installationDriveConnected,
+  runSnapshot,
+  snapshotPassphraseStore,
+  type GateReason,
+} from "./snapshot-runner.ts";
+import { nextNightlyAtMs } from "./snapshot-scheduler.ts";
+import {
+  readSnapshotState,
+  RETENTION_MAX,
+  writeSnapshotPolicy,
+  type SnapshotPolicy,
+} from "./snapshot-state.ts";
 
 /** Everything a family handler may touch for one request. index.ts owns the
  * session resolution, the live config and the data dir; the family only
@@ -170,12 +192,68 @@ const stageV2Restore = (
   };
 };
 
+// ── Snapshot automation (B1, DESIGN §11) ───────────────────────────────────
+// The Settings card's wire: the policy view, a manual run, and the
+// passphrase-store decision itself. Installation-scoped (point 6 above), so
+// every entry sits after the wall and answers without a session. The view
+// reports store EXISTENCE only — no response ever carries the passphrase.
+
+/** Strict: an unknown key is a typo the operator should see rejected, not a
+ * silently ignored field. Retention fields are individually optional — the
+ * card sends only the buckets it changes, each bounded 0..RETENTION_MAX. */
+const policyBodySchema = z.object({
+  nightlyEnabled: z.boolean().optional(),
+  retention: z.object({
+    recent: z.number().int().min(0).max(RETENTION_MAX).optional(),
+    daily: z.number().int().min(0).max(RETENTION_MAX).optional(),
+    weekly: z.number().int().min(0).max(RETENTION_MAX).optional(),
+    monthly: z.number().int().min(0).max(RETENTION_MAX).optional(),
+  }).strict().optional(),
+}).strict();
+
+/** The Settings view: policy, the §11 gate facts the card flags (Drive +
+ * trusted passphrase store), the health marker, and the run log. */
+async function snapshotPolicyView(ctx: BackupRequestContext) {
+  const state = readSnapshotState();
+  const store = snapshotPassphraseStore();
+  const status = store.status();
+  const hasPassphrase = status === "available" ? await store.has() : false;
+  return {
+    policy: state.policy,
+    store: { status, hasPassphrase },
+    driveConnected: installationDriveConnected(ctx.config()),
+    health: state.health,
+    runs: state.runs,
+    history: state.history,
+    nextNightlyAt: nextNightlyAtMs(Date.now()),
+  };
+}
+
+/** Honest 409 text for a closed §11 gate — the same `skipped` reason the
+ * runner returned, in operator words. */
+function gateExplanation(reason: GateReason): string {
+  switch (reason) {
+    case "self-hosted":
+      return "Workspace backups are available on local desktop installs only for now.";
+    case "drive-not-connected":
+      return "Google Drive is not connected on this computer — connect it before taking a snapshot.";
+    case "store-unavailable":
+      return "No trusted passphrase store exists on this computer — automatic snapshots stay off until one does.";
+    case "no-passphrase":
+      return "No snapshot passphrase is stored yet — store one below, then take a snapshot.";
+    default:
+      return "The snapshot gate is closed — check the Drive connection and the passphrase store.";
+  }
+}
+
 /** The ordered family table. Order within the family mirrors the original
  * inline sequence exactly: capability → hosted wall → account connect +
  * callback → v2 status/export/verify/restore → account push/pull → discard →
- * installation-Drive push/pull → device inventory (session-scoped metadata;
- * its path matches no earlier entry and the wall claims only workspace/vault
- * paths, so position within the table cannot shadow it). */
+ * installation-Drive push/pull → snapshot automation (policy, run,
+ * passphrase store — after the wall, no session check) → device inventory
+ * (session-scoped metadata; its path matches no earlier entry and the wall
+ * claims only workspace/vault paths, so position within the table cannot
+ * shadow it). */
 const routes: BackupRoute[] = [
   {
     // This exact read-only response is the sole hosted workspace exception.
@@ -461,6 +539,128 @@ const routes: BackupRoute[] = [
         json(res, out.ok ? 200 : out.status, out.body);
       } catch (e) {
         json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    },
+  },
+  {
+    // Snapshot automation (B1): the policy view — never cached (it carries
+    // live gate state), never a passphrase (existence only).
+    match: (method, path) => method === "GET" && path === "/api/workspace/snapshots/policy",
+    handle: async (_req, res, ctx) => {
+      res.setHeader("Cache-Control", "no-store");
+      json(res, 200, await snapshotPolicyView(ctx));
+    },
+  },
+  {
+    // Policy edit: explicit field-by-field merge over the current policy so
+    // a partial body changes only what it names; validation failures answer
+    // 400 with per-field issues, and a failed write surfaces (a silently
+    // dropped toggle would lie to the operator).
+    match: (method, path) => method === "POST" && path === "/api/workspace/snapshots/policy",
+    handle: async (req, res, ctx) => {
+      const body = await readBody(req);
+      const parsed = policyBodySchema.safeParse(body ?? {});
+      if (!parsed.success) {
+        return json(res, 400, {
+          error: "invalid snapshot policy",
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path.map((segment) => String(segment)).join("."),
+            message: issue.message,
+          })),
+        });
+      }
+      const current = readSnapshotState().policy;
+      const patch = parsed.data;
+      const next: SnapshotPolicy = {
+        nightlyEnabled: patch.nightlyEnabled ?? current.nightlyEnabled,
+        retention: {
+          recent: patch.retention?.recent ?? current.retention.recent,
+          daily: patch.retention?.daily ?? current.retention.daily,
+          weekly: patch.retention?.weekly ?? current.retention.weekly,
+          monthly: patch.retention?.monthly ?? current.retention.monthly,
+        },
+      };
+      try {
+        writeSnapshotPolicy(next);
+      } catch (e) {
+        return json(res, 500, { error: `the snapshot policy could not be saved: ${e instanceof Error ? e.message : String(e)}` });
+      }
+      res.setHeader("Cache-Control", "no-store");
+      json(res, 200, await snapshotPolicyView(ctx));
+    },
+  },
+  {
+    // Manual run: one attempt through the SAME runner the scheduler uses.
+    // A closed gate answers 409 with the explanation (and stays OFF the run
+    // log — the wire already told the operator); a real attempt's outcome is
+    // recorded by the runner itself.
+    match: (method, path) => method === "POST" && path === "/api/workspace/snapshots/run",
+    handle: async (_req, res) => {
+      try {
+        const result = await runSnapshot("manual");
+        if (result.status === "skipped") {
+          return json(res, 409, { ok: false, skipped: result.reason, error: gateExplanation(result.reason) });
+        }
+        if (result.status === "failed") {
+          return json(res, 502, { ok: false, error: `the snapshot failed: ${result.error}` });
+        }
+        json(res, 200, {
+          ok: true,
+          snapshotId: result.snapshotId,
+          name: result.name,
+          pruned: result.pruned,
+          pruneFailed: result.pruneFailed,
+        });
+      } catch (e) {
+        json(res, 502, { ok: false, error: `the snapshot failed: ${e instanceof Error ? e.message : String(e)}` });
+      }
+    },
+  },
+  {
+    // The passphrase-store decision itself (§11's flagged gate). 501 before
+    // the body is read (no store → nothing to validate against), the 8-char
+    // floor after; set failures answer a GENERIC 502 — never the helper's
+    // error (it would echo the argv that carries the passphrase) and never
+    // the passphrase.
+    match: (method, path) => method === "POST" && path === "/api/workspace/snapshots/passphrase",
+    handle: async (req, res) => {
+      const store = snapshotPassphraseStore();
+      if (store.status() !== "available") {
+        return json(res, 501, { error: "A trusted passphrase store is not available on this computer." });
+      }
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < KEYCHAIN_MIN_PASSPHRASE_LENGTH) {
+        return json(res, 400, { error: `passphrase must be at least ${KEYCHAIN_MIN_PASSPHRASE_LENGTH} characters` });
+      }
+      try {
+        const stored = await store.set(passphrase);
+        if (!stored) {
+          return json(res, 502, { error: "the passphrase could not be stored in the passphrase store" });
+        }
+        json(res, 200, { stored: true });
+      } catch {
+        json(res, 502, { error: "the passphrase could not be stored in the passphrase store" });
+      }
+    },
+  },
+  {
+    // Clearing is idempotent on the store side (absent counts as cleared);
+    // a store that reports failure or throws answers the same generic 502.
+    match: (method, path) => method === "DELETE" && path === "/api/workspace/snapshots/passphrase",
+    handle: async (_req, res) => {
+      const store = snapshotPassphraseStore();
+      if (store.status() !== "available") {
+        return json(res, 501, { error: "A trusted passphrase store is not available on this computer." });
+      }
+      try {
+        const cleared = await store.clear();
+        if (!cleared) {
+          return json(res, 502, { error: "the stored passphrase could not be cleared" });
+        }
+        json(res, 200, { cleared: true });
+      } catch {
+        json(res, 502, { error: "the stored passphrase could not be cleared" });
       }
     },
   },

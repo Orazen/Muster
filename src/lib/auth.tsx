@@ -32,6 +32,10 @@ export interface AuthCapabilities {
   desktopOAuth?: boolean;
   /** The cloud base URL the pairing flow opens in the system browser. */
   pairingCloudUrl: string | null;
+  /** Server offers email + 6-digit one-time-code sign-in (Better Auth's
+   * emailOTP plugin, policy-wrapped server-side). Optional so a server
+   * older than the rollout just hides the flow instead of breaking. */
+  emailOtp?: boolean;
 }
 
 const NO_CAPABILITIES: AuthCapabilities = {
@@ -41,6 +45,7 @@ const NO_CAPABILITIES: AuthCapabilities = {
   googleOnlySignup: false,
   cloudPairing: false,
   pairingCloudUrl: null,
+  emailOtp: false,
 };
 
 interface AuthContextType {
@@ -93,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         cloudPairing: Boolean(data.cloudPairing),
         desktopOAuth: Boolean(data.desktopOAuth),
         pairingCloudUrl: data.pairingCloudUrl ?? null,
+        emailOtp: Boolean(data.emailOtp),
       });
     } catch {
       // Server too old or unreachable — leave every optional flow hidden.

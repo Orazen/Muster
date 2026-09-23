@@ -267,9 +267,11 @@ import {
 } from "./restore-apply.ts";
 import { handleCalendarRoute } from "./calendar-routes.ts";
 import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
+import { handleMemoryRoute } from "./memory-routes.ts";
 import * as openconnector from "./openconnector.ts";
 import * as connectedApps from "./connected-apps.ts";
 import { isText, json, readBody } from "./http-helpers.ts";
+import { handleEmailOtpAuthRequest, isEmailOtpAuthPath } from "./email-otp-login.ts";
 import * as driveSync from "./drive-sync.ts";
 import * as accountDrive from "./account-drive.ts";
 import * as telegramSync from "./telegram-sync.ts";
@@ -277,6 +279,7 @@ import * as syncState from "./sync-state.ts";
 import { setMemoryWriteListener } from "./sync-hooks.ts";
 import { applyMemoryObject, createMemoryProducer, readMemoryObject } from "./sync-memory.ts";
 import { runSyncPass, type SyncPassDeps } from "./sync-pass.ts";
+import { snapshotPassphraseStore } from "./snapshot-runner.ts";
 import { driveSyncTransport, localSyncManifestStore, startSyncEngine } from "./sync-wiring.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimerPool } from "./local-vm-idle.ts";
@@ -397,9 +400,14 @@ foregroundCallSweep.unref();
 
 // S2c: the sync engine boots with its ONE producer (memory, fired at the
 // file layer's write choke point) and flushes the restart backlog. The
-// passphrase comes from the §11 flagged gate's env workaround: null holds
-// the queue to a reported result instead of guessing, and the manual
-// route below still runs a pass with the operator's own passphrase.
+// passphrase comes from the §11 flagged gate's env workaround, now with
+// the Keychain-backed trusted store as the fallback the owner's B1
+// decision chose (keychain-store.ts's header scopes the store to the
+// automatic snapshots AND this queue): env first (operator override),
+// else the stored passphrase read synchronously through the runner's
+// injectable seam, else null — which holds the queue to a reported
+// result instead of guessing, while the manual route below still runs a
+// pass with the operator's own passphrase.
 const syncLocalManifest = localSyncManifestStore(join(DATA_DIR, "muster-sync-manifest.json"));
 const syncTransport = driveSyncTransport({
   async getAccessToken(): Promise<string> {
@@ -424,7 +432,7 @@ const syncEngine = startSyncEngine({
   local: syncLocalManifest,
   readObject: readMemoryObject(),
   applyObject: applyMemoryObject(),
-  passphrase: () => process.env.MUSTER_SYNC_PASSPHRASE ?? null,
+  passphrase: () => process.env.MUSTER_SYNC_PASSPHRASE ?? snapshotPassphraseStore().getSync(),
   appVersion: appVersion(),
 });
 setMemoryWriteListener(
@@ -4463,6 +4471,16 @@ let requestUserEmail = "";
     }
     // ── auth routes (Better Auth) ────────────────────────────────────────
     if (path.startsWith("/api/auth/")) {
+      // Email + 6-digit one-time-code sign-in: two of the emailOTP plugin's
+      // routes need Muster's sign-up gates, a per-mailbox resend cooldown,
+      // and the unverified-user promotion BEFORE Better Auth sees them
+      // (otherwise an OTP sign-in would revoke a pre-existing password
+      // account) — server/email-otp-login.ts owns that policy, then
+      // delegates to the same auth.handler this block would have called.
+      if (method === "POST" && isEmailOtpAuthPath(path)) {
+        await handleEmailOtpAuthRequest(req, res, path);
+        return;
+      }
       // Muster Cloud identity bridge — opt-in (server/muster-cloud.ts).
       // When configured, sign-up AND sign-in both verify against the
       // central server first — that's what makes the exact same
@@ -5035,6 +5053,8 @@ let requestUserEmail = "";
     ) {
       return;
     }
+
+    if (await handleMemoryRoute(req, res, method, path, { bot: (id) => store.bot(id), requestUserId: requestUserId ?? null, operator: primaryUserId(), record: (botId, entry) => decisions.record(botId, entry) })) return;
 
     // ── multi-tenant guard (SELF_HOSTED only) ──────────────────────────
     // One shared store serves every signed-in account, so ownership is
@@ -9287,12 +9307,17 @@ let requestUserEmail = "";
         const file = join(MARKETING_DIR, rel);
         const data = readFileSync(file);
         const type = MIME.get(extname(file).toLowerCase()) ?? "text/html";
-        const headers: OutgoingHttpHeaders = { "content-type": type };
+        // Search Console HTML-tag verification rides every served HTML page,
+        // homepage included. The final bytes are computed BEFORE the headers
+        // go out: content-length must match what is actually written, and the
+        // desktop updater only installs its download-progress transform when
+        // the response carries a length — a chunked transfer strands the user
+        // on "Starting download…" with no percent for the whole download.
+        const body = type === "text/html" ? Buffer.from(withVerificationMeta(data.toString())) : data;
+        const headers: OutgoingHttpHeaders = { "content-type": type, "content-length": body.length };
         if (type === "text/html") headers["cache-control"] = "no-cache";
         res.writeHead(200, headers);
-        // Search Console HTML-tag verification rides every served HTML page,
-        // homepage included.
-        return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
+        return res.end(body);
       } catch {
         /* fall through to the app SPA below */
       }

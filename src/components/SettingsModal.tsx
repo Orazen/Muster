@@ -2,20 +2,23 @@
 // Per-bot settings (persona, model, computer) stay in SettingsPanel — this
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
+// The General/Appearance parity rows below adapt OpenMausBot settings
+// (© OpenMausBot contributors, Apache License 2.0).
 import { useEffect, useRef, useState } from "react";
 import { Brain, Building2, Coins, Download, FlaskConical, KeyRound, Monitor, Network, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
-import { clearOnboardingGate } from "@/lib/analytics";
+import { clearOnboardingGate, analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
 import { TelegramChatChannelCard, WorkspaceSyncCard } from "./WorkspaceSyncCard";
 import { PortableBackupCard } from "./PortableBackupCard";
+import { SnapshotsCard } from "./SnapshotsCard";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
 import { RemoteAccessSection } from "./RemoteAccessSection";
-import { Card } from "./SettingsPrimitives";
+import { Card, SettingRow, Switch } from "./SettingsPrimitives";
 import { SkinPicker } from "./SkinPicker";
 import { UsageSection } from "./UsageSection";
 import { InviteSection } from "./InviteSection";
@@ -313,6 +316,101 @@ function MergeAccountsCard() {
   );
 }
 
+// --- OpenMausBot parity rows (Apache-2.0, see file head) ------------------
+// Rows Muster has real backing for are wired (Analytics); rows it does not
+// are visibly disabled and labelled placeholders — no fake functionality.
+
+/** OMB ships a language picker; Muster is English-only on this build, so the
+ * control is present, honestly disabled, and says so. */
+function LanguageRow() {
+  return (
+    <SettingRow
+      label="Language"
+      description="Placeholder — only English ships on this build; no other languages are wired yet."
+    >
+      <select
+        disabled
+        value="en"
+        aria-label="Language"
+        className="min-h-9 rounded-lg border border-hairline bg-inset px-2 text-[13px] text-ink-secondary disabled:opacity-60"
+      >
+        <option value="en">English</option>
+      </select>
+    </SettingRow>
+  );
+}
+
+/** Real: flips the local opt-out that gates posthog init/capture/identify. */
+function AnalyticsRow() {
+  const [enabled, setEnabled] = useState(analyticsEnabled());
+  return (
+    <SettingRow
+      label="Analytics"
+      description="Anonymous product events — app opened, which features get used. Never conversations, prompts, file contents, or bot output. Nothing is sent while this is off."
+    >
+      <Switch
+        checked={enabled}
+        label="Analytics"
+        onChange={(next) => {
+          setAnalyticsEnabled(next);
+          setEnabled(next);
+        }}
+      />
+    </SettingRow>
+  );
+}
+
+/** OMB has a parallel-thread width; Muster runs one worker per bot today. */
+function ParallelThreadsRow() {
+  return (
+    <SettingRow
+      label="Parallel threads"
+      description="Placeholder — Muster runs one worker per bot on this build; there is no parallelism setting behind this yet."
+    >
+      <span className="rounded-lg border border-hairline bg-inset px-2.5 py-1.5 text-[12px] text-ink-secondary">
+        Not available
+      </span>
+    </SettingRow>
+  );
+}
+
+/** OMB prunes its local event log on a schedule; Muster's log is server-side. */
+function EventLogCleanupRow() {
+  return (
+    <SettingRow
+      label="Event log cleanup"
+      description="Placeholder — event-log retention is server-managed on this build; there is no local cleanup schedule to set."
+    >
+      <span className="rounded-lg border border-hairline bg-inset px-2.5 py-1.5 text-[12px] text-ink-secondary">
+        Not available
+      </span>
+    </SettingRow>
+  );
+}
+
+/** OMB Appearance toggles without a Muster consumer yet — inert by design. */
+function ShowThreadsRow() {
+  return (
+    <SettingRow
+      label="Show threads"
+      description="Placeholder — this preference does not exist in Muster yet, so the switch is disabled."
+    >
+      <Switch checked={false} disabled label="Show threads" onChange={() => {}} />
+    </SettingRow>
+  );
+}
+
+function ToolCallsRow() {
+  return (
+    <SettingRow
+      label="Tool calls in chat"
+      description="Placeholder — this preference does not exist in Muster yet, so the switch is disabled."
+    >
+      <Switch checked={false} disabled label="Tool calls in chat" onChange={() => {}} />
+    </SettingRow>
+  );
+}
+
 function UpdatesRow() {
   const s = useUpdaterState();
   if (!window.ogb?.updater) return null;
@@ -323,7 +421,9 @@ function UpdatesRow() {
       : s?.status === "available"
         ? `${s.version} available`
         : s?.status === "downloading"
-          ? `Downloading ${Math.round(s.percent ?? 0)}%`
+          ? s.percent == null
+            ? "Starting download…"
+            : `Downloading ${Math.round(s.percent)}%`
           : s?.status === "downloaded"
             ? `${s.version} ready — restart to apply`
             : s?.status === "error"
@@ -737,8 +837,12 @@ export function SettingsModal() {
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
                   <ProfileFields />
                 </Card>
+                <LanguageRow />
+                <AnalyticsRow />
                 <TourCard />
                 <ChannelTurnCapCard />
+                <ParallelThreadsRow />
+                <EventLogCleanupRow />
                 <VpsCard />
                 <DiagnosticsCard />
                 <AccountSection />
@@ -748,9 +852,13 @@ export function SettingsModal() {
             )}
 
             {section === "appearance" && (
-              <Card title="Appearance" subtitle="Applies instantly and is remembered on this machine.">
-                <SkinPicker />
-              </Card>
+              <>
+                <Card title="Appearance" subtitle="Applies instantly and is remembered on this machine.">
+                  <SkinPicker />
+                </Card>
+                <ShowThreadsRow />
+                <ToolCallsRow />
+              </>
             )}
 
             {section === "connections" && (
@@ -774,6 +882,9 @@ export function SettingsModal() {
                   <ApiKeyRow section="hiNew" />
                   <WorkspaceSyncCard />
                   <TelegramChatChannelCard />
+                  {/* B1: mounts above PortableBackupCard because the card's
+                      own copy points restores to the portable flow "below". */}
+                  <SnapshotsCard />
                   <PortableBackupCard />
                   <details className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
                     <summary className="cursor-pointer text-[13px] text-ink-secondary">Muster Connector — your own connected-apps runtime</summary>

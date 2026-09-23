@@ -18,6 +18,12 @@ const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
+// A release-binary fixture for the /downloads path: the non-UTF8 tail proves
+// the marketing handler never stringifies update artifacts on the way out.
+const UPDATE_ZIP = Buffer.concat([
+  Buffer.from("PKowned-update-fixture "),
+  Buffer.from([0x00, 0xff, 0xfe, 0x80, 0x41, 0x0d, 0x0a]),
+]);
 
 async function get(path: string, headers?: Record<string, string> | Headers) {
   const res = await fetch(`${BASE}${path}`, { headers });
@@ -48,6 +54,8 @@ posixOnly("docs pretty-URL serving", () => {
     writeFileSync(join(www, "docs", "index.html"), "<!doctype html><html><body>docs hub</body></html>");
     writeFileSync(join(www, "docs", "quick-start.html"), "<!doctype html><html><body>quick start</body></html>");
     writeFileSync(join(www, "docs", "docs.css"), "body{color:#fff}");
+    mkdirSync(join(www, "downloads"), { recursive: true });
+    writeFileSync(join(www, "downloads", "Muster-owned.zip"), UPDATE_ZIP);
 
     const dist = join(home, "dist");
     mkdirSync(join(dist, "assets"), { recursive: true });
@@ -214,5 +222,25 @@ posixOnly("docs pretty-URL serving", () => {
     expect(res.text).toBe("Not found");
     expect(res.cache).toBe("no-store");
     expect(res.nosniff).toBe("nosniff");
+  });
+
+  it("serves download binaries with a content-length so the desktop updater can show progress", async () => {
+    const res = await fetch(`${BASE}/downloads/Muster-owned.zip`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBeTruthy();
+    // electron-updater only installs its progress transform when the response
+    // carries a length; a chunked reply renders an endless "Starting
+    // download…" with no percent. The bytes must survive intact too.
+    expect(res.headers.get("content-length")).toBe(String(UPDATE_ZIP.length));
+    const served = Buffer.from(await res.arrayBuffer());
+    expect(served.equals(UPDATE_ZIP)).toBe(true);
+  });
+
+  it("sizes marketing HTML with a content-length that matches the bytes actually served", async () => {
+    const res = await fetch(`${BASE}/`);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain("landing");
+    expect(res.headers.get("content-length")).toBe(String(Buffer.byteLength(text)));
   });
 });

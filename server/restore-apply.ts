@@ -21,6 +21,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { z } from "zod";
 
+import { capturePreMigrationSnapshot } from "./snapshot-runner.ts";
 import { commitRestoreV2, type CommitRestoreResult, type ReconsentEntry } from "./workspace-bundle-v2.ts";
 
 const PENDING_FILE = "pending-restore.json";
@@ -218,6 +219,18 @@ export interface ApplyResult {
 export function applyPendingRestore(dataDir: string): ApplyResult {
   const pending = readPendingRestore(dataDir);
   if (!pending) return { status: "nothing-pending" };
+  // B1 pre-restore capture: the commit below REPLACES the live tree, so the
+  // pre-mutation state is sealed SYNCHRONOUSLY here, before checkpointLiveDb
+  // writes anything. Two-phase inside the runner: sync seal, detached ship;
+  // a closed gate is a silent observation and a ship failure never blocks
+  // the restore. Guarded OUT of the test harness deliberately: the
+  // workspace-drive fixture records any outbound attempt (its Drive has no
+  // DELETE branch for retention) and no test may reach a real Keychain —
+  // boot environments are clean, the same rule
+  // snapshot-scheduler.startSnapshotScheduler documents.
+  if (!process.env.VITEST && process.env.NODE_ENV !== "test") {
+    capturePreMigrationSnapshot(dataDir, "pre-restore");
+  }
   const stamp = new Date(pending.createdAt).toISOString().replace(/[:.]/g, "-");
   const backupDir = join(backupsRootFor(dataDir), stamp);
   checkpointLiveDb(dataDir);

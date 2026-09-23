@@ -91,7 +91,7 @@ export async function sendEmail(message: OutboundEmail): Promise<boolean> {
 }
 
 /** Wrap body copy in the plain, deliverable HTML shell used by every message. */
-function shell(heading: string, body: string, action: { href: string; label: string }): string {
+function shell(heading: string, body: string, action?: { href: string; label: string }): string {
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:24px;background:#0a0a0a;color:#cfcfd2;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;">
@@ -100,11 +100,11 @@ function shell(heading: string, body: string, action: { href: string; label: str
       <tr><td style="padding:28px;border:1px solid rgba(255,255,255,0.08);border-radius:20px;background:#131314;">
         <h1 style="margin:0 0 12px;color:#f6f6f7;font-size:22px;font-weight:600;letter-spacing:-0.02em;">${heading}</h1>
         <p style="margin:0 0 24px;font-size:15px;line-height:1.6;">${body}</p>
-        <a href="${action.href}" style="display:inline-block;padding:12px 22px;border-radius:12px;background:#f0460e;color:#ffffff;font-size:15px;font-weight:500;text-decoration:none;">${action.label}</a>
+        ${action ? `<a href="${action.href}" style="display:inline-block;padding:12px 22px;border-radius:12px;background:#f0460e;color:#ffffff;font-size:15px;font-weight:500;text-decoration:none;">${action.label}</a>
         <p style="margin:24px 0 0;font-size:13px;line-height:1.6;color:#75757b;">
           If the button does not work, paste this into your browser:<br>
           <span style="color:#98989e;word-break:break-all;">${action.href}</span>
-        </p>
+        </p>` : ""}
       </td></tr>
       <tr><td style="padding-top:20px;font-size:12px;color:#75757b;">
         You received this because someone used this address to sign in to Muster.
@@ -124,6 +124,42 @@ export async function sendVerificationEmail(to: string, url: string): Promise<vo
       "Verify your address",
       "Confirm this address to finish setting up your Muster account. The link expires in an hour.",
       { href: url, label: "Verify address" },
+    ),
+  });
+}
+
+/**
+ * Deliver a 6-digit sign-in one-time code.
+ *
+ * With no mailer configured (local dev, desktop, CI) the code is printed to
+ * the server output under a stable `[otp]` prefix so the flow can be finished
+ * without wiring up mail — the same contract verification emails already use.
+ * The code itself is never persisted anywhere but the auth database's
+ * verification table (stored hashed by Better Auth).
+ */
+export async function sendLoginCodeEmail(
+  to: string,
+  code: string,
+  expiresInSeconds: number,
+): Promise<void> {
+  if (!isEmailConfigured()) {
+    console.warn(
+      `[otp] sign-in code for ${to}: ${code} — RESEND_API_KEY is not set, so this was not emailed; it is only printed here for local development.`,
+    );
+    return;
+  }
+  const minutes = Math.max(1, Math.round(expiresInSeconds / 60));
+  await sendEmail({
+    to,
+    subject: `Your Muster sign-in code: ${code}`,
+    text: [
+      `Your Muster sign-in code is: ${code}`,
+      `It expires in ${minutes} minute${minutes === 1 ? "" : "s"}. Enter it on the sign-in screen to finish signing in.`,
+      "Never share this code with anyone. If you did not ask for this code, ignore this message.",
+    ].join("\n\n"),
+    html: shell(
+      "Your sign-in code",
+      `Enter this code on the sign-in screen to finish signing in. It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.<br><br><span style="display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:26px;letter-spacing:0.3em;font-weight:600;color:#f6f6f7;background:#1c1c1f;border:1px dashed #3a3a3f;border-radius:10px;padding:10px 14px;">${code}</span>`,
     ),
   });
 }

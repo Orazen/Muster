@@ -4,9 +4,10 @@ import { useAuth } from "@/lib/auth";
 import { AuthShell, authCardBox, authInputCls, authButtonCls } from "@/components/AuthShell";
 
 import { AuthPasswordField } from "@/components/AuthPasswordField";
+import { EmailOtpSignIn } from "@/components/EmailOtpSignIn";
 import { authDestination } from "@/lib/auth-navigation";
 
-/** Three ways in, on web and in the packaged desktop app alike:
+/** Four ways in, on web and in the packaged desktop app alike:
  *   1. Continue with Google        — direct OAuth on deployments with creds;
  *                                    on the DESKTOP this becomes the cloud
  *                                    handoff: the browser does Google against
@@ -14,6 +15,8 @@ import { authDestination } from "@/lib/auth-navigation";
  *                                    the identity over loopback (no codes)
  *   2. Pairing code bridge         (desktop fallback for the same flow)
  *   3. Email + password            (always available; sign-up lives at /sign-up)
+ *   4. Email + one-time code       (additive sibling of 3, offered when the
+ *                                    server advertises capabilities.emailOtp)
  * Whatever a deployment lacks renders as a last resort rather than bricking
  * the install — no path here is ever hidden behind another one. */
 export function LoginPage() {
@@ -231,6 +234,13 @@ export function LoginPage() {
             {emailBusy ? "Signing in…" : "Sign in with email"}
           </button>
         </form>
+
+        {capabilities.emailOtp && (
+          <>
+            <div className="auth-divider">or get a one-time code</div>
+            <EmailOtpSignIn next={next} />
+          </>
+        )}
 
         {capabilities.cloudPairing && (
           <form className="auth-pair" onSubmit={(event) => {

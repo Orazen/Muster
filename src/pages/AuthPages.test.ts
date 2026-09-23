@@ -142,4 +142,31 @@ describe("auth form contracts", () => {
     const markup = renderPage(LoginPage, {}, `/sign-in?next=${encodeURIComponent(next)}`);
     expect(markup).toContain(`href="/sign-up?next=${encodeURIComponent(next)}"`);
   });
+
+  it("hides the one-time-code path unless the server advertises it", () => {
+    const markup = renderPage(LoginPage);
+    expect(markup).not.toContain("Email me a code");
+    expect(markup).not.toContain("or get a one-time code");
+    expect(markup).not.toContain('id="otp-email"');
+  });
+
+  it("offers the one-time-code panel as its own form when the server advertises it", () => {
+    const markup = renderPage(LoginPage, { emailOtp: true });
+    expect(markup).toContain("or get a one-time code");
+    expect(markup).toContain("Email me a code");
+    expect(input(markup, "otp-email")).toMatch(/type="email"/);
+    expect(input(markup, "otp-email")).toMatch(/autoComplete="email"/i);
+    // Its own top-level form, never nested inside the password form — the
+    // same no-nesting contract the pairing form is pinned to above.
+    const forms = markup.match(/<form\b[^>]*>[\s\S]*?<\/form>/g) ?? [];
+    expect(forms).toHaveLength(2);
+    for (const form of forms) expect(form.match(/<form\b/g)).toHaveLength(1);
+    const otpForm = forms.find((form) => form.includes('id="otp-email"'));
+    expect(otpForm).toBeDefined();
+    expect(otpForm).not.toContain('autoComplete="current-password"');
+    const passwordForm = forms.find((form) => form.includes('autoComplete="current-password"'));
+    expect(passwordForm).toBeDefined();
+    // The existing password path is untouched and still present alongside.
+    expect(markup).toContain("Sign in with email");
+  });
 });

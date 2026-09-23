@@ -78,16 +78,20 @@ export function createWorkspaceRequestScope() {
 const errorSchema = z.object({ error: z.string() });
 
 /** Unlike the app-wide api helper, an old 401 cannot navigate a new session.
- * Keep the server's error text, and check retirement after every body read. */
+ * Keep the server's error text, and check retirement after every body read.
+ * `method` is additive: omit it and the verb is inferred exactly as before
+ * (body → POST, none → GET); the snapshot passphrase DELETE names its verb
+ * because it carries no body. */
 export async function workspaceResponse(
   request: WorkspaceRequest,
   path: string,
   body?: string,
   fetcher: typeof fetch = fetch,
+  method?: "POST" | "DELETE",
 ): Promise<Response | null> {
   if (!request.current()) return null;
   const response = await fetcher(path, {
-    method: body === undefined ? "GET" : "POST",
+    method: method ?? (body === undefined ? "GET" : "POST"),
     headers: { "content-type": "application/json" },
     credentials: "include",
     cache: "no-store",
@@ -104,8 +108,8 @@ export async function workspaceResponse(
   return response;
 }
 
-export async function readWorkspaceReply<T>(request: WorkspaceRequest, path: string, body: string | undefined, schema: z.ZodType<T>, fetcher: typeof fetch = fetch): Promise<T | null> {
-  const response = await workspaceResponse(request, path, body, fetcher);
+export async function readWorkspaceReply<T>(request: WorkspaceRequest, path: string, body: string | undefined, schema: z.ZodType<T>, fetcher: typeof fetch = fetch, method?: "POST" | "DELETE"): Promise<T | null> {
+  const response = await workspaceResponse(request, path, body, fetcher, method);
   if (!response) return null;
   const result = schema.safeParse(await response.json());
   if (!request.current()) return null;

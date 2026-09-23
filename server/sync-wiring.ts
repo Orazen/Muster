@@ -40,6 +40,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { writeFileAtomic } from "./atomic.ts";
 import * as driveSync from "./drive-sync.ts";
+import { startSnapshotScheduler } from "./snapshot-scheduler.ts";
 import { runSyncPass, type SyncPassDeps, type SyncPassResult, type SyncTransportDeps } from "./sync-pass.ts";
 import { SYNC_MANIFEST_FILE_NAME, manifestDocSchema, type SyncManifestDoc } from "./sync-objects.ts";
 
@@ -193,6 +194,12 @@ const heldResult = (reason: string): SyncEngineResult => ({
 const DEFAULT_ENGINE_DEBOUNCE_MS = 250;
 
 export function startSyncEngine(options: SyncEngineOptions): SyncEngine {
+  // B1: arm the nightly snapshot scheduler on this boot path — index.ts
+  // calls startSyncEngine exactly once. The singleton self-guards (no real
+  // timers under tests, no ticking on self-hosted installs), so this is a
+  // no-op in both; if the owner prefers the arm OUTSIDE the sync pass, the
+  // alternative wiring point is index.ts right at this call (~line 423).
+  startSnapshotScheduler();
   const now = options.now ?? Date.now;
   const runPass = options.runPass ?? runSyncPass;
   const debounceMs = options.debounceMs ?? DEFAULT_ENGINE_DEBOUNCE_MS;

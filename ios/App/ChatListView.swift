@@ -18,6 +18,7 @@ struct ChatListView: View {
     @State private var searchHits: [SearchHit] = []
     @State private var searching = false
     @State private var showingWalkie = false
+    @State private var showingUpdates = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -29,6 +30,14 @@ struct ChatListView: View {
             // list the top of the screen on every iOS.
             VStack(spacing: 0) {
                 header
+                // Who is doing what, right now — between the header and the
+                // roster, always visible, one tap from the chats themselves.
+                UpdatesPill(updates: updateItems) {
+                    Haptics.selection()
+                    showingUpdates = true
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
                 StatusBanner()
 
                 ScrollView {
@@ -118,6 +127,14 @@ struct ChatListView: View {
             // so the first frame that can resolve it opens the conversation.
             .onChange(of: session.pendingOpenThreadId) { _, _ in openPendingNotification() }
             .onChange(of: session.state.chatSummaries.count) { _, _ in openPendingNotification() }
+            .sheet(isPresented: $showingUpdates) {
+                UpdatesSheet(updates: updateItems) { chat in
+                    // Rows route to the conversation: an approval is
+                    // answered there, under its own view lease.
+                    showingUpdates = false
+                    path.append(chat)
+                }
+            }
             .fullScreenCover(isPresented: $showingWalkie) {
                 // A cover is a new environment root: it does not inherit the
                 // app's objects, so both have to be handed in explicitly.
@@ -217,6 +234,13 @@ struct ChatListView: View {
         if let bot = session.state.bot(forThread: threadId) { return .bot(bot) }
         if let room = session.state.room(forThread: threadId) { return .room(room) }
         return nil
+    }
+
+    /// The pill's and the sheet's shared list: every update this state
+    /// holds, resolved to the chat a row can open. A thread the roster
+    /// cannot resolve is dropped rather than shown nameless.
+    private var updateItems: [UpdateItem] {
+        session.state.updateItems { chat(forThread: $0) }
     }
 
     /// Open the conversation a notification tap asked for, once it resolves.

@@ -10,8 +10,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
+import { lastPreMigrationCapture } from "./snapshot-runner.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { buildPayloadV2, decryptBundleV2, encryptBundleV2, stageRestoreV2 } from "./workspace-bundle-v2.ts";
 import {
@@ -238,5 +239,51 @@ describe("pending restore apply", () => {
     expect(applied.deWeaponized).toEqual(["goals"]);
     const restored = JSON.parse(readFileSync(join(b, "routines.json"), "utf8"));
     expect(restored.routines[0].enabled).toBe(false);
+  });
+
+  it("stays out of the snapshot capture under the test harness guard", () => {
+    const root = makeRoot();
+    const a = makeInstallA(root);
+    const b = makeInstallB(root);
+    const staged = stageInto(b, exportFromA(a));
+    writePendingRestore(b, {
+      version: 1,
+      format: PENDING_RESTORE_FORMAT,
+      stagingDir: staged.stagingDir,
+      createdAt: Date.now(),
+      source: "file",
+      reconsentRequired: [],
+    });
+    expect(applyPendingRestore(b).status).toBe("committed");
+    // vitest sets VITEST, so the pre-restore hook must not have fired
+    expect(lastPreMigrationCapture()).toBeNull();
+  });
+
+  it("fires the pre-restore capture outside the harness — a closed gate is observed as skipped", () => {
+    vi.stubEnv("VITEST", "");
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      const root = makeRoot();
+      const a = makeInstallA(root);
+      const b = makeInstallB(root);
+      const staged = stageInto(b, exportFromA(a));
+      writePendingRestore(b, {
+        version: 1,
+        format: PENDING_RESTORE_FORMAT,
+        stagingDir: staged.stagingDir,
+        createdAt: Date.now(),
+        source: "file",
+        reconsentRequired: [],
+      });
+      const applied = applyPendingRestore(b);
+      expect(applied.status).toBe("committed");
+      const capture = lastPreMigrationCapture();
+      expect(capture).not.toBeNull();
+      // no config.json in the throwaway DATA_DIR → the Drive half of the
+      // §11 gate closes FIRST, so the store's getSync is never reached
+      expect(capture).toMatchObject({ reason: "pre-restore", status: "skipped", detail: "drive-not-connected" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

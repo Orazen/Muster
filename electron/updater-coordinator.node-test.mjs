@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
+import { createUpdaterCoordinator, DOWNLOAD_STALL_TIMEOUT_MS } from "./updater-coordinator.mjs";
 
 function deferred() {
   let resolve;
@@ -14,17 +14,50 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function harness() {
+function harness(options = {}) {
   const updater = new EventEmitter();
   // electron-updater has its own error listener; model that without routing it.
   updater.on("error", () => {});
   let state = { status: "idle" };
   const states = [];
-  const coordinator = createUpdaterCoordinator(updater, (patch) => {
-    state = { ...state, ...patch };
-    states.push({ ...state });
-  });
+  const coordinator = createUpdaterCoordinator(
+    updater,
+    (patch) => {
+      state = { ...state, ...patch };
+      states.push({ ...state });
+    },
+    options,
+  );
   return { updater, coordinator, states, getState: () => state };
+}
+
+/** Deterministic stand-in for the watchdog's timers: the coordinator gets
+ * handles it can cancel, and the test decides exactly when a deadline
+ * passes — no sleeps, no flake. */
+function fakeTimers() {
+  let nextId = 1;
+  const live = new Map();
+  let cancelled = 0;
+  return {
+    scheduleTimer(callback, ms) {
+      const handle = { id: nextId++, callback, ms };
+      live.set(handle.id, handle);
+      return handle;
+    },
+    cancelTimer(handle) {
+      cancelled += 1;
+      live.delete(handle.id);
+    },
+    live() {
+      return [...live.values()];
+    },
+    cancelledCount: () => cancelled,
+    fireAll() {
+      const pending = [...live.values()];
+      live.clear();
+      for (const handle of pending) handle.callback();
+    },
+  };
 }
 
 function errorStates(states) {
@@ -324,4 +357,131 @@ test("signed mac builds keep the normal pipeline", async () => {
   updater.emit("update-available", { version: "1.2.3" });
   const available = states.find((s) => s.status === "available");
   assert.equal(available.manualOnly, undefined);
+});
+
+// ── progress, error surfacing, and the stall watchdog ─────────────────
+
+test("download-progress flows a rounded percent into state", () => {
+  const { updater, coordinator, getState } = harness();
+  updater.downloadUpdate = () => new Promise(() => {});
+
+  coordinator.download();
+  assert.equal(getState().status, "downloading");
+  assert.equal(getState().percent, undefined); // unknown percent = "starting"
+
+  updater.emit("download-progress", { percent: 42.4 });
+  assert.deepEqual(getState(), { status: "downloading", percent: 42 });
+
+  updater.emit("download-progress", { percent: 99.9 });
+  assert.deepEqual(getState(), { status: "downloading", percent: 100 });
+});
+
+test("update-downloaded transitions to a downloaded state", () => {
+  const { updater, coordinator, getState } = harness();
+  updater.downloadUpdate = () => new Promise(() => {});
+
+  coordinator.download();
+  updater.emit("update-downloaded", { version: "3.0.0" });
+
+  assert.equal(getState().status, "downloaded");
+  assert.equal(getState().version, "3.0.0");
+});
+
+test("an updater error event surfaces an error even when the promise never settles", () => {
+  const { updater, coordinator, getState, states } = harness();
+  updater.downloadUpdate = () => new Promise(() => {});
+
+  coordinator.download();
+  updater.emit("error", new Error("socket hang up"));
+
+  assert.equal(getState().status, "error");
+  assert.match(getState().message, /socket hang up/);
+  assert.equal(errorStates(states).length, 1);
+
+  // a repeat of the same failure (event + eventual rejection) is one error
+  updater.emit("error", new Error("socket hang up"));
+  assert.equal(errorStates(states).length, 1);
+});
+
+test("an updater error event from a background check stays silent", async () => {
+  const { updater, coordinator, getState, states } = harness();
+  updater.checkForUpdates = () => {
+    updater.emit("checking-for-update");
+    // electron-updater dispatches "error" before its promise rejects
+    updater.emit("error", new Error("offline"));
+    return Promise.reject(new Error("offline"));
+  };
+
+  await coordinator.check(); // background (no manual flag)
+
+  assert.equal(getState().status, "idle");
+  assert.equal(errorStates(states).length, 0);
+});
+
+test("a silent download trips the stall watchdog into a retry-able error", async () => {
+  const timers = fakeTimers();
+  const { updater, coordinator, getState, states } = harness({
+    scheduleTimer: timers.scheduleTimer,
+    cancelTimer: timers.cancelTimer,
+  });
+  let downloadCalls = 0;
+  updater.downloadUpdate = () => {
+    downloadCalls += 1;
+    return new Promise(() => {});
+  };
+
+  coordinator.download();
+  assert.equal(getState().status, "downloading");
+  assert.equal(timers.live().length, 1, "watchdog armed on download start");
+  assert.equal(timers.live()[0].ms, DOWNLOAD_STALL_TIMEOUT_MS);
+  assert.equal(DOWNLOAD_STALL_TIMEOUT_MS, 120_000);
+
+  timers.fireAll();
+
+  assert.equal(getState().status, "error");
+  assert.match(getState().message, /stalled/i);
+  assert.match(getState().message, /try again/i);
+  assert.equal(errorStates(states).length, 1);
+
+  // download ownership was released — a retry starts a fresh attempt
+  // (deliberately not awaited: the fake transfer never settles)
+  void coordinator.download();
+  assert.equal(downloadCalls, 2);
+});
+
+test("each progress event rearms the stall watchdog", () => {
+  const timers = fakeTimers();
+  const { updater, coordinator } = harness({
+    scheduleTimer: timers.scheduleTimer,
+    cancelTimer: timers.cancelTimer,
+  });
+  updater.downloadUpdate = () => new Promise(() => {});
+
+  coordinator.download();
+  assert.equal(timers.live().length, 1);
+
+  updater.emit("download-progress", { percent: 10 });
+  assert.equal(timers.cancelledCount(), 1, "previous deadline cancelled");
+  assert.equal(timers.live().length, 1, "fresh deadline scheduled");
+});
+
+test("the stall watchdog is disarmed once the update is downloaded", () => {
+  const timers = fakeTimers();
+  const { updater, coordinator, getState } = harness({
+    scheduleTimer: timers.scheduleTimer,
+    cancelTimer: timers.cancelTimer,
+  });
+  updater.downloadUpdate = () => new Promise(() => {});
+
+  coordinator.download();
+  updater.emit("download-progress", { percent: 50 });
+  updater.emit("update-downloaded", { version: "2.0.0" });
+
+  assert.equal(getState().status, "downloaded");
+  assert.ok(timers.cancelledCount() >= 1, "watchdog cancelled on completion");
+  assert.equal(timers.live().length, 0);
+
+  // even a leaked deadline must not clobber a finished download
+  timers.fireAll();
+  assert.equal(getState().status, "downloaded");
 });

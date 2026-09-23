@@ -227,12 +227,27 @@ export function vpsSshAlias(cfg: AppConfig): string | null {
 export function ensureDirs() {
   // Only an implicit default directory participates in the rename migration.
   // An explicit override is an isolation boundary, even if it names ~/.muster.
+  let migrated = false;
   if (configuredDataDir === undefined && !existsSync(DATA_DIR) && existsSync(LEGACY_DATA_DIR)) {
     try {
       renameSync(LEGACY_DATA_DIR, DATA_DIR);
+      migrated = true;
     } catch {
       /* cross-device or busy — fall through to a fresh dir */
     }
+  }
+  if (migrated) {
+    // B1 pre-migration capture: a successful legacy rename ADOPTS this data
+    // — record a snapshot point before later boot steps can mutate it.
+    // DYNAMIC import on purpose: snapshot-runner statically imports this
+    // module (and its state sibling reads DATA_DIR at module load), so a
+    // static edge here would be a load-time cycle. Detached and never
+    // awaited: ensureDirs is synchronous boot code and a failed capture
+    // must never block startup — the runner's own gate decides whether
+    // anything happens at all.
+    void import("./snapshot-runner.ts")
+      .then((module) => module.capturePreMigrationSnapshot(DATA_DIR, "pre-migration"))
+      .catch(() => { /* boot must survive a failed capture */ });
   }
   for (const dir of [DATA_DIR, EVENTS_DIR, NATIVE_DIR]) mkdirSync(dir, { recursive: true });
 }

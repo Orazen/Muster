@@ -513,6 +513,53 @@ harness 139/139, oxlint 0/0, tsc 0, full suite **337/5022/8/0**
 (450.26s, no decrease). Not claimed: deployment, notarization success,
 flake root cause.
 
+### Combined batch — updater repair, OpenMausBot parity, email-OTP, snapshots + Keychain, memory grants, five studies (23 September 2026, Loop188)
+
+Eleven subagent streams plus the central updater/static slices landed
+in one commit by owner direction. **Shipped:** desktop updater
+stall/error fix (stderr logger, 120s watchdog, honest "Starting
+download…"); marketing bytes path now sends `content-length`
+(docs-static 40/40); OpenMausBot desktop parity (settings primitives,
+real analytics opt-out + init, five settings rows, searchable
+shortcuts sheet, window default 1440×920 → 1220×820); OpenMausBot iOS
+parity (Settings rework, updates pill/sheet, quick replies, typing
+indicator — `swift test` 457/0 vs 435, project.yml/entitlements/bundle
+IDs untouched); email-OTP sign-in everywhere (better-auth emailOTP +
+wrapper preserving pre-existing unverified accounts; dev mode logs the
+code with no mailer); B1 automatic snapshots + retention ladder
+7/7/4/6 with the never-delete-last-healthy invariant, macOS Keychain
+passphrase store (argv array), nightly scheduler, pre-migration/
+pre-restore captures, SnapshotsCard wired into Settings above
+PortableBackupCard, sync-queue passphrase now env → Keychain → null;
+memory M1–M2 (BM25 retrieval with provenance, default-deny grants with
+immediate revoke/expiry, four session-gated routes, 2-line mount);
+mascot-character e2e + AGENTS.md domain → muster.today; five studies
+(openmuse 13 slices / tiptour grounding / jev 5 slices never-decides /
+laya rules-only + seam / heavy-user perf A1–A5) — docs only.
+
+**Disclosed:** ~20 previously-no-op analytics `track()` calls now emit
+(opt-out shipped; e2e sets the same opt-out key before any app script
+runs); desktop window default resized; sync queue can read the Keychain
+store when `MUSTER_SYNC_PASSPHRASE` is unset; Settings now mounts a
+third workspace-capability consumer (workspace-backup e2e counts
+updated 4→5 and 5→7 with comments); the OTP email field's label was
+made distinct ("Email address for a sign-in code") so exact-match
+sign-in fixtures resolve one element.
+
+**Gates:** `tsc -p tsconfig.server.json` 0 · `-p tsconfig.json` 0 ·
+`oxlint .` 0/0 (951 files) · full vitest **354 files / 5250 passed /
+8 skipped / 0 failed** (480.03s, exit 0; baseline 344/5114/8/0, no
+decrease) · `pnpm test:updater` 21/21 · `pnpm check:electron` 0 ·
+`npm run build` 0 · `npx playwright test` **40/40** (3.7m, exit 0) ·
+`cd ios && swift test` 457/0.
+
+**Not claimed:** deployment (push ≠ receipt; GET-only verify owed),
+security (scanner re-run outstanding), email delivery until
+`RESEND_API_KEY`/`EMAIL_FROM` are set, the Jev-vs-Laya-remote-vs-rules
+provider choice, retention counts 7/7/4/6 (owner-confirmable), the
+pre-upgrade electron hook (deferred to protect the fresh updater fix),
+`queryAudit` default-limit quirk (`decision-log.ts` out of slice).
+
 # Current Muster state — read before editing
 
 **Full-tree re-verification (22 Sep 2026):** brought the existing `main`

@@ -16,7 +16,7 @@ local preview, production and installed apps as distinct versions. A push is not
 proof of deployment. Keep existing automation paused.
 
 
-You are working on **Muster** (source version: `package.json`; installed/live versions require verification) — an AI-agent workforce platform (Electron desktop + server + web + CLI + iOS/Watch companions). Humans own a fleet of persistent AI workers ("bots"); approvals stay human via OptionCard/Apple Watch. Private repo (BSL 1.1), prod at muster.orazen.online.
+You are working on **Muster** (source version: `package.json`; installed/live versions require verification) — an AI-agent workforce platform (Electron desktop + server + web + CLI + iOS/Watch companions). Humans own a fleet of persistent AI workers ("bots"); approvals stay human via OptionCard/Apple Watch. Private repo (BSL 1.1), prod at muster.today.
 
 ## Read first (in this order — then stop exploring, go build)
 

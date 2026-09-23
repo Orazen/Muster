@@ -30,6 +30,9 @@ struct ChatView: View {
     /// The composer's dictation. A `@StateObject` on purpose: a capture
     /// must survive body re-evaluation, and every partial result is one.
     @StateObject private var dictation = DictationController()
+    /// The saved prompts behind the chip row — the same storage the
+    /// settings editor writes, so a change there lands here live.
+    @AppStorage(QuickReply.storageKey) private var storedQuickReplies = ""
 
     /// The live bubble's scroll target. A constant because there is at most
     /// one per chat and it has no message id to borrow.
@@ -55,6 +58,15 @@ struct ChatView: View {
 
     /// True while the recogniser owns the tail of the draft.
     private var dictating: Bool { dictation.isListening }
+
+    /// The composer's chip row, as edited in Settings.
+    private var quickReplies: [QuickReply] { QuickReply.decode(storedQuickReplies) }
+
+    /// A stopped card outranks the chip row: this thread is waiting for an
+    /// answer, not for a new prompt.
+    private var hasPendingApproval: Bool {
+        messages.contains { $0.card?.isPending == true }
+    }
 
     /// The header reads as one element to VoiceOver: who this is, and the
     /// task it is on — the identity the truncated label visually hides.
@@ -134,6 +146,12 @@ struct ChatView: View {
                             // and showing both is just noise.
                             StreamingBubble(text: nil, reasoning: thinking)
                                 .id(Self.liveBubbleId)
+                        } else if current.busy {
+                            // Working, with nothing typed yet: the dots say
+                            // so without claiming words exist.
+                            TypingIndicatorView(tintColor: AgentPalette.color(current.color))
+                                .id(Self.liveBubbleId)
+                                .accessibilityLabel("\(current.name) is working")
                         }
                     }
                     .padding(.horizontal, 16)
@@ -353,6 +371,19 @@ struct ChatView: View {
         return messages[index].at - messages[index - 1].at > 30 * 60 * 1000
     }
 
+    /// Whether the chip row belongs on screen this frame: an empty draft,
+    /// an editable composer, and a thread that is neither mid-turn nor
+    /// stopped for an answer. Never shown during dictation — the
+    /// recogniser owns the draft then.
+    private func showQuickReplyChips(draft: ComposerDraft, canEdit: Bool) -> Bool {
+        !quickReplies.isEmpty
+            && draft.text.isEmpty
+            && canEdit
+            && !dictating
+            && !current.busy
+            && !hasPendingApproval
+    }
+
     private func composer(context: ComposerContext, lease: ComposerViewLease?) -> some View {
         let draft = session.composerDraft(context)
         let canSend = session.canSendComposer(context, lease: lease)
@@ -384,6 +415,42 @@ struct ChatView: View {
             } else if !canEdit {
                 Text("Reopen this conversation to write in its current task.")
                     .font(.footnote).foregroundStyle(.secondary)
+            }
+            // The saved prompts, as chips. They appear only when there is
+            // nothing typed, nothing mid-turn and nothing to answer — a
+            // draft, a busy bot or a stopped card all mean this row is not
+            // what the person is doing. Tapping one sends that prompt as
+            // deliberately as typing it: edit, then submit, through the
+            // same lease every other send takes.
+            if showQuickReplyChips(draft: draft, canEdit: canEdit) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(quickReplies) { reply in
+                            Button {
+                                Haptics.selection()
+                                session.editComposer(reply.prompt, context: context, lease: lease)
+                                submit()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: reply.icon)
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(AgentPalette.color(current.color))
+                                    Text(reply.title)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(Color.primary)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .glassCapsule()
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Send quick reply: \(reply.title)")
+                            .accessibilityIdentifier("quick-reply-\(reply.id)")
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+                .transition(.opacity)
             }
             HStack(spacing: 10) {
                 TextField("Ask \(chat.name)", text: Binding(
@@ -490,6 +557,9 @@ struct MessageRow: View {
     @EnvironmentObject private var session: Session
     @State private var editingText = ""
     @State private var showingEdit = false
+    /// The text on its way to the selection sheet, if that menu item was
+    /// the one tapped.
+    @State private var selecting: SelectableText?
 
     private static let reactionChoices = ["👍", "❤️", "😂", "🎉", "👀"]
 
@@ -552,6 +622,17 @@ struct MessageRow: View {
                 }
                 .disabled(bot.busy == true)
             }
+            // Copy takes the whole reply; selection happens in a sheet
+            // because long-press on the bubble already opens this menu.
+            if let text = message.text, !text.isEmpty {
+                Divider()
+                Button("Copy", systemImage: "doc.on.doc") {
+                    UIPasteboard.general.string = text
+                }
+                Button("Select Text", systemImage: "selection.pin.in.out") {
+                    selecting = SelectableText(text: text)
+                }
+            }
         }
         .alert("Edit and retry", isPresented: $showingEdit) {
             TextField("Message", text: $editingText)
@@ -567,6 +648,7 @@ struct MessageRow: View {
         } message: {
             Text("This creates a new version and continues from there.")
         }
+        .sheet(item: $selecting) { SelectableTextSheet(text: $0.text) }
     }
 
     @ViewBuilder

@@ -394,10 +394,10 @@ const appContents = new Set();
 function createWindow() {
   const isMac = process.platform === "darwin";
   const win = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 900,
-    minHeight: 600,
+    width: 1220,
+    height: 820,
+    minWidth: 760,
+    minHeight: 520,
     icon: APP_ICON,
     backgroundColor: "#070707",
     autoHideMenuBar: process.platform !== "darwin",

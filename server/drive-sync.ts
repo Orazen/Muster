@@ -336,6 +336,19 @@ export async function downloadSnapshot(
   return await res.text();
 }
 
+/** Retention's delete primitive (DESIGN §11's ladder needs one). A 404
+ * resolves: the file being already gone IS the desired end state, so a
+ * retried prune converges instead of failing on the first missing id. */
+export async function deleteSnapshot(
+  accessToken: string,
+  snapshotId: string,
+  guard: () => Promise<void> = async () => {},
+): Promise<void> {
+  const res = await driveFetch(accessToken, `${FILE_URL}/${encodeURIComponent(snapshotId)}?fields=id`, { method: "DELETE" }, guard);
+  if (res.status === 404) return;
+  if (!res.ok) throw new Error(`Drive delete failed: HTTP ${res.status}`);
+}
+
 /** Download the most recent snapshot (newest by modified time). Returns null
  * when no snapshot exists yet. Callers offering an explicit restore selection
  * should use listSnapshots + downloadSnapshot by chosen id instead. */

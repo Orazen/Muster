@@ -156,6 +156,11 @@ const test = base.extend<{ deployment: "local" | "hosted"; fixture: OwnedFixture
   },
   guarded: async ({ browser, fixture }, use, testInfo) => {
     const context = await browser.newContext({ serviceWorkers: "block", viewport: wideViewport });
+    // E2E must never emit third-party requests: the shipped analytics
+    // opt-out key, set before any app script runs (posthog never loads).
+    await context.addInitScript(() => {
+      try { localStorage.setItem("muster:analytics-opt-out", "1"); } catch { /* no storage in this document */ }
+    });
     const errors: string[] = [];
     const resourceErrors: { url: string; status: number; seen: number }[] = [];
     const seams: StatusSeam[] = [];
@@ -526,8 +531,9 @@ test("loading, failed and malformed status never enable writes before an explici
   expect((await actual).status()).toBe(200);
   await expect(backup(page).getByText("Drive configured on this computer", { exact: true })).toBeVisible();
   await expect(backup(page).getByRole("button", { name: "Back up to Drive", exact: true })).toBeEnabled();
-  // Two Settings consumers mount; each explicit Retry checks only the sync card.
-  expect(guarded.statusRequests.slice(beforeSettings)).toHaveLength(4);
+  // Three Settings consumers mount (sync, portable, snapshots — each with
+  // its one capability probe); each explicit Retry checks only the sync card.
+  expect(guarded.statusRequests.slice(beforeSettings)).toHaveLength(5);
   expect(guarded.writes).toEqual([]);
   expect(fixture.drive.entries()).toEqual([]);
 });
@@ -555,8 +561,9 @@ test("a status result from closed Settings cannot replace the reopened card's cu
   await capture(page, testInfo, "retired-status-current-error", backup(page).getByRole("alert"));
   await backup(page).getByRole("button", { name: "Retry backup status", exact: true }).click();
   await expect(backup(page).getByText("Drive configured on this computer", { exact: true })).toBeVisible();
-  // Two Settings consumers on each mount, then one sync-card Retry.
-  expect(guarded.statusRequests.slice(beforeSettings)).toHaveLength(5);
+  // Three Settings consumers on each mount (sync, portable, snapshots —
+  // each with its one capability probe), then one sync-card Retry.
+  expect(guarded.statusRequests.slice(beforeSettings)).toHaveLength(7);
   expect(guarded.writes).toEqual([]);
   expect(fixture.drive.entries()).toEqual([]);
 });

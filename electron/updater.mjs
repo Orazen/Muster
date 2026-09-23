@@ -36,6 +36,15 @@ function macUpdatesTrusted() {
 
 const require = createRequire(import.meta.url);
 
+function logUpdater(level, message) {
+  try {
+    const text = message instanceof Error ? message.stack || message.message : String(message);
+    process.stderr.write(`[updater:${level}] ${text}\n`);
+  } catch {
+    /* stderr gone — logging must never break the updater */
+  }
+}
+
 let autoUpdater = null;
 let win = null;
 // status: idle | checking | available | downloading | downloaded | installing | error
@@ -94,7 +103,18 @@ export function startUpdater(mainWindow) {
   }
   autoUpdater.autoDownload = false; // button-driven download
   autoUpdater.autoInstallOnAppQuit = false; // button-driven install
-  autoUpdater.logger = null;
+  // Minimal logger that can never throw. logger=null maps to
+  // electron-updater's NoOpLogger, which black-holed its internal
+  // "error" dispatch diagnostics on top of the swallowed "error" events —
+  // but log output must NOT drive updater state either: benign messages
+  // (e.g. the differential-download fallback) arrive at error level too.
+  // User-visible failures reach the renderer via the coordinator's
+  // "error"-event and rejection handling; this is diagnostics only.
+  autoUpdater.logger = {
+    info: (message) => logUpdater("info", message),
+    warn: (message) => logUpdater("warn", message),
+    error: (message) => logUpdater("error", message),
+  };
 
   updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState, {
     manualMacUpdates: !macUpdatesTrusted(),
