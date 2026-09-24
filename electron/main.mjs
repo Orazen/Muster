@@ -677,6 +677,113 @@ ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
   return true;
 });
 
+// ---- Remote client mode: "Connect to another computer" --------------------
+//
+// A Muster server is also a web app, so this desktop can act as a CLIENT for
+// another computer's Muster: a dedicated window loads that server's /app and
+// signs in through the server's own pairing link (/claim#CODE). The local
+// workspace, local server and companion are untouched — the window is
+// exactly as trustworthy as opening the same URL in a browser, minus the
+// browser.
+//
+// Hardening, because a remote document must never get app powers:
+//  - its own partition ("persist:remote-client") → separate cookies, and
+//    NOT the defaultSession the app authenticates against;
+//  - no preload at all → window.ogb never exists there;
+//  - permission and permission-check handlers DENY everything for this
+//    session, so a remote page cannot even ask for camera/mic/notifications;
+//  - popups open in the system browser (never inside the window);
+//  - navigation is pinned to the exact origin the user connected to, so a
+//    redirect to some other host cannot ride along.
+const remoteClientWindows = new Map(); // partition → BrowserWindow
+
+function remoteClientSession(partition) {
+  const ses = session.fromPartition(partition);
+  ses.setPermissionRequestHandler((_wc, permission, callback) => callback(false));
+  ses.setPermissionCheckHandler((_wc, _permission) => false);
+  return ses;
+}
+
+ipcMain.handle("desktop:open-remote-client", async (event, rawUrl) => {
+  if (asText(rawUrl) === null) throw new Error("A web address is required");
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error("That web address is invalid");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("Only web addresses can be connected to");
+  }
+  // Plain HTTP is the local-network shape (muster up prints exactly such a
+  // link); everywhere else Muster is HTTPS-only. This mirrors the renderer
+  // validator so the boundary does not depend on it.
+  const host = url.hostname.toLowerCase();
+  const lanHost = host === "localhost" || host.endsWith(".local") || host.endsWith(".localhost") ||
+    host.startsWith("127.") || host.startsWith("10.") ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) || host.startsWith("169.254.");
+  if (!lanHost && url.protocol !== "https:") {
+    throw new Error("Remote connections must use HTTPS");
+  }
+
+  const origin = url.origin;
+  const partition = `persist:remote-client-${origin}`;
+  const existing = remoteClientWindows.get(partition);
+  if (existing && !existing.isDestroyed()) {
+    existing.show();
+    existing.focus();
+    return true;
+  }
+
+  const win = new BrowserWindow({
+    width: 1220,
+    height: 820,
+    minWidth: 760,
+    minHeight: 520,
+    icon: APP_ICON,
+    backgroundColor: "#070707",
+    autoHideMenuBar: process.platform !== "darwin",
+    title: "Muster — remote",
+    webPreferences: {
+      contextIsolation: true,
+      // No preload: the remote surface gets none of the desktop bridge.
+      nodeIntegration: false,
+      sandbox: true,
+      session: remoteClientSession(partition),
+    },
+  });
+  remoteClientWindows.set(partition, win);
+  win.on("closed", () => remoteClientWindows.delete(partition));
+  win.webContents.setWindowOpenHandler(({ url: popup }) => {
+    // Popups from the remote surface go to the system browser, like any web
+    // page — never a second in-app window we would have to police.
+    if (popup.startsWith("http:")) shell.openExternal(popup);
+    else if (popup.startsWith("https:")) shell.openExternal(popup);
+    return { action: "deny" };
+  });
+  win.webContents.on("will-navigate", (navEvent, target) => {
+    // Pin to the origin the user connected to. The app's own routes stay;
+    // anything else (a redirect to another host, a hijacked asset) is sent
+    // to the system browser instead of loading in the window.
+    try {
+      if (new URL(target).origin === origin) return;
+    } catch {
+      /* fall through to the refusal below */
+    }
+    navEvent.preventDefault();
+    if (/^https?:/.test(target)) shell.openExternal(target);
+  });
+  win.webContents.on("did-fail-load", (failEvent, code, _description, failedUrl, isMainFrame) => {
+    if (isMainFrame && code !== -3) {
+      // The page itself explains connection problems; a dead-end dialog on
+      // top of it adds nothing.
+      slog(`remote client load failed: ${failedUrl} (${code})`);
+    }
+  });
+  void win.loadURL(url.toString()).catch((error) => slog(`remote client open failed: ${error?.message ?? error}`));
+  return true;
+});
+
 // Desktop Google sign-in handoff. The cloud bounce lands on
 // http://127.0.0.1:<port>/oauth/finish#code=… — a loopback URL only the
 // Muster server can serve, and the session cookie it sets must land in the
