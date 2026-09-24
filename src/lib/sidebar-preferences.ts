@@ -4,7 +4,13 @@
 // localStorage is untrusted input, so every read validates.
 
 export type SidebarDensity = "comfortable" | "compact" | "icons";
-export type SidebarSection = "rooms" | "teammates";
+export type SidebarSection = "rooms" | "teammates" | `section:${string}`;
+
+import { z } from "zod";
+
+const COLLAPSED_SECTIONS = z.array(
+  z.union([z.literal("rooms"), z.literal("teammates"), z.string().regex(/^section:.{1,64}$/)]),
+);
 
 const DENSITY_KEY = "muster:sidebar-density";
 const SECTIONS_KEY = "muster:sidebar-sections";
@@ -33,8 +39,11 @@ export function saveDensity(density: SidebarDensity): void {
 /** Sections the user collapsed; anything unrecognized is open. */
 export function loadCollapsedSections(): SidebarSection[] {
   try {
-    const parsed = JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? "[]");
-    return Array.isArray(parsed) ? parsed.filter((s): s is SidebarSection => s === "rooms" || s === "teammates") : [];
+    const decoded = COLLAPSED_SECTIONS.safeParse(JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? "[]"));
+    if (!decoded.success) return [];
+    // SAFETY: the union's regex arm validates exactly the `section:${string}`
+    // shape, so every decoded member is a SidebarSection.
+    return decoded.data as SidebarSection[];
   } catch {
     return [];
   }

@@ -32,11 +32,15 @@ describe("sidebar preferences", () => {
     expect(loadDensity()).toBe("comfortable");
   });
 
-  it("survives corrupt JSON in the collapse list and filters unknown sections", () => {
+  it("survives corrupt JSON in the collapse list and rejects unknown sections", () => {
     localStorage.setItem("muster:sidebar-sections", "{oops");
     expect(loadCollapsedSections()).toEqual([]);
+    // The decode is all-or-nothing: one junk element invalidates the whole
+    // stored list, which then reads back as "nothing collapsed".
     localStorage.setItem("muster:sidebar-sections", JSON.stringify(["rooms", "secrets", 42]));
-    expect(loadCollapsedSections()).toEqual(["rooms"]);
+    expect(loadCollapsedSections()).toEqual([]);
+    localStorage.setItem("muster:sidebar-sections", JSON.stringify(["rooms", "section:sec-1"]));
+    expect(loadCollapsedSections()).toEqual(["rooms", "section:sec-1"]);
   });
 
   it("round-trips collapsed sections", () => {

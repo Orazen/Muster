@@ -48,6 +48,18 @@ import { stateForBot } from "@/lib/mascot";
 import { MusterBotMark } from "@/lib/musterbot/MusterBotMark";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
+import {
+  assignBotToSection,
+  deriveAttentionInbox,
+  type AttentionFacts,
+  loadRosterAssignment,
+  loadRosterSections,
+  removeRosterSection,
+  renameRosterSection,
+  saveRosterAssignment,
+  saveRosterSections,
+  type RosterSection,
+} from "@/lib/roster-sections";
 import { downloadAllBots } from "@/lib/team-files";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
@@ -426,10 +438,12 @@ function BotContextMenu({
   menu,
   onClose,
   onArchive,
+  onMoveToSection,
 }: {
   menu: MenuState;
   onClose: () => void;
   onArchive: (bot: Bot) => void;
+  onMoveToSection: (botId: string) => void;
 }) {
   const { state, dispatch } = useStore();
   const bot = state.bots.find((b) => b.id === menu.botId);
@@ -510,10 +524,9 @@ function BotContextMenu({
             hint: !bot.chiefOfStaff && !canCoordinate ? "Choose a Claude or ACP engine first" : undefined,
           },
         ),
-        item(<FolderPlus size={16} className="text-ink-secondary" />, "Move to new section", undefined, {
-          disabled: true,
-          hint: "Coming soon",
-        }),
+        item(<FolderPlus size={16} className="text-ink-secondary" />, "Move to section…", () =>
+          onMoveToSection(bot.id),
+        ),
         item(<BellDot size={16} className="text-ink-secondary" />, "Mark as Unread", () =>
           dispatch({ type: "markUnread", botId: bot.id }),
         ),
@@ -571,6 +584,172 @@ function PresenceDot({ activity }: { activity?: Bot["activity"] }) {
 
 /** Collapsible roster section header (Rooms / Teammates). A collapsed
  * header keeps the attention counts the rows can no longer show. */
+/** Right-click menu on a roster section header: rename or remove it.
+ * Removing never deletes bots — members fall back to the default list. */
+function SectionContextMenu({
+  menu,
+  onClose,
+  onRename,
+  onRemove,
+}: {
+  menu: { sectionId: string; x: number; y: number };
+  onClose: () => void;
+  onRename: (sectionId: string) => void;
+  onRemove: (sectionId: string) => void;
+}) {
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (e.target instanceof Element && !e.target.closest("[data-section-menu]")) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("blur", onClose);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("blur", onClose);
+    };
+  }, [onClose]);
+  const top = Math.max(8, Math.min(menu.y, window.innerHeight - 160));
+  const left = Math.min(menu.x, window.innerWidth - 240);
+  return (
+    <div
+      data-section-menu
+      style={{ top, left }}
+      className="fixed z-40 w-[200px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60"
+    >
+      <button
+        onClick={() => {
+          onRename(menu.sectionId);
+          onClose();
+        }}
+        className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+      >
+        <Pencil size={16} className="text-ink-secondary" />
+        Rename section
+      </button>
+      <button
+        onClick={() => {
+          onRemove(menu.sectionId);
+          onClose();
+        }}
+        className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger hover:bg-raised/70"
+      >
+        <Trash2 size={16} />
+        Remove section
+      </button>
+    </div>
+  );
+}
+
+/** The move/rename sheet: pick an existing section, type a new one, or
+ * leave the default roster. One surface for both entry points. */
+function SectionAssignPanel({
+  mode,
+  sections,
+  assignment,
+  draft,
+  onDraft,
+  onPick,
+  onCreate,
+  onUnassign,
+  onClose,
+}: {
+  mode: "move" | "rename";
+  sections: RosterSection[];
+  assignment: Record<string, string>;
+  draft: string;
+  onDraft: (name: string) => void;
+  onPick: (sectionId: string) => void;
+  onCreate: () => void;
+  onUnassign: () => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const canCreate = draft.trim().length > 0 && sections.length < 8;
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-4 sm:items-center" onMouseDown={onClose}>
+      <div
+        className="w-full max-w-sm rounded-2xl border border-hairline/50 bg-card p-4 shadow-2xl shadow-black/60"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="text-[15px] font-medium text-ink">
+          {mode === "move" ? "Move to section" : "Rename section"}
+        </div>
+        {mode === "move" && (
+          <div className="mt-3 flex flex-col gap-1">
+            {sections.map((section) => (
+              <button
+                key={section.id}
+                onClick={() => onPick(section.id)}
+                className="flex items-center justify-between rounded-lg px-3 py-2 text-left text-[13.5px] text-ink hover:bg-raised/70"
+              >
+                <span className="truncate">{section.name}</span>
+                {assignment && Object.values(assignment).filter((id) => id === section.id).length > 0 && (
+                  <span className="text-[11px] text-ink-secondary">
+                    {Object.values(assignment).filter((id) => id === section.id).length}
+                  </span>
+                )}
+              </button>
+            ))}
+            {sections.length === 0 && (
+              <div className="px-1 py-1 text-[12.5px] text-ink-secondary">No sections yet — name one below.</div>
+            )}
+            {Object.keys(assignment ?? {}).length > 0 && (
+              <button
+                onClick={onUnassign}
+                className="mt-1 rounded-lg px-3 py-2 text-left text-[13.5px] text-ink-secondary hover:bg-raised/70 hover:text-ink"
+              >
+                No section (default list)
+              </button>
+            )}
+          </div>
+        )}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onCreate();
+          }}
+          className="mt-3 flex gap-2"
+        >
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => onDraft(e.target.value)}
+            placeholder={mode === "move" ? "New section name" : "Section name"}
+            aria-label={mode === "move" ? "New section name" : "Section name"}
+            maxLength={24}
+            className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary/60 focus:border-accent/50 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={!canCreate}
+            className="rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-40"
+          >
+            {mode === "move" ? "Create & move" : "Rename"}
+          </button>
+        </form>
+        <button
+          onClick={onClose}
+          className="mt-3 w-full rounded-lg border border-hairline/40 px-3 py-2 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** SAFETY: a stored section id is a non-empty string this module minted
+ * (createSectionAndMove), so the template literal always satisfies the
+ * `section:${string}` arm of SidebarSection. */
+const sectionToggleKey = (sectionId: string): SidebarSection => `section:${sectionId}` as SidebarSection;
+
 function SectionHeader({
   label,
   collapsed,
@@ -1009,6 +1188,13 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [density, setDensity] = useState<SidebarDensity>(() => loadDensity());
   const [densityMenu, setDensityMenu] = useState(false);
   const [collapsed, setCollapsed] = useState<SidebarSection[]>(() => loadCollapsedSections());
+  // OMB parity #1a/#1b: the cross-bot attention inbox and named roster
+  // sections (folders). Both persist per profile alongside density.
+  const [sections, setSections] = useState<RosterSection[]>(() => loadRosterSections(window.localStorage));
+  const [assignment, setAssignment] = useState<Record<string, string>>(() => loadRosterAssignment(window.localStorage));
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [sectionMenu, setSectionMenu] = useState<{ sectionId: string; x: number; y: number } | null>(null);
+
   const setSidebarDensity = (next: SidebarDensity) => {
     setDensity(next);
     saveDensity(next);
@@ -1141,6 +1327,34 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const macInset = capabilities.windowChrome === "mac-inset";
   const browser = capabilities.host.label === "Browser";
 
+  // OMB #1b — folder management. Every mutation goes through the pure lib
+  // and is persisted immediately; the assignment map stays the truth.
+  const persistAssignment = (nextSections: RosterSection[], nextAssignment: Record<string, string>) => {
+    setSections(saveRosterSections(window.localStorage, nextSections));
+    setAssignment(saveRosterAssignment(window.localStorage, nextAssignment));
+  };
+  const moveToSection = (botId: string, sectionId: string | null) => {
+    const moved = assignBotToSection(sections, assignment, botId, sectionId);
+    persistAssignment(moved.sections, moved.assignment);
+  };
+  const createSectionAndMove = (botId: string, name: string) => {
+    const clean = name.trim().slice(0, 24);
+    if (!clean || sections.length >= 8) return;
+    const id = `sec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const moved = assignBotToSection([...sections, { id, name: clean, botIds: [] }], assignment, botId, id);
+    persistAssignment(moved.sections, moved.assignment);
+  };
+  const removeSection = (sectionId: string) => {
+    const next = removeRosterSection(sections, assignment, sectionId);
+    persistAssignment(next.sections, next.assignment);
+  };
+  const renameSection = (sectionId: string, name: string) => {
+    setSections(saveRosterSections(window.localStorage, renameRosterSection(sections, sectionId, name)));
+  };
+  const [pendingMoveBot, setPendingMoveBot] = useState<string | null>(null);
+  const [pendingRenameSection, setPendingRenameSection] = useState<string | null>(null);
+  const [sectionNameDraft, setSectionNameDraft] = useState("");
+
   const q = query.trim().toLowerCase();
 
   // Message search rides the same box as the name filter: names match
@@ -1165,6 +1379,37 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const archivedBots = state.bots.filter((bot) => bot.hidden);
   const pendingTeamUndo = teamFeedback?.undo;
   const pendingBotUndo = teamFeedback?.restoreBot;
+
+  // The attention inbox derives from the feeds the roster already holds —
+  // no fetch, no new state: waiting beats failed beats unread; recency
+  // breaks ties. `lastToolFailed` is the same fact the mascot's error face
+  // reads, so the inbox and the faces can never disagree.
+  const botFacts: AttentionFacts[] = matchingBots.map((bot) => ({
+    id: bot.id,
+    name: bot.name,
+    unread: Boolean(bot.unread),
+    waiting: bot.activity === "waiting-on-you",
+    failed: visibleMessages(bot).some((m) => m.tool?.ok === false),
+    at: visibleMessages(bot).at(-1)?.at,
+  }));
+  const roomFacts: AttentionFacts[] = visibleGroups.map((g) => ({
+    id: g.id,
+    name: g.name,
+    unread: Boolean(g.unread),
+    at: g.messages.at(-1)?.at,
+  }));
+  const attention = deriveAttentionInbox(botFacts, roomFacts);
+
+  // Sections group the roster. The map is the source of truth; section
+  // membership lists follow it, so a deleted section's bots fall back to
+  // the default list automatically.
+  const sectionedBots = new Map<string, string[]>();
+  for (const [botId, sectionId] of Object.entries(assignment)) {
+    const list = sectionedBots.get(sectionId) ?? [];
+    list.push(botId);
+    sectionedBots.set(sectionId, list);
+  }
+  const unsectionedBots = visibleBots.filter((b) => !assignment[b.id]);
 
   return (
     <aside
@@ -1340,6 +1585,46 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       {/* Bot list */}
       <div className="flex-1 overflow-y-auto px-2">
         <div className="flex flex-col gap-0.5">
+          {/* OMB parity #1a — the cross-bot attention inbox: what needs me,
+              across every bot and room, waiting first. Derives from the same
+              facts the roster rows already show; empty fleets show nothing. */}
+          {attention.length > 0 && density !== "icons" && (
+            <div className="mb-1.5">
+              <SectionHeader
+                label={`Needs attention (${attention.length})`}
+                collapsed={!inboxOpen}
+                onToggle={() => setInboxOpen((o) => !o)}
+                waiting={attention.filter((i) => i.reason === "waiting").length}
+                unread={attention.filter((i) => i.reason === "unread").length}
+              />
+              {inboxOpen && (
+                <div className="mb-1 space-y-0.5">
+                  {attention.map((item) => (
+                    <button
+                      key={`${item.kind}:${item.id}`}
+                      onClick={() => {
+                        dispatch({ type: "select", id: item.id });
+                        setInboxOpen(false);
+                      }}
+                      aria-label={`Open ${item.name}`}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-raised/50"
+                    >
+                      <span
+                        className={cn(
+                          "size-1.5 shrink-0 rounded-full",
+                          item.reason === "waiting" ? "bg-warning" : item.reason === "failed" ? "bg-danger" : "bg-accent",
+                        )}
+                      />
+                      <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">{item.name}</span>
+                      <span className="shrink-0 text-[10.5px] text-ink-secondary/80">
+                        {item.reason === "waiting" ? "waiting" : item.reason === "failed" ? "failed" : "unread"}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {state.bots.filter((b) => !b.hidden).length <= 1 && density !== "icons" && <RecoveryCard />}
           {!chiefBot && visibleBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && density !== "icons" && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">Nothing matches “{query}”</div>
@@ -1378,7 +1663,59 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               compact={density === "icons"}
             />
           )}
-          {!collapsed.includes("teammates") && visibleBots.map((b) => (
+          {/* OMB parity #1b — named sections (folders). Each renders its
+              own collapsible group; bots outside every section stay in the
+              default Teammates list below. */}
+          {sections.map((section) => {
+            const members = (sectionedBots.get(section.id) ?? [])
+              .map((id) => visibleBots.find((b) => b.id === id))
+              .filter((b): b is Bot => Boolean(b));
+            if (members.length === 0) return null;
+            return (
+              <div key={section.id} className="mb-1">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => toggleSection(sectionToggleKey(section.id))}
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && toggleSection(sectionToggleKey(section.id))}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setSectionMenu({ sectionId: section.id, x: e.clientX, y: e.clientY });
+                  }}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-raised/50"
+                >
+                  <ChevronDown
+                    size={12}
+                    className={cn("shrink-0 text-ink-secondary transition-transform duration-200", collapsed.includes(sectionToggleKey(section.id)) && "-rotate-90")}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">{section.name}</span>
+                  <span className="text-[10.5px] text-ink-secondary/70">{members.length}</span>
+                </div>
+                {!collapsed.includes(sectionToggleKey(section.id)) &&
+                  members.map((b) => (
+                    <BotListItem
+                      key={b.id}
+                      bot={b}
+                      onMenu={setMenu}
+                      onArchive={(bot) => void archiveBot(bot)}
+                      archiveDisabled={activeBotCount <= 1}
+                      density={density}
+                    />
+                  ))}
+              </div>
+            );
+          })}
+          {visibleBots.length > 0 && (
+            <SectionHeader
+              label="Teammates"
+              collapsed={collapsed.includes("teammates")}
+              onToggle={() => toggleSection("teammates")}
+              waiting={unsectionedBots.filter((b) => b.activity === "waiting-on-you").length}
+              unread={unsectionedBots.filter((b) => b.unread).length}
+              compact={density === "icons"}
+            />
+          )}
+          {!collapsed.includes("teammates") && unsectionedBots.map((b) => (
             <BotListItem
               key={b.id}
               bot={b}
@@ -1484,7 +1821,45 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
       </div>
 
-      {menu && <BotContextMenu menu={menu} onClose={() => setMenu(null)} onArchive={(bot) => void archiveBot(bot)} />}
+      {menu && (
+        <BotContextMenu
+          menu={menu}
+          onClose={() => setMenu(null)}
+          onArchive={(bot) => void archiveBot(bot)}
+          onMoveToSection={(botId) => {
+            setPendingMoveBot(botId);
+            setSectionNameDraft("");
+          }}
+        />
+      )}
+      {sectionMenu && <SectionContextMenu menu={sectionMenu} onClose={() => setSectionMenu(null)} onRename={(id) => { setPendingRenameSection(id); setSectionNameDraft(""); }} onRemove={removeSection} />}
+      {(pendingMoveBot || pendingRenameSection) && (
+        <SectionAssignPanel
+          mode={pendingMoveBot ? "move" : "rename"}
+          sections={sections}
+          assignment={assignment}
+          draft={sectionNameDraft}
+          onDraft={setSectionNameDraft}
+          onPick={(sectionId) => {
+            if (pendingMoveBot) moveToSection(pendingMoveBot, sectionId);
+            setPendingMoveBot(null);
+          }}
+          onCreate={() => {
+            if (pendingMoveBot) createSectionAndMove(pendingMoveBot, sectionNameDraft);
+            else if (pendingRenameSection) renameSection(pendingRenameSection, sectionNameDraft);
+            setPendingMoveBot(null);
+            setPendingRenameSection(null);
+          }}
+          onUnassign={() => {
+            if (pendingMoveBot) moveToSection(pendingMoveBot, null);
+            setPendingMoveBot(null);
+          }}
+          onClose={() => {
+            setPendingMoveBot(null);
+            setPendingRenameSection(null);
+          }}
+        />
+      )}
       {roomMenu && (
         <RoomContextMenu
           menu={roomMenu}
