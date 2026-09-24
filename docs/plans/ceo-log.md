@@ -9247,3 +9247,41 @@ blockmap stays excluded by construction, and a ranged fetch on the arm64
 zip returns 206 `bytes 0-1023/183317862` with the feed's exact total.
 The 1.17.0→1.18.0 upgrade is the first to ride the Loop197 delta path
 end to end: clients on 1.17.0 should download chunks, not installers.
+
+## Loop202 — 2026-09-24 — the flagship parity gap lands: a cross-bot attention inbox, and "Move to new section" finally moves (24 September 2026)
+
+The parity study called threads-done-properly OMB's biggest recent
+investment and Muster's biggest gap. Two of its three missing pieces ship
+in dd7f44e, and the third turns out to have existed all along.
+
+The attention inbox answers "what needs me" across every bot and room at
+once, which is a question the roster could not ask before: its rows show
+one bot at a time, its rooms section shows rooms, and neither ranks a
+waiting phone-call bot above an unread room message. The inbox derives
+from the feeds the sidebar already holds — no fetch, no new state — and
+ranks waiting-on-you, then failed tools, then unread, recency breaking
+ties, capped at eight. The failed-tool fact is the same `lastToolFailed`
+the mascot's error face reads, so the inbox and the faces can never
+disagree about who is broken.
+
+"Move to new section" has been a disabled "Coming soon" stub since the
+benchmark drew it. It now moves bots into named, persisted sections:
+one bot sits in at most one section, right-clicking a section header
+renames or removes it, removal never deletes bots (members fall back to
+the default Teammates list), and the whole layout persists per profile
+through a zod-decoded localStorage schema — 8 sections, 24-character
+names, 20 bots each. Collapse state for sections rides the existing
+collapsed-sections preference with a validated decode.
+
+The third piece, show/hide threads, was already shipped under another
+name: a hidden bot IS Muster's archive, reversible from the "Archived
+bots" list, which is exactly OMB's inbox-archive semantics.
+
+Deliberately not claimed: LLM-generated short titles (needs a server-side
+seam; the roster already shows real task titles today) and OMB #8–#10.
+Gates: 14 new roster-sections tests, preferences tests updated to the
+strict decode contract (19/19 targeted), tsc clean on all touched files,
+oxlint 0, full CI green on dd7f44e (35990822987).
+
+Cut v1.19.0 immediately after: the public release carries the Remote
+access parity trio from Loop201 plus this slice.
