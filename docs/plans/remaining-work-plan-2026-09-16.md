@@ -398,5 +398,16 @@ multi-tenant hardening.
     reply/quote + raw-markdown toggle + transcript export; routines
     dedicated results destination. Pairing scope (chat-and-approvals-only)
     verified already enforced end to end — study doc item stands corrected.
-    Next-ranked gaps: custom-domain guidance in Remote access (#5), remote
-    client mode (#6), computer sharing grants (#7).
+    **#5/#6/#7 closed (Loop201, bd0d1e3):** custom-domain guidance card,
+    remote client mode (dedicated hardened window on a remote Muster via
+    its `/claim#CODE` link; companion 6-digit codes deliberately refused —
+    they authenticate token-per-request native clients, not pages), and
+    the cloud-desktop grant switch surfaced on Remote-access device rows
+    (enforcement already existed in the companion proxy). Remote access is
+    now at full parity with OMB's shipped surface minus the deliberately
+    not-ported pieces (email-OTP secure account, allowlist — Muster pairs
+    by capability token instead). Remaining study gaps: #8 org identity,
+    #9 Linux local control, #10 two-desktop canvas.
+13. **v1.18.0 cut (Loop201)** — first release to ride the Loop197 delta
+    path: 1.17.0→1.18.0 should fetch blockmap chunks, not installers.
+    Release run 35978916151; mirror-promotion receipt to follow.
