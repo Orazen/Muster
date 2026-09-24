@@ -112,7 +112,7 @@ final class LocalFirstStatusTests: XCTestCase {
         )
     }
 
-    func testClientReadsOnlyTheTwoComputerStatusRoutesAndProjectsSafeSnapshotFacts() async throws {
+    func testClientReadsOnlyTheThreeComputerStatusRoutesAndProjectsSafeSnapshotFacts() async throws {
         let capability = #"""
         {
           "capabilityVersion":1,
@@ -121,6 +121,15 @@ final class LocalFirstStatusTests: XCTestCase {
           "drive":false,
           "installationDrive":{"configured":true,"operationsAvailable":true},
           "accountDrive":{"available":true,"connected":true}
+        }
+        """#
+        let receipt = #"""
+        {
+          "version":1,
+          "storageDestination":"google-drive-account",
+          "backup":{"lastAttemptAt":1800000100000,"lastSuccessAt":1800000100000,
+                    "lastOutcome":"success","lastVerifiedAt":1800000000000},
+          "conversationSync":{"lastPushAt":1800000300000,"lastPullAt":1800000400000,"lastOutcome":"success"}
         }
         """#
         let snapshot = #"""
@@ -135,7 +144,7 @@ final class LocalFirstStatusTests: XCTestCase {
           "nextNightlyAt":1800000200000
         }
         """#
-        let (client, plan, token) = client([response(capability), response(snapshot)])
+        let (client, plan, token) = client([response(capability), response(receipt), response(snapshot)])
 
         let report = try await client.localFirstStatus()
 
@@ -147,8 +156,15 @@ final class LocalFirstStatusTests: XCTestCase {
         XCTAssertFalse(String(describing: report.snapshot).contains("sentinel"))
         XCTAssertFalse(String(describing: report.snapshot).contains("provider-"))
 
+        // Loop199: the computer's own receipt now answers for conversations.
+        XCTAssertTrue(report.conversationSyncReported)
+        XCTAssertEqual(report.lastConversationPushAt, 1_800_000_300_000)
+        XCTAssertEqual(report.lastConversationPullAt, 1_800_000_400_000)
+        XCTAssertEqual(report.conversationSyncOutcome, "success")
+
         XCTAssertEqual(plan.requests.map { $0.url?.path }, [
             "/api/workspace/google/status",
+            "/api/workspace/companion/status",
             "/api/workspace/snapshots/policy",
         ])
         for request in plan.requests {
@@ -160,7 +176,49 @@ final class LocalFirstStatusTests: XCTestCase {
         }
     }
 
-    func testUnavailableWorkspaceDoesNotProbeTheInstallationSnapshotView() async throws {
+    func testTheComputersOwnDestinationWinsAndAnUnknownFutureOneFallsBackToTheCapability() {
+        let capability = WorkspaceBackupCapability(
+            workspaceBackupAvailable: true,
+            installationDrive: DriveAvailability(configured: true, operationsAvailable: true)
+        )
+        let receiptDestination = LocalFirstStatus(
+            capability: capability,
+            receipt: CompanionReceipt(storageDestination: "google-drive-account")
+        )
+        XCTAssertEqual(receiptDestination.storageDestination, .googleDriveAccount)
+
+        // A destination this build has never heard of must not be guessed at:
+        // the capability-derived answer stands until the phone learns the word.
+        let future = LocalFirstStatus(
+            capability: capability,
+            receipt: CompanionReceipt(storageDestination: "future-cloud-vault")
+        )
+        XCTAssertEqual(future.storageDestination, .googleDriveComputer)
+    }
+
+    func testConversationSyncIsNotReportedWhenTheComputerSaysNothing() {
+        let capability = WorkspaceBackupCapability(workspaceBackupAvailable: true)
+        let withoutReceipt = LocalFirstStatus(capability: capability)
+        XCTAssertFalse(withoutReceipt.conversationSyncReported)
+        XCTAssertNil(withoutReceipt.lastConversationPushAt)
+        XCTAssertNil(withoutReceipt.lastConversationPullAt)
+        XCTAssertNil(withoutReceipt.conversationSyncOutcome)
+
+        // Zero is the wire's "never happened" and must read as absent, not as
+        // a date in 1970; a NaN is nonsense and reads the same way.
+        let zeroes = LocalFirstStatus(
+            capability: capability,
+            receipt: CompanionReceipt(
+                conversationSync: .init(lastPushAt: 0, lastPullAt: .nan, lastOutcome: "unknown")
+            )
+        )
+        XCTAssertTrue(zeroes.conversationSyncReported)
+        XCTAssertNil(zeroes.lastConversationPushAt)
+        XCTAssertNil(zeroes.lastConversationPullAt)
+        XCTAssertEqual(zeroes.conversationSyncOutcome, "unknown")
+    }
+
+    func testUnavailableWorkspaceStillReadsTheReceiptButNotTheInstallationSnapshotView() async throws {
         let capability = #"""
         {
           "capabilityVersion":1,
@@ -171,7 +229,15 @@ final class LocalFirstStatusTests: XCTestCase {
           "accountDrive":{"available":false,"connected":false}
         }
         """#
-        let (client, plan, _) = client([response(capability)])
+        let receipt = #"""
+        {
+          "version":1,
+          "storageDestination":"unavailable",
+          "backup":{"lastAttemptAt":0,"lastSuccessAt":0,"lastOutcome":"unknown","lastVerifiedAt":0},
+          "conversationSync":{"lastPushAt":1800000300000,"lastPullAt":0,"lastOutcome":"success"}
+        }
+        """#
+        let (client, plan, _) = client([response(capability), response(receipt)])
 
         let report = try await client.localFirstStatus()
 
@@ -179,7 +245,14 @@ final class LocalFirstStatusTests: XCTestCase {
         XCTAssertNil(report.snapshot)
         XCTAssertFalse(report.snapshotStatusUnavailable)
         XCTAssertFalse(String(describing: report.capability).contains("not available here"))
-        XCTAssertEqual(plan.requests.count, 1)
+        // A hosted computer still knows when its user's Drive last carried a
+        // conversation, so the receipt is read before the availability guard.
+        XCTAssertTrue(report.conversationSyncReported)
+        XCTAssertEqual(report.lastConversationPushAt, 1_800_000_300_000)
+        XCTAssertEqual(plan.requests.map { $0.url?.path }, [
+            "/api/workspace/google/status",
+            "/api/workspace/companion/status",
+        ])
     }
 
     func testSnapshotFailureLeavesAUsefulPartialReportWithoutErrorText() async throws {
@@ -193,15 +266,21 @@ final class LocalFirstStatusTests: XCTestCase {
           "accountDrive":{"available":false,"connected":false}
         }
         """#
-        let (client, plan, _) = client([response(capability), response(#"{"error":"sentinel-error"}"#, status: 500)])
+        let (client, plan, _) = client([
+            response(capability),
+            response(#"{"error":"sentinel-receipt"}"#, status: 500),
+            response(#"{"error":"sentinel-error"}"#, status: 500),
+        ])
 
         let report = try await client.localFirstStatus()
 
         XCTAssertEqual(report.storageDestination, .googleDriveComputer)
+        XCTAssertNil(report.receipt)
+        XCTAssertFalse(report.conversationSyncReported)
         XCTAssertNil(report.snapshot)
         XCTAssertTrue(report.snapshotStatusUnavailable)
-        XCTAssertFalse(String(describing: report).contains("sentinel-error"))
-        XCTAssertEqual(plan.requests.count, 2)
+        XCTAssertFalse(String(describing: report).contains("sentinel"))
+        XCTAssertEqual(plan.requests.count, 3)
     }
 
     func testSuccessfulUploadIsNotPresentedAsACompletedVerification() {

@@ -224,26 +224,47 @@ public struct CompanionClient: Sendable, SeedCardTransport, ComposerTransport, A
         try await send(try statusRequest("/api/workspace/snapshots/policy"), as: LocalSnapshotStatus.self)
     }
 
+    /// The computer's own read-only receipt (Loop199): where storage lives,
+    /// the last snapshot facts, and when conversations last pushed or pulled.
+    /// A computer that does not answer this route simply does not have it —
+    /// the caller degrades to the capability-derived view.
+    public func companionStatusReceipt() async throws -> CompanionReceipt {
+        try await send(try statusRequest("/api/workspace/companion/status"), as: CompanionReceipt.self)
+    }
+
     /// Read the computer's current storage and automatic-snapshot facts. A
-    /// missing snapshot view is deliberately a partial report rather than a
-    /// failed whole-card read: the capability answer is still useful, and the
-    /// phone can say that snapshot details were not reported.
+    /// missing receipt or snapshot view is deliberately a partial report
+    /// rather than a failed whole-card read: the capability answer is still
+    /// useful, and the phone can say that those details were not reported.
+    /// The receipt is fetched first and independently, because on a hosted
+    /// install the capability says "backups unavailable" while the receipt
+    /// still knows when the user's own Drive last carried a conversation.
     public func localFirstStatus() async throws -> LocalFirstStatus {
         let capability = try await workspaceBackupCapability()
         try Task.checkCancellation()
 
+        var receipt: CompanionReceipt?
+        do {
+            receipt = try await companionStatusReceipt()
+            try Task.checkCancellation()
+        } catch {
+            try Task.checkCancellation()
+            if let apiError = error as? APIError, apiError.isUnauthorized { throw apiError }
+            receipt = nil
+        }
+
         guard capability.workspaceBackupAvailable == true else {
-            return LocalFirstStatus(capability: capability)
+            return LocalFirstStatus(capability: capability, receipt: receipt)
         }
 
         do {
             let snapshot = try await localSnapshotStatus()
             try Task.checkCancellation()
-            return LocalFirstStatus(capability: capability, snapshot: snapshot)
+            return LocalFirstStatus(capability: capability, snapshot: snapshot, receipt: receipt)
         } catch {
             try Task.checkCancellation()
             if let apiError = error as? APIError, apiError.isUnauthorized { throw apiError }
-            return LocalFirstStatus(capability: capability, snapshotStatusUnavailable: true)
+            return LocalFirstStatus(capability: capability, snapshotStatusUnavailable: true, receipt: receipt)
         }
     }
 

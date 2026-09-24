@@ -48,6 +48,7 @@ import { getDb, forwardedProtoOf, SELF_HOSTED } from "./auth.ts";
 import { json, readBody, isText } from "./http-helpers.ts";
 import * as accountDrive from "./account-drive.ts";
 import { googleDriveConnectConfigured } from "./google-auth.ts";
+import { companionStatus } from "./companion-status.ts";
 import { consumeDriveState } from "./drive-grants.ts";
 import * as bundleV2 from "./workspace-bundle-v2.ts";
 import {
@@ -255,43 +256,82 @@ function gateExplanation(reason: GateReason): string {
  * (session-scoped metadata; its path matches no earlier entry and the wall
  * claims only workspace/vault paths, so position within the table cannot
  * shadow it). */
+/** The one capability computation on this surface, shared by the
+ * advertisement route and the Loop199 companion receipt so the two
+ * documents cannot drift apart.
+ *
+ * Hosted status does not read installation connections, account tokens or
+ * backup stamps. Local readiness uses only the existing operator transport.
+ * The account-linked transport exists for a signed-in user. On a local
+ * install it has always been available; on hosted it is the
+ * storage-sovereignty connect (decision 14): the user's own Drive becomes
+ * their storage home, so the capability advertises availability whenever a
+ * session exists — but only while this install holds the
+ * GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET pair that has to finish that
+ * consent: advertising `available` without credentials renders a connect
+ * button that can only fail (capability off hides the feature). `connected`
+ * reports the per-user token row. The push/pull transports stay behind the
+ * installation wall until a per-user bundle builder exists. */
+function workspaceBackupCapability(ctx: BackupRequestContext): WorkspaceBackupCapability {
+  const cfg = ctx.config();
+  const installationDriveReady = !SELF_HOSTED
+    && Boolean(cfg.driveSync?.refreshToken?.trim()) && driveSync.driveOAuthConfigured();
+  let accountDriveReady = false;
+  let accountDriveConnected = false;
+  if (ctx.requestUserId && googleDriveConnectConfigured()) {
+    const tokens = accountDrive.googleTokensFor(getDb(), ctx.requestUserId);
+    accountDriveConnected = Boolean(tokens?.refreshToken);
+    accountDriveReady = true;
+  }
+  return {
+    capabilityVersion: 1,
+    workspaceBackupAvailable: !SELF_HOSTED,
+    unavailableReason: SELF_HOSTED ? "Workspace backups are available on local desktop installs only for now." : null,
+    drive: false,
+    installationDrive: { configured: installationDriveReady, operationsAvailable: installationDriveReady },
+    accountDrive: { available: accountDriveReady, connected: accountDriveConnected },
+  };
+}
+
 const routes: BackupRoute[] = [
   {
     // This exact read-only response is the sole hosted workspace exception.
-    // Hosted status does not read installation connections, account tokens or
-    // backup stamps. Local readiness uses only the existing operator transport.
+    // It answers from the shared capability computation above.
     match: (method, path) => path === "/api/workspace/google/status" && method === "GET",
     handle: (_req, res, ctx) => {
-      const cfg = ctx.config();
-      const installationDriveReady = !SELF_HOSTED
-        && Boolean(cfg.driveSync?.refreshToken?.trim()) && driveSync.driveOAuthConfigured();
-      // The account-linked transport exists for a signed-in user. On a local
-      // install it has always been available; on hosted it is the
-      // storage-sovereignty connect (decision 14): the user's own Drive
-      // becomes their storage home, so the capability advertises availability
-      // whenever a session exists — but only while this install holds the
-      // GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET pair that has to finish that
-      // consent: advertising `available` without credentials renders a
-      // connect button that can only fail (capability off hides the
-      // feature). `connected` reports the per-user token row.
-      // The push/pull transports stay behind the installation wall below
-      // until a per-user bundle builder exists.
-      let accountDriveReady = false;
-      let accountDriveConnected = false;
-      if (ctx.requestUserId && googleDriveConnectConfigured()) {
-        const tokens = accountDrive.googleTokensFor(getDb(), ctx.requestUserId);
-        accountDriveConnected = Boolean(tokens?.refreshToken);
-        accountDriveReady = true;
-      }
-      const capability: WorkspaceBackupCapability = {
-        capabilityVersion: 1,
-        workspaceBackupAvailable: !SELF_HOSTED,
-        unavailableReason: SELF_HOSTED ? "Workspace backups are available on local desktop installs only for now." : null,
-        drive: false,
-        installationDrive: { configured: installationDriveReady, operationsAvailable: installationDriveReady },
-        accountDrive: { available: accountDriveReady, connected: accountDriveConnected },
-      };
-      json(res, 200, capability);
+      json(res, 200, workspaceBackupCapability(ctx));
+    },
+  },
+  {
+    // The companion receipt (Loop199): ONE read-only document a paired
+    // phone or watch can read for where storage lives, what the last
+    // snapshot attempt did (attempt / success / outcome / verified kept
+    // apart), and when conversations last pushed or pulled. It sits above
+    // the installation wall beside the capability advertisement because it
+    // is session-scoped, reports only the signed-in account's own stamps,
+    // and moves nothing: every run, restore, export, passphrase and Drive
+    // verb stays behind the wall and off the companion allowlist.
+    match: (method, path) => method === "GET" && path === "/api/workspace/companion/status",
+    handle: (_req, res, ctx) => {
+      const capability = workspaceBackupCapability(ctx);
+      const snapshot = readSnapshotState();
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      json(res, 200, companionStatus({
+        capability: {
+          workspaceBackupAvailable: capability.workspaceBackupAvailable,
+          installationDriveReady: capability.installationDrive.operationsAvailable,
+          accountDriveAvailable: capability.accountDrive.available,
+          accountDriveConnected: capability.accountDrive.connected,
+        },
+        snapshot: {
+          lastAttemptAt: snapshot.runs.lastAttemptAt,
+          lastSuccessAt: snapshot.runs.lastSuccessAt,
+          lastOutcome: snapshot.runs.lastOutcome,
+          verifiedAt: snapshot.health?.verifiedAt ?? null,
+        },
+        sync: syncState.readSyncState(ctx.requestUserId ?? "local"),
+      }));
     },
   },
   {

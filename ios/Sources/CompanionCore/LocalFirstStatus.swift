@@ -210,6 +210,69 @@ public struct LocalSnapshotStatus: Decodable, Sendable, Equatable {
     }
 }
 
+// MARK: - The computer's own receipt
+
+/// `GET /api/workspace/companion/status` — the computer's authoritative,
+/// read-only statement about itself: where storage lives, the last snapshot
+/// facts, and when conversations last pushed or pulled (Loop199, after P4
+/// made conversation sync real in Loop197).
+///
+/// Older computers do not answer this route, and a future computer may add
+/// destinations this build has never heard of. Every field is therefore
+/// optional, an unrecognized destination decodes to `nil` rather than a
+/// guess, and a missing receipt leaves the capability-derived view exactly
+/// as it was — the phone degrades to the older two-endpoint story rather
+/// than showing an error.
+///
+/// Like everything else in this file it carries no path, provider id or
+/// name, token, passphrase state, error text or history: a status row is
+/// not a second copy of the workspace.
+public struct CompanionReceipt: Codable, Sendable, Equatable {
+    public struct Backup: Codable, Sendable, Equatable {
+        public var lastAttemptAt: Double?
+        public var lastSuccessAt: Double?
+        public var lastOutcome: String?
+        public var lastVerifiedAt: Double?
+    }
+
+    public struct ConversationSync: Codable, Sendable, Equatable {
+        public var lastPushAt: Double?
+        public var lastPullAt: Double?
+        public var lastOutcome: String?
+    }
+
+    public var version: Int?
+    public var storageDestination: String?
+    public var backup: Backup?
+    public var conversationSync: ConversationSync?
+
+    public init(
+        version: Int? = nil,
+        storageDestination: String? = nil,
+        backup: Backup? = nil,
+        conversationSync: ConversationSync? = nil
+    ) {
+        self.version = version
+        self.storageDestination = storageDestination
+        self.backup = backup
+        self.conversationSync = conversationSync
+    }
+
+    /// The computer's destination, mapped explicitly. An unknown future
+    /// value is `nil`, which sends the UI back to the capability-derived
+    /// answer rather than pretending this build understands the computer.
+    public var destination: StorageDestination? {
+        switch storageDestination {
+        case "computer": return .computerOnly
+        case "google-drive-computer": return .googleDriveComputer
+        case "google-drive-account": return .googleDriveAccount
+        case "unavailable": return .unavailable
+        case "unknown": return .unknown
+        default: return nil
+        }
+    }
+}
+
 // MARK: - Aggregate report
 
 /// A point-in-time report assembled by the client. It is not persisted and is
@@ -219,39 +282,75 @@ public struct LocalFirstStatus: Sendable, Equatable {
     public let capability: WorkspaceBackupCapability
     public let snapshot: LocalSnapshotStatus?
     public let snapshotStatusUnavailable: Bool
+    /// The computer's own receipt when it answers the route; nil on an older
+    /// computer, where the capability-derived view below still stands.
+    public let receipt: CompanionReceipt?
     public let fetchedAt: Date
 
     public init(
         capability: WorkspaceBackupCapability,
         snapshot: LocalSnapshotStatus? = nil,
         snapshotStatusUnavailable: Bool = false,
+        receipt: CompanionReceipt? = nil,
         fetchedAt: Date = Date()
     ) {
         self.capability = capability
         self.snapshot = snapshot
         self.snapshotStatusUnavailable = snapshotStatusUnavailable
+        self.receipt = receipt
         self.fetchedAt = fetchedAt
     }
 
+    /// The computer's own word wins: it owns the workspace, and the receipt
+    /// is derived from the same capability computation the advertisement
+    /// route uses. The capability-derived value remains the answer for a
+    /// computer that does not answer the receipt route at all.
     public var storageDestination: StorageDestination {
-        capability.storageDestination
+        receipt?.destination ?? capability.storageDestination
     }
 
     /// Deliberately does not fall back to `lastSuccessAt`: a successful upload
     /// and a completed download-and-verify round trip are different facts.
     public var lastVerifiedSnapshotAt: Double? {
-        guard let value = snapshot?.lastVerifiedAt, value.isFinite, value > 0 else { return nil }
+        if let value = positive(receipt?.backup?.lastVerifiedAt) { return value }
+        guard let value = positive(snapshot?.lastVerifiedAt) else { return nil }
         return value
     }
 
     public var lastSuccessfulSnapshotAt: Double? {
-        guard let value = snapshot?.lastSuccessAt, value.isFinite, value > 0 else { return nil }
-        return value
+        positive(receipt?.backup?.lastSuccessAt) ?? positive(snapshot?.lastSuccessAt)
     }
 
     public var lastAttemptAt: Double? {
-        guard let value = snapshot?.lastAttemptAt, value.isFinite, value > 0 else { return nil }
-        return value
+        positive(receipt?.backup?.lastAttemptAt) ?? positive(snapshot?.lastAttemptAt)
+    }
+
+    // MARK: Conversation sync (the Loop199 receipt)
+
+    /// True only when the computer actually reported conversation-sync
+    /// facts. "Not reported" and "reported unknown" are different sentences
+    /// and the UI keeps them apart.
+    public var conversationSyncReported: Bool {
+        receipt?.conversationSync != nil
+    }
+
+    public var lastConversationPushAt: Double? {
+        positive(receipt?.conversationSync?.lastPushAt)
+    }
+
+    public var lastConversationPullAt: Double? {
+        positive(receipt?.conversationSync?.lastPullAt)
+    }
+
+    public var conversationSyncOutcome: String? {
+        receipt?.conversationSync?.lastOutcome
+    }
+
+    /// Zero is the wire's "never happened" and NaN/negative is nonsense —
+    /// both read as absent, never as a date.
+    private func positive(_ value: Double?) -> Double? {
+        guard let unwrapped = value, unwrapped.isFinite, unwrapped > 0 else { return nil }
+        return unwrapped
     }
 }
 

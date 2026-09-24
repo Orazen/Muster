@@ -49,6 +49,8 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings-workspace-storage")
                     LabeledContent("Loaded on this phone", value: loadedDataText)
                     LabeledContent("Backup", value: localFirstBackupText)
+                    LabeledContent("Conversations", value: localFirstConversationsText)
+                        .accessibilityIdentifier("settings-workspace-conversations")
                 } header: {
                     Text("Workspace data")
                 } footer: {
@@ -190,6 +192,22 @@ struct SettingsView: View {
     private func snapshotDate(_ milliseconds: Double) -> String {
         Date(timeIntervalSince1970: milliseconds / 1000)
             .formatted(date: .abbreviated, time: .shortened)
+    }
+
+    /// Conversation sync (Loop199). The computer's receipt is the only source
+    /// here: without it the phone has no honest answer, and "Not reported" is
+    /// the true sentence — never a guess that sync "just hasn't run yet".
+    private var localFirstConversationsText: String {
+        guard let status = session.localFirstStatus, status.conversationSyncReported else {
+            return "Not reported"
+        }
+        if status.conversationSyncOutcome == "failed" { return "Last attempt failed" }
+        if let push = status.lastConversationPushAt, let pull = status.lastConversationPullAt {
+            return "Pushed \(snapshotDate(push)) · pulled \(snapshotDate(pull))"
+        }
+        if let push = status.lastConversationPushAt { return "Last pushed \(snapshotDate(push))" }
+        if let pull = status.lastConversationPullAt { return "Last pulled \(snapshotDate(pull))" }
+        return "Not synced yet"
     }
 
     private var statusText: String {

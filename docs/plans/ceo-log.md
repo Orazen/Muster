@@ -8935,6 +8935,58 @@ still owes its multi-device gate. Push, CI, autodeploy and the GET-only
 production probe follow this entry; deployment is claimed only once
 observed.
 
+## Loop199 — 2026-09-24 — the phone stops guessing what the computer is doing (24 September 2026)
+
+Loop198 gave the phone and the watch a truthful status page, and then
+admitted in the same breath what it could not do: there was no wire for
+conversation sync, so the honest cell read "not reported" forever. That
+was the right answer to a missing receipt and the wrong place to stop.
+This loop is the receipt.
+
+One read-only document, served at `/api/workspace/companion/status`, that
+says where storage lives, what the last snapshot attempt did, and when
+conversations last pushed or pulled. The mapping is a pure function over
+state the server was already keeping — the per-account sync stamps, the
+snapshot runner's own bookkeeping, and the capability booleans the
+existing advertisement route already computes. Those booleans now live in
+one shared helper, which means the receipt and the advertisement cannot
+drift into two different truths about the same computer. The document is
+also pinned to exactly its key set by a test: no path, no provider name,
+no token, no passphrase state, no error text, no history. A status line,
+not a backup surface. Every run, restore, export, passphrase and Drive
+verb stays closed — the companion allowlist grew by one GET and the
+boundary tests for full and approvals-only devices still deny all of them.
+
+The subtleties are where this kind of feature usually lies. A successful
+upload is not a completed verify, so those two timestamps stay separate
+facts. "Available" is not "connected", so an unconnected account Drive
+never renders as if the data already lived there. An install that can do
+none of it says unavailable rather than guessing. A destination string
+this build has never heard of decodes to nothing at all and falls back to
+what the phone already knew, instead of being pattern-matched into Drive.
+Zero on the wire means "never happened" and reads as absent, not as a
+date in 1970. And conversation sync can only ever say success here,
+because a stamp exists only after a transport confirmed one — nothing
+records failures, and the document says so by never claiming otherwise.
+
+On the phone, the receipt is read before the availability guard, because
+a hosted computer that cannot run installation backups still knows when
+its user's own Drive last carried a conversation. The new row reads
+"Not reported" on an older computer, which is true, rather than inventing
+a timestamp. On the watch, same rule, and it still asks the computer it is
+directly paired to instead of borrowing the phone's copy.
+
+Receipts: swift test 465 passed with zero failures against a 463
+baseline, a clean parse across every changed Swift file, and a real
+XcodeGen plus xcodebuild run for the generic iOS Simulator that compiled
+the app, the embedded watch app, the complication and the widget. On the
+server, tsc clean both ways, oxlint zero across 988 files, the receipt's
+own decision table at 12/12, and 160 passing tests across the companion
+boundary and the workspace-backup family. Push, CI, autodeploy and the
+GET-only production probe follow this entry; deployment is claimed only
+once observed, and the receipt's live shape is only truly verified by an
+owner with a paired device in hand.
+
 ## Loop198 — 2026-09-23 — the feature finally shows up where people are: a settings section on the desktop, a read-only truth on the phone and the watch (23 September 2026)
 
 The web wasm-SQLite spike died so this feature could live where the data

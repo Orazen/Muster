@@ -977,6 +977,8 @@ struct WatchSettingsView: View {
                     LabeledContent("Storage", value: workspaceStorageText)
                         .accessibilityIdentifier("watch-workspace-storage")
                     LabeledContent("Backup", value: workspaceBackupText)
+                    LabeledContent("Conversations", value: workspaceConversationsText)
+                        .accessibilityIdentifier("watch-workspace-conversations")
                 } header: {
                     Text("Workspace data")
                 } footer: {
@@ -1017,6 +1019,22 @@ struct WatchSettingsView: View {
             return "Last successful \(snapshotDate(success))"
         }
         return "No snapshot reported"
+    }
+
+    /// Conversation sync (Loop199) — the watch reads it from the computer it
+    /// is directly paired to. Without a receipt the honest sentence is "Not
+    /// reported": the watch never borrows the phone's copy to fill the gap.
+    private var workspaceConversationsText: String {
+        guard let report = session.localFirstStatus, report.conversationSyncReported else {
+            return "Not reported"
+        }
+        if report.conversationSyncOutcome == "failed" { return "Last attempt failed" }
+        if let push = report.lastConversationPushAt, let pull = report.lastConversationPullAt {
+            return "Pushed \(snapshotDate(push)) · pulled \(snapshotDate(pull))"
+        }
+        if let push = report.lastConversationPushAt { return "Last pushed \(snapshotDate(push))" }
+        if let pull = report.lastConversationPullAt { return "Last pulled \(snapshotDate(pull))" }
+        return "Not synced yet"
     }
 
     private func snapshotDate(_ milliseconds: Double) -> String {

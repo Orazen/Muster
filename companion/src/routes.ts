@@ -86,6 +86,14 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // restore and export verb remains absent from this surface.
   { method: "GET", path: /^\/api\/workspace\/google\/status$/ },
   { method: "GET", path: /^\/api\/workspace\/snapshots\/policy$/ },
+  // The Loop199 receipt: ONE read-only document — where storage lives, the
+  // last snapshot attempt/success/verify facts, and when conversations last
+  // pushed or pulled — so a phone stops re-deriving them from two endpoints
+  // and stops saying "not reported" once the computer has real answers. It
+  // carries no path, provider name, token or error text, and admitting it
+  // here still leaves every run, restore, export, passphrase and Drive verb
+  // closed below.
+  { method: "GET", path: /^\/api\/workspace\/companion\/status$/ },
   { method: "GET", path: /^\/api\/events$/ },
   { method: "GET", path: /^\/api\/instances$/ },
 
