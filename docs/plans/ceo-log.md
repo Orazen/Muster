@@ -9117,3 +9117,46 @@ Receipts so far: nine new tests, 222 passing across the ten suites that
 touch sync or transcripts, tsc clean both ways. Push, CI, autodeploy and
 the GET-only production probe follow this entry; deployment is claimed only
 once observed.
+
+## Loop201 — 2026-09-24 — Remote access closes its OpenMausBot gaps: client mode, a domain walkthrough, and the grant switch that only lived on one card (24 September 2026)
+
+The parity study ranked three remaining Remote-access gaps after pairing
+scope turned out to be already built: custom-domain guidance (#5), remote
+client mode (#6), and computer-sharing grants (#7). All three ship in
+commit bd0d1e3, each shaped by what the code could honestly do.
+
+Client mode is the real build. A Muster server is also a web app — its own
+pairing link `/claim#CODE` redeems to an owner session in any browser — so
+"Connect to another computer" is a dedicated main-process window on that
+server, not a second implementation of the fleet. The hardening is the
+point: the remote surface runs in its own `persist:remote-client-*`
+partition (separate cookies, never the session the app authenticates
+against), gets no preload at all (window.ogb cannot exist there), answers
+every permission request and check with deny, pins navigation to the exact
+origin the user connected to (anything else goes to the system browser),
+and opens popups outside the window. Recent connections persist per
+profile through a zod-decoded localStorage schema, capped at four. One
+deliberate refusal, written into the copy and the code: the companion
+sidecar's 6-digit code is NOT accepted here, because it authenticates a
+native phone client that sends a bearer token on every request — the
+companion proxy allows nothing else, so a page loaded with it would pair
+and then load nothing. Pretending otherwise would manufacture a broken
+feature.
+
+The domain card (#5) is the CNAME / Cloudflare Tunnel walkthrough with
+certificate handling; guidance, not a form, because the DNS is the user's.
+Grants (#7) turned out to be mostly a discovery defect: the per-device
+cloud-desktop capability was already stored, enforced by the proxy's
+default-deny classifier, and toggled in the terse Companion section — the
+fuller Remote access surface (the one a person actually pairs from) never
+exposed it. The switch now sits on each device row there too; both call
+the same IPC, so the two cards cannot disagree.
+
+Gates: 30 new remote-client tests (normalization, http policy, fragment
+carrying, storage schema), tsc app+server 0, oxlint 0/992 files, full CI
+green twice — bd0d1e3 (35974970396) and the merged head b787a97
+(35976368605) which also carries the concurrent Loop200 sync-receipts
+slice, verified and committed with its own ledger entry (c080410).
+
+Cut v1.18.0 in the same loop: the first release to ride the delta path
+verified in Loop197 — 1.17.0→1.18.0 should download chunks, not installers.
