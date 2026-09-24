@@ -24,6 +24,12 @@ re-deriving 800+ commits of context.
    entries; never rewrite history.
 4. **`AGENTS.md`** — the owner's standing rules (75 lines, read all of it).
 5. **Your slice's plan doc** — find it in §3 below.
+6. **`docs/guides/verified-delivery.md`** — how a change earns "shipped":
+   scope → read the map → verify → commit the slice → push → **watch CI to a
+   terminal state on that SHA** → report real numbers against the baseline.
+   A push is not a receipt. It also covers the load-vs-logic failure mode: a
+   local suite that fails while the machine is oversubscribed is telling you
+   about the machine, so check `uptime` before changing code to satisfy it.
 
 **Rule: the latest verified full-suite baseline in current-state.md is the
 gate. If your work lowers a number, say so explicitly and explain why.**
