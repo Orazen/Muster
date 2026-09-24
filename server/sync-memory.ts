@@ -17,12 +17,11 @@
 // applyObject writes through applyMemoryFile, which deliberately does
 // NOT fire the producer hook: applying install B's rev from install A
 // must not enqueue a push-back, or the two would ping-pong revs forever.
-import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-import { DATA_DIR } from "./config.ts";
 import { enqueueSyncChange, type SyncJournalRow } from "./sync-journal.ts";
 import { withManifestEntry, type SyncPassDeps } from "./sync-pass.ts";
 import { syncObjectFileName, type SyncManifestEntry, type SyncObject } from "./sync-objects.ts";
@@ -35,7 +34,6 @@ const MEMORY_FILE = "MEMORY.md";
  * joins the workspaces root to form a file path, so anything outside
  * [\w-] never reaches the filesystem. */
 const SAFE_BOT_ID = /^[\w-]+$/u;
-const installIdValid = (value: string): boolean => /^[0-9a-f-]{1,128}$/iu.test(value);
 
 export function memoryObjectId(botId: string): string {
   return `${MEMORY_OBJECT_PREFIX}${botId}`;
@@ -52,19 +50,11 @@ function botIdOf(objectId: string): string {
 
 const sha256Hex = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
 
-/** This install's sync label: a random uuid persisted next to the data —
- * never derived from hardware (S0's no-fingerprinting rule). Regenerated
- * if the file is unreadable rather than trusted. */
-export function syncInstallId(dataDir: string = DATA_DIR): string {
-  const file = join(dataDir, "sync-install-id");
-  if (existsSync(file)) {
-    const existing = readFileSync(file, "utf8").trim();
-    if (installIdValid(existing)) return existing;
-  }
-  const id = randomUUID();
-  writeFileSync(file, `${id}\n`, { mode: 0o600 });
-  return id;
-}
+// Loop200 (P5a): this install's device_id now lives in sync-events.ts, the
+// module that owns device identity and the typed receipt stream. Re-exported
+// here so every existing importer — and the S2c tests — keep working.
+export { syncInstallId } from "./sync-events.ts";
+import { syncInstallId } from "./sync-events.ts";
 
 export interface MemoryProducerOptions {
   db: DatabaseSync;

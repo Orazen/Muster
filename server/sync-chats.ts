@@ -37,7 +37,7 @@ import { z } from "zod";
 
 import { deleteThreadSilently, readThreadRows, replaceThreadFromSync } from "./message-db.ts";
 import { enqueueSyncChange, type SyncJournalRow } from "./sync-journal.ts";
-import { syncInstallId } from "./sync-memory.ts";
+import { syncInstallId } from "./sync-events.ts";
 import { withManifestEntry, type SyncPassDeps } from "./sync-pass.ts";
 import { syncObjectFileName, type SyncManifestEntry, type SyncObject } from "./sync-objects.ts";
 import type { LocalManifestStore } from "./sync-wiring.ts";
@@ -150,7 +150,11 @@ export function createChatProducer(options: ChatProducerOptions): (threadId: str
     options.local.save(
       doc === null ? { schema: 1, updatedAt: at, entries: [entry] } : withManifestEntry(doc, entry, at),
     );
-    enqueueSyncChange(options.db, { objectId, objectType: CHAT_OBJECT_TYPE, rev, checksum }, at);
+    enqueueSyncChange(
+      options.db,
+      { objectId, objectType: CHAT_OBJECT_TYPE, rev, checksum, tombstone: deleting },
+      at,
+    );
     options.notify();
   };
 }

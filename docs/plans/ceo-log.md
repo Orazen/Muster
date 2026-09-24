@@ -9063,3 +9063,57 @@ ranked the remaining gaps. Two shipped this loop, one re-audited:
 Gate evidence: tsc -b 0, tsconfig.server.json 0, oxlint 0, vitest 372 files
 / 5,619 passed / 8 skipped; CI green on the merged head (35924299241) with
 both commits contained in origin/main.
+
+## Loop200 — 2026-09-24 — a receipt trail, a device identity, and a one-argument bug that meant only the first rev of any object ever synced (24 September 2026)
+
+P5 is three things — typed event receipts, stable device identity, and
+revocation with key envelopes — and the first two are what this loop
+lands, with their own gates. The interesting part is not the receipts; it
+is what building them exposed.
+
+The journal's supersede UPDATE sets `objectType = ?` and was being handed
+`objectId`. So the second and every later write of any object replaced its
+type with its own id — `chat:thread-a` where `chat` belonged. Nothing
+crashed, nothing logged, and every existing test passed, because the pass
+suites build their journal rows by hand and never enqueue twice. But the
+P4 dispatcher routes on `objectType`, so the second push of a conversation
+was handed to the memory reader, refused as "not a memory object", retried
+twelve times, and dead-lettered. Conversation sync — shipped two loops ago
+with a clean receipt — in practice pushed the first rev of each object and
+quietly gave up on every change after it. One argument, in one statement,
+standing between the feature and reality. It took writing the P5 test
+harness to see it, because that harness enqueues twice on purpose.
+
+The receipts themselves follow the plan's rule that there is no second
+queue: an event is the journal's own queue, viewed. It is written where
+the journal already passes — a row really enqueued, an object really
+applied — and it says exactly seven things: what changed, which object,
+which rev, which device, when. A transcript write carrying a password, an
+email address and a token-shaped string produces a receipt none of which
+contains any of it, and a test greps the actual file to prove it. Duplicate
+and stale enqueues are not changes and write nothing. A disk that refuses
+the receipt cannot fail the write it describes, and one damaged line does
+not blind the read of the rest.
+
+Device identity moved to the module that now owns it: a random uuid at
+mode 0600, regenerated rather than trusted, never derived from hardware,
+stable inside an install and different between two — the same value the
+encrypted objects already carry, so the audit trail and the data cannot
+disagree about who produced a rev. The gate ran for real: install A wrote a
+message and saw `chat.created` under A's id, pushed; install B pulled,
+verified, applied, and recorded `chat.applied` under B's id for A's
+object — and enqueued nothing back, because a replay that answers itself
+is how two installs talk themselves into an infinite loop.
+
+What is deliberately not claimed: generational compaction waits for the
+generation counter P6 introduces, so the bound is honestly a bound — thirty
+daily files and eight megabytes, oldest first. Key envelopes and device
+revocation are the rest of P5 and land as their own loops with their own
+revocation tests, not folded in here. One foreign stream is mid-flight in
+the same tree with the repo's only lint error; it is reported, untouched,
+and unstaged.
+
+Receipts so far: nine new tests, 222 passing across the ten suites that
+touch sync or transcripts, tsc clean both ways. Push, CI, autodeploy and
+the GET-only production probe follow this entry; deployment is claimed only
+once observed.

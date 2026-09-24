@@ -21,6 +21,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 
+import { recordSyncEvent } from "./sync-events.ts";
+
 /** Attempts (claims that failed or crashed rows counted as) before a row is
  * dead-lettered — visible in syncChangeRows, never silently dropped. */
 export const SYNC_CHANGE_MAX_ATTEMPTS = 12;
@@ -46,6 +48,10 @@ const changeInputSchema = z
     objectType: z.string().min(1).max(64).refine(printable),
     rev: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
     checksum: z.string().regex(/^[0-9a-f]{8,128}$/i),
+    /** P5a: a producer that knows its enqueue is a deletion says so here, so
+     * the typed receipt can say `deleted` rather than guessing from a rev.
+     * Absent means "not a tombstone" — the pre-P5 behavior, unchanged. */
+    tombstone: z.boolean().optional(),
   })
   .strict();
 
@@ -120,17 +126,38 @@ export function enqueueSyncChange(
       `INSERT INTO sync_journal (objectId, objectType, rev, checksum, state, attempts, enqueuedAt, nextAttemptAt, claimedAt)
        VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, NULL)`,
     ).run(input.objectId, input.objectType, input.rev, input.checksum, now, now);
+    // P5a: the receipt view of the queue. Only a row that was really
+    // queued earns an event — a duplicate or stale enqueue is not a change.
+    recordSyncEvent({
+      objectId: input.objectId,
+      objectType: input.objectType,
+      rev: input.rev,
+      tombstone: input.tombstone === true,
+      at: now,
+    });
     return "enqueued";
   }
   if (input.rev === existing.rev) {
     return input.checksum === existing.checksum ? "duplicate" : "stale";
   }
   if (input.rev < existing.rev) return "stale";
+  // Loop200 fix: this UPDATE's first bound value feeds `objectType`, and it
+  // was bound to `objectId` — so the second and every later push of an
+  // object overwrote its type with its id, the P4 dispatcher then routed it
+  // to the wrong producer, and the push retried to a dead letter. One
+  // argument order, silent for every object after its first rev.
   db.prepare(
     `UPDATE sync_journal SET objectType = ?, rev = ?, checksum = ?, state = 'pending',
        attempts = 0, enqueuedAt = ?, nextAttemptAt = ?, claimedAt = NULL
      WHERE objectId = ?`,
-  ).run(input.objectId, input.rev, input.checksum, now, now, input.objectId);
+  ).run(input.objectType, input.rev, input.checksum, now, now, input.objectId);
+  recordSyncEvent({
+    objectId: input.objectId,
+    objectType: input.objectType,
+    rev: input.rev,
+    tombstone: input.tombstone === true,
+    at: now,
+  });
   return "enqueued";
 }
 
