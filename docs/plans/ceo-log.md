@@ -9184,3 +9184,13 @@ slice, verified and committed with its own ledger entry (c080410).
 
 Cut v1.18.0 in the same loop: the first release to ride the delta path
 verified in Loop197 — 1.17.0→1.18.0 should download chunks, not installers.
+
+Mirror receipt (same loop): release 35978916151 finished 7/7 green at
+~09:27Z — pin, Windows NSIS, macOS Intel, Linux, macOS arm64 (signed,
+notarized, stapled), publish, VPS deploy. latest.json serves 1.18.0
+pinned to the exact tagged sha 29cab47; all three delta blockmaps
+(arm64.zip, x64.zip, setup.exe) answer 200 on the mirror, the stale dmg
+blockmap stays excluded by construction, and a ranged fetch on the arm64
+zip returns 206 `bytes 0-1023/183317862` with the feed's exact total.
+The 1.17.0→1.18.0 upgrade is the first to ride the Loop197 delta path
+end to end: clients on 1.17.0 should download chunks, not installers.
