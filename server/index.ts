@@ -274,7 +274,7 @@ import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
 import { handleMemoryRoute } from "./memory-routes.ts";
 import * as openconnector from "./openconnector.ts";
 import * as connectedApps from "./connected-apps.ts";
-import { isText, json, readBody } from "./http-helpers.ts";
+import { applyGzipHeaders, isText, json, negotiateStaticGzip, readBody } from "./http-helpers.ts";
 import { handleEmailOtpAuthRequest, isEmailOtpAuthPath } from "./email-otp-login.ts";
 import * as driveSync from "./drive-sync.ts";
 import * as accountDrive from "./account-drive.ts";
@@ -4569,11 +4569,24 @@ function serveStaticRange(
   return true;
 }
 
+/** Tag a content ETag with the content-coding it is being served under, so the
+ * gzip and identity variants of one file are distinct cache entries. Without
+ * this a shared cache can store the compressed body under the identity tag and
+ * hand undecodable bytes to a client that never negotiated gzip — the exact
+ * failure `Vary: Accept-Encoding` exists to prevent, caught one layer earlier
+ * by making the validator itself encoding-specific. */
+function etagForEncoding(etag: string, variant: string): string {
+  return variant && etag.endsWith('"') ? `${etag.slice(0, -1)}${variant}"` : etag;
+}
+
 /** Cache headers for one static file body: HTML is the caller's own
  * no-cache line (left alone); other files get a content ETag plus either
  * the immutable year (content-addressed build output) or no-cache
  * revalidation. Returns true when the request's If-None-Match already
- * matches — the 304 is written here and the caller must skip the body. */
+ * matches — the 304 is written here and the caller must skip the body.
+ *
+ * `variant` is the content-coding marker for the body actually being sent
+ * ("-gzip") or "" for the identity representation. */
 function staticCache(
   res: ServerResponse,
   req: IncomingMessage,
@@ -4582,10 +4595,11 @@ function staticCache(
   type: string,
   data: Buffer,
   immutable = false,
+  variant = "",
 ): boolean {
   if (type === "text/html") return false;
   const stat = statSync(file, { throwIfNoEntry: false });
-  const etag = staticEtag(file, stat, data);
+  const etag = etagForEncoding(staticEtag(file, stat, data), variant);
   const cache = immutable ? IMMUTABLE_CACHE : "no-cache";
   headers["cache-control"] = cache;
   headers.etag = etag;
@@ -9581,9 +9595,11 @@ let requestUserEmail = "";
           // (Google's OAuth review) must never see a stale shell.
           const headers: OutgoingHttpHeaders = { "content-type": type };
           if (type === "text/html") headers["cache-control"] = "no-cache";
-          if (staticCache(res, req, headers, file, type, data)) return;
+          const gzipped = negotiateStaticGzip(req, type, data);
+          if (gzipped) applyGzipHeaders(headers, gzipped.length);
+          if (staticCache(res, req, headers, file, type, data, false, gzipped ? "-gzip" : "")) return;
           res.writeHead(200, headers);
-          return res.end(data);
+          return res.end(gzipped ?? data);
         } catch {
           /* try the next candidate */
         }
@@ -9637,7 +9653,13 @@ let requestUserEmail = "";
         const body = type === "text/html" ? Buffer.from(withVerificationMeta(data.toString())) : data;
         const headers: OutgoingHttpHeaders = { "content-type": type, "content-length": body.length };
         if (type === "text/html") headers["cache-control"] = "no-cache";
-        if (staticCache(res, req, headers, file, type, body)) return;
+        // Decided before the ETag (so the validator names the representation
+        // actually sent) and before serveStaticRange (so a ranged installer
+        // read still addresses plain bytes — negotiateStaticGzip refuses any
+        // request carrying Range).
+        const gzipped = negotiateStaticGzip(req, type, body);
+        if (gzipped) applyGzipHeaders(headers, gzipped.length);
+        if (staticCache(res, req, headers, file, type, body, false, gzipped ? "-gzip" : "")) return;
         // Ranged reads serve electron-updater's differential downloader: it
         // fetches blockmap-declared byte ranges of the installers with
         // `Range` requests and needs 206 + Content-Range to assemble a delta.
@@ -9646,7 +9668,7 @@ let requestUserEmail = "";
         // pass through withVerificationMeta, are sliceable.
         if (type !== "text/html" && serveStaticRange(req, res, headers, body)) return;
         res.writeHead(200, headers);
-        return res.end(body);
+        return res.end(gzipped ?? body);
       } catch {
         /* fall through to the app SPA below */
       }
@@ -9660,12 +9682,15 @@ let requestUserEmail = "";
     ) {
       try {
         const file = join(MARKETING_DIR, "index.html");
-        const data = readFileSync(file);
-        res.writeHead(200, {
+        const body = Buffer.from(withVerificationMeta(readFileSync(file).toString()));
+        const headers: OutgoingHttpHeaders = {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-cache",
-        });
-        return res.end(withVerificationMeta(data.toString()));
+        };
+        const gzipped = negotiateStaticGzip(req, "text/html", body);
+        if (gzipped) applyGzipHeaders(headers, gzipped.length);
+        res.writeHead(200, headers);
+        return res.end(gzipped ?? body);
       } catch {
         /* fall through to app route fallback */
       }
@@ -9700,13 +9725,16 @@ let requestUserEmail = "";
           if (!stat.isFile()) return notFound();
           const data = readFileSync(file);
           const type = MIME.get(extname(file).toLowerCase()) ?? "application/octet-stream";
+          const body = type === "text/html" ? Buffer.from(withVerificationMeta(data.toString())) : data;
           const headers: OutgoingHttpHeaders = { "content-type": type, "x-content-type-options": "nosniff" };
           if (type === "text/html") headers["cache-control"] = "no-cache";
+          const gzipped = negotiateStaticGzip(req, type, body);
+          if (gzipped) applyGzipHeaders(headers, gzipped.length);
           // Vite content-hashes everything it emits into /assets, so the
           // path itself is the cache key — a new build is a new URL.
-          if (staticCache(res, req, headers, file, type, data, decodedPath.startsWith("/assets/"))) return;
+          if (staticCache(res, req, headers, file, type, data, decodedPath.startsWith("/assets/"), gzipped ? "-gzip" : "")) return;
           res.writeHead(200, headers);
-          return res.end(type === "text/html" ? withVerificationMeta(data.toString()) : data);
+          return res.end(gzipped ?? body);
         }
 
         // Only document navigation gets the SPA shell. A missing asset must
@@ -9721,8 +9749,16 @@ let requestUserEmail = "";
         if (!documentDestination || !acceptsDocument || segments.some((segment) => segment.includes(".")) ||
             decodedPath === "/assets" || decodedPath.startsWith("/assets/")) return notFound();
         const data = readFileSync(join(STATIC_DIR, "index.html"));
-        res.writeHead(200, { "content-type": "text/html", "cache-control": "no-cache", "x-content-type-options": "nosniff" });
-        return res.end(withVerificationMeta(data.toString()));
+        const body = Buffer.from(withVerificationMeta(data.toString()));
+        const headers: OutgoingHttpHeaders = {
+          "content-type": "text/html",
+          "cache-control": "no-cache",
+          "x-content-type-options": "nosniff",
+        };
+        const gzipped = negotiateStaticGzip(req, "text/html", body);
+        if (gzipped) applyGzipHeaders(headers, gzipped.length);
+        res.writeHead(200, headers);
+        return res.end(gzipped ?? body);
       } catch {
         return notFound();
       }

@@ -3,7 +3,7 @@
 // index.ts's private helpers. index.ts imports these too.
 
 import { gzipSync } from "node:zlib";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage, OutgoingHttpHeaders, ServerResponse } from "node:http";
 
 // Below this, gzip wins nothing but costs a CPU pass and a `Vary` header, so
 // tiny error bodies ship plain. ~1 KiB is where JSON responses start to earn
@@ -27,8 +27,7 @@ export function json<B>(res: ServerResponse, status: number, body: B) {
     return;
   }
   const accept = String(res.req.headers["accept-encoding"] ?? "");
-  const wantsGzip = accept.includes("gzip") && !accept.includes("identity");
-  if (wantsGzip && data.length >= GZIP_MIN_BYTES) {
+  if (acceptsGzip(accept) && data.length >= GZIP_MIN_BYTES) {
     const compressed = gzipSync(data);
     res.writeHead(status, {
       "content-type": "application/json",
@@ -43,9 +42,70 @@ export function json<B>(res: ServerResponse, status: number, body: B) {
   res.end(data);
 }
 
+// ── static asset compression ────────────────────────────────────────────
+// The JSON API compresses, but the other half of every page load did not:
+// the Vite bundle, the docs CSS and the marketing HTML all went out raw.
+// These decide whether one static body is worth compressing.
+
+/** Does this client actually want a gzip body? Same rule `json()` applies, so
+ * an API response and the bundle it was fetched next to never disagree. */
+export function acceptsGzip(acceptEncoding: string | string[] | undefined): boolean {
+  const accept = (Array.isArray(acceptEncoding) ? acceptEncoding.join(",") : String(acceptEncoding ?? ""))
+    .toLowerCase();
+  return accept.includes("gzip") && !accept.includes("identity");
+}
+
+/** Text-ish media worth compressing. Fonts, images, archives and wasm are
+ * already deflated — gzipping those burns a CPU pass and usually grows the
+ * body. `type` may carry parameters (`text/markdown; charset=utf-8`). */
+export function isCompressibleType(type: string): boolean {
+  const bare = type.split(";", 1)[0].trim().toLowerCase();
+  if (bare.startsWith("text/")) return true;
+  if (bare === "image/svg+xml") return true;
+  return (
+    bare === "application/javascript" ||
+    bare === "application/json" ||
+    bare === "application/xml" ||
+    bare === "application/manifest+json"
+  );
+}
+
+/** Compress one static body when the client asked for gzip and the bytes earn
+ * it. Returns null to mean "send it exactly as given".
+ *
+ * A request carrying `Range` is never compressed: a ranged read addresses the
+ * *uncompressed* representation's byte offsets — that is exactly how
+ * electron-updater's blockmap delta downloader reassembles an installer — so
+ * compressing would hand back offsets into the wrong byte stream and silently
+ * corrupt the update. */
+export function negotiateStaticGzip(
+  req: { headers: Record<string, string | string[] | undefined> },
+  type: string,
+  body: Buffer,
+): Buffer | null {
+  if (req.headers.range !== undefined) return null;
+  if (body.length < GZIP_MIN_BYTES) return null;
+  if (!isCompressibleType(type)) return null;
+  if (!acceptsGzip(req.headers["accept-encoding"])) return null;
+  const compressed = gzipSync(body);
+  // Already-dense bytes (a tiny minified file, a random-looking blob) can come
+  // out larger; sending the original is then both smaller and cheaper.
+  return compressed.length < body.length ? compressed : null;
+}
+
+/** Headers that mark the body as the gzip variant of this resource.
+ * `Vary` is what keeps a shared cache from handing the compressed bytes to a
+ * client that never asked for them. */
+export function applyGzipHeaders(headers: OutgoingHttpHeaders, compressedLength: number): void {
+  headers["content-encoding"] = "gzip";
+  headers.vary = "Accept-Encoding";
+  // Always overwrite: callers that precomputed content-length from the plain
+  // body would otherwise declare the wrong number of bytes and hang the client.
+  headers["content-length"] = compressedLength;
+}
+
 /** True only for primitive strings — what JSON decoding yields for text fields. */
 export const isText = <T>(value: T): value is T & string => String(value) === value;
-
 /** Parse the request body as JSON. Semantics match the original inline
  * index.ts version exactly: same 1 MB ceiling with the pause-then-destroy
  * drain guard, same `{ status }`-tagged rejections for the handler's
