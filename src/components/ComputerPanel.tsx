@@ -22,6 +22,7 @@ import { useStore, type Bot } from "@/state/store";
 import type { Routine } from "@/lib/routines";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
+import { localComputerRepair } from "@/lib/desktop";
 import { ComputerAccessControl, useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutineEditor } from "./RoutinesPage";
 
@@ -386,20 +387,20 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
     checking: "Checking…",
     starting: "Starting your bot's computer…",
     unconfigured: "No cloud computer configured",
-    "local-unavailable":
-      capabilitiesError
-        ? "Computer access could not be confirmed. Retry the capability check below."
-        : capabilities.localComputer.reasonCode === "computer-access-off"
-        ? "Computer access is off for this session. Enable it below."
-        : capabilities.host.platform === "linux"
-        ? "Local computer control isn't available on Linux yet. Use a cloud box instead."
-        : capabilities.host.label === "Browser"
-          ? "Local computer control requires the desktop app."
-          : "CUA Driver isn't ready for local computer control.",
+    "local-unavailable": localComputerRepair({
+      platform: capabilities.host.platform,
+      reasonCode: capabilities.localComputer.reasonCode,
+    }).message,
     "vm-unavailable": "The Local VM isn't available for this bot",
     off: "This bot's computer is off",
     error: "Couldn't reach the computer",
   } satisfies Record<Exclude<Phase, "ready" | "local" | "vm">, string>;
+
+  // The privacy repair for a blocked local session: named app, exact panes.
+  const localRepair = localComputerRepair({
+    platform: capabilities.host.platform,
+    reasonCode: capabilities.localComputer.reasonCode,
+  });
 
   return (
     <aside className="glass-panel animate-panel-in flex h-full w-[min(400px,100vw)] min-w-0 max-w-full shrink-0 flex-col border-l-0">
@@ -460,6 +461,19 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 >
                   Open Settings
                 </button>
+              )}
+              {phase === "local-unavailable" && localRepair.panes.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {localRepair.panes.map((pane) => (
+                    <button
+                      key={pane}
+                      onClick={() => window.ogb?.permOpenSettings?.(pane)}
+                      className="rounded-lg bg-raised px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
+                    >
+                      {pane === "screen" ? "Open Screen Recording settings" : "Open Accessibility settings"}
+                    </button>
+                  ))}
+                </div>
               )}
               {phase === "vm-unavailable" && (
                 <button

@@ -31,6 +31,46 @@ export type DesktopBridge = Pick<NonNullable<Window["ogb"]>, "platform"> &
  * control permission; mic/screen/speech are the voice and preview panes. */
 export type PrivacyPane = NonNullable<Parameters<NonNullable<DesktopBridge["permOpenSettings"]>>[0]>;
 
+/** The repair a blocked computer-access session needs: words plus the exact
+ * privacy panes to open, or none when a pane cannot help.
+ *
+ * WHY this exists as a named contract: the failure is easy to misread in both
+ * directions. macOS keys privacy grants to the BINARY that uses them, and the
+ * screenshots for local computer control are taken by CuaDriver
+ * (`com.trycua.driver`) — a separately signed app — not by Muster. A person
+ * who grants Screen Recording to Muster, as the old copy invited them to, has
+ * changed nothing for the driver, and then concludes the app is broken. The
+ * honest repair names the app that needs the grant and opens the exact panes;
+ * "computer access is off" (a user preference) gets no privacy buttons at all,
+ * because a settings pane cannot fix a toggle. */
+export interface LocalComputerRepair {
+  message: string;
+  panes: PrivacyPane[];
+}
+
+export function localComputerRepair(input: {
+  platform: string;
+  reasonCode: string | undefined;
+}): LocalComputerRepair {
+  const { platform } = input;
+  const reasonCode = input.reasonCode ?? "";
+  if (platform !== "mac") {
+    return { message: "CUA Driver isn't ready for local computer control.", panes: [] };
+  }
+  if (reasonCode === "computer-access-off") {
+    return { message: "Computer access is off for this session. Enable it below.", panes: [] };
+  }
+  if (reasonCode === "desktop-upgrade-required" || reasonCode === "unsupported-platform") {
+    return { message: "Local computer control requires the desktop app.", panes: [] };
+  }
+  return {
+    message:
+      "Computer access needs Screen Recording and Accessibility for CuaDriver. macOS grants privacy per app — " +
+      "in System Settings add CuaDriver (not just Muster), then try again.",
+    panes: ["screen", "accessibility"],
+  };
+}
+
 // ── permission presentation destination ───────────────────────────────
 // Adapted from tiptour-macos (github.com/milind-soni/tiptour-macos), MIT
 // License — Copyright (c) 2026 Milind Soni, Portions Copyright (c) 2025

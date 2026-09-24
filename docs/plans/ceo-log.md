@@ -9142,6 +9142,59 @@ A test that only passes when the laptop is idle was not a passing test.
 It is green now in sixty-five seconds, and it will say so tomorrow on a
 machine having a worse minute than this one did.
 
+## Loop201 — 2026-09-24 — the update path blamed a signature you have, and the privacy prompt named the wrong app (24 September 2026)
+
+Two complaints, one shape: both messages were confidently wrong about the
+machine they were describing.
+
+The first was the updater. "Restart didn't finish" appeared fifteen seconds
+after a restart click, with a subtitle blaming an unsigned build. The
+installed app is Muster 1.18.0, Developer ID signed by THARUN RAMAGIRI
+(7375K23WFU), carrying the marker that says in-app updates are trusted. A
+signed update of a hundred-and-eighty-megabyte application is verified,
+swapped and relaunched by macOS after the window is already gone; fifteen
+seconds is inside that window, not past it. So the banner was declaring a
+healthy install hung, inventing a signature the owner does not have, and
+offering a download instead of waiting. Two thresholds now, forty-five
+seconds to admit it is still working and one hundred and twenty before
+calling it failed, with the signature excuse reserved for the builds that
+lack the marker.
+
+The second was worse, because it had been telling the truth to the wrong
+process. The machine was running the CuaDriver daemon with
+`--cua-internal-gate-missing-screen-recording` in its command line, and
+asked directly it reported screen recording denied for `com.trycua.driver`
+— the vendor's own app, a different TeamID from Muster's — while
+accessibility was already true. macOS grants privacy per binary. The
+screenshots are taken by CuaDriver, not by Muster. The person granting
+Screen Recording to Muster, which the old copy explicitly invited them to
+do, has changed nothing at all for the process that needs it. And the
+failure had a second edge: Muster's own two checks — the SDK preflight and
+the fresh in-process capture — both measure Muster's identity, so the app
+could report itself granted while the driver stayed gated, which is
+precisely the false negative that made this look like a broken product
+rather than a misplaced click.
+
+The embedded path now asks the host for its own status before believing
+anything local, and when it is short, the refusal names the app, the bundle
+id and the pane: Screen Recording must be granted to CuaDriver
+(com.trycua.driver) in System Settings, because granting Muster does not
+grant the driver that takes the screenshot. The computer panel turns that
+into two one-click buttons for the exact panes, and offers no privacy
+buttons at all when the real problem is a toggle somebody switched off.
+
+The Local VM question that arrived alongside them had a quieter answer: the
+isolation model is already here — shared or per-bot, a global cap, and
+desktops recycled after eight idle hours — and the competitor's checkout
+has no equivalent knobs at all. What it could not do this morning is start,
+because the driver refuses to serve while its own gate is engaged. The
+grant this loop now points at the right place for is the same one.
+
+Nine new tests, fifty-three green across the CUA and desktop suites, oxlint
+silent on all eight touched files, check:electron clean, tsc zero. The live
+grant and a live VM boot stay with the owner: one System Settings action on
+one machine, which is the only place that truth can be established.
+
 ## Loop201 — 2026-09-24 — Remote access closes its OpenMausBot gaps: client mode, a domain walkthrough, and the grant switch that only lived on one card (24 September 2026)
 
 The parity study ranked three remaining Remote-access gaps after pairing

@@ -5,7 +5,36 @@ import { combinePermissionRead } from "./desktop-permission-probe.mjs";
 const HOST_BUNDLE_ID = "com.muster.app";
 const CUA_ENV = { CUA_DRIVER_RS_TELEMETRY_ENABLED: "0" };
 
-export function createCuaRuntime({ connectionStore, resolveDriverBinary, loadEmbeddedSdk, wantEmbedded, standaloneSocket, socketAlive, platform = process.platform, requestDesktopPermissions = null }) {
+/** What the host itself reports about its own TCC identity, when the
+ * adapter can ask it. `bundleId` is the app macOS actually keys the grant
+ * to — for the driver that is NOT Muster's bundle id.
+ * @typedef {{ bundleId: string, accessibility: boolean, screenRecording: boolean }} HostPermissionStatus
+ */
+
+/** The permissions this host has not proven, as words a person can act on. */
+function missingFor(status) {
+  return [
+    status.accessibility !== true && "Accessibility",
+    status.screenRecording !== true && "Screen Recording",
+  ].filter(Boolean);
+}
+
+/** The name a person will actually see in System Settings, next to the id
+ * so a row with two similarly named entries is unambiguous. */
+export function hostPermissionFailureReason(status) {
+  const missing = missingFor(status);
+  if (missing.length === 0) return null;
+  const pane = missing.length === 1
+    ? (missing[0] === "Accessibility" ? "Accessibility" : "Screen Recording")
+    : "Accessibility and Screen Recording";
+  return (
+    `${pane} must be granted to CuaDriver (${status.bundleId}) in System Settings → Privacy & Security. ` +
+    "macOS grants privacy per app, so granting Muster does not grant the driver that takes the screenshot — " +
+    "open the pane, add CuaDriver, then try again"
+  );
+}
+
+export function createCuaRuntime({ connectionStore, resolveDriverBinary, loadEmbeddedSdk, wantEmbedded, standaloneSocket, socketAlive, platform = process.platform, requestDesktopPermissions = null, hostPermissionStatus = null }) {
   let connection = { mode: "unavailable", reason: "computer-access-off" };
   let initialized = false;
   let stopped = false;
@@ -54,6 +83,19 @@ export function createCuaRuntime({ connectionStore, resolveDriverBinary, loadEmb
         failurePrefix = "embedded host failed";
         const sdk = await loadEmbeddedSdk();
         if (!active(attempt)) return connection;
+        // The host's own TCC identity decides this, not ours: the driver
+        // binary is a separately-signed app (com.trycua.driver), and macOS
+        // keys Screen Recording to the binary that captures. Asking the host
+        // first is what turns "I granted it and it still says no" into a
+        // message that names the app the grant actually belongs to.
+        if (hostPermissionStatus) {
+          const host = await hostPermissionStatus();
+          if (!active(attempt)) return connection;
+          if (host) {
+            const named = hostPermissionFailureReason(host);
+            if (named !== null) throw new Error(named);
+          }
+        }
         const permissions = sdk.requestMacOSPermissions();
         if (!sdk.hasRequiredMacOSPermissions(permissions)) {
           // macOS 15+ preflights cache per-process and keep reporting denied

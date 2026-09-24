@@ -25,6 +25,11 @@ import { pathToFileURL } from "node:url";
 import { createCuaRuntime, registerCuaRuntimeIpc } from "./cua-runtime.mjs";
 import { thumbnailIndicatesCapture } from "./desktop-permission-probe.mjs";
 
+// Muster's own bundle id. The host-status read treats it as "not a separate
+// app" on purpose: a status that reports Muster's own identity cannot answer
+// the question of which app macOS keyed the driver's grant to.
+const MUSTER_BUNDLE_ID = "com.muster.app";
+
 const require = createRequire(import.meta.url);
 const { createCuaConnectionStore } = require("./cua-connection.cjs");
 
@@ -119,6 +124,7 @@ const runtime = createCuaRuntime({
   connectionStore, resolveDriverBinary, loadEmbeddedSdk,
   wantEmbedded: () => app.isPackaged || process.env.MUSTER_CUA_EMBEDDED === "1",
   standaloneSocket: STANDALONE_SOCKET, socketAlive, requestDesktopPermissions,
+  hostPermissionStatus: readHostPermissions,
 });
 
 export const initializeCua = () => runtime.initialize();
@@ -139,6 +145,33 @@ export function cuaPermissionsStatus() {
   } catch {
     return { available: true, raw: out.stdout?.trim() };
   }
+}
+
+// The host's own permission read, in the shape the runtime's failure message
+// needs. The driver's status answers for the DRIVER's TCC identity (it says
+// so itself: "these booleans reflect the CuaDriver daemon's own TCC
+// identity … because this process is its own responsible process"), which is
+// the identity macOS keys Screen Recording to. A missing, unparsable or
+// self-referential answer returns null so the caller keeps its previous
+// behaviour instead of failing on a read it does not trust.
+// Domain checks for a child process's JSON: name the shapes by value. A
+// string is the only thing that can be a bundle id, and a boolean is the only
+// thing that can be a grant — everything else is "no answer", never a guess.
+const isText = (value) => value !== null && value !== undefined && value.constructor === String;
+const isBoolean = (value) => value === true || value === false;
+
+async function readHostPermissions() {
+  const status = cuaPermissionsStatus();
+  if (!status.available || !isBoolean(status.accessibility) || !isBoolean(status.screen_recording)) {
+    return null;
+  }
+  const bundleId = status.source?.bundle_id;
+  if (!isText(bundleId) || bundleId.length === 0 || bundleId === MUSTER_BUNDLE_ID) return null;
+  return {
+    bundleId,
+    accessibility: status.accessibility,
+    screenRecording: status.screen_recording,
+  };
 }
 
 export function registerCuaIpc(authorizeSender, onChanged) {

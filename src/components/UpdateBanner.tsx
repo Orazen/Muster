@@ -26,6 +26,30 @@ function friendlyError(message?: string): string {
   return message.split("\n")[0].slice(0, 140);
 }
 
+// A successful quitAndInstall tears down this whole renderer within seconds —
+// the OS replaces the running app. If this component is still mounted and
+// still showing "installing" after a real one would have already relaunched,
+// the install is taking far longer than it should.
+//
+// HOW LONG IS "far longer": a signed macOS update is a ~180 MB application
+// that macOS verifies, swaps and relaunches, and that work happens AFTER the
+// window is gone — the 15s this used to wait was short enough that a normal,
+// healthy install of a large app was declared "Restart didn't finish" while
+// Squirrel was still applying it. That is how a working update path taught
+// people to distrust it. Two thresholds now: "still working" (say so, keep
+// waiting) and "didn't finish" (offer the way out), both far beyond a real
+// install, and neither blaming the build's signature — Muster ships Developer
+// ID signed, and the old copy blamed "an unsigned build" for a hang that was
+// mostly this timer.
+export const INSTALL_STILL_WORKING_MS = 45_000;
+export const INSTALL_STUCK_MS = 120_000;
+
+/** One honest timer for the two moments, testable without a renderer. */
+export function installPhase(elapsedMs: number): "installing" | "still-working" | "stuck" {
+  if (elapsedMs < INSTALL_STILL_WORKING_MS) return "installing";
+  return elapsedMs < INSTALL_STUCK_MS ? "still-working" : "stuck";
+}
+
 export function UpdateBanner() {
   const s = useUpdaterState();
   // dismissal is per status+version, so the popup returns for the next
@@ -43,21 +67,21 @@ export function UpdateBanner() {
   // A successful quitAndInstall tears down this whole renderer within
   // seconds — the OS replaces the running app. If this component is still
   // mounted and still showing "installing" after a real one would have
-  // already relaunched, the install genuinely hung (this session found the
-  // likely cause: macOS's Squirrel.Mac updater can fail to actually apply
-  // an update whose signature isn't a real Developer ID one, which Muster's
-  // builds currently aren't — see electron/updater.mjs). Only client-side
-  // state, not asking the main process anything new — the point is exactly
-  // that "still here after N seconds" is itself the proof of a hang.
-  const [stuckInstalling, setStuckInstalling] = useState(false);
+  // already relaunched, the install genuinely hung.
+  const [installElapsed, setInstallElapsed] = useState(0);
   useEffect(() => {
     if (status !== "installing") {
-      setStuckInstalling(false);
+      setInstallElapsed(0);
       return;
     }
-    const timer = setTimeout(() => setStuckInstalling(true), 15_000);
-    return () => clearTimeout(timer);
+    const started = Date.now();
+    setInstallElapsed(0);
+    const timer = setInterval(() => setInstallElapsed(Date.now() - started), 1000);
+    return () => clearInterval(timer);
   }, [status]);
+  const installState = status === "installing" ? installPhase(installElapsed) : "installing";
+  const stillWorking = installState === "still-working";
+  const stuckInstalling = installState === "stuck";
 
   if (!s || s.status === "idle" || s.status === "checking") return null;
   const key = `${s.status}:${s.version ?? ""}`;
@@ -66,8 +90,8 @@ export function UpdateBanner() {
 
   // while busy the card owns the moment: no dismissing, no second click —
   // unless it's stuck, in which case the user needs a way out
-  const installing = s.status === "installing" && !stuckInstalling;
-  const busy = s.status === "downloading" || installing;
+  const installing = s.status === "installing" && !stillWorking && !stuckInstalling;
+  const busy = s.status === "downloading" || installing || stillWorking;
 
   // Unsigned mac builds never enter the download/restart pipeline at all:
   // one honest button that opens the release page. Everything Squirrel can't
@@ -83,9 +107,11 @@ export function UpdateBanner() {
           ? `${s.version} is ready`
           : installing
             ? "Restarting to update…"
-            : stuckInstalling
-              ? "Restart didn't finish"
-              : "Update check failed";
+            : stillWorking
+              ? "Still applying the update…"
+              : stuckInstalling
+                ? "Restart didn't finish"
+                : "Update check failed";
   const subtitle =
     s.status === "available"
       ? manualMac
@@ -100,9 +126,13 @@ export function UpdateBanner() {
           ? "Restart to finish updating."
           : installing
             ? "Muster will reopen in a moment."
-            : stuckInstalling
-              ? "This can happen on an unsigned build. Download the update directly instead."
-              : friendlyError(s.message);
+            : stillWorking
+              ? "macOS is verifying and swapping the new app. This takes a minute on a large download — leave Muster open."
+              : stuckInstalling
+                ? manualMac
+                  ? "This can happen on an unsigned build. Download the update directly instead."
+                  : "macOS didn't finish applying the update. Download the new version directly, or quit Muster and open it again."
+                : friendlyError(s.message);
 
   return (
     <div className="animate-panel-in fixed bottom-4 left-4 z-50 w-[300px] rounded-xl border border-hairline/40 bg-panel p-3.5 shadow-2xl shadow-black/50">
@@ -149,6 +179,17 @@ export function UpdateBanner() {
           >
             <Loader2 size={13} className="animate-spin" /> Restarting…
           </button>
+        </div>
+      )}
+
+      {stillWorking && (
+        <div className="mt-2.5 flex gap-2">
+          <div
+            role="status"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised px-2 py-1.5 text-[13px] text-ink-secondary"
+          >
+            <Loader2 size={13} className="animate-spin" /> Verifying and swapping the new app…
+          </div>
         </div>
       )}
 
