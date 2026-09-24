@@ -9118,6 +9118,30 @@ touch sync or transcripts, tsc clean both ways. Push, CI, autodeploy and
 the GET-only production probe follow this entry; deployment is claimed only
 once observed.
 
+And a correction that belongs in the same breath. Gating this slice
+produced a red run — twenty tests across four files, all of them
+subprocess fixtures that "did not start", on a run that took thirty-two
+minutes against a nine-minute baseline. Isolated, one file stayed red and
+the accusation it made was precise: something called out to the network in
+a suite whose whole point is that it never does. The harness's own
+blocked-attempt log named the caller, and it was the Telegram chat loop
+polling getUpdates every three seconds, started by a bot token the fixture
+had put in its config on purpose for a different subsystem. Pre-existing
+code, untouched by this work, racing a wall clock: at twenty-six seconds
+the fixtures die before the first tick and the suite passes; at two
+hundred they outlive it and an unasked-for call lands in the assertion.
+
+I first concluded the change was mine — green before the commit, red
+after it — and that conclusion was wrong, because the two runs differed in
+how busy the machine was, not in what the code did. The server boots and
+answers health under the change; the fixtures simply live longer when
+everything else is competing for the same cores. The repair is isolation,
+not behaviour: that harness now disables the chat poll outright, so its
+"no outbound" claim means the same thing on a fast machine and a slow one.
+A test that only passes when the laptop is idle was not a passing test.
+It is green now in sixty-five seconds, and it will say so tomorrow on a
+machine having a worse minute than this one did.
+
 ## Loop201 — 2026-09-24 — Remote access closes its OpenMausBot gaps: client mode, a domain walkthrough, and the grant switch that only lived on one card (24 September 2026)
 
 The parity study ranked three remaining Remote-access gaps after pairing

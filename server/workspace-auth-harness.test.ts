@@ -487,6 +487,16 @@ Socket.prototype.connect = blocked;
       secret: randomBytes(32).toString("hex"),
     });
     env.VAULTGRAM_HOME = vaultDirectory;
+    // Loop200: this suite's config deliberately carries a Telegram bot token,
+    // which also starts the Telegram CHAT loop (server/index.ts) — a
+    // different subsystem that polls getUpdates every 3 seconds. Its first
+    // tick then races the suite's no-outbound assertion: on a quiet machine
+    // the fixtures exit first and the assertion passes, on a loaded one they
+    // live past the tick and a network call this suite never asked for
+    // appears. The backup transport under test is unaffected by this flag;
+    // only the unsolicited chat poll is switched off, so "no outbound" means
+    // the same thing on a fast machine and a slow one.
+    env.TELEGRAM_CHANNEL_BOT_ID = "";
     if (kind === "shared") {
       // Explicit public-host configuration makes SELF_HOSTED true while the
       // owned listener itself remains confined to loopback.
