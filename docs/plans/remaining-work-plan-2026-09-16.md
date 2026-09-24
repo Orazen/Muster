@@ -411,3 +411,8 @@ multi-tenant hardening.
 13. **v1.18.0 cut (Loop201)** — first release to ride the Loop197 delta
     path: 1.17.0→1.18.0 should fetch blockmap chunks, not installers.
     Release run 35978916151; mirror-promotion receipt to follow.
+14. **v1.19.0 cut (Loop202)** — carries the attention inbox + roster
+    sections slice (dd7f44e) on top of the Loop201 Remote-access trio;
+    tag pinned to CI-green merged head feaee32, release run 35993671022.
+    OMB parity remaining after this: #8 org identity, #9 Linux local
+    control, #10 two-desktop canvas, LLM short titles (server seam).
