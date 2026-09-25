@@ -9324,3 +9324,52 @@ Audit results (what was actually wrong vs. what was verified healthy):
 Gates: voice-test 5/5, drag contract 4/4, onboarding draft/finish unit
 79/79 + e2e 7/7, tsc -b clean tree-wide, oxlint 0/0 on touched files.
 Commit 3e16d16, pushed through merge 3a9aebc; CI run 36154904887.
+## Loop204 — sweeps 2–4: live-repro bugs, OMB parity walk, event-log retention — 2026-09-25
+
+Continuation of the unlazy-method sweeps against OpenMausBot parity.
+Loop203 recorded sweep 1; this entry covers sweeps 2, 3, and 4 with the
+evidence each one left behind.
+
+### Sweep 2 — three live-reproduced bugs (a10cca2, CI green)
+
+- Sidebar duplicate "Teammates" header: a pre-sections duplicate sat above
+  the SectionHeader added for unsectioned bots. Removed; the single header
+  now only renders when unsectionedBots.length > 0.
+- SettingsModal raw-fetch saves (ProfileFields, ChannelTurnCapCard, VpsCard)
+  dispatched the error BODY as app config on failure. All three moved to
+  api() + role=alert saveError. Failure path proven against the live
+  SELF_HOSTED server (non-operator PUT → 403, config unchanged); happy path
+  PUT → 200 live.
+- Dead "Replay welcome tour": App.tsx gate decision now honors
+  tourReplayPending() — a new non-consuming peek in analytics.ts (the
+  wizard owns consume). Live-verified: wizard mounts at Welcome, gate
+  stays done:false.
+
+### Sweep 3 — OMB installed, feature walk, "About me" parity (c7f967f doc)
+
+OpenMausBot v0.1.87 cloned to /tmp/omb (Apache 2.0; enterprise/ carve-out;
+name + mascot are trademarks — logic/design ported only, attribution kept).
+Ran it live on 9412 and walked every feature against Muster; record in
+GATES.md. First parity gap shipped: profile.about ("About me") — optionalText
+in server/config.ts, injected into every bot persona in startTurn after the
+Role/About lines, echoed in configStatus, textarea in the Profile card
+(maxLength 2000) saved via api(). Verified end-to-end live: UI focusout →
+PUT 200 → disk → GET echo. index.test.ts profile test covers `about` (88/88).
+
+### Sweep 4 — real event-log retention (269825c)
+
+Replaced the Settings placeholder with a real daily server sweep:
+server/event-log-cleanup.ts deletes event-log FILES of archived (hidden)
+bots' threads past an age threshold (mtime-based, so active threads stay
+fresh) and trims every log to a size cap, keeping the newest tail cut at a
+newline. Never touches transcripts, the message database, or sync journals.
+Deletion is hidden-bots-only by design — groups archive immediately in
+Muster, so they are out of scope. Settings row is now two live controls
+(switch + clamped 1–3650 days / 1–10240 MiB) saved through api(); the
+server echoes eventLogRetention in /api/config (null = OFF). Verified live
+pre-commit: PUT {7,50} → 200 + disk; UI renders 7/50 switches ON; toggle
+round-trip.
+
+Concurrent-agent merges absorbed: 2b2585b landed the same config section
+(clean merge). Verification on the merged tree: event-log-cleanup 9/9 +
+index 60/60, tsc clean, oxlint 0/0. CI on 269825c in flight at write time.
