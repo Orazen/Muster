@@ -1755,6 +1755,14 @@ bus.subscribe((event: RuntimeEvent) => {
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
       turnProvenance.delete(event.threadId);
+      // The parallel-width slot is claimed at dispatch and must be given
+      // back when the turn ends, or the bot 409s "already working" forever
+      // after its first successful run. Every other release site (the
+      // dispatch catch, the lost-turn reaper, the provider rebuild) fires
+      // only on failure or abort — this is the normal path, and it was the
+      // one that leaked. Released before the activity flip so a bot is
+      // never idle while it still holds a slot.
+      if (bot) releaseSlot(bot.id, event.threadId);
       // group turns run on the room's thread — the speaking bot's task
       // tally is not the right home for a shared room's spend, so only
       // 1:1 task turns are tallied for now.
