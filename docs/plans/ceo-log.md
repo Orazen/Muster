@@ -9285,3 +9285,42 @@ oxlint 0, full CI green on dd7f44e (35990822987).
 
 Cut v1.19.0 immediately after: the public release carries the Remote
 access parity trio from Loop201 plus this slice.
+
+## Loop203 — desktop/web/onboarding bug sweep (unlazy method) — 2026-09-25
+
+User reported "a lot of bugs in the Windows exe desktop app, the webapp,
+and onboarding logic" with no reproduction details, and pointed at the
+unlazy skill (github.com/Leonxlnx/unlazy) as the method. Applied its core
+discipline literally: GATES.md ledger written before implementation, every
+gate given a runnable CHECK/EXPECT pair, evidence recorded before any done
+claim.
+
+Audit results (what was actually wrong vs. what was verified healthy):
+- FIXED — onboarding voice-test mic leak: the beat awaited getUserMedia
+  inline; an OS prompt answered after Stop or unmount still opened the
+  analyser and left the microphone live for a beat that no longer existed.
+  Rebuilt as src/lib/voice-test.ts with an idempotent stop handle covering
+  the late-grant race, denial-after-stop silence, and a double-tap guard
+  so a second pending grant can never orphan the first. 5 new tests.
+- FIXED — onboarding window drag: the wizard covers the whole window but
+  had NO app-region drag surface; on Windows (titleBarOverlay) and
+  macOS-inset there was no way to move the app during first-run except
+  the invisible frame edge. Stage head is now the drag strip behind
+  data-window-drag (web/Linux inert), title stays no-drag, and
+  src/styles.test.ts pins the two-platform contract against refactors.
+- VERIFIED HEALTHY (evidence, not assertion): Windows updater feed
+  latest.yml live-serves 1.19.0 with sha512 (the historical strand is
+  gone); NSIS x64 + zip targets configured; Windows chat header drag
+  correctly applied in both ChatView and GroupView; titleBarOverlay
+  height 60 matches the header strip and the IPC handler keeps geometry
+  renderer-proof; webapp auth layer (sign-out-before-OAuth, relative
+  callbackURL, per-field capability coercion) reviewed end-to-end; the
+  /api/config profile 403 for non-primary hosted users is deliberate
+  multi-tenant policy, not a bug.
+- Ops: the e2e run first hit ENOSPC — the volume was 100% full from
+  15G of stale .omb-scratch/verification artifacts (loops 33-49);
+  cleared, 16Gi free, e2e clean on rerun.
+
+Gates: voice-test 5/5, drag contract 4/4, onboarding draft/finish unit
+79/79 + e2e 7/7, tsc -b clean tree-wide, oxlint 0/0 on touched files.
+Commit 3e16d16, pushed through merge 3a9aebc; CI run 36154904887.
