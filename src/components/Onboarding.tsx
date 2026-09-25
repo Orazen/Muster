@@ -33,6 +33,7 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
 import { ProviderMark } from "./ProviderIcons";
 import { AGENT_CHARACTERS, AGENT_COLORS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor, type AgentState } from "@/lib/mascot";
+import { startVoiceTest, type VoiceTestHandle } from "@/lib/voice-test";
 import { api, useStore, type Bot } from "@/state/store";
 import { useAuth } from "@/lib/auth";
 import type { InstanceInfo } from "@/state/store";
@@ -362,56 +363,50 @@ const PHONE_POINTS = [
   { icon: Lock, title: "Private by default", detail: "Only devices you approve can connect to your Muster." },
 ];
 
-/** Live microphone test for the voice-setup beat: getUserMedia once, an
- * AnalyserNode level read in a rAF loop, and honest cleanup on stop/unmount.
- * `onActive` lifts "sound is coming through" to the guide mascot, which swaps
- * to its dictating face while you speak. */
+/** Live microphone test for the voice-setup beat. The acquisition/teardown
+ * rules live in src/lib/voice-test.ts (tested there, including the grant
+ * settling after Stop/unmount); this component renders the level bar and
+ * lifts "sound is coming through" to the guide mascot via `onActive`, which
+ * swaps it to its dictating face while you speak. */
 function VoiceTest({ onActive }: { onActive: (active: boolean) => void }) {
   const [testing, setTesting] = useState(false);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
+  const probeRef = useRef<VoiceTestHandle | null>(null);
 
   const stop = () => {
-    cleanupRef.current?.();
-    cleanupRef.current = null;
+    probeRef.current?.stop();
+    probeRef.current = null;
     setTesting(false);
     setLevel(0);
     onActive(false);
   };
 
-  useEffect(() => () => cleanupRef.current?.(), []);
+  useEffect(
+    () => () => {
+      // Unmount must release the microphone even while the OS prompt is
+      // still open — the probe owns the late-grant race.
+      probeRef.current?.stop();
+      probeRef.current = null;
+    },
+    [],
+  );
 
-  const start = async () => {
+  const start = () => {
     setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const ctx = new AudioContext();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      ctx.createMediaStreamSource(stream).connect(analyser);
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      let raf = 0;
-      const tick = () => {
-        analyser.getByteFrequencyData(data);
-        let sum = 0;
-        for (const v of data) sum += v * v;
-        const rms = Math.sqrt(sum / data.length) / 255;
-        setLevel(Math.min(1, rms * 4));
-        raf = requestAnimationFrame(tick);
-      };
-      raf = requestAnimationFrame(tick);
-      cleanupRef.current = () => {
-        cancelAnimationFrame(raf);
-        for (const track of stream.getTracks()) track.stop();
-        void ctx.close();
-        onActive(false);
-      };
-      setTesting(true);
-      onActive(true);
-    } catch {
-      setError("The browser blocked the microphone — allow it and try again.");
-    }
+    // The button can be tapped twice while a prompt is pending ("Test"
+    // stays "Test" until onReady). Retiring any previous probe first keeps
+    // exactly one outstanding getUserMedia — a second pending grant would
+    // otherwise orphan the first and leak its microphone.
+    probeRef.current?.stop();
+    probeRef.current = startVoiceTest({
+      onReady: () => {
+        setTesting(true);
+        onActive(true);
+      },
+      onLevel: setLevel,
+      onError: () => setError("The browser blocked the microphone — allow it and try again."),
+    });
   };
 
   return (
@@ -503,6 +498,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   // Browser mic permission (web only — desktop uses the OS TCC flow below).
   const [webMic, setWebMic] = useState<"prompt" | "granted" | "denied" | "unsupported">("prompt");
   const isDesktop = Boolean(window.ogb);
+  // Same detection as ChatView/GroupView: the wizard is full-screen, so its
+  // stage head must serve as the window's drag strip where the app has no
+  // native title bar to grab (Windows overlay; macOS inset traffic lights).
+  const isWin = window.ogb?.platform === "win32";
+  const macInset = capabilities.windowChrome === "mac-inset";
   // The voice-setup beat: while the live mic test hears you, the guide
   // mascot swaps to its dictating face.
   const [micTesting, setMicTesting] = useState(false);
@@ -1569,6 +1569,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       role="region"
       aria-labelledby="onboarding-title"
       className="onboarding-shell"
+      data-window-drag={isWin || macInset ? "true" : undefined}
       onKeyDown={(event) => {
         // Settings is a sibling dialog with its own keyboard boundary and
         // focus restoration. This handler receives events inside setup only.
