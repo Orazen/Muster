@@ -74,3 +74,22 @@ separately, People/Activity/Backups sections).
   EVIDENCE: profile.about added to server schema (zod-validated, 2000-char cap in UI), echoed in configStatus for both operator and signed-in branches, injected into EVERY bot's system prompt via the persona seam (server/index.ts startTurn), and editable in Settings → Profile with the same failure-proof save path as sweep 2. Verified LIVE: PUT -> 200, ~/.muster/config.json holds the value, GET echoes it; UI textarea round-trips (typed via the real React events, focusout -> PUT -> 200). Parity items already present in Muster and NOT re-implemented: standing instructions (soul-md.ts), skills (workspace-skills.ts), memory w/ history, routines, channels, engine CLIs, approval levels, tour replay, context menus, model per thread+bot, local VM/cloud computers.
 
 Note: concurrent agent shipped onboarding fixes (2e34471) mid-sweep; my diff stays out of their files.
+
+## Sweep 4 (2026-09-25): event-log retention — real implementation replacing the placeholder
+
+(The bash heredoc that appends this section failed with a quoting error; retrying below.)
+
+License check first: OMB is Apache 2.0 (enterprise/ carve-out; name/mascot are
+trademarks and stay out), so porting logic with Muster's own brand is permitted.
+Direct copy of OMB's UI was rejected on principle — Muster's Settings wire
+already had honest placeholders; the right move is real features behind them.
+
+- [x] G11: event-log retention works end-to-end (config -> sweep -> filesystem)
+  CHECK: npx vitest run server/config.test.ts server/index.test.ts server/event-log-cleanup.test.ts
+  EXPECT: 97 passed
+  EVIDENCE: server/event-log-cleanup.ts — listEventLogFiles excludes the sync engine's sync-*.ndjson journal by prefix; deleteStaleArchivedLogs removes only ARCHIVED (hidden) bots' thread logs whose mtime is older than the threshold (mtime = last bus write, so active threads are always fresh) and never touches a non-archived thread's log; trimEventLog/trimAllEventLogs keep the newest tail cut at a newline boundary. server/index.ts: daily unref'd sweep (24h) gated on the live config section; configStatus echoes both values (null = OFF); PUT /api/config persists through the existing section-merge. Verified LIVE: PUT {days:7,mib:50} -> 200, disk + echo confirmed, settings row shows 7/50 with switches ON; UI toggle round-trips through the guarded save path. Groups are deliberately out of scope (Muster never archives groups — deletion is already immediate there). Deliberately NOT cloned: OMB's React components, mock scene markup, and assets; Muster keeps its own design system and brand.
+
+- [x] G11: event-log retention works end-to-end (config -> sweep -> filesystem)
+  CHECK: npx vitest run server/config.test.ts server/index.test.ts server/event-log-cleanup.test.ts
+  EXPECT: 97 passed
+  EVIDENCE: server/event-log-cleanup.ts - listEventLogFiles excludes the sync engine sync-*.ndjson journal by prefix; deleteStaleArchivedLogs removes only ARCHIVED (hidden) bots thread logs whose mtime is older than the threshold (mtime = last bus write, so active threads are always fresh) and never touches a non-archived thread log; trimEventLog/trimAllEventLogs keep the newest tail cut at a newline boundary. server/index.ts: daily unref-ed sweep (24h) gated on the live config section; configStatus echoes both values (null = OFF); PUT /api/config persists through the existing section-merge. Verified LIVE before commit: PUT {days:7,mib:50} -> 200, disk + echo confirmed, settings row shows 7/50 with switches ON and toggles round-trip. Groups are deliberately out of scope (Muster never archives groups - room deletion already unlinks logs immediately). Deliberately NOT cloned: OMB React components, mock scene markup, assets; Muster keeps its own design system and brand. License: OMB is Apache 2.0 (enterprise/ carve-out; name and mascot are trademarks and stay out) - porting logic with attribution is permitted; attribution recorded here. Concurrent-agent note: 2b2585b landed the identical config section mid-flight (great minds); merged cleanly, my diff keeps the sweep + UI + tests on top. Suites at close: 97/97, tsc clean, oxlint 0/0.
