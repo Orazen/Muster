@@ -278,6 +278,7 @@ import { applyGzipHeaders, isText, json, negotiateStaticGzip, readBody } from ".
 import { handleEmailOtpAuthRequest, isEmailOtpAuthPath } from "./email-otp-login.ts";
 import * as driveSync from "./drive-sync.ts";
 import * as accountDrive from "./account-drive.ts";
+import { googleDriveConnectConfigured } from "./google-auth.ts";
 import * as telegramSync from "./telegram-sync.ts";
 import * as syncState from "./sync-state.ts";
 import { setChatChangeListener, setMemoryWriteListener } from "./sync-hooks.ts";
@@ -3855,6 +3856,17 @@ function appVersion(): string {
 interface StorageGateState {
   required: boolean;
   satisfied: boolean;
+  /** What this deployment can actually put in front of the user. The gate
+   * modal reads this so it never shows a connect button the server will
+   * refuse: `/api/workspace/google/connect` answers 501 unless a Drive
+   * credential pair is configured on this install. */
+  options: {
+    googleDrive: { available: boolean; connected: boolean };
+    /** Deployment-wide, not per-user: saveConfig writes one config.json, so a
+     * Telegram binding belongs to the operator and satisfies the gate for
+     * everyone. It is a workspace channel, not a user's own storage. */
+    telegram: { configured: boolean };
+  };
 }
 
 /** Hosted setup currently requires an explicit per-user storage connection.
@@ -3862,11 +3874,24 @@ interface StorageGateState {
  * the hosted installation bundle routes remain unavailable. Local installs
  * continue to use their own device storage without this prerequisite. */
 function storageGateFor(userId: string | null | undefined): StorageGateState {
-  if (!SELF_HOSTED || !userId) return { required: false, satisfied: true };
+  const telegramConfigured = Boolean(cfg.telegramSync?.botToken?.trim() && cfg.telegramSync?.chatId);
+  if (!SELF_HOSTED || !userId) {
+    return {
+      required: false,
+      satisfied: true,
+      options: { googleDrive: { available: googleDriveConnectConfigured(), connected: false }, telegram: { configured: telegramConfigured } },
+    };
+  }
   const tokens = accountDrive.googleTokensFor(getDb(), userId);
   const driveConnected = Boolean(tokens?.refreshToken);
-  const telegramConfigured = Boolean(cfg.telegramSync?.botToken?.trim() && cfg.telegramSync?.chatId);
-  return { required: true, satisfied: driveConnected || telegramConfigured };
+  return {
+    required: true,
+    satisfied: driveConnected || telegramConfigured,
+    options: {
+      googleDrive: { available: googleDriveConnectConfigured(), connected: driveConnected },
+      telegram: { configured: telegramConfigured },
+    },
+  };
 }
 
 function configStatus(userId?: string, userName?: string, userEmail?: string) {

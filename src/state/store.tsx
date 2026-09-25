@@ -309,8 +309,17 @@ export interface ConfigStatus {
   /** BYO VPS computer; the alias is a setting, credentials stay in ssh(1). */
   vps?: { sshAlias: string };
   /** Storage-sovereignty gate (decision 14): required on hosted deployments,
-   * satisfied once the user's own Drive (or install Telegram) is connected. */
-  storageGate?: { required: boolean; satisfied: boolean };
+   * satisfied once the user's own Drive (or install Telegram) is connected.
+   * `options` reports what this deployment can actually offer, so the gate
+   * modal never presents a connect action the server would refuse. */
+  storageGate?: {
+    required: boolean;
+    satisfied: boolean;
+    options?: {
+      googleDrive: { available: boolean; connected: boolean };
+      telegram: { configured: boolean };
+    };
+  };
 }
 
 /** How an engine gets installed — declared by its driver, mirrors

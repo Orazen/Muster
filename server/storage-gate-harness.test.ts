@@ -59,8 +59,18 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
   const gate = async (server: Booted) => {
     const response = await api(server, "/api/config", { headers: { cookie: server.cookie } });
     expect(response.status).toBe(200);
-    return z.object({ storageGate: z.object({ required: z.boolean(), satisfied: z.boolean() }) })
-      .parse(await response.json()).storageGate;
+    // `options` is what the gate modal reads to avoid offering a connect
+    // action the server would refuse, so it is part of the contract.
+    return z.object({
+      storageGate: z.object({
+        required: z.boolean(),
+        satisfied: z.boolean(),
+        options: z.object({
+          googleDrive: z.object({ available: z.boolean(), connected: z.boolean() }),
+          telegram: z.object({ configured: z.boolean() }),
+        }),
+      }),
+    }).parse(await response.json()).storageGate;
   };
 
   const boot = async (kind: "hosted" | "local", port: number, withTransport: boolean) => {
@@ -131,7 +141,15 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
 
   it("locks a fresh hosted workspace until the user's own Drive is connected", async () => {
     // The gate is advertised honestly…
-    expect(await gate(hosted)).toEqual({ required: true, satisfied: false });
+    const fresh = await gate(hosted);
+    expect(fresh).toMatchObject({ required: true, satisfied: false });
+    // …and it only claims Drive is available when the connect route would
+    // actually answer 200. This fixture configures Google credentials, so the
+    // two must agree; a deployment without them reports available:false and
+    // the modal stops offering a button that could only ever 501.
+    expect(fresh.options.googleDrive.available).toBe(true);
+    expect(fresh.options.googleDrive.connected).toBe(false);
+    expect(fresh.options.telegram.configured).toBe(false);
     // …and enforced where durable state is created.
     const denied = await api(hosted, "/api/bots", {
       method: "POST", headers: { "content-type": "application/json", cookie: hosted.cookie }, body: JSON.stringify({}),
@@ -140,7 +158,7 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
     expect(await denied.json()).toMatchObject({ code: "STORAGE_GATE_REQUIRED" });
 
     // A local desktop signup has NO gate: the machine is the storage.
-    expect(await gate(local)).toEqual({ required: false, satisfied: true });
+    expect(await gate(local)).toMatchObject({ required: false, satisfied: true });
     const localBot = await api(local, "/api/bots", {
       method: "POST", headers: { "content-type": "application/json", cookie: local.cookie }, body: JSON.stringify({}),
     });
@@ -156,7 +174,7 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
         .run(randomBytes(16).toString("hex"), transport.googleSubject, "google", hosted.userId,
           null, null, "", now, now);
     } finally { db.close(); }
-    expect(await gate(hosted)).toEqual({ required: true, satisfied: false });
+    expect(await gate(hosted)).toMatchObject({ required: true, satisfied: false });
 
     const connect = await api(hosted, "/api/workspace/google/connect", { headers: { cookie: hosted.cookie } });
     expect(connect.status).toBe(200);
@@ -173,7 +191,7 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
     } finally { consentDb.close(); }
     expect(await expectRedirect(hosted, `/api/workspace/google/callback?code=owned-consent-code&state=${encodeURIComponent(state)}`)).toBe(true);
 
-    expect(await gate(hosted)).toEqual({ required: true, satisfied: true });
+    expect(await gate(hosted)).toMatchObject({ required: true, satisfied: true });
     const created = await api(hosted, "/api/bots", {
       method: "POST", headers: { "content-type": "application/json", cookie: hosted.cookie }, body: JSON.stringify({}),
     });
@@ -197,7 +215,7 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
     try {
       disconnectDrive(db, hosted.userId);
     } finally { db.close(); }
-    expect(await gate(hosted)).toEqual({ required: true, satisfied: false });
+    expect(await gate(hosted)).toMatchObject({ required: true, satisfied: false });
     const send = await api(hosted, `/api/bots/${createdBotId}/messages`, {
       method: "POST", headers: { "content-type": "application/json", cookie: hosted.cookie }, body: JSON.stringify({ text: "hello" }),
     });
