@@ -91,6 +91,15 @@ export function beatAt(index: number): ChatBeat {
   return ONBOARDING_CHAT_BEATS[Math.max(0, Math.min(index, ONBOARDING_CHAT_BEATS.length - 1))];
 }
 
+/** Whether picking a chip on this beat immediately advances to the next beat.
+ * The crew beat must NOT: the beat after it ("done") renders no interactive
+ * control, so advancing on the chip stranded the user on a screen that
+ * claimed the crew was hired while creating nothing. Crew advances only
+ * through its explicit Continue / "Start empty" button. */
+export function beatAdvancesOnPick(beat: ChatBeat): boolean {
+  return beat.kind === "single" && beat.id !== "crew";
+}
+
 export function beatCount(): number {
   return ONBOARDING_CHAT_BEATS.length;
 }

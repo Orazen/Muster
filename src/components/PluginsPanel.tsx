@@ -209,8 +209,19 @@ export function PluginsPanel() {
 
   const disconnect = (slug: string) => {
     setBusySlug(slug);
+    setError(null);
+    // Read the body's { removed } count: the Muster Connector (openconnector)
+    // has no runtime disconnect and answers { removed: 0 }. Swallowing the
+    // body made a no-op look identical to a success — the pill just stayed
+    // "Connected". Only claim success when something was actually removed.
     api(`/api/connectors/${slug}`, { method: "DELETE" })
-      .then(() => refreshStatus([slug]))
+      .then((result: { removed?: number } | undefined) => {
+        if ((result?.removed ?? 0) === 0) {
+          setError("This connector has no disconnect endpoint — revoke the connection at the provider, then refresh.");
+          return;
+        }
+        return refreshStatus([slug]);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setBusySlug(null));
   };

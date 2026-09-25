@@ -9,7 +9,7 @@ import "./onboarding-chat.css";
 
 import { AgentBotAvatar } from "@/components/AgentBotAvatar";
 import { api, useStore } from "@/state/store";
-import { beatAt, beatCount, markOnboardingChatDone, onboardingChatDone, planCrew, type Turn } from "@/lib/onboarding-chat";
+import { beatAdvancesOnPick, beatAt, beatCount, markOnboardingChatDone, onboardingChatDone, planCrew, type Turn } from "@/lib/onboarding-chat";
 
 export function OnboardingChat() {
   const { state } = useStore();
@@ -58,12 +58,13 @@ export function OnboardingChat() {
   }, [turns.length]);
 
   const answer = (optionId: string, label: string) => {
-    if (beat.kind === "single") {
-      if (beat.id === "role") setPicked((p) => ({ ...p, role: optionId }));
-      if (beat.id === "crew") setPicked((p) => ({ ...p, crew: optionId }));
-      setTurns((prev) => [...prev, { who: "user", text: label }]);
-      setStep((s) => s + 1);
-    }
+    if (beat.kind !== "single") return;
+    if (beat.id === "role") setPicked((p) => ({ ...p, role: optionId }));
+    if (beat.id === "crew") setPicked((p) => ({ ...p, crew: optionId }));
+    setTurns((prev) => [...prev, { who: "user", text: label }]);
+    // crew is excluded here on purpose (see beatAdvancesOnPick): its Continue
+    // / "Start empty" button drives advance(), which runs the real hire.
+    if (beatAdvancesOnPick(beat)) setStep((s) => s + 1);
   };
 
   const togglePain = (optionId: string) => {

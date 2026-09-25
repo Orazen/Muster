@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  beatAdvancesOnPick,
   beatAt,
   beatCount,
   markOnboardingChatDone,
@@ -54,6 +55,28 @@ describe("onboarding chat beats", () => {
       { who: "user", text: "Marketing" },
     ];
     expect(turns.every((t) => t.who === "assistant" || t.who === "user")).toBe(true);
+  });
+
+  it("does not auto-advance the crew beat — its Continue button runs the hire", () => {
+    // Regression: the crew chip used to advance straight to the "done" beat,
+    // which renders no interactive control. That stranded the user on a
+    // screen that claimed the crew was hired while POST /api/bots never ran.
+    const crew = beatAt(3);
+    expect(crew.id).toBe("crew");
+    expect(beatAdvancesOnPick(crew)).toBe(false);
+    // role and pains still advance normally
+    expect(beatAdvancesOnPick(beatAt(1))).toBe(true); // role
+  });
+
+  it("every single-select beat either advances or is the crew (the only safe hold)", () => {
+    // If a future beat is added between crew and done, advancing on its pick
+    // must not land on the non-interactive "done" beat.
+    const singles = ONBOARDING_CHAT_BEATS.filter((b) => b.kind === "single");
+    for (const beat of singles) {
+      const next = ONBOARDING_CHAT_BEATS[ONBOARDING_CHAT_BEATS.indexOf(beat) + 1];
+      const landsOnDone = next?.id === "done";
+      expect(landsOnDone && beatAdvancesOnPick(beat)).toBe(false);
+    }
   });
 });
 

@@ -88,7 +88,7 @@ const CREDENTIALS = {
     label: "Muster Cloud account",
     placeholder: "https://muster.today",
     description:
-      "Opt in to one shared identity: sign in here and on your Muster Cloud endpoint. Bots, threads, and messages can sync where you enable cloud relay; local mode keeps all user data on-device.",
+      "Opt in to one shared identity: sign in here and on your Muster Cloud endpoint. This bridges sign-in only — each install keeps its own bots, threads, and messages on-device.",
     href: "/docs/self-host",
     linkLabel: "How it works",
     optional: true,
