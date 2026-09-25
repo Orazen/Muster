@@ -121,6 +121,7 @@ function TeamContextCard() {
 function TourCard() {
   const { user: authUser } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   return (
     <Card
       title="First-run tour"
@@ -131,14 +132,19 @@ function TourCard() {
         disabled={busy}
         onClick={() => {
           setBusy(true);
-          void clearOnboardingGate(authUser?.id).then(() => {
-            window.location.href = "/app";
-          });
+          setError("");
+          void clearOnboardingGate(authUser?.id)
+            .then((cleared) => {
+              if (cleared) window.location.href = "/app";
+              else setError("Couldn't reach the server to reset the tour. Check your connection and try again.");
+            })
+            .finally(() => setBusy(false));
         }}
         className="rounded-lg bg-raised px-3 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-raised-hover disabled:opacity-50"
       >
         {busy ? "Preparing…" : "Replay welcome tour"}
       </button>
+      {error && <div className="mt-2 text-[12.5px] text-[#ff6b6b]" role="alert">{error}</div>}
     </Card>
   );
 }

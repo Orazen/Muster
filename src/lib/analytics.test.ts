@@ -1,7 +1,7 @@
 // The Settings → Analytics switch must be able to stop every capture,
 // including the tracker's first init, and its choice must survive both
 // blocked storage and an app restart.
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const posthogMock = vi.hoisted(() => ({
   init: vi.fn(),
@@ -45,6 +45,7 @@ function blockingStorage(): FakeStorage {
 
 function stubStorage(storage: FakeStorage): void {
   vi.stubGlobal("localStorage", storage);
+  vi.stubGlobal("sessionStorage", storage);
 }
 
 /** Fresh module state (ready/initialized/sessionChoice) against the same
@@ -184,4 +185,47 @@ it("opt-out survives an app restart", async () => {
   a.track("anything");
   expect(posthogMock.init).not.toHaveBeenCalled();
   expect(posthogMock.capture).not.toHaveBeenCalled();
+});
+
+describe("clearOnboardingGate (Replay welcome tour)", () => {
+  const REPLAY_KEY = "muster:tour-replay";
+
+  function gateResponse(ok: boolean): Response {
+    return new Response("{}", { status: ok ? 200 : 500 });
+  }
+
+  it("clears the local gate and arms replay only after the server confirms", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(gateResponse(true));
+    vi.stubGlobal("fetch", fetchMock);
+    const a = await loadAnalytics();
+
+    expect(await a.clearOnboardingGate("user-1")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/me/onboarding",
+      expect.objectContaining({ method: "PUT" }),
+    );
+    // the local fast-path is dropped and the one-shot replay flag is armed
+    expect(localStorage.getItem("omb-email-gate.user-1")).toBeNull();
+    expect(sessionStorage.getItem(REPLAY_KEY)).toBe("1");
+  });
+
+  it("reports failure and leaves the gate intact when the server rejects the reset", async () => {
+    // A 500 must not look like success: reloading here would land back on a
+    // still-gated wizard, so the old code cleared the gate and reloaded into
+    // a hidden tour with no error.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(gateResponse(false)));
+    const a = await loadAnalytics();
+
+    expect(await a.clearOnboardingGate("user-1")).toBe(false);
+    // no replay armed — the caller stays put and can surface the error
+    expect(sessionStorage.getItem(REPLAY_KEY)).toBeNull();
+  });
+
+  it("reports failure and leaves the gate intact when the network throws", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    const a = await loadAnalytics();
+
+    expect(await a.clearOnboardingGate("user-1")).toBe(false);
+    expect(sessionStorage.getItem(REPLAY_KEY)).toBeNull();
+  });
 });

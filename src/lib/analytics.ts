@@ -144,18 +144,21 @@ export function setEmailGateDone(userId: string | undefined, status: "submitted"
 }
 
 /** Undo the dismissal everywhere — the client half of "Replay welcome
- * tour". Awaited, so the caller only reloads once the server gate is truly
- * cleared (a stale server flag would silently re-hide the wizard). */
-export async function clearOnboardingGate(userId: string | undefined): Promise<void> {
-  localStorage.removeItem(gateKey(userId));
-  localStorage.removeItem(gateKey(undefined));
-  requestTourReplay();
-  await fetch("/api/me/onboarding", {
+ * tour". Resolves only once the server gate is truly cleared; a stale
+ * server flag would silently re-hide the wizard, so a failed reset is
+ * reported instead of arming a replay that lands back on a hidden gate. */
+export async function clearOnboardingGate(userId: string | undefined): Promise<boolean> {
+  const res = await fetch("/api/me/onboarding", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     credentials: "include",
     body: JSON.stringify({ status: "reset" }),
-  }).catch(() => {});
+  }).catch(() => null);
+  if (!res || !res.ok) return false;
+  localStorage.removeItem(gateKey(userId));
+  localStorage.removeItem(gateKey(undefined));
+  requestTourReplay();
+  return true;
 }
 
 /** The wizard's returning-user guard (a transcript means you've seen it)
