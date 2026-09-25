@@ -70,6 +70,8 @@ import { StopCleanupNotice } from "./StopCleanupNotice";
 import { TimelineStrip } from "./TimelineStrip";
 import { ConnectorCard } from "./ConnectorCard";
 import { LocalVmQuickSetup } from "./LocalComputerSection";
+import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { hostBuild, turnFixAllowed } from "@/lib/host-build";
 import { ModelPicker } from "./ModelPicker";
 import { RenameTitle } from "./RenameTitle";
 import { TaskPicker } from "./TaskPicker";
@@ -254,7 +256,16 @@ function ErrorRow({
   const { dispatch } = useStore();
   const [fixing, setFixing] = useState(false);
   const [showVmSetup, setShowVmSetup] = useState(false);
+  // "Set up automatically" starts containers and pulls a desktop image on the
+  // machine answering /api/local-computer. In a browser that machine is the
+  // SERVER's, so the button offered to repair a failure on the reader's own
+  // Mac was a one-click way to modify a host they do not own. The switch-to-
+  // cloud fix stays — that one is a server-side bot setting and is correct in
+  // both builds.
+  const { capabilities } = useDesktopCapabilities();
+  const build = hostBuild(capabilities);
   const fix = errorFix(message);
+  const shownFix = fix && turnFixAllowed(fix.action, build) ? fix : undefined;
   const applyFix = async () => {
     if (!fix) return;
     if (fix.action === "open-vm-settings") {
@@ -295,21 +306,21 @@ function ErrorRow({
               </button>
             )
           )}
-          {fix && (
+          {shownFix && (
             <span className="flex items-center gap-2">
-              {fix.action !== "switch-computer-cloud" && <span className="text-[12px] text-ink-secondary">{fix.hint}</span>}
+              {shownFix.action !== "switch-computer-cloud" && <span className="text-[12px] text-ink-secondary">{shownFix.hint}</span>}
               <button
                 onClick={() => void applyFix()}
                 disabled={fixing}
                 className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
               >
                 {fixing ? <Loader2 size={12} className="animate-spin" /> : <Wrench size={12} />}
-                {fixing ? "Switching…" : fix.label}
+                {fixing ? "Switching…" : shownFix.label}
               </button>
             </span>
           )}
         </div>
-        {fix?.action === "open-vm-settings" && showVmSetup && <LocalVmQuickSetup />}
+        {shownFix?.action === "open-vm-settings" && showVmSetup && <LocalVmQuickSetup />}
       </div>
     </div>
   );

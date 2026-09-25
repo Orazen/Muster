@@ -17,6 +17,8 @@ import { PortableBackupCard } from "./PortableBackupCard";
 import { SnapshotsCard } from "./SnapshotsCard";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
+import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { hostBuild, settingsSectionAllowed } from "@/lib/host-build";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
 import { RemoteAccessSection } from "./RemoteAccessSection";
@@ -963,7 +965,21 @@ export function SettingsModal() {
   // Audit sits before Billing; present whenever the endpoint answers — an
   // empty ledger shows its honest empty state instead of hiding the feature.
   // The browser build is a thin client; the Electron preload is the desktop marker.
-  const sections = SECTIONS.filter((entry) => entry.id !== "localFirst" || Boolean(globalThis.window?.ogb));
+  //
+  // "Local VM" is DESKTOP-ONLY and was the sharpest web/desktop blur: its
+  // routes have no server-side wall (a hosted operator could install a
+  // container runtime and start containers on the production host), and in a
+  // browser it silently pointed at the SERVER's machine, never the user's.
+  // The VPS card has the same shape — it SSHes to a host chosen on the
+  // server and reports "check ~/.ssh/config", a file the browser user does
+  // not have. Both now stay out of the browser nav entirely. The build is
+  // read from the capability set (host-build.ts) rather than from a second
+  // window.ogb test: localComputer.available would hide the section from a
+  // desktop that has simply not enabled access yet.
+  const { capabilities } = useDesktopCapabilities();
+  const build = hostBuild(capabilities);
+  const inBrowser = build === "browser";
+  const sections = SECTIONS.filter((entry) => settingsSectionAllowed(entry.id, build, Boolean(globalThis.window?.ogb)));
   if (audit.reachable && auditBotId) {
     sections.splice(sections.length - 1, 0, { id: "audit", label: "Audit", icon: ShieldCheck, keywords: ["decisions", "ledger", "history"] });
     sections.splice(sections.length - 1, 0, { id: "why", label: "Why", icon: NotebookPen, keywords: ["journal", "decisions", "intent", "reasoning", "runs"] });
@@ -1167,7 +1183,12 @@ export function SettingsModal() {
                 <EffortDefaultRow />
                 <ParallelThreadsRow />
                 <EventLogCleanupRow />
-                <VpsCard />
+                {/* BYO VPS is a desktop setting: it SSHes to a host named on
+                    THIS machine's ~/.ssh/config. In a browser that config
+                    belongs to the server, not the reader, so the card is
+                    hidden rather than shown with a failure the user cannot
+                    act on. */}
+                {!inBrowser && <VpsCard />}
                 <DiagnosticsCard />
                 <AccountSection />
                 <MergeAccountsCard />
@@ -1303,7 +1324,7 @@ export function SettingsModal() {
 
             {section === "voice" && <VoiceSettings />}
 
-            {section === "computer" && <LocalComputerSection />}
+            {section === "computer" && !inBrowser && <LocalComputerSection />}
 
             {section === "usage" && <UsageSection />}
             {section === "usage" && <ProviderHealthSection />}

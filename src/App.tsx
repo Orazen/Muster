@@ -23,7 +23,8 @@ const StorageGate = lazy(() => import("@/components/StorageGate").then((m) => ({
 const TeamTemplates = lazy(() => import("@/components/TeamTemplates").then((m) => ({ default: m.TeamTemplates })));
 const OnboardingChat = lazy(() => import("@/components/OnboardingChat").then((m) => ({ default: m.OnboardingChat })));
 import { UpdateBanner } from "@/components/UpdateBanner";
-import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
+import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/components/DesktopCapabilities";
+import { hostBuild } from "@/lib/host-build";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ShortcutsSheet } from "@/components/ShortcutsSheet";
@@ -72,6 +73,14 @@ function Shell() {
   }, [location.key, location.search, location.pathname, location.hash, user?.id, state.rosterHydrated, state.bots, dispatch, navigate]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // The scout reads a project folder the SERVER opens, and it is offered as
+  // "scout a project folder" — a phrase that means the reader's own folder.
+  // On a desktop the server is the reader's machine, so that is exactly
+  // right. In a browser the path can only ever name a folder on the host
+  // that serves the app, so the prompt invites someone to type their Mac's
+  // layout and gets a read of the deployment instead. Desktop only.
+  const { capabilities } = useDesktopCapabilities();
+  const build = hostBuild(capabilities);
   const [scoutOpen, setScoutOpen] = useState(false);
   const [firstRun, setFirstRun] = useState(true);
   // Web audit 2026-08-23: the wizard must not render until the identity is
@@ -252,7 +261,7 @@ function Shell() {
               >
                 New bot
               </button>
-              {scoutOpen ? (
+              {build === "desktop" && (scoutOpen ? (
                 <ProjectScout onDone={() => setScoutOpen(false)} />
               ) : (
                 <button
@@ -261,7 +270,7 @@ function Shell() {
                 >
                   or scout a project folder for a suggested team
                 </button>
-              )}
+              ))}
             </div>
           )}
           {!state.connected && (
