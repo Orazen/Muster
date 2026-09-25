@@ -38,6 +38,7 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
   let transport: ReturnType<typeof createWorkspaceDriveFixture>;
   let hosted: Booted;
   let local: Booted;
+  let hostedWithOperatorTelegram: Booted;
   let createdBotId = "";
 
   const api = (server: Booted, path: string, opts: RequestInit = {}) =>
@@ -73,17 +74,34 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
     }).parse(await response.json()).storageGate;
   };
 
-  const boot = async (kind: "hosted" | "local", port: number, withTransport: boolean) => {
+  /** The only extra config section these fixtures inject: a deployment-wide
+   * operator Telegram binding, written into the shared config.json. */
+  interface OperatorTelegram {
+    botToken: string;
+    chatId: number;
+    chatLabel: string;
+    lastFileId: string;
+  }
+
+  const boot = async (
+    kind: "hosted" | "local",
+    port: number,
+    withTransport: boolean,
+    telegramSync?: OperatorTelegram,
+  ) => {
     const directory = join(rootDirectory, `${kind}-${randomBytes(4).toString("hex")}`);
     const dataDirectory = join(directory, "data");
     const home = join(directory, "home"), companion = join(directory, "companion"), ui = join(directory, "ui");
     for (const p of [dataDirectory, home, companion, ui]) mkdirSync(p, { recursive: true, mode: 0o700 });
     writeFileSync(join(ui, "index.html"), `<!doctype html><title>Storage-gate ${kind} fixture</title>`);
-    // No telegramSync anywhere: the Drive connect is the only path that can
-    // satisfy the gate in this fixture.
-    writeFileSync(join(dataDirectory, "config.json"), JSON.stringify({
-      instances: { ghost: { driver: "not-a-real-driver", displayName: "Offline storage-gate fixture" } },
-    }), { mode: 0o600 });
+    // No telegramSync unless the caller injects it: a user's own Drive
+    // connection is the only thing that can satisfy the gate.
+    const base = { instances: { ghost: { driver: "not-a-real-driver", displayName: "Offline storage-gate fixture" } } };
+    writeFileSync(
+      join(dataDirectory, "config.json"),
+      JSON.stringify(telegramSync ? { ...base, telegramSync } : base),
+      { mode: 0o600 },
+    );
     const env = pairingServerEnvironment({ home, dataDirectory, companionDirectory: companion, staticDir: ui, port, webhookPort: port + 1, secret: randomBytes(32).toString("hex") });
     Object.assign(env, { OMB_ALLOW_SIGNUPS: "true" });
     if (kind === "hosted") {
@@ -124,8 +142,18 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
     transport = createWorkspaceDriveFixture(join(rootDirectory, "google"));
     const hostedPort = await freePortBlock([0], 47000, 9000);
     const localPort = await freePortBlock([1], 47000, 9000);
+    const operatorPort = await freePortBlock([2], 47000, 9000);
     hosted = await boot("hosted", hostedPort, true);
     local = await boot("local", localPort, false);
+    // Same deployment, but the operator has already bound a Telegram
+    // workspace channel. That binding lives in the shared config.json, so it
+    // is visible to every account on this install.
+    hostedWithOperatorTelegram = await boot("hosted", operatorPort, true, {
+      botToken: "123456:operator-bot-token",
+      chatId: 424242,
+      chatLabel: "Operator channel",
+      lastFileId: "",
+    });
   }, 60_000);
 
   afterAll(async () => {
@@ -206,6 +234,28 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
     const roster = await api(hosted, "/api/bots", { headers: { cookie: hosted.cookie } });
     expect(roster.status).toBe(200);
   }, 30_000);
+
+  it("does not let the operator's Telegram channel open another user's gate", async () => {
+    // Regression: the gate used to read `driveConnected || telegramConfigured`,
+    // but telegramSync is one deployment-wide binding in the shared
+    // config.json — so the operator connecting Telegram once opened the
+    // storage gate for every account on the install, including a brand-new
+    // signup that had connected nothing. Only the user's own Drive grant
+    // counts now; the channel is still reported so the UI can explain it.
+    const operatorTelegram = await gate(hostedWithOperatorTelegram);
+    expect(operatorTelegram.options.telegram.configured).toBe(true);
+    expect(operatorTelegram).toMatchObject({ required: true, satisfied: false });
+    expect(operatorTelegram.options.googleDrive.connected).toBe(false);
+
+    // And it is not merely advertised — the write surface really refuses.
+    const denied = await api(hostedWithOperatorTelegram, "/api/bots", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: hostedWithOperatorTelegram.cookie },
+      body: JSON.stringify({}),
+    });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ code: "STORAGE_GATE_REQUIRED" });
+  }, 20_000);
 
   it("sends the same refusal for work on a gated user's thread", async () => {
     // Re-close the gate at its honest pre-consent shape (row exists, no

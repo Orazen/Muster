@@ -3863,8 +3863,9 @@ interface StorageGateState {
   options: {
     googleDrive: { available: boolean; connected: boolean };
     /** Deployment-wide, not per-user: saveConfig writes one config.json, so a
-     * Telegram binding belongs to the operator and satisfies the gate for
-     * everyone. It is a workspace channel, not a user's own storage. */
+     * Telegram binding belongs to the operator, not to any one account. It is
+     * reported so the UI can explain the deployment, but it is NOT counted
+     * toward a user's own gate — see storageGateFor. */
     telegram: { configured: boolean };
   };
 }
@@ -3872,7 +3873,16 @@ interface StorageGateState {
 /** Hosted setup currently requires an explicit per-user storage connection.
  * This gate does not implement account-scoped backup or automatic cloud sync;
  * the hosted installation bundle routes remain unavailable. Local installs
- * continue to use their own device storage without this prerequisite. */
+ * continue to use their own device storage without this prerequisite.
+ *
+ * Only this user's own Drive grant satisfies it. The Telegram workspace
+ * channel used to count as a second, alternative way through, but it is a
+ * single deployment-wide binding written to the shared config.json — so on a
+ * multi-user deployment the operator connecting Telegram once opened the
+ * gate for every account, including brand-new signups that had connected
+ * nothing. That is the opposite of what "requires an explicit per-user
+ * storage connection" means, so the Telegram leg is gone. It is still
+ * reported in `options` because the UI explains the deployment with it. */
 function storageGateFor(userId: string | null | undefined): StorageGateState {
   const telegramConfigured = Boolean(cfg.telegramSync?.botToken?.trim() && cfg.telegramSync?.chatId);
   if (!SELF_HOSTED || !userId) {
@@ -3886,7 +3896,7 @@ function storageGateFor(userId: string | null | undefined): StorageGateState {
   const driveConnected = Boolean(tokens?.refreshToken);
   return {
     required: true,
-    satisfied: driveConnected || telegramConfigured,
+    satisfied: driveConnected,
     options: {
       googleDrive: { available: googleDriveConnectConfigured(), connected: driveConnected },
       telegram: { configured: telegramConfigured },
@@ -3969,6 +3979,12 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
     localVm: { mode: localVmMode(cfg), maxInstances: localVmMaxInstances(cfg) },
     // same for the channel turn cap; the General panel's minutes input reads it
     channels: { turnCapMinutes: channelTurnCapMinutes(cfg) },
+    // event-log retention (OMB parity): both controls OFF by default — the
+    // General panel's retention checkboxes read this
+    eventLogRetention: {
+      deleteArchivedAfterDays: cfg.eventLogRetention?.deleteArchivedAfterDays ?? null,
+      trimToMib: cfg.eventLogRetention?.trimToMib ?? null,
+    },
     // alias is a setting, not a secret — ssh(1) holds the actual credentials
     vps: { sshAlias: vpsSshAlias(cfg) ?? "" },
   };
