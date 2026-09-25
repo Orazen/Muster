@@ -411,16 +411,90 @@ function ParallelThreadsRow() {
   );
 }
 
-/** OMB prunes its local event log on a schedule; Muster's log is server-side. */
+/** Real (OMB parity): the daily server sweep deletes event-log FILES of
+ * archived threads past the threshold and/or trims each log to a size cap —
+ * never transcripts, never the message database. Off by default; a disabled
+ * number input shows the value that will apply when the control is turned on. */
 function EventLogCleanupRow() {
+  const { state, dispatch } = useStore();
+  const retention = state.config?.eventLogRetention;
+  const savedDays = retention?.deleteArchivedAfterDays ?? 30;
+  const savedMib = retention?.trimToMib ?? 50;
+  const [deleteOn, setDeleteOn] = useState(retention?.deleteArchivedAfterDays != null);
+  const [days, setDays] = useState(String(savedDays));
+  const [trimOn, setTrimOn] = useState(retention?.trimToMib != null);
+  const [mib, setMib] = useState(String(savedMib));
+  const [saveError, setSaveError] = useState("");
+  useEffect(() => {
+    setDeleteOn(retention?.deleteArchivedAfterDays != null);
+    setTrimOn(retention?.trimToMib != null);
+    setDays(String(retention?.deleteArchivedAfterDays ?? 30));
+    setMib(String(retention?.trimToMib ?? 50));
+  }, [retention?.deleteArchivedAfterDays, retention?.trimToMib]);
+
+  const save = (next: { deleteArchivedAfterDays?: number | null; trimToMib?: number | null }) => {
+    setSaveError("");
+    void api("/api/config", {
+      method: "PUT",
+      body: JSON.stringify({ eventLogRetention: next }),
+    })
+      .then((config) => dispatch({ type: "configStatus", config }))
+      .catch((error) => setSaveError(error instanceof Error ? error.message : "Saving failed — try again."));
+  };
+  const commit = (a: boolean, b: string, c: boolean, d: string) => {
+    const parsedDays = Number.parseInt(b, 10);
+    const parsedMib = Number.parseInt(d, 10);
+    save({
+      deleteArchivedAfterDays: a ? (Number.isFinite(parsedDays) ? Math.min(3650, Math.max(1, parsedDays)) : null) : null,
+      trimToMib: c ? (Number.isFinite(parsedMib) ? Math.min(10240, Math.max(1, parsedMib)) : null) : null,
+    });
+  };
+  const numberInput = (value: string, onChange: (v: string) => void, enabled: boolean, min: number, max: number) => (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      value={value}
+      disabled={!enabled}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={() => commit(deleteOn, days, trimOn, mib)}
+      className="w-20 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink focus:border-hairline focus:outline-none disabled:opacity-60"
+    />
+  );
   return (
     <SettingRow
       label="Event log cleanup"
-      description="Placeholder — event-log retention is server-managed on this build; there is no local cleanup schedule to set."
+      description="Trim the logs threads accumulate while they run. The daily sweep only removes event-log files — never threads or transcripts."
     >
-      <span className="rounded-lg border border-hairline bg-inset px-2.5 py-1.5 text-[12px] text-ink-secondary">
-        Not available
-      </span>
+      <div className="flex flex-col gap-2">
+        <label className="flex items-center gap-2.5 text-[13.5px] text-ink-secondary">
+          <Switch
+            checked={deleteOn}
+            label="Delete event logs of archived bots after"
+            onChange={(next) => {
+              setDeleteOn(next);
+              commit(next, days, trimOn, mib);
+            }}
+          />
+          Delete event logs of archived bots after
+          {numberInput(days, setDays, deleteOn, 1, 3650)}
+          days
+        </label>
+        <label className="flex items-center gap-2.5 text-[13.5px] text-ink-secondary">
+          <Switch
+            checked={trimOn}
+            label="Trim each event log to"
+            onChange={(next) => {
+              setTrimOn(next);
+              commit(deleteOn, days, trimOn, mib);
+            }}
+          />
+          Trim each event log to
+          {numberInput(mib, setMib, trimOn, 1, 10240)}
+          MiB
+        </label>
+        {saveError && <p role="alert" className="text-[12.5px] text-[#ff6b6b]">{saveError}</p>}
+      </div>
     </SettingRow>
   );
 }

@@ -299,6 +299,7 @@ import { fetchGithubTeam, fetchLibraryTeam, fetchLibraryTeamReadme, fetchTeamCat
 import { parseTeamMarkdown, renderTeamMarkdown } from "./team-markdown.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { readRuntimeEvidence, readThreadEvents } from "./thread-events.ts";
+import { deleteStaleArchivedLogs, trimAllEventLogs } from "./event-log-cleanup.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -404,6 +405,34 @@ const foregroundCallSweep = setInterval(() => {
   foregroundCallDispatch.sweep();
 }, 5_000);
 foregroundCallSweep.unref();
+
+// Event-log retention (OMB parity), both controls OFF unless configured.
+// Daily sweep: delete the event-log FILES of ARCHIVED (hidden) bots' threads
+// older than the threshold (mtime = last write, so an active thread is always
+// fresh) and/or trim each log to its size cap by keeping the newest tail.
+// Groups are never archived in Muster — deletion is immediate there — so they
+// are out of scope. Never touches transcripts, the message database, or the
+// sync engine's journal files.
+function sweepEventLogs() {
+  const retention = cfg.eventLogRetention;
+  if (!retention) return;
+  const days = retention.deleteArchivedAfterDays;
+  const mib = retention.trimToMib;
+  if (!days && !mib) return;
+  try {
+    if (days) {
+      const archivedThreadIds = new Set(
+        store.bots.filter((b) => b.hidden === true).map((b) => b.threadId),
+      );
+      deleteStaleArchivedLogs({ eventsDir: EVENTS_DIR, archivedThreadIds, days });
+    }
+    if (mib) trimAllEventLogs(EVENTS_DIR, mib);
+  } catch (error) {
+    console.warn("Event-log cleanup will retry:", error instanceof Error ? error.message : error);
+  }
+}
+const eventLogSweep = setInterval(() => sweepEventLogs(), 24 * 60 * 60 * 1000);
+eventLogSweep.unref();
 
 // S2c: the sync engine boots with its ONE producer (memory, fired at the
 // file layer's write choke point) and flushes the restart backlog. The

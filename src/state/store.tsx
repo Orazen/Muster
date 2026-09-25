@@ -306,6 +306,10 @@ export interface ConfigStatus {
   /** Server-side cap on every bot turn in a channel, in minutes. Direct
    * chats are exempt — they stop on silence via the stall watchdog. */
   channels?: { turnCapMinutes: number };
+  /** Event-log retention (OMB parity): null = control OFF. The daily sweep
+   * deletes archived-thread event logs past the threshold and/or trims each
+   * log to the cap — never transcripts or the message database. */
+  eventLogRetention?: { deleteArchivedAfterDays: number | null; trimToMib: number | null };
   /** BYO VPS computer; the alias is a setting, credentials stay in ssh(1). */
   vps?: { sshAlias: string };
   /** Storage-sovereignty gate (decision 14): required on hosted deployments,
