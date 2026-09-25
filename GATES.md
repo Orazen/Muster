@@ -44,3 +44,33 @@
   CHECK: npx vitest run src/lib/analytics.test.ts src/lib/roster-sections.test.ts src/lib/sidebar-preferences.test.ts src/state/onboarding-draft.test.ts src/state/onboarding-finish.test.ts && npx playwright test e2e/onboarding-draft.e2e.spec.ts
   EXPECT: 7 passed
   EVIDENCE: units 112/112, onboarding e2e 7/7, tsc -b clean tree-wide, oxlint 0/0 on the five touched files. Full-suite context: 380 files / 5,728 unit tests passed at sweep start; all 15 e2e specs (40 tests) passed before these fixes were layered in.
+
+## Sweep 3 (2026-09-25): OpenMausBot installed live and diffed feature-by-feature
+
+OMB (milind-soni/OpenMausBot @ 0.1.87) cloned to /tmp/omb, pnpm install,
+vite build, harness run on http://127.0.0.1:9412 with a throwaway data dir
+(/tmp/omb-data) and walked in the browser: first-run tour (5 steps incl.
+terminal + engine-detect scenes), 9-step guided product tour (coach marks
+opening the Computer panel, plugins, automations, calendar), bot context
+menu (New thread / New folder / Pin / Make Chief of Staff / Move to team /
+Mark as Unread / Edit Profile / Duplicate / Copy conversation ID / Archive
+/ Delete), model picker (provider rail CLOUD/LOCAL, "Only this thread"
+vs "Thread + bot default" scope, effort levels Default..Max, suggested +
+show-all models), Team map (teams canvas, shared instructions, per-bot
+default model), Automations (scheduled task / scheduled call / webhook,
+calendar drag), Plugins (marketplace + MCP servers), Templates (Explore /
+Import .mausbackup.json + BotMRR .md + GitHub URL / From a folder /
+Share), bot profile tabs (Overview, Identity w/ image-provider, Soul
+standing instructions mirrored to SOUL.md on disk, Skills, Memory with
+change history, Routines, Access, Model, Permissions w/ Chief-of-Staff +
+approval level, Voice & alerts), App Settings (About me shared context,
+language picker w/ partial i18n, effort default for new bots, parallel
+threads per bot, event-log cleanup, preset sharing, BOTH tours replayable
+separately, People/Activity/Backups sections).
+
+- [x] G10: user shared context ("About me") — the one OMB feature Muster genuinely lacked — implemented and verified
+  CHECK: npx vitest run server/config.test.ts server/index.test.ts
+  EXPECT: 88 passed
+  EVIDENCE: profile.about added to server schema (zod-validated, 2000-char cap in UI), echoed in configStatus for both operator and signed-in branches, injected into EVERY bot's system prompt via the persona seam (server/index.ts startTurn), and editable in Settings → Profile with the same failure-proof save path as sweep 2. Verified LIVE: PUT -> 200, ~/.muster/config.json holds the value, GET echoes it; UI textarea round-trips (typed via the real React events, focusout -> PUT -> 200). Parity items already present in Muster and NOT re-implemented: standing instructions (soul-md.ts), skills (workspace-skills.ts), memory w/ history, routines, channels, engine CLIs, approval levels, tour replay, context menus, model per thread+bot, local VM/cloud computers.
+
+Note: concurrent agent shipped onboarding fixes (2e34471) mid-sweep; my diff stays out of their files.

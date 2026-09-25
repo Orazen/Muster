@@ -799,12 +799,15 @@ describe("harness HTTP API", () => {
   });
 
   it("stores and echoes the user profile (not write-only, unlike keys)", async () => {
-    const put = await api("PUT", "/api/config", { profile: { name: "Ada Lovelace", email: "Ada@Example.com" } });
+    // `about` is the OMB-parity shared context: saved verbatim, echoed back,
+    // and injected into every bot's system prompt (persona seam).
+    const about = "Runs a two-person studio. Prefers short answers. Timezone: IST.";
+    const put = await api("PUT", "/api/config", { profile: { name: "Ada Lovelace", email: "Ada@Example.com", about } });
     expect(put.status).toBe(200);
-    expect(put.body.profile).toEqual({ name: "Ada Lovelace", email: "Ada@Example.com" });
+    expect(put.body.profile).toEqual({ name: "Ada Lovelace", email: "Ada@Example.com", about });
 
     const after = await api("GET", "/api/config");
-    expect(after.body.profile).toEqual({ name: "Ada Lovelace", email: "Ada@Example.com" });
+    expect(after.body.profile).toEqual({ name: "Ada Lovelace", email: "Ada@Example.com", about });
   });
 
   it("creates an independent webhook, accepts a delivery, deduplicates it, and rotates its secret", async () => {

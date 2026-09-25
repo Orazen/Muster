@@ -69,8 +69,10 @@ const appConfigSchema = z.object({
   opencodeGo: z.object({ apiKey: optionalText }).optional(),
   /** Voice credentials and the selected voice id. */
   tts: z.object({ key: optionalText, voice: optionalText }).optional(),
-  /** Non-secret profile details shown in the sidebar. */
-  profile: z.object({ name: optionalText, email: optionalText }).optional(),
+  /** Non-secret profile details shown in the sidebar. `about` is the
+   * user's shared context — injected into every bot's system prompt, so
+   * each bot knows who it works for without being told every chat. */
+  profile: z.object({ name: optionalText, email: optionalText, about: optionalText }).optional(),
   /** Local VM desktop isolation. "shared" keeps the historical singleton
    * desktop every bot leases one at a time; "perBot" gives each bot its own
    * container, workspace, viewer port and lease lanes. */
@@ -140,7 +142,7 @@ export interface AppConfig {
   channels?: { turnCapMinutes?: number };
   /** BYO VPS over SSH; see isValidSshAlias for what may be stored here. */
   vps?: { sshAlias?: string };
-  profile?: { name?: string; email?: string };
+  profile?: { name?: string; email?: string; about?: string };
   providers?: Record<string, { apiKey?: string }>;
   customProviders?: CustomProvider[];
   instances?: InstanceConfigMap;

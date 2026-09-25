@@ -157,10 +157,14 @@ function ProfileFields() {
   // be `||`, not `??`: nullish coalescing never falls through on "".
   const [name, setName] = useState(state.config?.profile?.name || authUser?.name || "");
   const [email, setEmail] = useState(state.config?.profile?.email || authUser?.email || "");
+  // OMB parity: shared user context. Every bot's system prompt carries it,
+  // so the user explains once instead of re-explaining in every chat.
+  const [about, setAbout] = useState(state.config?.profile?.about || "");
   useEffect(() => {
     setName(state.config?.profile?.name || authUser?.name || "");
     setEmail(state.config?.profile?.email || authUser?.email || "");
-  }, [state.config?.profile?.name, state.config?.profile?.email, authUser?.name, authUser?.email]);
+    setAbout(state.config?.profile?.about || "");
+  }, [state.config?.profile?.name, state.config?.profile?.email, state.config?.profile?.about, authUser?.name, authUser?.email]);
 
   const [saveError, setSaveError] = useState("");
 
@@ -173,7 +177,7 @@ function ProfileFields() {
     setSaveError("");
     void api("/api/config", {
       method: "PUT",
-      body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase() } }),
+      body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase(), about: about.trim() } }),
     })
       .then((config) => dispatch({ type: "configStatus", config }))
       .catch((error) => setSaveError(error instanceof Error ? error.message : "Saving failed — try again."));
@@ -196,6 +200,24 @@ function ProfileFields() {
         placeholder="you@example.com"
         className={inputClass}
       />
+      </label>
+      {/* OMB parity: shared context. Plain text, always in every bot's
+          context — the user explains once, every bot benefits. */}
+      <label className="space-y-1.5 text-[13px] text-ink-secondary">
+        About me (shared with every bot)
+        <textarea
+          aria-label="About me"
+          value={about}
+          onChange={(e) => setAbout(e.target.value)}
+          onBlur={save}
+          rows={3}
+          maxLength={2000}
+          placeholder="Who you are, how you like to work, what you're focused on…"
+          className={cn(inputClass, "resize-y leading-relaxed")}
+        />
+        <span className="block text-[11.5px] text-ink-secondary/80">
+          Every bot reads this in every conversation. Keep it to durable facts — not task details.
+        </span>
       </label>
       {saveError && <p role="alert" className="text-[12.5px] text-[#ff6b6b]">{saveError}</p>}
     </div>

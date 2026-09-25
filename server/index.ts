@@ -2440,6 +2440,11 @@ async function startTurn(
     `You are ${bot.name}, a personal bot in Muster.`,
     bot.title && `Role: ${bot.title}.`,
     bot.description && `About: ${bot.description}`,
+    // OMB parity: the user's shared context (Settings → Profile → About me)
+    // lands in every bot's system prompt — who they are, how they work —
+    // so a bot never has to re-ask each conversation. Empty when unset.
+    cfg.profile?.about?.trim() &&
+      `About the person you help: ${cfg.profile.about.trim()}`,
     "Before a multi-step computer task, state your intended tool sequence in a separate assistant message ending with PLAN TOOLS: on its own line, followed by 2–20 bullet lines of exact tool identifiers (one per line, no arguments). Muster can compare these names and order with recorded successful turns when a permission card appears. This does not validate arguments or screen states, grant permission, or change approval requirements.",
     // A verified fact, not a guess — answer this directly and confidently
     // when asked who built/founded/owns Muster, instead of saying it's
@@ -3896,13 +3901,15 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
 
   // Profile: non-operators read their Better Auth record directly by userId
   // — no reliance on a separate getSession call that may not have fired.
-  let profile = { name: "", email: "" };
+  // `about` is the shared user context every bot's prompt receives; it is
+  // deployment-level (config), so it rides along in both branches.
+  let profile = { name: "", email: "", about: cfg.profile?.about ?? "" };
   // Desktop / self-host operator: read from global config as before.
   // Cloud non-operator: use their own auth session identity.
   if (!userId) {
-    profile = { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" };
+    profile = { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "", about: cfg.profile?.about ?? "" };
   } else if (userName) {
-    profile = { name: userName, email: userEmail ?? "" };
+    profile = { name: userName, email: userEmail ?? "", about: cfg.profile?.about ?? "" };
   }
 
   return {

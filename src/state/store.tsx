@@ -302,7 +302,7 @@ export interface ConfigStatus {
    * never echoed back. */
   tts?: { configured: boolean; ready: boolean; voice: string };
   /** who's using the app — collected in onboarding, shown in the sidebar */
-  profile?: { name: string; email: string };
+  profile?: { name: string; email: string; about?: string };
   /** Server-side cap on every bot turn in a channel, in minutes. Direct
    * chats are exempt — they stop on silence via the stall watchdog. */
   channels?: { turnCapMinutes: number };
