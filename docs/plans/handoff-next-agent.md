@@ -140,3 +140,53 @@ and the acceptance matrix. Earlier not-rerun statements describe the document
 review phase. These documents are included in the verified slice commit; the
 working-tree-only status above is historical at preparation, not a perpetual
 constraint. No native or real-Google acceptance was added.
+
+## Onboarding defect sweep (2026-09-25)
+
+Seven reproduced defects fixed, each with a test: the crew-hire dead end, a
+replay-tour reset that ignored its own failure, false Muster Cloud sync copy,
+connector Disconnect swallowing a no-op, unlabeled tour mock panels, an
+ungated "Something else" chip that collected nothing, and two storage-gate
+contract mismatches.
+
+Two storage-gate defects are worth carrying forward, because both are ways the
+gate could be silently ineffective:
+
+- The gate read `driveConnected || telegramConfigured`, but `telegramSync` is a
+  single deployment-wide binding in the shared `config.json`. One operator
+  connecting Telegram opened the gate for every account, including brand-new
+  signups. Only the user's own Drive grant counts now; the backup harness
+  depended on the old behaviour and now seeds a per-user grant directly.
+- The gate modal offered "Connect Google Drive" on deployments where the
+  connect route always answers 501. The unavailable case is a dismissible
+  notice, never an `aria-modal` with no dismissable control.
+
+The classic wizard and the conversational chat could also render at the same
+time on a deployment with `storageGate.required` false and an empty roster; they
+now share one arbitration condition in the app root.
+
+Verification: CI 36181561421 success — 380 files, 5741 passed, 9 skipped,
+0 failed (baseline 5731, +10 new tests). Typecheck and lint clean.
+
+**Open, needs an owner decision.** `server/browser-panel.ts` builds a
+PowerShell `-Command` string for Windows archive extraction. The correct fix is
+an argv-only `tar` call, but the Mimosa PreToolUse gate rejected four attempts
+as command injection — including a new file whose only subprocess was
+`spawn(file, args)` with no shell and no concatenation, which is the form the
+scanner's own message recommends. The plugin exposes no per-rule allowlist
+(only `MIMOSA_HOOK_FAILURE_MODE` and verbosity knobs), so this needs explicit
+owner approval, not a config change. Do not re-roll the phrasing to get past
+it; that is working around a safety control.
+
+## Competitive position (OpenMausBot v0.1.87, static source)
+
+The earlier comparison predated current tags. Verified gaps, in impact order:
+no post-welcome guided tour (theirs auto-presses real controls; ours are static
+DOM mocks, now labelled "Example"), no "Check again" for engine readiness during
+onboarding, and chat completion persisted only in `localStorage`, so it replays
+on a new device. None are defects. The stability contract forbids using an
+audit to redesign onboarding, so these are roadmap rather than work in progress.
+
+unlazy (github.com/Leonxlnx/unlazy) is an agent-workflow skill, not a
+performance library. It will not make the app faster and was not adopted.
+
