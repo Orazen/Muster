@@ -182,6 +182,14 @@ function Shell() {
     return <main className="flex h-full items-center justify-center p-6 text-ink-secondary" role="status">Opening bot conversation…</main>;
   }
 
+  // The classic wizard and the conversational hire are two first-run surfaces
+  // for the same moment, so only one may own the slot. The wizard claims it
+  // when its gate decision is "show" and storage is not already gating; the
+  // chat is the hosted empty-roster case. OnboardingChat self-gates on an
+  // empty roster but knows nothing of the wizard, so a fresh account with no
+  // seed bot and storageGate.required false used to render both at once.
+  const classicWizardActive = gateDecision === "show" && firstRun && state.config?.storageGate?.required !== true;
+
   return (
     <div className="flex h-full flex-col">
       {/* ambient wash under everything — what the glass panels refract */}
@@ -286,7 +294,7 @@ function Shell() {
       {/* On hosted, the conversational onboarding replaces the classic wizard:
           the assistant chats the user through role → pains → crew hire. The
           wizard remains the desktop/local first-run. */}
-      {gateDecision === "show" && firstRun && state.config?.storageGate?.required !== true && (
+      {classicWizardActive && (
         <Suspense fallback={null}>
         <Onboarding
           onDone={() => {
@@ -302,7 +310,7 @@ function Shell() {
           there). */}
       <Suspense fallback={null}><StorageGate /></Suspense>
       <Suspense fallback={null}><TeamTemplates /></Suspense>
-      <Suspense fallback={null}><OnboardingChat /></Suspense>
+      {!classicWizardActive && <Suspense fallback={null}><OnboardingChat /></Suspense>}
       </div>
       {/* The floating fleet orb is retired (owner direction 2026-09-15):
           presence lives on the roster rows that carry it — the benchmark's
