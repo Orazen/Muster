@@ -16,6 +16,7 @@ import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-har
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { createWorkspaceDriveFixture, type DriveFixtureMode } from "./testing/workspace-drive-fixture.ts";
+import { createDriveState, saveDriveGrant, DRIVE_APPDATA_SCOPE } from "./drive-grants.ts";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const UNAVAILABLE = {
@@ -410,6 +411,11 @@ describe.skipIf(process.platform === "win32")("workspace backup account boundary
   let local: OwnedServer;
   let primary: Account;
   let secondary: Account;
+  // Held deliberately WITHOUT an own Drive grant: the capability/status and
+  // connect tests assert that a hosted account which has only Google login
+  // tokens still reports its Drive as not connected.
+  let probePrimary: Account;
+  let probeSecondary: Account;
   let sharedConfig: string;
   const memoryCanary = randomBytes(24).toString("hex");
   const children: ChildProcess[] = [];
@@ -518,7 +524,32 @@ Socket.prototype.connect = blocked;
     return server;
   };
 
-  const signUp = async (label: string): Promise<Account> => {
+  /** A hosted account may only do durable work once it holds its OWN Drive
+   * grant (storage gate, decision 14). This suite is about the backup account
+   * boundary, not the gate, and its child process blocks outbound so a real
+   * PKCE consent round-trip is impossible here — so the grant is written
+   * directly. It used to lean on the deployment-wide telegramSync fixture
+   * instead, which is exactly the hole that got closed: a shared channel
+   * opened another account's gate. */
+  const grantOwnDrive = (userId: string) => {
+    const db = new DatabaseSync(join(shared.dataDirectory, "auth.db"));
+    try {
+      const pending = createDriveState(db, { userId, sessionId: "workspace-auth-fixture" });
+      saveDriveGrant(db, {
+        userId,
+        googleSub: `sub-${userId}`,
+        expectedGeneration: pending.generation,
+        accessToken: `access-${randomBytes(16).toString("hex")}`,
+        refreshToken: `refresh-${randomBytes(16).toString("hex")}`,
+        expiresAt: Date.now() + 300_000,
+        scopes: [DRIVE_APPDATA_SCOPE],
+      });
+    } finally {
+      db.close();
+    }
+  };
+
+  const signUp = async (label: string, options: { grantDrive?: boolean; createBot?: boolean } = {}): Promise<Account> => {
     const response = await request(shared, "/api/auth/sign-up/email", "POST", JSON.stringify({
       name: `Backup ${label}`, email: `${label}-${randomBytes(10).toString("hex")}@example.test`,
       password: randomBytes(32).toString("base64url"),
@@ -528,6 +559,8 @@ Socket.prototype.connect = blocked;
     const cookieHeader = response.headers.getSetCookie().find((value) => value.startsWith("better-auth.session_token="));
     if (!cookieHeader) throw new Error("Fixture sign-up returned no session cookie");
     const cookie = cookieHeader.split(";")[0];
+    if (options.grantDrive !== false) grantOwnDrive(user.id);
+    if (options.createBot === false) return { cookie, id: user.id, botId: "", botName: "" };
     const created = await request(shared, "/api/bots", "POST", JSON.stringify({ name: `Owned by ${label}` }), cookie);
     expect(created.status).toBe(201);
     const { bot } = z.object({ bot: botSchema }).parse(await created.json());
@@ -544,6 +577,11 @@ Socket.prototype.connect = blocked;
     local = await boot("local", port + 2);
     primary = await signUp("primary");
     secondary = await signUp("secondary");
+    // No Drive grant and no bot: these exist only so the capability, status
+    // and connect tests can observe an account that has Google login tokens
+    // but has never given explicit Drive consent.
+    probePrimary = await signUp("probe-primary", { grantDrive: false, createBot: false });
+    probeSecondary = await signUp("probe-secondary", { grantDrive: false, createBot: false });
     seedGoogleAccount(shared.dataDirectory, primary.id);
     seedGoogleAccount(shared.dataDirectory, secondary.id);
     seedGoogleAccount(local.dataDirectory);
@@ -758,7 +796,7 @@ Socket.prototype.connect = blocked;
   for (const role of ["primary", "secondary"]) {
     it(`returns the exact read-only hosted capability to ${role}`, async () => {
       const before = accountState(shared.dataDirectory);
-      const response = await request(shared, "/api/workspace/google/status", "GET", undefined, (role === "primary" ? primary : secondary).cookie);
+      const response = await request(shared, "/api/workspace/google/status", "GET", undefined, (role === "primary" ? probePrimary : probeSecondary).cookie);
       // Storage sovereignty (decision 14): a hosted session can connect its
       // OWN Drive, so the capability advertises accountDrive available. This
       // fixture seeds login tokens only; they are not explicit Drive consent.
@@ -774,7 +812,7 @@ Socket.prototype.connect = blocked;
     });
     it(`offers ${role} the hosted Drive connect without touching any token state`, async () => {
       const before = accountState(shared.dataDirectory);
-      const response = await request(shared, "/api/workspace/google/connect", "GET", undefined, (role === "primary" ? primary : secondary).cookie);
+      const response = await request(shared, "/api/workspace/google/connect", "GET", undefined, (role === "primary" ? probePrimary : probeSecondary).cookie);
       expect(response.status).toBe(200);
       const { url } = z.object({ url: z.string() }).parse(await response.json());
       expect(url).toContain("accounts.google.com");
