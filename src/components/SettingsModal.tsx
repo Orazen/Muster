@@ -162,15 +162,21 @@ function ProfileFields() {
     setEmail(state.config?.profile?.email || authUser?.email || "");
   }, [state.config?.profile?.name, state.config?.profile?.email, authUser?.name, authUser?.email]);
 
+  const [saveError, setSaveError] = useState("");
+
   const save = () => {
-    void fetch("/api/config", {
+    // api() throws with the server's own message on failure. This used to be
+    // a raw fetch that dispatched the parsed body unconditionally — a 403
+    // (any non-operator hosted account) or 400 replaced the app-wide config
+    // object with the error JSON, silently breaking every other settings
+    // read until the next successful fetch (live-audit 2026-09-25).
+    setSaveError("");
+    void api("/api/config", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
       body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase() } }),
     })
-      .then((r) => r.json())
       .then((config) => dispatch({ type: "configStatus", config }))
-      .catch(() => {});
+      .catch((error) => setSaveError(error instanceof Error ? error.message : "Saving failed — try again."));
   };
 
   const inputClass =
@@ -191,6 +197,7 @@ function ProfileFields() {
         className={inputClass}
       />
       </label>
+      {saveError && <p role="alert" className="text-[12.5px] text-[#ff6b6b]">{saveError}</p>}
     </div>
   );
 }
@@ -496,18 +503,21 @@ function ChannelTurnCapCard() {
     setMinutes(String(savedMinutes));
   }, [savedMinutes]);
 
+  const [saveError, setSaveError] = useState("");
+
   const save = () => {
     const parsed = Number.parseInt(minutes, 10);
     const clamped = Number.isFinite(parsed) ? Math.min(120, Math.max(1, parsed)) : savedMinutes;
     if (clamped === savedMinutes) return;
-    void fetch("/api/config", {
+    // Same guard as ProfileFields: failures must surface, never overwrite
+    // the app-wide config object with an error body.
+    setSaveError("");
+    void api("/api/config", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
       body: JSON.stringify({ channels: { turnCapMinutes: clamped } }),
     })
-      .then((r) => r.json())
       .then((config) => dispatch({ type: "configStatus", config }))
-      .catch(() => {});
+      .catch((error) => setSaveError(error instanceof Error ? error.message : "Saving failed — try again."));
   };
 
   return (
@@ -525,6 +535,7 @@ function ChannelTurnCapCard() {
           className="w-24 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink focus:border-hairline focus:outline-none"
         />
       </label>
+      {saveError && <p role="alert" className="text-[12.5px] text-[#ff6b6b]">{saveError}</p>}
     </Card>
   );
 }
@@ -541,17 +552,20 @@ function VpsCard() {
     setAlias(savedAlias);
   }, [savedAlias]);
 
+  const [saveError, setSaveError] = useState("");
+
   const save = () => {
     const next = alias.trim();
     if (next === savedAlias) return;
-    void fetch("/api/config", {
+    // Same guard as ProfileFields: failures must surface, never overwrite
+    // the app-wide config object with an error body.
+    setSaveError("");
+    void api("/api/config", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
       body: JSON.stringify({ vps: { sshAlias: next } }),
     })
-      .then((r) => r.json())
       .then((config) => dispatch({ type: "configStatus", config }))
-      .catch(() => {});
+      .catch((error) => setSaveError(error instanceof Error ? error.message : "Saving failed — try again."));
     setReach("idle");
   };
 
@@ -597,6 +611,7 @@ function VpsCard() {
         {reach === "down" && (
           <span className="text-[12.5px] text-danger">Not reachable — check ~/.ssh/config</span>
         )}
+        {saveError && <span role="alert" className="text-[12.5px] text-danger">{saveError}</span>}
       </div>
     </Card>
   );

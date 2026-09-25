@@ -36,7 +36,7 @@ import { ProjectScout } from "@/components/ProjectScout";
 import { SignupPage } from "@/pages/SignupPage";
 import { ForgotPasswordPage } from "@/pages/ForgotPasswordPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
-import { emailGateDone, serverGateDone, initAnalytics } from "@/lib/analytics";
+import { emailGateDone, serverGateDone, initAnalytics, tourReplayPending } from "@/lib/analytics";
 import { installGazeTracking } from "@/lib/musterbot/gaze";
 import { PairPage } from "@/pages/PairPage";
 import { ClaimPage } from "@/pages/ClaimPage";
@@ -94,8 +94,14 @@ function Shell() {
   useEffect(() => {
     if (gateDecision !== "pending" || authLoading || !user) return;
     let cancelled = false;
+    // A deliberate "Replay welcome tour" overrides a done gate here WITHOUT
+    // consuming the one-shot flag (the wizard consumes it): hiding the
+    // wizard on this path let the wizard's own returning-user guard
+    // auto-skip and re-mark the gate — replay did nothing on accounts with
+    // history (live-audit 2026-09-25).
+    const replay = tourReplayPending();
     void serverGateDone().then((serverDone) => {
-      if (!cancelled) setGateDecision(serverDone || emailGateDone(user.id) ? "hide" : "show");
+      if (!cancelled) setGateDecision(replay || !(serverDone || emailGateDone(user.id)) ? "show" : "hide");
     });
     return () => {
       cancelled = true;

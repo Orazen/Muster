@@ -228,4 +228,17 @@ describe("clearOnboardingGate (Replay welcome tour)", () => {
     expect(await a.clearOnboardingGate("user-1")).toBe(false);
     expect(sessionStorage.getItem(REPLAY_KEY)).toBeNull();
   });
+
+  it("tourReplayPending peeks without consuming the one-shot flag", async () => {
+    const a = await loadAnalytics();
+    expect(a.tourReplayPending()).toBe(false);
+    a.requestTourReplay();
+    // the App-level gate decision peeks; the flag must survive for the wizard
+    expect(a.tourReplayPending()).toBe(true);
+    expect(sessionStorage.getItem(REPLAY_KEY)).toBe("1");
+    // and a later consume still gets it exactly once
+    expect(a.consumeTourReplay()).toBe(true);
+    expect(a.tourReplayPending()).toBe(false);
+    expect(a.consumeTourReplay()).toBe(false);
+  });
 });

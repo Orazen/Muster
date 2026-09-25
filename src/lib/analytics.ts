@@ -182,6 +182,20 @@ export function consumeTourReplay(): boolean {
   }
 }
 
+/** Non-consuming peek at the replay intent. App.tsx's wizard-gate decision
+ * runs before Onboarding mounts and must not eat the one-shot flag the
+ * wizard itself consumes — but it does need to know a deliberate replay is
+ * in flight, or it hides the wizard, the wizard's returning-user guard
+ * auto-skips, and "Replay welcome tour" silently does nothing on accounts
+ * with history (live-audit 2026-09-25). */
+export function tourReplayPending(): boolean {
+  try {
+    return sessionStorage.getItem(REPLAY_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
 function gateKey(userId?: string): string {
   return userId ? `omb-email-gate.${userId}` : "omb-email-gate.legacy";
 }

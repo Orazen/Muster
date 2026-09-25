@@ -1653,16 +1653,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           {!collapsed.includes("rooms") && visibleGroups.map((g) => (
             <GroupListItem key={g.id} group={g} onMenu={setRoomMenu} density={density} />
           ))}
-          {visibleBots.length > 0 && (
-            <SectionHeader
-              label="Teammates"
-              collapsed={collapsed.includes("teammates")}
-              onToggle={() => toggleSection("teammates")}
-              waiting={visibleBots.filter((b) => b.activity === "waiting-on-you").length}
-              unread={visibleBots.filter((b) => b.unread).length}
-              compact={density === "icons"}
-            />
-          )}
           {/* OMB parity #1b — named sections (folders). Each renders its
               own collapsible group; bots outside every section stay in the
               default Teammates list below. */}
@@ -1705,7 +1695,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               </div>
             );
           })}
-          {visibleBots.length > 0 && (
+          {/* The ONE default Teammates header. Gated on rows actually
+              existing: a stray pre-sections duplicate above the named
+              sections stacked two identical headers for every user with
+              bots (live-audit 2026-09-25), and a header whose every row
+              moved into a named section must not linger. */}
+          {unsectionedBots.length > 0 && (
             <SectionHeader
               label="Teammates"
               collapsed={collapsed.includes("teammates")}
