@@ -49,6 +49,22 @@ describe("onboarding chat beats", () => {
     expect(planCrew("nonexistent", [])).toBeNull();
   });
 
+  it("briefs the crew on what the user actually typed for 'Something else'", () => {
+    const typed = planCrew("research-desk", ["other"], "Chasing month-end invoices");
+    const desc = typed!.members[0]!.description.toLowerCase();
+    expect(desc).toContain("chasing month-end invoices");
+    // The placeholder label must not survive alongside the real sentence.
+    expect(desc).not.toContain("something else");
+
+    // Nothing typed: the chip is all there is, so the label is honest.
+    const blank = planCrew("research-desk", ["other"], "   ");
+    expect(blank!.members[0]!.description.toLowerCase()).toContain("something else");
+
+    // Unrelated pains are untouched by the field.
+    const other = planCrew("research-desk", ["research"], "Chasing month-end invoices");
+    expect(other!.members[0]!.description.toLowerCase()).not.toContain("invoices");
+  });
+
   it("turns type only ever speaks as assistant or user", () => {
     const turns: Turn[] = [
       { who: "assistant", text: "Hey!" },

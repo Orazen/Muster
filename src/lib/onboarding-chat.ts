@@ -228,15 +228,28 @@ const CREWS = {
 
 /** Which crew the answers point at, and what each member should know. The
  * pains sharpen the crew's descriptions so the hire feels chosen, not
- * generic. `empty` and unknown ids return null — the caller creates nothing. */
-export function planCrew(crewId: string, pains: string[]): { key: string; members: CrewMember[] } | null {
+ * generic. `empty` and unknown ids return null — the caller creates nothing.
+ *
+ * `otherNeed` is what the user typed for the "Something else" pain. The chat
+ * has no per-beat text field of its own, so without it the chip recorded the
+ * literal label "something else" and the sentence the crew is actually
+ * briefed on said nothing about what the user meant. When present it stands
+ * in for that label. */
+export function planCrew(
+  crewId: string,
+  pains: string[],
+  otherNeed = "",
+): { key: string; members: CrewMember[] } | null {
   // SAFETY: the id originates from the crew beat's own option list; unknown
   // ids (and the deliberate "empty" path) fall through to null.
   const members: CrewMember[] | undefined = CREWS[crewId as keyof typeof CREWS];
   if (!members) return null;
+  const typed = otherNeed.trim();
   const painLabels = (ONBOARDING_CHAT_BEATS.find((b) => b.id === "pains")?.options ?? [])
     .filter((o) => pains.includes(o.id))
-    .map((o) => o.label.toLowerCase());
+    // "Something else" is only a placeholder for what the user actually
+    // typed; with nothing typed, the label is all there is.
+    .map((o) => (o.id === "other" && typed ? typed.toLowerCase() : o.label.toLowerCase()));
   const sharpened = members.map((m) => ({
     ...m,
     description: painLabels.length

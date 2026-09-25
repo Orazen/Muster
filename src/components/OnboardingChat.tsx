@@ -16,6 +16,9 @@ export function OnboardingChat() {
   const [step, setStep] = useState(0);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [picked, setPicked] = useState<{ role?: string; pains: string[]; crew?: string }>({ pains: [] });
+  // The "Something else" pain needs a sentence of its own: the chat has no
+  // per-beat text field, so picking the chip used to record only the label.
+  const [otherNeed, setOtherNeed] = useState("");
   const [busy, setBusy] = useState(false);
   const [hired, setHired] = useState(false);
   // Persisted completion is the fast path (the lib's gate helper): a chat
@@ -78,7 +81,12 @@ export function OnboardingChat() {
 
   const advance = async () => {
     if (beat.id === "pains") {
-      const labels = (beat.options ?? []).filter((o) => picked.pains.includes(o.id)).map((o) => o.label);
+      const typed = otherNeed.trim();
+      // The typed sentence stands in for the placeholder label in the user's
+      // own bubble, the same way planCrew uses it in the crew briefing.
+      const labels = (beat.options ?? [])
+        .filter((o) => picked.pains.includes(o.id))
+        .map((o) => (o.id === "other" && typed ? typed : o.label));
       setTurns((prev) => [...prev, { who: "user", text: labels.length ? labels.join(", ") : "I'll figure it out as we go" }]);
       setStep((s) => s + 1);
       return;
@@ -86,7 +94,7 @@ export function OnboardingChat() {
     if (beat.id === "crew" && picked.crew) {
       setBusy(true);
       try {
-        const plan = planCrew(picked.crew, picked.pains);
+        const plan = planCrew(picked.crew, picked.pains, otherNeed);
         if (plan) {
           for (const member of plan.members) {
             // SAFETY: create answers {bot:{id}}; a missing id fails loudly below.
@@ -163,6 +171,20 @@ export function OnboardingChat() {
                   );
                 })}
               </div>
+              {beat.id === "pains" && picked.pains.includes("other") && (
+                <label className="chat-other">
+                  <span className="chat-other-label">What should they take off your plate?</span>
+                  <input
+                    className="chat-other-input"
+                    value={otherNeed}
+                    onChange={(e) => setOtherNeed(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void advance(); } }}
+                    placeholder="e.g. chasing invoices every month end"
+                    maxLength={200}
+                    aria-label="What should they take off your plate?"
+                  />
+                </label>
+              )}
               {beat.id === "pains" && (
                 <div className="chat-meta">
                   <span className="left">{Math.max(0, (beat.max ?? 3) - picked.pains.length)} left</span>
@@ -195,7 +217,7 @@ export function OnboardingChat() {
       </div>
       <button
         className="restart"
-        onClick={() => { setStep(0); setPicked({ pains: [] }); setTurns([]); setHired(false); }}
+        onClick={() => { setStep(0); setPicked({ pains: [] }); setOtherNeed(""); setTurns([]); setHired(false); }}
       >
         ⟳ Restart onboarding
       </button>
