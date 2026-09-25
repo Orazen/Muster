@@ -190,3 +190,54 @@ audit to redesign onboarding, so these are roadmap rather than work in progress.
 unlazy (github.com/Leonxlnx/unlazy) is an agent-workflow skill, not a
 performance library. It will not make the app faster and was not adopted.
 
+
+## Web and desktop are different products (2026-09-25)
+
+A capability audit found the two builds had drifted back into one. Four
+surfaces acted on a machine the browser reader does not have, because the
+route behind each resolves against the server:
+
+| Surface | Route | What it actually touches |
+|---|---|---|
+| Settings → Local VM | `/api/local-computer/*` | starts containers, pulls a desktop image on the host |
+| Settings → BYO VPS | `/api/vps/status` | SSHes to an alias from the *server's* `~/.ssh/config` |
+| "Set up automatically" on a failed turn | `/api/local-computer/*` | same container work, from chat |
+| "scout a project folder" | `/api/scout` | `statSync`s an arbitrary absolute path on the host |
+
+All four are desktop-only and are now gated. The gate reads `host.label`
+from the capability set — the signal the rest of the app already uses, and
+one that is correct before the async capability fetch resolves, so nothing
+flashes the wrong build. It is deliberately **not** `localComputer.available`:
+that field is `false` in every build's initial capabilities and stays false
+on a desktop where access is merely switched off, so gating on it would hide
+the Local VM surfaces from the users who came to turn them on. The
+preload-marked section keeps its original synchronous `window.ogb` test.
+
+Switching a bot to the cloud computer stays available in both builds — it is
+a bot setting stored server-side.
+
+Verification: 384 files, 5768 passed, 8 skipped, 0 failed. Both typecheck
+projects and oxlint clean.
+
+## The turn-slot leak that reddened main (2026-09-25)
+
+CI was red on `b4c9f02` for two unrelated reasons, one of them a real
+product bug rather than a build problem.
+
+The parallel-thread gate claims a slot at dispatch and answers 409 while
+the bot holds one. Every release path fired only on failure or abort — the
+dispatch catch, the lost-turn reaper, the provider rebuild — so **a turn
+that completed normally never released its slot**. After a bot's first
+successful run it rejected every later message with "the bot is already
+working — interrupt it first", and nothing could clear it: every process
+the reaper watches had exited normally, so the reaper never fired.
+
+Six e2e suites were red for exactly this reason, 28 tests, all of the shape
+"send a second turn to a bot whose first turn just succeeded". The fix pairs
+the release with the activity flip in the `turn.completed` fold, before it.
+
+The second CI failure was a strict-typecheck break in the same feature: two
+config fields were added to the zod patch schema but not to the hand-written
+`AppConfig` interface, plus an unused parameter. `tsc -b` had passed locally
+on a stale composite cache, which is why the local loop missed it. Worth
+remembering: the local typecheck is not a substitute for CI here.
