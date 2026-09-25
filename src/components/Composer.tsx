@@ -627,7 +627,7 @@ export function Composer({
             circular toolbar buttons below — context controls left, send
             right. All Muster behavior (drafts, mentions, goal mode, dictation)
             is unchanged; see chat/message-bubble.css for the bubble tokens. */}
-        <div className="muster-composer px-1 pt-1 pb-2">
+        <div className="muster-composer px-1 pt-1 pb-2" data-tour="composer">
           <textarea
             ref={inputRef}
             rows={1}

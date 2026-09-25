@@ -300,6 +300,7 @@ import { parseTeamMarkdown, renderTeamMarkdown } from "./team-markdown.ts";
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { readRuntimeEvidence, readThreadEvents } from "./thread-events.ts";
 import { deleteStaleArchivedLogs, trimAllEventLogs } from "./event-log-cleanup.ts";
+import { claimSlot, clearSlots, configuredWidth, hasSlot, releaseSlot, runningThreads } from "./turn-slots.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -1265,6 +1266,7 @@ function settleLostTurn(turn: WatchedTurn, note: string): void {
     const currentBot = store.bot(turn.botId);
     if (currentBot?.busy) {
       stopScreenPoller(currentBot.id);
+      releaseSlot(turn.botId, turn.threadId);
       store.setActivity(currentBot.id, "idle");
     }
     // The normal turn.completed fold drains steered sends, but a lost turn
@@ -2297,6 +2299,23 @@ async function startTurn(
     }
   }
   const threadId = opts?.threadId ?? bot.threadId;
+  // Parallel threads (OMB parity): the busy flag still locks the composer
+  // and serializes the bot's OWN thread; the width only admits additional
+  // DIRECT threads up to the configured limit. Rooms stay one-speaker, and
+  // the group engine's own busy check is untouched. The width read and the
+  // slot check stay in this synchronous pre-dispatch block so no await can
+  // slip between them and the claim below.
+  const parallelWidth = configuredWidth(cfg.parallelThreads, bot.id, store.groupByThread(bot.threadId) !== undefined);
+  if (!hasSlot(bot.id, threadId, parallelWidth)) {
+    throw Object.assign(
+      new Error(
+        parallelWidth === 1
+          ? "the bot is already working — interrupt it first"
+          : `this bot is running its limit of ${parallelWidth} parallel threads — wait for one to finish or raise the limit`,
+      ),
+      { status: 409 },
+    );
+  }
   // a webhook turn, or one inherited from a bot already running unattended
   if (opts?.automationSource === "webhook" || opts?.unattended) markUnattended(bot.id);
   // a person typing into this bot ends the unattended window immediately
@@ -2495,6 +2514,7 @@ async function startTurn(
   store.setActivity(bot.id, "working");
   store.patchBot(bot.id, { unread: false });
   turnUsage.delete(threadId);
+  claimSlot(bot.id, threadId);
 
   void (async () => {
     let driverInvoked = false;
@@ -2949,6 +2969,7 @@ async function startTurn(
       watchdog.settle(threadId);
       turnUsage.delete(threadId);
       turnProvenance.delete(threadId);
+      releaseSlot(bot.id, threadId);
       const message = e instanceof Error ? e.message : String(e);
       // The chip must never mask the unwind below: a throw here would skip
       // setActivity/onDispatchError/drainQueuedSends and strand the bot busy.
@@ -4014,6 +4035,14 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
       deleteArchivedAfterDays: cfg.eventLogRetention?.deleteArchivedAfterDays ?? null,
       trimToMib: cfg.eventLogRetention?.trimToMib ?? null,
     },
+    // parallel threads per bot (OMB parity): the live widths the UI shows;
+    // group threads never parallelize and are not part of this number
+    parallelThreads: {
+      default: cfg.parallelThreads?.default ?? 1,
+      perBot: cfg.parallelThreads?.perBot ?? {},
+    },
+    // effort default for NEW bots (OMB parity): null = engine default
+    bots: { defaultEffort: cfg.bots?.defaultEffort ?? null },
     // alias is a setting, not a secret — ssh(1) holds the actual credentials
     vps: { sshAlias: vpsSshAlias(cfg) ?? "" },
   };
@@ -4116,6 +4145,10 @@ async function reloadProviders() {
         }
       }
       stopScreenPoller(b.id);
+      releaseSlot(b.id, b.threadId);
+      // A provider rebuild kills the bot's in-flight turns wholesale — drop
+      // any other-thread slots the parallel-width ledger still holds.
+      clearSlots(b.id);
       // Settle the watchdog too: a turn left in the reaper's snapshot could
       // absorb a later unrelated process death once sweeping resumes.
       watchdog.settle(b.threadId);
@@ -7394,7 +7427,13 @@ let requestUserEmail = "";
       // No tier gate: the roster is unlimited, so creation proceeds as long
       // as the storage-sovereignty gate above is satisfied.
       const bot = store.createBot(requestUserId ? { ownerId: requestUserId } : {});
-      store.patchBot(bot.id, { modelSelection: await defaultSelection(requestUserId) });
+      // Effort default (OMB parity): the operator's "effort for new bots"
+      // seeds the selection's reasoning effort — existing bots keep what
+      // they saved. No engines available still seeds no effort.
+      const seed = await defaultSelection(requestUserId);
+      const seedEffort = cfg.bots?.defaultEffort;
+      if (seedEffort && seed.instanceId) store.patchBot(bot.id, { modelSelection: { ...seed, effort: seedEffort } });
+      else store.patchBot(bot.id, { modelSelection: seed });
       return json(res, 201, {
         bot: {
           ...wireBot(store.bot(bot.id)!),
@@ -8061,9 +8100,13 @@ let requestUserEmail = "";
       let interruptError: unknown;
       try {
         if (routineRun) await routines!.cancelRun(routineRun.id);
-        // There is one provider turn per bot. Freeze its actual destination and
-        // invoke once before awaiting; never interrupt a second thread later.
-        else await instance?.adapter.interruptTurn(busyGroup?.threadId ?? runningThread);
+        // Parallel threads (OMB parity): with width > 1 several threads may
+        // run at once — interrupt every one of them, primary first. With the
+        // classic width of 1 this is the historical single interrupt.
+        else {
+          const targets = [busyGroup?.threadId ?? runningThread, ...runningThreads(bot.id).filter((t) => t !== (busyGroup?.threadId ?? runningThread))];
+          for (const t of targets) await instance?.adapter.interruptTurn(t);
+        }
       } catch (error) { interruptError = error; }
       if (cleanupReceipt) {
         const currentBot = store.bot(bot.id);
@@ -8582,6 +8625,48 @@ let requestUserEmail = "";
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configStatus(requestUserId, requestUserName, requestUserEmail));
+    }
+
+    // ── People (OMB parity): the deployment's accounts. Operator-only on a
+    // self-hosted server; on a desktop install there is exactly one row and
+    // no session to check. Emails and names only — no ids beyond the
+    // primary flag the UI needs, no session data, no capability info.
+    if (method === "GET" && path === "/api/people") {
+      if (SELF_HOSTED && requestUserId !== primaryUserId()) {
+        return json(res, 403, { error: "only the deployment operator can list accounts" });
+      }
+      const primary = primaryUserId();
+      // SAFETY: the SELECT projects exactly the columns returned here
+      const rows = getDb()
+        .prepare('SELECT "id", "name", "email", "createdAt" FROM "user" ORDER BY "createdAt" ASC')
+        .all() as Array<{ id: string; name: string | null; email: string | null }>;
+      return json(res, 200, {
+        people: rows.map((row) => ({
+          id: row.id,
+          name: row.name ?? "",
+          email: row.email ?? "",
+          primary: row.id === primary,
+        })),
+      });
+    }
+
+    // ── Activity (OMB parity): the turns running right now. Any signed-in
+    // user may see the fleet's activity — it carries names and live token
+    // counts, never conversation content.
+    if (method === "GET" && path === "/api/activity") {
+      const turns = store.bots
+        .filter((b) => b.busy)
+        .map((b) => {
+          const inFlight = turnUsage.get(b.threadId);
+          return {
+            botId: b.id,
+            botName: b.name,
+            threadId: b.threadId,
+            group: store.groupByThread(b.threadId) !== undefined,
+            tokens: (inFlight?.input ?? 0) + (inFlight?.output ?? 0),
+          };
+        });
+      return json(res, 200, { turns });
     }
     // ── Team context (user-owned shared brief) ────────────────────────
     if (method === "GET" && path === "/api/team-context") {

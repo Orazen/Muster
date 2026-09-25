@@ -27,6 +27,7 @@ import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ShortcutsSheet } from "@/components/ShortcutsSheet";
+import { ProductTour } from "@/components/ProductTour";
 import { NotificationStack } from "@/components/NotificationStack";
 import { MusterBloom } from "@/components/MusterBloom";
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -311,6 +312,15 @@ function Shell() {
       <Suspense fallback={null}><StorageGate /></Suspense>
       <Suspense fallback={null}><TeamTemplates /></Suspense>
       {!classicWizardActive && <Suspense fallback={null}><OnboardingChat /></Suspense>}
+      {/* Guided product tour (OMB parity): coach marks over the real UI. It
+          starts when the app surface is actually shown — a returning user's
+          settled "hide" gate, or right after the first-run wizard completes
+          (its onDone settles the same gate) — and never competes with the
+          wizard or the hosted storage gate. Replayable from Settings →
+          First-run tour; completion persists per browser. */}
+      {gateDecision === "hide" && state.config?.storageGate?.required !== true && (
+        <Suspense fallback={null}><ProductTour /></Suspense>
+      )}
       </div>
       {/* The floating fleet orb is retired (owner direction 2026-09-15):
           presence lives on the roster rows that carry it — the benchmark's

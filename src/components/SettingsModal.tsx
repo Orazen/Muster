@@ -5,9 +5,10 @@
 // The General/Appearance parity rows below adapt OpenMausBot settings
 // (© OpenMausBot contributors, Apache License 2.0).
 import { useEffect, useRef, useState } from "react";
-import { Brain, Building2, Coins, Download, FlaskConical, HardDrive, KeyRound, Monitor, Network, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Volume2, X, Cloud, Vault } from "lucide-react";
+import { Brain, Building2, Coins, Download, FlaskConical, HardDrive, KeyRound, Monitor, Network, NotebookPen, Palette, Plug, Search, ShieldCheck, Smartphone, Terminal, User, Users, Activity as ActivityIcon, Save, Volume2, X, Cloud, Vault } from "lucide-react";
 import { useStore, api, type AppSettingsSection } from "@/state/store";
 import { clearOnboardingGate, analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
+import { productTourPending, replayProductTour } from "./ProductTour";
 import { useAuth } from "@/lib/auth";
 import { ApiKeyRow } from "./ApiKeys";
 import { TelegramChatChannelCard, WorkspaceSyncCard } from "./WorkspaceSyncCard";
@@ -53,6 +54,9 @@ const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User
   { id: "computer", label: "Local VM", icon: Monitor, keywords: ["vm", "virtual machine", "desktop", "sandbox", "isolation"] },
   { id: "voice", label: "Voice", icon: Volume2, keywords: ["tts", "speech", "elevenlabs", "speak"] },
   { id: "usage", label: "Usage", icon: Coins, keywords: ["tokens", "cost", "spend", "history"] },
+  { id: "people", label: "People", icon: Users, keywords: ["people", "accounts", "members", "users", "operator"] },
+  { id: "activity", label: "Activity", icon: ActivityIcon, keywords: ["activity", "running", "busy", "live", "turns"] },
+  { id: "backups", label: "Backups", icon: Save, keywords: ["backup", "snapshot", "restore", "portable", "nightly", "drive"] },
   { id: "vault", label: "Vault", icon: Vault, keywords: ["backup", "restore", "telegram", "google", "vaultgram"] },
 ];
 
@@ -127,23 +131,35 @@ function TourCard() {
       title="First-run tour"
       subtitle="The walkthrough: engines, permissions, phone, and your first teammate. You can replay it any time."
     >
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          setBusy(true);
-          setError("");
-          void clearOnboardingGate(authUser?.id)
-            .then((cleared) => {
-              if (cleared) window.location.href = "/app";
-              else setError("Couldn't reach the server to reset the tour. Check your connection and try again.");
-            })
-            .finally(() => setBusy(false));
-        }}
-        className="rounded-lg bg-raised px-3 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-raised-hover disabled:opacity-50"
-      >
-        {busy ? "Preparing…" : "Replay welcome tour"}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setBusy(true);
+            setError("");
+            void clearOnboardingGate(authUser?.id)
+              .then((cleared) => {
+                if (cleared) window.location.href = "/app";
+                else setError("Couldn't reach the server to reset the tour. Check your connection and try again.");
+              })
+              .finally(() => setBusy(false));
+          }}
+          className="rounded-lg bg-raised px-3 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-raised-hover disabled:opacity-50"
+        >
+          {busy ? "Preparing…" : "Replay welcome tour"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            replayProductTour();
+            window.location.href = "/app";
+          }}
+          className="rounded-lg border border-hairline/40 px-3 py-2 text-[13px] text-ink-secondary transition-colors hover:text-ink"
+        >
+          {productTourPending() ? "Resume feature tour" : "Replay feature tour"}
+        </button>
+      </div>
       {error && <div className="mt-2 text-[12.5px] text-[#ff6b6b]" role="alert">{error}</div>}
     </Card>
   );
@@ -358,12 +374,16 @@ function MergeAccountsCard() {
 // are visibly disabled and labelled placeholders — no fake functionality.
 
 /** OMB ships a language picker; Muster is English-only on this build, so the
- * control is present, honestly disabled, and says so. */
+ * control is present, honestly disabled, and says so. Deliberate non-goal
+ * (recorded in GATES.md): Muster's strings live inline in components with no
+ * extraction layer, so partial i18n would ship half-translated surfaces —
+ * worse than an honest English-only statement. Revisit when a real
+ * locale demand lands, as a full i18n scaffold, not a picker over 1 string. */
 function LanguageRow() {
   return (
     <SettingRow
       label="Language"
-      description="Placeholder — only English ships on this build; no other languages are wired yet."
+      description="English only, by design for now — a language switch without translated surfaces would be a fake setting. Full i18n lands when there is real locale demand."
     >
       <select
         disabled
@@ -397,16 +417,52 @@ function AnalyticsRow() {
   );
 }
 
-/** OMB has a parallel-thread width; Muster runs one worker per bot today. */
+/** Real (OMB parity): the deployment's parallel-thread width. `default`
+ * applies to every bot without its own override; `perBot` pins a bot. The
+ * server admits extra DIRECT threads up to the width; rooms always stay
+ * one-speaker and the busy flag still locks the bot's own thread. */
 function ParallelThreadsRow() {
+  const { state, dispatch } = useStore();
+  const config = state.config?.parallelThreads;
+  const [value, setValue] = useState(String(config?.default ?? 1));
+  const [saveError, setSaveError] = useState("");
+  useEffect(() => {
+    setValue(String(config?.default ?? 1));
+  }, [config?.default]);
+
+  const commit = (next: string) => {
+    const parsed = Number.parseInt(next, 10);
+    const clamped = Number.isFinite(parsed) ? Math.min(8, Math.max(1, parsed)) : 1;
+    if (clamped === (config?.default ?? 1)) return;
+    setSaveError("");
+    void api("/api/config", {
+      method: "PUT",
+      body: JSON.stringify({ parallelThreads: { default: clamped } }),
+    })
+      .then((nextConfig) => dispatch({ type: "configStatus", config: nextConfig }))
+      .catch((error) => setSaveError(error instanceof Error ? error.message : "Saving failed — try again."));
+  };
+
   return (
     <SettingRow
       label="Parallel threads"
-      description="Placeholder — Muster runs one worker per bot on this build; there is no parallelism setting behind this yet."
+      description="How many of a bot's direct conversations may run at once (1–8). Rooms always take turns one speaker at a time, and a bot's own chat stays serial."
     >
-      <span className="rounded-lg border border-hairline bg-inset px-2.5 py-1.5 text-[12px] text-ink-secondary">
-        Not available
-      </span>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={1}
+          max={8}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={() => commit(value)}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+          aria-label="Parallel threads default"
+          className="w-20 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink focus:border-hairline focus:outline-none"
+        />
+        <span className="text-[12px] text-ink-secondary">threads per bot</span>
+      </div>
+      {saveError && <p role="alert" className="text-[12.5px] text-[#ff6b6b]">{saveError}</p>}
     </SettingRow>
   );
 }
@@ -496,6 +552,152 @@ function EventLogCleanupRow() {
         {saveError && <p role="alert" className="text-[12.5px] text-[#ff6b6b]">{saveError}</p>}
       </div>
     </SettingRow>
+  );
+}
+
+/** Real (OMB parity): the reasoning effort seeded into every NEW bot's
+ * model selection. Existing bots keep their saved level; "Engine default"
+ * sends no flag at all. */
+const EFFORT_DEFAULT_OPTIONS = ["", "none", "low", "medium", "high", "xhigh", "max"] as const;
+function EffortDefaultRow() {
+  const { state, dispatch } = useStore();
+  const saved = state.config?.bots?.defaultEffort ?? null;
+  const [value, setValue] = useState(saved ?? "");
+  const [saveError, setSaveError] = useState("");
+  useEffect(() => {
+    setValue(saved ?? "");
+  }, [saved]);
+
+  const commit = (next: string) => {
+    if ((saved ?? "") === next) return;
+    setSaveError("");
+    void api("/api/config", {
+      method: "PUT",
+      body: JSON.stringify({ bots: { defaultEffort: next === "" ? null : next } }),
+    })
+      .then((nextConfig) => dispatch({ type: "configStatus", config: nextConfig }))
+      .catch((error) => setSaveError(error instanceof Error ? error.message : "Saving failed — try again."));
+  };
+
+  return (
+    <SettingRow
+      label="Effort for new bots"
+      description="Reasoning effort preselected when you hire a new teammate. Existing bots keep their own setting; each engine offers only the levels it supports."
+    >
+      <div className="flex items-center gap-2">
+        <select
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            commit(e.target.value);
+          }}
+          aria-label="Default reasoning effort for new bots"
+          className="min-h-9 rounded-lg border border-hairline bg-inset px-2 text-[13px] text-ink focus:outline-none"
+        >
+          {EFFORT_DEFAULT_OPTIONS.map((option) => (
+            <option key={option || "default"} value={option}>{option === "" ? "Engine default" : option}</option>
+          ))}
+        </select>
+      </div>
+      {saveError && <p role="alert" className="text-[12.5px] text-[#ff6b6b]">{saveError}</p>}
+    </SettingRow>
+  );
+}
+
+/** Real (OMB parity): the deployment's accounts. Operator-only on a
+ * self-hosted server; a desktop install sees its own single row. */
+function PeopleSection() {
+  const [people, setPeople] = useState<Array<{ id: string; name: string; email: string; primary: boolean }> | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    api("/api/people")
+      .then((body) => {
+        if (!cancelled) setPeople(body.people);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load accounts.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (error) return <Card title="People" subtitle=""><p role="alert" className="text-[13px] text-[#ff6b6b]">{error}</p></Card>;
+  return (
+    <Card title="People" subtitle="Everyone with an account on this deployment. Operators manage engines, keys and settings for the whole fleet.">
+      {people === null ? (
+        <p className="text-[13px] text-ink-secondary">Loading…</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {people.map((person) => (
+            <li key={person.id} className="flex items-center gap-3 rounded-lg border border-hairline/40 bg-inset px-3 py-2">
+              <span className="flex size-8 items-center justify-center rounded-full bg-raised text-[13px] font-medium text-ink">
+                {(person.name || person.email || "?").slice(0, 1).toUpperCase()}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13.5px] text-ink">{person.name || person.email}</span>
+                {person.email && person.name && <span className="block truncate text-[12px] text-ink-secondary">{person.email}</span>}
+              </span>
+              {person.primary && (
+                <span className="rounded-lg border border-hairline bg-raised px-2 py-0.5 text-[11.5px] text-ink-secondary">Operator</span>
+              )}
+            </li>
+          ))
+          }
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+/** Real (OMB parity): the turns running right now, refreshed while the
+ * section is open. Names and live token counts only — never content. */
+function ActivitySection() {
+  const [turns, setTurns] = useState<Array<{ botId: string; botName: string; threadId: string; group: boolean; tokens: number }> | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      api("/api/activity")
+        .then((body) => {
+          if (!cancelled) setTurns(body.turns);
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : "Could not load activity.");
+        });
+    };
+    load();
+    const timer = setInterval(load, 5_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  return (
+    <Card title="Activity" subtitle="Turns running right now. This list refreshes while the section is open.">
+      {error ? (
+        <p role="alert" className="text-[13px] text-[#ff6b6b]">{error}</p>
+      ) : turns === null ? (
+        <p className="text-[13px] text-ink-secondary">Loading…</p>
+      ) : turns.length === 0 ? (
+        <p className="text-[13px] text-ink-secondary">Nothing is running — every bot is idle.</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {turns.map((turn) => (
+            <li key={turn.botId} className="flex items-center gap-3 rounded-lg border border-hairline/40 bg-inset px-3 py-2">
+              <span className="size-2 shrink-0 animate-pulse rounded-full bg-success" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink">
+                {turn.botName}
+                {turn.group ? " · in a room" : ""}
+              </span>
+              <span className="text-[12px] text-ink-secondary">{turn.tokens.toLocaleString()} tokens so far</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
@@ -962,6 +1164,7 @@ export function SettingsModal() {
                 <AnalyticsRow />
                 <TourCard />
                 <ChannelTurnCapCard />
+                <EffortDefaultRow />
                 <ParallelThreadsRow />
                 <EventLogCleanupRow />
                 <VpsCard />
@@ -1109,6 +1312,15 @@ export function SettingsModal() {
               <>
                 <VaultSection />
                 <ManageDevicesCard />
+              </>
+            )}
+
+            {section === "people" && <PeopleSection />}
+            {section === "activity" && <ActivitySection />}
+            {section === "backups" && (
+              <>
+                <SnapshotsCard />
+                <PortableBackupCard />
               </>
             )}
 

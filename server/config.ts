@@ -13,7 +13,7 @@ import {
   customProviderSchema,
   type CustomProvider,
 } from "./custom-providers.ts";
-import type { InstanceConfigMap } from "./contracts.ts";
+import { EFFORT_LEVELS, type InstanceConfigMap } from "./contracts.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 
 const optionalText = z.string().optional();
@@ -83,6 +83,19 @@ const appConfigSchema = z.object({
       trimToMib: z.number().int().min(1).max(10240).optional(),
     })
     .optional(),
+  /** Parallel threads per bot (OMB parity). `default` is the deployment
+   * default width (1 = the classic single-worker invariant); `perBot` holds
+   * explicit per-bot widths. Group threads are never parallel. */
+  parallelThreads: z
+    .object({
+      default: z.number().int().min(1).max(8).optional(),
+      perBot: z.record(z.string(), z.number().int().min(1).max(8)).optional(),
+    })
+    .optional(),
+  /** Model defaults for bots (OMB parity). `defaultEffort` seeds the
+   * reasoning effort of every NEW bot's model selection; existing bots keep
+   * whatever they saved. */
+  bots: z.object({ defaultEffort: z.enum(EFFORT_LEVELS).nullable().optional() }).optional(),
   /** Local VM desktop isolation. "shared" keeps the historical singleton
    * desktop every bot leases one at a time; "perBot" gives each bot its own
    * container, workspace, viewer port and lease lanes. */
@@ -293,7 +306,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
-  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm", "channels", "vps", "hiNew", "driveSync", "telegramSync", "eventLogRetention"] as const) {
+  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm", "channels", "vps", "hiNew", "driveSync", "telegramSync", "eventLogRetention", "parallelThreads", "bots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

@@ -1275,7 +1275,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
         primary={<>
           <div className="conversation-task-slot"><TaskPicker bot={bot} /></div>
-          <div className="conversation-model-slot"><ModelPicker bot={bot} /></div>
+          <div className="conversation-model-slot" data-tour="model-picker"><ModelPicker bot={bot} /></div>
         </>}
         tools={<>
           <UsageChip bot={bot} />
@@ -1294,6 +1294,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             onClick={() => dispatch({ type: "toggleComputer" })}
             aria-label="Bot's computer"
             aria-pressed={state.computerOpen}
+            data-tour="computer"
             className={cn(iconToggleClasses, state.computerOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}
             title="Bot's computer"
           >

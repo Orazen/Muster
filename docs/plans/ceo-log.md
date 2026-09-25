@@ -9373,3 +9373,43 @@ round-trip.
 Concurrent-agent merges absorbed: 2b2585b landed the same config section
 (clean merge). Verification on the merged tree: event-log-cleanup 9/9 +
 index 60/60, tsc clean, oxlint 0/0. CI on 269825c in flight at write time.
+## Loop205 — remaining OMB parity gaps closed (parallel threads, effort default, People/Activity/Backups, guided tour) — 2026-09-25
+
+User: "gohead complete all remaing make it faster." The Loop203 walk had left
+five named gaps; all five are now resolved with real implementations, no
+placeholders, live-verified before commit. GATES.md carries G12–G16.
+
+- Parallel threads per bot (the deep one): implemented as a bounded widening,
+  NOT a scheduler rewrite. server/turn-slots.ts is a per-bot Set ledger;
+  configuredWidth() resolves default → per-bot override with group threads
+  pinned to 1 forever. startTurn keeps check-and-claim synchronous, releases
+  ride the turn.completed fold, settleLostTurn (idempotent), and the
+  provider-reload path; Stop interrupts every running thread via
+  runningThreads(). Width 1 reproduces the old invariant exactly (same 409
+  message). Config echo + UI number input (1–8) through the guarded api()
+  path. Caught and fixed one real bug during verification: my first gate
+  referenced `threadId` before its declaration (TDZ 500 in index.test) —
+  relocated after the existing seam rather than papering over the test.
+- Effort default for new bots: config.bots.defaultEffort (nullable), applied
+  at POST /api/bots only when an engine instance exists; live-proven in both
+  directions (high → seeded; null → absent), test bots cleaned up.
+- People / Activity / Backups settings sections: two new operator-scoped,
+  minimal-payload endpoints (GET /api/people, GET /api/activity) + a Backups
+  nav section reusing the proven snapshot cards. Verified live including the
+  honest empty state and the Operator badge.
+- Guided product tour: five coach marks on data-tour anchors with auto-skip,
+  named backdrop/Skip controls, localStorage persistence, settings replay —
+  auto-started live on first visit, walked, completed, replayed, skipped.
+  Bonus: data-tour on the settings gear fixed the missing accessible name
+  noted in sweep 1.
+- i18n: recorded as an honest non-goal (G16) — a picker over untranslated
+  strings would be a fake setting.
+
+Verification: tsc clean, oxlint 0/0 (657 files), targeted suites green
+(components/state/lib 97 files; server batches 63/60/76; index 60/60).
+Live on OMB_PORT=8801: every PUT/GET round-trip, bot seeding both ways,
+tour lifecycle, real-React-event UI round-trips. Ops notes: the harness
+listens on OMB_PORT (PORT is ignored) and serves static via OMB_STATIC_DIR;
+port 8799 is the user's actual OpenMausBot desktop app — detected and left
+untouched. Two full `vitest run` passes timed out locally (>580s, no output
+captured) — CI is the arbiter for the tree-wide number, as in Loop204.

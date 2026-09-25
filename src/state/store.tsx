@@ -310,6 +310,10 @@ export interface ConfigStatus {
    * deletes archived-thread event logs past the threshold and/or trims each
    * log to the cap — never transcripts or the message database. */
   eventLogRetention?: { deleteArchivedAfterDays: number | null; trimToMib: number | null };
+  /** Parallel threads per bot (OMB parity). Group threads never parallelize. */
+  parallelThreads?: { default: number; perBot: Record<string, number> };
+  /** Reasoning effort seeded into every NEW bot's model selection; null = engine default. */
+  bots?: { defaultEffort: EffortLevel | null };
   /** BYO VPS computer; the alias is a setting, credentials stay in ssh(1). */
   vps?: { sshAlias: string };
   /** Storage-sovereignty gate (decision 14): required on hosted deployments,
@@ -389,6 +393,9 @@ export type AppSettingsSection =
   | "computer"
   | "usage"
   | "vault"
+  | "people"
+  | "activity"
+  | "backups"
   | "audit"
   | "why";
 

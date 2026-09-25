@@ -1413,6 +1413,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   return (
     <aside
+      data-tour="roster"
       className={cn(
         "glass-shell-sidebar flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel transition-[width] duration-200 ease-[cubic-bezier(.24,1,.4,1)]",
         DENSITY_WIDTH[density],
@@ -1810,6 +1811,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             onClick={() => dispatch({ type: "toggleAppSettings" })}
             className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
             title="App settings"
+            aria-label="App settings"
+            data-tour="app-settings"
           >
             <Settings size={18} />
           </button>

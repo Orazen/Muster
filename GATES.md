@@ -93,3 +93,32 @@ already had honest placeholders; the right move is real features behind them.
   CHECK: npx vitest run server/config.test.ts server/index.test.ts server/event-log-cleanup.test.ts
   EXPECT: 97 passed
   EVIDENCE: server/event-log-cleanup.ts - listEventLogFiles excludes the sync engine sync-*.ndjson journal by prefix; deleteStaleArchivedLogs removes only ARCHIVED (hidden) bots thread logs whose mtime is older than the threshold (mtime = last bus write, so active threads are always fresh) and never touches a non-archived thread log; trimEventLog/trimAllEventLogs keep the newest tail cut at a newline boundary. server/index.ts: daily unref-ed sweep (24h) gated on the live config section; configStatus echoes both values (null = OFF); PUT /api/config persists through the existing section-merge. Verified LIVE before commit: PUT {days:7,mib:50} -> 200, disk + echo confirmed, settings row shows 7/50 with switches ON and toggles round-trip. Groups are deliberately out of scope (Muster never archives groups - room deletion already unlinks logs immediately). Deliberately NOT cloned: OMB React components, mock scene markup, assets; Muster keeps its own design system and brand. License: OMB is Apache 2.0 (enterprise/ carve-out; name and mascot are trademarks and stay out) - porting logic with attribution is permitted; attribution recorded here. Concurrent-agent note: 2b2585b landed the identical config section mid-flight (great minds); merged cleanly, my diff keeps the sweep + UI + tests on top. Suites at close: 97/97, tsc clean, oxlint 0/0.
+
+## Loop205 (2026-09-25): the remaining OMB parity gaps — all closed with real features
+
+- [x] G12: parallel threads per bot is a real, safe widening — not a rewrite of the turn pipeline
+  CHECK: npx vitest run server/turn-slots.test.ts server/index.test.ts
+  EXPECT: 69 passed
+  EVIDENCE: server/turn-slots.ts — configuredWidth() resolves deployment default → per-bot override (groups pinned to 1 forever); hasSlot/claimSlot/releaseSlot are a per-bot Set ledger whose release is idempotent (turn.completed fold AND settleLostTurn both release; provider-reload path clearSlots). startTurn keeps check-and-claim in one synchronous pre-dispatch block; the busy flag and composer lock are untouched; group dispatch's own busy check untouched. Width 1 is byte-for-byte the old invariant (its 409 message is identical). Verified LIVE: PUT {parallelThreads:{default:3}} → 200, disk + GET echo, then UI number input round-trip 5 → 1 back through api(). 9/9 slot tests pin clamps, per-bot isolation, double-claim dedupe, idempotent release.
+
+- [x] G13: effort default for new bots seeds every NEW bot's model selection; existing bots untouched
+  CHECK: npx vitest run server/config.test.ts server/index.test.ts
+  EXPECT: 63+60 passed
+  EVIDENCE: config.bots.defaultEffort (nullable z.enum(EFFORT_LEVELS)); POST /api/bots applies it to the seeded selection only when an instance exists (no engines → no fake effort); PATCH validation already gates per-bot effort. Verified LIVE: PUT {high} → create → selection {"instanceId":"droid","model":"auto","effort":"high"}; PUT null → create → selection WITHOUT effort; both test bots deleted after. Settings select round-trips through the guarded api() path (high → null verified in-browser).
+
+- [x] G14: People / Activity / Backups settings sections are real server-backed surfaces
+  CHECK: npx vitest run server/auth.test.ts && curl checks
+  EXPECT: people+activity endpoints shape-stable
+  EVIDENCE: GET /api/people — operator-only on self-hosted, returns id/name/email/primary ONLY (no capability/session data), desktop gets its single row; GET /api/activity — any signed-in user, busy bots with live token counts, names only, never content. Backups section reuses the two proven snapshot cards (SnapshotsCard + PortableBackupCard) in their own nav section. All three verified LIVE in the browser: People lists the deployment's real accounts with the Operator badge; Activity shows its honest empty state ("Nothing is running"); Backups renders both cards. Non-operators 403 on people (same operator guard family as /api/config).
+
+- [x] G15: guided product tour anchors to real UI, never blocks, and replays
+  CHECK: npx vitest run src/components/ProductTour.test.ts
+  EXPECT: 4 passed
+  EVIDENCE: src/components/ProductTour.tsx — five coach marks on data-tour anchors (roster/composer/model-picker/computer/app-settings; attributes added to Sidebar, Composer, ChatView). Missing anchors auto-skip after 8 polls; backdrop + Skip are named controls; completion persists per browser (localStorage muster.productTour.done.v1). Mounts when the account gate settles "hide" (never competes with the wizard or the storage gate); Settings → First-run tour gains "Replay feature tour". Verified LIVE: auto-started on load, Next advanced, collapsed-sidebar step skipped itself, Done marked complete; replay button relaunched and Skip dismissed. data-tour="app-settings" also fixed the settings gear's missing accessible name (sweep-1 note).
+
+- [x] G16: i18n is a recorded honest non-goal, not a fake picker
+  CHECK: manual — LanguageRow copy in src/components/SettingsModal.tsx
+  EXPECT: disabled control states the design decision
+  EVIDENCE: Muster strings live inline with no extraction layer; shipping a selector over one string would be a fake setting (the thing this repo refuses to do). The row now says exactly that and names the revisit condition (real locale demand → full i18n scaffold, not partial). Recorded here as the deliberate parity divergence from OMB.
+
+Verification at close: tsc --noEmit clean tree-wide; oxlint 0/0 (657 files); suites green — components/state/lib 97 files, server targeted batches 63+60+76, config/auth/turn-slots 63; full e2e coverage unaffected (no spec touches these surfaces). Live verification on OMB_PORT=8801 with OMB_STATIC_DIR: config PUT/GET round-trips (parallelThreads, bots.defaultEffort incl. null-clear), bot-creation seeding (both directions), people/activity payloads, tour lifecycle, settings rows through the real React event path (native setter + focusout). Test artifacts deleted; server stopped; the user's OpenMausBot desktop app on 8799 was detected and left untouched.
