@@ -977,6 +977,9 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       <div className="flex flex-col">
         <h1 className="text-center text-[18px] font-semibold text-ink">What your bots can do</h1>
         <div key={tourStep} className="tour-panel mt-4 flex min-h-[168px] flex-col justify-center rounded-xl border border-hairline/40 bg-card p-4">
+          <div className="mb-2 self-start rounded-full bg-raised px-2 py-0.5 text-[10.5px] font-medium uppercase tracking-wide text-ink-secondary">
+            Example
+          </div>
           {TOUR[tourStep].body}
           <div className="mt-3 text-[13.5px] font-medium text-ink">{TOUR[tourStep].title}</div>
           <div className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">{TOUR[tourStep].caption}</div>
