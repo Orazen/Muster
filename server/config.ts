@@ -73,6 +73,16 @@ const appConfigSchema = z.object({
    * user's shared context — injected into every bot's system prompt, so
    * each bot knows who it works for without being told every chat. */
   profile: z.object({ name: optionalText, email: optionalText, about: optionalText }).optional(),
+  /** Event-log retention (OMB parity). Both controls default OFF; when on,
+   * the daily sweep deletes event-log FILES of archived threads older than
+   * the threshold and/or trims each log to a size cap — never transcripts,
+   * never the message database. */
+  eventLogRetention: z
+    .object({
+      deleteArchivedAfterDays: z.number().int().min(1).max(3650).optional(),
+      trimToMib: z.number().int().min(1).max(10240).optional(),
+    })
+    .optional(),
   /** Local VM desktop isolation. "shared" keeps the historical singleton
    * desktop every bot leases one at a time; "perBot" gives each bot its own
    * container, workspace, viewer port and lease lanes. */
@@ -143,6 +153,7 @@ export interface AppConfig {
   /** BYO VPS over SSH; see isValidSshAlias for what may be stored here. */
   vps?: { sshAlias?: string };
   profile?: { name?: string; email?: string; about?: string };
+  eventLogRetention?: { deleteArchivedAfterDays?: number; trimToMib?: number };
   providers?: Record<string, { apiKey?: string }>;
   customProviders?: CustomProvider[];
   instances?: InstanceConfigMap;
@@ -282,7 +293,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
-  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm", "channels", "vps", "hiNew", "driveSync", "telegramSync"] as const) {
+  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm", "channels", "vps", "hiNew", "driveSync", "telegramSync", "eventLogRetention"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
