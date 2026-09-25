@@ -46,8 +46,11 @@ const slots = new Map<string, Set<string>>();
 
 /** Is there room for one more turn on `threadId`? Pure counter read — the
  * caller (startTurn) keeps check-and-claim in one synchronous block, so no
- * await can slip between the count and the claim. */
-export function hasSlot(botId: string, threadId: string, width: number): boolean {
+ * await can slip between the count and the claim. The width is the bot's, so
+ * the count is per-bot and the thread id is not consulted; it stays in the
+ * signature because it is what makes the question "is there room for THIS
+ * turn" and because a per-thread cap would need it. */
+export function hasSlot(botId: string, _threadId: string, width: number): boolean {
   const taken = slots.get(botId);
   if (!taken) return true;
   return taken.size < width;

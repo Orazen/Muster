@@ -167,6 +167,11 @@ export interface AppConfig {
   vps?: { sshAlias?: string };
   profile?: { name?: string; email?: string; about?: string };
   eventLogRetention?: { deleteArchivedAfterDays?: number; trimToMib?: number };
+  /** Parallel threads per bot: `default` is the deployment width, `perBot`
+   * holds explicit per-bot overrides. `bots` seeds new bots' model choices
+   * (defaultEffort); existing bots keep what they saved. */
+  parallelThreads?: { default?: number; perBot?: Record<string, number> };
+  bots?: { defaultEffort?: (typeof EFFORT_LEVELS)[number] | null };
   providers?: Record<string, { apiKey?: string }>;
   customProviders?: CustomProvider[];
   instances?: InstanceConfigMap;
