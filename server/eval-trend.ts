@@ -19,12 +19,16 @@ const identity = {
   status,
   limitation: z.string(),
 };
+// Metrics a grader can actually emit: never negative, never NaN/Infinity
+// (JSON cannot encode those, but a hand-edited scorecard can carry them and
+// the trend would render nonsense like "-5.0s").
+const metric = z.number().finite().nonnegative().nullable();
 const probeScore = z.object({
   status: z.enum(["passed", "failed", "missing"]),
   checks: z.array(check),
-  elapsedMs: z.number().nullable(),
-  tokens: z.number().nullable(),
-  costUsd: z.number().nullable(),
+  elapsedMs: metric,
+  tokens: metric,
+  costUsd: metric,
 });
 const fleetSchema = z.object({
   ...identity,
@@ -34,9 +38,9 @@ const roleScenarioScore = z.object({
   role: z.enum(roleNames), kind: z.enum(scenarioKinds), name: z.string(),
   status: z.enum(["passed", "failed"]),
   checks: z.array(check),
-  elapsedMs: z.number().nullable(),
-  tokens: z.number().nullable(),
-  costUsd: z.number().nullable(),
+  elapsedMs: metric,
+  tokens: metric,
+  costUsd: metric,
 });
 const roleStatus = z.object({ status, scenarios: z.array(roleScenarioScore) });
 const roleSchema = z.object({
@@ -104,14 +108,21 @@ export function parseScorecard(file: string, json: string): ParsedScorecard {
   } catch {
     throw new Error(`${file} is not a fleet or role scorecard: not JSON`);
   }
+  const hasKey = (key: string) => body instanceof Object && !Array.isArray(body) && key in body;
+  // A body carrying both shapes is ambiguous by construction: whichever
+  // schema parsed first would silently discard the other half.
+  if (hasKey("probes") && hasKey("roles")) {
+    throw new Error(`${file} carries both fleet probes and role sections — it is not a scorecard either grader wrote.`);
+  }
   const fleet = fleetSchema.safeParse(body);
   if (fleet.success) return { kind: "fleet", scorecard: fleet.data };
   const role = roleSchema.safeParse(body);
   if (role.success) return { kind: "role", scorecard: role.data };
-  // Name the file and the fleet schema's first disagreement; never echo
-  // file contents. A body that satisfies neither schema lands here.
-  const detail = fleet.error.issues[0]?.message ?? "schema mismatch";
-  throw new Error(`${file} is not a fleet or role scorecard: ${detail}`);
+  // Name the file and each schema's first disagreement — the reader has no
+  // way to know which shape they intended, so both get a voice.
+  const fleetDetail = fleet.error.issues[0]?.message ?? "schema mismatch";
+  const roleDetail = role.error.issues[0]?.message ?? "schema mismatch";
+  throw new Error(`${file} is not a fleet or role scorecard (fleet: ${fleetDetail}; role: ${roleDetail})`);
 }
 
 function probeTrend(p: FleetScorecard["probes"]["completion"]): TrendProbe {

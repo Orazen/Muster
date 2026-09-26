@@ -218,8 +218,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     writeFileSync(output, JSON.stringify(scorecard, null, 2) + "\n", { flag: "wx", mode: 0o600 });
     console.log(JSON.stringify({ status: scorecard.status, output }));
     process.exitCode = scorecard.status === "passed" ? 0 : 1;
-  } catch {
-    console.error("Could not grade capture. Supply valid capture/output paths, a valid capture under 2 MB, and a new output filename.");
+  } catch (error) {
+    // Grading and writing fail differently: an EEXIST means the capture
+    // graded fine and only the write was refused — the generic catch-all
+    // would make that read as a bad capture.
+    if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+      console.error("A scorecard already exists at that path — pick a new output filename; existing runs are never overwritten.");
+    } else {
+      console.error("Could not grade capture. Supply valid capture/output paths, a valid capture under 2 MB, and a new output filename.");
+    }
     process.exitCode = 2;
   }
 }

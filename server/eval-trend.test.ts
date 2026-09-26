@@ -100,6 +100,25 @@ describe('fleet eval trend', () => {
     expect(() => parseScorecard('old.json', JSON.stringify({ version: 2 }))).toThrow(/old\.json/);
   });
 
+  it('reports both schemas when neither matches, so the reader knows both shapes', () => {
+    expect(() => parseScorecard('fog.json', JSON.stringify({ version: 1 }))).toThrow(/fleet:.*role:/s);
+  });
+
+  it('refuses a body carrying both fleet and role sections instead of discarding half', () => {
+    const both = JSON.stringify({
+      ...fleetFixture('x', 'passed').scorecard,
+      roles: roleFixture('x', 'passed').scorecard.roles,
+    });
+    expect(() => parseScorecard('both.json', both)).toThrow(/both fleet probes and role sections/);
+  });
+
+  it('rejects metrics no grader can emit', () => {
+    const negative = fleetFixture('x', 'passed');
+    if (negative.kind !== 'fleet') throw new Error('fixture kind drifted');
+    negative.scorecard.probes.completion.elapsedMs = -50;
+    expect(() => parseScorecard('neg.json', JSON.stringify(negative.scorecard))).toThrow(/neg\.json/);
+  });
+
   it('summarizes the verdict and keeps unknown usage visible as a dash', () => {
     const trend = trendFromScorecards([
       { file: '/tmp/eval/a.json', scorecard: fleetFixture('run-a', 'passed') },
