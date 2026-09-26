@@ -337,3 +337,39 @@ Verification: targeted 3 eval suites 36/36; typecheck clean; oxlint 0/0 on
 1010 files; full local suite 385 files, 5789 passed, 8 skipped, 0 failed
 (+7 on the previous 5782 — this slice's tests). Live smoke ran the real CLI
 over two synthetic scorecards and a missing file (exit 0 / 2 respectively).
+
+## The trend gets a face, and the bench gets its trend (2026-09-26, later)
+
+**Using the trend showed its flaw within minutes.** Grading three synthetic
+captures through the real CLI and trending them worked, but seeing the
+sequence meant piping the JSON through a script — the machine contract had
+eaten the human view. Default output is now the at-a-glance form: one line
+per run (status, completion tokens, elapsed, which named checks failed),
+then the verdict ("2 of 3 runs passed") and differing labels; `--json`
+keeps the machine contract, same convention as `bots`/`status`.
+
+**Astra slice 1's "trendable" is now done for BOTH graders.** The ranked
+plan's item 1 had a second open half: the per-role benchmark kept
+never-overwritten scorecards that nothing read back either. The same
+command now trends role scorecards — per-role assistant/coordinator/
+specialist statuses and failed scenario names in the compact view,
+per-scenario metrics in the JSON. One invocation trends exactly one kind:
+fleet and role statuses measure different things, and the command exits 2
+rather than produce a trend of unlike with unlike.
+
+Two defects fixed on the way: the CLI's usage strings pointed at a
+"per-role benchmark playbook" that did not exist (the playbook now covers
+both graders), and the ranked plan's item 1 still listed trending as open.
+
+Verification: eval-family suites 44/44 (trend 14, fleet 14, role 12,
+harness 4); typecheck clean; oxlint 0/0 on touched files; full local suite
+385 files, 5806 passed, 8 skipped, 0 failed — the same numbers the entry
+commit after it independently reports. Deliberately NOT built: scheduled
+benchmark wiring — Actions billing can block triggers, so that stays an
+owner decision, recorded in the ranked plan.
+
+Parallel-agent note: the entry-pages commit that landed after this slice's
+commit interleaved cleanly on top of it; the shared ranked-plan file was
+partially staged (this slice's item-1 hunk only) so the audit header that
+agent added stayed theirs.
+
