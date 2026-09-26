@@ -190,9 +190,10 @@ import {
   desktopSignInRetrySeconds,
   handoffFinishURL,
   isHandoffRedirect,
-  issueDesktopGrantWithReturn,
+  issueBoundDesktopGrant,
   issueHandoffCode,
-  redeemHandoffCode,
+  redeemBoundHandoffCode,
+  EXCHANGE_VERSION,
 } from "./desktop-auth.ts";
 import { startAccountMerge, spendAccountMergeToken } from "./account-merge.ts";
 import { mergeUserVault } from "./user-keys.ts";
@@ -5034,7 +5035,17 @@ let requestUserEmail = "";
       if (!isHandoffRedirect(redirect)) {
         return html(res, 400, "<body style=\"font:14px -apple-system,sans-serif;padding:2rem\">sign-in needs a http://127.0.0.1 or localhost redirect (or the companion's muster://oauth/finish).</body>");
       }
-      const grant = issueDesktopGrantWithReturn(redirect, returnTo);
+      // Client binding, all optional: a desktop that sends none gets exactly
+      // the flow it had before. Normalized inside the issuer, so a malformed
+      // state or challenge degrades to unbound rather than to a grant nobody
+      // can ever satisfy.
+      const grant = issueBoundDesktopGrant({
+        redirect,
+        returnTo,
+        state: url.searchParams.get("state") ?? undefined,
+        codeChallenge: url.searchParams.get("code_challenge") ?? undefined,
+        codeChallengeMethod: url.searchParams.get("code_challenge_method") ?? undefined,
+      });
       const callback = `/desktop-auth/done?grant=${encodeURIComponent(grant)}`;
       // Better Auth's social endpoint is POST-only — a browser 302 at a GET
       // URL 404s. Resolve the Google URL server-side and bounce there.
@@ -5100,18 +5111,35 @@ let requestUserEmail = "";
       });
       if (!handoff) return html(res, 400, "<body style=\"font:14px -apple-system,sans-serif;padding:2rem\">This desktop sign-in link expired. Start again from Muster.</body>");
       // Code rides in the FRAGMENT: browsers never send #... to servers, so
-      // it can't leak into access logs or Referrer headers anywhere.
-      const nextHash = handoff.returnTo ? `&next=${encodeURIComponent(handoff.returnTo)}` : "";
-      return res.writeHead(302, { Location: `${handoffFinishURL(handoff.redirect)}#code=${encodeURIComponent(handoff.code)}${nextHash}` }).end();
+      // it can't leak into access logs or Referrer headers anywhere. `state`
+      // rides with it so the client can tell this callback from a stale or
+      // replayed one, and `v` names the exchange shape it must speak.
+      const parts = [`code=${encodeURIComponent(handoff.code)}`];
+      if (handoff.state) parts.push(`state=${encodeURIComponent(handoff.state)}`);
+      parts.push(`v=${handoff.version}`);
+      if (handoff.returnTo) parts.push(`next=${encodeURIComponent(handoff.returnTo)}`);
+      return res.writeHead(302, { Location: `${handoffFinishURL(handoff.redirect)}#${parts.join("&")}` }).end();
     }
     if (method === "POST" && path === "/api/desktop-auth/exchange") {
       // Server-to-server: a desktop's LOCAL server burns the one-time code
-      // for the identity. 90-second TTL, single-use, memory-only.
+      // for the identity. 90-second TTL, single-use, memory-only. When the
+      // code is bound to a PKCE challenge, the verifier is required — that is
+      // the whole point, since the code travels over a loopback port any local
+      // process can race.
       const body = await readBody(req);
       const code = isText(body?.code) ? body.code.trim() : "";
-      const identity = redeemHandoffCode(code);
-      if (!identity) return json(res, 400, { error: "that sign-in code expired or was already used — start again from Muster" });
-      return json(res, 200, { email: identity.email, name: identity.name });
+      const verifier = isText(body?.code_verifier) ? body.code_verifier : undefined;
+      const result = redeemBoundHandoffCode(code, verifier);
+      if (!result.ok) {
+        if (result.reason === "verifier") {
+          return json(res, 400, { error: "this sign-in could not be verified — start again from Muster" });
+        }
+        if (result.reason === "version") {
+          return json(res, 400, { error: `this sign-in uses a newer exchange version than this build — update Muster (server speaks v${EXCHANGE_VERSION})` });
+        }
+        return json(res, 400, { error: "that sign-in code expired or was already used — start again from Muster" });
+      }
+      return json(res, 200, { email: result.identity.email, name: result.identity.name, v: result.version });
     }
 
     // ── desktop side of the OAuth handoff ──────────────────────────────
