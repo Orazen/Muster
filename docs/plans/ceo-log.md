@@ -9413,3 +9413,15 @@ listens on OMB_PORT (PORT is ignored) and serves static via OMB_STATIC_DIR;
 port 8799 is the user's actual OpenMausBot desktop app — detected and left
 untouched. Two full `vitest run` passes timed out locally (>580s, no output
 captured) — CI is the arbiter for the tree-wide number, as in Loop204.
+## Loop206 (2026-09-26) — v1.20.0 release cut carrying OMB parity
+
+GATE: version bump → CI green → tag on tested sha → release.yml 7 jobs → published release + VPS mirror.
+CHECK: bump `node scripts/bump-version.mjs minor` → package.json 1.20.0; commit f638a29; CI+autodeploy success; tag v1.20.0 on f638a29.
+EXPECT: Release run all 7 jobs success; gh release draft=false; mirror serves 1.20.0.
+EVIDENCE: Release run (rerun of failed pin) completed success — Pin/mac-x64/mac-arm64(sign,notarize,staple)/win-nsis/linux/verify-feeds+publish/deploy-vps all success. gh release: "Muster 1.20.0" draft=false prerelease=false, 12 assets (deb, arm64.zip+blockmap, intel.dmg, x64.zip, setup.exe+blockmap, 3 latest-*.yml feeds, cli.mjs). Mirror: https://muster.orazen.online/downloads/latest.yml → version 1.20.0; HEAD on setup.exe → 200.
+
+Incidents, both resolved:
+1. Tagged v1.21.0 assuming semver-minor from 1.19; the project's bump script writes 1.19→1.20 (patch-style). Pin gate correctly rejected the mismatch; deleted my own minutes-old tag, re-tagged v1.20.0 (no v1.20.0 tag existed; nothing consumed it). Lesson: read the bump script output (it prints the candidate tag) before tagging.
+2. First v1.20.0 Release run failed in prepare: "Draft creation did not produce a confirmed matching draft" — GitHub listing eventual-consistency race; the draft it created matched the state contract exactly (draft=true, prerelease=false, target=f638a29). Re-run of failed job took the script's "reused" path and passed. No code change warranted.
+
+Release carries: parallel threads per bot (turn-slots), effort default for new bots, People/Activity/Backups settings sections, guided product tour, About-me shared context, event-log retention, sweeps 1–3 fixes.
