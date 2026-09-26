@@ -246,6 +246,53 @@ describe.skipIf(process.platform === "win32")("a configured mail provider's refu
     expect(transported().filter((r) => r.to === email)).toHaveLength(2);
   });
 
+  it("does not let a password-reset send decide a later sign-in send", async () => {
+    // A guard, not a regression test for the retention fix: this passes with
+    // or without the type gate, because the send policy only reads AFTER it
+    // delegates, and delegating always invokes the sender first — so the
+    // verdict it reads is always its own. What it pins is that a non-sign-in
+    // route outside the wrapper (`/email-otp/request-password-reset` needs no
+    // configuration and simply bypasses it) cannot influence a sign-in send
+    // at all, now or later. The leak that gate prevents is asserted directly
+    // in server/otp-delivery.test.ts.
+    const email = mailbox("crosscontam");
+    // The account must exist: the plugin short-circuits a non-sign-in send for
+    // an unknown address without ever calling the sender.
+    const signUp = await fetch(`${url}/api/auth/sign-up/email`, {
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(20_000),
+      headers: new Headers({ "content-type": "application/json", origin: url }),
+      body: JSON.stringify({ name: "Cross Contam", email, password: randomBytes(24).toString("base64url") }),
+    });
+    expect(signUp.status).toBe(200);
+
+    setMode("accept");
+    const before = transported().filter((r) => r.to === email).length;
+    const reset = await fetch(`${url}/api/auth/email-otp/request-password-reset`, {
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(20_000),
+      headers: new Headers({ "content-type": "application/json", origin: url }),
+      body: JSON.stringify({ email }),
+    });
+    expect(reset.status).toBe(200);
+    // The sender really ran for that non-sign-in request, so this is not a
+    // vacuous pass.
+    expect(transported().filter((r) => r.to === email).length).toBe(before + 1);
+
+    // Now the provider starts refusing. A sign-in code for the same mailbox
+    // must still be reported as undelivered. It is not cooldown-blocked: the
+    // reset route never reached the send policy, so no cooldown was armed.
+    setMode("reject");
+    const signIn = await send(email);
+    expect(signIn.res.status).toBeGreaterThanOrEqual(500);
+    expect(signIn.body.code).toBe("EMAIL_DELIVERY_FAILED");
+    // And the user must be able to try again.
+    const retry = await send(email);
+    expect(retry.res.status).not.toBe(429);
+  });
+
   it("recovers as soon as the provider does, with no operator action", async () => {
     const email = mailbox("recovers");
     setMode("reject");

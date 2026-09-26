@@ -688,8 +688,13 @@ export const auth = betterAuth({
       expiresIn: OTP_TTL_SECONDS,
       allowedAttempts: 3,
       storeOTP: "hashed",
-      sendVerificationOTP: async ({ email, otp }) => {
-        await sendLoginCodeEmail(email, otp, OTP_TTL_SECONDS);
+      // `type` is forwarded, not dropped. The plugin sends this callback for
+      // email-verification, forget-password and change-email codes too, and
+      // several of those routes sit outside the send policy, so a delivery
+      // outcome recorded for them has no reader. The sender keeps only the
+      // sign-in type — see shouldRecordDelivery in server/otp-delivery.ts.
+      sendVerificationOTP: async ({ email, otp, type }) => {
+        await sendLoginCodeEmail(email, otp, OTP_TTL_SECONDS, type);
       },
     }),
   ],

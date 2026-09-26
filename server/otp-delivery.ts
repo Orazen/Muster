@@ -47,12 +47,46 @@ export type DeliveryFailure =
 
 export type DeliveryOutcome = { ok: true } | DeliveryFailure;
 
+/** The code kinds the plugin can ask the sender to deliver. Mirrors its own
+ * `sendVerificationOTP` payload so a new kind is a compile error here rather
+ * than a silent leak. */
+export type OtpCodeType = "sign-in" | "email-verification" | "forget-password" | "change-email";
+
+/** Whether a delivery of this kind is one the send policy will come back for.
+ *
+ * Only the sign-in send is reconciled, so only the sign-in send may be
+ * recorded. The plugin's other kinds matter here because their routes are not
+ * all wrapped: `/email-otp/request-password-reset` and
+ * `/email-otp/request-email-change` call this same sender while sitting
+ * outside the send policy entirely, and the `/sign-up` after-hook can too. A
+ * record written on those paths has no reader, so recording them grows a Map
+ * by one entry per address ever mailed such a code — silently, on a
+ * long-lived server, which is exactly the kind of defect no test announces.
+ *
+ * This is a retention rule, not an attribution one. A stale record cannot be
+ * mistaken for a later send's verdict either way, because the send policy only
+ * reads after delegating, and delegating always invokes the sender first.
+ */
+export function shouldRecordDelivery(type: OtpCodeType): boolean {
+  return type === "sign-in";
+}
+
 /** How long a recorded outcome stays readable. Generous next to the
  * transport's own timeout (see RESEND_TIMEOUT_MS in email.ts) so a slow but
  * answered send is still attributed correctly, and short enough that a request
  * which died between storing the code and recording the outcome cannot leave a
  * stale verdict for an unrelated later send. */
 const OUTCOME_TTL_MS = 60_000;
+
+/** Hard ceiling on retained entries, as defence in depth. Every write today is
+ * paired with a read-and-clear on the send path, and only the sign-in type is
+ * recorded at all, so this should never be reached. It exists because the
+ * failure it guards against is silent: an unbounded Map in a server that runs
+ * for weeks is a slow leak that no test announces, and a future caller that
+ * records without clearing would otherwise leak one entry per address mailed.
+ * Oldest-first eviction matches the TTL: the entry most likely to be stale is
+ * the one dropped. */
+const MAX_TRACKED = 1_000;
 
 const outcomes = new Map<string, { outcome: DeliveryOutcome; at: number }>();
 
@@ -66,6 +100,12 @@ export function recordDelivery(email: string, outcome: DeliveryOutcome): void {
   // One mailbox has one send in flight: the per-mailbox cooldown admits no
   // second attempt, so the newest verdict is the only one that can be read.
   outcomes.set(key, { outcome, at: Date.now() });
+  // Map preserves insertion order, so the first key is the oldest write.
+  while (outcomes.size > MAX_TRACKED) {
+    const oldest = outcomes.keys().next();
+    if (oldest.done) break;
+    outcomes.delete(oldest.value);
+  }
 }
 
 /** The recorded outcome for a mailbox, or undefined when none is live.

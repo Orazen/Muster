@@ -24,7 +24,7 @@
  * server/otp-delivery.ts for why better-auth cannot answer that itself).
  */
 
-import { recordDelivery, type DeliveryOutcome } from "./otp-delivery.ts";
+import { recordDelivery, shouldRecordDelivery, type DeliveryOutcome, type OtpCodeType } from "./otp-delivery.ts";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY?.trim();
 const EMAIL_FROM = process.env.EMAIL_FROM?.trim() || "Muster <noreply@localhost>";
@@ -184,11 +184,27 @@ export async function sendVerificationEmail(to: string, url: string): Promise<vo
  * and the send policy must keep treating that as the success it is. A
  * deployment with no mailer never offers the flow anyway — `emailOtp` is
  * advertised from isEmailConfigured(), so the UI hides email codes entirely.
+ *
+ * `type` gates the recording, and it has to. The plugin invokes this callback
+ * for `email-verification`, `forget-password` and `change-email` codes as
+ * well, and several of those routes sit OUTSIDE the send policy —
+ * `/email-otp/request-password-reset` is one, and it needs no configuration.
+ * A record written for them has no reader, so without this gate the map would
+ * gain an entry per address ever mailed a reset or change code, on a server
+ * that runs for weeks. Only the sign-in type is recorded, because only the
+ * sign-in type has a reader. The union mirrors the plugin's own
+ * `sendVerificationOTP` payload.
+ *
+ * Note what this does NOT rely on: a leaked record cannot be misread as some
+ * later send's verdict, because the send policy reads only after delegating,
+ * and delegating always calls this sender first — so the verdict it reads is
+ * its own. The gate is about retention, not about correctness of attribution.
  */
 export async function sendLoginCodeEmail(
   to: string,
   code: string,
   expiresInSeconds: number,
+  type: OtpCodeType = "sign-in",
 ): Promise<void> {
   if (!isEmailConfigured()) {
     console.warn(
@@ -210,7 +226,8 @@ export async function sendLoginCodeEmail(
       `Enter this code on the sign-in screen to finish signing in. It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.<br><br><span style="display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:26px;letter-spacing:0.3em;font-weight:600;color:#f6f6f7;background:#1c1c1f;border:1px dashed #3a3a3f;border-radius:10px;padding:10px 14px;">${code}</span>`,
     ),
   });
-  recordDelivery(to, outcome);
+  // The one and only write, gated to the type the send policy can read.
+  if (shouldRecordDelivery(type)) recordDelivery(to, outcome);
 }
 
 export async function sendPasswordResetEmail(to: string, url: string): Promise<void> {
