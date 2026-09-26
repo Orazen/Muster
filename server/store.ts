@@ -187,6 +187,11 @@ export interface TaskRecord {
   threadId: ThreadId;
   title: string;
   createdAt: number;
+  /** Set once a title came from anything other than the mechanical
+   * first-message naming (user rename or LLM short title). A later turn
+   * must not overwrite a human's rename — only another generated title
+   * may replace it. Absent = mechanical/legacy. */
+  titleSource?: "user" | "generated";
   /** provider-native continuation per instance, for THIS task only */
   resumeCursors: Record<string, string>;
   /** which instance dispatched the most recent turn. A cursor alone can't
@@ -1274,6 +1279,7 @@ export class Store {
     const task = this.bot(botId)?.tasks?.find((t) => t.threadId === threadId);
     if (!task) return null;
     task.title = title.trim().slice(0, 80) || UNTITLED_TASK;
+    task.titleSource = "user";
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;
@@ -1286,6 +1292,29 @@ export class Store {
     task.title = titleFromMessage(text);
     this.saveBots();
     this.emit({ type: "bot", botId });
+  }
+
+  /** True when the task's name is the mechanical first-message one (or
+   * still "New task") — only these may be replaced by a generated title,
+   * and a user rename is always off-limits. */
+  hasMechanicalTitle(botId: string, threadId: string): boolean {
+    const task = this.taskByThread(botId, threadId);
+    return !!task && task.titleSource === undefined;
+  }
+
+  /** Swap in an LLM-generated short title for a mechanically-named task.
+   * Generated titles may replace each other on later turns; user renames
+   * are checked by hasMechanicalTitle before this is ever called. */
+  applyGeneratedTitle(botId: string, threadId: string, title: string): TaskRecord | null {
+    const task = this.taskByThread(botId, threadId);
+    if (!task || task.titleSource === "user") return null;
+    const next = title.trim().slice(0, 80);
+    if (!next || next === task.title) return task;
+    task.title = next;
+    task.titleSource = "generated";
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return task;
   }
 
   /** Delete a task and its transcript. A bot always keeps one. */

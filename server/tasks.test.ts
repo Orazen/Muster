@@ -135,4 +135,37 @@ describe("tasks", () => {
     // and it is named from the conversation rather than left blank
     expect(migrated[0]!.title).not.toBe(UNTITLED_TASK);
   });
+
+  it("generated titles replace mechanical names but never a user rename", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const threadId = bot.threadId;
+    store.appendMessage(threadId, { role: "user", kind: "text", text: "Plan the offsite agenda for Thursday" });
+    store.titleTaskFromFirstMessage(bot.id, "Plan the offsite agenda for Thursday", threadId);
+    // mechanical title: replaceable by a generated one
+    expect(store.hasMechanicalTitle(bot.id, threadId)).toBe(true);
+    const generated = store.applyGeneratedTitle(bot.id, threadId, "Offsite agenda plan");
+    expect(generated).toMatchObject({ title: "Offsite agenda plan", titleSource: "generated" });
+    // a later generated title may replace an earlier one
+    expect(store.applyGeneratedTitle(bot.id, threadId, "Q4 offsite")?.title).toBe("Q4 offsite");
+    // user rename: lock the title
+    store.renameTask(bot.id, threadId, "My rename");
+    expect(store.hasMechanicalTitle(bot.id, threadId)).toBe(false);
+    expect(store.applyGeneratedTitle(bot.id, threadId, "Clobbered")).toBeNull();
+    expect(store.taskByThread(bot.id, threadId)?.title).toBe("My rename");
+  });
+
+  it("applyGeneratedTitle rejects empty input and identical titles without churn", async () => {
+    const { store, UNTITLED_TASK } = await freshStore();
+    const bot = store.createBot();
+    const threadId = bot.threadId;
+    // junk input: unchanged, still mechanical
+    expect(store.applyGeneratedTitle(bot.id, threadId, "   ")?.title).toBe(UNTITLED_TASK);
+    expect(store.hasMechanicalTitle(bot.id, threadId)).toBe(true);
+    // same title again: no rewrite, no save churn (marker unchanged)
+    store.applyGeneratedTitle(bot.id, threadId, "Same");
+    const before = store.taskByThread(bot.id, threadId);
+    expect(store.applyGeneratedTitle(bot.id, threadId, "Same")).toBe(before);
+    expect(before!.titleSource).toBe("generated");
+  });
 });

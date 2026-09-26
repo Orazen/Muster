@@ -160,6 +160,7 @@ import {
   mentionedBots,
   roomResponders,
   Store,
+  UNTITLED_TASK,
   type AgentCharacter,
   type GroupRecord,
   type GroupDefaultResponder,
@@ -301,6 +302,7 @@ import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { readRuntimeEvidence, readThreadEvents } from "./thread-events.ts";
 import { deleteStaleArchivedLogs, trimAllEventLogs } from "./event-log-cleanup.ts";
 import { claimSlot, clearSlots, configuredWidth, hasSlot, releaseSlot, runningThreads } from "./turn-slots.ts";
+import { clampGeneratedTitle, generatedTitlePrompt } from "./generated-titles.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -1763,6 +1765,11 @@ bus.subscribe((event: RuntimeEvent) => {
       lastReply.delete(event.threadId);
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
+      // LLM short titles need the adapter that just served the turn, but
+      // the provenance entry is deleted below — capture it first. `instance`
+      // in this fold is a DIFFERENT binding (the runtime boot instance),
+      // so resolve the turn's adapter explicitly from the provenance.
+      const completedProvenance = turnProvenance.get(event.threadId);
       turnProvenance.delete(event.threadId);
       // The parallel-width slot is claimed at dispatch and must be given
       // back when the turn ends, or the bot 409s "already working" forever
@@ -1788,6 +1795,37 @@ bus.subscribe((event: RuntimeEvent) => {
         });
         // settled → idle; a setup failure already marked it dead, keep that
         if (store.bot(bot.id)?.activity !== "dead") store.setActivity(bot.id, "idle");
+        // LLM short titles (OMB parity): once the turn settles, upgrade a
+        // mechanical task title to a compact generated one. Strictly
+        // best-effort — an adapter without generateText, a failed call, or
+        // junk output all leave the existing title alone, and a user
+        // rename is never touched (hasMechanicalTitle gates the call).
+        const task = store.taskByThread(bot.id, event.threadId);
+        const firstUser = store
+          .messagesFor(event.threadId)
+          .find((m) => m.role === "user" && m.kind === "text" && m.text?.trim());
+        const turnInstance = completedProvenance
+          ? registry.get(completedProvenance.instanceId)
+          : registry.get(bot.modelSelection.instanceId);
+        if (
+          task &&
+          store.hasMechanicalTitle(bot.id, event.threadId) &&
+          firstUser?.text &&
+          turnInstance?.generateText &&
+          (task.title !== UNTITLED_TASK || event.threadId === bot.threadId)
+        ) {
+          const promptText = firstUser.text.trim().slice(0, 400);
+          void turnInstance
+            .generateText(generatedTitlePrompt(promptText))
+            .then((raw) => {
+              const title = clampGeneratedTitle(raw);
+              if (title) store.applyGeneratedTitle(bot.id, event.threadId, title);
+            })
+            .catch(() => {
+              // Title generation is cosmetic; a failure keeps the
+              // mechanical title. Never surfaces as a turn error.
+            });
+        }
         store.patchBot(bot.id, { unread: true });
         notify(buildNotification("done", bot, event.threadId, reply));
         // WhatsApp channel: the customer's answer goes back over the Graph
