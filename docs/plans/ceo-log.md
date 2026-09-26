@@ -9425,3 +9425,15 @@ Incidents, both resolved:
 2. First v1.20.0 Release run failed in prepare: "Draft creation did not produce a confirmed matching draft" — GitHub listing eventual-consistency race; the draft it created matched the state contract exactly (draft=true, prerelease=false, target=f638a29). Re-run of failed job took the script's "reused" path and passed. No code change warranted.
 
 Release carries: parallel threads per bot (turn-slots), effort default for new bots, People/Activity/Backups settings sections, guided product tour, About-me shared context, event-log retention, sweeps 1–3 fixes.
+## Loop207 (2026-09-26) — full-suite verification + release-gate hardening
+
+GATE: full vitest suite passes on main; the two v1.20.0 release incidents get real fixes, not just ledger notes.
+CHECK: npx vitest run (full, 385 files) → 0 failures; release-state/policy/workflow suites green; oxlint 0/0; CI + autodeploy green on push.
+EXPECT: draft-confirmation retries within a bounded window; pin mismatch error names the actual mismatch.
+EVIDENCE:
+- Full suite: 385 files passed, 5796 tests passed / 8 skipped, 0 failed (574s, /tmp/full-vitest-loop207.log). Note: nohup-in-tool dies with the tool process — the node detached-spawn pattern (child.unref) is the only reliable way to run it.
+- release-state.mjs: post-create draft confirmation now rechecks tag + listing up to 3 attempts, 2s apart (injectable `delay` — no wall-clock in tests). Directly addresses incident 2 of Loop206 (GitHub listing eventual-consistency killed the v1.20.0 prepare step).
+- release-policy.mjs: pin mismatch error now names tag + package version (or instructs to disable dry_run) instead of one opaque line. Addresses the Loop206 incident-1 confusion.
+- Tests: electron/release-state.test.mjs 47 (2 new: settle-window success + bounded give-up; absent-draft fixture extended to 3 attempts/13 calls), electron/release-policy.test.mjs 26 (2 new message tests), release-workflow contract 80. oxlint 0/0 on all 4 files.
+- Pushed as 05ff801 (through merge dac9e31); CI success + autodeploy success on dac9e31.
+- Honest non-change: bump-version.mjs is CORRECT as-is — 1.19→1.20 via "minor" is semver-minor; Loop206 incident 1 was operator error, and the improved pin error now makes the mismatch self-explaining.
