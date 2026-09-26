@@ -41,6 +41,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { auth, forwardedProtoOf, getDb, OTP_TTL_SECONDS } from "./auth.ts";
 import { isText, json, readBody } from "./http-helpers.ts";
+import { clearDelivery, deliveryOutcome, type DeliveryFailure } from "./otp-delivery.ts";
 import { parseJson, type JsonObject, type JsonValue } from "./schema.ts";
 
 export const OTP_SEND_PATH = "/api/auth/email-otp/send-verification-otp";
@@ -106,6 +107,40 @@ const IDEMPOTENCY_TTL_MS = OTP_TTL_SECONDS * 1000;
  * construction: a client that never sends the header behaves exactly as
  * before. */
 const IDEMPOTENCY_KEY_MAX = 128;
+
+/** How long a client is told to wait after the mail provider refused a code.
+ * This is a HINT, not a lock: unlike the resend cooldown it arms no server
+ * state, because refusing the request was not the user's fault and must not
+ * cost them the attempt. Long enough to spare a struggling provider a burst,
+ * short enough that a person who is actually blocked does not sit through a
+ * minute of nothing happening. */
+const DELIVERY_RETRY_SECONDS = 20;
+
+/** The truthful body for a send the provider did not accept. Deliberately
+ * uniform with every other send rejection on this route, and deliberately
+ * uninformative about the provider: a member learns that no mail went out and
+ * may try again, not which vendor rejected it or why — that detail belongs in
+ * the server log, where sendEmail already puts it, and never in a receipt
+ * that might reach a mailbox the caller does not control. */
+function deliveryRejection(failure: DeliveryFailure): SendRejectionBody {
+  return {
+    // One message for both provider-side failure kinds on purpose. Whether
+    // the provider refused or never answered, the user's next move is
+    // identical — try again shortly — and the difference is already in the
+    // server log, where sendEmail records the provider's status verbatim.
+    // `unconfigured` is unreachable from this route (the code path returns
+    // before the sender when no mailer exists) but the branch is written
+    // rather than assumed, so a future caller cannot answer it with the
+    // wrong sentence.
+    message:
+      failure.reason === "unconfigured"
+        ? "Email is not available on this deployment, so no code was sent."
+        : failure.reason === "transport"
+          ? "We could not reach the mail service. Please try again in a moment."
+          : "We could not send your code. Please try again in a moment.",
+    code: "EMAIL_DELIVERY_FAILED",
+  };
+}
 
 /** What one accepted send stored for replay: the delegated answer itself —
  * status, body, content type and the individually kept set-cookie headers,
@@ -568,6 +603,26 @@ export async function handleEmailOtpAuthRequest(
   if (isSend) spendIpSend(clientIpOf(req), Date.now());
   const delegated = await delegateToAuth(req, path, body);
   if (isSend && delegated.status >= 200 && delegated.status < 300) {
+    // A 2xx here is the PLUGIN's answer, not the mail's. The plugin stores
+    // the code and then awaits our sender through runInBackgroundOrAwait,
+    // which catches a rejection and still resolves — so this branch used to
+    // read as "the provider accepted the message" when it only meant "the
+    // plugin was called". A refused or undelivered send therefore armed the
+    // 60s cooldown and stored a replayable success: the user was told a code
+    // was on its way and then blocked from asking again for a minute. The
+    // recorded outcome is the only honest signal (server/otp-delivery.ts).
+    //
+    // Undefined means no delivery was attempted — the plugin short-circuits
+    // the send route for an unknown address when sign-up-on-verify is off, and
+    // answers success without ever calling the sender. That is not a failure
+    // and keeps its existing behavior.
+    const outcome = deliveryOutcome(email);
+    clearDelivery(email);
+    if (outcome && !outcome.ok) {
+      // Nothing armed: no cooldown, no replay entry. A failed send must leave
+      // the mailbox exactly as able to try again as it was before.
+      return rejectSend(res, 503, deliveryRejection(outcome), DELIVERY_RETRY_SECONDS);
+    }
     armCooldown(email, Date.now());
     if (idemKey) {
       rememberAcceptedSend(
@@ -582,6 +637,7 @@ export async function handleEmailOtpAuthRequest(
     }
     return relay(res, delegated);
   }
+  if (isSend) clearDelivery(email);
   if (isSend && delegated.status >= 400) return relaySendRejection(res, delegated);
   return relay(res, delegated);
 }

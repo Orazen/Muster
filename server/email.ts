@@ -16,10 +16,25 @@
  * `isEmailConfigured()` is the switch the auth layer reads to decide whether
  * to advertise verification and password reset at all. Offering a "reset your
  * password" button that silently drops the mail is worse than not offering it.
+ *
+ * A configured transport can still REFUSE a message — a bad sender address, a
+ * revoked key, a provider outage. `deliverEmail` reports that as a typed
+ * outcome rather than a bare boolean, because the sign-in code path has to
+ * tell the person who asked for a code whether it was actually sent (see
+ * server/otp-delivery.ts for why better-auth cannot answer that itself).
  */
+
+import { recordDelivery, type DeliveryOutcome } from "./otp-delivery.ts";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY?.trim();
 const EMAIL_FROM = process.env.EMAIL_FROM?.trim() || "Muster <noreply@localhost>";
+
+/** Bound on one provider call. Without it a provider that accepts the
+ * connection and then stalls holds the sign-in request open indefinitely,
+ * and the user sees a spinner instead of a retry — the same false
+ * "still working" as a silent refusal, one layer up. Comfortably above a real
+ * API call, far below any client's patience. */
+const RESEND_TIMEOUT_MS = 10_000;
 
 /** True when real delivery is possible. */
 export function isEmailConfigured(): boolean {
@@ -35,6 +50,8 @@ export interface OutboundEmail {
   html?: string;
 }
 
+export type { DeliveryOutcome } from "./otp-delivery.ts";
+
 /** The Resend send-message envelope; `html` rides along only for messages
  * that carry an HTML body. */
 interface ResendPayload {
@@ -46,18 +63,25 @@ interface ResendPayload {
 }
 
 /**
- * Send one message. Never throws: a mail failure must not turn into a 500 on
- * a sign-up request, and Better Auth treats a rejected promise as a failed
- * registration. Returns whether it went out, for logging.
+ * Send one message, reporting what actually happened.
+ *
+ * Never throws: a mail failure must not turn into a 500 on a sign-up request,
+ * and Better Auth treats a rejected promise as a failed registration. The
+ * typed outcome is how a caller that MUST tell the truth (the sign-in code
+ * path) learns the difference between "sent", "the provider refused" and
+ * "the request never made it" — a bare boolean collapses all three.
  */
-export async function sendEmail(message: OutboundEmail): Promise<boolean> {
+export async function deliverEmail(message: OutboundEmail): Promise<DeliveryOutcome> {
   if (!RESEND_API_KEY) {
     // No transport. Log it so a self-hoster mid-setup can still click through.
+    // Only the verification and reset mail reach this branch: the sign-in code
+    // returns before it, because there the console channel above IS the
+    // delivery and must not be reported as a failure.
     console.warn(
       `[email] RESEND_API_KEY is not set — not sending "${message.subject}" to ${message.to}.\n` +
         `[email] Body:\n${message.text}`,
     );
-    return false;
+    return { ok: false, reason: "unconfigured" };
   }
 
   try {
@@ -76,18 +100,33 @@ export async function sendEmail(message: OutboundEmail): Promise<boolean> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
     });
 
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
+      // The provider's own error body, never the payload: the payload holds
+      // the sign-in code, and a rejection reason has no need of it.
       console.error(`[email] Resend rejected the message (${res.status}): ${detail}`);
-      return false;
+      return { ok: false, reason: "rejected", status: res.status };
     }
-    return true;
+    return { ok: true };
   } catch (error) {
+    // A timeout surfaces here as the same AbortError as any other transport
+    // fault. The distinction the caller needs is "did not get there", not
+    // "why", and both are retryable.
     console.error("[email] transport error:", error instanceof Error ? error.message : error);
-    return false;
+    return { ok: false, reason: "transport" };
   }
+}
+
+/**
+ * Send one message, never throws: a mail failure must not turn into a 500 on
+ * a sign-up request, and Better Auth treats a rejected promise as a failed
+ * registration. Returns whether it went out, for logging.
+ */
+export async function sendEmail(message: OutboundEmail): Promise<boolean> {
+  return (await deliverEmail(message)).ok;
 }
 
 /** Wrap body copy in the plain, deliverable HTML shell used by every message. */
@@ -136,6 +175,15 @@ export async function sendVerificationEmail(to: string, url: string): Promise<vo
  * without wiring up mail — the same contract verification emails already use.
  * The code itself is never persisted anywhere but the auth database's
  * verification table (stored hashed by Better Auth).
+ *
+ * Whatever happens to the message is RECORDED against the mailbox, because
+ * the caller cannot observe it: better-auth swallows this callback's rejection
+ * and still answers the send route with success. See server/otp-delivery.ts.
+ * With no mailer configured nothing is recorded, and that is deliberate: the
+ * code DID reach its recipient, through the console channel documented above,
+ * and the send policy must keep treating that as the success it is. A
+ * deployment with no mailer never offers the flow anyway — `emailOtp` is
+ * advertised from isEmailConfigured(), so the UI hides email codes entirely.
  */
 export async function sendLoginCodeEmail(
   to: string,
@@ -149,7 +197,7 @@ export async function sendLoginCodeEmail(
     return;
   }
   const minutes = Math.max(1, Math.round(expiresInSeconds / 60));
-  await sendEmail({
+  const outcome = await deliverEmail({
     to,
     subject: `Your Muster sign-in code: ${code}`,
     text: [
@@ -162,6 +210,7 @@ export async function sendLoginCodeEmail(
       `Enter this code on the sign-in screen to finish signing in. It expires in ${minutes} minute${minutes === 1 ? "" : "s"}.<br><br><span style="display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:26px;letter-spacing:0.3em;font-weight:600;color:#f6f6f7;background:#1c1c1f;border:1px dashed #3a3a3f;border-radius:10px;padding:10px 14px;">${code}</span>`,
     ),
   });
+  recordDelivery(to, outcome);
 }
 
 export async function sendPasswordResetEmail(to: string, url: string): Promise<void> {
