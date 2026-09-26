@@ -5322,6 +5322,39 @@ let requestUserEmail = "";
       return json(res, 200, { ok: true, email: owner.email, name: owner.name });
     }
 
+    // ── Browser redeem: the same pairing code, spent by the web console ─
+    // /pair#CODE lands a signed-in visitor on a display-only page; this
+    // endpoint lets THAT browser spend the code when its person presses
+    // the explicit button. Same trust model as the claim flow — the code
+    // is the credential, single-use, 5-minute TTL, per-IP throttled —
+    // with one difference: a pairing code always maps to an existing
+    // cloud account, so there is no bridged-user fallback; a vanished
+    // account answers the same invalid-code error as a replay.
+    if (method === "POST" && path === "/api/pair/redeem-browser") {
+      const body = await readBody(req);
+      const code = isText(body.code) ? body.code : "";
+      try {
+        const userId = consumeCode(code, clientIpForLimiting(req));
+        const user = findUserById(userId);
+        if (!user) return json(res, 400, { error: "that code isn't valid — generate a fresh one on muster.today/pair" });
+        const { token, expiresAt } = mintSession(user.id, {
+          ip: req.socket.remoteAddress ?? undefined,
+          userAgent: req.headers["user-agent"],
+        });
+        // Same signed cookie shape pair/claim sets (see that comment for
+        // why the value must be the signed form). No Secure flag matches
+        // the neighboring redeem, which serves plain loopback HTTP.
+        res.setHeader(
+          "Set-Cookie",
+          `better-auth.session_token=${signedSessionCookieValue(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}`,
+        );
+        return json(res, 200, { ok: true, email: user.email, name: user.name });
+      } catch (e) {
+        if (e instanceof VerifyError) return json(res, e.status, { error: e.message });
+        throw e;
+      }
+    }
+
     // ── Stripe webhook ─────────────────────────────────────────────────
     // Before the session gate: Stripe authenticates with a signature over the
     // raw body, not a cookie. Must also run before any body parsing.
@@ -5807,6 +5840,12 @@ let requestUserEmail = "";
     const brainOwner = requestUserId ?? (await getSession(req).catch(() => null))?.userId;
     if (path === "/api/brain" && method === "GET") {
       return json(res, 200, { brain: workspaceBrain().stats(brainOwner) });
+    }
+    // The browse surface: every fact the caller may see, withdrawn ones
+    // with their withdrawnAt — provenance, not deletion. The client picks
+    // a fact here before opening its history chain.
+    if (path === "/api/brain/facts" && method === "GET") {
+      return json(res, 200, { facts: workspaceBrain().list(brainOwner) });
     }
     if (path === "/api/brain/query" && method === "POST") {
       const body = await readBody(req);

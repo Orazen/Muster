@@ -4,6 +4,7 @@ import { Check, Copy, RefreshCw } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { AuthShell, authButtonCls, authInputCls } from "@/components/AuthShell";
 import { PairingFlow, pairingSecondsLeft } from "@/lib/pairing-flow";
+import { PairRedeemFlow } from "@/lib/pair-redeem-flow";
 import { parseFragmentCode, carriedCodeInstruction } from "@/lib/pairing-link";
 
 /** Cloud pairing codes retain their value until they expire or are used. */
@@ -17,12 +18,23 @@ function PairCodeView({ email }: { email: string }) {
   const [state, setState] = useState(flow.state);
   const [now, setNow] = useState(Date.now);
   const codeInput = useRef<HTMLInputElement>(null);
+  // A `/pair` visit may carry a pairing code in the link fragment. It is only
+  // displayed here, never redeemed automatically — redemption happens solely
+  // through the explicit button in the carried-code card (see pair-fragment.ts).
+  const carried = parseFragmentCode(window.location.hash);
+  const [redeem] = useState(() => (carried ? new PairRedeemFlow(carried.code) : null));
+  const [redeemState, setRedeemState] = useState(redeem?.state ?? null);
 
   useEffect(() => {
     const unsubscribe = flow.subscribe(setState);
     void flow.start();
     return unsubscribe;
   }, [flow]);
+
+  useEffect(() => {
+    if (!redeem) return;
+    return redeem.subscribe(setRedeemState);
+  }, [redeem]);
 
   useEffect(() => {
     if (!state.pairing) return;
@@ -36,9 +48,6 @@ function PairCodeView({ email }: { email: string }) {
   const expired = state.pairing !== null && seconds === 0;
   const busy = state.status === "idle" || state.status === "loading";
   const usable = state.status === "ready" && !expired && state.pairing !== null;
-  // A `/pair` visit may carry a pairing code in the link fragment. The page
-  // does not redeem it — it only ever displays it (see pair-fragment.ts).
-  const carried = parseFragmentCode(window.location.hash);
   const refreshLabel = busy ? "Getting your code…" : state.status === "error" ? "Try again" : expired ? "Get a new code" : "Refresh code";
 
   const copy = async () => {
@@ -55,7 +64,7 @@ function PairCodeView({ email }: { email: string }) {
       subtitle="Open Muster Desktop and enter this code in its pairing field."
       footer={<><p className="break-all">Signed in as {email}.</p><Link to="/app">Back to your workspace</Link></>}
     >
-      {carried && (
+      {carried && redeem && (
         <div className="rounded-lg border border-hairline/40 bg-inset p-3">
           <div className="text-[12px] font-medium text-ink">Pairing code carried in this link</div>
           <code className="mt-1 block break-all font-mono text-[13px] text-ink">{carried.code}</code>
@@ -63,9 +72,26 @@ function PairCodeView({ email }: { email: string }) {
             {carriedCodeInstruction(carried, window.location.origin)}
           </p>
           <p className="mt-2 text-[11px] text-ink-tertiary">
-            This page does not redeem the code. It is single-use and expires in 5
-            minutes, like the code you would generate below.
+            Redeem only through the button below — nothing happens on page load.
+            The code is single-use and expires in 5 minutes, like the code you
+            would generate below.
           </p>
+          <button
+            type="button" className={authButtonCls}
+            disabled={redeemState?.status !== "idle"}
+            onClick={() => void redeem.start()}
+          >
+            {redeemState?.status === "redeeming" ? "Redeeming…" : "Redeem on this device"}
+          </button>
+          {redeemState?.status === "done" && <p className="mt-2 text-[12px] text-ink-secondary" role="status">Signing you in…</p>}
+          {redeemState?.status === "error" && (
+            <>
+              <div className="auth-notice auth-error mt-2" role="alert">{redeemState.message}</div>
+              {redeemState.retryable && (
+                <button type="button" className={authButtonCls} onClick={() => void redeem.retry()}>Try again</button>
+              )}
+            </>
+          )}
         </div>
       )}
       <div className="flex flex-col gap-3">

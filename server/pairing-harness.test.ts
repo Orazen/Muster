@@ -145,6 +145,33 @@ posixOnly("real cloud to desktop pairing fixture", () => {
     expect(await response.json()).toMatchObject({ error: expect.any(String) });
   });
 
+  it("redeems a cloud pairing code in the browser that displays it", async () => {
+    const create = await request(harness.cloudUrl, "/api/pair/create", {}, cloudCookie);
+    expect(create.status).toBe(201);
+    // SAFETY: the owned create route answers { code, expiresAt }; the shape
+    // is asserted by the desktop redeem test above.
+    const pairing = await create.json() as { code: string };
+    const browser = await request(harness.cloudUrl, "/api/pair/redeem-browser", { code: pairing.code });
+    expect(browser.status).toBe(200);
+    expect(await browser.json()).toMatchObject({ ok: true, email: harness.email });
+    const session = await request(harness.cloudUrl, "/api/auth/get-session", undefined, sessionCookie(browser));
+    expect(session.status).toBe(200);
+    expect(await session.json()).toMatchObject({ user: { email: harness.email } });
+  });
+
+  it("answers a replayed browser redeem with no second session", async () => {
+    const create = await request(harness.cloudUrl, "/api/pair/create", {}, cloudCookie);
+    expect(create.status).toBe(201);
+    // SAFETY: the owned create route answers { code, expiresAt }; the shape
+    // is asserted by the desktop redeem test above.
+    const pairing = await create.json() as { code: string };
+    expect((await request(harness.cloudUrl, "/api/pair/redeem-browser", { code: pairing.code })).status).toBe(200);
+    const replay = await request(harness.cloudUrl, "/api/pair/redeem-browser", { code: pairing.code });
+    expect(replay.status).toBe(400);
+    expect(replay.headers.getSetCookie()).toHaveLength(0);
+    expect(await replay.json()).toMatchObject({ error: expect.any(String) });
+  });
+
   it("runs the deterministic local engine without inherited provider credentials", async () => {
     const { cookie: desktopCookie } = await pairDesktop();
     const create = await request(harness.desktopUrl, "/api/bots", {}, desktopCookie);
