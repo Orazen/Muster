@@ -1098,6 +1098,8 @@
     .comparison-grid { grid-template-columns: minmax(0, 1fr); }
   }
 </style>
+<link rel="stylesheet" href="/landing-demo.css?v=workspace-1" />
+<script src="/landing-demo.js?v=workspace-1" defer></script>
 </head>
 <body>
 
@@ -1252,9 +1254,57 @@
         <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#0EA5C6" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
         <span class="hero__teamlabel">A little team. A familiar face.</span>
       </div>
-      <figure class="shot-frame">
-        <img src="/hero.png" alt="Muster — a chat app where every conversation is a real AI agent" width="980" height="613" />
-        <figcaption>Muster’s workspace: named teammates, conversations and action cards. Available tools depend on the connected host and model.</figcaption>
+      <figure id="workspace-demo" class="shot-frame workspace-demo" data-workspace-demo aria-label="Interactive Muster workspace preview">
+        <div data-demo-fallback>
+          <img src="/hero.png" alt="Muster — named teammates, conversations and action cards" width="980" height="613" loading="lazy" />
+          <p class="demo-disclosure" style="padding:16px;font-size:12px">Muster’s workspace. Enable JavaScript to try a scripted conversation. Available tools depend on the connected host and model.</p>
+        </div>
+        <div data-demo-shell hidden>
+          <div class="demo-titlebar">
+            <span class="demo-window-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="demo-titlebar__name">Muster / Your workspace</span>
+            <span class="demo-titlebar__tag">Interactive preview</span>
+          </div>
+          <div class="demo-layout">
+            <aside class="demo-sidebar">
+              <div class="demo-roster-label">Your teammates</div>
+              <nav class="demo-roster" data-demo-roster aria-label="Demo teammates"></nav>
+              <div class="demo-sidebar__bottom"><div class="demo-user"><span class="demo-user__icon" aria-hidden="true">Y</span>Your sample workspace</div></div>
+            </aside>
+            <section class="demo-workspace" aria-label="Sample conversation">
+              <header class="demo-header">
+                <span data-demo-avatar></span>
+                <div class="demo-header__identity"><strong data-demo-name>Milo</strong><small data-demo-status>Ready for a task</small></div>
+                <button class="demo-details-toggle" data-demo-details type="button" aria-label="Show task details" aria-expanded="false" aria-controls="workspace-demo-details"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16M6 9h5M6 13h5"/></svg><span>Task details</span></button>
+              </header>
+              <div class="demo-stage">
+                <div class="demo-chat">
+                  <div class="demo-messages" data-demo-messages role="log" aria-live="polite" aria-relevant="additions" aria-label="Milo sample conversation"></div>
+                  <div class="demo-pending" data-demo-pending hidden><i aria-hidden="true"></i>Preparing a scripted example…</div>
+                  <div class="demo-compose-wrap">
+                    <button class="demo-prompt" data-demo-prompt type="button">Help me plan a calmer morning.</button>
+                    <form class="demo-form" data-demo-form>
+                      <label class="demo-sr-only" for="workspace-demo-input" data-demo-input-label>Message Milo in the demo</label>
+                      <input id="workspace-demo-input" data-demo-input type="text" maxlength="500" autocomplete="off" placeholder="Message Milo…" aria-describedby="workspace-demo-disclosure" />
+                      <button class="demo-send" data-demo-send type="submit" aria-label="Send demo message" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                    </form>
+                  </div>
+                </div>
+                <aside id="workspace-demo-details" class="demo-inspector" data-demo-inspector aria-label="Sample task details" hidden>
+                  <div class="demo-inspector__label"><span>Work snapshot</span><span class="demo-inspector__dot">Sample</span></div>
+                  <div class="demo-paper"><div class="demo-paper__top">A useful starting point</div><h3 data-demo-paper-title>A little room for your day.</h3><ol data-demo-paper-items></ol></div>
+                  <p class="demo-inspector__note" data-demo-task-note></p>
+                  <div class="demo-inspector__status">Your choices. Your final say.</div>
+                </aside>
+              </div>
+            </section>
+          </div>
+        </div>
+        <span class="demo-sr-only" data-demo-notice role="status"></span>
+        <figcaption id="workspace-demo-disclosure" class="demo-disclosure" data-demo-disclosure hidden>
+          <p><strong>A scripted demo.</strong> Pick a teammate or type a message. Sample replies only; nothing is sent or saved outside this page.</p>
+          <button class="demo-reset" data-demo-reset type="button">Reset demo</button>
+        </figcaption>
       </figure>
       <p class="hero__micro">Web workspace · desktop execution · companions in development</p>
 

@@ -194,3 +194,150 @@ test("search snippets, visible FAQs and internal anchors share one product story
   await expect(page.locator('meta[name="twitter:description"]')).toHaveAttribute("content", description ?? "");
   await expect(page.locator("#pricing")).not.toContainText(/\$20|\$192|Free forever|Self-host/);
 });
+
+for (const width of [320, 390, 768, 1440]) {
+  test(`workspace demo fits and its controls work at ${width}px`, async ({ openLanding }, testInfo) => {
+    const page = await openLanding(width);
+    const demo = page.locator("#workspace-demo");
+    const shell = demo.locator("[data-demo-shell]");
+    await expect(shell).toBeVisible();
+    await expect(demo.locator("[data-demo-fallback]")).toBeHidden();
+    await expect(shell.getByRole("button", { name: "Milo · Daily planning", exact: true })).toHaveAttribute("aria-pressed", "true");
+    const details = shell.locator("[data-demo-details]");
+    await expect(details).toHaveAttribute("aria-expanded", String(width >= 1000));
+    await details.click();
+    await expect(details).toHaveAttribute("aria-expanded", String(width < 1000));
+    if (width < 1000) await expect(shell.locator("[data-demo-inspector]")).toBeVisible();
+    else await expect(shell.locator("[data-demo-inspector]")).toBeHidden();
+
+    const scout = shell.getByRole("button", { name: "Scout · Email drafts", exact: true });
+    await scout.click();
+    await expect(scout).toHaveAttribute("aria-pressed", "true");
+    await shell.locator("[data-demo-prompt]").click();
+    await expect(shell.locator("[data-demo-input]")).not.toHaveValue("");
+    await expect(shell.getByRole("button", { name: "Send demo message", exact: true })).toBeEnabled();
+    const bounds = await demo.boundingBox();
+    expect(bounds).not.toBeNull();
+    if (!bounds) throw new Error("Workspace demo has no rendered bounds");
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    const screenshot = testInfo.outputPath(`workspace-demo-${width}.png`);
+    await demo.screenshot({ path: screenshot });
+    await testInfo.attach(`workspace-demo-${width}`, { path: screenshot, contentType: "image/png" });
+  });
+}
+
+test("workspace sample approval is keyboard operable and stays explicitly simulated", async ({ openLanding }) => {
+  const page = await openLanding(390);
+  const demo = page.locator("#workspace-demo");
+  await demo.locator("[data-demo-input]").fill("Make time for writing this afternoon.");
+  const send = demo.getByRole("button", { name: "Send demo message", exact: true });
+  await send.focus();
+  await page.keyboard.press("Enter");
+  await expect(demo.locator("[data-demo-messages]")).toContainText("Make time for writing this afternoon.");
+  await expect(demo.locator("[data-demo-status]")).toHaveText("Ready for your review");
+  const approve = demo.getByRole("button", { name: "Approve sample", exact: true });
+  await approve.focus();
+  await page.keyboard.press("Enter");
+  await expect(demo).toContainText("Sample approved. No real action was taken.");
+  await expect(demo.getByRole("button", { name: "Skip sample", exact: true })).toHaveCount(0);
+});
+
+test("workspace messages render as text and leave network and browser storage untouched", async ({ openLanding }) => {
+  const page = await openLanding(1440);
+  const demo = page.locator("#workspace-demo");
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(`${request.method()} ${request.url()}`));
+  const storageBefore = await page.evaluate(() => ({
+    local: Object.entries(localStorage), session: Object.entries(sessionStorage), cookie: document.cookie,
+  }));
+  const input = demo.locator("[data-demo-input]");
+  await expect(input).toHaveAttribute("maxlength", "500");
+  const payload = '<img id="demo-injected" src="/unexpected-demo-request" onerror="document.body.dataset.demoInjected=1">';
+  await input.fill(payload);
+  await demo.getByRole("button", { name: "Send demo message", exact: true }).click();
+  await expect(demo.locator("[data-demo-messages]")).toContainText(payload);
+  await expect(demo.locator("[data-demo-status]")).toHaveText("Ready for your review");
+  await demo.getByRole("button", { name: "Skip sample", exact: true }).click();
+  await expect(demo.locator("#demo-injected")).toHaveCount(0);
+  expect(await page.locator("body").getAttribute("data-demo-injected")).toBeNull();
+  expect(await page.evaluate(() => ({
+    local: Object.entries(localStorage), session: Object.entries(sessionStorage), cookie: document.cookie,
+  }))).toEqual(storageBefore);
+  expect(requests, "Workspace sample interactions stay on the page").toEqual([]);
+});
+
+test("workspace teammates retain separate drafts and pending replies stay in their conversation", async ({ openLanding }) => {
+  const page = await openLanding(1440);
+  await page.clock.install();
+  const demo = page.locator("#workspace-demo");
+  const input = demo.locator("[data-demo-input]");
+  const messages = demo.locator("[data-demo-messages]");
+  const milo = demo.getByRole("button", { name: "Milo · Daily planning", exact: true });
+  const scout = demo.getByRole("button", { name: "Scout · Email drafts", exact: true });
+  await input.fill("Milo's unsent draft");
+  await scout.click();
+  await expect(input).toHaveValue("");
+  await input.fill("Scout's unsent draft");
+  await milo.click();
+  await expect(input).toHaveValue("Milo's unsent draft");
+  await demo.getByRole("button", { name: "Send demo message", exact: true }).click();
+  await expect(demo.locator("[data-demo-status]")).toHaveText("Preparing a sample…");
+  await scout.click();
+  await expect(input).toHaveValue("Scout's unsent draft");
+  await page.clock.runFor(1000);
+  await expect(messages).not.toContainText("Milo's unsent draft");
+  await expect(demo.getByRole("button", { name: "Approve sample", exact: true })).toHaveCount(0);
+  await milo.click();
+  await expect(messages).toContainText("Milo's unsent draft");
+  await expect(input).toHaveValue("");
+  await expect(demo.getByRole("button", { name: "Approve sample", exact: true })).toBeVisible();
+});
+
+test("reset cancels pending workspace replies and clears every teammate draft", async ({ openLanding }) => {
+  const page = await openLanding(390);
+  await page.clock.install();
+  const demo = page.locator("#workspace-demo");
+  const input = demo.locator("[data-demo-input]");
+  await input.fill("This pending task must disappear after reset.");
+  await demo.getByRole("button", { name: "Send demo message", exact: true }).click();
+  await demo.getByRole("button", { name: "Nova · Research", exact: true }).click();
+  await input.fill("Nova's draft must also disappear.");
+  await demo.locator("[data-demo-reset]").click();
+  await page.clock.runFor(1000);
+  await expect(demo.locator("[data-demo-status]")).toHaveText("Ready for a task");
+  for (const name of ["Milo · Daily planning", "Scout · Email drafts", "Nova · Research", "Atlas · Projects"]) {
+    await demo.getByRole("button", { name, exact: true }).click();
+    await expect(input).toHaveValue("");
+    await expect(demo.locator("[data-demo-messages]")).not.toContainText("must disappear");
+    await expect(demo.getByRole("button", { name: "Approve sample", exact: true })).toHaveCount(0);
+  }
+});
+
+test("reduced motion keeps workspace animation still while sample controls remain usable", async ({ openLanding }) => {
+  const page = await openLanding(320, true);
+  const demo = page.locator("#workspace-demo");
+  await demo.locator("[data-demo-input]").fill("A calm sample task");
+  await demo.getByRole("button", { name: "Send demo message", exact: true }).click();
+  await expect(demo.locator("[data-demo-status]")).toHaveText("Ready for your review");
+  expect(await demo.evaluate((element) => [element, ...element.querySelectorAll("*")].every((target) => {
+    const style = getComputedStyle(target);
+    return style.animationName === "none" || style.animationDuration.split(",").every((duration) => parseFloat(duration) === 0);
+  }))).toBe(true);
+  await expect(demo.getByRole("button", { name: "Approve sample", exact: true })).toBeVisible();
+});
+
+test("workspace retains its screenshot and caption when JavaScript is unavailable", async ({ openLanding }) => {
+  const page = await openLanding(390, false, false);
+  const demo = page.locator("#workspace-demo");
+  await expect(demo.locator("[data-demo-shell]")).toBeHidden();
+  const fallback = demo.locator("[data-demo-fallback]");
+  await expect(fallback).toBeVisible();
+  const image = fallback.locator("img");
+  await expect(image).toHaveAttribute("src", "/hero.png");
+  await image.scrollIntoViewIfNeeded();
+  await expect.poll(() => image.evaluate((element) => element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0)).toBe(true);
+  await expect(fallback.locator("p")).toContainText("Enable JavaScript to try a scripted conversation.");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
