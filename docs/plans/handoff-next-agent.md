@@ -290,8 +290,15 @@ The 403 itself is unchanged and correct. This only stops offering the door.
 **Deployment receipt for the platform contract.** `GET https://muster.today/app`
 serves a bundle containing `hostPlatform` at both call sites — the install
 command lookup and the no-engines sort — so the server-platform fix above is
-live in production and not merely pushed. The `isOperator` work is in the push
-queue as of this entry and is **not** claimed as deployed.
+live in production and not merely pushed.
+
+**Deployment receipt for the operator flag.** The settings code is a lazy
+chunk, not the entry bundle — grepping `main-*.js` alone reports a false
+negative, which is exactly what the first probe did. The served
+`SettingsModal-UcQyk9BY.js` contains the full filter chain, both gates ANDed:
+build-plus-preload, then `config?.isOperator`. `/api/config` answers 401
+unauthenticated (correct), so the server half is evidenced by the same deploy
+that shipped the client, not by a direct probe.
 
 Verification: CI 36241203900 success — 384 files, 5781 passed, 9 skipped,
 0 failed; lint, typecheck and build all pass. That is +9 on the 5781 total of
