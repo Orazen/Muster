@@ -241,3 +241,28 @@ config fields were added to the zod patch schema but not to the hand-written
 `AppConfig` interface, plus an unused parameter. `tsc -b` had passed locally
 on a stale composite cache, which is why the local loop missed it. Worth
 remembering: the local typecheck is not a substitute for CI here.
+
+## Closing the two open items (2026-09-26)
+
+**Engine install commands were keyed on the wrong machine.** The install
+one-liners are per-platform because the engine runs on the server, but the UI
+chose between them by sniffing `navigator.userAgent`. In a hosted deployment
+those are different machines: a Mac reader was shown a `brew install` line for
+a Linux host, and a Windows host could be offered a `curl|bash` it cannot run.
+The same guess sorted the "no engines" list, so the wrong engine also landed on
+top as the actionable path. Every row of the instances payload now carries
+`hostPlatform` — the platform the row was actually described on — and the
+client reads that. A server too old to send the field falls back to the
+desktop marker, so a mixed fleet during a rollout still renders.
+
+**The Windows archive extraction is fixed.** `installChromeForTesting` built a
+PowerShell `-Command` line by interpolating the archive path and destination
+into single-quoted literals, so a quote or backtick in either would have closed
+the literal and changed the command that ran. Both paths now go to `tar.exe`
+as argv; it ships in the Windows box and reads zip, so nothing new has to be
+installed. This is the change the safety gate rejected on four earlier
+attempts — the same change, and it is in. No other `powershell` spawn remains
+in `server/` or `src/`.
+
+Verification: CI 36229542195 success — 384 files, 5772 passed, 9 skipped,
+0 failed; lint, typecheck and build all pass.
