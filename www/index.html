@@ -1099,6 +1099,8 @@
   }
 </style>
 <link rel="stylesheet" href="/landing-demo.css?v=workspace-1" />
+<link rel="stylesheet" href="/landing-showcase.css?v=showcase-1" />
+<script src="/landing-showcase.js?v=showcase-1" defer></script>
 <script src="/landing-demo.js?v=workspace-1" defer></script>
 </head>
 <body>
@@ -1122,8 +1124,8 @@
       <nav class="site-nav" aria-label="Primary">
         <a href="#how">How it works</a>
         <a href="#approvals">Try the demo</a>
-        <a href="#ecosystem">Your devices</a>
-        <a href="#pricing">Beta</a>
+        <a href="#scenes">Products</a>
+        <a href="#download">Downloads</a>
       </nav>
     </div>
     <div class="site-header__right">
@@ -1326,14 +1328,22 @@
       </div>
     </section>
 
-    <section id="scenes" class="section">
-      <div class="section-intro"><div class="eyebrow">Small starts, useful results</div><h2 class="section-heading">Give the next task<br>a little company.</h2><p class="section-copy">Start with one job you can review. Add another teammate when you need one.</p></div>
-      <div class="card-grid-3">
-        <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">01</div><h3>Think it through</h3><p>Research a question, compare options or turn a rough idea into a plan. Ask your teammate to show its sources.</p></article>
-        <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">02</div><h3>Make a first draft</h3><p>Prepare a reply, a brief or a checklist. Connected services require their own setup and permission.</p></article>
-        <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">03</div><h3>Review what happened</h3><p>Read the result alongside the task history and usage reported by the engine. Keep the next decision yours.</p></article>
-      </div>
-    </section>
+    <section id="scenes" class="section muster-story" data-story-reveal>
+ <div class="section-intro"><div class="eyebrow">A place for your whole day</div><h2 class="section-heading">One familiar team.<br>So many ways to begin.</h2><p class="section-copy">Explore how Muster fits your life, your work and your devices. These are illustrations; availability is shown for each surface.</p></div>
+ <div data-product-showcase><div class="product-tabs" data-product-tabs aria-label="Explore Muster" hidden><button id="product-tab-personal" data-product-tab="personal" type="button">Personal</button><button id="product-tab-teams" data-product-tab="teams" type="button">For teams</button><button id="product-tab-desktop" data-product-tab="desktop" type="button">Desktop</button><button id="product-tab-companions" data-product-tab="companions" type="button">On the go</button></div><div class="product-panels"><article id="product-personal" class="product-panel" data-product-panel="personal" aria-labelledby="product-tab-personal">
+ <div class="product-copy"><span class="story-kicker">01 / A little room for you</span><h3>Your day.<br>A little lighter.</h3><p>A calendar to untangle. An idea to explore. A reply to get right. Start with one teammate who helps you find a useful next step.</p><div class="product-features">Planning · research · writing</div><a class="button button--primary" href="/app">Open your workspace <span aria-hidden="true">↗</span></a><small class="product-availability">Web workspace · model setup required</small></div>
+ <div class="product-visual product-visual--personal" aria-label="Illustrative personal workflow"><div class="story-note"><span class="story-note__label">AN ILLUSTRATIVE MORNING</span><h4>Make space for<br>what matters.</h4><ul><li><span>09:00</span>A little focused work</li><li><span>11:30</span>A thoughtful follow-up</li><li><span>15:00</span>Time away from the screen</li></ul><div class="story-note__foot">A suggested plan. You decide.</div></div><div class="story-flower story-flower--one"><svg class="" viewBox="-112 -112 224 224" width="110" height="110" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></div><div class="story-flower story-flower--two"><svg class="" viewBox="-112 -112 224 224" width="65" height="65" aria-hidden="true"><use href="#hero-face-body" fill="#b799d4"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></div></div>
+ </article><article id="product-teams" class="product-panel" data-product-panel="teams" aria-labelledby="product-tab-teams">
+ <div class="product-copy"><span class="story-kicker">02 / More minds on the task</span><h3>A team with<br>a shared purpose.</h3><p>Give each teammate a role. Bring the discussion into a room, compare their work and keep the next decision close to the people it affects.</p><div class="product-features">Named roles · rooms · review</div><a class="button button--primary" href="#use-cases">Meet the starter teammates <span aria-hidden="true">↗</span></a><small class="product-availability">Available in the workspace · tools depend on setup</small></div>
+ <div class="product-visual product-visual--teams" aria-label="Illustrative for teams workflow"><div class="story-room"><div class="story-room__head">Launch room <span>Illustration</span></div><div><b>Compass</b><p>Let’s agree on the next useful result.</p></div><div><b>Forge</b><p>I’ll take the implementation.</p></div><div><b>Probe</b><p>I’ll review the evidence with you.</p></div><span class="story-room__decision">One shared goal. A human decision.</span></div><div class="story-flower story-flower--one"><svg class="" viewBox="-112 -112 224 224" width="110" height="110" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></div><div class="story-flower story-flower--two"><svg class="" viewBox="-112 -112 224 224" width="65" height="65" aria-hidden="true"><use href="#hero-face-body" fill="#b799d4"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></div></div>
+ </article><article id="product-desktop" class="product-panel" data-product-panel="desktop" aria-labelledby="product-tab-desktop">
+ <div class="product-copy"><span class="story-kicker">03 / Alongside your work</span><h3>A familiar face.<br>On your computer.</h3><p>Keep a workspace on your Mac, Windows or Linux computer. Connect supported engines and choose which tools your teammates can use.</p><div class="product-features">Local engines · browser tasks · permission controls</div><a class="button button--primary" href="#download">Find your desktop download <span aria-hidden="true">↗</span></a><small class="product-availability">Capabilities vary by operating system and permissions</small></div>
+ <div class="product-visual product-visual--desktop" aria-label="Illustrative desktop workflow"><div class="story-desktop"><div class="story-window"><span class="story-window__bar">Your workspace <i>Illustration</i></span><div class="story-window__lines"><i></i><i></i><i></i></div><div class="story-consent"><span>Before the next step</span><strong>Review the proposed action.</strong><small>Your permissions stay explicit.</small></div></div><div class="story-desktop__companion"><svg class="" viewBox="-112 -112 224 224" width="58" height="58" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><span>A teammate, within reach.</span></div></div><div class="story-flower story-flower--one"><svg class="" viewBox="-112 -112 224 224" width="110" height="110" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></div><div class="story-flower story-flower--two"><svg class="" viewBox="-112 -112 224 224" width="65" height="65" aria-hidden="true"><use href="#hero-face-body" fill="#b799d4"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></div></div>
+ </article><article id="product-companions" class="product-panel" data-product-panel="companions" aria-labelledby="product-tab-companions">
+ <div class="product-copy"><span class="story-kicker">04 / Small screen, useful moments</span><h3>A quick check-in.<br>Then back to life.</h3><p>Phone and Watch companions are being tested for conversations and approvals. A connected, capable Muster host does the work.</p><div class="product-features">iPhone · Android · Apple Watch</div><a class="button button--primary" href="#download">Check companion availability <span aria-hidden="true">↗</span></a><small class="product-availability">Companion beta · installation and device acceptance vary</small></div>
+ <div class="product-visual product-visual--companions" aria-label="Illustrative on the go workflow"><div class="story-devices"><div class="story-phone"><div class="story-phone__camera"></div><span>ILLUSTRATION</span><svg class="" viewBox="-112 -112 224 224" width="60" height="60" aria-hidden="true"><use href="#hero-face-body" fill="#75b896"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><strong>A little update.</strong><p>Your draft is ready to review.</p><div>Open the conversation</div></div><div class="story-watch"><span>COMPANION BETA</span><svg class="" viewBox="-112 -112 224 224" width="42" height="42" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><strong>Your call.</strong><small>Review when you’re ready.</small></div></div><div class="story-flower story-flower--one"><svg class="" viewBox="-112 -112 224 224" width="110" height="110" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></div><div class="story-flower story-flower--two"><svg class="" viewBox="-112 -112 224 224" width="65" height="65" aria-hidden="true"><use href="#hero-face-body" fill="#b799d4"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></div></div>
+ </article></div></div>
+ </section>
     <!-- Platform roles and availability are deliberately stated separately. -->
     <section id="ecosystem" class="section">
       <div class="section-intro"><div class="eyebrow">Your devices, different roles</div><h2 class="section-heading">A team that fits<br>the way you work.</h2><p class="section-copy">Choose where you talk to Muster and where the work runs. Each app has its own release and capabilities; signing in does not automatically sync separate workspaces.</p></div>
@@ -1347,23 +1357,13 @@
       </div>
     </section>
     <!-- Use cases: real jobs on a schedule -->
-    <section id="use-cases" class="section">
-      <div class="section-intro"><div class="eyebrow">Ideas for your first task</div><h2 class="section-heading">Start with what’s<br>on your mind.</h2><p class="section-copy">Examples to adapt to your day. Connected tasks need a compatible model, the right tools and your permissions.</p></div>
-      <div class="card-grid-3">
-        <article class="feature-card"><h3>A clearer morning</h3><p>“Help me choose three priorities and make a plan I can actually follow.”</p></article>
-        <article class="feature-card"><h3>A reply worth sending</h3><p>“Draft a thoughtful reply from these notes. Leave it here for me to review.”</p></article>
-        <article class="feature-card"><h3>A little less research</h3><p>“Compare these options, show your sources and explain the tradeoffs.”</p></article>
-        <article class="feature-card"><h3>Ideas into next steps</h3><p>“Turn this rough idea into a checklist. Tell me what we need to decide first.”</p></article>
-        <article class="feature-card"><h3>A useful second look</h3><p>“Review this document for gaps and help me make the argument clearer.”</p></article>
-        <article class="feature-card"><h3>A weekly reflection</h3><p>“Summarize these updates. What moved forward, and what needs my attention?”</p></article>
-      </div>
-    </section>
+    <section id="use-cases" class="section muster-story" data-story-reveal><div class="section-intro"><div class="eyebrow">Start with someone useful</div><h2 class="section-heading">A good team starts<br>with one good teammate.</h2><p class="section-copy">Meet six starter roles from Muster’s Agent Hub. Choose one in your workspace, add context and review the first task before sending it.</p></div><div class="starter-grid"><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Daylight</h3><span>Personal assistant</span></div></div><p>Find a calmer start to your day.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Choose three priorities and suggest time blocks from the schedule I share.”</blockquote><small>Connect a calendar for live events, or share your schedule.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#dfc46b"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Compass</h3><span>Chief of Staff</span></div></div><p>Keep the important work in view.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Help me sort this week’s work into priorities, owners and decisions.”</blockquote><small>Delegation needs teammates and tools you have configured.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#819fdb"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Forge</h3><span>Engineer</span></div></div><p>Turn a clear brief into a first build.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Plan a small implementation and tell me how we will verify it.”</blockquote><small>Coding needs a compatible engine and permitted workspace access.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#75b896"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Probe</h3><span>Reviewer</span></div></div><p>Give the result a useful second look.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Review this change for gaps and tell me what evidence is missing.”</blockquote><small>Give it the files, context or results you want reviewed.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#b799d4"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Quill</h3><span>Researcher</span></div></div><p>Make the next choice more informed.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Compare these options, show your sources and separate facts from assumptions.”</blockquote><small>Live research needs configured search or browser tools.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article><article class="starter-card"><div class="starter-card__head"><svg class="" viewBox="-112 -112 224 224" width="48" height="48" aria-hidden="true"><use href="#hero-face-body" fill="#e899aa"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg><div><h3>Slate</h3><span>Writer</span></div></div><p>Get from rough notes to a clear draft.</p><details><summary>See a starter task <span aria-hidden="true">+</span></summary><div class="starter-task"><blockquote>“Turn these notes into a concise first draft for me to review.”</blockquote><small>Nothing is published or sent by selecting a starter role.</small></div></details><a href="/app">Choose in Agent Hub <span aria-hidden="true">↗</span></a></article></div><p class="showcase-footnote">Starter roles do not connect accounts, grant permissions or start work for you. Build your team at your own pace.</p></section>
     <section id="roster" class="section">
       <div class="section-intro">
         <div class="eyebrow">The Agent Hub</div>
         <h2 class="section-heading">Hire a cast. Every one a real teammate.</h2>
         <p class="section-copy">
-          Nine curated personas ship with the app — each with a persona file, conservative guardrails,
+          Ten curated personas ship with the app — each with a persona file, conservative guardrails,
           and a first task already waiting in the composer. Or start a blank bot and it interviews you.
         </p>
       </div>
@@ -1392,29 +1392,7 @@
     </section>
     <!-- How the pieces fit — two tables, zero adjectives -->
 
-    <section id="engines" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Engines</div>
-        <h2 class="section-heading">Bring your own model</h2>
-        <p class="section-copy">
-          Choose a provider in your web account, or use supported engines installed on your desktop.
-          Muster coordinates the work; the model supplies the reasoning. Tools, computer access and
-          vision support vary by driver. Your provider’s usage limits and charges still apply.
-        </p>
-      </div>
-      <div class="engine-tags">
-        <span class="engine-tag">Claude</span>
-        <span class="engine-tag">Codex</span>
-        <span class="engine-tag">Grok</span>
-        <span class="engine-tag">Gemini</span>
-        <span class="engine-tag">Kimi</span>
-        <span class="engine-tag">Qwen</span>
-        <span class="engine-tag">Hermes</span>
-        <span class="engine-tag">Droid</span>
-        <span class="engine-tag">Antigravity</span>
-        <span class="engine-tag">OpenCode Go</span>
-      </div>
-    </section>
+    <section id="engines" class="section muster-story" data-story-reveal><div class="section-intro"><div class="eyebrow">Made to connect</div><h2 class="section-heading">Your tools.<br>A little more together.</h2><p class="section-copy">Muster brings models, apps and computers into a workspace you direct. Start with the connections that matter to you.</p></div><div class="connection-grid"><article class="connection-family"><span class="story-kicker">Models</span><h3>The thinking behind your team.</h3><p>Choose supported model accounts or compatible endpoints. Provider costs and limits still apply.</p><ul><li>OpenAI</li><li>Anthropic</li><li>Google</li><li>xAI</li><li>OpenRouter</li><li>Local models</li></ul><a class="feature-link" href="/docs/engines">Explore model setup <span aria-hidden="true">↗</span></a></article><article class="connection-family"><span class="story-kicker">Connected apps</span><h3>Context from the tools you choose.</h3><p>Connect the services you need and grant access deliberately. Catalog availability depends on your host and connector setup.</p><ul><li>Gmail</li><li>Google Calendar</li><li>Google Drive</li><li>Slack</li><li>Notion</li><li>Linear</li></ul><a class="feature-link" href="/app">Manage your connections <span aria-hidden="true">↗</span></a></article><article class="connection-family"><span class="story-kicker">Computers</span><h3>A place to do the work.</h3><p>Use browser tools or an available desktop environment. Each needs setup, a capable host and the permissions you allow.</p><ul><li>Browser</li><li>This computer</li><li>Local VM</li><li>Cloud computer</li></ul><a class="feature-link" href="/docs">Explore the guides <span aria-hidden="true">↗</span></a></article></div><p class="showcase-footnote">Supported services, not a list of commercial partnerships. Connecting an account does not approve every action.</p></section>
     <!-- Coding agents (what they're actually for) -->
     <section id="coding" class="section">
       <div class="section-intro">
@@ -1581,72 +1559,7 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
         <details class="faq-item"><summary>What does Privacy Shield cover?</summary><div class="faq-a">Privacy Shield is optional masking for supported API-driver text. When enabled for a compatible bot, it masks recognized patterns before that text is sent and records masking counts. It is not a guarantee that every secret, attachment or provider request is filtered. Review sensitive content and your provider’s terms.</div></details>
         <details class="faq-item"><summary>Does the app send analytics?</summary><div class="faq-a">Muster can send product-usage events and check for updates. You can turn usage analytics off in Settings. Models, connected apps and other online features send requests to their services when used. See the privacy policy for details.</div></details>
       </div></div></section>
-    <section id="download" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Download</div>
-        <h2 class="section-heading">Get Muster</h2>
-        <p class="section-copy">Choose your device. Desktop downloads and native companion betas have separate release schedules. Check the download page for version details and checksums.</p>
-      </div>
-      <div class="download-rows">
-        <div class="download-row">
-          <div>
-            <div class="download-row__os">macOS</div>
-            <div class="download-row__meta">Apple silicon · signed and notarized desktop release · .dmg</div>
-          </div>
-          <a href="https://muster.today/downloads/Muster.dmg">Download .dmg</a>
-        </div>
-        <div class="download-row">
-          <div>
-            <div class="download-row__os">macOS Intel</div>
-            <div class="download-row__meta">Intel Macs · signed and notarized desktop release · .dmg</div>
-          </div>
-          <a href="https://muster.today/downloads/Muster-intel.dmg">Download .dmg (Intel)</a>
-        </div>
-        <div class="download-row">
-          <div>
-            <div class="download-row__os">Windows</div>
-            <div class="download-row__meta">64-bit · one-click installer, no admin rights</div>
-          </div>
-          <a href="https://muster.today/downloads/Muster-setup.exe">Download .exe</a>
-        </div>
-        <div class="download-row">
-          <div>
-            <div class="download-row__os">Ubuntu / Debian</div>
-            <div class="download-row__meta">24.04 x64 · .deb package</div>
-          </div>
-          <a href="https://muster.today/downloads/Muster.deb">Download .deb</a>
-        </div>
-        <div class="download-row">
-          <div>
-            <div class="download-row__os">Linux (any distro)</div>
-            <div class="download-row__meta">x64 · AppImage, portable, no install</div>
-          </div>
-          <a href="https://muster.today/downloads/Muster.AppImage">Download AppImage</a>
-        </div>
-        <div class="download-row">
-          <div>
-            <div class="download-row__os">Web</div>
-            <div class="download-row__meta">Your hosted workspace · no desktop download required</div>
-          </div>
-          <a href="/app">Open Muster</a>
-        </div>
-        <div class="download-row">
-          <div>
-            <div class="download-row__os">Command line</div>
-            <div class="download-row__meta">Pair, send work and read receipts from any terminal</div>
-          </div>
-          <a href="/download.html#cli">Install the CLI</a>
-        </div>
-        <div class="download-row">
-          <div>
-            <div class="download-row__os">iPhone — TestFlight</div>
-            <div class="download-row__meta">iPhone and Apple Watch companions · check current beta access and setup instructions</div>
-          </div>
-          <a href="/download.html#ios">iOS beta →</a>
-        </div>
-      </div>
-      <p style="margin-top:18px;text-align:center;"><a href="/download.html" style="color:var(--accent-border);font-weight:500;font-size:15px;">All platforms + checksums →</a></p>
-    </section>
+    <section id="download" class="section muster-story" data-story-reveal><div class="section-intro"><div class="eyebrow">Make yourself at home</div><h2 class="section-heading">Your devices.<br>Your way into Muster.</h2><p class="section-copy">Open the web workspace or choose a desktop app. Phone and Watch companions have their own beta availability.</p></div><div class="download-release"><span class="download-release__dot" aria-hidden="true"></span><span data-release-status role="status">Checking published desktop downloads…</span><a href="/app">Use Muster on the web ↗</a></div><noscript><p class="showcase-footnote">JavaScript is off. Check the download page for current builds and checksums.</p></noscript><div class="download-grid"><article class="download-card"><div class="download-card__icon" aria-hidden="true">⌘</div><div class="download-card__heading"><h3>macOS</h3><span>Apple silicon & Intel</span></div><p>Your own workspace, right on your Mac.</p><div class="download-card__actions"><div class="download-option"><a class="download-action" data-download-file="Muster.dmg" href="/download.html" data-download-label="Apple silicon .dmg">Apple silicon .dmg <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster.dmg">Check availability</span><details class="download-checksum" data-download-checksum="Muster.dmg" hidden><summary>SHA-256 checksum</summary><code></code></details></div><div class="download-option"><a class="download-action" data-download-file="Muster-intel.dmg" href="/download.html" data-download-label="Intel .dmg">Intel .dmg <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster-intel.dmg">Check availability</span><details class="download-checksum" data-download-checksum="Muster-intel.dmg" hidden><summary>SHA-256 checksum</summary><code></code></details></div></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">⊞</div><div class="download-card__heading"><h3>Windows</h3><span>64-bit desktop</span></div><p>A familiar team alongside your everyday apps.</p><div class="download-card__actions"><div class="download-option"><a class="download-action" data-download-file="Muster-setup.exe" href="/download.html" data-download-label="Download .exe">Download .exe <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster-setup.exe">Check availability</span><details class="download-checksum" data-download-checksum="Muster-setup.exe" hidden><summary>SHA-256 checksum</summary><code></code></details></div></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">›_</div><div class="download-card__heading"><h3>Linux</h3><span>x86-64 desktop</span></div><p>Choose a Debian package or a portable AppImage.</p><div class="download-card__actions"><div class="download-option"><a class="download-action" data-download-file="Muster.deb" href="/download.html" data-download-label="Download .deb">Download .deb <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster.deb">Check availability</span><details class="download-checksum" data-download-checksum="Muster.deb" hidden><summary>SHA-256 checksum</summary><code></code></details></div><div class="download-option"><a class="download-action" data-download-file="Muster.AppImage" href="/download.html" data-download-label="Download AppImage">Download AppImage <span aria-hidden="true">↗</span></a><span class="download-file-meta" data-download-meta="Muster.AppImage">Check availability</span><details class="download-checksum" data-download-checksum="Muster.AppImage" hidden><summary>SHA-256 checksum</summary><code></code></details></div></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">▯</div><div class="download-card__heading"><h3>iPhone</h3><span>Companion beta</span></div><p>Connect to a running Muster host for conversations and approvals.</p><div class="download-card__actions"><a class="download-action" href="/download.html#ios">Check iPhone availability ↗</a><span class="download-file-meta">Separate beta distribution</span></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">▯</div><div class="download-card__heading"><h3>Android</h3><span>Companion beta</span></div><p>Take your conversations with you. Installation and device testing are still in progress.</p><div class="download-card__actions"><span class="download-file-meta">Android beta in development.<br>Public installation is not yet listed.</span></div></article><article class="download-card"><div class="download-card__icon" aria-hidden="true">◉</div><div class="download-card__heading"><h3>Apple Watch</h3><span>Companion beta</span></div><p>A small place for a useful check-in. Your paired host handles the work.</p><div class="download-card__actions"><a class="download-action" href="/download.html#ios">Check Watch availability ↗</a><span class="download-file-meta">Requires companion setup</span></div></article></div><p class="showcase-footnote">Desktop links use Muster’s download service. Release details update from its published manifest. <a href="/download.html">Installation guide</a> · <a href="#cli">Command-line access</a></p></section>
     <!-- Releases band — newest first, from /downloads/releases.json -->
     <section id="releases" class="section">
       <div class="section-intro">
@@ -1660,6 +1573,7 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
     </section>
 
 
+<section id="meet-muster" class="section muster-story meet-muster" data-story-reveal><div class="eyebrow">Something good starts small</div><h2 class="section-heading">Meet your<br>first teammate.</h2><p class="section-copy">One task. A little context.<br>Let’s make room for what comes next.</p><div class="meet-muster__actions"><a class="button button--primary" href="/app">Open Muster <span aria-hidden="true">↗</span></a><a class="button button--secondary" href="#download">Get the desktop app <span aria-hidden="true">↓</span></a></div><p class="meet-muster__note">Free during beta. Connected providers may charge separately.</p><div class="meet-muster__cast" aria-hidden="true"><span><svg class="" viewBox="-112 -112 224 224" width="130" height="130" aria-hidden="true"><use href="#hero-face-body" fill="#75b896"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span><svg class="" viewBox="-112 -112 224 224" width="200" height="200" aria-hidden="true"><use href="#hero-face-body" fill="#819fdb"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span class="meet-muster__lead"><svg class="" viewBox="-112 -112 224 224" width="340" height="340" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span><svg class="" viewBox="-112 -112 224 224" width="190" height="190" aria-hidden="true"><use href="#hero-face-body" fill="#b799d4"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span><span><svg class="" viewBox="-112 -112 224 224" width="125" height="125" aria-hidden="true"><use href="#hero-face-body" fill="#dfc46b"/><g class="story-eyes"><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#25261f"/></g></g></svg></span></div><div class="meet-muster__hello"><button type="button" data-mascot-greet hidden>Say hello to Muster <span aria-hidden="true">↗</span></button><span data-mascot-greeting role="status"></span></div></section>
   </main>
 
   <footer class="site-footer">
@@ -2078,76 +1992,8 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
     });
   })();
 
-  // Secondary desktop link: detect the OS and point it at the right
-  // artifact, and label it with the live version from /downloads/latest.json
-  // (same consumption pattern as download.html). Unsupported or mobile
-  // devices keep the general download-page link; version fetch failure is harmless.
-  (function () {
-    var ua = navigator.userAgent;
-    var plat = navigator.platform || "";
-    var mobile = /iPhone|iPad|iPod|Android/i.test(ua) || (/Mac/i.test(plat) && navigator.maxTouchPoints > 1);
-    var macLike = !mobile && (/Mac/i.test(plat) || /Mac OS X/i.test(ua));
-    var isWindows = !mobile && /Win/i.test(ua);
-    var isLinux = /Linux/i.test(ua) && !/Android/i.test(ua);
-    var detected = null;
+  // Download metadata and device links are handled by landing-showcase.js.
 
-    var link = document.getElementById("hero-dl");
-    var label = document.getElementById("hero-dl-label");
-    var version = document.getElementById("hero-dl-version");
-    if (!link || !label) return;
-
-    // WebKit reports platform "MacIntel" even on Apple silicon, so the
-    // platform string cannot distinguish the two. Trust the GPU renderer
-    // string (Apple M-series names never appear on Intel Macs) and default
-    // to Apple silicon when in doubt.
-    function macArch() {
-      if (typeof navigator.userAgentData !== "undefined" && navigator.userAgentData.getHighEntropyValues) {
-        return navigator.userAgentData.getHighEntropyValues(["architecture"]).then(function (h) {
-          return h && h.architecture === "arm" ? "arm" : "x86";
-        }).catch(function () { return glGuess(); });
-      }
-      return Promise.resolve(glGuess());
-    }
-    function glGuess() {
-      try {
-        var canvas = document.createElement("canvas");
-        var gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
-        if (!gl) return "arm";
-        var ext = gl.getExtension("WEBGL_debug_renderer_info");
-        var renderer = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : "";
-        if (/Apple M\d|apple silicon/i.test(renderer)) return "arm";
-        if (/Intel|AMD/i.test(renderer)) return "x86";
-        return "arm";
-      } catch (e) { return "arm"; }
-    }
-
-    var artifact = null;
-    if (isWindows) { artifact = "Muster-setup.exe"; label.textContent = "Download for Windows"; detected = "windows"; }
-    else if (isLinux) { artifact = "Muster.AppImage"; label.textContent = "Download for Linux"; detected = "linux"; }
-    else if (macLike) { artifact = "Muster.dmg"; label.textContent = "Download for macOS (Apple silicon)"; detected = "mac-arm64"; }
-    if (macLike) {
-      // refine the mac artifact once the architecture is known
-      macArch().then(function (arch) {
-        if (arch === "x86") {
-          document.getElementById("hero-dl").href = "https://muster.today/downloads/Muster-intel.dmg";
-          document.getElementById("hero-dl-label").textContent = "Download for macOS (Intel)";
-          hideAlso("mac-arm64"); showAlso("mac-x64");
-          detected = "mac-x64";
-        }
-      });
-    }
-    if (artifact) link.href = "https://muster.today/downloads/" + artifact;
-    function hideAlso(d) { var els = document.querySelectorAll('[data-also="' + d + '"]'); for (var i = 0; i < els.length; i++) els[i].style.display = "none"; }
-    function showAlso(d) { var els = document.querySelectorAll('[data-also="' + d + '"]'); for (var i = 0; i < els.length; i++) els[i].style.display = ""; }
-    if (detected) hideAlso(detected);
-
-    fetch("/downloads/latest.json").then(function (r) {
-      if (!r.ok) throw 0;
-      return r.json();
-    }).then(function (meta) {
-      if (version && meta.version) version.textContent = "v" + meta.version;
-    }).catch(function () { /* keep the CTA without a version chip */ });
-  })();
 </script>
 
 </body>

@@ -95,7 +95,7 @@ async function expectFits(page: Page, width: number) {
   for (const [name, value] of Object.entries(geometry)) expect(value, `${name} horizontal extent`).toBeLessThanOrEqual(width + 1);
 }
 
-for (const width of [320, 390, 1440]) {
+for (const width of [320, 390, 768, 1440]) {
   test(`auth entry remains usable at ${width}px with reduced motion`, async ({ harness, openAuth }, testInfo) => {
     const page = await openAuth(harness.cloudUrl, { width, reducedMotion: true });
     await overrideCapabilities(page, harness.cloudUrl, { emailOtp: true });
@@ -115,6 +115,45 @@ for (const width of [320, 390, 1440]) {
     await testInfo.attach(`auth-entry-${width}`, { path: screenshot, contentType: "image/png" });
   });
 }
+
+test("keyboard visitors can skip the welcome artwork and greet the mascot without submitting", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.cloudUrl, { width: 320, reducedMotion: true });
+  await overrideCapabilities(page, harness.cloudUrl, { emailOtp: true });
+  let submits = 0;
+  page.on("request", (request) => { if (request.method() === "POST") submits += 1; });
+  await page.goto(`${harness.cloudUrl}/sign-in`);
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "Skip to form", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#auth-form")).toBeFocused();
+  const email = page.getByLabel("Email address for a sign-in code", { exact: true });
+  await email.fill("keep-this-draft@example.test");
+  const mascot = page.getByRole("button", { name: "Wave to Muster", exact: true });
+  await mascot.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("status")).toHaveText("Hello from Muster.");
+  await expect(email).toHaveValue("keep-this-draft@example.test");
+  await page.getByRole("link", { name: "Get the desktop app", exact: false }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole("link", { name: "Get the desktop app", exact: false })).toBeInViewport();
+  await expectFits(page, 320);
+  expect(submits).toBe(0);
+});
+
+test("the welcome layout keeps signup and recovery reachable on a small screen", async ({ harness, openAuth }) => {
+  const page = await openAuth(harness.cloudUrl, { width: 320 });
+  await page.goto(`${harness.cloudUrl}/sign-up`);
+  await expect(page.getByRole("heading", { name: "Create your account", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue with Google", exact: true })).toBeVisible();
+  await expectFits(page, 320);
+  await page.goto(`${harness.cloudUrl}/reset-password`);
+  await expect(page.getByText("This link is missing its reset token", { exact: false })).toBeVisible();
+  await page.getByRole("link", { name: "Request a new one", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Reset your password", exact: true })).toBeVisible();
+  await expect(page.getByText("Password reset is not available here.", { exact: false })).toBeVisible();
+  await expectFits(page, 320);
+  await page.getByRole("link", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Your day, with Muster.", exact: true })).toBeVisible();
+});
 
 test("unconfigured optional methods leave the password path available", async ({ harness, openAuth }) => {
   const page = await openAuth(harness.cloudUrl);

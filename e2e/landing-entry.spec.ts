@@ -15,8 +15,15 @@ const CONTENT_TYPES = new Map([
   [".woff2", "font/woff2"], [".json", "application/json"],
 ]);
 
+interface LandingOptions {
+  userAgent?: string;
+  manifest?: unknown;
+  manifestBody?: string;
+  manifestStatus?: number;
+}
+
 const test = baseTest.extend<{
-  openLanding: (width: number, reducedMotion?: boolean, javaScriptEnabled?: boolean) => Promise<Page>;
+  openLanding: (width: number, reducedMotion?: boolean, javaScriptEnabled?: boolean, options?: LandingOptions) => Promise<Page>;
 }, { landingUrl: string }>({
   landingUrl: [async ({ browserName: _browserName }, use) => {
     // The application server redirects / to authentication in this mode.
@@ -49,10 +56,11 @@ const test = baseTest.extend<{
     const contexts: BrowserContext[] = [];
     const errors: string[] = [];
     try {
-      await use(async (width, reducedMotion = false, javaScriptEnabled = true) => {
+      await use(async (width, reducedMotion = false, javaScriptEnabled = true, options = {}) => {
         const context = await browser.newContext({
           viewport: { width, height: 900 }, javaScriptEnabled,
           reducedMotion: reducedMotion ? "reduce" : "no-preference",
+          userAgent: options.userAgent,
         });
         contexts.push(context);
         await context.route("**/*", async (route) => {
@@ -61,14 +69,21 @@ const test = baseTest.extend<{
             errors.push(`Unexpected external request: ${url.origin}${url.pathname}`);
             return route.abort("blockedbyclient");
           }
-          if (url.pathname === "/downloads/latest.json" || url.pathname === "/downloads/releases.json") {
-            return route.fulfill({ contentType: "application/json", body: url.pathname.endsWith("latest.json") ? "{}" : "[]" });
-          }
+          if (url.pathname === "/downloads/latest.json") return route.fulfill({
+            status: options.manifestStatus ?? 200,
+            contentType: "application/json",
+            body: options.manifestBody ?? JSON.stringify(options.manifest ?? {}),
+          });
+          if (url.pathname === "/downloads/releases.json") return route.fulfill({ contentType: "application/json", body: "[]" });
           await route.continue();
         });
         const page = await context.newPage();
         page.on("pageerror", (error) => errors.push(error.message));
         page.on("console", (message) => {
+          // A deliberately refused metadata response emits a browser resource
+          // error even when the page handles it. Keep every other error visible.
+          if ((options.manifestStatus ?? 200) >= 400 && message.location().url === `${landingUrl}/downloads/latest.json`
+            && message.text().includes(`status of ${options.manifestStatus}`)) return;
           if (message.type() === "error") errors.push(`${message.location().url}: ${message.text()}`);
         });
         await page.goto(landingUrl, { waitUntil: "networkidle" });
@@ -340,4 +355,211 @@ test("workspace retains its screenshot and caption when JavaScript is unavailabl
   await expect.poll(() => image.evaluate((element) => element instanceof HTMLImageElement && element.complete && element.naturalWidth > 0)).toBe(true);
   await expect(fallback.locator("p")).toContainText("Enable JavaScript to try a scripted conversation.");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+const DESKTOP_DOWNLOADS = ["Muster.dmg", "Muster-intel.dmg", "Muster-setup.exe", "Muster.deb", "Muster.AppImage"] as const;
+const SAMPLE_CHECKSUM = "a".repeat(64);
+
+function sampleManifest() {
+  return {
+    version: "1.20.7",
+    files: Object.fromEntries(DESKTOP_DOWNLOADS.map((name) => [name, {
+      size: 1024,
+      sha256: SAMPLE_CHECKSUM,
+      // A descriptor's URL must never override the known release location.
+      url: "https://attacker.invalid/installer",
+    }])),
+  };
+}
+
+async function expectDownloadFallbacks(page: Page) {
+  for (const name of DESKTOP_DOWNLOADS) {
+    await expect(page.locator(`[data-download-file="${name}"]`)).toHaveAttribute("href", "/download.html");
+    await expect(page.locator(`[data-download-checksum="${name}"]`)).toBeHidden();
+  }
+  await expect(page.locator("#hero-dl-version")).toBeEmpty();
+}
+
+for (const width of [320, 390, 768, 1440]) {
+  test(`product showcase, templates, connections and downloads fit at ${width}px`, async ({ openLanding }, testInfo) => {
+    const page = await openLanding(width);
+    const sections = ["#scenes", "#use-cases", "#engines", "#download", "#meet-muster"];
+    for (const selector of sections) {
+      const section = page.locator(selector);
+      await section.scrollIntoViewIfNeeded();
+      await expect(section).toBeVisible();
+      const bounds = await section.boundingBox();
+      expect(bounds, `${selector} has visible bounds`).not.toBeNull();
+      if (!bounds) throw new Error(`${selector} is not rendered`);
+      expect(bounds.x, `${selector} stays inside the viewport`).toBeGreaterThanOrEqual(0);
+      expect(bounds.x + bounds.width, `${selector} stays inside the viewport`).toBeLessThanOrEqual(width);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      const screenshot = testInfo.outputPath(`${selector.slice(1)}-${width}.png`);
+      // Section portraits may be taller than the viewport. Hide only the
+      // fixed navigation in the artifact, after checking the real layout.
+      await section.screenshot({ path: screenshot, animations: "disabled", style: ".site-header { visibility: hidden !important; }" });
+      await testInfo.attach(`${selector.slice(1)}-${width}`, { path: screenshot, contentType: "image/png" });
+    }
+    await expect(page.locator("#use-cases .starter-card")).toHaveCount(6);
+    const android = page.locator("#download .download-card").filter({ has: page.getByRole("heading", { name: "Android", exact: true }) });
+    await expect(android).toContainText("Android beta in development. Public installation is not yet listed.", { useInnerText: true });
+    await expect(android.getByRole("link")).toHaveCount(0);
+    await expectDownloadFallbacks(page);
+  });
+}
+
+test("product tabs support roving keyboard focus without rotating on their own", async ({ openLanding }) => {
+  const page = await openLanding(768);
+  const showcase = page.locator("[data-product-showcase]");
+  const tabs = showcase.getByRole("tablist", { name: "Explore Muster", exact: true });
+  const personal = tabs.getByRole("tab", { name: "Personal", exact: true });
+  const teams = tabs.getByRole("tab", { name: "For teams", exact: true });
+  const desktop = tabs.getByRole("tab", { name: "Desktop", exact: true });
+  const companions = tabs.getByRole("tab", { name: "On the go", exact: true });
+  await expect(personal).toHaveAttribute("aria-selected", "true");
+  await expect(personal).toHaveAttribute("tabindex", "0");
+  await expect(showcase.locator('[role="tabpanel"]:visible')).toHaveCount(1);
+  await personal.focus();
+  for (const [key, tab, panel] of [
+    ["ArrowRight", teams, "product-teams"],
+    ["End", companions, "product-companions"],
+    ["ArrowRight", personal, "product-personal"],
+    ["ArrowLeft", companions, "product-companions"],
+    ["Home", personal, "product-personal"],
+    ["ArrowRight", teams, "product-teams"],
+    ["ArrowRight", desktop, "product-desktop"],
+  ] as const) {
+    await page.keyboard.press(key);
+    await expect(tab).toBeFocused();
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+    await expect(tab).toHaveAttribute("aria-controls", panel);
+    await expect(showcase.locator(`#${panel}`)).toBeVisible();
+    await expect(tabs.locator('[aria-selected="true"]')).toHaveCount(1);
+    await expect(tabs.locator('[tabindex="0"]')).toHaveCount(1);
+    await expect(showcase.locator('[role="tabpanel"]:visible')).toHaveCount(1);
+  }
+  await page.clock.install();
+  await page.clock.fastForward(30_000);
+  await expect(desktop).toHaveAttribute("aria-selected", "true");
+  await expect(desktop).toBeFocused();
+});
+
+test("product stories, template previews and download destinations remain usable without JavaScript", async ({ openLanding }) => {
+  const page = await openLanding(390, false, false);
+  for (const id of ["product-personal", "product-teams", "product-desktop", "product-companions"]) {
+    await expect(page.locator(`#${id}`)).toBeVisible();
+  }
+  await expect(page.locator("[data-mascot-greet]")).toBeHidden();
+  const preview = page.locator("#use-cases .starter-card details").first();
+  await preview.locator("summary").click();
+  await expect(preview).toHaveAttribute("open", "");
+  for (const link of await page.locator("#use-cases .starter-card a").all()) {
+    await expect(link).toHaveAttribute("href", "/app");
+  }
+  await expectDownloadFallbacks(page);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test("template cards preview real Agent Hub roles without installing or sending anything", async ({ openLanding }) => {
+  const page = await openLanding(1440);
+  const requests: string[] = [];
+  page.on("request", (request) => requests.push(`${request.method()} ${request.url()}`));
+  const templates = page.locator("#use-cases");
+  const cards = templates.locator(".starter-card");
+  await expect(cards).toHaveCount(6);
+  const knownNames = ["Daylight", "Compass", "Atlas", "Forge", "Probe", "Quill", "Slate", "Anchor", "Ranger", "Ledger"];
+  for (const card of await cards.all()) {
+    const title = await card.getByRole("heading").innerText();
+    expect(knownNames.some((name) => title.includes(name)), `Real Agent Hub persona: ${title}`).toBe(true);
+    const details = card.locator("details");
+    const summary = details.locator("summary");
+    await summary.focus();
+    await page.keyboard.press("Enter");
+    await expect(details).toHaveAttribute("open", "");
+    await expect(card.getByRole("link")).toHaveAttribute("href", "/app");
+    await page.keyboard.press("Enter");
+    await expect(details).not.toHaveAttribute("open", "");
+  }
+  expect(requests, "Template previews are local disclosure controls").toEqual([]);
+});
+
+test("valid release metadata enables only known downloads without guessing Mac or mobile architecture", async ({ openLanding }) => {
+  for (const userAgent of [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1",
+  ]) {
+    const page = await openLanding(390, false, true, { userAgent, manifest: sampleManifest() });
+    for (const name of DESKTOP_DOWNLOADS) {
+      await expect(page.locator(`[data-download-file="${name}"]`)).toHaveAttribute("href", `https://muster.today/downloads/${name}`);
+      const checksum = page.locator(`[data-download-checksum="${name}"]`);
+      await expect(checksum).toBeVisible();
+      await checksum.locator("summary").click();
+      await expect(checksum.locator("code")).toHaveText(SAMPLE_CHECKSUM);
+    }
+    await expect(page.locator("[data-release-status]")).toContainText("1.20.7");
+    await expect(page.locator("#hero-dl")).toHaveAttribute("href", "/download.html");
+    await expect(page.locator('a[href*="attacker.invalid"]')).toHaveCount(0);
+    expect(await page.evaluate(() => performance.getEntriesByType("resource")
+      .filter((entry) => new URL(entry.name).pathname === "/downloads/latest.json").length)).toBe(1);
+  }
+});
+
+test("a partial manifest leaves malformed artifacts unavailable and ignores unrecognized URLs", async ({ openLanding }) => {
+  const page = await openLanding(1440, false, true, { manifest: {
+    version: "1.20.7",
+    files: {
+      "Muster.dmg": { size: 1024, sha256: SAMPLE_CHECKSUM, url: "javascript:alert('unexpected')" },
+      "Muster-intel.dmg": { size: 0, sha256: SAMPLE_CHECKSUM },
+      "Muster-setup.exe": { size: 1.5, sha256: SAMPLE_CHECKSUM },
+      "Muster.deb": { size: "1024", sha256: SAMPLE_CHECKSUM },
+      "Muster.AppImage": { size: 1024, sha256: "g".repeat(64) },
+      "https://attacker.invalid/malware.exe": { size: 1024, sha256: SAMPLE_CHECKSUM },
+    },
+  } });
+  await expect(page.locator('[data-download-file="Muster.dmg"]')).toHaveAttribute("href", "https://muster.today/downloads/Muster.dmg");
+  for (const name of DESKTOP_DOWNLOADS.slice(1)) {
+    await expect(page.locator(`[data-download-file="${name}"]`)).toHaveAttribute("href", "/download.html");
+    await expect(page.locator(`[data-download-checksum="${name}"]`)).toBeHidden();
+  }
+  await expect(page.locator("[data-download-file]")).toHaveCount(5);
+  await expect(page.locator('a[href^="javascript:"], a[href*="attacker.invalid"]')).toHaveCount(0);
+  await expect(page.locator("#download")).not.toContainText("attacker.invalid");
+});
+
+test("invalid release versions cannot activate downloads or inject release labels", async ({ openLanding }) => {
+  for (const version of ["01.20.7", "1.20", "1.20.7-01", "1.20.7-..", '<img src="https://attacker.invalid/version" onerror="alert(1)">']) {
+    const page = await openLanding(390, false, true, { manifest: { ...sampleManifest(), version } });
+    await expectDownloadFallbacks(page);
+    await expect(page.locator("[data-release-status]")).not.toContainText(version);
+    await expect(page.locator('[src*="attacker.invalid"], [href*="attacker.invalid"]')).toHaveCount(0);
+  }
+});
+
+test("unavailable or unreadable release metadata preserves useful download choices", async ({ openLanding }) => {
+  for (const options of [{ manifest: {} }, { manifestStatus: 503 }, { manifestBody: "{incomplete-json" }]) {
+    const page = await openLanding(320, false, true, options);
+    await expectDownloadFallbacks(page);
+    await expect(page.locator("#download").getByRole("link", { name: /web|browser|open muster/i }).first()).toHaveAttribute("href", "/app");
+    await expect(page.locator("#download")).toContainText(/beta/i);
+  }
+});
+
+test("the mascot greets from the keyboard with finite motion and respects reduced motion", async ({ openLanding }) => {
+  for (const reducedMotion of [false, true]) {
+    const page = await openLanding(390, reducedMotion);
+    const section = page.locator("#meet-muster");
+    const button = section.locator("[data-mascot-greet]");
+    const greeting = section.locator("[data-mascot-greeting]");
+    const initial = await greeting.textContent();
+    await button.focus();
+    await page.keyboard.press("Enter");
+    await expect(greeting).not.toHaveText(initial ?? "");
+    await expect(button).toBeFocused();
+    expect(await section.evaluate((element) => element.getAnimations({ subtree: true })
+      .every((animation) => animation.effect?.getTiming().iterations !== Infinity))).toBe(true);
+    if (reducedMotion) expect(await section.evaluate((element) => [element, ...element.querySelectorAll("*")].every((target) => {
+      const style = getComputedStyle(target);
+      return style.animationName === "none" || style.animationDuration.split(",").every((duration) => parseFloat(duration) === 0);
+    }))).toBe(true);
+  }
 });
