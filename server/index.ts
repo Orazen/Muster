@@ -534,6 +534,15 @@ function installationAppsFor(ownerId?: string | null): boolean {
   return installationAppsAllowed(SELF_HOSTED, primaryUserId(), ownerId);
 }
 
+/** The platform an engine actually runs on. The reader's browser is not it:
+ * a hosted deployment serves a Mac reader from a Linux host, and the CLI
+ * a driver spawns, the image it pulls and the installer line the UI shows
+ * all belong to THIS machine. Narrowed to the three values a driver's
+ * `command` map is keyed by, so the client can index it without a cast. */
+function hostPlatform(): "darwin" | "win32" | "linux" {
+  return process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
+}
+
 function botAppsAllowed(bot: { ownerId?: string; composio?: boolean }): boolean {
   return installationAppsFor(bot.ownerId) && bot.composio !== false && connectedApps.configured(cfg);
 }
@@ -8485,16 +8494,23 @@ let requestUserEmail = "";
       // this the answer is frozen at boot and "check again" is a no-op.
       resetPathCache();
       const described = await registry.describe();
+      // The install one-liners are per-platform because the ENGINE runs
+      // here, not on the reader's machine. A browser was picking its
+      // command from navigator.userAgent, so a Mac reader in a hosted
+      // deployment was shown a brew line for a machine that would never
+      // run it. Each row now carries the platform it was actually
+      // described on, and the client keys off that.
+      const withHostPlatform = described.map((d) => ({ ...d, hostPlatform: hostPlatform() }));
       // Non-operators see ONLY their own engines (vault keys + custom
       // providers, both suffixed with their user id). The operator's global
       // fleet is not listed for them — turn-start would refuse it anyway,
       // and a picker full of unusable engines is the bug this replaces.
       if (requestUserId && requestUserId !== primaryUserId()) {
         const suffix = `:${requestUserId}`;
-        const filtered = described.filter((d) => d.instanceId.endsWith(suffix));
+        const filtered = withHostPlatform.filter((d) => d.instanceId.endsWith(suffix));
         return json(res, 200, { instances: filtered });
       }
-      return json(res, 200, { instances: described });
+      return json(res, 200, { instances: withHostPlatform });
     }
 
     // ── CLI binary discovery for the Engines "detected" dropdown ──

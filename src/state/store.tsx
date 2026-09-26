@@ -345,6 +345,11 @@ export interface InstanceInfo {
   instanceId: string;
   driverKind: string;
   displayName: string;
+  /** The platform the SERVER described this engine on — where the CLI will
+   * actually be spawned. Not the reader's: a hosted deployment serves a Mac
+   * reader from a Linux host, so `command` must be keyed on this or the UI
+   * offers an installer for a machine that will never run it. */
+  hostPlatform?: "darwin" | "win32" | "linux";
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;

@@ -289,6 +289,16 @@ describe("harness HTTP API", () => {
     expect(body.instances[0].snapshot.reason).toContain("not-a-real-driver");
   });
 
+  it("reports the platform each engine was described on, not the caller's", async () => {
+    // The install one-liners are keyed by the machine the CLI is spawned
+    // on, which is this server. A browser was picking its own user agent
+    // and offering a Mac reader a brew line for a Linux host.
+    const { status, body } = await api("GET", "/api/instances");
+    expect(status).toBe(200);
+    const expected = process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
+    for (const row of body.instances) expect(row.hostPlatform).toBe(expected);
+  });
+
   it("searches transcripts and exports a conversation", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     // every new bot opens with a seeded greeting — a known searchable string

@@ -22,12 +22,13 @@ export function NoEngines() {
   // dead end alongside the real options.
   const engines = state.instances
     .filter((i) => i.install)
-    // An engine with a command for this platform is one the user can act on
-    // right now; the rest (GUI downloads, POSIX-only installers on Windows)
-    // sort below so the actionable path is the obvious one.
+    // An engine with a command for the platform the SERVER runs on is one
+    // the user can act on right now; the rest (GUI downloads, POSIX-only
+    // installers on Windows) sort below so the actionable path is the
+    // obvious one. In a browser "now" means on the host, not on the reader.
     .sort((a, b) => {
-      const aCmd = installCommandFor(a.install) ? 0 : 1;
-      const bCmd = installCommandFor(b.install) ? 0 : 1;
+      const aCmd = installCommandFor(a.install, a.hostPlatform) ? 0 : 1;
+      const bCmd = installCommandFor(b.install, b.hostPlatform) ? 0 : 1;
       return aCmd - bCmd;
     });
 

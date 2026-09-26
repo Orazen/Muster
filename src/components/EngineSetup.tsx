@@ -8,7 +8,13 @@ import { cn } from "@/lib/cn";
 
 type Platform = "darwin" | "win32" | "linux";
 
-function hostPlatform(): Platform {
+/** Where the CLI will actually be spawned. The server says so on every
+ * instance row, and that answer wins: the engine runs on the serving
+ * machine, which in a hosted deployment is not the reader's. Only a server
+ * too old to send the field falls through to the local guess, so a mixed
+ * fleet during a rollout still shows something rather than nothing. */
+function hostPlatform(serverPlatform?: Platform): Platform {
+  if (serverPlatform) return serverPlatform;
   const platform = window.ogb?.platform;
   if (platform === "darwin" || platform === "win32" || platform === "linux") return platform;
   const userAgent = navigator.userAgent;
@@ -17,10 +23,11 @@ function hostPlatform(): Platform {
   return "linux";
 }
 
-/** The install command for this machine, or null when the engine has none
- * here (a GUI download, or a POSIX-only installer viewed on Windows). */
-export function installCommandFor(install: EngineInstall | undefined): string | null {
-  return install?.command?.[hostPlatform()] ?? null;
+/** The install command for the machine the engine runs on, or null when the
+ * engine has none there (a GUI download, or a POSIX-only installer viewed on
+ * Windows). */
+export function installCommandFor(install: EngineInstall | undefined, serverPlatform?: Platform): string | null {
+  return install?.command?.[hostPlatform(serverPlatform)] ?? null;
 }
 
 /** Installed but missing the cloud account session. */
@@ -116,7 +123,7 @@ export function EngineSetup({
   intent?: "cloud" | "inject";
 }) {
   const install = instance.install;
-  const installCommand = installCommandFor(install);
+  const installCommand = installCommandFor(install, instance.hostPlatform);
   const signInCommand = install?.signInCommand;
   const signInOnly = intent === "cloud" && needsSignIn(instance);
   const command = signInOnly ? signInCommand : installCommand;
