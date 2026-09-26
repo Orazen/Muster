@@ -22,6 +22,7 @@ import { hostBuild, operatorSectionAllowed, settingsSectionAllowed } from "@/lib
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
 import { RemoteAccessSection } from "./RemoteAccessSection";
+import { BrainFacts } from "./bot-profile/BrainFacts";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
 import { SkinPicker } from "./SkinPicker";
 import { UsageSection } from "./UsageSection";
@@ -1148,6 +1149,7 @@ export function SettingsModal() {
             {section === "brain" && (
               <>
                 <TeamContextCard />
+                <BrainFacts />
                 <Card title="How bots use the Brain" subtitle="Every bot reads this shared brief on every turn — it is how your whole roster stays on the same page.">
                   <ul className="list-disc space-y-1 pl-5 text-[13px] text-ink-secondary">
                     <li>Put company facts, goals, conventions, links, and standing preferences here.</li>

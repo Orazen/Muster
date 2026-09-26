@@ -162,4 +162,22 @@ describe("WorkspaceBrain", () => {
     expect(b.history(cross.id, "u1").ancestors).toEqual([]);
     expect(b.history(mine.id, "u1").fact?.id).toBe(mine.id);
   });
+
+  it("list returns the owner's whole slice, withdrawn ones included", async () => {
+    const b = await brain();
+    const live = b.add({ text: "The rollout is Tuesday", source: "standup", ownerId: "u1" });
+    const retired = b.add({ text: "The rollout was Monday", source: "standup", ownerId: "u1" });
+    b.withdraw(retired.id, "u1");
+    b.add({ text: "Someone else's rollout", source: "standup", ownerId: "u2" });
+    const listed = b.list("u1");
+    expect(listed.map((f) => f.id).sort()).toEqual([live.id, retired.id].sort());
+    // Provenance, not deletion: the withdrawn fact rides along marked.
+    expect(listed.find((f) => f.id === retired.id)?.withdrawnAt).toBeTypeOf("number");
+    expect(listed.find((f) => f.id === live.id)?.withdrawnAt).toBeUndefined();
+    // A copy — mutating the result must not touch the record.
+    listed.pop();
+    expect(b.list("u1")).toHaveLength(2);
+    // The desktop's implicit user still sees everything.
+    expect(b.list(undefined).length).toBeGreaterThanOrEqual(3);
+  });
 });

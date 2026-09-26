@@ -101,6 +101,11 @@ describe.skipIf(process.platform === "win32")("workspace brain over the live har
   const queryBody = z.object({ result: queryResultSchema });
   const writeBody = z.object({ fact: factSchema });
   const statsBody = z.object({ brain: z.object({ facts: z.number(), withdrawn: z.number() }) });
+  const listBody = z.object({
+    facts: z.array(factSchema.extend({
+      createdAt: z.number(), origin: z.string().optional(), withdrawnAt: z.number().optional(),
+    })),
+  });
 
   it("writes, queries with citations, and reports gaps", async () => {
     const write = await api("/api/brain/facts", "POST", {
@@ -182,6 +187,35 @@ describe.skipIf(process.platform === "win32")("workspace brain over the live har
     const tail = await api(`/api/brain/facts/${v3.id}/history`);
     const tailBody = z.object({ history: z.object({ ancestors: z.array(z.object({ id: z.string() })) }) }).parse(await tail.json());
     expect(tailBody.history.ancestors.map((f) => f.id)).toEqual([fact.id, v2.id]);
+  });
+
+  it("lists the caller's slice with withdrawn facts provenance-marked", async () => {
+    const write = await api("/api/brain/facts", "POST", {
+      text: "The backup rotation is weekly",
+      source: "ops wiki",
+    });
+    expect(write.status).toBe(201);
+    const { fact: live } = writeBody.parse(await write.json());
+    const retire = await api("/api/brain/facts", "POST", {
+      text: "The backup rotation was daily",
+      source: "ops wiki",
+    });
+    const { fact: retired } = writeBody.parse(await retire.json());
+    expect((await api(`/api/brain/facts/${retired.id}/withdraw`, "POST")).status).toBe(200);
+
+    const listed = listBody.parse(await (await api("/api/brain/facts")).json());
+    const byId = new Map(listed.facts.map((f) => [f.id, f]));
+    expect(byId.get(live.id)?.withdrawnAt).toBeUndefined();
+    expect(byId.get(retired.id)?.withdrawnAt).toBeTypeOf("number");
+    // The list the client renders from must agree with the query surface:
+    // a withdrawn fact is not gone, it is marked.
+    expect(byId.get(retired.id)?.text).toBe("The backup rotation was daily");
+
+    // Isolation holds on the browse surface too: the other account's list
+    // never contains alpha's facts, not even the withdrawn one.
+    const betaList = listBody.parse(await (await api("/api/brain/facts", "GET", undefined, cookieB)).json());
+    expect(betaList.facts.map((f) => f.id)).not.toContain(live.id);
+    expect(betaList.facts.map((f) => f.id)).not.toContain(retired.id);
   });
 
   it("keeps accounts isolated: beta never sees alpha's facts", async () => {

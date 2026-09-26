@@ -271,6 +271,13 @@ export class WorkspaceBrain {
     return this.visible(ownerId).find((f) => f.id === factId);
   }
 
+  /** Every fact this owner may see, withdrawn ones included — provenance
+   * is the point of the browse surface. A copy: callers read the record,
+   * they do not hold a reference into it. */
+  list(ownerId: string | undefined): BrainFact[] {
+    return [...this.visible(ownerId)];
+  }
+
   /** Typed edges for a fact's entity refs. Built on read from the facts
    * themselves, so the graph can never disagree with the record. */
   edges(fact: BrainFact): BrainEdge[] {
