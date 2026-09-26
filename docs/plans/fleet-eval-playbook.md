@@ -86,6 +86,14 @@ receipt tokens/cost when a matching fresh receipt exists. Unknown cost or
 missing receipt usage remains `null`. Receipts aggregate a task thread; do
 not compare runs made in reused threads as per-task measurements.
 
+`muster eval-trend scorecard-*.json…` reads already-graded scorecards in the
+order you list them — that order is the trend, because a scorecard records no
+timestamp — and prints a JSON report: per-run status, per-probe metrics with
+unknowns kept `null`, the named checks that failed in each probe, and the
+distinct labels so unlike task specifications are visible. It is read-only
+and writes nothing. It does not re-grade captures or judge comparability; it
+reports the scorecards' own claims.
+
 All three probes must be present and pass for an overall pass. A supplied
 failed probe takes precedence over missing probes. Keep `source: simulated`
 for fixture captures: a simulated pass is never evidence of a live benchmark.

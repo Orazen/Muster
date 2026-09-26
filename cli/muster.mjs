@@ -864,6 +864,23 @@ async function benchCommand() {
   await gradeCommand("role-eval", "Usage: muster bench capture.json scorecard.json (see the per-role benchmark playbook)");
 }
 
+async function evalTrendCommand() {
+  // One or more already-graded fleet scorecards, in the order that is meant
+  // by "over time". Nothing is written; the trend goes to stdout.
+  if (!subject) {
+    console.error("Usage: muster eval-trend scorecard1.json [scorecard2.json ...] (see the fleet eval playbook)");
+    process.exitCode = 2;
+    return;
+  }
+  const inputs = [subject, ...rest].map((file) => resolve(file));
+  const rt = resolveFleetRuntime("eval-trend");
+  process.exitCode = await new Promise((finish) => {
+    const child = spawn(rt.cmd, [...rt.args, ...inputs], { cwd: rt.cwd, stdio: "inherit" });
+    child.on("error", () => finish(2));
+    child.on("exit", (code) => finish(code ?? 2));
+  });
+}
+
 const HELP = `muster — the CLI for your AI workforce
 
   muster --version [--json]        version and embedded source commit (unbundled checkout: null)
@@ -882,6 +899,7 @@ const HELP = `muster — the CLI for your AI workforce
   muster sessions [--json]        active sign-in sessions; --revoke <prefix|other|all>
   muster mcp [--serve]            print MCP client config for Muster (--serve runs the stdio server)
   muster eval capture.json scorecard.json  grade captured fleet probes locally; no fleet actions
+  muster eval-trend a.json [b.json ...]    trend across stored fleet scorecards, in file order; read-only
   muster bench capture.json scorecard.json grade captured per-role benchmarks; no fleet actions
   muster help`;
 
@@ -940,6 +958,9 @@ try {
       break;
     case "eval":
       await evalCommand();
+      break;
+    case "eval-trend":
+      await evalTrendCommand();
       break;
     case "bench":
       await benchCommand();

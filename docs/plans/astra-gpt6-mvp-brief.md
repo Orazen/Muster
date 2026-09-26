@@ -80,6 +80,10 @@ Ranked; each is a bounded, shippable increment consistent with §3's rule:
    `muster eval` (or a docs-run playbook + stored scorecards): same three
    probes, JSON results, trendable. The product that can grade its own
    agents wins procurement conversations.
+   *(shipped — `muster eval` grades captured probes per
+   [fleet-eval-playbook.md](fleet-eval-playbook.md), stored scorecards are
+   never overwritten, and `muster eval-trend` reads a trend across them in
+   file order, read-only.)*
 2. **Fleet MCP write-safe extensions.** `list_sessions`-style reads,
    `get_why_journal`, `get_scorecard` — read-only trust artifacts. Keep
    approvals/deletes/credentials out; the asymmetry IS the product.

@@ -33,6 +33,7 @@ const ENTRY_POINTS = [
   "fleet-mcp.ts",
   "fleet-eval.ts",
   "role-eval.ts",
+  "eval-trend.ts",
   "computer-proxy.ts",
   "container-mcp.ts",
   "permission-proxy.ts",
