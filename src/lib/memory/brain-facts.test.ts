@@ -13,10 +13,16 @@ type WireFact = {
   createdAt: string | number;
 };
 
+// The shapes below mirror what the routes actually send: history rides in a
+// `{ history }` envelope, withdraw/restore confirm with their own named
+// fields, revert wraps the replacement in `{ fact }`. The mock shapes ARE the
+// regression pin — a drift on either side fails here first.
 type TestReply =
   | { facts: WireFact[] }
-  | { ancestors: WireFact[]; fact?: WireFact; descendants: WireFact[] }
-  | WireFact
+  | { history: { ancestors: WireFact[]; fact?: WireFact | null; descendants: WireFact[] } }
+  | { withdrawn: true }
+  | { restored: true }
+  | { fact: WireFact }
   | { ok: true }
   | { error: string }
   // the malformed case under test: a list item that is only an id
@@ -57,12 +63,12 @@ describe("brain fact client", () => {
     await expect(listBrainFacts()).rejects.toThrow("unexpected shape");
   });
 
-  it("returns the correction chain oldest first with the fact in the middle", async () => {
+  it("unwraps the history envelope, oldest first with the fact in the middle", async () => {
     const oldest = { ...person, id: "f-1", text: "Zed contracts through Northwind" };
     const current = { ...person, id: "f-2", text: "Zed works at Northwind" };
     const newest = { ...person, id: "f-3", text: "Zed leads Northwind" };
     const transport = vi.fn<typeof fetch>().mockResolvedValue(
-      jsonResponse({ ancestors: [oldest], fact: current, descendants: [newest] }),
+      jsonResponse({ history: { ancestors: [oldest], fact: current, descendants: [newest] } }),
     );
     vi.stubGlobal("fetch", transport);
     const history = await factHistory("f-2");
@@ -70,14 +76,24 @@ describe("brain fact client", () => {
     expect(transport.mock.calls[0][0]).toBe("/api/brain/facts/f-2/history");
   });
 
+  it("decodes a null chain head as an absent fact", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({ history: { ancestors: [], fact: null, descendants: [] } }),
+    ));
+    const history = await factHistory("ghost");
+    expect(history.fact).toBeUndefined();
+  });
+
   it("surfaces a 404 history as the server's error", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ error: "unknown fact" }, 404)));
     await expect(factHistory("ghost")).rejects.toThrow("unknown fact");
   });
 
-  it("withdraws and restores by posting to the fact's own path", async () => {
+  it("withdraws and restores against each action's own confirmation shape", async () => {
     // two calls, so each must get its own Response — a body reads once
-    const transport = vi.fn<typeof fetch>().mockImplementation(async () => jsonResponse({ ok: true }));
+    const transport = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ withdrawn: true }))
+      .mockResolvedValueOnce(jsonResponse({ restored: true }));
     vi.stubGlobal("fetch", transport);
     await withdrawFact("f-person");
     await restoreFact("f-person");
@@ -85,11 +101,14 @@ describe("brain fact client", () => {
       "POST /api/brain/facts/f-person/withdraw",
       "POST /api/brain/facts/f-person/restore",
     ]);
+    // a bare { ok: true } is NOT what this server sends — reject the drift
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ok: true })));
+    await expect(withdrawFact("f-person")).rejects.toThrow("did not confirm the withdrawal");
   });
 
-  it("revert posts the replacement text and returns the new fact", async () => {
+  it("revert posts the replacement text and unwraps the returned fact", async () => {
     const replacement = { ...person, id: "f-next", text: "Ram drinks black coffee now", source: "revert" };
-    const transport = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(replacement));
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ fact: replacement }));
     vi.stubGlobal("fetch", transport);
     const reverted = await revertFact("f-person", "Ram drinks black coffee now");
     const [path, init] = transport.mock.calls[0];

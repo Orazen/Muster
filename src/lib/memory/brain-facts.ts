@@ -35,12 +35,19 @@ export interface FactHistory {
 }
 
 const factListSchema = z.object({ facts: z.array(brainFactSchema) });
+// The server wraps the chain in `{ history }` and answers actions with their
+// own named confirmations (`{ withdrawn: true }`, `{ restored: true }`) —
+// decoded against the envelopes the routes actually send.
 const factHistorySchema = z.object({
-  ancestors: z.array(brainFactSchema),
-  fact: brainFactSchema.optional(),
-  descendants: z.array(brainFactSchema),
+  history: z.object({
+    ancestors: z.array(brainFactSchema),
+    fact: brainFactSchema.nullable().optional(),
+    descendants: z.array(brainFactSchema),
+  }),
 });
-const confirmationSchema = z.object({ ok: z.literal(true) });
+const withdrawSchema = z.object({ withdrawn: z.literal(true) });
+const restoreSchema = z.object({ restored: z.literal(true) });
+const revertSchema = z.object({ fact: brainFactSchema });
 
 const factPath = (id: string) => `/api/brain/facts/${encodeURIComponent(id)}`;
 
@@ -55,31 +62,31 @@ export async function listBrainFacts(): Promise<BrainFact[]> {
 export async function factHistory(id: string): Promise<FactHistory> {
   const parsed = factHistorySchema.safeParse(await api(`${factPath(id)}/history`));
   if (!parsed.success) throw new Error("Fact history came back in an unexpected shape.");
-  // spread instead of pass-through: the decoded `fact` key is optional, the
+  // spread instead of pass-through: the decoded `fact` key is nullable, the
   // contract type keeps it present-but-possibly-undefined
   return {
-    ancestors: parsed.data.ancestors,
-    fact: parsed.data.fact,
-    descendants: parsed.data.descendants,
+    ancestors: parsed.data.history.ancestors,
+    fact: parsed.data.history.fact ?? undefined,
+    descendants: parsed.data.history.descendants,
   };
 }
 
 export async function withdrawFact(id: string): Promise<void> {
-  const parsed = confirmationSchema.safeParse(await api(`${factPath(id)}/withdraw`, { method: "POST" }));
+  const parsed = withdrawSchema.safeParse(await api(`${factPath(id)}/withdraw`, { method: "POST" }));
   if (!parsed.success) throw new Error("The server did not confirm the withdrawal.");
 }
 
 export async function restoreFact(id: string): Promise<void> {
-  const parsed = confirmationSchema.safeParse(await api(`${factPath(id)}/restore`, { method: "POST" }));
+  const parsed = restoreSchema.safeParse(await api(`${factPath(id)}/restore`, { method: "POST" }));
   if (!parsed.success) throw new Error("The server did not confirm the restore.");
 }
 
 export async function revertFact(id: string, text: string): Promise<BrainFact> {
   // A revert mints a NEW fact superseding the chain head — history is never
-  // rewritten — so the reply is the replacement fact itself.
-  const parsed = brainFactSchema.safeParse(
+  // rewritten — so the reply carries the replacement fact in `fact`.
+  const parsed = revertSchema.safeParse(
     await api(`${factPath(id)}/revert`, { method: "POST", body: JSON.stringify({ text }) }),
   );
   if (!parsed.success) throw new Error("The reverted fact came back in an unexpected shape.");
-  return parsed.data;
+  return parsed.data.fact;
 }
