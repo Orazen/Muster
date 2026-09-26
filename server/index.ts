@@ -6777,18 +6777,36 @@ let requestUserEmail = "";
     // their OWN bots/transcripts — the isolation above — but never this
     // machine's fleet: no listing of the operator's engines, no executing
     // on them, no touching the local computer or MCP servers.
-    // /api/instances and /api/custom-providers are deliberately NOT blocked:
-    // their handlers answer non-primary users from per-user state only
-    // (own vault instances + own custom providers), never the global
+    // GET /api/instances and /api/custom-providers are deliberately NOT
+    // blocked: those handlers answer non-primary users from per-user state
+    // only (own vault instances + own custom providers), never the global
     // config — so the picker fills and "add your own key" is a real path.
     const isPrimaryUser = !requestUserId || requestUserId === primaryUserId();
     if (!isPrimaryUser) {
+      // The CLI discovery/probe pair describes and exercises the machine the
+      // SERVER runs on, not the caller's: it returns absolute host paths and
+      // spawns a binary. That is the same host-administration class as
+      // /api/local-computer, so it is concealed (404) rather than explained —
+      // a 403 would confirm the endpoint exists. UI hiding was never the
+      // control; this is.
       const infraPath =
         path.startsWith("/api/local-computer") ||
         path.startsWith("/api/mcp-servers") ||
-        path.startsWith("/api/bots/") && /\/computer(\/|$)/.test(path);
+        path.startsWith("/api/bots/") && /\/computer(\/|$)/.test(path) ||
+        path === "/api/cli-candidates" ||
+        path === "/api/cli-test";
       if (infraPath) return json(res, 404, { error: "no such resource" });
       if ((method === "PUT" || method === "PATCH" || method === "DELETE") && path === "/api/config") {
+        return json(res, 403, { error: "only the deployment operator can change configuration" });
+      }
+      // PATCH /api/instances/:id rewrites the GLOBAL instances map through
+      // withInstanceCli + saveConfig — operator infrastructure, so it joins
+      // the /api/config refusal above and says who may do it. It cannot be a
+      // member's own BYOK path: withInstanceCli looks the id up in cfg.instances,
+      // and a member's vault/custom instance is registered under a
+      // `:<userId>`-suffixed id that never appears there, so the write could
+      // only ever have been the operator's map.
+      if (method === "PATCH" && /^\/api\/instances\/[\w.-]+$/.test(path)) {
         return json(res, 403, { error: "only the deployment operator can change configuration" });
       }
     }
