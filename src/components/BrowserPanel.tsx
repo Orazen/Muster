@@ -102,6 +102,7 @@ function BrowserPanelSession({ bot, onClose }: { bot: Bot; onClose: () => void }
       onStart={(profile) => void session.current?.start(profile)}
       onStop={() => void session.current?.stop()}
       onNavigate={(url) => void session.current?.navigate(url)}
+      onOpenAgentPage={(url) => void session.current?.openAgentPage(url)}
       onSwitchProfile={(profile) => void session.current?.switchProfile(profile)}
       onTakeControl={() => setTakeoverOpen(true)}
       />
@@ -150,12 +151,15 @@ type BrowserPanelViewProps = {
   /** Only wired by the session; the Take control affordance renders solely
    * when the server reports the takeover gate ON. */
   onTakeControl?: () => void;
+  /** The agent's own browser is headless; the panel mirrors where it went
+   * from its browser-tool chips and opens that page here on click. */
+  onOpenAgentPage: (url: string) => void;
 };
 
 export function BrowserPanelView({
-  botName, snapshot, address, onAddressChange, onClose, onRetry, onStart, onStop, onNavigate, onSwitchProfile, onTakeControl,
+  botName, snapshot, address, onAddressChange, onClose, onRetry, onStart, onStop, onNavigate, onSwitchProfile, onTakeControl, onOpenAgentPage,
 }: BrowserPanelViewProps) {
-  const { state, frame, busy, error, pollError } = snapshot;
+  const { state, frame, agent, busy, error, pollError } = snapshot;
   const status = busy
     ? { start: "Opening preview…", stop: "Closing preview…", navigate: "Loading address…", profile: "Switching profile…" }[busy]
     : pollError ? "Preview refresh unavailable"
@@ -179,9 +183,28 @@ export function BrowserPanelView({
       </div>
 
       <div className="shrink-0 border-b border-hairline/40 px-3 py-2 text-[11.5px] leading-relaxed text-ink-secondary">
-        Enter an address to preview a page. This preview is separate from agent browsing.
+        Enter an address to preview a page. This preview runs separately from
+        the agent's own (headless) browser — when the agent browses, its latest
+        page appears below and opens here with one click.
         Clicking or typing on the page image is not supported.
       </div>
+      {agent && (
+        <div className="shrink-0 border-b border-hairline/40 px-3 py-2 text-[11.5px]" data-testid="agent-browsing">
+          <div className="text-ink-secondary">Agent browsing</div>
+          <div className="mt-0.5 flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink" title={agent.url}>{agent.url}</code>
+            <button
+              type="button"
+              aria-label="Open the agent's latest page in the preview"
+              onClick={() => onOpenAgentPage(agent.url)}
+              disabled={Boolean(busy)}
+              className="shrink-0 rounded-md border border-hairline/60 px-2 py-1 text-[11px] font-medium text-ink hover:bg-raised disabled:opacity-50"
+            >
+              {busy === "navigate" ? "Opening…" : "Open in preview"}
+            </button>
+          </div>
+        </div>
+      )}
       <div role="status" className="flex shrink-0 items-center gap-2 px-3 py-2 text-[11.5px] text-ink-secondary">
         {(busy || (!state && !pollError)) && <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
         {status}

@@ -46,6 +46,30 @@ const isFlag = (v: JsonValue): v is boolean => v === true || v === false;
 const isCount = (v: JsonValue): v is number =>
   !(v instanceof Object) && v !== null && !isText(v) && !isFlag(v);
 
+/** Browser-tool chips carry the page they acted on: the human's Browser
+ * panel mirrors the agent's browsing from this one fact (the "browser"
+ * mount's `browser_navigate` reports its target as rawInput.url). The tool
+ * name alone reads as noise in the chat and tells the panel nothing. */
+const urlFromInput = (value: JsonValue | undefined): string | undefined =>
+  value !== undefined && isText(value) ? value : undefined;
+
+export function browserChipTitle(u: { title?: JsonValue; rawInput?: JsonValue }): string {
+  const input = u.rawInput;
+  // SAFETY: ACP tool_call rawInput is untyped JSON from the engine; after
+  // ruling out null, undefined and arrays, an "object" value is exactly a
+  // record — the same boundary every ACP driver frame crosses.
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof
+  const record = input !== null && input !== undefined && typeof input === "object" && !Array.isArray(input)
+    ? input
+    : undefined;
+  const url = record
+    ? urlFromInput(record.url) ?? urlFromInput(record.address) ?? urlFromInput(record.target)
+    : undefined;
+  const command = urlFromInput(record?.command);
+  const name = command ?? (u.title !== undefined && isText(u.title) ? u.title : "tool");
+  return /^browser_/i.test(name) && url ? `${name} → ${url}` : name;
+}
+
 /** Classify a JSON-RPC error frame by its `data` payload — the shared floor
  * under every ACP support's own classifier. CLIs relay upstream HTTP errors
  * as the data string (droid: `"402 {\"detail\":\"No active subscription…\"}"`),
@@ -464,7 +488,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 type: "item.started",
                 itemType: "tool",
                 itemId: u.toolCallId,
-                title: String(u.rawInput?.command ?? u.title ?? "tool").slice(0, 80),
+                title: browserChipTitle(u).slice(0, 200),
               });
               break;
             }

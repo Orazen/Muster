@@ -267,6 +267,7 @@ import {
   writeWorkspaceFile,
 } from "./workspace-files.ts";
 import * as browserPanel from "./browser-panel.ts";
+const { agentPageFromChip } = browserPanel;
 import * as workspaceBundle from "./workspace-bundle.ts";
 import {
   applyPendingRestore,
@@ -1131,6 +1132,13 @@ function visibleToClient(client: SseClient, payload: FrameIdentity): boolean {
 const toolMessageByItem = new Map<string, string>(); // threadId:itemId -> messageId
 const askMessageByRequest = new Map<string, string>(); // threadId:requestId -> messageId
 
+// The latest page each bot's own (headless, per-turn) browser opened, from
+// its browser-tool chips. Memory-only, one entry per bot: the Browser panel
+// polls it so the human can see where the agent is and open that page in
+// the visible preview. A restart simply clears it — the next navigation
+// repopulates it.
+const lastAgentBrowserPage = new Map<string, { tool: string; url: string; at: number }>();
+
 /** Deliver a person's answer to the engine that asked, and tell the truth
  * about what happened. `unavailable` — the turn ended, the ask timed out,
  * the engine has no asks — is fail-closed: the action was never run. The
@@ -1575,6 +1583,12 @@ bus.subscribe((event: RuntimeEvent) => {
           tool: { name, spoken: narrateTool(name) ?? undefined },
         });
         if (event.itemId) toolMessageByItem.set(`${event.threadId}:${event.itemId}`, message.id);
+        // The agent's browser is headless and per-turn; the human's Browser
+        // panel mirrors it from this one breadcrumb — the chip's own URL.
+        if (bot) {
+          const agentPage = agentPageFromChip(name);
+          if (agentPage) lastAgentBrowserPage.set(bot.id, { ...agentPage, at: Date.now() });
+        }
       }
       break;
     case "request.opened": {
@@ -3039,6 +3053,9 @@ async function startTurn(
                   : " The user hasn't connected any apps yet. If the request needs one (email, calendar, files, and so on), briefly tell them Muster can connect it in Settings → Connected apps and offer to walk them through it — then use the app once it's connected. Never claim the task is impossible."
                 : "") +
           (coordinationPrompt ? ` ${coordinationPrompt}` : "") +
+          (bot.browser === true
+            ? " Your browser tools run in your own headless browser that the human cannot watch live — never say your navigation appears on their screen, and never claim a page is 'open for them'. When you open a page the human asked about, name the URL in your reply; Muster's Browser panel shows your latest page in its Agent browsing strip and they can open it in a visible preview with one click."
+            : "") +
           teamContextSystemPrompt() +
           (privateWorkspace ? memorySystemPrompt(bot.id) : "") +
           (opts?.automationSource === "webhook"
@@ -9137,7 +9154,11 @@ let requestUserEmail = "";
       const frame = browserPanel.latestFrame(m[1]);
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(
-        JSON.stringify({ frame: frame ? frame.toString("base64") : null, state: browserPanel.panelState(m[1]) }),
+        JSON.stringify({
+          frame: frame ? frame.toString("base64") : null,
+          state: browserPanel.panelState(m[1]),
+          agent: lastAgentBrowserPage.get(m[1]) ?? null,
+        }),
       );
     }
 

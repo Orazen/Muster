@@ -12,7 +12,7 @@ const props = (patch: Partial<BrowserPreviewSnapshot> = {}) => ({
   snapshot: { ...emptyBrowserPreview(), ...patch },
   address: "https://example.com/draft",
   onAddressChange: vi.fn(), onClose: vi.fn(), onRetry: vi.fn(), onStart: vi.fn(),
-  onStop: vi.fn(), onNavigate: vi.fn(), onSwitchProfile: vi.fn(),
+  onStop: vi.fn(), onNavigate: vi.fn(), onSwitchProfile: vi.fn(), onOpenAgentPage: vi.fn(),
 });
 const render = (patch: Partial<BrowserPreviewSnapshot> = {}) => renderToStaticMarkup(createElement(BrowserPanelView, props(patch)));
 const buttons = (html: string) => html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? [];
@@ -85,10 +85,36 @@ describe("Browser preview rendered states (SSR, not browser execution)", () => {
     const html = render({ state: idle });
     expect(html).toContain("Browser preview");
     expect(html).toContain("No preview open");
-    expect(html).toContain("This preview is separate from agent browsing.");
+    expect(html).toContain("separately from");
+    expect(html).toContain("agent&#x27;s own (headless) browser");
     expect(html).toContain("Clicking or typing on the page image is not supported.");
     expect(button(html, "Open preview")).not.toContain('disabled=""');
     expect(button(html, "Guest preview")).not.toContain('disabled=""');
+  });
+
+  it("mirrors the agent's browsing and opens its latest page in the visible preview", () => {
+    const onOpenAgentPage = vi.fn();
+    const input = {
+      ...props({
+        state: idle,
+        agent: { tool: "browser_browser_navigate", url: "https://github.com/milind-soni/OpenMausBot", at: 1_788_086_400_000 },
+      }),
+      onOpenAgentPage,
+    };
+    const html = renderToStaticMarkup(createElement(BrowserPanelView, input));
+    expect(html).toContain("Agent browsing");
+    expect(html).toContain("https://github.com/milind-soni/OpenMausBot");
+    expect(button(html, "Open in preview")).not.toContain('disabled=""');
+    const click = findClick(BrowserPanelView(input), "Open the agent's latest page in the preview");
+    expect(click).toBeTypeOf("function");
+    click!();
+    expect(onOpenAgentPage).toHaveBeenCalledExactlyOnceWith("https://github.com/milind-soni/OpenMausBot");
+  });
+
+  it("renders no agent strip until the agent has browsed", () => {
+    const html = render({ state: idle });
+    expect(html).not.toContain("Agent browsing");
+    expect(html).not.toContain("Open in preview");
   });
 
   it("shows the latest page image and confirmed address without takeover promises", () => {

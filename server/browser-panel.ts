@@ -729,6 +729,18 @@ function previewLinkFor(botId: string): string | null {
   }
 }
 
+/** The agent's browser is headless and per-turn, so the panel mirrors it
+ * from breadcrumbs instead of a screencast: a browser-tool chip whose
+ * title carries the page it acted on ("browser_browser_navigate → url").
+ * Returns null for any other chip. */
+export function agentPageFromChip(title: string): { tool: string; url: string } | null {
+  const separator = title.indexOf(" → ");
+  if (separator === -1) return null;
+  const tool = title.slice(0, separator);
+  const url = title.slice(separator + 3).trim();
+  return /^browser_/i.test(tool) && /^https?:\/\//i.test(url) ? { tool, url } : null;
+}
+
 export function panelState(botId: string): BrowserPanelState {
   const enabled = takeoverEnabled();
   const s = sessions.get(botId);
