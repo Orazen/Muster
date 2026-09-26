@@ -277,13 +277,15 @@ export async function installChromeForTesting(): Promise<string> {
   mkdirSync(root, { recursive: true });
   try {
     await downloadTo(`${CFT_ARCHIVE_HOST}/${version}/${zipName}`, zipPath);
+    // argv-only, no shell: the archive path and the destination are
+    // arguments, never concatenated into a command line for an interpreter
+    // to re-parse. The previous form built a PowerShell -Command string from
+    // those two paths, so a quote or backtick in either would have escaped
+    // the literal and changed the command. tar.exe ships in the Windows
+    // box (bsdtar, which reads zip), so this needs no extra install.
     const extract =
       process.platform === "win32"
-        ? spawn("powershell", [
-            "-NoProfile",
-            "-Command",
-            `Expand-Archive -Force -LiteralPath '${zipPath}' -DestinationPath '${root}'`,
-          ], { stdio: "ignore" })
+        ? spawn("tar.exe", ["-xf", zipPath, "-C", root], { stdio: "ignore" })
         : spawn("unzip", ["-oq", zipPath, "-d", root], { stdio: "ignore" });
     await new Promise<void>((resolve, reject) => {
       extract.on("exit", (code) =>
