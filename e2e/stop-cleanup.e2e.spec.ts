@@ -83,7 +83,14 @@ const test = baseTest.extend<Fixture>({
           unexpected.push(`${message.location().url}: ${message.text()}`);
         });
       });
-      return context.newPage();
+      const page = await context.newPage();
+      // Exercise cleanup controls after explicitly declining the optional
+      // product tour; do not bypass the account-onboarding flow.
+      const productTour = page.getByRole("dialog", { name: "Product tour", exact: true });
+      await page.addLocatorHandler(productTour, async (dialog) => {
+        await dialog.getByRole("button", { name: "Skip", exact: true }).click();
+      });
+      return page;
     };
     try {
       const cloud = await open();

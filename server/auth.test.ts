@@ -90,6 +90,30 @@ describe("SELF_HOSTED", () => {
   });
 });
 
+describe("email sign-in capability", () => {
+  it.each([
+    { label: "a desktop without a mailer", hosted: false, key: undefined, expected: false },
+    { label: "a hosted deployment without a mailer", hosted: true, key: undefined, expected: false },
+    { label: "a blank mailer configuration", hosted: false, key: "   ", expected: false },
+    { label: "a configured mailer", hosted: true, key: "fixture-mailer-not-a-real-key", expected: true },
+  ])("advertises email code delivery accurately for $label", async ({ hosted, key, expected }) => {
+    const saved = { ...process.env };
+    try {
+      process.env.OMB_HOST = hosted ? "0.0.0.0" : "127.0.0.1";
+      delete process.env.OMB_PUBLIC_HOST;
+      process.env.BETTER_AUTH_SECRET = "test-secret-for-vitest-only-not-real";
+      if (key === undefined) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = key;
+      vi.resetModules();
+      const { authCapabilities } = await import("./auth.ts");
+      expect(authCapabilities().emailOtp).toBe(expected);
+    } finally {
+      process.env = saved;
+      vi.resetModules();
+    }
+  });
+});
+
 describe("requestOwnOrigin", () => {
   // The trustedOrigins function trusts a request's own Host — the same-host
   // CSRF rule — so a deployment whose PUBLIC_BASE_URL doesn't match the

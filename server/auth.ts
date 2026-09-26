@@ -457,12 +457,10 @@ export function authCapabilities() {
     cloudPairing: Boolean(pairingCloudUrl),
     desktopOAuth: Boolean(pairingCloudUrl),
     pairingCloudUrl,
-    // Email + 6-digit one-time-code sign-in (better-auth's emailOTP plugin,
-    // policy-wrapped by server/email-otp-login.ts). Always available: with
-    // no mailer configured the code is logged for local finishing rather
-    // than dropped, so this does not depend on RESEND_API_KEY the way
-    // passwordReset does.
-    emailOtp: true,
+    // Offer emailed codes only when this install has a delivery transport.
+    // The direct dev/test routes can still log codes without a mailer, but
+    // that is not delivery to the person's inbox and must not be advertised.
+    emailOtp: isEmailConfigured(),
   };
 }
 

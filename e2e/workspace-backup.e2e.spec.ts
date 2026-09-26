@@ -205,6 +205,12 @@ const test = base.extend<{ deployment: "local" | "hosted"; fixture: OwnedFixture
       await route.continue();
     });
     const page = await context.newPage();
+    // Backup checks acknowledge the optional tour through its real control;
+    // keep the account onboarding flow and production DOM unchanged.
+    const productTour = page.getByRole("dialog", { name: "Product tour", exact: true });
+    await page.addLocatorHandler(productTour, async (dialog) => {
+      await dialog.getByRole("button", { name: "Skip", exact: true }).click();
+    });
     page.on("request", (request) => {
       const url = new URL(request.url());
       if (url.origin === fixture.url && url.pathname.startsWith("/api/workspace/") && request.method() !== "GET") {

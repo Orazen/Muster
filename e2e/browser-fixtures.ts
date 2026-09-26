@@ -60,6 +60,13 @@ const test = baseTest.extend<Fixtures>({
         await route.continue();
       });
       const page = await context.newPage();
+      // These fixtures exercise task flows, not the optional product tour.
+      // Acknowledge its actual visible Skip control so a first-visit overlay
+      // cannot intercept later approvals; leave account onboarding untouched.
+      const productTour = page.getByRole("dialog", { name: "Product tour", exact: true });
+      await page.addLocatorHandler(productTour, async (dialog) => {
+        await dialog.getByRole("button", { name: "Skip", exact: true }).click();
+      });
       page.on("pageerror", (error) => errors.push(error.message));
       page.on("console", (message) => {
         if (message.type() !== "error") return;

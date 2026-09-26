@@ -152,7 +152,7 @@ describe("auth form contracts", () => {
 
   it("offers the one-time-code panel as its own form when the server advertises it", () => {
     const markup = renderPage(LoginPage, { emailOtp: true });
-    expect(markup).toContain("or get a one-time code");
+    expect(markup).toContain("Use a password instead");
     expect(markup).toContain("Email me a code");
     expect(input(markup, "otp-email")).toMatch(/type="email"/);
     expect(input(markup, "otp-email")).toMatch(/autoComplete="email"/i);
@@ -166,7 +166,20 @@ describe("auth form contracts", () => {
     expect(otpForm).not.toContain('autoComplete="current-password"');
     const passwordForm = forms.find((form) => form.includes('autoComplete="current-password"'));
     expect(passwordForm).toBeDefined();
-    // The existing password path is untouched and still present alongside.
+    // Password remains available in a disclosure without discarding its fields.
     expect(markup).toContain("Sign in with email");
   });
+});
+
+// These markup cases cover platform availability; browser tests exercise the
+// handoff and delivery recovery transitions with explicit fixture responses.
+it("offers the same Google handoff on desktop account creation", () => {
+  const markup = renderPage(SignupPage, { desktopOAuth: true });
+  expect(markup).toContain("Continue with Google");
+});
+
+it("makes email codes primary while keeping the password choice discoverable", () => {
+  const markup = renderPage(LoginPage, { emailOtp: true });
+  expect(markup.indexOf('id="otp-email"')).toBeLessThan(markup.indexOf('id="password"'));
+  expect(markup).toMatch(/<details class="auth-password-option"><summary>Use a password instead/);
 });

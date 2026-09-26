@@ -162,6 +162,11 @@ export function EmailOtpCodeForm(props: {
           autoFocus
           value={code}
           onChange={(event) => onCodeChange(otpDigits(event.target.value))}
+          onPaste={(event) => {
+            event.preventDefault();
+            onCodeChange(otpDigits(event.clipboardData.getData("text")));
+          }}
+          disabled={busy}
           placeholder="123456"
           aria-describedby={error ? "otp-code-error" : undefined}
           className={authInputCls}
@@ -199,23 +204,28 @@ export function EmailOtpSignIn({ next }: { next: string }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [resendIn, setResendIn] = useState(0);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mailboxDeadlines = useRef(new Map<string, number>());
+  const globalDeadline = useRef(0);
+  const submitting = useRef(false);
+  const [now, setNow] = useState(Date.now);
+  const mailbox = email.trim().toLowerCase();
+  const resendIn = Math.max(0, Math.ceil((Math.max(
+    mailboxDeadlines.current.get(mailbox) ?? 0, globalDeadline.current,
+  ) - now) / 1000));
 
-  // Resend cooldown ticker — mirrors the server's 60s per-mailbox cooldown
-  // so the button rarely gets to show a server-side "already sent" answer.
+  // Mailbox cooldowns survive editing/backtracking without blocking a corrected
+  // address. A server-wide rate limit still applies to every address.
   useEffect(() => {
-    if (resendIn <= 0) {
-      if (timer.current) clearInterval(timer.current);
-      timer.current = null;
-      return;
-    }
-    timer.current = setInterval(() => setResendIn((seconds) => (seconds <= 1 ? 0 : seconds - 1)), 1000);
-    return () => {
-      if (timer.current) clearInterval(timer.current);
-      timer.current = null;
-    };
-  }, [resendIn]);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  function armCooldown(seconds: number, global = false) {
+    const time = Date.now();
+    if (global) globalDeadline.current = time + seconds * 1000;
+    else mailboxDeadlines.current.set(mailbox, time + seconds * 1000);
+    setNow(time);
+  }
 
   async function post(path: string, body: Record<string, string>, headers: Record<string, string> = {}): Promise<OtpPostResult> {
     const response = await fetch(path, {
@@ -231,6 +241,8 @@ export function EmailOtpSignIn({ next }: { next: string }) {
   }
 
   async function sendCode(target = email) {
+    if (submitting.current || resendIn > 0) return;
+    submitting.current = true;
     setError("");
     setBusy(true);
     try {
@@ -240,20 +252,23 @@ export function EmailOtpSignIn({ next }: { next: string }) {
         setError(otpErrorMessage(result.json, otpSendFallback(result.status, seconds)));
         // Arm the resend countdown from the server's own seconds (S2) —
         // every wrapper 429 carries them; a bare answer arms nothing new.
-        if (seconds > 0) setResendIn(seconds);
+        if (seconds > 0) armCooldown(seconds, result.json?.code !== "RESEND_COOLDOWN");
         return;
       }
       setStage("code");
       setCode("");
-      setResendIn(60);
+      armCooldown(60);
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
 
   async function verify() {
+    if (submitting.current || code.length !== 6) return;
+    submitting.current = true;
     setError("");
     setBusy(true);
     try {
@@ -274,6 +289,7 @@ export function EmailOtpSignIn({ next }: { next: string }) {
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -292,9 +308,10 @@ export function EmailOtpSignIn({ next }: { next: string }) {
         }}
         onSubmit={() => void verify()}
         onResend={() => {
-          if (resendIn <= 0) void sendCode();
+          if (!submitting.current && resendIn <= 0) void sendCode();
         }}
         onBack={() => {
+          if (submitting.current) return;
           setStage("email");
           setCode("");
           setError("");
@@ -315,6 +332,7 @@ export function EmailOtpSignIn({ next }: { next: string }) {
         <label htmlFor="otp-email" className="auth-label">Email address for a sign-in code</label>
         <input
           id="otp-email"
+          disabled={busy}
           name="email"
           type="email"
           required
@@ -333,12 +351,11 @@ export function EmailOtpSignIn({ next }: { next: string }) {
           {error}
         </div>
       )}
-      <button type="submit" disabled={busy} className={authButtonCls}>
-        {busy ? "Sending…" : "Email me a code"}
+      <button type="submit" disabled={busy || resendIn > 0} className={authButtonCls}>
+        {busy ? "Sending…" : resendIn > 0 ? `Try again in ${resendIn}s` : "Email me a code"}
       </button>
       <p className="auth-hint">
-        We’ll send a 6-digit code — no password needed. New addresses get an account
-        created on first sign-in.
+        We’ll email a 6-digit sign-in code. No password to remember.
       </p>
     </form>
   );

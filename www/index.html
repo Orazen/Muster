@@ -73,19 +73,19 @@
     src: url("/fonts/inter-latin-900-normal.woff2") format("woff2");
   }
 </style>
-<title>Muster — Muster your agents</title>
-<meta name="description" content="AI agents with real computers. Privacy Shield scrubs emails and secrets before any cloud model sees them. Self-host free — or hosted from $20/mo."/>
+<title>Muster — Your personal AI team</title>
+<meta name="description" content="A personal AI team for your everyday work. Plan, research and draft with named assistants, connected tools and approvals. Open Muster in your browser. Free during beta."/>
 <link rel="canonical" href="https://muster.today/" />
 <meta property="og:site_name" content="Muster" />
 <meta property="og:locale" content="en_US" />
-<meta property="og:title" content="Muster — Muster your agents" />
-<meta property="og:description" content="Give each agent a name, a memory, and a Linux desktop it drives. On-device Privacy Shield. Self-host free, or hosted from $20/mo." />
+<meta property="og:title" content="Muster — Your personal AI team" />
+<meta property="og:description" content="A personal AI team for your everyday work. Plan, research and draft with named assistants, connected tools and approvals. Open Muster in your browser. Free during beta." />
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://muster.today/" />
 <meta property="og:image" content="https://muster.today/hero.png" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Muster — Muster your agents" />
-<meta name="twitter:description" content="AI agents that do real work on real computers. Privacy Shield included. Self-host free, or hosted from $20/mo." />
+<meta name="twitter:title" content="Muster — Your personal AI team" />
+<meta name="twitter:description" content="A personal AI team for your everyday work. Plan, research and draft with named assistants, connected tools and approvals. Open Muster in your browser. Free during beta." />
 <meta name="twitter:image" content="https://muster.today/hero.png" />
 <script type="application/ld+json">
 {
@@ -96,60 +96,103 @@
       "@id": "https://muster.today/#org",
       "name": "Muster",
       "url": "https://muster.today/",
-      "logo": "https://muster.today/app-icon.svg",
-      "email": "ramagiritharun@gmail.com",
-      "description": "Muster is an AI-agent workforce platform built by Tharun Ramagiri at Orazen."
+      "logo": "https://muster.today/app-icon.svg"
     },
     {
       "@type": "WebSite",
       "@id": "https://muster.today/#site",
       "url": "https://muster.today/",
       "name": "Muster",
-      "publisher": { "@id": "https://muster.today/#org" },
+      "publisher": {
+        "@id": "https://muster.today/#org"
+      },
       "inLanguage": "en"
     },
     {
       "@type": "SoftwareApplication",
+      "@id": "https://muster.today/#software",
       "name": "Muster",
       "url": "https://muster.today/",
-      "applicationCategory": "BusinessApplication",
-      "operatingSystem": "macOS, Windows, Linux, Web",
-      "description": "A roster of persistent AI agents with personas, memory, approval guardrails, real computer access and verifiable job receipts. Free to self-host; hosted from $20/month.",
-      "offers": { "@type": "AggregateOffer", "lowPrice": "0", "highPrice": "20", "priceCurrency": "USD" },
-      "publisher": { "@id": "https://muster.today/#org" }
+      "description": "A personal AI team for your everyday work. Plan, research and draft with named assistants, connected tools and approvals. Open Muster in your browser. Free during beta.",
+      "applicationCategory": "ProductivityApplication",
+      "operatingSystem": "Web, macOS, Windows, Linux",
+      "isAccessibleForFree": true,
+      "offers": {
+        "@type": "Offer",
+        "description": "Free during beta; separate provider and optional computer-service charges may apply.",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "publisher": {
+        "@id": "https://muster.today/#org"
+      }
     },
     {
       "@type": "FAQPage",
       "mainEntity": [
         {
           "@type": "Question",
-          "name": "What exactly is a “cloud computer”?",
-          "acceptedAnswer": { "@type": "Answer", "text": "A small Linux desktop in our cloud that your bot drives like a person would — real browser, real files, real apps. It's the metered unit because it's the only part of Muster that costs us compute. Bots themselves are free and unlimited on every plan." }
+          "name": "What can I use Muster for?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Give a named assistant a task, discuss a plan, and review its results. Start with research, organizing work, or drafting a reply. Available tools depend on the model, connections and computer you choose."
+          }
         },
         {
           "@type": "Question",
-          "name": "Does the Privacy Shield slow my bots down or break their context?",
-          "acceptedAnswer": { "@type": "Answer", "text": "No. Masking is deterministic — the same email always becomes the same [EMAIL_n] token — so models keep thread context across turns. You get a counts-only receipt each turn showing exactly how many items were masked, never the content itself." }
+          "name": "Is Muster free?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Muster is free during the beta. Bring your own provider key or use a model available in your account. Provider usage and optional computer services may have their own charges. Future pricing has not been decided."
+          }
         },
         {
           "@type": "Question",
-          "name": "If I self-host, do I lose any features?",
-          "acceptedAnswer": { "@type": "Answer", "text": "None. The software ships complete under BSL 1.1 — every feature, unlimited bots, no license keys, no phone-home. What we sell is hosting and convenience, not unlocks." }
+          "name": "How are the web and desktop apps different?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The web app opens your hosted workspace in a browser. The desktop app runs a workspace on your computer and can use supported local engines and tools. Signing in on both does not automatically merge their workspaces."
+          }
         },
         {
           "@type": "Question",
-          "name": "What happens to my bots if I cancel?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Your bots, transcripts, and connected apps stay intact. Cloud computer provisioning pauses until billing resumes, and you can export everything and self-host the same harness at any time." }
+          "name": "Where does my data live?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "The web workspace is stored on Muster’s server. The desktop workspace is stored on your computer. Connecting Google Drive grants storage access; it does not by itself start backups or sync. Desktop backup and restore need separate setup. Automatic web-to-device recovery is still being developed."
+          }
         },
         {
           "@type": "Question",
-          "name": "Which AI models can my bots use?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Whatever you already pay for. Bots run on Claude Code, Codex, Grok, Gemini, and any OpenAI-compatible API — including local models via Ollama. There's also a built-in free tier through OpenRouter, so you can start without a single paid subscription. Vision-capable models can read screenshots you attach." }
+          "name": "Can I use Muster on my phone or Watch?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "iPhone, Android and Apple Watch companions are in beta development. They connect to a running Muster host; they do not run desktop engines themselves. Check the download page for current installation and testing availability."
+          }
         },
         {
           "@type": "Question",
-          "name": "Where does my data actually live?",
-          "acceptedAnswer": { "@type": "Answer", "text": "On your machine, by default — transcripts, keys, and memories in ~/.muster. If you want sync across devices, Muster pushes one AES-256-encrypted bundle to storage you own: your Google Drive or a private Telegram chat. Both hold ciphertext only — your passphrase never leaves you, and neither service can read a byte." }
+          "name": "Which models can I connect?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Muster supports multiple model providers, compatible API endpoints and local engines. Desktop engines use their installed accounts; web providers use the keys connected to your account. Tools, vision and computer access vary by driver and model."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What does Privacy Shield cover?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Privacy Shield is optional masking for supported API-driver text. When enabled for a compatible bot, it masks recognized patterns before that text is sent and records masking counts. It is not a guarantee that every secret, attachment or provider request is filtered. Review sensitive content and your provider’s terms."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does the app send analytics?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Muster can send product-usage events and check for updates. You can turn usage analytics off in Settings. Models, connected apps and other online features send requests to their services when used. See the privacy policy for details."
+          }
         }
       ]
     }
@@ -896,7 +939,7 @@
   .hero__terminal ol { list-style: none; margin: 0; padding: 0; }
   .hero__terminal li {
     font: 400 12.5px/1.9 var(--font-mono); color: var(--muted);
-    opacity: 0; transform: translateY(6px);
+    opacity: 1; transform: none;
     transition: opacity 240ms var(--ease), transform 240ms var(--ease);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
@@ -905,14 +948,13 @@
   .hero__terminal li .t-red { color: var(--accent-border); }
   .hero__terminal li .t-dim { color: var(--muted-2); }
 
-  /* per-letter headline reveal — entrance is never from zero: 10px rise +
-     fade on the same curve, 40ms stagger. Each letter clips its own
-     white→grey gradient (per-element background-clip is the robust form). */
+  /* Headline stays visible by default. Animation is progressive enhancement,
+     never a persistent hidden state after the entrance has finished. */
   .hero h1 .wr { display: inline-block; }
   .hero h1 .w {
-    display: inline-block; opacity: 0;
-    background: linear-gradient(to bottom, #ffffff, #dbdbdb);
-    -webkit-background-clip: text; background-clip: text; color: transparent;
+    display: inline-block; opacity: 1;
+    background: none;
+    color: inherit;
   }
   .hero h1 .accent .w { background: none; -webkit-background-clip: initial; background-clip: initial; color: var(--accent-border); }
   .hero h1.revealed .w {
@@ -951,6 +993,110 @@
     .hero h1 .w { opacity: 1; filter: none; transform: none; transition: none; animation: none; }
     .hero__terminal li { opacity: 1; transform: none; transition: none; }
   }
+
+  /* Everyday workspace: graphite surroundings, a warm paper plan, one orange. */
+  :root {
+    --app: #191918; --panel: #222220; --inset: #1d1d1c; --card: #242422;
+    --raised: #30302d; --raised-hover: #383835;
+    --ink: #f5f2ea; --body: #d9d6ce; --secondary: #b9b7af;
+    --muted: #b5b2aa; --muted-2: #a29f97;
+    --line: #41413b; --line-2: #58584f;
+    --accent: #be3d10; --accent-strong: #d44816; --accent-border: #ff9c6b;
+  }
+  body { background: var(--app); }
+  section[id] { scroll-margin-top: 110px; }
+  .site-header { width: 100%; margin-top: 18px; border-radius: 16px; background: #222220f5; padding-block: 12px; }
+  .site-header__left { gap: 34px; }
+  .site-nav { gap: 24px; letter-spacing: 0; font-family: var(--font-sans); font-size: 13px; }
+  .site-header__cta { display: flex; }
+  .star-pill { border: 0; background: transparent; padding: 0 8px; }
+  .promo-banner { background: #292720; color: #e8dbc3; font-size: 10px; letter-spacing: .09em; min-height: 36px; }
+  .promo-banner__dot { background: #e6a262; animation: none; width: 5px; height: 5px; }
+  .promo-banner__close { color: #e8dbc3; font-size: 20px; min-width: 40px; min-height: 34px; }
+  .hero { padding-top: 80px; }
+  .hero__layout { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr); gap: clamp(36px, 5vw, 72px); align-items: center; text-align: left; }
+  .hero__intro { min-width: 0; }
+  .hero__intro .eyebrow { margin-bottom: 22px; color: #d0b995; }
+  .hero h1 { font-size: clamp(2.6rem, 4.8vw, 4.6rem); max-width: 700px; margin: 0; line-height: 1.04; letter-spacing: -.055em; text-wrap: balance; }
+  .hero h1 .accent { color: var(--accent-border); }
+  .lead { color: var(--muted); margin: 25px 0 0; font-size: 16px; max-width: 465px; }
+  .hero__actions { justify-content: flex-start; margin-top: 30px; }
+  .hero__actions .button { min-height: 49px; font-size: 14px; padding: 12px 20px; }
+  .button--primary { box-shadow: none; border-color: transparent; }
+  .button--primary::before { display: none; }
+  .button--primary:hover, .button--primary:focus-visible { transform: translateY(-2px); box-shadow: none; background: #bd3a0b; }
+  .hero__note { color: var(--muted); font-size: 12px; margin-top: 17px; }
+  .hero__platforms { margin-top: 10px; font-size: 12px; }
+  .hero__dl-version:empty { display: none; }
+  .hero__dl-version { margin-left: 6px; font-size: 10px; padding: 2px 5px; }
+  .day-preview { color: #302d27; background: #f2eee4; border: 1px solid #e5dfd2; border-radius: 20px; padding: clamp(22px, 2.5vw, 32px); box-shadow: 0 24px 48px #0002; min-width: 0; }
+  .day-preview__top { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #6a6255; font: 10px/1.5 var(--font-mono); letter-spacing: .05em; }
+  .day-preview__top span:last-child { border: 1px solid #c8bfb0; border-radius: 99px; padding: 4px 9px; white-space: nowrap; letter-spacing: 0; }
+  .day-preview__hello { display: flex; align-items: center; gap: 16px; margin: 34px 0 27px; }
+  .day-preview__mascot { flex: 0 0 82px; width: 82px; height: 82px; transform: rotate(-9deg); }
+  .day-preview:hover .day-preview__mascot { transform: rotate(4deg); }
+  .day-preview h2 { font-family: Georgia, 'Times New Roman', serif; font-weight: 400; font-size: clamp(25px, 2.7vw, 34px); line-height: 1.08; letter-spacing: -.04em; color: #28261f; }
+  .day-preview__from { display: block; font: 9px/1.5 var(--font-mono); letter-spacing: .05em; margin-bottom: 8px; color: #756652; }
+  .day-preview__caption { font-size: 12px; color: #6a6255; padding-bottom: 12px; border-bottom: 1px solid #d7d0c2; }
+  .day-preview__tasks { list-style: none; margin: 0; padding: 0; }
+  .day-preview__tasks li { display: flex; align-items: flex-start; gap: 12px; padding: 17px 0; border-bottom: 1px solid #d7d0c2; }
+  .day-preview__tasks li > span:first-child { flex: none; font: 11px/1.6 var(--font-mono); color: #947b5b; }
+  .day-preview__tasks li > div { min-width: 0; flex: 1; }
+  .day-preview__tasks strong { display: block; color: #383329; font-size: 12px; font-weight: 600; line-height: 1.5; }
+  .day-preview__tasks small { display: block; color: #6a6255; font-size: 11px; margin-top: 3px; }
+  .day-preview__time { flex: none; color: #766a58; font: 10px/1.8 var(--font-mono); }
+  .day-preview__footer { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding-top: 20px; font-size: 10px; color: #6a6255; }
+  .day-preview__status { color: #875729; }
+  .trust-strip { max-width: none; margin-top: 52px; gap: 28px; }
+  .trust-tile { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 20px 0 0; }
+  .trust-tile__copy { max-width: 285px; font-size: 12px; }
+  .hero__teamstrip { margin: 62px auto 0; gap: 10px; flex-wrap: wrap; }
+  .hero__teamlabel { font-size: 10px; letter-spacing: .06em; }
+  .shot-frame { margin-top: 20px; max-width: 1050px; }
+  .hero__micro { color: var(--muted-2); font-size: 12px; }
+  .hero__terminal { margin-top: 26px; }
+  .section-heading { font-size: clamp(2rem, 4vw, 3rem); max-width: 730px; letter-spacing: -.045em; }
+  .section-copy { max-width: 650px; font-size: 16px; }
+  .feature-card { padding: 26px; box-shadow: none; }
+  .feature-card h3 { font-size: 19px; }
+  .feature-card p { font-size: 14px; color: var(--muted); }
+  .feature-card__icon { font-family: var(--font-mono); font-size: 12px; color: var(--accent-border); background: transparent; border: 0; width: auto; height: 24px; }
+  .platform-status { color: var(--accent-border); font: 10px/1.5 var(--font-mono); letter-spacing: .09em; margin-bottom: 24px; }
+  .feature-link { display: inline-flex; gap: 8px; align-items: center; margin-top: 20px; color: var(--ink); font-size: 13px; text-decoration: underline; text-underline-offset: 5px; text-decoration-color: var(--line-2); }
+  .feature-link:hover { color: var(--accent-border); }
+  .statement-card { margin-top: 0; }
+  .apx { max-width: none; }
+  .apx-card { max-width: 900px; }
+  .comparison-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .beta-section .comparison-card:first-child { border-color: #886047; }
+  @media (prefers-reduced-motion: no-preference) { .day-preview__mascot { transition: transform 450ms var(--ease); } }
+  @media (max-width: 900px) {
+    .hero { padding-top: 48px; }
+    .hero__layout { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+    .hero__intro { max-width: 620px; }
+    .hero h1 { font-size: clamp(2.8rem, 8vw, 4.6rem); }
+    .day-preview { width: min(100%, 580px); }
+    .hero__actions { flex-direction: row; align-items: center; }
+    .hero__actions .button { width: auto; }
+    .hero__terminal { max-width: 100%; }
+  }
+  @media (max-width: 600px) {
+    .site-header { gap: 6px; padding-inline: 12px; }
+    .site-header__right { gap: 6px; }
+    .brand-lockup { gap: 6px; }
+    .brand-lockup__word { font-size: 16px; }
+    .brand-lockup__mark { width: 25px; height: 25px; }
+    .site-header__cta .button--small { min-height: 40px; padding-inline: 12px; font-size: 11px; }
+    .site-menu__toggle { width: 36px; height: 40px; }
+    .hero h1 { font-size: clamp(2.55rem, 10.5vw, 3.6rem); }
+    .hero__actions { gap: 8px; }
+    .hero__actions .button { padding-inline: 17px; font-size: 13px; }
+    .day-preview__hello { gap: 10px; }
+    .day-preview__mascot { flex-basis: 62px; width: 62px; height: 62px; }
+    .day-preview__top { gap: 10px; font-size: 8px; }
+    .day-preview__time { display: none; }
+    .comparison-grid { grid-template-columns: minmax(0, 1fr); }
+  }
 </style>
 </head>
 <body>
@@ -959,7 +1105,7 @@
 
 <div class="promo-banner" id="promo" role="note">
   <span class="promo-banner__dot" aria-hidden="true"></span>
-  <span>New: full portable backup — your whole team, encrypted, in your own Drive</span>
+  <span>Muster beta · a little more room for what matters</span>
   <button class="promo-banner__close" type="button" aria-label="Dismiss announcement" data-promo-close>&times;</button>
 </div>
 
@@ -972,23 +1118,18 @@
         <span class="brand-lockup__word">Muster</span>
       </a>
       <nav class="site-nav" aria-label="Primary">
-        <a href="#download">Download</a>
-        <a href="#scenes">Scenes</a>
-        <a href="#use-cases">Use cases</a>
         <a href="#how">How it works</a>
-        <a href="#trust">Trust</a>
-        <a href="#pricing">Pricing</a>
-        <a href="#faq">FAQ</a>
+        <a href="#approvals">Try the demo</a>
+        <a href="#ecosystem">Your devices</a>
+        <a href="#pricing">Beta</a>
       </nav>
     </div>
     <div class="site-header__right">
       <a class="star-pill" href="/docs">
-        <span aria-hidden="true">★</span>
         <span>Docs</span>
       </a>
       <div class="site-header__cta">
-        <a class="button button--secondary button--small" href="/app">Open Muster</a>
-        <a class="button button--primary button--small" href="/download.html">Download</a>
+        <a class="button button--primary button--small" href="/app">Open Muster <span aria-hidden="true">↗</span></a>
       </div>
       <details class="site-menu" data-site-menu>
         <summary class="site-menu__toggle" aria-label="Menu">
@@ -1003,7 +1144,7 @@
           <a href="#trust">Trust</a>
           <a href="#engines">Engines</a>
           <a href="#cli">CLI</a>
-          <a href="#pricing">Pricing</a>
+          <a href="#pricing">Free beta</a>
           <a href="/teams.html">Teams</a>
           <a href="/switch.html">Switch</a>
           <a href="/docs">Docs</a>
@@ -1024,43 +1165,84 @@
           <rect id="hero-face-eye" x="-10.5" y="-22" width="21" height="44" rx="10.5" />
         </defs>
       </svg>
-      <p class="eyebrow" style="text-align:center; margin-bottom:18px;">Local-first agent workforce</p>
-      <h1 id="hero-title">Your own team of AI agents, <span class="accent">in a chat app.</span></h1>
-      <p class="lead">
-        Every bot you hire is a real agent on your machine — running on the model you already pay
-        for, with its own name, memory, and a Linux desktop it drives. Talk to them like contacts.
-        Watch them work. Approve what matters.
-      </p>
-      <div class="hero__actions">
-        <a class="button button--primary" id="hero-dl" href="https://muster.today/downloads/Muster.dmg">
-          <span id="hero-dl-label">Download for macOS (Apple silicon)</span>
-          <span class="hero__dl-version" id="hero-dl-version"></span>
-        </a>
-        <a class="button button--secondary" href="/app">Open the web app</a>
+      <div class="hero__layout">
+        <div class="hero__intro">
+          <p class="eyebrow">Meet your everyday team</p>
+          <h1 id="hero-title">A personal AI team for your <span class="accent">everyday work.</span></h1>
+          <p class="lead">A few good teammates for everything on your mind. Plan your day, research an idea, draft the next step — with you deciding what happens next.</p>
+          <div class="hero__actions">
+            <a class="button button--primary" href="/app">Open Muster <span aria-hidden="true">↗</span></a>
+            <a class="button button--secondary" href="#approvals">Try the demo <span aria-hidden="true">→</span></a>
+          </div>
+          <p class="hero__note">Free during beta. Bring a model you trust.</p>
+          <p class="hero__platforms"><a id="hero-dl" href="/download.html"><span id="hero-dl-label">Get the desktop app</span><span class="hero__dl-version" id="hero-dl-version"></span></a> · <a href="#ecosystem">Find your device</a></p>
+        </div>
+        <aside class="day-preview" aria-label="Illustrative daily plan, sample data only">
+          <div class="day-preview__top"><span>MADE FOR YOUR EVERYDAY</span><span>Sample plan</span></div>
+          <div class="day-preview__hello">
+            <svg class="day-preview__mascot" viewBox="-112 -112 224 224" width="100" height="100" aria-hidden="true"><use href="#hero-face-body" fill="#f08a24"/><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#23211f"/></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#23211f"/></g></svg>
+            <div><span class="day-preview__from">ATLAS · YOUR PLANNER</span><h2>Let’s make room<br>for a good day.</h2></div>
+          </div>
+          <p class="day-preview__caption">Three priorities. One place to start.</p>
+          <ol class="day-preview__tasks">
+            <li><span>01</span><div><strong>Move the important work forward</strong><small>A quiet hour for your proposal</small></div><span class="day-preview__time">09:00</span></li>
+            <li><span>02</span><div><strong>Make the next reply easier</strong><small>Review a draft before sending</small></div><span class="day-preview__time">11:30</span></li>
+            <li><span>03</span><div><strong>Leave space for yourself</strong><small>A walk, away from the screen</small></div><span class="day-preview__time">15:00</span></li>
+          </ol>
+          <div class="day-preview__footer"><span class="day-preview__status">Draft for your review</span><span>No calendar changes</span></div>
+        </aside>
       </div>
-      <p class="hero__platforms">
-        Also on <a href="https://muster.today/downloads/Muster-intel.dmg" data-also="mac-x64">macOS Intel</a> ·
-        <a href="https://muster.today/downloads/Muster-setup.exe" data-also="windows">Windows</a> ·
-        <a href="https://muster.today/downloads/Muster.deb" data-also="linux">Ubuntu/Debian</a> ·
-        <a href="https://muster.today/downloads/Muster.AppImage" data-also="linux">Linux AppImage</a> ·
-        <a href="/download.html#docker">Docker</a> ·
-        <a href="/download.html#cli">CLI</a> ·
-        <a href="/download.html#ios">iPhone</a>
-      </p>
-      <div class="trust-strip" role="list" aria-label="Why Muster is safe to run">
+      <div class="trust-strip" role="list" aria-label="How your team works">
         <div class="trust-tile" role="listitem">
-          <div class="trust-tile__title">Runs on your machine</div>
-          <div class="trust-tile__copy">One harness on 127.0.0.1. Transcripts and keys stay in ~/.muster.</div>
+          <div class="trust-tile__title">Start with a conversation</div>
+          <div class="trust-tile__copy">Give your teammate a task, a little context and a clear outcome.</div>
         </div>
         <div class="trust-tile" role="listitem">
-          <div class="trust-tile__title">Your own models</div>
-          <div class="trust-tile__copy">Runs on the CLIs and keys you already pay for. No proxy in the middle.</div>
+          <div class="trust-tile__title">Choose your tools</div>
+          <div class="trust-tile__copy">Connect a provider and the apps you need. Capabilities depend on your setup.</div>
         </div>
         <div class="trust-tile" role="listitem">
-          <div class="trust-tile__title">Self-host free</div>
-          <div class="trust-tile__copy">Every feature, unlimited bots, no license keys — BSL 1.1 source-available.</div>
+          <div class="trust-tile__title">Stay in the conversation</div>
+          <div class="trust-tile__copy">Review proposed actions, answer questions and check the result.</div>
         </div>
       </div>
+    </section>
+    <section id="how" class="section">
+      <div class="section-intro"><div class="eyebrow">How it works</div><h2 class="section-heading">From “I need to…”<br>to a clear next step.</h2></div>
+      <div class="card-grid-3">
+        <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">01</div><h3>Meet your teammate</h3><p>Open Muster, sign in and choose a role for your bot. Give it a name and a task that matters to you.</p><a class="feature-link" href="/docs/quick-start">Getting started →</a></article>
+        <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">02</div><h3>Connect what it needs</h3><p>Choose a model and connect only the tools you need. Desktop engines and hosted providers have separate setup.</p><a class="feature-link" href="/docs/engines">Models &amp; tools →</a></article>
+        <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">03</div><h3>Stay in control</h3><p>Keep approval settings explicit, review action cards and read the result before taking the next step.</p><a class="feature-link" href="/docs/approvals">How approvals work →</a></article>
+      </div>
+    </section>
+    <!-- Approval simulation: static sample data, no network or model calls -->
+    <section id="approvals" class="section">
+      <div class="section-intro">
+        <div class="eyebrow">Approvals</div>
+        <h2 class="section-heading">You decide what your bots may do</h2>
+        <p class="section-copy">
+          See an approval card in action with sample data. Pick a task, review the proposed action,
+          then Allow or Deny. In your workspace, what requires approval depends on your
+          permissions and the tools your model supports.
+        </p>
+      </div>
+      <div class="apx">
+        <p class="apx-sim-badge" role="note">Simulation — sample data only. Nothing real runs, no model is called, nothing leaves this page.</p>
+        <div class="apx-card">
+          <div class="apx-head">
+            <img src="/app-icon.svg" width="28" height="28" alt="" aria-hidden="true" />
+            <div>
+              <div class="apx-head__name" data-apx-agent>Scout</div>
+              <div class="apx-head__role" data-apx-role>Sample bot · Inbox Manager</div>
+            </div>
+            <span class="apx-head__state" data-apx-state>Sample</span>
+          </div>
+          <div class="apx-body" data-apx-body aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+    <section id="workspace" class="section">
+      <div class="section-intro"><div class="eyebrow">A place for the work</div><h2 class="section-heading">Your teammates.<br>Your conversations.</h2><p class="section-copy">Keep each task close to its context, its questions and its result.</p></div>
       <div class="hero__teamstrip" aria-label="Your roster, the way the app draws it">
         <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#009957" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
         <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#377FE6" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
@@ -1068,40 +1250,14 @@
         <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#D94B52" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
         <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#8057C8" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
         <svg class="hero__face" viewBox="-112 -112 224 224" aria-label="Teammate"><use href="#hero-face-body" fill="#0EA5C6" /><g transform="translate(-15 -2) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g><g transform="translate(38 -6) rotate(-4)"><use href="#hero-face-eye" fill="#f9f9f9" /></g></svg>
-        <span class="hero__teamlabel">Hire a cast, not a chatbot</span>
+        <span class="hero__teamlabel">A little team. A familiar face.</span>
       </div>
       <figure class="shot-frame">
         <img src="/hero.png" alt="Muster — a chat app where every conversation is a real AI agent" width="980" height="613" />
-        <figcaption>The web console: a roster of named agents on the left, each conversation a real worker with its own model, computer, and approval cards.</figcaption>
+        <figcaption>Muster’s workspace: named teammates, conversations and action cards. Available tools depend on the connected host and model.</figcaption>
       </figure>
-      <p class="hero__micro">Free to self-host · BSL 1.1 source-available · your own API keys · iOS app with Apple Watch companion</p>
-      <div class="stat-row" role="list" aria-label="Platform facts">
-        <div class="stat-row__item" role="listitem"><span class="stat-row__value">10+</span><span class="stat-row__label">engines</span></div>
-        <div class="stat-row__item" role="listitem"><span class="stat-row__value">8</span><span class="stat-row__label">platforms</span></div>
-        <div class="stat-row__item" role="listitem"><span class="stat-row__value">500+</span><span class="stat-row__label">connected apps</span></div>
-        <div class="stat-row__item" role="listitem"><span class="stat-row__value">0</span><span class="stat-row__label">license keys</span></div>
-      </div>
-      <div class="hero__terminal" aria-hidden="true">
-        <div class="hero__terminal-bar">muster · live fleet (sample data)</div>
-        <ol id="term-lines">
-          <li><span class="t-dim">10:02</span> scout: triaged 14 messages · 2 drafts ready</li>
-          <li><span class="t-dim">10:03</span> forge: <span class="t-ok">tests green</span> — 41 passed in 2.3s</li>
-          <li><span class="t-dim">10:04</span> inbox: PRIVACY SHIELD → <span class="t-red">3 secrets scrubbed</span> before the model saw a byte</li>
-          <li><span class="t-dim">10:05</span> filer: asked to move 7 invoices — <span class="t-ok">allowed once</span></li>
-          <li><span class="t-dim">10:06</span> scout: receipt signed · 6 turns · 41s · 12,431 tokens</li>
-          <li><span class="t-dim">10:07</span> night-shift: digest posted to #team before you woke up</li>
-        </ol>
-      </div>
-      <div class="hero__agent-setup">
-        <button class="setup-copy" type="button" data-setup-copy="Set up Muster for me. Follow the quick start at https://muster.today/docs/quick-start">
-          <span class="setup-copy__prefix" aria-hidden="true">$</span>
-          <span class="setup-copy__label">Set up with your agent</span>
-          <svg class="setup-copy__icon" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="8" y="8" width="12" height="12" rx="2"></rect>
-            <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
-          </svg>
-        </button>
-      </div>
+      <p class="hero__micro">Web workspace · desktop execution · companions in development</p>
+
     </section>
     <!-- Statement card — one belief, one panel -->
     <section id="statement" class="section" aria-label="What Muster believes">
@@ -1110,8 +1266,8 @@
           <h2 class="section-heading">Message your agents like teammates.</h2>
           <p>
             Give tasks to bots the way you'd hand work to a teammate — on desktop, web or phone.
-            They take a job from start to finish, keep context on how you work, and come back when
-            your approval is the next step.
+            Keep each task in its own conversation, choose the tools it can use, and review
+            the result with a record of what happened.
           </p>
         </div>
         <div class="statement-card__panel" aria-hidden="true">
@@ -1121,171 +1277,35 @@
     </section>
 
     <section id="scenes" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Scenes</div>
-        <h2 class="section-heading">Six scenes from a working roster</h2>
-        <p class="section-copy">
-          Every chat is a real agent. They have hands. Set it and forget it. Put bots in a room.
-          The whole product, scene by scene.
-        </p>
-      </div>
+      <div class="section-intro"><div class="eyebrow">Small starts, useful results</div><h2 class="section-heading">Give the next task<br>a little company.</h2><p class="section-copy">Start with one job you can review. Add another teammate when you need one.</p></div>
       <div class="card-grid-3">
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🧠</div>
-          <h3>A brain per bot</h3>
-          <p>A model picker with a provider rail, side by side. Swap a bot's model mid-conversation — the cheap one triages, the smart one writes.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🖥️</div>
-          <h3>Every bot gets a computer</h3>
-          <p>Give each bot a real cloud Linux desktop it drives while you watch live, or point it straight at your own Mac.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🙋</div>
-          <h3>Approvals that hold</h3>
-          <p>Shell commands, file edits, and questions surface as inline cards — Allow, Deny, or answer in the thread.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🔌</div>
-          <h3>500+ connected apps</h3>
-          <p>Gmail, Slack, GitHub, Notion, Linear and hundreds more through Composio. OAuth once, reuse across the roster.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🤝</div>
-          <h3>Bots work together</h3>
-          <p>Groups, group calls, and delegation. Import a whole roster from the team library and put it to work.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🔑</div>
-          <h3>Keys once, local always</h3>
-          <p>Credentials persist in <code>~/.muster</code> and the fleet hot-reloads. Secrets stay write-only.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🗄️</div>
-          <h3>Vaultgram backups, built in</h3>
-          <p>Pair Vaultgram with your Telegram channel to back up files, sync Google Drive, or import an extracted Google Takeout archive. Browse saved files and restore them from Settings → Vault. Setup is required.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">📦</div>
-          <h3>Hire a finished team</h3>
-          <p>Fifteen installable packs in the team library — Sales Outbound, Inbox Manager, Bug Triage, Engineering crews and more. Review before import; routines put them on a schedule. <a href="/teams.html">Browse the full library →</a></p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🧾</div>
-          <h3>Bots with receipts</h3>
-          <p>Open a task receipt to review recorded turns, duration, token usage, and cost when the engine reports it. Copy the receipt to share the record with your team.</p>
-        </article>
+        <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">01</div><h3>Think it through</h3><p>Research a question, compare options or turn a rough idea into a plan. Ask your teammate to show its sources.</p></article>
+        <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">02</div><h3>Make a first draft</h3><p>Prepare a reply, a brief or a checklist. Connected services require their own setup and permission.</p></article>
+        <article class="feature-card"><div class="feature-card__icon" aria-hidden="true">03</div><h3>Review what happened</h3><p>Read the result alongside the task history and usage reported by the engine. Keep the next decision yours.</p></article>
       </div>
     </section>
-    <!-- Ecosystem showcase — everything shipped, one grid -->
+    <!-- Platform roles and availability are deliberately stated separately. -->
     <section id="ecosystem" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Ecosystem</div>
-        <h2 class="section-heading">One workforce. Every surface.</h2>
-        <p class="section-copy">
-          Everything below ships today — not a roadmap. The same harness powers all of it, and your
-          bots reach every piece from the same chat.
-        </p>
-      </div>
+      <div class="section-intro"><div class="eyebrow">Your devices, different roles</div><h2 class="section-heading">A team that fits<br>the way you work.</h2><p class="section-copy">Choose where you talk to Muster and where the work runs. Each app has its own release and capabilities; signing in does not automatically sync separate workspaces.</p></div>
       <div class="card-grid-3">
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🖥️</div>
-          <h3>Desktop app</h3>
-          <p>Native macOS, Windows, and Linux builds with auto-update, menu-bar control, and on-device dictation.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🌐</div>
-          <h3>Web console</h3>
-          <p>The full roster in any browser — pair your phone with a QR code, watch bot screens live, approve from anywhere.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">⌨️</div>
-          <h3>CLI</h3>
-          <p><code>muster up</code>, <code>muster bots</code>, <code>muster send</code>, <code>muster approve</code>, <code>muster receipts</code> — the whole workforce from any shell. Zero dependencies.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">📱</div>
-          <h3>iPhone &amp; Android</h3>
-          <p>Native companions that pair with your harness — chat, approvals, and voice calls with your bots from your pocket.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">⌚</div>
-          <h3>Apple Watch</h3>
-          <p>Glance at runs, approve actions, and start bot calls from your wrist — the workforce follows you off the couch.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🎛️</div>
-          <h3>Muster OS ⌘K</h3>
-          <p>One command palette across the whole platform: jump to any bot, task, setting, or doc without leaving the keyboard.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">📮</div>
-          <h3>hi.new agent mail</h3>
-          <p>Email a task to your roster — each bot gets a real mailbox, and replies land in the thread like any teammate's would.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🌍</div>
-          <h3>Browser panel</h3>
-          <p>Bots drive a visible browser you can watch side-by-side — real pages, real logins, every click on screen.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">☁️</div>
-          <h3>Cloud computers</h3>
-          <p>Per-bot Linux desktops with a real browser and files. Watch live as the bot works, or bring your own machine instead.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🔁</div>
-          <h3>Routines &amp; sentries</h3>
-          <p>Put any task on a schedule, or post a sentry that watches and speaks up when a condition hits. Scorecards grade each run.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🎯</div>
-          <h3>Goal mode</h3>
-          <p>Give a bot an outcome, not a task list. It plans, works in bounded autonomous loops, and checks in with a why-journal.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🔐</div>
-          <h3>Approvals + history</h3>
-          <p>Every Allow/Deny decision is logged with its evidence strip — an audit trail you can read, not a black box.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🗄️</div>
-          <h3>Cloud sync, your storage</h3>
-          <p>Workspace sync to Google Drive or your own private Telegram chat — encrypted with your passphrase, ciphertext-only, free storage you already own.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🗣️</div>
-          <h3>Voice mode</h3>
-          <p>Spoken replies and full bot calls. Free built-in voice out of the box; bring an ElevenLabs key when you want studio quality.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">🆓</div>
-          <h3>Free model tier</h3>
-          <p>OpenRouter free models built in — including Nex AGI — plus any OpenAI-compatible endpoint and local models via Ollama.</p>
-        </article>
-        <article class="feature-card">
-          <div class="feature-card__icon" aria-hidden="true">📚</div>
-          <h3>Docs &amp; self-host</h3>
-          <p>Full docs at /docs and one-command self-hosting — the whole platform, free forever, on your own hardware.</p>
-        </article>
+        <article class="feature-card"><div class="platform-status">OPEN IN YOUR BROWSER</div><h3>Muster Web</h3><p>Open your hosted workspace, talk to teammates and review their work. Your browser does not gain access to your computer’s apps or files.</p><a class="feature-link" href="/app">Open Muster <span aria-hidden="true">↗</span></a></article>
+        <article class="feature-card"><div class="platform-status">MAC · WINDOWS · LINUX</div><h3>Muster Desktop</h3><p>A workspace on your computer, with supported local engines and tools. Computer control and dictation depend on the operating system and permissions.</p><a class="feature-link" href="/download.html">Get the desktop app <span aria-hidden="true">→</span></a></article>
+        <article class="feature-card"><div class="platform-status">COMPANION BETA</div><h3>iPhone &amp; Android</h3><p>Companions connect to a running Muster host for chats and approvals. Features and installation availability differ; device testing is ongoing.</p><a class="feature-link" href="/download.html#ios">Check mobile availability <span aria-hidden="true">→</span></a></article>
+        <article class="feature-card"><div class="platform-status">COMPANION BETA</div><h3>Apple Watch</h3><p>Quick approvals and bot calls are being tested for the wrist. A connected, capable host does the work; the Watch does not run desktop engines.</p><a class="feature-link" href="/download.html#ios">Explore the companion <span aria-hidden="true">→</span></a></article>
+        <article class="feature-card"><div class="platform-status">ANOTHER WORKSPACE VIEW</div><h3>Muster OS</h3><p>A windowed view of the same workspace’s bots and rooms. Choose a different view without creating a different team.</p><a class="feature-link" href="/os">Open Muster OS <span aria-hidden="true">↗</span></a></article>
+        <article class="feature-card"><div class="platform-status">FOR YOUR WORKFLOW</div><h3>Models &amp; connections</h3><p>Use compatible providers and connected apps. Each model has its own tools, usage limits and costs; app permissions stay explicit.</p><a class="feature-link" href="#engines">Explore models <span aria-hidden="true">→</span></a></article>
       </div>
     </section>
     <!-- Use cases: real jobs on a schedule -->
     <section id="use-cases" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Use cases</div>
-        <h2 class="section-heading">Real jobs, on a schedule, while you do something else</h2>
-        <p class="section-copy">Every job below is one bot with one routine. Set the schedule once; the result lands in your chat with a receipt.</p>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin-top:40px;">
-        <div class="feature-card"><h3>📮 Inbox sweep</h3><p>A bot triages your inbox every morning and drafts replies for the three that matter. You approve before anything sends.</p></div>
-        <div class="feature-card"><h3>🧾 Invoice chaser</h3><p>Checks your billing dashboard for overdue invoices and writes the follow-up email in your tone, on your cadence.</p></div>
-        <div class="feature-card"><h3>🔍 Competitor watch</h3><p>Reads rival landing pages and changelogs weekly, then posts a diff summary of what actually changed.</p></div>
-        <div class="feature-card"><h3>📊 Weekly numbers</h3><p>Pulls your analytics and payments every Friday and leaves one plain-English summary in your team room.</p></div>
-        <div class="feature-card"><h3>🧪 Release QA</h3><p>Before every deploy, a bot walks the critical path in a real browser and files anything that regressed.</p></div>
-        <div class="feature-card"><h3>🔀 PR review</h3><p>A reviewer bot reads each new pull request, checks the diff against your conventions, and leaves the first pass.</p></div>
-        <div class="feature-card"><h3>🎯 Lead research</h3><p>Overnight, a bot researches new prospects and queues a brief on each one — you wake up to a shortlist.</p></div>
-        <div class="feature-card"><h3>📅 Personal bookings</h3><p>A booking bot answers your WhatsApp, offers slots, takes the deposit and fills your calendar while you work.</p></div>
+      <div class="section-intro"><div class="eyebrow">Ideas for your first task</div><h2 class="section-heading">Start with what’s<br>on your mind.</h2><p class="section-copy">Examples to adapt to your day. Connected tasks need a compatible model, the right tools and your permissions.</p></div>
+      <div class="card-grid-3">
+        <article class="feature-card"><h3>A clearer morning</h3><p>“Help me choose three priorities and make a plan I can actually follow.”</p></article>
+        <article class="feature-card"><h3>A reply worth sending</h3><p>“Draft a thoughtful reply from these notes. Leave it here for me to review.”</p></article>
+        <article class="feature-card"><h3>A little less research</h3><p>“Compare these options, show your sources and explain the tradeoffs.”</p></article>
+        <article class="feature-card"><h3>Ideas into next steps</h3><p>“Turn this rough idea into a checklist. Tell me what we need to decide first.”</p></article>
+        <article class="feature-card"><h3>A useful second look</h3><p>“Review this document for gaps and help me make the argument clearer.”</p></article>
+        <article class="feature-card"><h3>A weekly reflection</h3><p>“Summarize these updates. What moved forward, and what needs my attention?”</p></article>
       </div>
     </section>
     <section id="roster" class="section">
@@ -1321,50 +1341,15 @@
       </div>
     </section>
     <!-- How the pieces fit — two tables, zero adjectives -->
-    <section id="how" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">How the pieces fit</div>
-        <h2 class="section-heading">Every piece, what it does, where you set it up</h2>
-      </div>
-      <div class="table-frame" style="margin-top:40px;">
-        <table>
-          <thead>
-            <tr><th scope="col">Piece</th><th scope="col">What it does</th><th scope="col">Where you set it up</th></tr>
-          </thead>
-          <tbody>
-            <tr><th scope="row">Bot</th><td>A named, persistent agent with its own persona, memory, model and approvals. It interviews you, then works.</td><td>Sidebar → New bot, or hire a pack from <a href="/teams.html">the team library</a></td></tr>
-            <tr><th scope="row">Engine</th><td>Which AI CLI the bot runs on — Claude Code, Codex, Grok, Gemini, Ollama, any OpenAI-compatible endpoint.</td><td>Settings → Engines, or per-bot in Bot settings</td></tr>
-            <tr><th scope="row">Computer</th><td>The Linux desktop the bot drives — cloud or your own machine. Where files get moved and pages get clicked.</td><td>Bot settings → Computer</td></tr>
-            <tr><th scope="row">Approvals</th><td>Shell commands, file edits and questions stop at an inline card until you Allow or Deny. Every decision is logged.</td><td>Inline in the thread; patterns in Bot settings → Permissions</td></tr>
-            <tr><th scope="row">Routines</th><td>Any task on a schedule, or a sentry that watches a condition and speaks up. Scorecards grade each run.</td><td>Automations tab → New routine</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="table-frame" style="margin-top:16px;">
-        <table>
-          <caption class="table-caption">Choose your path — each link opens the matching guide.</caption>
-          <thead>
-            <tr><th scope="col">If you want to…</th><th scope="col">Start here</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>Hire your first bot and give it a task</td><td><a href="/docs/quick-start">Quick start</a></td></tr>
-            <tr><td>Install the desktop app or self-host</td><td><a href="/docs/install">Install</a></td></tr>
-            <tr><td>Bring your own model or key</td><td><a href="/docs/engines">Engines</a></td></tr>
-            <tr><td>Review what a bot is allowed to do</td><td><a href="/docs/approvals">Approvals</a></td></tr>
-            <tr><td>Put work on a schedule</td><td><a href="/docs/automation">Automation</a></td></tr>
-            <tr><td>Run the whole thing on your own server</td><td><a href="/docs/self-host">Self-host</a></td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
+
     <section id="engines" class="section">
       <div class="section-intro">
         <div class="eyebrow">Engines</div>
         <h2 class="section-heading">Bring your own model</h2>
         <p class="section-copy">
-          Muster does not ship a model of its own. Your bots run on the AI CLIs already installed on your
-          machine, using your existing logins. Point any engine at a custom binary in
-          <strong>Settings → Engines</strong>.
+          Choose a provider in your web account, or use supported engines installed on your desktop.
+          Muster coordinates the work; the model supplies the reasoning. Tools, computer access and
+          vision support vary by driver. Your provider’s usage limits and charges still apply.
         </p>
       </div>
       <div class="engine-tags">
@@ -1400,12 +1385,12 @@
         <article class="feature-card">
           <div class="feature-card__icon" aria-hidden="true">🖥️</div>
           <h3>Each agent gets a desk</h3>
-          <p>A coding bot runs on its own Linux desktop — or your Mac — so three agents can attack three tickets at once without fighting over your laptop. Watch their screens live.</p>
+          <p>Choose an available computer for a supported engine. Separate workspaces can keep tasks apart; computer availability and isolation depend on your configuration.</p>
         </article>
         <article class="feature-card">
           <div class="feature-card__icon" aria-hidden="true">🚦</div>
           <h3>Approvals, not vibes</h3>
-          <p>Shell commands and file writes pause for your Allow until you trust the bot — then flip it to Always for the patterns you've reviewed. Every decision is logged.</p>
+          <p>Supported tool actions can pause at approval cards. Review the proposed action and your bot’s permissions before granting broader access.</p>
         </article>
         <article class="feature-card">
           <div class="feature-card__icon" aria-hidden="true">🧾</div>
@@ -1415,12 +1400,12 @@
         <article class="feature-card">
           <div class="feature-card__icon" aria-hidden="true">🔁</div>
           <h3>Routines on a schedule</h3>
-          <p>Turn any task into a routine — nightly dependency bumps, morning triage, weekly release notes — and it runs while you sleep, with failures surfaced as notifications.</p>
+          <p>Schedule repeatable work such as a weekly draft or a review checklist. The connected host and provider must remain available for a routine to run.</p>
         </article>
         <article class="feature-card">
           <div class="feature-card__icon" aria-hidden="true">👥</div>
           <h3>Delegation between bots</h3>
-          <p>A reviewer bot reads the coder's output before it reaches you. Group calls let three agents argue about an architecture doc so you only read the conclusion.</p>
+          <p>Ask a supported teammate to delegate or review another bot’s output. Keep the discussion and your final decision together in the workspace.</p>
         </article>
       </div>
     </section>
@@ -1428,11 +1413,11 @@
     <section id="cli" class="section">
       <div class="section-intro">
         <div class="eyebrow">Muster CLI</div>
-        <h2 class="section-heading">One command boots the whole workforce</h2>
+        <h2 class="section-heading">For the work you do in a terminal</h2>
         <p class="section-copy">
-          The desktop app, the web console, your phone, and now your terminal — all talking to the
-          same local server. The CLI is a single zero-dependency script: it boots the harness,
-          prints a QR code for your phone, and runs your agents from any shell.
+          The CLI is another way to reach a running Muster host: send work, review approvals and
+          read receipts. It requires Node.js and a configured runtime. These are sample commands,
+          not a live session.
         </p>
       </div>
 
@@ -1441,7 +1426,7 @@
           <span class="term__dot"></span><span class="term__dot"></span><span class="term__dot term__dot--accent"></span>
           <span class="term__title">~/projects/webapp — muster</span>
         </div>
-<pre class="term__body"><span class="dim"># boot the harness (from a checkout or the self-host image)</span>
+<pre class="term__body"><span class="dim"># sample commands for a configured local runtime</span>
 <span class="dim">$</span> <span class="c">muster up -d</span>
 
   Muster is up in the background on port 8799.
@@ -1479,131 +1464,55 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
         <button type="button" data-install-copy>Copy</button>
       </div>
       <p style="margin-top:14px;text-align:center;color:var(--muted-2);font-size:13px;">
-        Single file, zero dependencies, ~40 KB — no install step. Requires Node 22+.
-        Every command works against your local harness or Muster Cloud. The desktop app bundles the same server; the CLI is just another window into it.
+        Requires Node 23.4+ and a configured Muster host. Commands that start a local server require the runtime; the standalone CLI is not a server installer.
       </p>
-    </section>
+          <div class="hero__terminal" aria-hidden="true">
+        <div class="hero__terminal-bar">muster · live fleet (sample data)</div>
+        <ol id="term-lines">
+          <li><span class="t-dim">10:02</span> scout: triaged 14 messages · 2 drafts ready</li>
+          <li><span class="t-dim">10:03</span> forge: <span class="t-ok">tests green</span> — 41 passed in 2.3s</li>
+          <li><span class="t-dim">10:04</span> inbox: PRIVACY SHIELD → <span class="t-red">3 patterns masked</span> in supported text</li>
+          <li><span class="t-dim">10:05</span> filer: asked to move 7 invoices — <span class="t-ok">allowed once</span></li>
+          <li><span class="t-dim">10:06</span> scout: receipt recorded · 6 turns · 41s · 12,431 tokens</li>
+          <li><span class="t-dim">10:07</span> night-shift: digest posted to #team before you woke up</li>
+        </ol>
+      </div>
+      <div class="hero__agent-setup">
+        <button class="setup-copy" type="button" data-setup-copy="Set up Muster for me. Follow the quick start at https://muster.today/docs/quick-start">
+          <span class="setup-copy__prefix" aria-hidden="true">$</span>
+          <span class="setup-copy__label">Set up with your agent</span>
+          <svg class="setup-copy__icon" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="8" y="8" width="12" height="12" rx="2"></rect>
+            <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path>
+          </svg>
+        </button>
+      </div>
+</section>
     <!-- Trust — what runs where, your responsibility, honesty callout -->
     <section id="trust" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Trust</div>
-        <h2 class="section-heading">What runs where — and what you decide</h2>
-        <p class="section-copy">Local-first does not mean risk-free. Here are the boundaries, stated plainly.</p>
-      </div>
+      <div class="section-intro"><div class="eyebrow">Know what you’re connecting</div><h2 class="section-heading">Clear boundaries.<br>Decisions you can see.</h2><p class="section-copy">Your workspace, its tools and your backups have different jobs. Here is what to expect today.</p></div>
       <div class="card-grid-3">
-        <article class="feature-card">
-          <h3>The harness is loopback</h3>
-          <p>One small server on <code>127.0.0.1</code> owns every agent process. Transcripts, keys, and events live in <code>~/.muster</code> — not in a cloud, not behind a seat count.</p>
-        </article>
-        <article class="feature-card">
-          <h3>Keys stay put</h3>
-          <p>Credentials persist in <code>~/.muster</code>; the API exposes configured-or-not flags, never values. Secrets are write-only.</p>
-        </article>
-        <article class="feature-card">
-          <h3>Devices are allowlisted</h3>
-          <p>Only devices you approve can connect to your harness. Everything else is denied by default.</p>
-        </article>
-        <article class="feature-card">
-          <h3>Privacy Shield masks before models see</h3>
-          <p>Emails become <code>[EMAIL_1]</code>, phones <code>[PHONE_2]</code> — deterministic, local, reversible only by you, with a counts-only receipt every turn.</p>
-        </article>
-        <article class="feature-card">
-          <h3>Choose what you connect</h3>
-          <p>Cloud models, connected apps, backups and other online features send requests to external services — you choose which, per bot.</p>
-        </article>
-        <article class="feature-card">
-          <h3>Your responsibility</h3>
-          <p>You own the keys, the passphrase, and the approval decisions. Keep your recovery passphrase safe — without it, a lost machine loses your backup.</p>
-        </article>
+        <article class="feature-card"><h3>Know where work lives</h3><p>The web workspace is stored on Muster’s server. Desktop workspaces are stored on your computer. Google sign-in does not merge these copies.</p></article>
+        <article class="feature-card"><h3>Connect deliberately</h3><p>Model providers and connected apps receive requests when used. Review their permissions and terms, and your bot’s approval settings.</p></article>
+        <article class="feature-card"><h3>Back up with care</h3><p>Desktop backups require setup and a recovery passphrase. Connecting Drive alone does not start automatic backups or sync. Web-to-device recovery is still in development.</p></article>
       </div>
-      <p class="honesty-callout" role="note">This page describes shipped releases — features in review or on a branch are not listed.</p>
+      <p class="honesty-callout">Privacy Shield is optional masking for supported text flows, not a guarantee that all sensitive information is filtered. Product analytics can be switched off in Settings. <a href="/privacy-policy">Read the privacy policy →</a></p>
     </section>
 
-    <!-- Approval simulation: static sample data, no network or model calls -->
-    <section id="approvals" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Approvals</div>
-        <h2 class="section-heading">You decide what your bots may do</h2>
-        <p class="section-copy">
-          Before a bot touches your mail, your files, or anything that can't be undone, it stops
-          and asks. This is the loop, with sample data: pick a task, review the proposed action,
-          then Allow or Deny.
-        </p>
-      </div>
-      <div class="apx">
-        <p class="apx-sim-badge" role="note">Simulation — sample data only. Nothing real runs, no model is called, nothing leaves this page.</p>
-        <div class="apx-card">
-          <div class="apx-head">
-            <img src="/app-icon.svg" width="28" height="28" alt="" aria-hidden="true" />
-            <div>
-              <div class="apx-head__name" data-apx-agent>Scout</div>
-              <div class="apx-head__role" data-apx-role>Sample bot · Inbox Manager</div>
-            </div>
-            <span class="apx-head__state" data-apx-state>Sample</span>
-          </div>
-          <div class="apx-body" data-apx-body aria-live="polite"></div>
-        </div>
-      </div>
-    </section>
-    <section id="pricing" class="section">
-      <div class="section-intro">
-        <div class="eyebrow">Pricing</div>
-        <h2 class="section-heading">Free to self-host. Pay for the hands.</h2>
-        <p class="section-copy">
-          Bots are free and unlimited on every plan. The metered unit is the cloud computer — the
-          Linux desktop your bot actually drives.
-        </p>
-      </div>
+
+    <section id="pricing" class="section beta-section">
+      <div class="section-intro"><div class="eyebrow">Build your everyday team</div><h2 class="section-heading">Free while we<br>learn together.</h2><p class="section-copy">Muster is in beta. We’re focusing on useful daily work and reliable core flows before deciding future pricing.</p></div>
       <div class="comparison-grid">
-        <article class="comparison-card comparison-card--muted">
-          <h3>Self-host</h3>
-          <p class="comparison-meta">Free forever, on your own hardware</p>
-          <div class="comparison-list comparison-list--muted">
-            <div>Every feature, nothing withheld</div>
-            <div>Unlimited bots and cloud computers</div>
-            <div>One Docker command to start</div>
-          </div>
-          <div class="comparison-actions">
-            <a class="button button--secondary button--small" href="/download.html">Download</a>
-            <a class="button button--secondary button--small" href="/docs">Read the docs</a>
-          </div>
-        </article>
-        <article class="comparison-card">
-          <div class="comparison-kicker">
-            <h3>Cloud · Monthly</h3>
-            <span class="comparison-badge">Most popular</span>
-          </div>
-          <p class="comparison-meta"><strong style="color:var(--ink);font-size:28px;">$20</strong> per cloud computer / month · hosted, managed, ready in minutes</p>
-          <div class="comparison-list">
-            <div>No servers, no Docker, no setup</div>
-            <div>Privacy Shield included</div>
-            <div>Scale count up or down anytime</div>
-          </div>
-          <div class="comparison-actions">
-            <a class="button button--primary button--small" href="/sign-up" rel="noreferrer">Start with Muster Cloud</a>
-          </div>
-        </article>
-        <article class="comparison-card comparison-card--muted">
-          <h3>Cloud · Annual</h3>
-          <p class="comparison-meta"><strong style="color:var(--ink);font-size:28px;">$192</strong> per cloud computer / year · two months free vs monthly</p>
-          <div class="comparison-list comparison-list--muted">
-            <div>Everything in Monthly</div>
-            <div>Locked-in rate for the year</div>
-            <div>Cancel anytime from the billing portal</div>
-          </div>
-          <div class="comparison-actions">
-            <a class="button button--secondary button--small" href="/sign-up" rel="noreferrer">Go annual</a>
-          </div>
-        </article>
+        <article class="comparison-card"><div class="comparison-kicker"><h3>Muster beta</h3><span class="comparison-badge">Free during beta</span></div><p class="comparison-meta">Start with one teammate and one task.</p><div class="comparison-list"><div>Open your workspace on the web</div><div>Bring a compatible provider or model account</div><div>Review actions and results in the conversation</div></div><div class="comparison-actions"><a class="button button--primary" href="/app">Open Muster ↗</a></div></article>
+        <article class="comparison-card comparison-card--muted"><h3>Your models. Your choice.</h3><p class="comparison-meta">A free beta is separate from the services you connect.</p><div class="comparison-list"><div>Provider usage may have its own costs</div><div>Optional computer services can charge separately</div><div>Available models and features depend on your setup</div></div><div class="comparison-actions"><a class="button button--secondary" href="/docs/engines">See model setup →</a></div></article>
       </div>
-      <p style="margin-top:22px;text-align:center;color:var(--muted-2);font-size:13px;">Checkout and card data are handled entirely by Stripe. No trial to cancel, no seat license, export anytime — cancel from the self-serve billing portal.</p>
     </section>
     <!-- Rooms (multiplayer agent spaces) -->
     <section id="rooms" class="section">
       <div class="section-intro">
         <div class="eyebrow">Rooms</div>
         <h2 class="section-heading">Teams, working together — in one place</h2>
-        <p style="color:var(--muted-2);max-width:560px;">A Room is a shared computer where your agents and your team work side by side — membership visible, presence live, handoffs instant.</p>
+        <p style="color:var(--muted-2);max-width:560px;">Rooms bring related bots and conversations together. Available computer backends and tools depend on your host and configuration.</p>
       </div>
       <div id="rooms-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;max-width:900px;margin:0 auto;">
         <div class="room-card"><div class="room-kind">localvm</div><h3>Support Squad</h3><p>Inbox triage and customer replies in one shared desktop.</p></div>
@@ -1612,63 +1521,34 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
       </div>
       <p style="margin-top:18px;text-align:center;"><a class="button button--secondary button--small" href="/app">Open Muster to see your rooms</a></p>
     </section>
-    <section id="faq" class="section">
-      <div class="faq-cols">
-        <h2 class="section-heading">Questions, answered plainly</h2>
-        <div class="faq-list">
-        <details class="faq-item" open>
-          <summary>What exactly is a “cloud computer”?</summary>
-          <div class="faq-a">A small Linux desktop in our cloud that your bot drives like a person would — real browser, real files, real apps. It's the metered unit because it's the only part of Muster that costs us compute. Bots themselves are free and unlimited on every plan.</div>
-        </details>
-        <details class="faq-item">
-          <summary>Does the Privacy Shield slow my bots down or break their context?</summary>
-          <div class="faq-a">No. Masking is deterministic — the same email always becomes the same <code>[EMAIL_n]</code> token — so models keep thread context across turns. You get a counts-only receipt each turn showing exactly how many items were masked, never the content itself.</div>
-        </details>
-        <details class="faq-item">
-          <summary>If I self-host, do I lose any features?</summary>
-          <div class="faq-a">None. The software ships complete under BSL 1.1 — every feature, unlimited bots, no license keys, no phone-home. What we sell is hosting and convenience, not unlocks.</div>
-        </details>
-        <details class="faq-item">
-          <summary>What happens to my bots if I cancel?</summary>
-          <div class="faq-a">Your bots, transcripts, and connected apps stay intact. Cloud computer provisioning pauses until billing resumes, and you can export everything and self-host the same harness at any time.</div>
-        </details>
-        <details class="faq-item">
-          <summary>Which AI models can my bots use?</summary>
-          <div class="faq-a">Whatever you already pay for. Bots run on Claude Code, Codex, Grok, Gemini, and any OpenAI-compatible API — including local models via Ollama. There's also a built-in free tier through OpenRouter (including Nex AGI models), so you can start without a single paid subscription. Vision-capable models can read screenshots you attach.</div>
-        </details>
-        <details class="faq-item">
-          <summary>Where does my data actually live?</summary>
-          <div class="faq-a">On your machine, by default — transcripts, keys, and memories in <code>~/.muster</code>. If you want sync across devices, Muster pushes one AES-256-encrypted bundle to storage <em>you</em> own: your Google Drive or a private Telegram chat with a bot you create via @BotFather. Both hold ciphertext only — your passphrase never leaves you, and neither service can read a byte.</div>
-        </details>
-        <details class="faq-item">
-          <summary>Do you train on my data or sell it?</summary>
-          <div class="faq-a">No. Muster trains no model and sells no data. When a bot's transcript goes to a cloud model, it goes masked by Privacy Shield, on your own API keys — the provider's terms apply to that call, and there is no Muster-side training pipeline.</div>
-        </details>
-        <details class="faq-item">
-          <summary>Does the unsigned build phone home?</summary>
-          <div class="faq-a">There are no license keys and no phone-home. The one outbound call the app makes on its own is a static <code>latest.json</code> fetch to check for updates. macOS shows "unidentified developer" on unsigned builds — right-click the app → Open, then Open again; the steps are on the <a href="/download.html">download page</a>.</div>
-        </details>
-      </div>
-      </div>
-    </section>
+    <section id="faq" class="section"><div class="faq-cols"><h2 class="section-heading">A few things<br>worth knowing.</h2><div class="faq-list">
+        <details class="faq-item" open><summary>What can I use Muster for?</summary><div class="faq-a">Give a named assistant a task, discuss a plan, and review its results. Start with research, organizing work, or drafting a reply. Available tools depend on the model, connections and computer you choose.</div></details>
+        <details class="faq-item"><summary>Is Muster free?</summary><div class="faq-a">Muster is free during the beta. Bring your own provider key or use a model available in your account. Provider usage and optional computer services may have their own charges. Future pricing has not been decided.</div></details>
+        <details class="faq-item"><summary>How are the web and desktop apps different?</summary><div class="faq-a">The web app opens your hosted workspace in a browser. The desktop app runs a workspace on your computer and can use supported local engines and tools. Signing in on both does not automatically merge their workspaces.</div></details>
+        <details class="faq-item"><summary>Where does my data live?</summary><div class="faq-a">The web workspace is stored on Muster’s server. The desktop workspace is stored on your computer. Connecting Google Drive grants storage access; it does not by itself start backups or sync. Desktop backup and restore need separate setup. Automatic web-to-device recovery is still being developed.</div></details>
+        <details class="faq-item"><summary>Can I use Muster on my phone or Watch?</summary><div class="faq-a">iPhone, Android and Apple Watch companions are in beta development. They connect to a running Muster host; they do not run desktop engines themselves. Check the download page for current installation and testing availability.</div></details>
+        <details class="faq-item"><summary>Which models can I connect?</summary><div class="faq-a">Muster supports multiple model providers, compatible API endpoints and local engines. Desktop engines use their installed accounts; web providers use the keys connected to your account. Tools, vision and computer access vary by driver and model.</div></details>
+        <details class="faq-item"><summary>What does Privacy Shield cover?</summary><div class="faq-a">Privacy Shield is optional masking for supported API-driver text. When enabled for a compatible bot, it masks recognized patterns before that text is sent and records masking counts. It is not a guarantee that every secret, attachment or provider request is filtered. Review sensitive content and your provider’s terms.</div></details>
+        <details class="faq-item"><summary>Does the app send analytics?</summary><div class="faq-a">Muster can send product-usage events and check for updates. You can turn usage analytics off in Settings. Models, connected apps and other online features send requests to their services when used. See the privacy policy for details.</div></details>
+      </div></div></section>
     <section id="download" class="section">
       <div class="section-intro">
         <div class="eyebrow">Download</div>
         <h2 class="section-heading">Get Muster</h2>
-        <p class="section-copy">Always the latest release, straight from our servers.</p>
+        <p class="section-copy">Choose your device. Desktop downloads and native companion betas have separate release schedules. Check the download page for version details and checksums.</p>
       </div>
       <div class="download-rows">
         <div class="download-row">
           <div>
             <div class="download-row__os">macOS</div>
-            <div class="download-row__meta">Apple silicon · unsigned build · one-click .dmg — <a href="/#local-first" style="color:var(--accent-border);">right-click → Open</a></div>
+            <div class="download-row__meta">Apple silicon · signed and notarized desktop release · .dmg</div>
           </div>
           <a href="https://muster.today/downloads/Muster.dmg">Download .dmg</a>
         </div>
         <div class="download-row">
           <div>
             <div class="download-row__os">macOS Intel</div>
-            <div class="download-row__meta">Intel Macs · unsigned build · one-click .dmg</div>
+            <div class="download-row__meta">Intel Macs · signed and notarized desktop release · .dmg</div>
           </div>
           <a href="https://muster.today/downloads/Muster-intel.dmg">Download .dmg (Intel)</a>
         </div>
@@ -1695,10 +1575,10 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
         </div>
         <div class="download-row">
           <div>
-            <div class="download-row__os">Self-host (web)</div>
-            <div class="download-row__meta">Run the web UI and harness in Docker</div>
+            <div class="download-row__os">Web</div>
+            <div class="download-row__meta">Your hosted workspace · no desktop download required</div>
           </div>
-          <a href="/download.html#docker">Docker guide</a>
+          <a href="/app">Open Muster</a>
         </div>
         <div class="download-row">
           <div>
@@ -1710,7 +1590,7 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
         <div class="download-row">
           <div>
             <div class="download-row__os">iPhone — TestFlight</div>
-            <div class="download-row__meta">Full companion: chats, approvals, tasks, Apple Watch app included · build uploaded, beta opening shortly</div>
+            <div class="download-row__meta">iPhone and Apple Watch companions · check current beta access and setup instructions</div>
           </div>
           <a href="/download.html#ios">iOS beta →</a>
         </div>
@@ -1760,45 +1640,7 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
 
 </div>
 
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@graph": [
-    {
-      "@type": "WebSite",
-      "@id": "https://muster.today/#website",
-      "url": "https://muster.today/",
-      "name": "Muster",
-      "description": "A local-first roster of AI agents you actually own.",
-      "inLanguage": "en"
-    },
-    {
-      "@type": "SoftwareApplication",
-      "@id": "https://muster.today/#software",
-      "name": "Muster",
-      "url": "https://muster.today/",
-      "description": "A local-first roster of AI agents you actually own. Bring your own model, give each one a computer, and run your team like a team.",
-      "applicationCategory": "BusinessApplication",
-      "applicationSubCategory": "AI agent platform",
-      "operatingSystem": "macOS, Windows, Ubuntu, Web",
-      "isAccessibleForFree": true,
-      "license": "https://muster.today/docs/security",
-      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-      "author": {
-        "@type": "Person",
-        "name": "Tharun Ramagiri",
-        "url": "https://ramagiritharun.in",
-        "sameAs": ["https://www.linkedin.com/in/ramagiritharun", "https://orazen.online"]
-      },
-      "creator": {
-        "@type": "Organization",
-        "name": "Orazen",
-        "url": "https://orazen.online"
-      }
-    }
-  ]
-}
-</script>
+
 
 <script>
   // Mobile menu
@@ -1922,7 +1764,7 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
       if (target) target.focus();
     }
 
-    function renderIdle() {
+    function renderIdle(shouldFocus) {
       setBadge("Sample", "");
       var wrap = document.createElement("div");
       var pick = document.createElement("p");
@@ -1944,7 +1786,7 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
       var first = list.querySelector("button");
       if (first) {
         first.setAttribute("data-apx-focus", "");
-        focusFirst(body);
+        if (shouldFocus === true) focusFirst(body);
       }
     }
 
@@ -2043,20 +1885,21 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
       reset.type = "button";
       reset.className = "apx-reset";
       reset.textContent = "Run another sample task";
-      reset.addEventListener("click", renderIdle);
+      reset.addEventListener("click", function () { renderIdle(true); });
       wrap.appendChild(reset);
       body.replaceChildren(wrap);
       reset.setAttribute("data-apx-focus", "");
       focusFirst(body);
     }
 
-    renderIdle();
+    // Initial content must not move focus or scroll away from the hero.
+    renderIdle(false);
   })();
 </script>
 
 <script>
-  /* Editorial behaviors — all enhancement, all reduced-motion aware.
-     Zero network requests; every string below is sample data. */
+  /* Editorial enhancements respect reduced motion. Sample content stays local;
+     release metadata is fetched separately from this site’s download endpoints. */
   var REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   // Banner: dismissible, remembered for the session.
@@ -2185,15 +2028,16 @@ vesper          fix flaky cart test               7 turns · 62,096 tok · $0.74
     });
   })();
 
-  // Hero download CTA: detect the OS, point the primary button at the right
+  // Secondary desktop link: detect the OS and point it at the right
   // artifact, and label it with the live version from /downloads/latest.json
-  // (same consumption pattern as download.html). Falls back to the static
-  // macOS label when the fetch fails.
+  // (same consumption pattern as download.html). Unsupported or mobile
+  // devices keep the general download-page link; version fetch failure is harmless.
   (function () {
     var ua = navigator.userAgent;
     var plat = navigator.platform || "";
-    var macLike = /Mac/i.test(plat) || /Mac OS X/i.test(ua);
-    var isWindows = /Win/i.test(ua);
+    var mobile = /iPhone|iPad|iPod|Android/i.test(ua) || (/Mac/i.test(plat) && navigator.maxTouchPoints > 1);
+    var macLike = !mobile && (/Mac/i.test(plat) || /Mac OS X/i.test(ua));
+    var isWindows = !mobile && /Win/i.test(ua);
     var isLinux = /Linux/i.test(ua) && !/Android/i.test(ua);
     var detected = null;
 

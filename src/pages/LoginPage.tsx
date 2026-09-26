@@ -1,31 +1,22 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { z } from "zod";
 import { useAuth } from "@/lib/auth";
 import { AuthShell, authCardBox, authInputCls, authButtonCls } from "@/components/AuthShell";
 
 import { AuthPasswordField } from "@/components/AuthPasswordField";
+import { GoogleSignIn } from "@/components/GoogleSignIn";
 import { EmailOtpSignIn } from "@/components/EmailOtpSignIn";
 import { authDestination } from "@/lib/auth-navigation";
 
-/** Four ways in, on web and in the packaged desktop app alike:
- *   1. Continue with Google        — direct OAuth on deployments with creds;
- *                                    on the DESKTOP this becomes the cloud
- *                                    handoff: the browser does Google against
- *                                    muster.today, the app receives
- *                                    the identity over loopback (no codes)
- *   2. Pairing code bridge         (desktop fallback for the same flow)
- *   3. Email + password            (always available; sign-up lives at /sign-up)
- *   4. Email + one-time code       (additive sibling of 3, offered when the
- *                                    server advertises capabilities.emailOtp)
- * Whatever a deployment lacks renders as a last resort rather than bricking
- * the install — no path here is ever hidden behind another one. */
+/** Account sign-in and device connection share a page, but remain separate actions. */
 export function LoginPage() {
-  const { capabilities, signInWithProvider, signIn, user, loading: authLoading, signOut, sessionError, retrySession } = useAuth();
+  const { capabilities, signIn, user, loading: authLoading, signOut, sessionError, retrySession } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = authDestination(params.get("next"));
   const [error, setError] = useState("");
-  const [googlePending, setGooglePending] = useState(false);
+  const submitting = useRef(false);
 
   // OAuth failures bounce back here as /sign-in?authError=<code> (the server
   // rewrites better-auth's /api/auth/error). state_mismatch is by far the
@@ -48,51 +39,15 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
 
-  // Desktop OAuth handoff: after the system browser finishes Google on the
-  // cloud and bounces back to /oauth/finish, THAT page signs us in by
-  // setting the session cookie. From here we just watch get-session until
-  // a user materializes, then hard-navigate like pairing does.
-  const [oauthWaiting, setOauthWaiting] = useState(false);
-
-  useEffect(() => {
-    if (!oauthWaiting) return;
-    let alive = true;
-    const started = Date.now();
-    const tick = async () => {
-      try {
-        const r = await fetch("/api/auth/get-session", { credentials: "include" });
-        // SAFETY: get-session's success body is better-auth's session JSON
-        // ({user: {...}, ...}); non-JSON or error bodies resolve null and
-        // the poll simply continues.
-        if (r.ok && ((await r.json().catch(() => null)) as { user?: unknown } | null)?.user) {
-          if (!alive) return;
-          setOauthWaiting(false);
-          window.location.href = next;
-          return;
-        }
-      } catch {
-        /* local server restarting or offline — keep polling */
-      }
-      if (alive && Date.now() - started > 180_000) {
-        setOauthWaiting(false);
-        setError("sign-in took too long — please start again");
-      }
-    };
-    void tick();
-    const id = setInterval(() => void tick(), 1500);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
-  }, [oauthWaiting, next]);
-
   async function handleEmailSignIn(e?: React.FormEvent) {
     e?.preventDefault();
+    if (submitting.current) return;
     setError("");
     if (!email.trim() || !password) {
       setError("Enter your email and password.");
       return;
     }
+    submitting.current = true;
     setEmailBusy(true);
     try {
       const result = await signIn(email.trim(), password);
@@ -104,11 +59,14 @@ export function LoginPage() {
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
+      submitting.current = false;
       setEmailBusy(false);
     }
   }
 
   async function handlePair() {
+    if (submitting.current) return;
+    submitting.current = true;
     setError("");
     setPairBusy(true);
     try {
@@ -119,7 +77,8 @@ export function LoginPage() {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(body?.error ?? "pairing failed");
+        const failure = z.object({ error: z.string().min(1) }).safeParse(body);
+        setError(failure.success ? failure.data.error : "Could not connect this app. Check the code and try again.");
         return;
       }
       // the session cookie is set — reload auth state by hard-navigating
@@ -127,6 +86,7 @@ export function LoginPage() {
     } catch {
       setError("Could not reach the local server. Please try again.");
     } finally {
+      submitting.current = false;
       setPairBusy(false);
     }
   }
@@ -137,7 +97,7 @@ export function LoginPage() {
   const desktopOAuthHandoff = Boolean(capabilities.desktopOAuth) && !googleConfigured;
 
   return (
-    <AuthShell title="Welcome back" subtitle="Sign in to pick up where your team left off."
+    <AuthShell title="Your day, with Muster." subtitle="Sign in to your workspace. Your next good idea starts here."
       footer={<>New to Muster? <Link to={`/sign-up?next=${encodeURIComponent(next)}`} className="auth-link">Create an account</Link></>}>
       <div className="auth-stack">
         {sessionError && <div className="auth-notice auth-error" role="alert">
@@ -182,45 +142,12 @@ export function LoginPage() {
           </div>
         )}
 
-        {(googleConfigured || desktopOAuthHandoff) && (
-          <button
-            type="button"
-            disabled={googlePending || oauthWaiting}
-            onClick={async () => {
-              setError("");
-              if (desktopOAuthHandoff) {
-              const cloud = (capabilities.pairingCloudUrl ?? "https://muster.today").replace(/\/$/, "");
-              const url = `${cloud}/desktop-auth/start?redirect=${encodeURIComponent(window.location.origin)}&next=${encodeURIComponent(next)}`;
-                // The handoff window (Electron) shares the app's cookie jar, so
-                // /oauth/finish sets its session cookie where the get-session
-                // poll below can see it. The system browser would sign the
-                // BROWSER in and leave the app polling forever. Web builds
-                // keep the plain new-tab behavior.
-                if (window.ogb?.openAuthHandoff) await window.ogb.openAuthHandoff(url);
-                else if (window.ogb?.openExternal) await window.ogb.openExternal(url);
-                else window.open(url, "_blank", "noopener");
-                setOauthWaiting(true);
-                return;
-              }
-              setGooglePending(true);
-              const result = await signInWithProvider("google");
-              // success navigates away; reaching here means it failed
-              setGooglePending(false);
-              if (result.error) setError(result.error);
-            }}
-            className="auth-google"
-          >
-            <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
-              <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z" />
-              <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18Z" />
-              <path fill="#FBBC05" d="M3.97 10.72a5.41 5.41 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33Z" />
-              <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.46 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z" />
-            </svg>
-            {oauthWaiting ? "Finish in your browser…" : googlePending ? "Connecting…" : "Continue with Google"}
-          </button>
-        )}
+        <GoogleSignIn next={next} onError={setError} />
 
         {(googleConfigured || desktopOAuthHandoff) && <div className="auth-divider">or use your email</div>}
+        {capabilities.emailOtp && <EmailOtpSignIn next={next} />}
+        <details className={`auth-password-option${capabilities.emailOtp ? "" : " auth-password-default"}`} open={capabilities.emailOtp ? undefined : true}>
+          <summary hidden={!capabilities.emailOtp}>Use a password instead</summary>
         <form onSubmit={(e) => void handleEmailSignIn(e)} className="auth-form">
           <div>
             <label htmlFor="email" className="auth-label">Email address</label>
@@ -234,22 +161,17 @@ export function LoginPage() {
             {emailBusy ? "Signing in…" : "Sign in with email"}
           </button>
         </form>
-
-        {capabilities.emailOtp && (
-          <>
-            <div className="auth-divider">or get a one-time code</div>
-            <EmailOtpSignIn next={next} />
-          </>
-        )}
+        </details>
 
         {capabilities.cloudPairing && (
-          <form className="auth-pair" onSubmit={(event) => {
+          <form id="connect" className="auth-pair" onSubmit={(event) => {
             event.preventDefault();
             if (!pairBusy && pairCode.trim().length >= 4) void handlePair();
           }}>
+            <h2 className="auth-pair-title">Connect this app</h2>
             <p className="auth-hint">
-              Sign in once on muster.today with Google, then type the
-              code it shows here. Codes last five minutes.
+              Already use Muster on the web? Open the pairing page, sign in,
+              and enter its code here. Codes last five minutes.
             </p>
             <div className="auth-pair-row">
               <input
@@ -282,7 +204,7 @@ export function LoginPage() {
               }}
               className="auth-link"
             >
-              Open muster.today/pair ↗
+              Get a pairing code ↗
             </button>
           </form>
         )}
