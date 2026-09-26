@@ -430,3 +430,22 @@ multi-tenant hardening.
     tag pinned to CI-green merged head feaee32, release run 35993671022.
     OMB parity remaining after this: #8 org identity, #9 Linux local
     control, #10 two-desktop canvas, LLM short titles (server seam).
+15. **OMB parity CLOSED (Loop209/210, 2026-09-26)** — every item from the
+    study's gap list is now shipped, deliberately scoped, or refused:
+    **#8 org identity SHIPPED** (885b8fb): config.branding orgName + logo
+    (validated ≤300k image data: URL, server+client), browser sidebar brand
+    slot + Settings → Organization card; shared bot icons deliberately
+    unported (per-bot mascots are Muster's design choice); desktop keeps
+    the stock brand (macOS owns the titlebar). **#9 Linux local control
+    REFUSED**: readCuaConnection deliberately returns null on Linux pending
+    session-aware readiness + end-to-end evidence — recorded, not faked.
+    **#10 two-desktop canvas SHIPPED** (885b8fb): watch-only side-by-side
+    view of every existing local desktop (POST /api/local-computer/
+    canvas-screenshots + DesktopCanvas, launched from the Computer panel);
+    control deliberately stays in each bot's panel. **LLM short titles
+    SHIPPED** (fa305f0): turn.completed asks the turn's own adapter for an
+    ≤6-word title, clamped (48 UTF-16 chars), titleSource marker so user
+    renames are never clobbered; best-effort with mechanical fallback.
+    Also shipped this round: turn-fold hardening (why-journal guarded,
+    screen-frame .catch). All carried by release **v1.21.0** (988a9cd,
+    7/7 release jobs, mirror serving 1.21.0). OMB parity work is complete.

@@ -67,6 +67,21 @@ one panel; **no Skills tab, no Visibility tab, no per-bot Threads tab**.
    for Linux self-hosters.
 10. **Two-desktop canvas** — watch two Local VM desktops side by side.
 
+## Close-out (2026-09-26, Loops 209/210)
+
+- **#8 SHIPPED** — org name + logo (validated image data: URL) in the
+  browser sidebar brand slot + Settings → Organization. Shared bot icons
+  stay unported on purpose: per-bot colors/mascots are a design choice.
+- **#9 REFUSED** — `readCuaConnection` deliberately returns null on Linux
+  ("outside the Ubuntu baseline") pending session-aware readiness and
+  end-to-end evidence. Recorded as a deliberate non-goal, not a gap.
+- **#10 SHIPPED** — DesktopCanvas: watch-only side-by-side view of every
+  local desktop that exists right now (per-bot or shared), launched from
+  the Computer panel; control stays in each bot's own panel.
+- **LLM short titles SHIPPED** — generated at turn end by the turn's own
+  adapter; user renames are never clobbered (titleSource marker).
+- All of the above rides release v1.21.0 (7/7 release jobs, mirror live).
+
 Not ported (deliberately): client-workspace server tenants (Muster's model is
 one workspace per deployment), license banners (no enterprise licensing),
 usage-analytics toggle (Muster ships none — keep it that way), OMB's

@@ -53,15 +53,15 @@ so you never repeat work.
 
 | Question | Doc |
 |---|---|
-| **What is the product direction? (owner-locked 2026-09-18: cloud-relay flagship, BYOK free forever, Drive/Telegram-only storage)** | `docs/plans/cloud-relay-strategy-2026-09-18.md` |
+| **Historical direction / target architecture (read newer owner decisions first)** | `docs/plans/cloud-relay-strategy-2026-09-18.md` |
 | What is the mascot character system? (slices, contracts, ownership) | `docs/plans/mascot-character-system-plan-2026-09-18.md` |
 | How should agents behave on this codebase? (per-slice rules) | `skills/mascot/SKILL.md`, this file |
 | Where did the mascot references come from? (Novra GrokBot, botato, LaoA…) | `docs/research/mascot-character-study-2026-09-18.md` |
-| Release process, mirror, signing, who is blocked on what | `docs/release-mirror.md`, remaining-work-plan §4/§8 |
+| Release process, mirror, signing, who is blocked on what | `docs/release-mirror.md`, `docs/release-runbook.md`, remaining-work-plan §4/§8 |
 | App Store Connect / Xcode Cloud / TestFlight access (auth is set up) | `docs/guides/asc-cli.md` |
 | Backup/Drive boundary, what never gets claimed | `docs/plans/portable-backup-contract-2026-09-12.md` |
 | OpenMausBot / Grok Bot competitive gaps | `docs/plans/competitive-landscape.md`, `docs/plans/landing-reference-study-2026-09-10.md` |
-| What production serves right now (verified GET receipts) | ceo-log Loop116, current-state Loop116 |
+| Latest audited platform/source/release separation | `docs/plans/platform-boundaries-audit-2026-09-26.md` §1; recheck live receipts |
 | Untracked snapshots — preserve byte-identical, never commit | `docs/research/glm/*`, `www/templates.html` |
 
 ## 4. Non-negotiable rules (violate these and the loop fails review)
