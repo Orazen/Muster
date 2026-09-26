@@ -316,6 +316,11 @@ export interface ConfigStatus {
   bots?: { defaultEffort: EffortLevel | null };
   /** BYO VPS computer; the alias is a setting, credentials stay in ssh(1). */
   vps?: { sshAlias: string };
+  /** Whether this reader administers the deployment. Operator-only panels
+   * (People) read it so the nav can omit them instead of opening a section
+   * whose only possible outcome is a 403. Absent = operator, which is the
+   * desktop and self-host case where there is one account. */
+  isOperator?: boolean;
   /** Storage-sovereignty gate (decision 14): required on hosted deployments,
    * satisfied once the user's own Drive (or install Telegram) is connected.
    * `options` reports what this deployment can actually offer, so the gate

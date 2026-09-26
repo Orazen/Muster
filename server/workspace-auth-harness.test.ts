@@ -810,6 +810,30 @@ Socket.prototype.connect = blocked;
       expect(readFileSync(join(shared.dataDirectory, "memory", "canary.md"), "utf8")).toBe(memoryCanary);
       expect(existsSync(shared.networkLog)).toBe(false);
     });
+    it(`tells ${role} whether it administers the deployment, so People can be hidden`, async () => {
+      // The 403 on /api/people is permanent for a non-operator, so the UI
+      // hides the section rather than opening one that can only error. That
+      // needs the server to say which case the reader is, per request.
+      // `primary` is signed up first in this harness, which makes it the
+      // deployment operator by creation order; `secondary` is not. The
+      // probe accounts are later signups, so they are non-operators too.
+      const expected = new Map<Account, boolean>([[primary, true], [secondary, false], [probePrimary, false], [probeSecondary, false]]);
+      const account = role === "primary" ? probePrimary : probeSecondary;
+      const response = await request(shared, "/api/config", "GET", undefined, account.cookie);
+      expect(response.status).toBe(200);
+      const { isOperator } = z.object({ isOperator: z.boolean() }).parse(await response.json());
+      expect(isOperator).toBe(expected.get(account));
+    });
+    it("tells the deployment operator the same thing as its own role claims", async () => {
+      // The operator must not be locked out of its own People list by the
+      // same gate that hides it from everyone else.
+      const { isOperator } = z.object({ isOperator: z.boolean() })
+        .parse(await (await request(shared, "/api/config", "GET", undefined, primary.cookie)).json());
+      expect(isOperator).toBe(true);
+      expect((await request(shared, "/api/people", "GET", undefined, primary.cookie)).status).toBe(200);
+      // and the account the gate exists for is refused both ways
+      expect((await request(shared, "/api/people", "GET", undefined, secondary.cookie)).status).toBe(403);
+    });
     it(`offers ${role} the hosted Drive connect without touching any token state`, async () => {
       const before = accountState(shared.dataDirectory);
       const response = await request(shared, "/api/workspace/google/connect", "GET", undefined, (role === "primary" ? probePrimary : probeSecondary).cookie);

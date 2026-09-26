@@ -18,7 +18,7 @@ import { SnapshotsCard } from "./SnapshotsCard";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
-import { hostBuild, settingsSectionAllowed } from "@/lib/host-build";
+import { hostBuild, operatorSectionAllowed, settingsSectionAllowed } from "@/lib/host-build";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
 import { RemoteAccessSection } from "./RemoteAccessSection";
@@ -979,7 +979,13 @@ export function SettingsModal() {
   const { capabilities } = useDesktopCapabilities();
   const build = hostBuild(capabilities);
   const inBrowser = build === "browser";
-  const sections = SECTIONS.filter((entry) => settingsSectionAllowed(entry.id, build, Boolean(globalThis.window?.ogb)));
+  const sections = SECTIONS.filter((entry) =>
+    settingsSectionAllowed(entry.id, build, Boolean(globalThis.window?.ogb))
+    // People lists every account on the deployment and 403s to anyone who
+    // does not administer it — a nav entry that could only ever show an
+    // error, so it is omitted for a non-operator instead.
+    && operatorSectionAllowed(entry.id, state.config?.isOperator),
+  );
   if (audit.reachable && auditBotId) {
     sections.splice(sections.length - 1, 0, { id: "audit", label: "Audit", icon: ShieldCheck, keywords: ["decisions", "ledger", "history"] });
     sections.splice(sections.length - 1, 0, { id: "why", label: "Why", icon: NotebookPen, keywords: ["journal", "decisions", "intent", "reasoning", "runs"] });

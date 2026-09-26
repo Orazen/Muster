@@ -49,3 +49,19 @@ export function turnFixAllowed(action: string, build: HostBuild): boolean {
   if (action === "open-vm-settings") return build === "desktop";
   return true;
 }
+
+/** A section the deployment operator alone can open. `/api/people` lists
+ * every account on a hosted server, so it answers 403 to anyone else — not
+ * because the request was wrong, but because this reader does not administer
+ * the deployment. That is a permanent condition, so rendering the section
+ * means a nav entry whose only possible outcome is a red error. Hide it
+ * instead.
+ *
+ * This is a different axis from the build. A desktop install and a hosted
+ * operator both pass, and a hosted non-operator is the only case excluded;
+ * the default is true so a config that predates the flag, or the window
+ * before it loads, still offers the section rather than blinking it out. */
+export function operatorSectionAllowed(sectionId: string, isOperator: boolean | undefined): boolean {
+  if (sectionId === "people") return isOperator !== false;
+  return true;
+}

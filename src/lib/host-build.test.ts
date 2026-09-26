@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { initialDesktopCapabilities, type DesktopBridge } from "@/lib/desktop";
-import { hostBuild, settingsSectionAllowed, turnFixAllowed } from "./host-build";
+import { hostBuild, operatorSectionAllowed, settingsSectionAllowed, turnFixAllowed } from "./host-build";
 
 describe("host build", () => {
   it("reads the browser build from the capability fallback, not from a preload global", () => {
@@ -84,5 +84,43 @@ describe("turn failure repairs by build", () => {
 
   it("does not fail closed on an action it has never heard of", () => {
     expect(turnFixAllowed("some-future-server-side-fix", "browser")).toBe(true);
+  });
+});
+
+describe("operator-only sections", () => {
+  it("omits People for a reader who does not administer the deployment", () => {
+    // /api/people answers 403 here, permanently — not a transient failure
+    // the user can retry or fix, so the nav entry itself is the defect.
+    expect(operatorSectionAllowed("people", false)).toBe(false);
+  });
+
+  it("keeps People for the operator and on a desktop install", () => {
+    expect(operatorSectionAllowed("people", true)).toBe(true);
+  });
+
+  it("keeps People while the config has not said either way", () => {
+    // undefined covers a server that predates the flag and the window
+    // before /api/config lands. Defaulting to hidden would make the section
+    // blink out for the operator on every load.
+    expect(operatorSectionAllowed("people", undefined)).toBe(true);
+  });
+
+  it("leaves every other section alone, operator or not", () => {
+    for (const id of ["general", "activity", "backups", "vault", "billing", "anything-new"]) {
+      expect(operatorSectionAllowed(id, false)).toBe(true);
+      expect(operatorSectionAllowed(id, true)).toBe(true);
+      expect(operatorSectionAllowed(id, undefined)).toBe(true);
+    }
+  });
+
+  it("does not confuse this axis with the build — an operator may be in a browser", () => {
+    // The desktop gate and the operator gate are independent: a hosted
+    // operator is a browser reader and still gets People, while a desktop
+    // user who somehow is not the operator is excluded by role rather than
+    // by platform.
+    const build = hostBuild(initialDesktopCapabilities(undefined));
+    expect(build).toBe("browser");
+    expect(operatorSectionAllowed("people", true)).toBe(true);
+    expect(settingsSectionAllowed("computer", build, false)).toBe(false);
   });
 });

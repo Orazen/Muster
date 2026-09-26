@@ -4062,6 +4062,11 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
     bots: { defaultEffort: cfg.bots?.defaultEffort ?? null },
     // alias is a setting, not a secret — ssh(1) holds the actual credentials
     vps: { sshAlias: vpsSshAlias(cfg) ?? "" },
+    // Whether this reader administers the deployment. Not a secret — the UI
+    // needs it to hide operator-only panels (People) rather than opening a
+    // section whose only outcome is a 403. Same predicate the providers
+    // fill above already uses.
+    isOperator,
   };
 }
 
