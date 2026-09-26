@@ -411,4 +411,20 @@ live HTTP), pairing harness 12/12 (browser redeem + replay), redeem flow
 touched files; full local suite 385 files, 5861 passed, 8 skipped,
 0 failed.
 
+## Bug sweep 2026-09-26 — read the report before claiming a fix (2026-09-26, night)
+
+Four parallel hunts (brain surface, pairing family, eval CLI + fleet MCP,
+fresh product surfaces) produced [bug-report-2026-09-26.md](bug-report-2026-09-26.md):
+twenty-plus findings, each CONFIRMED live or SUSPECTED with exact lines,
+each with a suggested fix and an owning lane. The four to read first: the
+parallel-threads widening is unreachable behind the busy-check (the
+feature is a no-op); a cosmetic config save tears down every in-flight
+turn; a signed-in account can read another account's receipts and mint
+public share links for them; `muster pair --redeem` burns the single-use
+code it reports as failed. The brain panel's own P1 — client decodes
+written against invented shapes, so every action threw on success — was
+fixed in the same push, with its tests re-pinned to the wire. Claim by
+finding number in the ceo-log before editing; findings touching
+`server/index.ts` sequence through the integrator.
+
 
