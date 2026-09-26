@@ -80,32 +80,36 @@ final class WatchHandoffReceiver: NSObject, WCSessionDelegate {
         guard let session, let ordering else { return }
         guard let data = dictionary[CompanionHandoffCodec.key] as? Data else { return }
 
-        // Tombstone: the phone unpaired, so does the watch — unless a newer
-        // pairing has already superseded it.
-        if CompanionHandoffCodec.isUnpair(data) {
-            let tombstone = CompanionHandoffCodec.decodeTombstone(from: dictionary)
-            switch ordering.decideUnpair(generation: tombstone?.generation) {
-            case .unpair:
-                if session.connection != nil { session.signOut() }
-            case .stale, .duplicate:
-                break
+        // ONE classification, then ONE branch. Asking "is this an unpair?"
+        // separately from "decode it as a pairing" is how a valid pairing came
+        // to be treated as an unpair: the tombstone decoder used to accept any
+        // JSON object, so it matched a pairing and the watch signed itself out.
+        switch CompanionHandoffCodec.classify(data) {
+        case .unpair(let tombstone):
+            // The phone unpaired, so does the watch — unless a newer pairing has
+            // already superseded this tombstone.
+            if case .unpair = ordering.decideUnpair(generation: tombstone.generation), session.connection != nil {
+                session.signOut()
+            }
+
+        case .pair(let handoff):
+            switch ordering.decidePairing(handoff) {
             case .adopt:
+                // Trust advances only once the credential is actually stored.
+                // adoptHandoff can fail at the keychain write, and committing
+                // anyway would make the next redelivery look like a duplicate —
+                // so a pairing that failed to store could never be retried.
+                if session.adoptHandoff(handoff) {
+                    ordering.commitAdoption(handoff)
+                    WKInterfaceDevice.current().play(.notification)
+                }
+            case .duplicate, .stale:
+                break
+            case .unpair:
                 break
             }
-            return
-        }
 
-        guard let handoff = CompanionHandoffCodec.decode(from: data) else { return }
-        switch ordering.decidePairing(handoff) {
-        case .adopt:
-            session.adoptHandoff(handoff)
-            // Only now that the pairing is actually in place: the generation
-            // floor must not advance ahead of the work it is meant to describe.
-            ordering.commitAdoption(handoff)
-            WKInterfaceDevice.current().play(.notification)
-        case .duplicate, .stale:
-            break
-        case .unpair:
+        case nil:
             break
         }
     }

@@ -25,29 +25,44 @@
 // `WatchHandoffReceiver` is a thin shell over it, because a WCSession delegate
 // cannot be exercised without a paired radio — the decision is what can be
 // pinned, so the decision is what carries the tests.
+import CryptoKit
 import Foundation
 
 /// What the watch currently believes, and the highest generation it has seen.
 public struct HandoffTrustState: Codable, Equatable, Sendable {
     /// The pairing in force, or nil when unpaired.
     public var connection: Connection?
-    /// The token belonging to `connection`, held so a duplicate can be told
-    /// from a re-pair without touching the keychain on the hot path.
-    public var token: String?
+    /// A SHA-256 FINGERPRINT of the token belonging to `connection` — never the
+    /// token itself.
+    ///
+    /// This value is written to UserDefaults, which is plaintext, world-readable
+    /// to anything with the app container, and included in unencrypted backups.
+    /// A bearer token does not belong there. The fingerprint is enough for the
+    /// only job this state has — telling a redelivery from a re-pair — because
+    /// the real credential lives in the keychain, where `Keychain.save` put it.
+    /// (Storing the raw token here was a regression in the change that added
+    /// generations.)
+    public var tokenFingerprint: String?
     /// Highest generation ever observed, paired or unpaired. Survives unpairing,
     /// which is what makes a delayed unpair droppable.
     public var generation: UInt64
     /// Monotonic floor handed out to the next local pairing event.
     public var counter: UInt64
 
-    public init(connection: Connection? = nil, token: String? = nil, generation: UInt64 = 0, counter: UInt64 = 0) {
+    public init(connection: Connection? = nil, tokenFingerprint: String? = nil, generation: UInt64 = 0, counter: UInt64 = 0) {
         self.connection = connection
-        self.token = token
+        self.tokenFingerprint = tokenFingerprint
         self.generation = generation
         self.counter = counter
     }
 
     public var isPaired: Bool { connection != nil }
+}
+
+/// SHA-256 of a token, hex encoded. Stable across launches, useless to anyone
+/// holding it: it cannot be replayed as a credential.
+public func handoffTokenFingerprint(_ token: String) -> String {
+    SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
 }
 
 /// Where the generation survives process death. Injectable so the reducer is
@@ -130,7 +145,8 @@ public struct WatchHandoffOrdering {
         if let generation, generation < state.generation { return .stale }
         if generation == nil && state.generation > 0 { return .stale }
 
-        if state.connection?.id == handoff.connection.id, state.token == handoff.token {
+        if state.connection?.id == handoff.connection.id,
+           state.tokenFingerprint == handoffTokenFingerprint(handoff.token) {
             // Same pairing, same token. Advance the floor so a later unnumbered
             // delivery is still correctly seen as stale, then no-op.
             if let generation, generation > state.generation {
@@ -153,7 +169,7 @@ public struct WatchHandoffOrdering {
             var updated = state
             updated.generation = max(updated.generation, generation)
             updated.connection = nil
-            updated.token = nil
+            updated.tokenFingerprint = nil
             store.save(updated)
             return .unpair(generation: generation)
         }
@@ -162,7 +178,7 @@ public struct WatchHandoffOrdering {
         // an unpair is the safe direction to be wrong in.
         var updated = state
         updated.connection = nil
-        updated.token = nil
+        updated.tokenFingerprint = nil
         store.save(updated)
         return .unpair(generation: state.generation)
     }
@@ -173,7 +189,7 @@ public struct WatchHandoffOrdering {
         let state = store.load()
         var updated = state
         updated.connection = handoff.connection
-        updated.token = handoff.token
+        updated.tokenFingerprint = handoffTokenFingerprint(handoff.token)
         if let generation = handoff.generation {
             updated.generation = max(updated.generation, generation)
         }

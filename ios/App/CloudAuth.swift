@@ -155,11 +155,22 @@ final class CloudAuth: NSObject, ObservableObject {
                 let text = String(data: data, encoding: .utf8) ?? ""
                 throw CloudAuthError.server(Self.friendlyServerText(text))
             }
-            let decoded = try JSONDecoder().decode([String: String].self, from: data)
-            guard let email = decoded["email"], !email.isEmpty else {
+            // Decode ONLY the fields this app needs, into named slots. The
+            // previous `[String: String]` decode of the whole body meant any
+            // field the server added — a version number, say — failed the
+            // decode outright, and the catch below then reported a NETWORK
+            // error for a sign-in that had actually worked. Unknown fields are
+            // ignored now, which is what a client and a server that version
+            // independently actually need.
+            struct ExchangeResponse: Decodable {
+                let email: String
+                let name: String?
+            }
+            let decoded = try JSONDecoder().decode(ExchangeResponse.self, from: data)
+            guard !decoded.email.isEmpty else {
                 throw CloudAuthError.server("The sign-in response had no account.")
             }
-            store(CloudIdentity(email: email, name: decoded["name"] ?? ""))
+            store(CloudIdentity(email: decoded.email, name: decoded.name ?? ""))
         } catch let err as CloudAuthError {
             error = err.message
         } catch {

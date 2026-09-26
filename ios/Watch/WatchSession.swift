@@ -382,7 +382,15 @@ final class WatchSession: ObservableObject {
     /// phone paired normally and shares the outcome; the watch skips the
     /// six-digit code entirely. Same postconditions as pair(with:): token
     /// to the keychain, connection to defaults, client built, connected.
-    func adoptHandoff(_ handoff: CompanionHandoff) {
+    ///
+    /// Returns whether the pairing was actually stored. The caller advances the
+    /// persisted trust generation on `true` only: this function can fail at the
+    /// keychain write and return early, and a caller that advanced trust anyway
+    /// would record a pairing the watch does not hold — after which the next
+    /// redelivery reads as a duplicate and is dropped, so the pairing could
+    /// never be retried.
+    @discardableResult
+    func adoptHandoff(_ handoff: CompanionHandoff) -> Bool {
         pairingGeneration += 1
         streamGeneration += 1
         streamTask?.cancel()
@@ -394,7 +402,7 @@ final class WatchSession: ObservableObject {
             try Keychain.save(handoff.token, for: handoff.connection.id)
         } catch {
             status = .offline("Could not store the pairing from your phone: \(error.localizedDescription)")
-            return
+            return false
         }
         UserDefaults.standard.set(try? JSONEncoder().encode(handoff.connection), forKey: Self.connectionKey)
         connection = handoff.connection
@@ -403,6 +411,7 @@ final class WatchSession: ObservableObject {
         status = .connecting
         reconnectDelay = 0
         connect()
+        return true
     }
 
     func signOut() {

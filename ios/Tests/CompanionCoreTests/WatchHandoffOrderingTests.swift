@@ -64,7 +64,12 @@ final class WatchHandoffOrderingTests: XCTestCase {
         XCTAssertEqual(ordering.decidePairing(delayed), .stale)
         // And the watch still believes what it believed before.
         XCTAssertEqual(ordering.currentState().connection?.id, "conn-b")
-        XCTAssertEqual(ordering.currentState().token, "token-b")
+        XCTAssertEqual(ordering.currentState().tokenFingerprint, handoffTokenFingerprint("token-b"))
+        // The credential itself must be nowhere in the persisted state: this
+        // value lands in UserDefaults, which is plaintext.
+        let encoded = String(data: (try? JSONEncoder().encode(ordering.currentState())) ?? Data(), encoding: .utf8) ?? ""
+        XCTAssertFalse(encoded.contains("token-b"))
+        XCTAssertTrue(encoded.contains("tokenFingerprint"))
     }
 
     func testDelayedOlderUnpairCannotSignOutALivePairing() {

@@ -5139,7 +5139,17 @@ let requestUserEmail = "";
         }
         return json(res, 400, { error: "that sign-in code expired or was already used — start again from Muster" });
       }
-      return json(res, 200, { email: result.identity.email, name: result.identity.name, v: result.version });
+      // The body is frozen at the 1.20 shape {email, name} and must stay
+      // frozen: the iPhone decodes the WHOLE response as [String: String]
+      // (ios/App/CloudAuth.swift), so adding a field — even a version number —
+      // fails that decode with a type mismatch and the app reports a network
+      // error for a sign-in that actually worked. The exchange version
+      // therefore rides a header, which an old client ignores and a new one can
+      // read. Do not add a body field here without auditing every strict
+      // decoder that reads this response first.
+      res.setHeader("x-muster-exchange-version", String(result.version));
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { email: result.identity.email, name: result.identity.name });
     }
 
     // ── desktop side of the OAuth handoff ──────────────────────────────
