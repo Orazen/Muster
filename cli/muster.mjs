@@ -22,7 +22,7 @@
 //   muster status --json             machine-readable (agent callers)
 
 import { homedir, networkInterfaces } from "node:os";
-import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -136,27 +136,20 @@ async function pair() {
     headers: { "content-type": "application/json", cookie },
   });
   const { code } = await asJson(create);
-  console.log(`Pairing code: ${code}\nOpen muster.orazen.online/pair on a signed-in device, or run: muster pair --redeem ${code} --cloud ${cloud}`);
+  console.log(`Pairing code: ${code}\nOpen muster.orazen.online/pair on a signed-in device and press "Redeem on this device", or scan the QR with the phone you pair from.`);
   saveConfig({ cloud, cloudEmail: email });
 }
 
 async function pairRedeem() {
-  const cloud = arg("--cloud") ?? CLOUD_DEFAULT;
-  const code = arg("--redeem") ?? process.exit(1);
-  const verify = await fetch(`${cloud}/api/pair/verify`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "user-agent": "muster-cli" },
-    body: JSON.stringify({ code }),
-  });
-  const raw = verify.headers.getSetCookie().find((c) => c.startsWith("better-auth.session_token="));
-  if (!verify.ok || !raw) {
-    console.error("Redeem failed — the code may be consumed or expired.");
-    process.exit(1);
-  }
-  const pair = raw.split(";")[0];
-  const eq = pair.indexOf("=");
-  saveConfig({ base: cloud, cookie: `${pair.slice(0, eq)}=${pair.slice(eq + 1)}` });
-  console.log(`Paired. Config: ${CONFIG_PATH}`);
+  // Retired, deliberately without touching the network: the cloud's verify
+  // endpoint consumes the single-use code and returns only an identity —
+  // no session a CLI can hold — so every run of this command destroyed the
+  // code it was given and then reported failure. The working paths are
+  // `muster pair` (QR or credentials) and, on a signed-in browser, the
+  // /pair#CODE link's "Redeem on this device" button.
+  console.error("muster pair --redeem is retired. The cloud never could hand a CLI a session this way, and running it consumed the single-use code before failing.");
+  console.error("Pair this CLI with `muster pair` (scan the QR or use credentials). A carried /pair#CODE link redeems in a signed-in browser — open it and press \"Redeem on this device\".");
+  process.exit(1);
 }
 
 async function bots() {
@@ -312,7 +305,19 @@ async function sessions() {
   }
   const list = await asJson(await api(cfg, "/api/auth/list-sessions"));
   const current = currentToken(cfg);
-  if (json) return console.log(JSON.stringify({ sessions: list }, null, 2));
+  if (json) {
+    // The raw token is credential material (it drives --revoke prefix
+    // matching server-side); even truncated it must not land in shell
+    // history or CI logs, so JSON mode carries a display prefix only.
+    const safe = list.map((s) => ({
+      id: s.id,
+      token: `${String(s.token ?? "").slice(0, 6)}…`,
+      current: s.token === current,
+      createdAt: s.createdAt, expiresAt: s.expiresAt,
+      ipAddress: s.ipAddress, userAgent: s.userAgent,
+    }));
+    return console.log(JSON.stringify({ sessions: safe }, null, 2));
+  }
   console.log(
     `${list.length} active session${list.length === 1 ? "" : "s"} (current marked *):`,
   );
@@ -799,7 +804,17 @@ function resolveFleetRuntime(entry = "fleet-mcp") {
   // dist-server/ beside cli/, a repo checkout runs TypeScript directly.
   const pkgRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
   const bundled = join(pkgRoot, "dist-server", `${entry}.js`);
-  if (existsSync(bundled)) return { cmd: process.execPath, args: [bundled], cwd: pkgRoot };
+  const source = join(pkgRoot, "server", `${entry}.ts`);
+  if (existsSync(bundled)) {
+    // The bundle is a build artifact, not the source of truth: a checkout
+    // where the source moved on but the bundle did not must run the source,
+    // or the CLI silently grades with yesterday's rules.
+    if (existsSync(source) && statSync(source).mtimeMs > statSync(bundled).mtimeMs) {
+      console.error(`Warning: dist-server/${entry}.js is older than server/${entry}.ts — running the source. Rebuild with \`pnpm build:server\` to refresh the bundle.`);
+      return { cmd: process.execPath, args: ["--experimental-strip-types", source], cwd: pkgRoot };
+    }
+    return { cmd: process.execPath, args: [bundled], cwd: pkgRoot };
+  }
   for (const cwd of [pkgRoot, process.cwd()]) {
     if (existsSync(join(cwd, "server", `${entry}.ts`))) {
       return {
@@ -869,7 +884,10 @@ async function evalTrendCommand() {
   // is meant by "over time"; one kind per trend. Nothing is written; the
   // trend goes to stdout — compact by default, full JSON with --json (same
   // convention as bots/status).
-  const inputs = [subject, ...rest].filter((file) => file && !file.startsWith("--")).map((file) => resolve(file));
+  // Only the exact --json token is a flag; any other argument is a file, so
+  // a scorecard literally named --something.json fails with a clear stat
+  // error instead of being silently swallowed here.
+  const inputs = [subject, ...rest].filter((file) => file && file !== "--json").map((file) => resolve(file));
   if (!inputs.length) {
     console.error("Usage: muster eval-trend [--json] scorecard1.json [scorecard2.json ...] (see the fleet and role eval playbook)");
     process.exitCode = 2;

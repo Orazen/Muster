@@ -73,10 +73,12 @@ export function parseFragmentCode(hash: string | null | undefined): CarriedCode 
 }
 
 /** One-line, copyable redemption instruction keyed to how the code was
- * issued. The page that shows a carried code never redeems it itself. */
+ * issued. The page that shows a carried code never redeems it on its own —
+ * the person presses the button; a cloud code can also be redeemed by the
+ * very browser that displays it. */
 export function carriedCodeInstruction(code: CarriedCode, origin: string): string {
   if (code.mode === "cloud") {
-    return `Enter this code in Muster Desktop to sign in as the account that issued it on ${origin}, or run \`muster pair --redeem ${code.code} --cloud ${origin}\` on that account.`;
+    return `Press "Redeem on this device" below to sign this browser in as the account that issued the code, or enter it in Muster Desktop on the computer you are pairing.`;
   }
   if (code.mode === "self-hosted") {
     return `This is a server pairing code for ${origin}. Enter it in the app connecting to that server — or paste the whole link there.`;

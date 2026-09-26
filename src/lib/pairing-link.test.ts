@@ -313,8 +313,9 @@ describe("carriedCodeInstruction", () => {
     expect(text).toMatch(/server pairing code/);
   });
 
-  it("gives the cloud redeem command for a cloud code", () => {
+  it("points a cloud code at this browser's own redeem button", () => {
     const text = carriedCodeInstruction({ code: "ABCD2345", mode: "cloud" }, "https://muster.example");
-    expect(text).toContain("muster pair --redeem ABCD2345 --cloud https://muster.example");
+    expect(text).toContain('Press "Redeem on this device" below');
+    expect(text).not.toContain("--redeem");
   });
 });
