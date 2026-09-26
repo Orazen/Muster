@@ -162,3 +162,15 @@ EVIDENCE:
 - #9 Linux local control: NOT implemented — readCuaConnection deliberately returns null on Linux ("outside the Ubuntu baseline… until session-aware readiness and end-to-end evidence"). Faking a fake bridge would be exactly the dishonesty the unlazy method forbids; recorded as a documented refusal, not a gap.
 - v1.21.0 released: bump script output READ this time (1.20.0 → 1.21.0; Loop206 lesson applied); hand-fixed the stale no-JS download-badge fallback (v1.12.1 → v1.21.0) per the script's warning; bump commit 988a9cd CI-green; tag v1.21.0 on 988a9cd; Release run all 7 jobs success (pin, mac-x64, mac-arm64 sign+notarize+staple, win-nsis, linux, verify+publish, VPS deploy); "Muster 1.21.0" published (draft=false, prerelease=false); mirror latest-mac.yml → 1.21.0 and arm64.zip → HTTP 200.
 - Shared-tree notes: commit swept 2 staged docs hunks from another agent's in-flight `git add` (2b6f0c4) — the rider was docs-only and CI-green; afterwards scoped commits with `git commit -m ... -- <paths>`. Their auth/email WIP (which carries a known tsc error) stayed uncommitted and is theirs to close.
+
+## Loop211 (2026-09-26) — parity docs closed out, release runbook, full test pass
+
+GATE: the parity close-out is recorded in the docs agents actually read; the release process is written down where the next agent will find it; the complete test surface (unit + e2e) passes on current main.
+CHECK: append final status to remaining-work-plan §15 + parity study close-out; write docs/release-runbook.md from the v1.20.0/v1.21.0 evidence; run npx vitest run (all) and npx playwright test (all, fresh dist).
+EXPECT: 0 failures across both suites; runbook covers tag contract, draft race, staple-on-DMG, port var, shared-tree commits.
+EVIDENCE:
+- Docs: remaining-work-plan item 15 + parity-study "Close-out (2026-09-26)" record #8 SHIPPED (scoped), #9 REFUSED (deliberate), #10 SHIPPED, LLM short titles SHIPPED — carried by v1.21.0 (988a9cd, 7/7 jobs, mirror live). docs/release-runbook.md written (110 lines, 6-gotcha table) and linked from AGENT-ORIENTATION's release row.
+- Shared-tree surgery: both edited docs carried other agents' uncommitted text (incl. notes marked "do not publish while scope unresolved") — committed ONLY my hunks by hunk-splitting the diffs, then re-applied their WIP to the tree. Verified: commit c3ee75d contains exactly my 4 files/147 insertions; their text byte-identical in the working tree after.
+- Full vitest: 392 files passed, 5891 tests passed / 8 skipped / 0 failed (~10 min, /tmp/full-vitest-loop211.log).
+- Full e2e (playwright, serial workers, fresh `pnpm vite build`): 88 passed / 0 failed in 9.0m (/tmp/e2e-loop211.log) — incl. the new auth-entry + landing suites other agents landed.
+- No code changes this loop: docs + verification only. Both suites green without a single fix needed, confirming the fold hardening, titles, #8/#10 work from Loops 209–210.
