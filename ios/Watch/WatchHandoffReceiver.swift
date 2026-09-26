@@ -1,6 +1,6 @@
 // WatchHandoffReceiver — the watch side of phone-to-watch pairing.
 //
-// The phone's WatchHandoffBridge pushes {connection, token} over
+// The phone's WatchHandoffBridge pushes {connection, token, generation} over
 // WatchConnectivity after the phone pairs; this receiver adopts it with the
 // watch's own normal pairing path (token to keychain, connection to
 // defaults, client built, stream connected) — the wrist never types a
@@ -8,9 +8,13 @@
 // unpairs.
 //
 // The radio delivers on its own schedule (watch app not running, wrist
-// asleep); every entry point funnels into one idempotent adopt that checks
-// the incoming token against what is already stored, so a redelivered
-// context is a no-op, not a re-pair.
+// asleep), on two channels, so the SAME payload can arrive twice and an OLDER
+// payload can arrive after a newer one. Every entry point therefore funnels
+// into `adoptIfNewer`, which asks `WatchHandoffOrdering` what to do and then
+// only carries the decision out. The ordering itself — higher generation wins,
+// equal is a no-op, lower is dropped — lives in CompanionCore where it is
+// tested; see that file for why a queued delivery used to be able to restore
+// revoked trust.
 import Foundation
 import WatchConnectivity
 import WatchKit
@@ -21,6 +25,10 @@ final class WatchHandoffReceiver: NSObject, WCSessionDelegate {
     static let shared = WatchHandoffReceiver()
 
     private weak var session: WatchSession?
+    /// Ordering lives in CompanionCore so it is testable; this is only a handle
+    /// on it. Nil until `attach(to:)`, so a delegate callback that beats
+    /// activation does nothing rather than deciding without persistence.
+    private var ordering: WatchHandoffOrdering?
 
     private override init() {
         super.init()
@@ -31,6 +39,7 @@ final class WatchHandoffReceiver: NSObject, WCSessionDelegate {
     /// application context (a handoff sent while the watch app was closed).
     func attach(to session: WatchSession) {
         self.session = session
+        ordering = WatchHandoffOrdering(store: UserDefaultsHandoffTrustStore())
 #if DEBUG
         // Owned acceptance: the rig delivers the handoff as a launch
         // argument (JSON, identical to what the radio would carry). The
@@ -58,30 +67,47 @@ final class WatchHandoffReceiver: NSObject, WCSessionDelegate {
         adoptIfNewer(dictionary: context)
     }
 
-    /// The single decision every delivery path funnels into. Idempotent: if
-    /// the token on the wire is the one already in the keychain, nothing
-    /// happens — that is what makes redelivery harmless. A fresh token
-    /// (re-paired phone, new computer) goes through the watch's normal pair
-    /// path.
+    /// The single decision every delivery path funnels into.
+    ///
+    /// The ORDERING is not decided here — it is decided by
+    /// `WatchHandoffOrdering` in CompanionCore, where it can be tested without
+    /// a radio. This shell only carries out the decision: adopt, unpair,
+    /// ignore. Before that existed, any delivery that was not byte-identical to
+    /// the current one was adopted, so a queued older pairing could put a
+    /// revoked computer's token back into the keychain, and a queued older
+    /// unpair could sign out a pairing created after it.
     private func adoptIfNewer(dictionary: [String: Any]) {
-        guard let session else { return }
-        // Tombstone: the phone unpaired, so does the watch.
-        if let data = dictionary[CompanionHandoffCodec.key] as? Data,
-           String(data: data, encoding: .utf8) == CompanionHandoffCodec.unpairMarker {
-            if session.connection != nil {
-                session.signOut()
+        guard let session, let ordering else { return }
+        guard let data = dictionary[CompanionHandoffCodec.key] as? Data else { return }
+
+        // Tombstone: the phone unpaired, so does the watch — unless a newer
+        // pairing has already superseded it.
+        if CompanionHandoffCodec.isUnpair(data) {
+            let tombstone = CompanionHandoffCodec.decodeTombstone(from: dictionary)
+            switch ordering.decideUnpair(generation: tombstone?.generation) {
+            case .unpair:
+                if session.connection != nil { session.signOut() }
+            case .stale, .duplicate:
+                break
+            case .adopt:
+                break
             }
             return
         }
-        guard let handoff = CompanionHandoffCodec.decode(from: dictionary) else { return }
-        // Already on this exact pairing? Nothing to do — this is what makes
-        // redelivery harmless.
-        if session.connection?.id == handoff.connection.id,
-           (try? Keychain.token(for: handoff.connection.id)) == handoff.token {
-            return
+
+        guard let handoff = CompanionHandoffCodec.decode(from: data) else { return }
+        switch ordering.decidePairing(handoff) {
+        case .adopt:
+            session.adoptHandoff(handoff)
+            // Only now that the pairing is actually in place: the generation
+            // floor must not advance ahead of the work it is meant to describe.
+            ordering.commitAdoption(handoff)
+            WKInterfaceDevice.current().play(.notification)
+        case .duplicate, .stale:
+            break
+        case .unpair:
+            break
         }
-        session.adoptHandoff(handoff)
-        WKInterfaceDevice.current().play(.notification)
     }
 
     // MARK: - WCSessionDelegate

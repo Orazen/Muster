@@ -38,16 +38,32 @@ final class WatchHandoffBridge: NSObject, WCSessionDelegate {
 
     /// After a successful pairing on the phone.
     func pushPairing(connection: Connection, token: String) {
-        send(CompanionHandoff(connection: connection, token: token))
+        send(CompanionHandoff(connection: connection, token: token, generation: nextGeneration()))
     }
 
     /// After an unpair on the phone.
     func pushUnpair() {
+        // Burn a generation for the tombstone too. Pair and unpair share one
+        // counter, so an unpair can never be reordered behind a pairing that
+        // happened before it — which is the whole point of numbering them.
+        let generation = nextGeneration()
+        guard let data = CompanionHandoffCodec.encode(CompanionHandoffTombstone(generation: generation)) else { return }
         guard let session = reachableSession() else { return }
         // The tombstone rides both channels: user-info survives even if the
-        // watch is unreachable a moment later.
-        try? session.updateApplicationContext([CompanionHandoffCodec.key: Data(CompanionHandoffCodec.unpairMarker.utf8)])
-        session.transferUserInfo([CompanionHandoffCodec.key: Data(CompanionHandoffCodec.unpairMarker.utf8)])
+        // watch is unreachable a moment later — and so does a delivery that
+        // arrives after a NEWER pairing, which the watch now drops.
+        try? session.updateApplicationContext([CompanionHandoffCodec.key: data])
+        session.transferUserInfo([CompanionHandoffCodec.key: data])
+    }
+
+    /// Issue the next pairing-event number. Persisted, so a relaunch never
+    /// reissues one the watch has already seen, and floored at anything learned
+    /// from the wire.
+    private func nextGeneration() -> UInt64 {
+        let store = UserDefaultsHandoffTrustStore()
+        let (generation, updated) = WatchHandoffOrdering.nextGeneration(store.load())
+        store.save(updated)
+        return generation
     }
 
     private func send(_ handoff: CompanionHandoff) {
