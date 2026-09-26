@@ -1,9 +1,12 @@
-# Fleet eval: three probes and stored scorecards
+# Fleet and role evals: probes, benchmarks, stored scorecards
 
-`muster eval capture.json scorecard.json` grades a captured benchmark locally
-and writes a versioned JSON scorecard. It does not send tasks, answer
-approvals, read pairing credentials, or kill engines. Exit codes: 0 = all
-checks passed; 1 = failed or missing probes; 2 = invalid input or output.
+`muster eval capture.json scorecard.json` grades a captured whole-fleet
+benchmark locally and writes a versioned JSON scorecard. `muster bench
+capture.json scorecard.json` does the same for the per-role benchmarks
+(assistant / coordinator / specialist — the capture half is the live harness
+behind `pnpm bench:roles`). Neither sends tasks, answers approvals, reads
+pairing credentials, or kills engines. Exit codes: 0 = all checks passed;
+1 = failed or missing probes; 2 = invalid input or output.
 Output must be a new file; existing runs are never overwritten.
 
 This is the docs-run option in the Astra brief. The command grades evidence
@@ -86,13 +89,17 @@ receipt tokens/cost when a matching fresh receipt exists. Unknown cost or
 missing receipt usage remains `null`. Receipts aggregate a task thread; do
 not compare runs made in reused threads as per-task measurements.
 
-`muster eval-trend scorecard-*.json…` reads already-graded scorecards in the
-order you list them — that order is the trend, because a scorecard records no
-timestamp — and prints a JSON report: per-run status, per-probe metrics with
-unknowns kept `null`, the named checks that failed in each probe, and the
-distinct labels so unlike task specifications are visible. It is read-only
-and writes nothing. It does not re-grade captures or judge comparability; it
-reports the scorecards' own claims.
+`muster eval-trend [--json] scorecard-*.json…` reads already-graded scorecards in
+the order you list them — that order is the trend, because a scorecard records no
+timestamp — and by default prints a compact sequence: one line per run (status,
+completion-probe tokens, elapsed, and which named checks failed; for role
+scorecards, the assistant/coordinator/specialist statuses and the failed
+scenarios), then a verdict line and the labels so unlike task specifications are
+visible. `--json` prints the full machine-readable report with per-probe and
+per-scenario metrics and unknowns kept `null`. It is read-only and writes
+nothing. It does not re-grade captures or judge comparability; it reports the
+scorecards' own claims. One invocation trends exactly one kind — fleet and role
+scorecards measure different things, and the command refuses to mix them.
 
 All three probes must be present and pass for an overall pass. A supplied
 failed probe takes precedence over missing probes. Keep `source: simulated`

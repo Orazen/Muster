@@ -257,9 +257,12 @@ may shift as work lands.
    runs all six required benchmarks as real settled turns, captures them in
    the role-eval schema and grades a passing scorecard through the shipped
    grader — deterministic across three consecutive runs. **2026-09-18
-   (Loop118):** runnable on demand as `pnpm bench:roles`. **Still open:**
-   scheduled/CI wiring and scorecard trending (the pipeline exists; nothing
-   runs it on a schedule yet).
+   (Loop118):** runnable on demand as `pnpm bench:roles`. **2026-09-26
+   (verified):** scorecard trending ships — `muster eval-trend` reads stored
+   fleet and role scorecards in file order, one kind per trend, read-only,
+   with a grade→trend flow test through the real CLI. **Still open:**
+   scheduled/CI wiring (nothing runs the pipeline on a schedule yet;
+   Actions-billing gated, so owner decision).
 2. **Memory history + rollback.** The brain stores correction chains and
    withdrawal that preserves history (`server/workspace-brain.ts`), but there
    is no UI/CLI surface to browse a fact's history or roll one back; any

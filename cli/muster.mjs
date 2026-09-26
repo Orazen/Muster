@@ -857,25 +857,27 @@ async function gradeCommand(entry, usage) {
 }
 
 async function evalCommand() {
-  await gradeCommand("fleet-eval", "Usage: muster eval capture.json scorecard.json (see the fleet eval playbook)");
+  await gradeCommand("fleet-eval", "Usage: muster eval capture.json scorecard.json (see the fleet and role eval playbook)");
 }
 
 async function benchCommand() {
-  await gradeCommand("role-eval", "Usage: muster bench capture.json scorecard.json (see the per-role benchmark playbook)");
+  await gradeCommand("role-eval", "Usage: muster bench capture.json scorecard.json (see the fleet and role eval playbook)");
 }
 
 async function evalTrendCommand() {
-  // One or more already-graded fleet scorecards, in the order that is meant
-  // by "over time". Nothing is written; the trend goes to stdout.
-  if (!subject) {
-    console.error("Usage: muster eval-trend scorecard1.json [scorecard2.json ...] (see the fleet eval playbook)");
+  // One or more already-graded fleet or role scorecards, in the order that
+  // is meant by "over time"; one kind per trend. Nothing is written; the
+  // trend goes to stdout — compact by default, full JSON with --json (same
+  // convention as bots/status).
+  const inputs = [subject, ...rest].filter((file) => file && !file.startsWith("--")).map((file) => resolve(file));
+  if (!inputs.length) {
+    console.error("Usage: muster eval-trend [--json] scorecard1.json [scorecard2.json ...] (see the fleet and role eval playbook)");
     process.exitCode = 2;
     return;
   }
-  const inputs = [subject, ...rest].map((file) => resolve(file));
   const rt = resolveFleetRuntime("eval-trend");
   process.exitCode = await new Promise((finish) => {
-    const child = spawn(rt.cmd, [...rt.args, ...inputs], { cwd: rt.cwd, stdio: "inherit" });
+    const child = spawn(rt.cmd, [...rt.args, ...(has("--json") ? ["--json"] : []), ...inputs], { cwd: rt.cwd, stdio: "inherit" });
     child.on("error", () => finish(2));
     child.on("exit", (code) => finish(code ?? 2));
   });
@@ -899,7 +901,7 @@ const HELP = `muster — the CLI for your AI workforce
   muster sessions [--json]        active sign-in sessions; --revoke <prefix|other|all>
   muster mcp [--serve]            print MCP client config for Muster (--serve runs the stdio server)
   muster eval capture.json scorecard.json  grade captured fleet probes locally; no fleet actions
-  muster eval-trend a.json [b.json ...]    trend across stored fleet scorecards, in file order; read-only
+  muster eval-trend [--json] a.json [b.json …]  trend across stored fleet or role scorecards, in file order; one kind per trend; read-only
   muster bench capture.json scorecard.json grade captured per-role benchmarks; no fleet actions
   muster help`;
 
