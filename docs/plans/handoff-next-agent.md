@@ -308,3 +308,32 @@ skipped — one test skips on macOS that runs on Linux, so the two suites are
 not directly comparable. The remaining untracked `.commandcode/`, `.freebuff/`
 and `.zcode/` trees are tooling snapshots, preserved uncommitted per the note
 at the top of this file.
+
+## The eval trend the scorecards were stored for (2026-09-26)
+
+Astra-brief slice 1 was misread as done. `muster eval` grades a capture and
+the playbook tells the reader to compare runs, but nothing read the stored
+scorecards back: the "trendable" word of the slice had no code behind it, and
+the comparison was by eye. The slice is now complete: `muster eval-trend
+scorecard1.json [scorecard2.json …]` reads already-graded fleet scorecards in
+the order listed and prints a JSON trend — per-run status, per-probe metrics
+with unknowns kept null, the named checks that failed in each probe, and the
+distinct labels across runs so unlike task specifications show themselves.
+
+Two honesty choices are load-bearing. A scorecard records no timestamp, so
+the order is exactly the caller's file order — the playbook's
+`scorecard-YYYYMMDD-HHMMSS.json` naming is what makes it chronological, and
+the report says so instead of implying the data carries the time axis. And
+the tool does not re-grade captures or judge comparability: statuses are the
+scorecards' own claims, and differing labels are listed, not scored. It is
+read-only and writes nothing.
+
+Wiring follows the existing grader pattern end to end: a standalone server
+entry (offline, like the fleet grader), the CLI spawn through the shared
+runtime resolver, the packaged-server bundle list, an end-to-end CLI test
+that spawns the real CLI, and a playbook section.
+
+Verification: targeted 3 eval suites 36/36; typecheck clean; oxlint 0/0 on
+1010 files; full local suite 385 files, 5789 passed, 8 skipped, 0 failed
+(+7 on the previous 5782 — this slice's tests). Live smoke ran the real CLI
+over two synthetic scorecards and a missing file (exit 0 / 2 respectively).
