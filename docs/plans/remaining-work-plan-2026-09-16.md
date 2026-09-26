@@ -264,9 +264,13 @@ may shift as work lands.
    scheduled/CI wiring (nothing runs the pipeline on a schedule yet;
    Actions-billing gated, so owner decision).
 2. **Memory history + rollback.** The brain stores correction chains and
-   withdrawal that preserves history (`server/workspace-brain.ts`), but there
-   is no UI/CLI surface to browse a fact's history or roll one back; any
-   self-proposal slice that touches memory needs this first. Proposed.
+   withdrawal that preserves history (`server/workspace-brain.ts`).
+   **Done (verified 2026-09-26).** The server surface had shipped earlier
+   (history/withdraw/restore/revert over HTTP); the gap was enumeration —
+   nothing could list facts to pick one. `list()` + `GET /api/brain/facts`
+   now feed a Brain-facts panel in settings (chain browsing, withdraw,
+   restore, revert-as-new-fact; withdrawn facts struck through, per-account
+   isolation harness-tested over live HTTP).
 3. **Skills-creation API.** No `server/skills*` surface exists; the largest
    server gap. Proposed — design behind the same owner-scoped route-table
    pattern as the workspace/backup family.
@@ -283,10 +287,14 @@ may shift as work lands.
    Guided first run / tour pacing: onboarding ships seven mascot-led stages;
    pacing is acceptance-only.
 7. **Pairing redeem in the browser.** `/pair#CODE` carry-and-display is
-   verified with browser acceptance (Loop104, current-state.md:31); redeem is
-   still desktop/CLI only (`cli/muster.mjs:139` prints the code;
-   `cli/muster.mjs:637` redeems via `/api/pair/claim`). The `/api/pair/claim`
-   route exists server-side; a signed-in web redemption surface is proposed.
+   verified with browser acceptance (Loop104, current-state.md:31).
+   **Done (verified 2026-09-26).** The earlier "already shipped" note below
+   conflated the two code namespaces: ClaimPage redeems claim codes, and
+   pairing codes had no web redemption at all. PairPage now offers an
+   explicit redeem button (never auto-redeem) over a new
+   `/api/pair/redeem-browser` endpoint — code-as-credential, single-use,
+   per-IP throttled, owner's session, replay refused, no bridged-user
+   fallback (harness-tested over live HTTP).
 8. **Release legs (blocked, owner gates).** Windows/Linux 1.12.3: Actions
    billing. macOS signing/notarization: `APPLE_CERTIFICATE` (Developer ID)
    secret. Mirror promotion: VPS SSH to the host named in the repo's `VPS_HOST` secret. TestFlight: awaiting
@@ -332,9 +340,12 @@ Status changes since the ranked list above — all committed and gated:
    remains env-config; other networks still not started.
 5. **Engines Add account: done (Loop159).** Readiness rows expose an
    account-add action reusing the EngineSetup card (tested row-action logic).
-6. **Pairing redeem in the browser: verified already shipped.** PairPage +
-   ClaimPage cover generate and redeem with e2e; the ranked item predates it.
-   Resilient carry shapes added (2026-09-22): the claim front door's
+6. **Pairing redeem in the browser: corrected (2026-09-26).** This line's
+   earlier "verified already shipped" was wrong about namespaces — PairPage
+   displayed pairing codes without redeeming them, and ClaimPage's e2e
+   covers claim codes, not pairing codes. The actual browser redemption
+   ships now (see ranked item 7). Resilient carry shapes added
+   (2026-09-22): the claim front door's
    fragment parser now normalizes the hand-typed carry shapes the pairing
    front door documents — bare, keyed (#code=CODE) and grouped (ABCD-EFGH)
    — to the mint form before the same throttled redeem; wrong strings still

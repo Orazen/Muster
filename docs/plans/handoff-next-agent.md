@@ -373,3 +373,42 @@ commit interleaved cleanly on top of it; the shared ranked-plan file was
 partially staged (this slice's item-1 hunk only) so the audit header that
 agent added stayed theirs.
 
+## Two ranked items closed in one round: the brain's history, and the browser's code (2026-09-26, evening)
+
+**Ranked item 2 is fully closed.** The scoping pass found the plan stale in
+an unusual way: the server half of memory history + rollback shipped weeks
+ago (correction chains, withdraw, restore, revert — all live over HTTP),
+and the actual gap was that nothing could enumerate facts to pick one from,
+so no client surface was possible. `list()` on the brain plus a read-only
+`GET /api/brain/facts` now feeds a Brain-facts panel in settings' Brain
+section: each fact opens its chain both directions with provenance, and
+offers exactly the actions the record supports — withdraw, restore, revert
+(a new fact stating what is true now, never a silent history edit).
+Withdrawn facts render struck-through because provenance is the point; the
+other account's list never shows them at all, verified over live HTTP.
+
+**Ranked item 7 is closed.** The /pair#CODE page was display-only while the
+browser showing the code was the one signed-in device that could not use
+it. An explicit button (never auto-redeem — that contract was
+browser-acceptance-verified and survives) spends the code through a new
+`/api/pair/redeem-browser` endpoint with the claim flow's exact trust
+model: code-as-credential, single-use, per-IP throttled, owner's session,
+replay answers the standard invalid-code error. No bridged-user fallback —
+a pairing code always maps to an existing account.
+
+**Parallel-agent cost, recorded honestly.** The scoping ran as three
+subagents (memory, redeem, and a collision audit of the other agent's
+uncommitted work — their A1 email lane was actively mid-flight, so
+`server/index.ts` edits were timed to land between their commits). Even
+so, the shared checkout's concurrent git operations stripped four files
+from the first memory commit mid-flight; the missing server half went in
+as its own commit, and the full suite had already run over exactly the
+combined tree before either commit was made.
+
+Verification: brain unit 16/16, brain harness 7/7 (list + isolation over
+live HTTP), pairing harness 12/12 (browser redeem + replay), redeem flow
+22/22, brain-facts client 7/7; both typechecks clean; oxlint 0/0 on all
+touched files; full local suite 385 files, 5861 passed, 8 skipped,
+0 failed.
+
+

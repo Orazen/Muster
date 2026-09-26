@@ -1857,20 +1857,28 @@ bus.subscribe((event: RuntimeEvent) => {
         // Hypothesis/findings ride along when the bot states them (the ARC
         // reasoning pattern), making runs comparable over time.
         if (reply.includes(WHY_MARKER)) {
-          const { intent, decisions, hypothesis, findings } = extractWhyFromReply(reply);
-          if (intent) {
-            const entry: WhyEntry = {
-              runId: randomUUID(),
-              botId: bot.id,
-              threadId: event.threadId,
-              at: Date.now(),
-              intent,
-              decisions,
-              outcome: event.ok ? "done" : "partial",
-            };
-            if (hypothesis) entry.hypothesis = hypothesis;
-            if (findings) entry.findings = findings;
-            appendWhy(DATA_DIR, entry);
+          try {
+            const { intent, decisions, hypothesis, findings } = extractWhyFromReply(reply);
+            if (intent) {
+              const entry: WhyEntry = {
+                runId: randomUUID(),
+                botId: bot.id,
+                threadId: event.threadId,
+                at: Date.now(),
+                intent,
+                decisions,
+                outcome: event.ok ? "done" : "partial",
+              };
+              if (hypothesis) entry.hypothesis = hypothesis;
+              if (findings) entry.findings = findings;
+              appendWhy(DATA_DIR, entry);
+            }
+          } catch {
+            // The why-journal is an audit layer, never a turn gate — a
+            // failed read/parse/append (degraded disk, corrupt journal)
+            // must not take the whole fold down with it. The bot's idle
+            // flip, slot release, and notifications all run before this,
+            // but later fold steps (screen frame, group settle) must too.
           }
         }
         if (screenPollers.has(bot.id)) {
@@ -1883,6 +1891,10 @@ bus.subscribe((event: RuntimeEvent) => {
             if (frame && store.bot(bot.id)) {
               pushMessage({ role: "bot", kind: "screen", png: frame.png, mime: frame.mime });
             }
+          }).catch(() => {
+            // capture() guards its own failures, but the settle path must
+            // stay rejection-proof against future changes — an unhandled
+            // rejection here would take the whole process down.
           });
         }
       }
