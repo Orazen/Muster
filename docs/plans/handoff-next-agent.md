@@ -266,3 +266,38 @@ in `server/` or `src/`.
 
 Verification: CI 36229542195 success — 384 files, 5772 passed, 9 skipped,
 0 failed; lint, typecheck and build all pass.
+
+## A panel a reader can never open (2026-09-26)
+
+**The People section was a nav entry whose only outcome was a 403.**
+`/api/people` lists every account on a hosted deployment and refuses anyone who
+does not administer it. That refusal is *permanent* — there is nothing to retry
+and nothing the reader can change — so rendering the section meant a link that
+could only ever turn red. Same shape of defect as the web/desktop split above,
+one axis further out: not "wrong machine", but "wrong person".
+
+The fix is a flag on the existing config payload, `isOperator`, using the same
+predicate the provider fill already used (`userId === primaryUserId()`), so
+there is no second notion of operator. The nav omits People when it is
+explicitly false and keeps it when the field is **absent** — a desktop install
+and a self-host with one account never send it, and defaulting to hidden would
+make the section blink out for the operator on every single load. This is a
+separate axis from the build: a hosted operator is a browser reader and still
+gets the panel, and a desktop reader is never excluded for its platform.
+
+The 403 itself is unchanged and correct. This only stops offering the door.
+
+**Deployment receipt for the platform contract.** `GET https://muster.today/app`
+serves a bundle containing `hostPlatform` at both call sites — the install
+command lookup and the no-engines sort — so the server-platform fix above is
+live in production and not merely pushed. The `isOperator` work is in the push
+queue as of this entry and is **not** claimed as deployed.
+
+Verification: CI 36241203900 success — 384 files, 5781 passed, 9 skipped,
+0 failed; lint, typecheck and build all pass. That is +9 on the 5781 total of
+the run above; 7 of the 9 are new here (5 operator-gate, 2 auth-harness) and
+the other 2 were not traced. Locally the same tree gives 5782 passed / 8
+skipped — one test skips on macOS that runs on Linux, so the two suites are
+not directly comparable. The remaining untracked `.commandcode/`, `.freebuff/`
+and `.zcode/` trees are tooling snapshots, preserved uncommitted per the note
+at the top of this file.
