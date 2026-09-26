@@ -18,7 +18,7 @@
 
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { z } from "zod";
 
@@ -30,6 +30,7 @@ import type {
   TaskApprovalBody,
   TaskControlAction,
   TaskControlBody,
+  TaskExecutionContext,
   TaskInputBody,
   TaskPlanAnswer,
   TaskPlanCreateInput,
@@ -65,8 +66,13 @@ const MAX_STEP_TITLE = 200;
 const MAX_PROMPT = 2_000;
 const MAX_ERROR = 300;
 const FIELD_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
+const INTENT_ID = /^[\w.-]{8,128}$/;
 const RESTING: readonly TaskPlanStatus[] = ["succeeded", "failed", "cancelled"];
 const DEFAULT_HOLDER = "harness";
+/** Delivery context is bounded: every field is clamped text, and an
+ * oversized data: URL blob (e.g. a branding logo) can never ride in here. */
+const MAX_CONTEXT_FIELD = 200;
+const MAX_INTENTS = 500;
 
 /** Legal moves out of each status. Terminal states have none, and a plan
  * that is waiting keeps its wait: only an answered input, an approval
@@ -102,6 +108,20 @@ interface TaskPlanFile {
   transitions: TaskTransitionEvent[];
 }
 
+/** Delivery ledger — separate from plan storage so pruning old plans can
+ * never detach the acceptance timestamp a client may still be reconciling
+ * against. Beyond the cap, the OLDEST intent is dropped: an extremely old
+ * retry then creates a new plan rather than lying about acceptance. */
+interface DeliveryIntentsFile {
+  version: 1;
+  intents: Record<string, { planId: string; acceptedAt: number }>;
+}
+
+const intentsFileSchema = z.object({
+  version: z.literal(1),
+  intents: z.record(z.string(), z.object({ planId: z.string(), acceptedAt: z.number() })),
+}).partial();
+
 function fail(status: number, message: string): never {
   throw Object.assign(new Error(message), { status });
 }
@@ -136,6 +156,41 @@ function clampAttempts(raw: number | undefined, fallback: number): number {
   const n = Math.round(Number(raw));
   if (!Number.isFinite(n)) return fallback;
   return Math.min(10, Math.max(1, n));
+}
+
+/** Clamp the client-supplied execution context into a bounded record:
+ * every field is trimmed text, empty fields are dropped, and there is no
+ * escape hatch for nested or oversized payloads. */
+// Shape-only: zod proves every field that IS present is a string; length
+// is text()'s job (clamping beats rejecting, and one over-long field must
+// not erase an otherwise valid context).
+const contextSchema = z
+  .object({
+    accountId: z.string().optional(),
+    workspace: z.string().optional(),
+    originClient: z.string().optional(),
+    executionHost: z.string().optional(),
+  })
+  .partial()
+  .optional();
+
+/** Clamp the client-supplied execution context: zod validates the shape at
+ * this one boundary (a wrong-typed field fails the object and the whole
+ * context is dropped), then text() clamps lengths and empty fields are
+ * dropped so a context of nothing is no context at all. */
+function normalizeContext(raw: TaskPlanCreateInput["context"]): TaskExecutionContext | undefined {
+  const parsed = contextSchema.catch(undefined).parse(raw);
+  if (!parsed) return undefined;
+  const out: TaskExecutionContext = {};
+  const accountId = text(parsed.accountId, MAX_CONTEXT_FIELD);
+  const workspace = text(parsed.workspace, MAX_CONTEXT_FIELD);
+  const originClient = text(parsed.originClient, 40);
+  const executionHost = text(parsed.executionHost, MAX_CONTEXT_FIELD);
+  if (accountId) out.accountId = accountId;
+  if (workspace) out.workspace = workspace;
+  if (originClient) out.originClient = originClient;
+  if (executionHost) out.executionHost = executionHost;
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** Turn the client's loose entries into ordered, bounded steps. Steps are
@@ -246,6 +301,10 @@ export class TaskPlanEngine {
   private readonly emit?: (payload: TaskPlanEvent) => void;
   private plans: TaskPlanRecord[] = [];
   private transitions: TaskTransitionEvent[] = [];
+  /** intentId → acceptance record; persisted to its own file next to the
+   * plans so a retrying client reconciles across restarts. */
+  private deliveryIntents: Record<string, { planId: string; acceptedAt: number }> = {};
+  private intentsFile = "";
   /** Reentrancy depth for the transaction frame: only the outermost call
    * snapshots and restores, so nested helpers join their caller's frame. */
   private depth = 0;
@@ -258,6 +317,7 @@ export class TaskPlanEngine {
     this.maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
     this.maxPlans = options.maxPlans ?? MAX_PLANS;
     this.emit = options.emit;
+    this.intentsFile = resolve(dirname(this.file), "task-delivery-intents.json");
     try {
       // SAFETY: save() writes exactly the TaskPlanFile shape; a corrupt or
       // foreign file throws below and resets to an empty store.
@@ -267,6 +327,14 @@ export class TaskPlanEngine {
     } catch {
       this.plans = [];
       this.transitions = [];
+    }
+    try {
+      // saveIntents() writes exactly the DeliveryIntentsFile shape; zod is
+      // the boundary that proves the file still has that shape.
+      const intentsDisk = intentsFileSchema.parse(JSON.parse(readFileSync(this.intentsFile, "utf8")));
+      this.deliveryIntents = intentsDisk.intents ?? {};
+    } catch {
+      this.deliveryIntents = {};
     }
     // A lease belongs to a worker that died with the process, so boot is
     // the one sweep that must run before anyone can touch the store. It is
@@ -314,8 +382,31 @@ export class TaskPlanEngine {
     return this.tx(() => {
       const botId = text(input?.botId, 120);
       if (!botId) fail(400, "Choose a bot");
+      // Delivery reconciliation (strategy #2): a client retry carrying the
+      // SAME intentId gets the ORIGINAL plan back — a lost acknowledgement
+      // is a lookup, never a resend. The intent is persisted BEFORE the
+      // plan starts, so "accepted" always means "durable".
+      const intentId = text(input?.intentId, 128);
+      if (intentId) {
+        // Validate the RAW value too: text() would have silently truncated
+        // an over-long id, and truncation must never make one intent id
+        // collide with another.
+        if (input?.intentId !== undefined && input.intentId !== intentId) {
+          fail(400, "intentId must be 8-128 characters of letters, digits, dot, dash or underscore");
+        }
+        if (!INTENT_ID.test(intentId)) fail(400, "intentId must be 8-128 characters of letters, digits, dot, dash or underscore");
+        const known = this.deliveryIntents[intentId];
+        if (known) {
+          const original = this.plans.find((plan) => plan.id === known.planId);
+          if (original) return clone(original);
+          // The referenced plan was pruned (or the file was hand-edited):
+          // fall through and create fresh, replacing the stale intent.
+          delete this.deliveryIntents[intentId];
+        }
+      }
       const title = text(input?.title, MAX_TITLE) || "Task plan";
       const steps = normalizeSteps(input?.steps);
+      const context = normalizeContext(input?.context);
       const events: TaskTransitionEvent[] = [];
       const at = this.now();
       const plan: TaskPlanRecord = {
@@ -330,9 +421,22 @@ export class TaskPlanEngine {
         attempts: 0,
         maxAttempts: clampAttempts(input?.maxAttempts, this.maxAttempts),
         inputAnswers: [],
+        context,
+        delivery: intentId ? { intentId, acceptedAt: at } : undefined,
         createdAt: at,
         updatedAt: at,
       };
+      if (intentId) {
+        this.deliveryIntents[intentId] = { planId: plan.id, acceptedAt: at };
+        // Bounded ledger: drop the OLDEST intent past the cap.
+        const ids = Object.keys(this.deliveryIntents);
+        if (ids.length > MAX_INTENTS) {
+          const oldest = ids
+            .sort((a, b) => this.deliveryIntents[a]!.acceptedAt - this.deliveryIntents[b]!.acceptedAt)
+            .slice(0, ids.length - MAX_INTENTS);
+          for (const id of oldest) delete this.deliveryIntents[id];
+        }
+      }
       this.plans.unshift(plan);
       this.prune();
       // A plan nobody starts would be dead on arrival: the API has no
@@ -833,6 +937,15 @@ export class TaskPlanEngine {
     const file: TaskPlanFile = { version: 1, plans: this.plans, transitions: this.transitions };
     mkdirSync(dirname(this.file), { recursive: true });
     writeFileAtomic(this.file, JSON.stringify(file, null, 2));
+    this.persistIntents();
+  }
+
+  /** Delivery ledger gets its own atomic write, so intent acceptance is
+   * durable even if the plans file write is the one that fails. */
+  private persistIntents(): void {
+    const file: DeliveryIntentsFile = { version: 1, intents: this.deliveryIntents };
+    mkdirSync(dirname(this.intentsFile), { recursive: true });
+    writeFileAtomic(this.intentsFile, JSON.stringify(file, null, 2));
   }
 
   /** Publish only after the write lands, so a client that reacts to a

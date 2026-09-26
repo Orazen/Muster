@@ -109,6 +109,20 @@ const appConfigSchema = z.object({
    * reasoning effort of every NEW bot's model selection; existing bots keep
    * whatever they saved. */
   bots: z.object({ defaultEffort: z.enum(EFFORT_LEVELS).nullable().optional() }).optional(),
+  /** Usage allowance (strategy #6). The OWNER sets the numbers — there is
+   * no approved default quota. Unset = unmetered. `monthlyUsd` caps each
+   * account's committed model spend per UTC month; `turnReserveUsd` is
+   * held per running turn and reconciled to the real cost at completion. */
+  usage: z
+    .object({
+      allowance: z
+        .object({
+          monthlyUsd: z.number().positive().max(100_000).optional(),
+          turnReserveUsd: z.number().positive().max(25).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   /** Local VM desktop isolation. "shared" keeps the historical singleton
    * desktop every bot leases one at a time; "perBot" gives each bot its own
    * container, workspace, viewer port and lease lanes. */
@@ -187,6 +201,7 @@ export interface AppConfig {
    * holds explicit per-bot overrides. `bots` seeds new bots' model choices
    * (defaultEffort); existing bots keep what they saved. */
   parallelThreads?: { default?: number; perBot?: Record<string, number> };
+  usage?: { allowance?: { monthlyUsd?: number; turnReserveUsd?: number } };
   bots?: { defaultEffort?: (typeof EFFORT_LEVELS)[number] | null };
   providers?: Record<string, { apiKey?: string }>;
   customProviders?: CustomProvider[];
@@ -327,7 +342,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
-  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "branding", "musterCloud", "localVm", "channels", "vps", "hiNew", "driveSync", "telegramSync", "eventLogRetention", "parallelThreads", "bots"] as const) {
+  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "branding", "musterCloud", "localVm", "channels", "vps", "hiNew", "driveSync", "telegramSync", "eventLogRetention", "parallelThreads", "bots", "usage"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

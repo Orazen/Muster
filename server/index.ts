@@ -304,6 +304,7 @@ import { readRuntimeEvidence, readThreadEvents } from "./thread-events.ts";
 import { deleteStaleArchivedLogs, trimAllEventLogs } from "./event-log-cleanup.ts";
 import { claimSlot, clearSlots, configuredWidth, hasSlot, releaseSlot, runningThreads } from "./turn-slots.ts";
 import { clampGeneratedTitle, generatedTitlePrompt } from "./generated-titles.ts";
+import { UsageAllowance } from "./usage-allowance.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -1206,6 +1207,12 @@ const turnUsage = new Map<string, { input: number; output: number }>();
 // fold stamps it onto every reply message it persists, so the transcript
 // shows "which model said that" instead of hiding the harness.
 const turnProvenance = new Map<string, { instanceId: string; model: string; effort?: string }>();
+// Usage-allowance reservations in flight, threadId → { account, amount }.
+// Written at dispatch (reserve), settled in the fold (reconcile) or the
+// dispatch catch (release). A restart drops these — the reservation was
+// optimistic and the month ledger resets with the process; honest
+// reporting keeps the bound, not perfect across restarts.
+const allowanceReservations = new Map<string, { accountId: string; amount: number }>();
 
 // Bounded per active turn. OpenHands uses a bounded recent-event scan for
 // the same class of stuck-loop detection; retaining an unlimited set of
@@ -1794,6 +1801,15 @@ bus.subscribe((event: RuntimeEvent) => {
           output: tokens?.output,
           costUsd: event.cost ?? null,
         });
+        // Usage allowance: trade this turn's reservation for its real cost
+        // (held on the turnProvenance-adjacent map below). A turn whose
+        // provider reports no cost releases its full reservation — it ran,
+        // but nothing was billed.
+        const held = allowanceReservations.get(event.threadId);
+        if (held !== undefined) {
+          allowanceReservations.delete(event.threadId);
+          if (usageAllowance.enabled) usageAllowance.reconcile(held.accountId, event.cost ?? 0, held.amount);
+        }
         // settled → idle; a setup failure already marked it dead, keep that
         if (store.bot(bot.id)?.activity !== "dead") store.setActivity(bot.id, "idle");
         // LLM short titles (OMB parity): once the turn settles, upgrade a
@@ -2584,6 +2600,40 @@ async function startTurn(
   turnUsage.delete(threadId);
   claimSlot(bot.id, threadId);
 
+  // Usage allowance (strategy #6): reserve BEFORE dispatch when the owner
+  // configured a cap. The account is the bot's owner (self-host: primary).
+  // Refusal parks the turn with a 402-shaped error before any model call;
+  // the reservation is reconciled from the turn's real cost (or released)
+  // at settle time. BYOK engines are exempt: the user pays the provider
+  // directly, and silently burning the shared allowance for them would be
+  // a hidden charge.
+  const allowanceAccount = SELF_HOSTED
+    ? bot.ownerId && bot.ownerId !== primaryUserId() ? bot.ownerId : "local"
+    : bot.ownerId ?? "local";
+  const byokEngine = userInstanceOwner(bot.modelSelection?.instanceId ?? "") !== undefined;
+  // The reservation record itself lives in allowanceReservations (keyed by
+  // thread), so the settle paths can reconcile or release without threading
+  // another parameter through startTurn.
+  if (usageAllowance.enabled && !byokEngine) {
+    const granted = usageAllowance.reserve(allowanceAccount, usageAllowance.reservePerTurn);
+    if (granted.ok) {
+      allowanceReservations.set(threadId, { accountId: allowanceAccount, amount: usageAllowance.reservePerTurn });
+    } else {
+      const current = peerCapabilities.forBot(bot.id);
+      if (dispatchLease) {
+        foregroundCallDispatch.fail(dispatchLease, false);
+        peerCapabilities.revoke(dispatchLease);
+      }
+      if (connectorLease) connectorCapabilities.revoke(connectorLease);
+      if (!current || current === dispatchLease) store.setActivity(bot.id, "idle");
+      releaseSlot(bot.id, threadId);
+      throw Object.assign(
+        new Error("Monthly usage allowance reached — the turn was not started. Add your own provider key (Settings → Providers) to keep going, or wait for the next month."),
+        { status: 402 },
+      );
+    }
+  }
+
   void (async () => {
     let driverInvoked = false;
     try {
@@ -3038,6 +3088,13 @@ async function startTurn(
       turnUsage.delete(threadId);
       turnProvenance.delete(threadId);
       releaseSlot(bot.id, threadId);
+      // Usage allowance: the turn never reached a driver — hand the
+      // reservation back so a failed dispatch does not eat the cap.
+      const abandoned = allowanceReservations.get(threadId);
+      if (abandoned !== undefined) {
+        allowanceReservations.delete(threadId);
+        if (usageAllowance.enabled) usageAllowance.release(abandoned.accountId, abandoned.amount);
+      }
       const message = e instanceof Error ? e.message : String(e);
       // The chip must never mask the unwind below: a throw here would skip
       // setActivity/onDispatchError/drainQueuedSends and strand the bot busy.
@@ -3143,6 +3200,12 @@ goals.start();
 // filter drops foreign plans the same way it drops foreign bot frames.
 taskPlans = new TaskPlanEngine({ emit: (payload) => broadcast(payload) });
 taskPlans.start();
+
+// Usage allowance (strategy #6): pure ledger seeded from config.json's
+// `usage.allowance` — the owner sets the actual numbers; unset = unmetered.
+// A config change restarts the server (mutations go through saveConfig),
+// so a once-created ledger per boot is the correct lifecycle.
+const usageAllowance = new UsageAllowance(cfg.usage?.allowance);
 
 // Webhook definitions are independent from calendar schedules, but every
 // delivery joins the same RoutineManager queue. That keeps unattended work
@@ -5521,10 +5584,18 @@ let requestUserEmail = "";
 
     // ── multi-tenant guard (SELF_HOSTED only) ──────────────────────────
     // One shared store serves every signed-in account, so ownership is
-    // enforced at this single choke point instead of inside each of the
-    // dozens of /api/bots/:id and /api/threads/:id handlers: a record owned
-    // by another user looks like it never existed (404), for reads, writes,
-    // and every sub-route alike.
+    // enforced here for every route whose SUBJECT is named in the URL — the
+    // dozens of /api/bots/:id, /api/groups/:id and /api/threads/:id handlers.
+    // A record owned by another user looks like it never existed (404), for
+    // reads, writes, and every sub-route alike.
+    //
+    // "in the URL" is the honest limit of this choke point, and it is not
+    // hypothetical: a route that takes its record id in the request BODY is
+    // invisible to a URL matcher. The receipt routes are the known case — both
+    // check `ownsRecord` in their own handler. When adding a route that reads
+    // an id from a body or a query, check it there; do not assume this covered
+    // it.
+    //
     // Isolation: unowned records belong to the operator (primary user).
     // Non-operators never see them — this is what prevented Rocky balboa
     // from seeing tharunramagiri's bots.
@@ -6225,6 +6296,13 @@ let requestUserEmail = "";
       const bot = botId ? store.bot(botId) : undefined;
       const task = bot && threadId ? store.taskByThread(bot.id, threadId) : undefined;
       if (!bot || !task) return json(res, 404, { error: "no such task" });
+      // Ownership is checked HERE, not at the multi-tenant choke point, because
+      // this route names its bot in the request BODY — a URL matcher never sees
+      // it. Without this, any signed-in account could mint an unauthenticated
+      // public /r/<token> link to another account's work: what they asked a
+      // computer to do, what it cost, and what came back. See the receipt read
+      // route below for the same check on the read path.
+      if (requestUserId && !ownsRecord(bot)) return json(res, 404, { error: "no such task" });
       const msgs = store.messagesFor(threadId);
       const lastBotWord = [...msgs].reverse().find((msg) => msg.role === "bot" && msg.kind === "text" && msg.text?.trim());
       const receipt = buildReceipt({
@@ -6630,6 +6708,13 @@ let requestUserEmail = "";
       const bot = store.bot(botId);
       const task = store.taskByThread(botId, threadId);
       if (!bot || !task) return json(res, 404, { error: "no such task" });
+      // Same ownership check as /api/receipts/share, and for the same reason:
+      // a receipt is a summary of one account's actual work — bot name, job
+      // title, usage, findings and the final assistant message. 404 rather than
+      // 403, so a refusal does not confirm the receipt exists. The multi-tenant
+      // choke point cannot cover this route: it matches URL prefixes, and
+      // receipts were never one of them.
+      if (requestUserId && !ownsRecord(bot)) return json(res, 404, { error: "no such task" });
       const msgs = store.messagesFor(threadId);
       const lastBotWord = [...msgs].reverse().find((m) => m.role === "bot" && m.kind === "text" && m.text?.trim());
       const receipt = buildReceipt({
@@ -8332,6 +8417,16 @@ let requestUserEmail = "";
             start: body.start !== false,
             actorId: requestUserId,
             maxAttempts: body.maxAttempts,
+            // Shared context (strategy #1): the server owns accountId (it
+            // is a session fact, not a client claim); the client may state
+            // its surface and the host it believes is selected.
+            context: {
+              accountId: requestUserId ?? "local",
+              workspace: isText(body.context?.workspace) ? body.context.workspace : undefined,
+              originClient: isText(body.context?.originClient) ? body.context.originClient : undefined,
+              executionHost: isText(body.context?.executionHost) ? body.context.executionHost : undefined,
+            },
+            intentId: isText(body.intentId) ? body.intentId : undefined,
           });
           return json(res, 201, { plan });
         }

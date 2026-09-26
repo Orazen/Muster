@@ -453,6 +453,38 @@ export type TaskPlanStatus =
  * ordered progress a worker reports as it goes. */
 export type TaskStepKind = "checkpoint" | "input" | "approval";
 
+/** Delivery context (device-first strategy, missing-logic #1): WHOSE task
+ * this is and WHERE it runs. Five distinct concepts, never collapsed:
+ * an account is not a device, a device is not permission to execute, and
+ * a workspace is not an account. `originClient` is the surface that
+ * created the request ("web" | "desktop" | "companion" | ...);
+ * `executionHost` names the selected executor — the engine never routes
+ * or fails over on its own, it only records what was chosen. */
+export interface TaskExecutionContext {
+  /** Owning account (self-host: the primary user; cloud: the account id). */
+  accountId?: string;
+  /** The workspace directory the task's turns run in, when pinned. */
+  workspace?: string;
+  /** Surface that created the request. */
+  originClient?: string;
+  /** The single selected executor for this task. */
+  executionHost?: string;
+}
+
+/** Delivery reconciliation (device-first strategy, missing-logic #2 + #4):
+ * clients get an `intentId` back at creation; reconnecting with the SAME
+ * id returns the original plan instead of creating a duplicate. A lost
+ * acknowledgement is therefore a lookup, never a resend: the idempotency
+ * guarantee is creation-only — retries of dispatch/external writes stay
+ * governed by attempts + lease + provider idempotency, and this record
+ * makes the outcome visible instead of silently re-executing. */
+export interface TaskDeliveryContext {
+  /** Client-generated intent id (accept: 8–128 chars of [\w.-]). */
+  intentId: string;
+  /** When this delivery was accepted; clients may expire after it. */
+  acceptedAt: number;
+}
+
 export type TaskStepStatus = "pending" | "active" | "done" | "skipped" | "failed";
 
 export interface TaskPlanStep {
@@ -528,6 +560,10 @@ export interface TaskPlanRecord {
   /** Typed answers collected so far, oldest first. */
   inputAnswers: TaskPlanAnswer[];
   lastError?: string;
+  /** Shared context: account / workspace / origin client / selected host. */
+  context?: TaskExecutionContext;
+  /** Delivery reconciliation (see TaskDeliveryContext). */
+  delivery?: TaskDeliveryContext;
   createdAt: number;
   updatedAt: number;
 }
@@ -601,4 +637,10 @@ export interface TaskPlanCreateInput {
   /** Who the running plan is leased to. */
   actorId?: string;
   maxAttempts?: number;
+  /** Shared context (strategy #1): account / workspace / origin / host. */
+  context?: TaskExecutionContext;
+  /** Delivery reconciliation key (strategy #2): a client retry carrying
+   * the SAME intentId gets the original plan back (201 → the original
+   * record), not a duplicate run. */
+  intentId?: string;
 }

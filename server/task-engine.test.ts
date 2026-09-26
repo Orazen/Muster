@@ -599,4 +599,75 @@ describe("TaskPlanEngine — persistence", () => {
     expect(h.engine.plan("nope")).toBeNull();
     expect(statusOf(() => h.engine.control("nope", { action: "pause" }))).toBe(404);
   });
+
+  it("returns the ORIGINAL plan for a retried intentId — a lost ack is a lookup", () => {
+    const h = harness();
+    const original = h.engine.create({ botId: "bot-1", steps: ["work"], intentId: "intent-abc-12345" });
+    expect(original.delivery).toMatchObject({ intentId: "intent-abc-12345" });
+    // same client retry: identical plan, no duplicate run
+    const replay = h.engine.create({ botId: "bot-1", steps: ["work"], intentId: "intent-abc-12345" });
+    expect(replay.id).toBe(original.id);
+    expect(h.engine.listPlans()).toHaveLength(1);
+    // a DIFFERENT intent gets its own plan
+    const other = h.engine.create({ botId: "bot-1", steps: ["work"], intentId: "intent-def-67890" });
+    expect(other.id).not.toBe(original.id);
+    expect(h.engine.listPlans()).toHaveLength(2);
+  });
+
+  it("rejects malformed intent ids before creating anything", () => {
+    const h = harness();
+    for (const bad of ["short", "has spaces", "x".repeat(129)]) {
+      expect(statusOf(() => h.engine.create({ botId: "bot-1", steps: ["w"], intentId: bad }))).toBe(400);
+    }
+    expect(h.engine.listPlans()).toHaveLength(0);
+    // an absent or empty intentId is legitimate (reconciliation is opt-in):
+    // the plan is created with no delivery record at all
+    const anonymous = h.engine.create({ botId: "bot-1", steps: ["w"], start: false, intentId: "" });
+    expect(anonymous.delivery).toBeUndefined();
+  });
+
+  it("keeps intent acceptance durable across a restart", () => {
+    const h = harness();
+    const original = h.engine.create({ botId: "bot-1", steps: ["work"], intentId: "intent-abc-12345", start: false });
+    h.restart();
+    const replay = h.engine.create({ botId: "bot-1", steps: ["work"], intentId: "intent-abc-12345", start: false });
+    expect(replay.id).toBe(original.id);
+    expect(replay.delivery?.intentId).toBe("intent-abc-12345");
+  });
+
+  it("bounds the intent ledger, dropping the oldest acceptance", () => {
+    const h = harness();
+    for (let i = 0; i < 505; i += 1) {
+      h.advance(1);
+      h.engine.create({ botId: "bot-1", steps: ["w"], intentId: `intent-${String(i).padStart(8, "0")}` });
+    }
+    // the oldest intent aged out: a retry of it creates a fresh plan
+    const agedOut = h.engine.create({ botId: "bot-1", steps: ["w"], intentId: "intent-00000000" });
+    expect(agedOut.delivery?.intentId).toBe("intent-00000000");
+    expect(agedOut.attempts).toBe(0);
+    // but a recent one still reconciles to its original plan
+    const recent = h.engine.create({ botId: "bot-1", steps: ["w"], intentId: "intent-00000504" });
+    expect(recent.id).not.toBe(agedOut.id);
+    const recentPlans = h.engine.listPlans().filter((p) => p.delivery?.intentId === "intent-00000504");
+    expect(recentPlans).toHaveLength(1);
+  });
+
+  it("records the execution context with the plan", () => {
+    const h = harness();
+    const plan = h.engine.create({
+      botId: "bot-1",
+      steps: ["work"],
+      start: false,
+      context: { accountId: "acct-1", workspace: "/home/me/ws", originClient: "web", executionHost: "mac-studio" },
+    });
+    expect(plan.context).toEqual({ accountId: "acct-1", workspace: "/home/me/ws", originClient: "web", executionHost: "mac-studio" });
+    // junk fields are clamped away, empty context becomes undefined.
+    // SAFETY: the wire is untyped JSON — a number can arrive where a
+    // string belongs, and the engine must clamp junk rather than crash.
+    const malformed = JSON.parse('{"accountId":"  ","originClient":42}') as { accountId?: string; originClient?: string };
+    const bare = h.engine.create({ botId: "bot-1", steps: ["w"], start: false, context: malformed });
+    expect(bare.context).toBeUndefined();
+    const oversized = h.engine.create({ botId: "bot-1", steps: ["w"], start: false, context: { workspace: "x".repeat(500) } });
+    expect(oversized.context?.workspace).toHaveLength(200);
+  });
 });
