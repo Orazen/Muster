@@ -7654,6 +7654,12 @@ let requestUserEmail = "";
       const runningThread = stopPeerDispatch(bot.id).threadId ?? bot.threadId;
       await registry.get(turnProvenance.get(runningThread)?.instanceId ?? bot.modelSelection.instanceId)?.adapter.interruptTurn(runningThread).catch(() => {});
       stopScreenPoller(bot.id);
+      // The bot is gone: drop its slot-ledger entry now, because a late
+      // turn.completed fold for an interrupted parallel thread is guarded by
+      // `if (bot)` — after store.deleteBot that lookup is undefined and the
+      // release never fires. Hygiene only (ids are never reused), but the
+      // Stop handler iterates this same ledger.
+      clearSlots(bot.id);
       routines!.disableForBot(bot.id);
       // a deleted bot leaves the social network too: profile, edges, requests
       social!.forgetBot(bot.id);
