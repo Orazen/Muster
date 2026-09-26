@@ -15,6 +15,15 @@ export function pinRelease({ version, sha, eventName, refType, refName, dryRun }
   if (!['push', 'workflow_dispatch'].includes(eventName)) throw new Error('Unsupported release event');
   if (!['true', 'false'].includes(dryRun)) throw new Error('Explicit dry-run state required');
   if (eventName === 'push' && (dryRun !== 'false' || refType !== 'tag' || refName !== `v${version}`)) {
+    // This arm only runs on tag pushes, so the tag guard has already passed.
+    // The remaining mismatches are dry-run state and the tag/version pair —
+    // name them so the fix is obvious instead of one opaque line.
+    if (refType === 'tag') {
+      if (dryRun !== 'false') {
+        throw new Error(`Release tag push for v${version} must run with dry_run disabled; re-run the workflow with dry_run unchecked`);
+      }
+      throw new Error(`Release tag ${refName} does not match the package version ${version}; re-tag the tested commit as v${version} (see scripts/bump-version.mjs output) or fix package.json`);
+    }
     throw new Error('Release tag push must match the package version');
   }
   return { sha, version, dry_run: dryRun };

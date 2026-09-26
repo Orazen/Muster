@@ -11,6 +11,14 @@ const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\
 const MAX_TAG_DEPTH = 8;
 const RELEASE_PAGE_SIZE = 100;
 const MAX_RELEASE_PAGES = 10;
+// A draft the API just accepted is not always visible to the release listing
+// immediately (provider-side cache lag) and a whole release run must not die
+// on it — observed live on the v1.20.0 run (2026-09-26). Bounded settle
+// window: recheck the tag and listing a few times before declaring failure.
+const CREATE_SETTLE_ATTEMPTS = 3;
+const CREATE_SETTLE_DELAY_MS = 2_000;
+
+const sleep = (ms) => new Promise((wakeup) => setTimeout(wakeup, ms));
 
 function requiredText(value, label) {
   // Environment and external JSON are untyped runtime boundaries.
@@ -46,7 +54,7 @@ function httpResponse(stdout) {
   return { status: Number(status[1]), body: stdout.slice(boundary.index + boundary[0].length) };
 }
 
-export async function manageReleaseState(mode, { env = process.env, run = execute } = {}) {
+export async function manageReleaseState(mode, { env = process.env, run = execute, delay = sleep } = {}) {
   if (!["prepare", "assert-draft", "assert-published"].includes(mode)) throw new Error("Expected prepare, assert-draft, or assert-published");
   const release = readReleaseEnvironment(env);
   const childEnv = { ...env, GH_HOST: "github.com", GH_PROMPT_DISABLED: "1", GH_PAGER: "cat", NO_COLOR: "1" };
@@ -150,8 +158,12 @@ export async function manageReleaseState(mode, { env = process.env, run = execut
       } catch {
         throw new Error("Draft creation failed; release state was not confirmed");
       }
-      await verifyTag();
-      state = await readState();
+      for (let attempt = 0; attempt < CREATE_SETTLE_ATTEMPTS; attempt++) {
+        if (attempt > 0) await delay(CREATE_SETTLE_DELAY_MS);
+        await verifyTag();
+        state = await readState();
+        if (state?.draft) break;
+      }
       if (!state?.draft) throw new Error("Draft creation did not produce a confirmed matching draft");
       action = "created";
     }

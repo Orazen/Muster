@@ -24,6 +24,17 @@ describe('release identity and dry-run derivation', () => {
   });
 });
 
+describe('pin failure messages name the mismatch', () => {
+  it('tells the operator to disable dry run for a matching tag push', () => {
+    expect(() => pinRelease({ ...selected, eventName: 'push', refName: 'v1.10.5', dryRun: 'true' }))
+      .toThrow(/dry_run disabled/);
+  });
+  it('names both tag and package version on a version mismatch', () => {
+    expect(() => pinRelease({ ...selected, eventName: 'push', refName: 'v1.10.4', dryRun: 'false' }))
+      .toThrow(/v1\.10\.4 does not match the package version 1\.10\.5/);
+  });
+});
+
 describe('core platform publication policy', () => {
   it('keeps partial and cancelled core builds as drafts, with Intel optional', () => {
     const statuses = ['success', 'failure', 'cancelled', 'skipped'];

@@ -264,9 +264,42 @@ describe("fail-closed staging", () => {
 
   it("does not report success when creation leaves the release absent", async () => {
     const owned = fixture();
-    const fake = runner([http(owned.ref), rejectedHttp(404), http([]), { stdout: "" }, http(owned.ref), rejectedHttp(404), http([])]);
+    const absent = () => [rejectedHttp(404), http([])];
+    const fake = runner([http(owned.ref), rejectedHttp(404), http([]), { stdout: "" }, http(owned.ref), ...absent(), http(owned.ref), ...absent(), http(owned.ref), ...absent()]);
     await expect(manageReleaseState("prepare", { env: owned.env, run: fake.run })).rejects.toThrow("did not produce a confirmed matching draft");
-    expect(fake.calls).toHaveLength(7);
+    expect(fake.calls).toHaveLength(13);
+  });
+
+  it("waits out listing lag: a draft visible only on a later settle check is confirmed", async () => {
+    const owned = fixture();
+    let settles = 0;
+    const delay = async () => { settles += 1; };
+    // create, then two invisible checks (tag + tag-404 + empty listing),
+    // then the draft shows up on the third attempt.
+    const fake = runner([
+      http(owned.ref), rejectedHttp(404), http([]), { stdout: "fixture release URL" },
+      http(owned.ref), rejectedHttp(404), http([]),
+      http(owned.ref), rejectedHttp(404), http([]),
+      http(owned.ref), http(owned.release),
+    ]);
+    await expect(manageReleaseState("prepare", { env: owned.env, run: fake.run, delay })).resolves.toMatchObject({ action: "created", state: "draft", releaseId: 1234 });
+    expect(settles).toBe(2);
+    expect(fake.calls).toHaveLength(12);
+  });
+
+  it("bounds the settle window before giving up on an invisible draft", async () => {
+    const owned = fixture();
+    let settles = 0;
+    const delay = async () => { settles += 1; };
+    const fake = runner([
+      http(owned.ref), rejectedHttp(404), http([]), { stdout: "" },
+      http(owned.ref), rejectedHttp(404), http([]),
+      http(owned.ref), rejectedHttp(404), http([]),
+      http(owned.ref), rejectedHttp(404), http([]),
+    ]);
+    await expect(manageReleaseState("prepare", { env: owned.env, run: fake.run, delay })).rejects.toThrow("did not produce a confirmed matching draft");
+    expect(settles).toBe(2);
+    expect(fake.calls).toHaveLength(13);
   });
 
   it("detects a tag moved during creation", async () => {
