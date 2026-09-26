@@ -85,19 +85,25 @@ export interface BrainQuery {
 const BRAIN_FILE = join(DATA_DIR, "workspace-brain.json");
 const MAX_FACTS = 10_000;
 
+/** The closed set of fact kinds, and the single source of truth for it: the
+ * schema is built from this list, the writer validates against it, and stats
+ * counts against it. Typed `readonly string[]` rather than the narrower union on
+ * purpose — the checks that matter here are RUNTIME checks against whatever a
+ * file or a request actually contains, and a `FactKind[]` would make the
+ * compiler treat them as always-true. */
+export const FACT_KINDS: readonly string[] = ["person", "company", "project", "decision", "note"];
+
 const factKindSchema = z.enum(["person", "company", "project", "decision", "note"]);
-const brainFileSchema = z.object({
-  facts: z.array(z.object({
-    id: z.string(),
-    ownerId: z.string().optional(),
-    text: z.string().min(1),
-    kind: factKindSchema,
-    source: z.string().min(1),
-    origin: z.string().optional(),
-    supersedes: z.string().optional(),
-    withdrawnAt: z.number().optional(),
-    createdAt: z.number(),
-  })),
+const factRecordSchema = z.object({
+  id: z.string(),
+  ownerId: z.string().optional(),
+  text: z.string().min(1),
+  kind: factKindSchema,
+  source: z.string().min(1),
+  origin: z.string().optional(),
+  supersedes: z.string().optional(),
+  withdrawnAt: z.number().optional(),
+  createdAt: z.number(),
 });
 
 // ── zero-LLM entity extraction ──────────────────────────────────────────
@@ -170,12 +176,40 @@ export class WorkspaceBrain {
 
   private load(): void {
     if (!existsSync(BRAIN_FILE)) return;
+    let raw: unknown;
     try {
-      const parsed = brainFileSchema.safeParse(parseJson(readFileSync(BRAIN_FILE, "utf8")));
-      if (parsed.success) this.facts = parsed.data.facts;
+      raw = parseJson(readFileSync(BRAIN_FILE, "utf8"));
     } catch {
-      // A corrupt brain file must not take the server down; it just starts
-      // empty, like a fresh install. The file is left untouched for triage.
+      // A brain file we cannot parse at all must not take the server down. It
+      // starts empty, like a fresh install, and — critically — nothing is
+      // written until a real fact is added, so the unreadable file survives for
+      // triage instead of being replaced by an empty one.
+      console.error("[brain] workspace-brain.json is not readable JSON; starting empty and leaving the file in place");
+      return;
+    }
+    // Per-fact, NOT per-file. Validating the whole array at once meant a single
+    // malformed record failed every record: `facts` came up empty, and the next
+    // persist() overwrote the file with `{facts: []}`. One bad `kind` from one
+    // account therefore erased every other account's memory, silently, with no
+    // error anywhere. The bad record is dropped and reported; the good ones
+    // load.
+    const envelope = z.object({ facts: z.array(z.unknown()) }).safeParse(raw);
+    if (!envelope.success) {
+      console.error("[brain] workspace-brain.json is not a {facts: []} document; starting empty and leaving the file in place");
+      return;
+    }
+    const kept: BrainFact[] = [];
+    let dropped = 0;
+    for (const candidate of envelope.data.facts) {
+      const fact = factRecordSchema.safeParse(candidate);
+      if (fact.success) kept.push(fact.data);
+      else dropped += 1;
+    }
+    this.facts = kept;
+    if (dropped > 0) {
+      // Loud on purpose, and never destructive: the next write drops those
+      // records for real, so the operator needs to know it happened.
+      console.error(`[brain] dropped ${dropped} unreadable fact record(s) from workspace-brain.json; ${kept.length} kept`);
     }
   }
 
@@ -194,6 +228,12 @@ export class WorkspaceBrain {
     const text = input.text.trim();
     if (!text) throw new Error("Fact text is required.");
     if (!input.source.trim()) throw new Error("A fact needs a source (provenance).");
+    // The kind is checked HERE, at the write, rather than only when the file is
+    // read back. Validating on load alone is what let a bad kind in: the record
+    // was accepted with 201, and the damage only appeared at the next restart.
+    if (input.kind !== undefined && !FACT_KINDS.includes(input.kind)) {
+      throw new Error(`kind must be one of: ${FACT_KINDS.join(", ")}`);
+    }
     const fact: BrainFact = {
       id: newId(),
       text,
@@ -204,16 +244,48 @@ export class WorkspaceBrain {
     if (input.ownerId) fact.ownerId = input.ownerId;
     if (input.origin) fact.origin = input.origin;
     if (input.supersedes) {
-      fact.supersedes = input.supersedes;
+      // A correction has to correct SOMETHING. A dangling id was accepted with
+      // 201 before, so the caller was told its correction landed while the chain
+      // pointed at nothing.
       const old = this.facts.find((f) => f.id === input.supersedes);
-      if (old) old.withdrawnAt = Date.now();
+      if (!old) throw new Error("supersedes must name a fact that exists.");
+      // The reference is kept either way: `history()` already refuses to walk
+      // into another owner's chain, so recording it leaks nothing — that is the
+      // behaviour server/workspace-brain.test.ts pins.
+      fact.supersedes = input.supersedes;
+      // But a FOREIGN fact is not retired. Marking it withdrawn was a write to
+      // another account's data: Alice could supersede Bob's live fact and make
+      // it stop answering his queries, silently, with nothing in his history to
+      // explain it. Only the owner may retire their own fact — see withdraw().
+      if (old.ownerId === input.ownerId) old.withdrawnAt = Date.now();
     }
     this.facts.push(fact);
-    if (this.facts.length > MAX_FACTS) {
-      this.facts = this.facts.slice(this.facts.length - MAX_FACTS);
-    }
+    this.trimToCap(input.ownerId);
     this.persist();
     return fact;
+  }
+
+  /** Keep the file bounded WITHOUT letting one account delete another's
+   * memory.
+   *
+   * The cap used to be applied to the whole array, so a single busy tenant
+   * pushing past 10,000 facts evicted the oldest records in the FILE — which
+   * belonged to whoever happened to write first, silently and permanently. The
+   * limit is now per owner: the writing account gives up its own oldest records
+   * and nobody else's.
+   *
+   * A desktop install's records carry no ownerId. They are the operator's, and
+   * they are trimmed as their own bucket rather than being treated as
+   * unowned-and-therefore-cheapest-to-drop. */
+  private trimToCap(writingOwnerId: string | undefined): void {
+    const owner = writingOwnerId ?? "";
+    const own = this.facts.filter((f) => (f.ownerId ?? "") === owner);
+    if (own.length <= MAX_FACTS) return;
+    // Oldest first: `facts` is append-ordered, so the surplus is a prefix of
+    // this owner's own records.
+    const surplus = own.slice(0, own.length - MAX_FACTS);
+    const drop = new Set(surplus.map((f) => f.id));
+    this.facts = this.facts.filter((f) => !drop.has(f.id));
   }
 
   /** Withdrawal, not deletion — provenance stays queryable via `includingWithdrawn`. */
@@ -327,7 +399,14 @@ export class WorkspaceBrain {
   stats(ownerId: string | undefined) {
     const visible = this.visible(ownerId);
     const kinds = { person: 0, company: 0, project: 0, decision: 0, note: 0 };
-    for (const f of visible) if (!f.withdrawnAt) kinds[f.kind] += 1;
+    // Counted by membership, never by indexing with an arbitrary string:
+    // `kinds[f.kind] += 1` on an unrecognised kind yields NaN, which serialises
+    // to null and reads as a broken counter on the client. A record that slipped
+    // past the writer's validation is counted in `facts` and in no bucket.
+    for (const f of visible) {
+      if (f.withdrawnAt) continue;
+      if (FACT_KINDS.includes(f.kind)) kinds[f.kind] += 1;
+    }
     return {
       facts: visible.filter((f) => !f.withdrawnAt).length,
       withdrawn: visible.length - visible.filter((f) => !f.withdrawnAt).length,
