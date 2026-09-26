@@ -88,7 +88,7 @@ describe("Browser pairing-code redeem flow", () => {
       const flow = new PairRedeemFlow(syntheticCode, transport);
       await flow.start();
       expect(flow.state).toEqual({ status: "error", retryable: false,
-        message: "The server did not confirm this sign-in. Try redeeming the code again." });
+        message: "The sign-in could not be confirmed. The code cannot be used twice \u2014 reload the page: if you are signed in, you are done." });
       await flow.retry();
       await flow.start();
       expect(transport).toHaveBeenCalledTimes(1);
@@ -101,7 +101,7 @@ describe("Browser pairing-code redeem flow", () => {
     const flow = new PairRedeemFlow(syntheticCode, transport);
     await flow.start();
     expect(flow.state).toEqual({ status: "error", retryable: false,
-      message: "The server did not confirm this sign-in. Try redeeming the code again." });
+      message: "The sign-in could not be confirmed. The code cannot be used twice \u2014 reload the page: if you are signed in, you are done." });
     expect(windowReplace).not.toHaveBeenCalled();
   });
 

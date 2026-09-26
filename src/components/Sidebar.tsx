@@ -1382,16 +1382,21 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   // The attention inbox derives from the feeds the roster already holds —
   // no fetch, no new state: waiting beats failed beats unread; recency
-  // breaks ties. `lastToolFailed` is the same fact the mascot's error face
-  // reads, so the inbox and the faces can never disagree.
-  const botFacts: AttentionFacts[] = matchingBots.map((bot) => ({
-    id: bot.id,
-    name: bot.name,
-    unread: Boolean(bot.unread),
-    waiting: bot.activity === "waiting-on-you",
-    failed: visibleMessages(bot).some((m) => m.tool?.ok === false),
-    at: visibleMessages(bot).at(-1)?.at,
-  }));
+  // breaks ties. `failed` reads the LAST activity chip exactly like the
+  // mascot's error face does (src/lib/mascot.ts): a failure recovered by
+  // later work must stop holding the top rank, and both surfaces must
+  // agree on when that is.
+  const botFacts: AttentionFacts[] = matchingBots.map((bot) => {
+    const last = visibleMessages(bot).at(-1);
+    return {
+      id: bot.id,
+      name: bot.name,
+      unread: Boolean(bot.unread),
+      waiting: bot.activity === "waiting-on-you",
+      failed: last?.kind === "activity" && last.tool?.ok === false,
+      at: last?.at,
+    };
+  });
   const roomFacts: AttentionFacts[] = visibleGroups.map((g) => ({
     id: g.id,
     name: g.name,

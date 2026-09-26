@@ -69,8 +69,12 @@ export class PairRedeemFlow {
         return;
       }
       if (response.ok) {
+        // A 200 already consumed the single-use code and set the session
+        // cookie, whatever the body says — "try again" would be a doomed
+        // instruction. The honest move is to check whether the sign-in
+        // actually landed before asking the user to do anything.
         this.publish({ status: "error", retryable: false,
-          message: "The server did not confirm this sign-in. Try redeeming the code again." });
+          message: "The sign-in could not be confirmed. The code cannot be used twice — reload the page: if you are signed in, you are done." });
       } else if (response.status === 400) {
         // Invalid, consumed and expired share one remedy — a fresh code — so
         // single-use semantics get one honest message for the whole class.
