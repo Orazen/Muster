@@ -4090,6 +4090,9 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
     tts: tts.describeVoice(cfg),
     // not a secret — the sidebar shows it
     profile,
+    // org identity (OMB parity #8): the sidebar brand slot reads these;
+    // both are settings, not secrets
+    branding: { orgName: cfg.branding?.orgName ?? "", logo: cfg.branding?.logo ?? "" },
     // storage-sovereignty gate: the onboarding UI reads required/satisfied
     storageGate: storageGateFor(userId),
     // desktop isolation is a setting, not a secret; the Local VM panel reads it
@@ -8427,6 +8430,35 @@ let requestUserEmail = "";
     if (method === "POST" && path === "/api/local-computer/screenshot") {
       localVmIdles.forTarget(SHARED_LOCAL_VM_TARGET.key).touch();
       return json(res, 200, { image: await containerComputerScreenshot() });
+    }
+
+    // Desktop canvas (OMB parity #10): read-only snapshots of every local
+    // desktop that exists, for side-by-side watching. Read-only by design —
+    // acting on a desktop belongs to the bot's own Computer panel, which
+    // owns the lease and the activity context. Existence is checked on the
+    // machine, not memory, so a recycled desktop simply drops out.
+    if (method === "POST" && path === "/api/local-computer/canvas-screenshots") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const bodies = store.bots
+        .filter((b) => !b.hidden)
+        .map((b) => ({ botId: b.id, target: localVmMode(cfg) === "perBot" ? perBotLocalVmTarget(b.id) : SHARED_LOCAL_VM_TARGET }));
+      const byKey = new Map(bodies.map((b) => [b.target.key, b]));
+      const desktops = await Promise.all(
+        [...byKey.values()].map(async ({ botId, target }) => {
+          try {
+            const status = await containerComputerStatus(undefined, undefined, target);
+            if (status.container !== "running") return null;
+            const image = await containerComputerScreenshot(undefined, undefined, target);
+            return { botId, label: target.label, image };
+          } catch {
+            // one sleepy or missing desktop never blanks the whole canvas
+            return null;
+          }
+        }),
+      );
+      return json(res, 200, { desktops: desktops.filter((d) => d !== null) });
     }
 
     // identity handshake for the packaged app's port fallback: the forked

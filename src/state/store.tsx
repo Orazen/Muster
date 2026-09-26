@@ -303,6 +303,9 @@ export interface ConfigStatus {
   tts?: { configured: boolean; ready: boolean; voice: string };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string; about?: string };
+  /** Org identity (OMB parity #8): the sidebar brand slot in the browser.
+   * logo is a validated image data: URL; empty strings = defaults. */
+  branding?: { orgName: string; logo: string };
   /** Server-side cap on every bot turn in a channel, in minutes. Direct
    * chats are exempt — they stop on silence via the stall watchdog. */
   channels?: { turnCapMinutes: number };
@@ -432,6 +435,8 @@ export interface AppState {
   settingsOpen: boolean;
   pluginsOpen: boolean;
   computerOpen: boolean;
+  /** side-by-side watch-only view of every local desktop (OMB parity #10) */
+  desktopCanvasOpen: boolean;
   /** the per-bot visible browser side panel (human watch/drive) */
   browserPanelOpen: boolean;
   /** the per-thread event inspector (runtime stream + native protocol tee) */
@@ -582,6 +587,7 @@ export type Action =
   | { type: "toggleSettings"; open?: boolean }
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
+  | { type: "toggleDesktopCanvas"; open?: boolean }
   | { type: "toggleBrowserPanel"; open?: boolean }
   | { type: "toggleInspector"; open?: boolean }
   | { type: "focusMessage"; threadId: string; messageId: string }
@@ -635,6 +641,7 @@ export function reducer(state: AppState, action: Action): AppState {
         activeView: "routines",
         settingsOpen: false,
         computerOpen: false,
+        desktopCanvasOpen: false,
         browserPanelOpen: false,
         inspectorOpen: false,
         appSettingsOpen: false,
@@ -965,6 +972,19 @@ export function reducer(state: AppState, action: Action): AppState {
         settingsOpen: open ? false : state.settingsOpen,
         computerOpen: open ? false : state.computerOpen,
         inspectorOpen: open ? false : state.inspectorOpen,
+        desktopCanvasOpen: open ? false : state.desktopCanvasOpen,
+        appSettingsOpen: open ? false : state.appSettingsOpen,
+      };
+    }
+    case "toggleDesktopCanvas": {
+      const open = action.open ?? !state.desktopCanvasOpen;
+      return {
+        ...state,
+        desktopCanvasOpen: open,
+        settingsOpen: open ? false : state.settingsOpen,
+        computerOpen: open ? false : state.computerOpen,
+        browserPanelOpen: open ? false : state.browserPanelOpen,
+        inspectorOpen: open ? false : state.inspectorOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
@@ -1099,6 +1119,7 @@ export const initialState: AppState = {
   settingsOpen: false,
   pluginsOpen: false,
   computerOpen: false,
+  desktopCanvasOpen: false,
   browserPanelOpen: false,
   inspectorOpen: false,
   appSettingsOpen: false,

@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   CalendarDays,
   CalendarClock,
+  Columns3,
   ExternalLink,
   Loader2,
   Monitor,
@@ -414,12 +415,24 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           <Settings size={18} />
         </button>
         <span className="text-[15px] font-semibold text-ink">Computer</span>
-        <button
-          onClick={() => dispatch({ type: "toggleComputer", open: false })}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
-        >
-          <X size={18} />
-        </button>
+        <div className="flex items-center gap-1">
+          {/* Desktop canvas (OMB parity #10): side-by-side watch-only view of
+              every running local desktop. */}
+          <button
+            onClick={() => dispatch({ type: "toggleDesktopCanvas", open: true })}
+            className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+            title="Watch all desktops side by side"
+            aria-label="Watch all desktops side by side"
+          >
+            <Columns3 size={18} />
+          </button>
+          <button
+            onClick={() => dispatch({ type: "toggleComputer", open: false })}
+            className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          >
+            <X size={18} />
+          </button>
+        </div>
       </div>
       <ControlHold botId={bot.id} />
       <div className="flex-1 overflow-y-auto px-5 pb-5">

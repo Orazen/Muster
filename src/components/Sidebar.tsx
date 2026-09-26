@@ -1440,8 +1440,24 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           <div className="w-14" />
         ) : browser ? (
           <div className="flex items-center gap-2">
-            <MusterBotMark size={22} label="Muster" />
-            {density !== "icons" && <span className="text-[15px] font-semibold tracking-tight text-ink">Muster</span>}
+            {/* Org identity (OMB parity #8): a configured org logo/name
+                replaces the default brand in the browser sidebar — the
+                workspace reads as the org's, not the vendor's. Desktop keeps
+                the stock brand (macOS owns the titlebar chrome there). */}
+            {state.config?.branding?.logo ? (
+              <img
+                src={state.config.branding.logo}
+                alt={state.config.branding.orgName || "Organization"}
+                className="size-[22px] rounded object-contain"
+              />
+            ) : (
+              <MusterBotMark size={22} label="Muster" />
+            )}
+            {density !== "icons" && (
+              <span className="text-[15px] font-semibold tracking-tight text-ink">
+                {state.config?.branding?.orgName || "Muster"}
+              </span>
+            )}
           </div>
         ) : <div />}
         <div

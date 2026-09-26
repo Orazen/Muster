@@ -28,6 +28,18 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ profile: [] })).toThrow("profile");
   });
 
+  it("accepts org branding with a valid image data URL and rejects the rest", () => {
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    expect(parseConfigPatch({ branding: { orgName: "Orazen", logo: png } })).toMatchObject({ branding: { orgName: "Orazen", logo: png } });
+    expect(parseConfigPatch({ branding: { orgName: "Orazen" } })).toMatchObject({ branding: { orgName: "Orazen" } });
+    // script-capable or non-image data URLs are refused
+    expect(() => parseConfigPatch({ branding: { logo: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=" } })).toThrow(/logo/);
+    expect(() => parseConfigPatch({ branding: { logo: "https://example.com/logo.png" } })).toThrow(/logo/);
+    expect(() => parseConfigPatch({ branding: { logo: "data:text/html;base64,PGI+cDwvYj4=" } })).toThrow(/logo/);
+    // the size budget is real
+    expect(() => parseConfigPatch({ branding: { logo: `data:image/png;base64,${"A".repeat(300_001)}` } })).toThrow(/large/);
+  });
+
   it("persists customProviders as a whole array (regression: saveConfig dropped the key, BYOK providers vanished on reload)", async () => {
     // saveConfig is the only path that could lose this key: its section
     // merge had no branch for customProviders, so the write silently

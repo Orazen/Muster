@@ -83,6 +83,19 @@ const appConfigSchema = z.object({
       trimToMib: z.number().int().min(1).max(10240).optional(),
     })
     .optional(),
+  /** Org identity (OMB parity #8, scoped): the workspace's display name and
+   * logo, shown in the sidebar's brand slot in the browser. The logo is a
+   * data: URL (no asset hosting, works offline) — validated to an image
+   * mime type and size-capped, since a data: URL is persisted config. */
+  branding: z
+    .object({ orgName: optionalText, logo: optionalText })
+    .refine((value) => !value.logo || /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(value.logo), {
+      message: "logo must be a base64 data URL of a png, jpeg, webp, or gif",
+    })
+    .refine((value) => !value.logo || value.logo.length <= 300_000, {
+      message: "logo is too large (max ~220 KB decoded)",
+    })
+    .optional(),
   /** Parallel threads per bot (OMB parity). `default` is the deployment
    * default width (1 = the classic single-worker invariant); `perBot` holds
    * explicit per-bot widths. Group threads are never parallel. */
@@ -167,6 +180,9 @@ export interface AppConfig {
   vps?: { sshAlias?: string };
   profile?: { name?: string; email?: string; about?: string };
   eventLogRetention?: { deleteArchivedAfterDays?: number; trimToMib?: number };
+  /** Org identity (OMB parity #8): sidebar brand slot in the browser. The
+   * logo is a validated, size-capped image data: URL. */
+  branding?: { orgName?: string; logo?: string };
   /** Parallel threads per bot: `default` is the deployment width, `perBot`
    * holds explicit per-bot overrides. `bots` seeds new bots' model choices
    * (defaultEffort); existing bots keep what they saved. */
@@ -311,7 +327,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
-  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "musterCloud", "localVm", "channels", "vps", "hiNew", "driveSync", "telegramSync", "eventLogRetention", "parallelThreads", "bots"] as const) {
+  for (const key of ["xai", "composio", "box", "opensandbox", "opencodeGo", "tts", "profile", "branding", "musterCloud", "localVm", "channels", "vps", "hiNew", "driveSync", "telegramSync", "eventLogRetention", "parallelThreads", "bots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

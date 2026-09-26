@@ -41,7 +41,7 @@ import { TeamContextDraft } from "@/lib/team-context-draft";
 import "./settings-modal.css";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User; keywords: string[] }> = [
-  { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "account", "updates", "turn cap", "diagnostics"] },
+  { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "account", "updates", "turn cap", "diagnostics", "logo", "branding", "organization"] },
   { id: "workspaces", label: "Connected workspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "connect", "pair", "switch", "local", "address"] },
   { id: "localFirst", label: "Local-first", icon: HardDrive, keywords: ["local", "data", "drive", "sync", "storage", "offline"] },
   { id: "organisation", label: "Organisation", icon: Building2, keywords: ["company", "team", "org", "models", "gateway", "policy", "members"] },
@@ -238,6 +238,108 @@ function ProfileFields() {
           Every bot reads this in every conversation. Keep it to durable facts — not task details.
         </span>
       </label>
+      {saveError && <p role="alert" className="text-[12.5px] text-[#ff6b6b]">{saveError}</p>}
+    </div>
+  );
+}
+
+/** Org identity (OMB parity #8, scoped): the browser sidebar's brand slot
+ * shows this name/logo instead of the stock brand. The logo lives in
+ * config as a data: URL — no asset hosting, works offline, and the server
+ * validates both the mime type and the size. */
+function BrandingCard() {
+  const { state, dispatch } = useStore();
+  const [orgName, setOrgName] = useState(state.config?.branding?.orgName || "");
+  const [logo, setLogo] = useState(state.config?.branding?.logo || "");
+  const [saveError, setSaveError] = useState("");
+  useEffect(() => {
+    setOrgName(state.config?.branding?.orgName || "");
+    setLogo(state.config?.branding?.logo || "");
+  }, [state.config?.branding?.orgName, state.config?.branding?.logo]);
+
+  const save = (next: { orgName?: string; logo?: string }) => {
+    setSaveError("");
+    void api("/api/config", {
+      method: "PUT",
+      body: JSON.stringify({ branding: { orgName: (next.orgName ?? orgName).trim(), logo: next.logo ?? logo } }),
+    })
+      .then((config) => dispatch({ type: "configStatus", config }))
+      .catch((error) => setSaveError(error instanceof Error ? error.message : "Saving failed — try again."));
+  };
+
+  const onLogoFile = (file: File | undefined) => {
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+      setSaveError("Logo must be a PNG, JPEG, WebP, or GIF.");
+      return;
+    }
+    // Keep the client check in step with the server's data-URL budget.
+    if (file.size > 220_000) {
+      setSaveError("Logo must be under 220 KB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result ?? "");
+      setLogo(url);
+      save({ logo: url });
+    };
+    reader.onerror = () => setSaveError("Could not read that file.");
+    reader.readAsDataURL(file);
+  };
+
+  const inputClass =
+    "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
+  return (
+    <div className="flex flex-col gap-3">
+      <label className="space-y-1.5 text-[13px] text-ink-secondary">Organization name
+        <input
+          aria-label="Organization name"
+          value={orgName}
+          onChange={(e) => setOrgName(e.target.value)}
+          onBlur={() => save({ orgName })}
+          placeholder="Muster"
+          className={inputClass}
+        />
+      </label>
+      <div className="space-y-1.5 text-[13px] text-ink-secondary">
+        Logo
+        <div className="flex items-center gap-3">
+          {logo ? (
+            <img src={logo} alt="Organization logo" className="size-10 rounded-lg border border-hairline/40 object-contain p-1" />
+          ) : (
+            <div aria-hidden className="flex size-10 items-center justify-center rounded-lg border border-dashed border-hairline/40 text-ink-secondary">?</div>
+          )}
+          <label className="cursor-pointer rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:border-hairline">
+            Upload logo
+            <input
+              type="file"
+              aria-label="Upload logo"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="sr-only"
+              onChange={(e) => {
+                onLogoFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          {logo && (
+            <button
+              type="button"
+              onClick={() => {
+                setLogo("");
+                save({ logo: "" });
+              }}
+              className="rounded-lg px-2 py-1.5 text-[13px] text-ink-secondary hover:text-ink"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+        <span className="block text-[11.5px] text-ink-secondary/80">
+          Shown instead of the Muster brand in the browser sidebar. PNG, JPEG, WebP, or GIF under 220 KB.
+        </span>
+      </div>
       {saveError && <p role="alert" className="text-[12.5px] text-[#ff6b6b]">{saveError}</p>}
     </div>
   );
@@ -1183,6 +1285,9 @@ export function SettingsModal() {
               <>
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
                   <ProfileFields />
+                </Card>
+                <Card title="Organization" subtitle="Name and logo for this workspace. Shown in the browser sidebar.">
+                  <BrandingCard />
                 </Card>
                 <LanguageRow />
                 <AnalyticsRow />

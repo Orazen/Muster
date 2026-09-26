@@ -13,6 +13,7 @@ import { GroupView } from "@/components/GroupView";
 const SettingsPanel = lazy(() => import("@/components/SettingsPanel").then((m) => ({ default: m.SettingsPanel })));
 const PluginsPanel = lazy(() => import("@/components/PluginsPanel").then((m) => ({ default: m.PluginsPanel })));
 const ComputerPanel = lazy(() => import("@/components/ComputerPanel").then((m) => ({ default: m.ComputerPanel })));
+const DesktopCanvas = lazy(() => import("@/components/DesktopCanvas").then((m) => ({ default: m.default })));
 const BrowserPanel = lazy(() => import("@/components/BrowserPanel").then((m) => ({ default: m.BrowserPanel })));
 const InspectorPanel = lazy(() => import("@/components/InspectorPanel").then((m) => ({ default: m.InspectorPanel })));
 const SettingsModal = lazy(() => import("@/components/SettingsModal").then((m) => ({ default: m.SettingsModal })));
@@ -294,6 +295,7 @@ function Shell() {
       )}
       {state.settingsOpen && bot && <Suspense fallback={null}><SettingsPanel bot={bot} /></Suspense>}
       {state.computerOpen && bot && <Suspense fallback={null}><ComputerPanel bot={bot} /></Suspense>}
+      {state.desktopCanvasOpen && <Suspense fallback={null}><DesktopCanvas onClose={() => dispatch({ type: "toggleDesktopCanvas", open: false })} /></Suspense>}
       {state.browserPanelOpen && bot && <Suspense fallback={null}><BrowserPanel bot={bot} onClose={() => dispatch({ type: "toggleBrowserPanel", open: false })} /></Suspense>}
       {state.inspectorOpen && bot && <Suspense fallback={null}><InspectorPanel bot={bot} /></Suspense>}
       {state.appSettingsOpen && <Suspense fallback={null}><SettingsModal /></Suspense>}
