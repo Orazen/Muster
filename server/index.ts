@@ -315,6 +315,18 @@ import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { readRuntimeEvidence, readThreadEvents } from "./thread-events.ts";
 import { deleteStaleArchivedLogs, trimAllEventLogs } from "./event-log-cleanup.ts";
 import { claimSlot, clearSlots, configuredWidth, hasSlot, releaseSlot, runningThreads } from "./turn-slots.ts";
+
+/** Idle a bot only when no turn of its own is still running.
+ *
+ * `busy` is a single boolean per bot while the ledger is per thread, so above a
+ * width of one the two can disagree: the first of two parallel threads to finish
+ * would clear `busy` while the other is still working — unlocking the composer
+ * mid-turn and telling every open window the bot is idle. Every settle site
+ * that means "this TURN is done" must ask the ledger, not the flag. */
+function idleWhenNoTurns(botId: string): void {
+  if (runningThreads(botId).length > 0) return;
+  store.setActivity(botId, "idle");
+}
 import { clampGeneratedTitle, generatedTitlePrompt } from "./generated-titles.ts";
 import { UsageAllowance } from "./usage-allowance.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
@@ -1971,7 +1983,7 @@ bus.subscribe((event: RuntimeEvent) => {
           if (usageAllowance.enabled) usageAllowance.reconcile(held.accountId, event.cost ?? 0, held.amount);
         }
         // settled → idle; a setup failure already marked it dead, keep that
-        if (store.bot(bot.id)?.activity !== "dead") store.setActivity(bot.id, "idle");
+        if (store.bot(bot.id)?.activity !== "dead") idleWhenNoTurns(bot.id);
         // LLM short titles (OMB parity): once the turn settles, upgrade a
         // mechanical task title to a compact generated one. Strictly
         // best-effort — an adapter without generateText, a failed call, or
@@ -2565,7 +2577,42 @@ async function startTurn(
   const bot: typeof savedBot = savedBot && opts?.fallbackSelection ? { ...savedBot, modelSelection: opts.fallbackSelection } : savedBot;
   if (!bot) throw Object.assign(new Error("no such bot"), { status: 404 });
   if (opts?.peerGuard && !opts.peerGuard()) throw Object.assign(new Error("peer exchange is no longer authorized"), { status: 403 });
-  if (bot.busy) throw Object.assign(new Error("the bot is already working — interrupt it first"), { status: 409 });
+  // ── admission: the slot ledger decides, not the busy flag ──
+  // The busy flag is ONE boolean per bot, so testing it refused every second
+  // send and made the configured width unreachable at any value: the check sat
+  // at the top of startTurn, `setActivity("working")` ran synchronously right
+  // after it, and the ledger was only consulted further down. The
+  // `parallelWidth > 1` branch was dead code, and the Settings copy promising
+  // "the server admits extra DIRECT threads up to the width" was a lie.
+  //
+  // Two conditions, both read from the ledger, in one synchronous block with
+  // the claim below so no await can slip between the count and the claim:
+  //
+  //   1. the bot's OWN thread stays strictly serial at any width — a second
+  //      concurrent turn on one thread is not what "parallel threads" means;
+  //   2. the ledger must have room, up to the width.
+  //
+  // At the classic width of 1 both collapse to the historical answer, and the
+  // width-1 message is byte-identical to the one the busy check used to give.
+  const threadId = opts?.threadId ?? bot.threadId;
+  const parallelWidth = configuredWidth(cfg.parallelThreads, bot.id, store.groupByThread(bot.threadId) !== undefined);
+  const busyMessage = () =>
+    parallelWidth === 1
+      ? "the bot is already working — interrupt it first"
+      : `this bot is running its limit of ${parallelWidth} parallel threads — wait for one to finish or raise the limit`;
+  if (runningThreads(bot.id).includes(threadId)) {
+    throw Object.assign(new Error(busyMessage()), { status: 409 });
+  }
+  if (!hasSlot(bot.id, threadId, parallelWidth)) {
+    throw Object.assign(new Error(busyMessage()), { status: 409 });
+  }
+  // Claimed HERE, next to the check that admitted it, so check-and-claim is
+  // atomic with respect to an await. Claiming 200 lines later left a window in
+  // which two simultaneous sends both passed `hasSlot` and both claimed — which
+  // over-parallelises past the configured width, the one direction
+  // server/turn-slots.ts says can never happen. `claimSlot` is a Set.add and so
+  // idempotent; the later call stays as documentation, not state.
+  claimSlot(bot.id, threadId);
   // Muster Vault (lite): a bot with a token budget that is already spent
   // refuses new turns. The refusal is a normal pre-dispatch error — it
   // lands as a chip in the thread with the raise-the-cap hint, and the
@@ -2619,6 +2666,11 @@ async function startTurn(
     }
     if (connectorLease) connectorCapabilities.revoke(connectorLease);
     if (!current || current === dispatchLease) store.setActivity(bot.id, "idle");
+    // The slot is claimed at admission, before any of this, so every
+    // pre-dispatch failure has to hand it back. Without this a single 402 or
+    // 404 left the ledger full and the bot refused every later turn with
+    // "already working" — a leak that is permanent and invisible.
+    releaseSlot(bot.id, threadId);
     throw err;
   };
   // Multi-tenant engine guard: a turn may only run on credentials that
@@ -2642,24 +2694,6 @@ async function startTurn(
         { status: 403 },
       ));
     }
-  }
-  const threadId = opts?.threadId ?? bot.threadId;
-  // Parallel threads (OMB parity): the busy flag still locks the composer
-  // and serializes the bot's OWN thread; the width only admits additional
-  // DIRECT threads up to the configured limit. Rooms stay one-speaker, and
-  // the group engine's own busy check is untouched. The width read and the
-  // slot check stay in this synchronous pre-dispatch block so no await can
-  // slip between them and the claim below.
-  const parallelWidth = configuredWidth(cfg.parallelThreads, bot.id, store.groupByThread(bot.threadId) !== undefined);
-  if (!hasSlot(bot.id, threadId, parallelWidth)) {
-    throw Object.assign(
-      new Error(
-        parallelWidth === 1
-          ? "the bot is already working — interrupt it first"
-          : `this bot is running its limit of ${parallelWidth} parallel threads — wait for one to finish or raise the limit`,
-      ),
-      { status: 409 },
-    );
   }
   // a webhook turn, or one inherited from a bot already running unattended
   if (opts?.automationSource === "webhook" || opts?.unattended) markUnattended(bot.id);
@@ -3340,6 +3374,11 @@ async function startTurn(
       // A late setup rejection belongs to this lease, never a replacement.
       if (currentLease && currentLease !== lease) {
         opts?.onDispatchError?.("dispatch was superseded", driverInvoked);
+        // Released BEFORE the return. This path used to return eleven lines
+        // above the release, so the slot was never given back — invisible while
+        // the admission gate was unreachable, and a permanent serialisation for
+        // that bot the moment the ledger became the gate.
+        releaseSlot(bot.id, threadId);
         return;
       }
       const failedKey = threadDesktopTarget.get(threadId);
@@ -3371,7 +3410,7 @@ async function startTurn(
         },
         { bestEffort: true },
       );
-      store.setActivity(bot.id, "idle");
+      idleWhenNoTurns(bot.id);
       opts?.onDispatchError?.(message, driverInvoked);
       // a dispatch failure never emits turn.completed, so the settle-driven
       // drain would strand anything queued behind this turn
@@ -8827,7 +8866,14 @@ let requestUserEmail = "";
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      if (bot.busy) return json(res, 409, { error: "this bot is working — let it finish before starting a task" });
+      // Creating a task means switching the composer to another thread, which
+      // is exactly what a width above one exists to allow. Gating this on the
+      // busy flag made the second thread unreachable: you could not create the
+      // thread you needed while the first was running. The ledger decides, and
+      // at the classic width of 1 the answer — and the message — is unchanged.
+      if (runningThreads(bot.id).length >= configuredWidth(cfg.parallelThreads, bot.id, false)) {
+        return json(res, 409, { error: "this bot is working — let it finish before starting a task" });
+      }
       const body = await readBody(req);
       const task = store.createTask(bot.id, isText(body.title) ? body.title : undefined);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
