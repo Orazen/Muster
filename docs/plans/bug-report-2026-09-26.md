@@ -1,5 +1,19 @@
 # Bug report — 2026-09-26 sweep (read before picking up a fix)
 
+**Status update (2026-09-27).** Fixed and on main, each with tests: items
+**1's stale-bundle enabler** (the runtime resolver now runs newer source
+over an older bundle with a warning), **4** (pair --redeem retired
+honestly — it no longer touches the network, so it cannot burn a code;
+both copy surfaces point at working flows), **5** (sessions --json
+carries a display prefix, never a raw token), **8** (inbox reads the last
+activity chip like the mascot), **10, 12, 13, 14, 15** (eval trend and
+graders), and **19**. Items **6 and 7** were claimed and are being fixed
+by the lane that owns workspace-brain. Item **20** is left as pinned: the
+throttle-counts-successes behavior is deliberately locked by a security
+test, so changing it is an owner decision. Still open: **1, 2, 3, 17**
+(all `server/index.ts`, integrator lane), **9, 18** (auth/entry lane),
+**21** (cosmetic).
+
 Four parallel hunts over the freshest surfaces, all evidence live: an
 isolated boot per the repo's own harness pattern (owned data dirs, owned
 ports, never port 8845), the real CLI against a fixture cloud, the real
