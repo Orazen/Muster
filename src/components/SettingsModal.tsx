@@ -258,10 +258,17 @@ function BrandingCard() {
   }, [state.config?.branding?.orgName, state.config?.branding?.logo]);
 
   const save = (next: { orgName?: string; logo?: string }) => {
+    const orgNameNext = (next.orgName ?? orgName).trim();
+    const logoNext = next.logo ?? logo;
+    // Saving is never free — a config PUT can reload engines fleet-wide —
+    // so a blur that changed nothing must not send anything.
+    if (orgNameNext === (state.config?.branding?.orgName || "") && logoNext === (state.config?.branding?.logo || "")) {
+      return;
+    }
     setSaveError("");
     void api("/api/config", {
       method: "PUT",
-      body: JSON.stringify({ branding: { orgName: (next.orgName ?? orgName).trim(), logo: next.logo ?? logo } }),
+      body: JSON.stringify({ branding: { orgName: orgNameNext, logo: logoNext } }),
     })
       .then((config) => dispatch({ type: "configStatus", config }))
       .catch((error) => setSaveError(error instanceof Error ? error.message : "Saving failed — try again."));
@@ -1286,9 +1293,13 @@ export function SettingsModal() {
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
                   <ProfileFields />
                 </Card>
-                <Card title="Organization" subtitle="Name and logo for this workspace. Shown in the browser sidebar.">
-                  <BrandingCard />
-                </Card>
+                {/* Branding saves are operator-scoped config: for a hosted
+                    non-operator the card could only ever 403 on save. */}
+                {state.config?.isOperator !== false && (
+                  <Card title="Organization" subtitle="Name and logo for this workspace. Shown in the browser sidebar.">
+                    <BrandingCard />
+                  </Card>
+                )}
                 <LanguageRow />
                 <AnalyticsRow />
                 <TourCard />
