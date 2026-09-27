@@ -852,7 +852,20 @@ const providerFallback = new ProviderFallbackRunner({
 // connects their own storage (decision 14), and hires their team from
 // templates (decision 13); a seeded bot would steal that moment and pretend
 // the workspace was already usable.
-if (!SELF_HOSTED || process.env.OMB_ALLOW_SIGNUPS !== "true") store.seedIfEmpty();
+// A SELF-HOSTED deployment must never open with an OWNERLESS bot, and this
+// condition let it. `OMB_ALLOW_SIGNUPS` unset means signups are OPEN, but the
+// `!== "true"` test read that as closed and seeded anyway — on a fresh data
+// directory, where no account exists yet, so nothing could own the seed and the
+// ownership migration below had no primary to assign it to. It then stayed
+// ownerless for the life of the deployment, and every tenant rule reads
+// ownerless as shared: the first two accounts to sign up could read, rename and
+// run each other's bot. Reproduced on a two-account self-hosted fixture.
+if (!SELF_HOSTED) store.seedIfEmpty();
+else if (process.env.OMB_ALLOW_SIGNUPS !== "true" && primaryUserId()) {
+  // Closed signups on a deployment that already has an operator: the seed is
+  // wanted, and there is a real account to own it.
+  store.seedIfEmpty(primaryUserId() ?? undefined);
+}
 // Per-user vault engines register at boot so saved keys are live on any
 // device the account signs in from — configured once, everywhere.
 // Awaited, not fire-and-forget: an early /api/instances or first turn must
@@ -1103,6 +1116,51 @@ function broadcast<P extends FrameIdentity>(payload: P) {
   }
 }
 
+/** The account ids that own records named ANYWHERE inside a frame.
+ *
+ * The three explicit checks in `visibleToClient` only read TOP-LEVEL fields, so
+ * the shape nearly every bot frame actually takes — `{kind:"bot", bot:{…}}` —
+ * matched none of them and fell through to "no owner found, therefore
+ * deployment-wide, therefore send to everyone". Reproduced on a SELF-HOSTED
+ * two-account fixture: Bob, subscribed to his own stream and asking for nothing,
+ * received Alice's bot record the moment she renamed it.
+ *
+ * Ownership cannot be read off the payload either: `wireBot` deliberately
+ * strips `ownerId` from the wire shape — right for the client, and the reason
+ * this has to resolve records by id. Resolving through the store is also what
+ * makes the rule hold for nested records and for frames carrying a list, rather
+ * than only for a shape somebody remembered to add.
+ *
+ * Bounded on depth and on how many strings are probed. A frame is not a place
+ * to hide an unbounded walk, and a pathological payload must not make the
+ * filter expensive for every connected client. */
+const FRAME_SCAN_MAX_DEPTH = 6;
+const FRAME_SCAN_MAX_PROBES = 64;
+function frameOwnerIds(
+  value: unknown,
+  found = new Set<string>(),
+  depth = 0,
+  budget = { left: FRAME_SCAN_MAX_PROBES },
+): Set<string> {
+  if (depth > FRAME_SCAN_MAX_DEPTH || budget.left <= 0) return found;
+  if (typeof value === "string") {
+    budget.left -= 1;
+    const bot = store.bot(value);
+    if (bot?.ownerId) found.add(bot.ownerId);
+    const group = store.groups.find((g) => g.id === value);
+    if (group?.ownerId) found.add(group.ownerId);
+    return found;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) frameOwnerIds(item, found, depth + 1, budget);
+    return found;
+  }
+  if (value && typeof value === "object") {
+    for (const item of Object.values(value)) frameOwnerIds(item, found, depth + 1, budget);
+  }
+  return found;
+}
+
 /** Multi-tenant frame filter (SELF_HOSTED): a stream belonging to one user
  * never receives frames about another user's bots/threads/groups. Frames
  * without a resolvable record — engine status, usage, config events — are
@@ -1120,6 +1178,13 @@ function visibleToClient(client: SseClient, payload: FrameIdentity): boolean {
     // unknown[] element type for .some().
     return (payload.socialOwnerIds as unknown[]).some((id) => id === client.userId);
   }
+  // The general gate, BEFORE the three explicit field checks below: a frame
+  // naming ANY record with an owner belongs to that owner, wherever the record
+  // sits in the payload. A frame naming records from two accounts has no correct
+  // audience, so it is shown to neither — dropping it is the only safe answer,
+  // and it is the same direction the fail-safe bias takes everywhere else.
+  const owners = frameOwnerIds(payload);
+  if (owners.size > 0) return [...owners].every((id) => id === client.userId);
   const botId = isText(payload.botId) ? payload.botId : null;
   if (botId) {
     const b = store.bot(botId);
@@ -6267,7 +6332,21 @@ let requestUserEmail = "";
       });
     }
     if (path === "/api/routines" && method === "POST") {
-      return json(res, 201, { routine: routines!.create(await readBody(req)) });
+      // A routine is unattended, repeating work on a bot. Scheduling one on
+      // ANOTHER account's bot handed that account's engine a job it never asked
+      // for, and this was the only route in the family with no ownership check
+      // — /run, PATCH and DELETE have all had `ownsRoutine` since it was
+      // introduced. The bot id arrives in the BODY, so the URL choke point
+      // cannot see it; the check has to live here, exactly as its own comment
+      // says. 404 rather than 403, so a foreign id stays indistinguishable from
+      // a missing one and the route is not a bot-existence oracle.
+      const body = await readBody(req);
+      const named = isText(body?.botId) ? body.botId : "";
+      const target = named ? store.bot(named) : null;
+      if (target && !ownsRecord(target)) {
+        return json(res, 404, { error: "no such bot" });
+      }
+      return json(res, 201, { routine: routines!.create(body) });
     }
     let routineMatch = path.match(/^\/api\/routines\/([\w-]+)\/run$/);
     if (routineMatch && method === "POST") {
@@ -6292,6 +6371,14 @@ let requestUserEmail = "";
     }
     const runMatch = path.match(/^\/api\/routine-runs\/([\w-]+)\/(cancel|seen)$/);
     if (runMatch && method === "POST") {
+      // A run belongs to whoever owns its bot, exactly as the routine does.
+      // Without this, any signed-in account could cancel another account's
+      // running unattended work — or mark it seen, which silences the very
+      // badge that would have told its owner it needed attention.
+      const named = routines!.listRuns().find((r) => r.id === runMatch![1]);
+      if (named && !ownsRoutine(named)) {
+        return json(res, 404, { error: "no such active run" });
+      }
       const run = runMatch[2] === "cancel"
         ? await routines!.cancelRun(runMatch[1])
         : routines!.markSeen(runMatch[1]);

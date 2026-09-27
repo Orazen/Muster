@@ -1390,9 +1390,16 @@ export class Store {
   }
 
   /** First-run seed: one bot so the app never opens empty — it gets a
-   * random friendly name like every other bot. */
-  seedIfEmpty() {
+   * random friendly name like every other bot.
+   *
+   * `ownerId` matters more than it looks. Every tenant rule in the codebase
+   * reads a missing ownerId as "shared" — the SSE filter, `ownsRecord`, the bot
+   * list, the engine guard — so an ownerless bot on a multi-account deployment
+   * belongs to everyone: readable, renameable and runnable by any account. The
+   * caller passes the primary account when one exists, and omits it only where
+   * an unowned seed is genuinely right: a single-user desktop install. */
+  seedIfEmpty(ownerId?: string) {
     if (this.bots.length) return;
-    this.createBot();
+    this.createBot(ownerId ? { ownerId } : {});
   }
 }
