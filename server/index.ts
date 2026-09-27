@@ -268,7 +268,7 @@ import {
   writeWorkspaceFile,
 } from "./workspace-files.ts";
 import * as browserPanel from "./browser-panel.ts";
-const { agentPageFromChip } = browserPanel;
+const { agentPageForToolEvent } = browserPanel;
 import * as workspaceBundle from "./workspace-bundle.ts";
 import {
   applyPendingRestore,
@@ -1595,8 +1595,11 @@ bus.subscribe((event: RuntimeEvent) => {
         if (event.itemId) toolMessageByItem.set(`${event.threadId}:${event.itemId}`, message.id);
         // The agent's browser is headless and per-turn; the human's Browser
         // panel mirrors it from this one breadcrumb — the chip's own URL.
+        // The driver's structured page wins: the chip title above is a
+        // display crop, so a long URL re-parsed from it would open a page
+        // that does not exist.
         if (bot) {
-          const agentPage = agentPageFromChip(name);
+          const agentPage = agentPageForToolEvent(event);
           if (agentPage) lastAgentBrowserPage.set(bot.id, { ...agentPage, at: Date.now() });
         }
       }
