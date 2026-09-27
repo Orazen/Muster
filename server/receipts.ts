@@ -47,6 +47,27 @@ export function formatDuration(ms: number): string {
   return `${h}h ${m % 60}m`;
 }
 
+/** When the job actually stopped. What. The transcript's own last timestamp,
+ *  which is a fact about the past, instead of the clock at read time, which is
+ *  a fact about the reader. Why. Receipts are read with a GET, so passing
+ *  `Date.now()` made the same finished job report 17m 27s, then 17m 33s, then
+ *  17m 39s on three consecutive reads — and the receipt is the shareable
+ *  proof-of-work artifact, so a duration that climbs while you stare at it is
+ *  worse than reporting none. A task with no messages has nothing to read a
+ *  time from and falls back to `now`; the result is never earlier than
+ *  `createdAt`, because a receipt that claims a job finished before it started
+ *  is a different lie. */
+export function receiptFinishedAt(
+  createdAt: number,
+  messages: readonly { at: number }[],
+  now = Date.now(),
+): number {
+  if (messages.length === 0) return now;
+  let last = Number.NEGATIVE_INFINITY;
+  for (const message of messages) if (message.at > last) last = message.at;
+  return Math.max(createdAt, last);
+}
+
 export function buildReceipt(input: ReceiptInput): JobReceipt {
   const durationMs = Math.max(0, input.finishedAt - input.createdAt);
   const rawSummary = (input.finalWord ?? "").trim();

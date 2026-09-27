@@ -194,15 +194,15 @@ function cleanDays(days: ReadonlyArray<unknown> | undefined): number[] {
 function cleanSchedule(schedule: RoutineSchedule): RoutineSchedule {
   if (schedule?.type === "once") {
     const at = Number(schedule.at);
-    if (!Number.isFinite(at)) throw new Error("Choose a valid date and time");
+    if (!Number.isFinite(at)) throw rejected("Choose a valid date and time");
     return { type: "once", at };
   }
   if (schedule?.type === "daily") {
     const time = String(schedule.time ?? "");
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error("Time must use HH:MM");
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw rejected("Time must use HH:MM");
     return { type: "daily", time, weekdays: cleanDays(schedule.weekdays) };
   }
-  throw new Error("Choose a supported schedule");
+  throw rejected("Choose a supported schedule");
 }
 
 /** Next wall-clock occurrence in this computer's timezone, strictly after `after`. */
@@ -219,15 +219,36 @@ export function nextOccurrence(schedule: RoutineSchedule, after: number): number
   return null;
 }
 
-function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | "updatedAt" | "nextRunAt"> {
+/** A rejected-input error. What. The same message the code always threw, plus
+ *  the 400 that says the CALLER sent something unusable. Why. These throws
+ *  reached the server's catch-all, which falls back to 500 for anything
+ *  without a status — so `POST /api/routines {"foo":"bar"}` answered
+ *  500 "Give the routine a name" for a body the client simply got wrong, and a
+ *  null body leaked a raw TypeError about reading 'name'. The text was already
+ *  written for a person; only the status was wrong. */
+function rejected(message: string): Error {
+  return Object.assign(new Error(message), { status: 400 });
+}
+
+function sanitizeInput(raw: RoutineInput): Omit<Routine, "id" | "createdAt" | "updatedAt" | "nextRunAt"> {
+  // A JSON body of `null` arrives here as null, and reading `.name` off it threw
+  // a TypeError that the server reported verbatim: 500 "Cannot read properties
+  // of null (reading 'name')" — a 5xx blaming the server, with a null-pointer
+  // message the caller can do nothing about. Normalising first means a missing
+  // body lands on the same "Give the routine a name" 400 as an empty one.
+  // SAFETY: the caller's JSON body is untyped by construction, so it can be
+  // null, an array, or a string. Coercing a falsy body to {} is the whole
+  // guard — every read below is then `?? ""`, so a wrong-typed body degrades
+  // to the same 400 rather than throwing.
+  const input: RoutineInput = (raw ?? {}) as RoutineInput;
   const name = String(input.name ?? "").trim().slice(0, 80);
   const prompt = String(input.prompt ?? "").trim().slice(0, 20_000);
   const botId = String(input.botId ?? "").trim();
-  if (!name) throw new Error("Give the routine a name");
-  if (!prompt) throw new Error("Tell the bot what to do");
-  if (!botId) throw new Error("Choose a bot");
+  if (!name) throw rejected("Give the routine a name");
+  if (!prompt) throw rejected("Tell the bot what to do");
+  if (!botId) throw rejected("Choose a bot");
   const runOn = input.runOn ?? "agent";
-  if (runOn !== "agent" && runOn !== "cloud" && runOn !== "opensandbox") throw new Error("Choose where this routine runs");
+  if (runOn !== "agent" && runOn !== "cloud" && runOn !== "opensandbox") throw rejected("Choose where this routine runs");
   return {
     name,
     prompt,
@@ -270,18 +291,18 @@ function sanitizeChecks(raw: unknown): RoutineCheck[] | undefined {
   const parsed = checksSchema.safeParse(raw);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
-    throw new Error(`checks: ${issue?.message ?? "invalid check"}`);
+    throw rejected(`checks: ${issue?.message ?? "invalid check"}`);
   }
   return parsed.data.map((check) => {
     if (check.kind === "matches") {
       try {
         new RegExp(check.value);
       } catch {
-        throw new Error(`check "${check.label}": "${check.value}" is not a valid regular expression`);
+        throw rejected(`check "${check.label}": "${check.value}" is not a valid regular expression`);
       }
-      if (check.value.length > 200) throw new Error(`check "${check.label}": regex too long`);
+      if (check.value.length > 200) throw rejected(`check "${check.label}": regex too long`);
     } else if (!check.value.trim()) {
-      throw new Error(`check "${check.label}": give it something to look for`);
+      throw rejected(`check "${check.label}": give it something to look for`);
     }
     return { id: check.id?.trim() || randomUUID(), label: check.label.trim(), kind: check.kind, value: check.value.trim() };
   });
@@ -385,7 +406,7 @@ export class RoutineManager {
 
   create(input: RoutineInput): Routine {
     const clean = sanitizeInput(input);
-    if (this.options.botState(clean.botId) === "missing") throw new Error("That bot no longer exists");
+    if (this.options.botState(clean.botId) === "missing") throw rejected("That bot no longer exists");
     const at = this.now();
     const routine: Routine = {
       id: randomUUID(),
@@ -417,7 +438,7 @@ export class RoutineManager {
       checks: patch.checks ?? routine.checks,
       destination: patch.destination ?? routine.destination,
     });
-    if (this.options.botState(clean.botId) === "missing") throw new Error("That bot no longer exists");
+    if (this.options.botState(clean.botId) === "missing") throw rejected("That bot no longer exists");
     Object.assign(routine, clean, {
       nextRunAt: clean.enabled ? this.initialOccurrence(clean.schedule, this.now()) : null,
       updatedAt: this.now(),

@@ -334,7 +334,7 @@ import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
 import { VaultManager } from "./vault-manager.ts";
 import { buildBriefing } from "./briefing.ts";
-import { buildReceipt, renderReceiptText } from "./receipts.ts";
+import { buildReceipt, receiptFinishedAt, renderReceiptText } from "./receipts.ts";
 import { receiptFindings } from "./receipt-findings.ts";
 import { executeWorkflow, webagentsManifest, webagentsMarkdown } from "./agent-workflow.ts";
 import { buildWrapped, renderWrappedText } from "./wrapped.ts";
@@ -7098,7 +7098,9 @@ let requestUserEmail = "";
         botName: bot.name,
         taskTitle: task.title,
         createdAt: task.createdAt,
-        finishedAt: Date.now(),
+        // The transcript's own last word, not Date.now(): this route is a GET,
+        // so a clock reading made the duration a function of when you looked.
+        finishedAt: receiptFinishedAt(task.createdAt, msgs),
         usage: task.usage,
         finalWord: lastBotWord?.text ?? null,
         findings: receiptFindings(msgs),
@@ -10193,7 +10195,10 @@ let requestUserEmail = "";
       const body = await readBody(req);
       return json(res, 200, {
         ready: tts.voiceReady(cfg, isText(body.voiceId) ? body.voiceId : undefined),
-        utterances: toUtterances(String(body.text ?? "")),
+        // isText, not String(): `String({a:{b:1}})` is "[object Object]", and
+        // the caller got 200 with that as a real utterance to speak. A body the
+        // client got wrong should say so.
+        utterances: isText(body.text) ? toUtterances(body.text) : [],
       });
     }
     if (method === "GET" && path === "/api/tts/voices") {
