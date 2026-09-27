@@ -22,3 +22,29 @@ export function authGateReturnPath(location: { pathname: string; search: string;
   const path = location.pathname === "/" ? "/app" : location.pathname;
   return authDestination(path + location.search + location.hash);
 }
+
+const PAIR_RETURN_KEY = "muster.pair-return";
+
+/** A carried pairing code must never ride a query string: the /pair deep
+ * link's code would land in `?next=%2Fpair%23CODE`, and the server's own
+ * rule is that codes go in fragments precisely because query strings land
+ * in proxy and CDN access logs. The stash holds the return path across the
+ * sign-in round trip instead — same tab, wiped on read, nothing logged. */
+export function stashPairReturn(pathname: string, hash: string): string {
+  try {
+    globalThis.sessionStorage?.setItem(PAIR_RETURN_KEY, `${pathname}${hash}`);
+  } catch { /* storage unavailable (private mode): the hash is lost, not leaked */ }
+  return pathname;
+}
+
+/** Consume the stashed /pair return path (path + fragment) after sign-in.
+ * Reading removes it: a stash is one round trip old, never reusable. */
+export function takeStashedPairReturn(): string | null {
+  try {
+    const stashed = globalThis.sessionStorage?.getItem(PAIR_RETURN_KEY);
+    globalThis.sessionStorage?.removeItem(PAIR_RETURN_KEY);
+    return stashed && stashed.startsWith("/pair") ? stashed : null;
+  } catch {
+    return null;
+  }
+}

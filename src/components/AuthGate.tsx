@@ -2,7 +2,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { Loader2 } from "lucide-react";
 import { AuthShell, authButtonCls } from "./AuthShell";
-import { authGateReturnPath } from "@/lib/auth-navigation";
+import { authGateReturnPath, stashPairReturn, takeStashedPairReturn } from "@/lib/auth-navigation";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading, sessionError, retrySession } = useAuth();
@@ -27,10 +27,23 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    // `next` carries the destination through sign-in so deep links like
-    // /pair survive the auth round trip.
-    const next = encodeURIComponent(authGateReturnPath(location));
+    // A /pair deep link carries its code in the fragment, and a fragment
+    // must not be copied into `next` — a query string lands in access logs
+    // and the code is a live 5-minute credential. The stash carries the
+    // full return path across the round trip instead.
+    const carried = location.pathname === "/pair" && location.hash;
+    const next = encodeURIComponent(
+      carried ? stashPairReturn(location.pathname, location.hash) : authGateReturnPath(location),
+    );
     return <Navigate to={`/sign-in?next=${next}`} replace />;
+  }
+
+  // Back from sign-in: restore the stashed fragment before the page reads
+  // it, synchronously through the URL so the mount sees the carried code.
+  if (location.pathname === "/pair" && !location.hash) {
+    const stashed = takeStashedPairReturn();
+    const hash = stashed?.slice(stashed.indexOf("#"));
+    if (hash) globalThis.history?.replaceState(null, "", `${location.pathname}${hash}`);
   }
 
   return <>{children}</>;

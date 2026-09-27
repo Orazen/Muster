@@ -88,7 +88,12 @@ const appConfigSchema = z.object({
    * data: URL (no asset hosting, works offline) — validated to an image
    * mime type and size-capped, since a data: URL is persisted config. */
   branding: z
-    .object({ orgName: optionalText, logo: optionalText })
+    .object({
+      // The name is echoed into every config poll; the logo's own cap shows
+      // the intent — an org name is a label, not a second storage channel.
+      orgName: z.string().max(200).optional(),
+      logo: optionalText,
+    })
     .refine((value) => !value.logo || /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(value.logo), {
       message: "logo must be a base64 data URL of a png, jpeg, webp, or gif",
     })
