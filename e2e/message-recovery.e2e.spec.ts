@@ -180,7 +180,10 @@ test("a lost send response is recovered on reload as one message and one turn", 
   // seconds of observed idleness (long tasks, heap) on the recovered page.
   const timing = await page.evaluate(() => performance.getEntriesByType("navigation")[0]?.toJSON() ?? {});
   const idle = await page.evaluate(async () => {
-    const memory = performanceMemorySchema.parse(performance).memory?.usedJSHeapSize;
+    // SAFETY: this callback runs in the PAGE context, where test-file
+    // variables do not exist; performance.memory is a Chromium-only
+    // extension whose shape is fixed by the platform, not untrusted input.
+    const memory = (performance as { memory?: { usedJSHeapSize: number } }).memory;
     const longTasks = await new Promise<number>((resolveTasks) => {
       let count = 0;
       const observer = new PerformanceObserver((list) => { count += list.getEntries().length; });
