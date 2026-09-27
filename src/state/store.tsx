@@ -20,6 +20,7 @@ import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { SocialProfile, SocialPostView, SocialState } from "@/lib/social";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
+import { newIntentId, parkSend, reconcileThread, retireSend, type PendingSend } from "@/lib/message-intent";
 import { soulMdFor, type AgentTemplate } from "@/lib/agent-templates";
 import { seedDraft } from "@/lib/drafts";
 import { showNotification } from "@/lib/notify";
@@ -451,6 +452,13 @@ export interface AppState {
    * same message be focused twice in a row */
   focusMessage: { threadId: string; messageId: string; nonce: number; consumed: boolean } | null;
   connected: boolean;
+  /** Durable send receipts (first-slice request recovery): per intent id,
+   * one compact delivery state the transcript renders beside the bubble.
+   * "checking" = parked, not yet acknowledged; "sent" = acknowledged with a
+   * dispatched receipt; "unknown" = the executor died mid-dispatch — honest
+   * uncertainty, never auto-resend. The message id lands once the receipt
+   * (or replay fold) names the original transcript row. */
+  messageDelivery: Record<string, { threadId: string; state: "checking" | "accepted" | "sent" | "unknown"; messageId?: string; text?: string }>;
   error: string | null;
 }
 
@@ -469,6 +477,18 @@ export function prepareUnreadAnnouncement<T extends { id: string; unread?: boole
 ): PreparedUnreadAnnouncement<T> {
   const markRead = state.readSelectedMessages && record.id === state.selectedId && Boolean(record.unread);
   return { record: markRead ? { ...record, unread: false } : record, markRead };
+}
+
+/** The storage backend for client-side ledgers, chosen once per module load:
+ * the browser's localStorage when this bundle runs in a browser, undefined
+ * when a non-browser test renders the store (ledgers then stay in-memory).
+ * Centralized here so ledgers never each re-derive it. */
+function useLocalStorageBackend(): Pick<Storage, "getItem" | "setItem"> | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Fields a bot-settings PATCH may change; also what duplicateBot copies. */
@@ -547,6 +567,7 @@ export type Action =
   | { type: "configStatus"; config: ConfigStatus }
   | { type: "select"; id: string }
   | { type: "send"; botId: string; text: string }
+  | { type: "messageDelivery"; intentId: string; threadId: string; state: "checking" | "accepted" | "sent" | "unknown"; messageId?: string; text?: string }
   | { type: "editMessage"; botId: string; messageId: string; text: string }
   | { type: "switchBranch"; botId: string; messageId: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
@@ -910,6 +931,17 @@ export function reducer(state: AppState, action: Action): AppState {
       return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
     case "connected":
       return { ...state, connected: action.value };
+    case "messageDelivery": {
+      // One compact state per intent id; the message id arrives with the
+      // receipt (or the reconnect fold) so the chip can sit beside its row.
+      return {
+        ...state,
+        messageDelivery: {
+          ...state.messageDelivery,
+          [action.intentId]: { threadId: action.threadId, state: action.state, messageId: action.messageId, text: action.text },
+        },
+      };
+    }
     case "error":
       return {
         ...state,
@@ -1128,6 +1160,7 @@ export const initialState: AppState = {
   provisioning: {},
   focusMessage: null,
   connected: false,
+  messageDelivery: {},
   error: null,
 };
 
@@ -1196,6 +1229,9 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
   stateRef.current = state;
   const accountRef = useRef(accountId);
   accountRef.current = accountId;
+  // Durable send receipts: the ledger lives in localStorage (same store the
+  // drafts use) so a parked intent survives a reload, not just a reconnect.
+  const intentStore = useLocalStorageBackend();
   const stopCleanup = useMemo(() => new StopCleanupSession({
     accountId,
     getAccountId: () => accountRef.current,
@@ -1357,22 +1393,67 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
         case "stopGoal":
           api(`/api/goals/${action.goalId}/stop`, { method: "POST" }).catch(showError);
           break;
-        case "send":
+        case "send": {
+          const bot = stateRef.current.bots.find((b) => b.id === action.botId);
+          const threadId = bot?.threadId;
+          if (!threadId) break;
+          // Durable send receipt: park ONE id + the exact words BEFORE the
+          // request leaves, so a lost response is a lookup on reconnect,
+          // never a blind resend (first-slice request recovery).
+          const intentId = newIntentId();
+          const pendingSend: PendingSend = { intentId, threadId, botId: action.botId, text: action.text, createdAt: Date.now() };
+          parkSend(intentStore, pendingSend);
+          rawDispatch({ type: "messageDelivery", threadId, intentId, state: "checking", text: action.text });
           api(`/api/bots/${action.botId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text }),
+            body: JSON.stringify({ text: action.text, clientIntentId: intentId }),
           })
-            .then(({ message }: { message?: Message }) => {
+            .then((body: { message?: Message; intent?: { messageId: string; state: "accepted" | "dispatched" | "unknown" } }) => {
+              const messageId = body.intent?.messageId ?? body.message?.id;
+              // A 2xx that names no message confirms NOTHING: keep the
+              // record parked and the compact checking row up (with the
+              // exact words) — the next reconnect's replay resolves it
+              // honestly instead of trusting an unconfirmable ack.
+              if (!messageId) {
+                rawDispatch({ type: "messageDelivery", threadId, intentId, state: "checking", text: action.text });
+                return;
+              }
+              // "accepted" means durable but NOT yet sent (queued behind a
+              // busy turn): the chip says so, and the record stays parked so
+              // reconnect replays keep converging it. Only dispatched/unknown
+              // are terminal and retire the ledger entry.
+              const state = body.intent?.state === "unknown" ? "unknown" : body.intent?.state === "accepted" ? "accepted" : "sent";
+              if (state === "sent" || state === "unknown") retireSend(intentStore, threadId, intentId);
               // Belt-and-braces echo: the SSE frame normally delivers the
               // user's bubble, but a missed or replayed frame must not hide
               // the send. messageAdded dedupes by id, so a later stream
-              // copy of the same message is a no-op.
-              if (!message) return;
-              const bot = stateRef.current.bots.find((b) => b.id === action.botId);
-              if (bot) rawDispatch({ type: "messageAdded", threadId: bot.threadId, message });
+              // copy of the same message is a no-op. A replayed intent
+              // folds the ORIGINAL bubble — never a second one.
+              if (body.message) {
+                const current = stateRef.current.bots.find((b) => b.id === action.botId);
+                if (current) rawDispatch({ type: "messageAdded", threadId: current.threadId, message: body.message });
+              }
+              // The durable receipt's honest state: dispatched reads "sent",
+              // unknown stays visibly uncertain. The chip carries the
+              // original message id so it renders beside the right row.
+              rawDispatch({
+                type: "messageDelivery",
+                threadId,
+                intentId,
+                state,
+                messageId,
+              });
             })
-            .catch(showError);
+            .catch(() => {
+              // The response was lost — NOT necessarily the send. The record
+              // stays parked for reconnect reconciliation (which replays the
+              // SAME id); keep the compact "checking" state and drop any
+              // optimistic bubble so a duplicate can never be authored here.
+              rawDispatch({ type: "messageDelivery", threadId, intentId, state: "checking", text: action.text });
+              rawDispatch({ type: "error", message: "Checking delivery — your message will be reconciled when the connection returns." });
+            });
           break;
+        }
         case "editMessage":
           api(`/api/bots/${action.botId}/messages/${action.messageId}/edit`, {
             method: "POST",
@@ -1674,6 +1755,63 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
         handleFrame(entry.frame);
       }
     };
+    // Durable send receipts (first-slice request recovery): replay every
+    // still-parked intent for threads this account has mounted. The server
+    // answers a replayed id with the ORIGINAL message (a lookup, never a
+    // resend); a local-only record stays parked for the next reconnect.
+    // Called on stream open AND after each hydrate: on a page reload the
+    // stream opens before any bot is mounted, so onopen alone would never
+    // see the parked record — the hydrate boundary must catch it.
+    const reconcileParkedSends = () => {
+      for (const bot of stateRef.current.bots) {
+        void reconcileThread(intentStore, bot.threadId, (pending) =>
+          api(`/api/bots/${pending.botId}/messages`, {
+            method: "POST",
+            body: JSON.stringify({ text: pending.text, clientIntentId: pending.intentId }),
+          }),
+        ).then((result) => {
+          for (const item of result.recovered) {
+            rawDispatch({
+              type: "messageDelivery",
+              threadId: bot.threadId,
+              intentId: item.pending.intentId,
+              state: item.receipt.state === "unknown" ? "unknown" : "sent",
+              messageId: item.receipt.messageId,
+            });
+          }
+          // Durable but still queued behind a busy turn: show "Accepted —
+          // waiting to send" beside the folded ORIGINAL bubble and keep the
+          // record parked — the next reconnect replays until it dispatches.
+          for (const item of result.accepted) {
+            if (item.message) {
+              const current = stateRef.current.bots.find((b) => b.id === item.pending.botId);
+              if (current) {
+                // SAFETY: the replay body echoes the persisted Message shape
+                // this same account stored; messageAdded dedupes by id.
+                rawDispatch({ type: "messageAdded", threadId: current.threadId, message: item.message as Message });
+              }
+            }
+            rawDispatch({
+              type: "messageDelivery",
+              threadId: bot.threadId,
+              intentId: item.pending.intentId,
+              state: "accepted",
+              messageId: item.receipt.messageId,
+            });
+          }
+          // A record the server could not confirm stays parked, but it must
+          // not vanish from the transcript: surface it as a compact checking
+          // row carrying the exact words, so "the message might not be sent"
+          // is visible instead of silent (the reload path has no receipt yet).
+          for (const pending of result.unresolved) {
+            rawDispatch({ type: "messageDelivery", threadId: bot.threadId, intentId: pending.intentId, state: "checking", text: pending.text });
+            // The record itself stays parked (full PendingSend re-parked so
+            // botId/createdAt survive; reconcileThread only pruned it).
+            parkSend(intentStore, pending);
+          }
+        });
+      }
+    };
     const hydrate = () => {
       if (hydrating) {
         // A second non-resumable hello means this snapshot may have started
@@ -1695,6 +1833,9 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
         for (const frame of pendingFrames.splice(0)) handleFrame(frame);
         // a fresh snapshot may carry threads that parked frames were waiting on
         replayParked();
+        // ...and freshly mounted threads may be holding parked sends that a
+        // pre-mount onopen could not see (the reload recovery path)
+        reconcileParkedSends();
       });
     };
     // If SSE is unavailable, the app should still show its saved state. A
@@ -1725,7 +1866,11 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
     // The hydrate decision belongs to the hello frame, not to onopen: the
     // server replays what we missed when it can, and re-downloading every
     // transcript on a reconnect it already covered is pure waste.
-    es.onopen = () => { seedCards.connectionChanged(); rawDispatch({ type: "connected", value: true }); };
+    es.onopen = () => {
+      seedCards.connectionChanged();
+      rawDispatch({ type: "connected", value: true });
+      reconcileParkedSends();
+    };
     es.onerror = () => { seedCards.connectionChanged(); rawDispatch({ type: "connected", value: false }); };
     handleFrame = (frame) => {
       switch (frame.kind) {

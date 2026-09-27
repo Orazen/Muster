@@ -409,6 +409,7 @@ function Bubble({
   editing,
   isLastBotText,
   runPosition,
+  delivery,
   onStartEdit,
   onCancelEdit,
   onSubmitEdit,
@@ -421,6 +422,8 @@ function Bubble({
   isLastBotText: boolean;
   /** position in a run of consecutive same-role text bubbles (GAIA grouping) */
   runPosition?: "first" | "middle" | "last";
+  /** Durable send receipt for this row, when one is still open. */
+  delivery?: "checking" | "accepted" | "sent" | "unknown";
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onSubmitEdit: (text: string) => void;
@@ -587,6 +590,39 @@ function Bubble({
         <div className="mt-1 flex items-center gap-1 pr-1 text-[11px] text-ink-secondary/70">
           <Clock size={11} aria-hidden="true" />
           <span>Queued — sends when this turn finishes</span>
+        </div>
+      )}
+      {/* Durable send receipt (one compact row, GAIA's calm status grammar):
+          checking = the ack was lost and the record is parked for reconnect
+          reconciliation; unknown = the executor died mid-dispatch and nobody
+          can prove the outcome — the words are never silently resent. */}
+      {user && delivery && (
+        <div
+          className="mt-1 flex items-center gap-1 pr-1 text-[11px] text-ink-secondary/70"
+          role="status"
+          data-delivery={delivery}
+        >
+          {delivery === "checking" ? (
+            <>
+              <Loader2 size={11} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              <span>Checking delivery…</span>
+            </>
+          ) : delivery === "unknown" ? (
+            <>
+              <AlertTriangle size={11} aria-hidden="true" />
+              <span>Outcome unknown — review before resending</span>
+            </>
+          ) : delivery === "accepted" ? (
+            <>
+              <Clock size={11} aria-hidden="true" />
+              <span>Accepted — waiting to send</span>
+            </>
+          ) : (
+            <>
+              <Check size={11} className="text-success" aria-hidden="true" />
+              <span>Sent</span>
+            </>
+          )}
         </div>
       )}
       <ReactionChips threadId={bot.threadId} message={message} align={user ? "right" : "left"} />
@@ -869,6 +905,7 @@ const MessagesList = memo(function MessagesList({
   lastBotTextId,
   canRetryLast,
   engine,
+  deliveryByMessageId,
   onStartEdit,
   onCancelEdit,
   onSubmitEdit,
@@ -882,6 +919,9 @@ const MessagesList = memo(function MessagesList({
   canRetryLast: boolean;
   /** This bot's engine, for rendering setup help on a `setup` error. */
   engine: InstanceInfo | undefined;
+  /** Durable send receipts, keyed by the message id their intent resolved
+   * to (undefined until the receipt names the original transcript row). */
+  deliveryByMessageId: Record<string, "checking" | "accepted" | "sent" | "unknown">;
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
   onSubmitEdit: (id: string, text: string) => void;
@@ -1000,6 +1040,7 @@ const MessagesList = memo(function MessagesList({
                   editing={editingId === m.id}
                   isLastBotText={m.id === lastBotTextId}
                   runPosition={runPositions.get(m.id)}
+                  delivery={deliveryByMessageId[m.id]}
                   onStartEdit={() => onStartEdit(m.id)}
                   onCancelEdit={onCancelEdit}
                   onSubmitEdit={(text) => onSubmitEdit(m.id, text)}
@@ -1085,6 +1126,29 @@ export function ChatView({ bot }: { bot: Bot }) {
   const lastBotTextId = useMemo(
     () => [...messages].reverse().find((m) => m.role === "bot" && m.kind === "text")?.id,
     [messages],
+  );
+
+  // Durable send receipts for THIS thread, keyed by the message id each
+  // intent resolved to (memo'd so MessagesList's memo sees a stable map).
+  const deliveryByMessageId = useMemo(() => {
+    const out: Record<string, "checking" | "accepted" | "sent" | "unknown"> = {};
+    for (const entry of Object.values(state.messageDelivery)) {
+      if (entry.threadId !== bot.threadId || !entry.messageId) continue;
+      out[entry.messageId] = entry.state;
+    }
+    return out;
+  }, [state.messageDelivery, bot.threadId]);
+
+  // Records still parked without a receipt (response lost, reconnect
+  // pending): one compact checking row each, above the transcript, carrying
+  // the exact words so uncertainty is visible rather than silent. Resolved
+  // intents (sent/unknown) live beside their transcript row instead.
+  const checkingSends = useMemo(
+    () =>
+      Object.entries(state.messageDelivery)
+        .filter(([, entry]) => entry.threadId === bot.threadId && !entry.messageId)
+        .map(([intentId, entry]) => ({ intentId, text: entry.text ?? "" })),
+    [state.messageDelivery, bot.threadId],
   );
 
   // one message at a time may be in edit mode
@@ -1365,6 +1429,20 @@ export function ChatView({ bot }: { bot: Bot }) {
         </div>
       )}
 
+      {/* Durable send receipts still awaiting a receipt (checking): one
+          compact row per parked send, GAIA's calm status grammar, the exact
+          words kept visible so a lost response is never silent. */}
+      {checkingSends.length > 0 && (
+        <div className="mx-auto w-full max-w-[900px] px-5">
+          {checkingSends.map((send) => (
+            <div key={send.intentId} role="status" data-delivery="checking" className="mb-2 flex items-center gap-1.5 text-[11px] text-ink-secondary/70">
+              <Loader2 size={11} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              <span className="min-w-0 break-words">Checking delivery — {send.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Messages */}
       <div
         ref={scrollRef}
@@ -1420,6 +1498,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             lastBotTextId={lastBotTextId}
             canRetryLast={canRegenerateLast}
             engine={state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)}
+            deliveryByMessageId={deliveryByMessageId}
             onStartEdit={startEdit}
             onCancelEdit={cancelEdit}
             onSubmitEdit={submitEdit}

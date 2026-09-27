@@ -67,6 +67,15 @@ function open(): DatabaseSync {
       status TEXT NOT NULL,
       settled_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS message_intents (
+      intent_id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      accepted_at INTEGER NOT NULL,
+      state TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS message_intents_thread ON message_intents(thread_id);
   `);
   return db;
 }
@@ -574,6 +583,116 @@ export function searchMessages(query: string, limit = 40): SearchHit[] {
     if (row.from_name) hit.from = row.from_name;
     return hit;
   });
+}
+
+// ── durable send intents (first-slice request recovery) ──────────────
+// An ordinary chat message gets a durable receipt: the intent row lands in
+// the SAME transaction as the transcript row, so "accepted" always means
+// the message is durable and a reconnecting client replaying the same id
+// is a lookup, never a resend. States: accepted → dispatched → (crash) →
+// unknown. The ledger functions live beside the seed/Stop receipts rather
+// than adding a second store; deleteThread leaves them behind as history.
+
+export type MessageIntentState = "accepted" | "dispatched" | "unknown";
+
+export interface StoredMessageIntent {
+  intentId: string;
+  threadId: string;
+  messageId: string;
+  fingerprint: string;
+  acceptedAt: number;
+  state: MessageIntentState;
+}
+
+// SAFETY: each row maps 1:1 to the message_intents columns.
+const rowToIntent = (row: {
+  intent_id: string;
+  thread_id: string;
+  message_id: string;
+  fingerprint: string;
+  accepted_at: number;
+  state: string;
+}): StoredMessageIntent => ({
+  intentId: row.intent_id,
+  threadId: row.thread_id,
+  messageId: row.message_id,
+  fingerprint: row.fingerprint,
+  acceptedAt: row.accepted_at,
+  state: row.state as MessageIntentState,
+});
+
+export function readMessageIntent(intentId: string): StoredMessageIntent | null {
+  // SAFETY: the select lists exactly this table's own columns.
+  const row = db()
+    .prepare("SELECT intent_id, thread_id, message_id, fingerprint, accepted_at, state FROM message_intents WHERE intent_id = ?")
+    .get(intentId) as Parameters<typeof rowToIntent>[0] | undefined;
+  return row ? rowToIntent(row) : null;
+}
+
+/** The transcript row and its acceptance are one mutation: a crash can
+ * leave neither (nothing accepted, draft stays) or both (recoverable),
+ * never a transcript row the client was told nothing about. */
+export function appendMessageWithIntent(
+  threadId: string,
+  message: Message,
+  intent: { intentId: string; fingerprint: string },
+): void {
+  const database = db();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database
+      .prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
+    setActiveLeafQuiet(threadId, message.id);
+    database
+      .prepare("INSERT INTO message_intents (intent_id, thread_id, message_id, fingerprint, accepted_at, state) VALUES (?, ?, ?, ?, ?, 'accepted')")
+      .run(intent.intentId, threadId, message.id, intent.fingerprint, message.at);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+  // P4: one durable change -> one producer notification, after the commit.
+  chatWasWritten(threadId);
+}
+
+/** The dispatch step began for this intent — persisted BEFORE the provider
+ * call, so an unknown outcome after a crash covers the worst case, not the
+ * best one. Returns false when the row vanished (deleted thread). */
+export function setMessageIntentState(intentId: string, state: MessageIntentState, at: number): boolean {
+  const updated = db()
+    .prepare("UPDATE message_intents SET state = ?, accepted_at = CASE WHEN ? > accepted_at THEN ? ELSE accepted_at END WHERE intent_id = ?")
+    .run(state, at, at, intentId);
+  return updated.changes === 1;
+}
+
+/** The steer-queue drain dispatches a whole batch of queued words in one
+ * turn, so the intents for exactly those messages cross the dispatch
+ * boundary together — scoped by id, never "the whole thread": a user who
+ * removed an entry from the composer strip before the drain must not have
+ * its receipt flipped too. */
+export function markMessageIntentsDispatched(messageIds: string[], at: number): void {
+  const statement = db().prepare("UPDATE message_intents SET state = 'dispatched', accepted_at = CASE WHEN ? > accepted_at THEN ? ELSE accepted_at END WHERE message_id = ? AND state = 'accepted'");
+  for (const messageId of messageIds) statement.run(at, at, messageId);
+}
+
+/** A drained batch gave up (final dispatch refusal): the words never ran,
+ * so their receipts return to accepted — held for review, never a phantom
+ * "dispatched". */
+export function revertIntentsToAccepted(messageIds: string[]): void {
+  const statement = db().prepare("UPDATE message_intents SET state = 'accepted' WHERE message_id = ? AND state = 'dispatched'");
+  for (const messageId of messageIds) statement.run(messageId);
+}
+
+/** Boot reconciliation: a row left 'dispatched' by a previous process may
+ * have reached the provider before that process died — nobody alive can
+ * prove either way, so it reads 'unknown' and the client asks, never
+ * resends. Still-'accepted' rows are left alone: the dead process never
+ * reached dispatch, so they read as held-for-review, not as sent work. */
+export function markAllDispatchedIntentsUnknown(): void {
+  db()
+    .prepare("UPDATE message_intents SET state = 'unknown' WHERE state = 'dispatched'")
+    .run();
 }
 
 /** Test/shutdown hook — closes the handle so a wiped DATA_DIR starts clean. */

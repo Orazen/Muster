@@ -80,6 +80,16 @@ export function queueSteeredMessage(store: SteerStore, bot: BotRecord, text: str
   return message;
 }
 
+/** Arm the auto-send for an ALREADY-PERSISTED message: the durable intent
+ * path admits the transcript row through its own transaction first, then
+ * hands the row here so the busy bot's settle drains it like any other
+ * queued send. */
+export function enqueueSteeredMessage(bot: BotRecord, message: Message): void {
+  const entry = queues.get(bot.threadId) ?? { botId: bot.id, items: [] };
+  entry.items.push({ messageId: message.id, text: message.text ?? "" });
+  queues.set(bot.threadId, entry);
+}
+
 /** Every queue entry this bot owns — a bot can hold entries across a
  * thread switch, so the queue controls address the BOT, not one thread. */
 function entriesFor(botId: string): Array<[string, QueueEntry]> {
@@ -153,10 +163,25 @@ export function setSteerQueuePaused(botId: string, paused: boolean): boolean {
  * every other failure — and the requeue budget running out — reaches
  * `onGiveUp` so the caller can say so in the thread. Nothing is ever
  * dropped silently. */
+/** Durable-receipt hooks for the drain, injected rather than imported so
+ * this module stays store-pure (its tests fake the Store and have no data
+ * directory). index.ts wires the real SQLite flips; unwired callers simply
+ * have no receipts to reconcile. */
+export interface SteerDrainIntentHooks {
+  /** The batch crossed the dispatch boundary — called BEFORE the provider
+   * turn starts, so a crash after this point reads "unknown", the honest
+   * worst case. */
+  dispatched?: (messageIds: string[]) => void;
+  /** The batch's dispatch refused: the words never ran, so receipts return
+   * to accepted (held for review) — covering the transient re-queue too. */
+  reverted?: (messageIds: string[]) => void;
+}
+
 export function drainSteeredMessages(
   store: SteerStore,
   run: (botId: string, threadId: string, prompt: string, userMessage: Message) => void | Promise<void>,
   onGiveUp: (threadId: string, error: PossiblyHttpError) => void = () => {},
+  intents: SteerDrainIntentHooks = {},
 ): void {
   // deleting only the entry being visited is safe under Map iteration
   for (const [threadId, entry] of queues) {
@@ -173,6 +198,12 @@ export function drainSteeredMessages(
     // committed to draining: the entry leaves the map before anything runs,
     // so a settle racing another settle can never fire the same queue twice
     queues.delete(threadId);
+    // Durable receipts: the batch crosses the dispatch boundary in ONE
+    // turn, so the intents for exactly these messages flip to dispatched
+    // BEFORE the provider is called (a crash after this point then reads
+    // "unknown", the honest worst case). Scoped to THIS batch — a user-
+    // removed entry's receipt is not part of it.
+    intents.dispatched?.(entry.items.map((item) => item.messageId));
     // clear the affordance before dispatch, so the user never sees
     // "queued" on a message the bot is already answering
     let last: Message | null = null;
@@ -191,6 +222,10 @@ export function drainSteeredMessages(
       settled = Promise.reject(error);
     }
     void Promise.resolve(settled).catch((error: PossiblyHttpError) => {
+      // A refusal means the words never ran: receipts go back to accepted —
+      // held for review, not "dispatched" — whether the refusal is transient
+      // (re-queued below) or final (give-up note below).
+      intents.reverted?.(entry.items.map((item) => item.messageId));
       const transient = isHttpError(error) && error.status === 409;
       if (transient && (entry.attempts ?? 0) < MAX_REQUEUES) {
         // The bot went busy again between this settle and the dispatch —

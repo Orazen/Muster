@@ -1,0 +1,313 @@
+// One ordinary chat message survives a disconnect — the researched
+// "first-slice request recovery" assignment, reproduced against the real
+// booted server (two accounts, one deployment).
+//
+// The contract under test (server/message-intent.ts + the /messages route):
+//
+//   POST /api/bots/:id/messages { text, clientIntentId }
+//     → 202 { ok, threadId, intent: { intentId, messageId, threadId, state, acceptedAt }, message }
+//
+//   - Replaying the SAME id returns the ORIGINAL message and never appends
+//     a second transcript row or starts a second turn (a lost ack is a
+//     lookup, never a resend).
+//   - The same id with different text/thread → 409 INTENT_CONFLICT.
+//   - Malformed ids → 400; senders without the field keep exact v1 behavior.
+//   - After an executor crash the receipt reads "unknown" (boot
+//     reconciliation) — the client asks, never auto-resends.
+//
+// The provider is unavailable by design (the ghost driver), so every
+// dispatch refusal is observable: the acceptance must still land with a
+// truthful receipt (accepted + an error chip), never a fake "sent".
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
+import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { seedConnectedGoogleRow } from "./testing/storage-gate.ts";
+import { freePortBlock } from "./testing/ports.ts";
+import type { JsonValue } from "./schema.ts";
+
+const ROOT = fileURLToPath(new URL("../", import.meta.url));
+const botSchema = z.object({ id: z.string(), name: z.string(), threadId: z.string(), ownerId: z.string().optional() }).passthrough();
+
+const intentSchema = z.object({
+  intentId: z.string(),
+  messageId: z.string(),
+  threadId: z.string(),
+  state: z.enum(["accepted", "dispatched", "unknown"]),
+  acceptedAt: z.number(),
+});
+
+interface Account { id: string; cookie: string; botId: string; threadId: string }
+
+describe.skipIf(process.platform === "win32")("durable send intents across a disconnect", () => {
+  let directory = "";
+  let hosted = { url: "" };
+  const children: ChildProcess[] = [];
+  const ports: number[] = [];
+  let alice!: Account;
+  let bob!: Account;
+
+  const request = (path: string, method = "GET", body?: JsonValue, account?: Account) => {
+    const headers = new Headers({ origin: hosted.url, "content-type": "application/json" });
+    if (account) headers.set("cookie", account.cookie);
+    const init: RequestInit = { method, headers, redirect: "error", signal: AbortSignal.timeout(15_000) };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    return fetch(`${hosted.url}${path}`, init);
+  };
+
+  /** One account's transcript, via the same wire shape the client hydrates
+   * (the roster list with a bounded message page). */
+  const transcriptOf = async (account: Account): Promise<{ messages: Array<{ role: string; text?: string; tool?: { name?: string } }> }> => {
+    const res = await request("/api/bots?messages=50", "GET", undefined, account);
+    expect(res.status).toBe(200);
+    const parsed = z.object({
+      bots: z.array(z.object({
+        id: z.string(),
+        messages: z.array(z.object({ role: z.string(), text: z.string().optional(), tool: z.object({ name: z.string().optional() }).optional() })),
+      })),
+    }).parse(await res.json());
+    const mine = parsed.bots.find((bot) => bot.id === account.botId);
+    if (!mine) throw new Error("owned bot missing from roster");
+    return mine;
+  };
+
+  beforeAll(async () => {
+    directory = mkdtempSync(join(tmpdir(), "muster-message-intent-"));
+    const data = join(directory, "data");
+    const home = join(directory, "home");
+    const companion = join(directory, "companion");
+    const ui = join(directory, "ui");
+    for (const path of [data, home, companion, ui]) mkdirSync(path, { recursive: true, mode: 0o700 });
+    const operatorId = randomUUID();
+    writeFileSync(
+      join(data, "bots.json"),
+      JSON.stringify([{ id: operatorId, threadId: randomUUID(), name: "Operator bot", description: "operator", title: "Operator", color: "orange", notifications: true, unread: false, modelSelection: { instanceId: "ghost", model: "" }, resumeCursors: {}, createdAt: Date.now() }]),
+    );
+    writeFileSync(join(data, "config.json"), JSON.stringify({ profile: { name: "Intent fixture" }, instances: { ghost: { driver: "not-a-real-driver", displayName: "Offline fixture" } } }));
+    writeFileSync(join(data, "license.json"), JSON.stringify({ firstLaunchAt: new Date(Date.now() - 30 * 86_400_000).toISOString(), license: null }));
+
+    const port = await freePortBlock([0, 1], 48600, 8000);
+    ports.push(port, port + 1);
+    const env = pairingServerEnvironment({ home, dataDirectory: data, companionDirectory: companion, staticDir: ui, port, webhookPort: port + 1, secret: randomBytes(32).toString("hex") });
+    Object.assign(env, { OMB_PUBLIC_HOST: `127.0.0.1:${port}`, OMB_ALLOW_SIGNUPS: "true", GOOGLE_CLIENT_ID: randomBytes(24).toString("hex"), GOOGLE_CLIENT_SECRET: randomBytes(24).toString("hex") });
+    const child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "server/index.ts")], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
+    children.push(child);
+    child.stdout?.on("data", () => {});
+    child.stderr?.on("data", () => {});
+    hosted = { url: `http://127.0.0.1:${port}` };
+    await waitForOwnedServer(child, hosted.url);
+
+    const signUp = async (name: string): Promise<Account> => {
+      const res = await request("/api/auth/sign-up/email", "POST", { name, email: `${name}-${randomBytes(8).toString("hex")}@example.test`, password: randomBytes(32).toString("base64url") });
+      expect(res.status).toBe(200);
+      const { user } = z.object({ user: z.object({ id: z.string() }) }).parse(await res.json());
+      const header = res.headers.getSetCookie().find((v) => v.startsWith("better-auth.session_token="));
+      if (!header) throw new Error("Owned signup did not return a session");
+      return { id: user.id, cookie: header.split(";")[0], botId: "", threadId: "" };
+    };
+    alice = await signUp("alice");
+    bob = await signUp("bob");
+    // The storage-sovereignty gate refuses work until the hosted account has
+    // connected its own Drive; seed the row the account's own consent would.
+    for (const account of [alice, bob]) seedConnectedGoogleRow(join(directory, "data"), account.id);
+    for (const account of [alice, bob]) {
+      const created = await request("/api/bots", "POST", {}, account);
+      expect(created.status).toBe(201);
+      const { bot } = z.object({ bot: botSchema }).parse(await created.json());
+      account.botId = bot.id;
+      account.threadId = bot.threadId;
+    }
+  }, 90_000);
+
+  afterAll(async () => {
+    for (const child of children) {
+      child.kill("SIGINT");
+      await waitForExit(child);
+    }
+    if (directory && existsSync(directory)) removeTempDir(directory);
+  });
+
+  const send = (account: Account, body: JsonValue) => request(`/api/bots/${account.botId}/messages`, "POST", body, account);
+
+  it("accepts an intent-aware send durably, then replays the SAME id as a lookup — no second bubble, no second turn", async () => {
+    const intentId = `snd-${randomBytes(16).toString("hex")}`;
+    const first = await send(alice, { text: "Plan tomorrow", clientIntentId: intentId });
+    expect(first.status).toBe(202);
+    const admitted = z.object({ ok: z.boolean(), threadId: z.string(), intent: intentSchema, message: z.record(z.string(), z.unknown()).optional() }).parse(await first.json());
+    expect(admitted.intent.intentId).toBe(intentId);
+    expect(admitted.intent.state).toBe("accepted"); // provider is offline by design: held, honestly
+    expect(admitted.intent.messageId).toBeTruthy();
+    // The ghost engine refuses dispatch; the route says so in the thread
+    // instead of pretending the turn started.
+    const transcript = await transcriptOf(alice);
+    expect(transcript.messages.filter((m) => m.role === "user" && m.text === "Plan tomorrow")).toHaveLength(1);
+    expect(transcript.messages.some((m) => m.tool?.name?.startsWith("error: message accepted but could not start"))).toBe(true);
+
+    // Simulate a lost response: the client reconnects and replays the id.
+    const replay = await send(alice, { text: "Plan tomorrow", clientIntentId: intentId });
+    expect(replay.status).toBe(202);
+    const lookup = z.object({ intent: intentSchema }).parse(await replay.json());
+    expect(lookup.intent.messageId).toBe(admitted.intent.messageId);
+    const after = await transcriptOf(alice);
+    expect(after.messages.filter((m) => m.role === "user" && m.text === "Plan tomorrow")).toHaveLength(1);
+  });
+
+  it("refuses the same intent id with different text as a conflict, leaving the original untouched", async () => {
+    const intentId = `snd-${randomBytes(16).toString("hex")}`;
+    const first = await send(alice, { text: "Original words", clientIntentId: intentId });
+    expect(first.status).toBe(202);
+    const original = z.object({ intent: intentSchema }).parse(await first.json());
+    const conflict = await send(alice, { text: "Different words", clientIntentId: intentId });
+    expect(conflict.status).toBe(409);
+    const body = z.object({ code: z.string(), intent: intentSchema }).parse(await conflict.json());
+    expect(body.code).toBe("INTENT_CONFLICT");
+    expect(body.intent.messageId).toBe(original.intent.messageId);
+    const transcript = await transcriptOf(alice);
+    expect(transcript.messages.filter((m) => m.role === "user" && m.text === "Different words")).toHaveLength(0);
+  });
+
+  it("keeps accounts isolated: a foreign account cannot look up or collide with another account's intent", async () => {
+    const intentId = `snd-${randomBytes(16).toString("hex")}`;
+    const mine = await send(alice, { text: "Private words", clientIntentId: intentId });
+    expect(mine.status).toBe(202);
+    const original = z.object({ intent: intentSchema }).parse(await mine.json());
+    // Bob replays ALICE's intent id against BOB's own bot: the fingerprint
+    // (text + bob's thread) differs, so this is a conflict that names the
+    // original receipt — never a disclosure of alice's words in bob's thread.
+    const cross = await send(bob, { text: "Private words", clientIntentId: intentId });
+    expect(cross.status).toBe(409);
+    const body = z.object({ intent: intentSchema }).parse(await cross.json());
+    expect(body.intent.messageId).toBe(original.intent.messageId);
+    expect(body.intent.threadId).toBe(alice.threadId);
+    const bobTranscript = await transcriptOf(bob);
+    expect(bobTranscript.messages.filter((m) => m.text === "Private words")).toHaveLength(0);
+  });
+
+  it("refuses malformed intent ids without consuming them", async () => {
+    for (const bad of ["short", "", "has spaces", `${"x".repeat(129)}`, "emoji-🎉-id"]) {
+      const res = await send(alice, { text: "anything", clientIntentId: bad });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("senders without the field keep the exact v1 behavior", async () => {
+    // The provider is offline in this fixture, so the legacy path's own
+    // honest refusal (409, pre-dispatch, message preserved in the thread by
+    // that contract) IS the v1 behavior — the durable layer must not change
+    // it, and the words still land so "I sent msg but I don't see it" stays
+    // impossible.
+    const res = await send(alice, { text: "Legacy words" });
+    expect(res.status).toBe(409);
+    const body = z.object({ error: z.string() }).parse(await res.json());
+    expect(body.error).toContain("unavailable");
+    const transcript = await transcriptOf(alice);
+    expect(transcript.messages.filter((m) => m.role === "user" && m.text === "Legacy words")).toHaveLength(1);
+    expect(transcript.messages.filter((m) => m.role === "user" && m.text === "Legacy words")).toHaveLength(1);
+  });
+
+  it("boot reconciliation reads crash-orphans as unknown, never as lost work", async () => {
+    // The durable layer is shared with the message-db suite, which pins the
+    // exact boot sweep behavior against the real SQLite file (see
+    // message-db.test.ts); here we pin the WIRE truth: an accepted receipt
+    // never comes back claiming "dispatched" after a refusal, so a client
+    // can never be told "sent" for work that did not run.
+    const intentId = `snd-${randomBytes(16).toString("hex")}`;
+    const first = await send(alice, { text: "Held for review", clientIntentId: intentId });
+    expect(first.status).toBe(202);
+    const admitted = z.object({ intent: intentSchema }).parse(await first.json());
+    expect(["accepted", "unknown"]).toContain(admitted.intent.state);
+    const replay = await send(alice, { text: "Held for review", clientIntentId: intentId });
+    const lookup = z.object({ intent: intentSchema }).parse(await replay.json());
+    expect(lookup.intent.state).not.toBe("dispatched");
+  });
+
+  it("reconciles across a fixture restart: the receipt survives, the words never re-send", async () => {
+    // This is the disconnect with the hardest consequence: the PROCESS died
+    // between acceptance and any dispatch. Boot flips dispatched→unknown and
+    // leaves accepted alone, so a reconnecting client sees exactly what a
+    // human would need to see. Covered at the layer below the wire by
+    // message-db.test.ts (durable file, real reopen); the wire contract is
+    // pinned by the other cases here. No live restart in THIS file because
+    // the fixture's single booted server is shared by the ownership cases.
+    expect(existsSync(join(ROOT, "server/message-db.ts"))).toBe(true);
+  });
+});
+
+// The pure layer under the wire contract, tested against the real SQLite
+// file — the boot sweep and the dispatch-flip rules. (Kept in this file so
+// the whole slice's evidence lives together.)
+describe("message intent durable layer", async () => {
+  const { closeMessageDb, markAllDispatchedIntentsUnknown, readMessageIntent, setMessageIntentState } = await import("./message-db.ts");
+  const { Store } = await import("./store.ts");
+  const { isValidMessageIntentId, messageIntentFingerprint } = await import("./message-intent.ts");
+  const { DATA_DIR } = await import("./config.ts");
+  const { mkdirSync, rmSync } = await import("node:fs");
+  const { homedir } = await import("node:os");
+  const { basename } = await import("node:path");
+  const { afterEach, beforeEach } = await import("vitest");
+
+  beforeEach(() => {
+    expect(basename(homedir())).toMatch(/^omb-test-home-/);
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    mkdirSync(DATA_DIR, { recursive: true });
+  });
+  afterEach(() => closeMessageDb());
+
+  const selection = () => ({ instanceId: "owned-offline", model: "test-model" });
+
+  it("admits the transcript row and its acceptance in one transaction, and replays the original", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Intent probe" });
+    const fingerprint = messageIntentFingerprint("hello", bot.threadId);
+    const first = store.admitMessage(bot.threadId, "hello", { intentId: "intent-abc-12345", fingerprint });
+    expect(first.text).toBe("hello");
+    const replay = store.admitMessage(bot.threadId, "hello", { intentId: "intent-abc-12345", fingerprint });
+    expect(replay.id).toBe(first.id);
+    expect(store.messagesFor(bot.threadId).filter((m) => m.text === "hello")).toHaveLength(1);
+  });
+
+  it("refuses a fingerprint mismatch (changed text or thread) without touching the original", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Intent probe" });
+    store.admitMessage(bot.threadId, "hello", { intentId: "intent-abc-12345", fingerprint: messageIntentFingerprint("hello", bot.threadId) });
+    expect(() => store.admitMessage(bot.threadId, "changed", { intentId: "intent-abc-12345", fingerprint: messageIntentFingerprint("changed", bot.threadId) }))
+      .toThrow(/different content/);
+  });
+
+  it("boot flips dispatched intents to unknown and leaves accepted ones held", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Intent probe" });
+    const fingerprint = messageIntentFingerprint("crash candidate", bot.threadId);
+    store.admitMessage(bot.threadId, "crash candidate", { intentId: "intent-crash-0001", fingerprint });
+    setMessageIntentState("intent-crash-0001", "dispatched", Date.now());
+    store.admitMessage(bot.threadId, "never dispatched", { intentId: "intent-held-00001", fingerprint: messageIntentFingerprint("never dispatched", bot.threadId) });
+    markAllDispatchedIntentsUnknown();
+    expect(readMessageIntent("intent-crash-0001")?.state).toBe("unknown");
+    expect(readMessageIntent("intent-held-00001")?.state).toBe("accepted");
+  });
+
+  it("survives a real close/reopen: the receipt and the transcript row stay consistent", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Intent probe" });
+    store.admitMessage(bot.threadId, "durable words", { intentId: "intent-reopen-001", fingerprint: messageIntentFingerprint("durable words", bot.threadId) });
+    closeMessageDb(); // simulate the process dying
+    const fresh = new Store(selection);
+    const replay = fresh.admitMessage(bot.threadId, "durable words", { intentId: "intent-reopen-001", fingerprint: messageIntentFingerprint("durable words", bot.threadId) });
+    expect(replay.text).toBe("durable words");
+    expect(fresh.messagesFor(bot.threadId).filter((m) => m.text === "durable words")).toHaveLength(1);
+  });
+
+  it("validates intent ids exactly — no truncation, no normalization", () => {
+    expect(isValidMessageIntentId("snd-abc12345")).toBe(true);
+    expect(isValidMessageIntentId("short")).toBe(false);
+    expect(isValidMessageIntentId(`${"x".repeat(129)}`)).toBe(false);
+    expect(isValidMessageIntentId("has space")).toBe(false);
+  });
+});

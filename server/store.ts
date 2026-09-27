@@ -15,6 +15,7 @@ import type { AgentCharacter } from "./agent-character.ts";
 import { pickBotName } from "./names.ts";
 import { redactApprovalWhy, type ApprovalWhy } from "./approval-why.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { readThreadRows } from "./message-db.ts";
 import type { JsonValue } from "./schema.ts";
 import {
   createOnboardingCard, isRecognizedSeedCard, SeedAnswerError, seedAnswerReceiptSchema, SEED_CARD_PURPOSE, validateSeedAnswer,
@@ -837,6 +838,61 @@ export class Store {
 
   /** Fork the conversation: a new user message that replaces `sourceId`
    * (same parent, new text) and becomes the active leaf. */
+  /** Send with a durable per-intent receipt: the transcript row and its
+   * acceptance are one SQLite mutation, so a replayed id after a lost
+   * response is a lookup — the ORIGINAL message — never a second bubble or
+   * a second dispatch. Ownership is the CALLER's job (this method derives
+   * nothing from a client); text is the caller's trimmed value.
+   * Reentrancy note: SQLite is synchronous, so both racing requests run
+   * inside the transaction — the first INSERT wins and the loser gets an
+   * intentId collision before it can append anything. */
+  admitMessage(
+    threadId: string,
+    text: string,
+    intent: { intentId: string; fingerprint: string; acceptedAt?: number },
+    opts: { queued?: boolean } = {},
+  ): Message {
+    const known = mdb.readMessageIntent(intent.intentId);
+    if (known) {
+      if (known.fingerprint !== intent.fingerprint) {
+        throw Object.assign(new Error("this send was already accepted with different content"), { status: 409, code: "INTENT_CONFLICT" });
+      }
+      // SAFETY: the intent row and its transcript row are written in one
+      // transaction; the message is always resolvable while the intent lives.
+      const original = this.thread(threadId).messages.find((m) => m.id === known.messageId) ??
+        readThreadRows(known.threadId).messages.find((m) => m.id === known.messageId);
+      if (!original) throw Object.assign(new Error("the acknowledged message no longer exists"), { status: 410 });
+      return original;
+    }
+    const t = this.thread(threadId);
+    const base: Omit<Message, "id" | "at"> = { role: "user", kind: "text", text };
+    if (opts.queued) base.queued = true;
+    const full: Message = {
+      id: newId(),
+      at: intent.acceptedAt ?? Date.now(),
+      parentId: t.activeLeafId,
+      ...redactBotAuthored(base),
+    };
+    try {
+      mdb.appendMessageWithIntent(threadId, full, intent);
+    } catch (cause) {
+      // A UNIQUE violation on the intent id means a concurrent request
+      // admitted this intent first; re-read through the duplicate path so
+      // both callers converge on the same receipt.
+      const known2 = mdb.readMessageIntent(intent.intentId);
+      if (known2 && known2.fingerprint === intent.fingerprint) {
+        const original = this.thread(threadId).messages.find((m) => m.id === known2.messageId) ??
+          readThreadRows(known2.threadId).messages.find((m) => m.id === known2.messageId);
+        if (original) return original;
+      }
+      throw cause instanceof Error ? cause : new Error(String(cause));
+    }
+    t.messages.push(full);
+    t.activeLeafId = full.id;
+    this.emit({ type: "message", threadId, message: full });
+    return full;
+  }
+
   branchMessage(threadId: string, sourceId: string, text: string): Message | null {
     const t = this.thread(threadId);
     const source = t.messages.find((m) => m.id === sourceId);

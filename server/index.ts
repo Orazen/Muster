@@ -33,6 +33,7 @@ import type { JsonValue } from "./schema.ts";
 import { modelAcceptsImages } from "./contracts.ts";
 import { isSameOrigin, needsSameOriginMutationCheck } from "./origin-gate.ts";
 import { MESSAGE_SEND_VERSION, requireMessageThread } from "./message-send-contract.ts";
+import { isValidMessageIntentId, messageIntentFingerprint, type MessageIntentReceipt } from "./message-intent.ts";
 import { APPROVAL_ACTION_VERSION, prepareApprovalGrant } from "./approval-action-contract.ts";
 import {
   customerThreadKey,
@@ -143,9 +144,18 @@ import { isEffortLevel, type RequestOutcome, type RuntimeEvent } from "./contrac
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
-import { searchMessages, stopCleanupJournal } from "./message-db.ts";
+import {
+  markAllDispatchedIntentsUnknown,
+  markMessageIntentsDispatched,
+  readMessageIntent as readIntentRow,
+  readThreadRows,
+  revertIntentsToAccepted,
+  setMessageIntentState as mdbSetIntentDispatched,
+  searchMessages,
+  stopCleanupJournal,
+} from "./message-db.ts";
 import { _loadPending, discardDelegations, discardDelegationSnapshot, snapshotDelegations, drainDelegations, pendingThreads, queueDelegation, type DelegationSnapshot } from "./delegations.ts";
-import { drainSteeredMessages, queueSteeredMessage, removeQueuedSend, setSteerQueuePaused, steerQueueSnapshot } from "./steer-queue.ts";
+import { drainSteeredMessages, enqueueSteeredMessage, queueSteeredMessage, removeQueuedSend, setSteerQueuePaused, steerQueueSnapshot } from "./steer-queue.ts";
 import { TaskPlanEngine } from "./task-engine.ts";
 import { DecisionLog, queryAudit } from "./decision-log.ts";
 import { approvalWhy } from "./approval-why.ts";
@@ -718,6 +728,12 @@ for (const botId of store.takeStartupLosses()) {
     tool: { name: "error: the app restarted while this task was running — its turn did not survive", ok: false },
   });
 }
+// Durable send receipts (boot reconciliation): a previous process that died
+// with dispatched intents may or may not have reached the provider — nobody
+// alive can prove either way, so those receipts read "unknown" and a
+// reconnecting client asks instead of resends. Still-accepted rows never
+// reached dispatch and stay accepted (held for review, not lost work).
+markAllDispatchedIntentsUnknown();
 
 /**
  * Resolve the live provider instance for a bot's stored model selection,
@@ -2204,6 +2220,13 @@ function drainQueuedSends() {
         { bestEffort: true },
       );
     },
+    // Durable receipts: the batch flips to dispatched before the turn runs
+    // and returns to accepted if the dispatch refused — the words are then
+    // held for review, never a phantom "dispatched".
+    {
+      dispatched: (messageIds) => markMessageIntentsDispatched(messageIds, Date.now()),
+      reverted: (messageIds) => revertIntentsToAccepted(messageIds),
+    },
   );
 }
 
@@ -2338,6 +2361,100 @@ async function dispatchForegroundCall(call: CallDispatch) {
   } catch {
     call.update({ state: "failed", error: "The message could not start." });
   }
+}
+
+/** Wire shape of the intent-aware send response. `queued` mirrors the
+ * legacy flag so an intent-aware client can render the same affordance;
+ * `message` is the stored user message (fold-on-ack, dedupe by id). */
+interface IntentSendPayload {
+  ok: true;
+  threadId: string;
+  intent: MessageIntentReceipt;
+  queued?: boolean;
+  message?: Message;
+}
+
+/** Resolve the transcript row a durable receipt points at — memory first,
+ * then the durable rows — so a replay after reload (fresh process, empty
+ * thread cache) still folds the ORIGINAL message instead of resending. */
+function resolveIntentMessage(known: { threadId: string; messageId: string }): Message | null {
+  const inMemory = store.messagesFor(known.threadId).find((message) => message.id === known.messageId);
+  if (inMemory) return inMemory;
+  // SAFETY: readThreadRows returns the serialized Message rows for exactly
+  // this thread id; the find below reads only their id fields.
+  return readThreadRows(known.threadId).messages.find((message) => message.id === known.messageId) ?? null;
+}
+
+/** Durable-receipt admission for one ordinary message. The transcript row
+ * and its intent acceptance are the SAME SQLite transaction (via
+ * store.admitMessage), so "202 with a receipt" always means durable.
+ *
+ * Replay-first: a KNOWN intent is a pure lookup — never re-queued while the
+ * bot is busy, never re-stamped dispatched while idle — so a reconnecting
+ * client cannot move an already-accepted request. The Store's transaction
+ * still closes the race between two simultaneous first admissions; a
+ * raced id with different content comes back as a conflict.
+ *
+ * For a first admission the dispatched stamp goes down BEFORE startTurn is
+ * called (or when the words join the busy queue), so a crash between
+ * stamping and the provider call degrades the receipt to "unknown" — the
+ * honest worst case — instead of ever reading "not sent" when the provider
+ * may have seen the words. Direct dispatch is the single flip point for one
+ * intent; the steer-queue drain owns the batch case. */
+type IntentAdmission =
+  | { outcome: "accepted" | "replayed"; receipt: MessageIntentReceipt; queued: boolean; message: Message }
+  | { outcome: "conflict"; receipt: MessageIntentReceipt };
+
+function admitIntentMessage(
+  bot: NonNullable<ReturnType<typeof store.bot>>,
+  threadId: string,
+  text: string,
+  intentId: string,
+  queuedFlag: boolean,
+): IntentAdmission {
+  const fingerprint = messageIntentFingerprint(text, threadId);
+  const known = readIntentRow(intentId);
+  if (known) {
+    if (known.fingerprint !== fingerprint) {
+      // The receipt reports where the words ACTUALLY went — never silently
+      // re-bound to the replay's new text or destination.
+      return { outcome: "conflict", receipt: intentReceipt(intentId, known.threadId, known.messageId, known.state, known.acceptedAt) };
+    }
+    const original = resolveIntentMessage(known);
+    if (original) {
+      return { outcome: "replayed", receipt: intentReceipt(intentId, known.threadId, known.messageId, known.state, known.acceptedAt), queued: false, message: original };
+    }
+    // Receipt without transcript (deleted thread): fall through to
+    // admission, where the UNIQUE intent id refuses the duplicate.
+  }
+  try {
+    if (bot.busy || queuedFlag) {
+      // The words land in the transcript with their durable receipt and
+      // join the (memory) steer queue: a restart loses only the auto-run
+      // intent — the transcript words and the acceptance survive — and the
+      // drain flips the receipt to dispatched before the provider sees them.
+      const message = store.admitMessage(threadId, text, { intentId, fingerprint }, { queued: true });
+      enqueueSteeredMessage(bot, message);
+      return { outcome: "accepted", receipt: intentReceipt(intentId, threadId, message.id, "accepted", message.at), queued: true, message };
+    }
+    const message = store.admitMessage(threadId, text, { intentId, fingerprint });
+    mdbSetIntentDispatched(intentId, "dispatched", Date.now());
+    return { outcome: "accepted", receipt: intentReceipt(intentId, threadId, message.id, "dispatched", message.at), queued: false, message };
+  } catch (error) {
+    // SAFETY: Store.admitMessage stamps INTENT_CONFLICT on the rejection it
+    // rethrows; nothing else in this try carries that code.
+    if ((error as { code?: string }).code === "INTENT_CONFLICT") {
+      const raced = readIntentRow(intentId);
+      return { outcome: "conflict", receipt: intentReceipt(intentId, raced?.threadId ?? threadId, raced?.messageId ?? "", raced?.state ?? "accepted", raced?.acceptedAt ?? 0) };
+    }
+    // A rejected admission emits nothing and starts no provider work: the
+    // client keeps its draft and the error is the HTTP failure below.
+    throw error;
+  }
+}
+
+function intentReceipt(intentId: string, threadId: string, messageId: string, state: MessageIntentReceipt["state"], acceptedAt: number): MessageIntentReceipt {
+  return { intentId, messageId, threadId, state, acceptedAt };
 }
 
 async function startTurn(
@@ -8251,6 +8368,56 @@ let requestUserEmail = "";
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const threadId = requireMessageThread(body, bot.threadId);
+      // Durable send receipts (opt-in): an intent-aware client gets a
+      // per-intent durable receipt that survives restarts, so a lost
+      // acknowledgement is a lookup, never a resend. Ownership comes from
+      // the session binding above — the client never names an account —
+      // and the fingerprint pins the exact words + destination, so a
+      // replayed id with different content is a conflict, not a redirect.
+      if (body.clientIntentId !== undefined) {
+        if (!isText(body.clientIntentId) || !isValidMessageIntentId(body.clientIntentId)) {
+          return json(res, 400, { error: "clientIntentId must be 8-128 characters of letters, digits, dot, dash or underscore" });
+        }
+        const intentId = body.clientIntentId;
+        const admitted = admitIntentMessage(bot, threadId, text, intentId, body.queued === true);
+        if (admitted.outcome === "conflict") {
+          return json(res, 409, {
+            error: "this send was already accepted with different content",
+            code: "INTENT_CONFLICT",
+            intent: admitted.receipt,
+          });
+        }
+        // Dispatch for a first admission only — a replayed id is a lookup
+        // and must never start a second turn. A refused dispatch reverts
+        // the receipt to accepted (the words are durable and held, not
+        // "dispatched"), and the activity chip explains the refusal.
+        if (admitted.outcome === "accepted" && !admitted.queued) {
+          try {
+            await startTurn(bot.id, text, { threadId, userMessage: admitted.message });
+          } catch (cause) {
+            mdbSetIntentDispatched(intentId, "accepted", Date.now());
+            store.appendMessage(
+              threadId,
+              {
+                role: "bot",
+                kind: "activity",
+                tool: { name: `error: message accepted but could not start — ${(cause instanceof Error ? cause.message : String(cause)).slice(0, 120)}`, ok: false },
+              },
+              { bestEffort: true },
+            );
+            return json(res, 202, {
+              ok: true,
+              threadId,
+              intent: { ...admitted.receipt, state: "accepted" },
+              message: admitted.message,
+            });
+          }
+        }
+        const payload: IntentSendPayload = { ok: true, threadId, intent: admitted.receipt };
+        if (admitted.queued) payload.queued = true;
+        payload.message = admitted.message;
+        return json(res, 202, payload);
+      }
       // A busy bot no longer refuses the message: it lands in the thread
       // now (marked queued) and auto-sends when the turn settles — see the
       // steer-queue drain above. Synchronous from the busy check to the
