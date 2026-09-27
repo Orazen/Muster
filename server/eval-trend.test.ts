@@ -105,10 +105,10 @@ describe('fleet eval trend', () => {
   });
 
   it('refuses a body carrying both fleet and role sections instead of discarding half', () => {
-    const both = JSON.stringify({
-      ...fleetFixture('x', 'passed').scorecard,
-      roles: roleFixture('x', 'passed').scorecard.roles,
-    });
+    const fleetParsed = fleetFixture('x', 'passed');
+    const roleParsed = roleFixture('x', 'passed');
+    if (fleetParsed.kind !== 'fleet' || roleParsed.kind !== 'role') throw new Error('fixture kind drifted');
+    const both = JSON.stringify({ ...fleetParsed.scorecard, roles: roleParsed.scorecard.roles });
     expect(() => parseScorecard('both.json', both)).toThrow(/both fleet probes and role sections/);
   });
 
