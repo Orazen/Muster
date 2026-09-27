@@ -4,8 +4,13 @@ import { expect, test as baseTest, type BrowserContext, type Page } from "@playw
 import { startPairingHarness, type FixtureEngineMode } from "./pairing-harness.ts";
 
 type Harness = Awaited<ReturnType<typeof startPairingHarness>>;
-type PageFailure = boolean | { messageSend503: true };
-interface MessageSendFailure { url: string | null; consoleErrors: number }
+/** How the send's acknowledgement is lost. `true` (or a bare boolean) fails
+ * BEFORE forwarding — the server never hears the send. `{ afterCommit: true }`
+ * forwards the POST to the real server first, so the durable layer records
+ * the words, and only then answers 503 — the committed-send-whose-ack-was-
+ * lost case, which exercises replay from the durable record itself. */
+type PageFailure = boolean | { messageSend503: true | { afterCommit: true } };
+interface MessageSendFailure { url: string | null; consoleErrors: number; afterCommit: boolean }
 type Fixtures = {
   engineMode: FixtureEngineMode;
   harness: Harness;
@@ -36,8 +41,10 @@ const test = baseTest.extend<Fixtures>({
       });
       contexts.push(context);
       const expectedPairFailure = expectedFailure === true;
-      const failedSend: MessageSendFailure | null = expectedFailure && expectedFailure !== true
-        ? { url: null, consoleErrors: 0 } : null;
+      const send503Spec = expectedFailure && expectedFailure !== true ? expectedFailure.messageSend503 : false;
+      const failedSend: MessageSendFailure | null = send503Spec
+        ? { url: null, consoleErrors: 0, afterCommit: send503Spec !== true }
+        : null;
       if (failedSend) sendFailures.push(failedSend);
       // A server fetch guard cannot stop the browser following OAuth or
       // third-party page resources. Only these two owned origins are allowed.
@@ -50,9 +57,23 @@ const test = baseTest.extend<Fixtures>({
         }
         if (failedSend && failedSend.url === null && url.origin === harness.desktopUrl
           && route.request().method() === "POST" && /^\/api\/bots\/[^/]+\/messages$/.test(url.pathname) && !url.search) {
-          // Pin the exact request before responding. This is explicitly a
-          // failure BEFORE forwarding, never fabricated server acceptance.
+          // Pin the exact request before responding. In the default mode this
+          // is a failure BEFORE forwarding — the server never hears the send.
+          // In the afterCommit mode the POST is FORWARDED first (the server's
+          // durable layer genuinely records the words) and only the response
+          // is replaced: the acknowledgement is lost after acceptance, which
+          // is the stronger replay case. Neither mode fabricates acceptance.
           failedSend.url = url.href;
+          if (failedSend.afterCommit) {
+            const response = await route.fetch();
+            if (response.status() < 400) {
+              await route.fulfill({ status: 503, contentType: "application/json",
+                body: JSON.stringify({ error: "Owned fixture: the send was accepted but its acknowledgement was lost. Please retry." }) });
+            } else {
+              await route.fulfill({ response });
+            }
+            return;
+          }
           await route.fulfill({ status: 503, contentType: "application/json",
             body: JSON.stringify({ error: "Owned fixture: first task was not sent. Please retry." }) });
           return;

@@ -1330,8 +1330,8 @@ const turnProvenance = new Map<string, { instanceId: string; model: string; effo
 // Usage-allowance reservations in flight, threadId → { account, amount }.
 // Written at dispatch (reserve), settled in the fold (reconcile) or the
 // dispatch catch (release). A restart drops these — the reservation was
-// optimistic and the month ledger resets with the process; honest
-// reporting keeps the bound, not perfect across restarts.
+// optimistic. The durable ledger converts any surviving hold to unknown
+// spend at restart because provider execution may already have occurred.
 const allowanceReservations = new Map<string, { accountId: string; amount: number }>();
 
 // Bounded per active turn. OpenHands uses a bounded recent-event scan for
@@ -1975,12 +1975,13 @@ bus.subscribe((event: RuntimeEvent) => {
         });
         // Usage allowance: trade this turn's reservation for its real cost
         // (held on the turnProvenance-adjacent map below). A turn whose
-        // provider reports no cost releases its full reservation — it ran,
-        // but nothing was billed.
+        // provider reports no cost is recorded as UNKNOWN spend — the
+        // reservation was the best estimate available, and collapsing it to
+        // zero would silently re-open the cap.
         const held = allowanceReservations.get(event.threadId);
         if (held !== undefined) {
           allowanceReservations.delete(event.threadId);
-          if (usageAllowance.enabled) usageAllowance.reconcile(held.accountId, event.cost ?? 0, held.amount);
+          if (usageAllowance.enabled) usageAllowance.reconcile(held.accountId, event.cost ?? null, held.amount);
         }
         // settled → idle; a setup failure already marked it dead, keep that
         if (store.bot(bot.id)?.activity !== "dead") idleWhenNoTurns(bot.id);
@@ -2905,7 +2906,7 @@ async function startTurn(
   const allowanceAccount = SELF_HOSTED
     ? bot.ownerId && bot.ownerId !== primaryUserId() ? bot.ownerId : "local"
     : bot.ownerId ?? "local";
-  const byokEngine = userInstanceOwner(bot.modelSelection?.instanceId ?? "") !== undefined;
+  const byokEngine = userInstanceOwner(instanceId) !== null;
   // The reservation record itself lives in allowanceReservations (keyed by
   // thread), so the settle paths can reconcile or release without threading
   // another parameter through startTurn.
@@ -2923,8 +2924,10 @@ async function startTurn(
       if (!current || current === dispatchLease) store.setActivity(bot.id, "idle");
       releaseSlot(bot.id, threadId);
       throw Object.assign(
-        new Error("Monthly usage allowance reached — the turn was not started. Add your own provider key (Settings → Providers) to keep going, or wait for the next month."),
-        { status: 402 },
+        new Error(granted.reason === "ledger-unavailable"
+          ? "Usage allowance could not be verified from its saved ledger — the turn was not started. Check the server's allowance ledger before trying again."
+          : "Monthly usage allowance reached — the turn was not started. Add your own provider key (Settings → Providers) to keep going, or wait for the next month."),
+        { status: granted.reason === "ledger-unavailable" ? 503 : 402 },
       );
     }
   }
@@ -3507,8 +3510,10 @@ taskPlans.start();
 // Usage allowance (strategy #6): pure ledger seeded from config.json's
 // `usage.allowance` — the owner sets the actual numbers; unset = unmetered.
 // A config change restarts the server (mutations go through saveConfig),
-// so a once-created ledger per boot is the correct lifecycle.
-const usageAllowance = new UsageAllowance(cfg.usage?.allowance);
+// so a once-created ledger per boot is the correct lifecycle. Settled spend
+// and pre-dispatch holds persist beside the plans file; a restart retains
+// interrupted holds as unknown spend rather than silently reopening the cap.
+const usageAllowance = new UsageAllowance(cfg.usage?.allowance, Date.now, join(DATA_DIR, "usage-allowance-ledger.json"));
 
 // Webhook definitions are independent from calendar schedules, but every
 // delivery joins the same RoutineManager queue. That keeps unattended work
@@ -8872,6 +8877,10 @@ let requestUserEmail = "";
               executionHost: isText(body.context?.executionHost) ? body.context.executionHost : undefined,
             },
             intentId: isText(body.intentId) ? body.intentId : undefined,
+            // Delivery reconciliation is owner-scoped: the intent lookup is
+            // keyed by the SESSION's account, so a colliding or guessed
+            // intent id can never materialize another account's plan.
+            intentOwnerId: requestUserId ?? "local",
           });
           return json(res, 201, { plan });
         }

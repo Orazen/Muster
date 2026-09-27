@@ -1,8 +1,9 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { buildSync } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 import { formatTrend, parseScorecard, trendFromScorecards, type FleetScorecard, type ParsedScorecard, type RoleScorecard } from './eval-trend.ts';
 import { parseEvalCapture, scoreFleetCapture } from './fleet-eval.ts';
@@ -187,6 +188,30 @@ describe('role bench trend', () => {
 });
 
 describe('trend CLI', () => {
+  it('runs only the trend command after bundling and never writes over scorecards', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'muster-trend-bundle-'));
+    try {
+      const bundle = join(dir, 'eval-trend.mjs');
+      buildSync({
+        entryPoints: [fileURLToPath(new URL('./eval-trend.ts', import.meta.url))],
+        outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node20',
+      });
+      const first = join(dir, 'first.json');
+      const second = join(dir, 'second.json');
+      writeFileSync(first, JSON.stringify(fleetFixture('same run', 'passed').scorecard));
+      writeFileSync(second, JSON.stringify(fleetFixture('same run', 'failed').scorecard));
+      for (const args of [[first, second], ['--json', first, second]]) {
+        const result = spawnSync(process.execPath, [bundle, ...args], { encoding: 'utf8', cwd: dir });
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stderr).toBe('');
+        expect(result.stdout).toContain(args[0] === '--json' ? '"statuses"' : '1 of 2 runs passed.');
+      }
+      expect(readdirSync(dir).sort()).toEqual(['eval-trend.mjs', 'first.json', 'second.json']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('drives the CLI end to end: compact by default, JSON with --json', () => {
     const dir = mkdtempSync(join(homedir(), 'eval-trend-'));
     const write = (name: string, body: string) => {

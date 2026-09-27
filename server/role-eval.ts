@@ -11,6 +11,7 @@ import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { MAX_SUBTASKS, MIN_SUBTASKS } from "./dispatch.ts";
+import { roleNames, scenarioKinds, type RoleName, type ScenarioKind } from "./role-eval-kinds.ts";
 
 const text = z.string().min(1).max(16000);
 const count = z.number().int().nonnegative();
@@ -26,10 +27,7 @@ export type TaskReceipt = z.infer<typeof receipt>;
 /** The task-receipt shape, exported so capture harnesses parse the same
  * wire body the grader consumes — one schema owner, no drift. */
 export const taskReceipt = receipt;
-export const roleNames = ["assistant", "coordinator", "specialist"] as const;
-export type RoleName = (typeof roleNames)[number];
-export const scenarioKinds = ["direct-answer", "grounded-answer", "delegation", "escalation"] as const;
-export type ScenarioKind = (typeof scenarioKinds)[number];
+export { roleNames, scenarioKinds, type RoleName, type ScenarioKind } from "./role-eval-kinds.ts";
 const role = z.enum(roleNames);
 const scenarioKind = z.enum(scenarioKinds);
 const scenario = z.object({

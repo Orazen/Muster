@@ -114,12 +114,30 @@ interface TaskPlanFile {
  * retry then creates a new plan rather than lying about acceptance. */
 interface DeliveryIntentsFile {
   version: 1;
-  intents: Record<string, { planId: string; acceptedAt: number }>;
+  intents: Record<string, IntentRecord>;
+}
+
+/** One accepted delivery intent. `ownerId` is the SESSION fact of the
+ * request that accepted it (server-owned at the route), not a client claim:
+ * the reconciliation lookup returns a plan only to the account that created
+ * it, so one account can never materialize another's plan by guessing or
+ * colliding on its intent id. */
+interface IntentRecord {
+  planId: string;
+  acceptedAt: number;
+  ownerId?: string;
 }
 
 const intentsFileSchema = z.object({
   version: z.literal(1),
-  intents: z.record(z.string(), z.object({ planId: z.string(), acceptedAt: z.number() })),
+  intents: z.record(
+    z.string(),
+    z.object({
+      planId: z.string(),
+      acceptedAt: z.number(),
+      ownerId: z.string().optional(),
+    }),
+  ),
 }).partial();
 
 function fail(status: number, message: string): never {
@@ -302,8 +320,9 @@ export class TaskPlanEngine {
   private plans: TaskPlanRecord[] = [];
   private transitions: TaskTransitionEvent[] = [];
   /** intentId → acceptance record; persisted to its own file next to the
-   * plans so a retrying client reconciles across restarts. */
-  private deliveryIntents: Record<string, { planId: string; acceptedAt: number }> = {};
+   * plans so a retrying client reconciles across restarts. Owner-scoped:
+   * see IntentRecord. */
+  private deliveryIntents: Record<string, IntentRecord> = {};
   private intentsFile = "";
   /** Reentrancy depth for the transaction frame: only the outermost call
    * snapshots and restores, so nested helpers join their caller's frame. */
@@ -386,7 +405,17 @@ export class TaskPlanEngine {
       // SAME intentId gets the ORIGINAL plan back — a lost acknowledgement
       // is a lookup, never a resend. The intent is persisted BEFORE the
       // plan starts, so "accepted" always means "durable".
+      //
+      // The lookup is OWNER-SCOPED: `intentOwnerId` arrives from the route as the
+      // authenticated session's account (server-owned, like context
+      // accountId), never from the request body. A plan id is exactly as
+      // account-boundary-sensitive as the plan itself — returning account A's
+      // plan to account B because B guessed (or collided with) A's intent id
+      // is the same disclosure as GET /api/task-plans/:id without ownsPlan.
+      // Direct engine callers retain the existing ownerId fallback. On
+      // desktop, including pre-upgrade ownerless records, the owner is local.
       const intentId = text(input?.intentId, 128);
+      const intentOwner = text(input?.intentOwnerId ?? input?.ownerId, 120) || "local";
       if (intentId) {
         // Validate the RAW value too: text() would have silently truncated
         // an over-long id, and truncation must never make one intent id
@@ -398,9 +427,22 @@ export class TaskPlanEngine {
         const known = this.deliveryIntents[intentId];
         if (known) {
           const original = this.plans.find((plan) => plan.id === known.planId);
+          // Pre-upgrade ledgers have no owner field. The route recorded the
+          // request identity in context before intent owners were persisted.
+          // Prefer that identity: a local bot can later gain a primary owner
+          // while its original request still belongs to the local operator.
+          const knownOwner = known.ownerId ?? (original ? original.context?.accountId ?? original.ownerId ?? "local" : intentOwner);
+          // Same intent id, different account: never disclose what the id
+          // maps to. An explicit 403 keeps the retry honest instead of
+          // pointing at a plan the caller does not own.
+          if (knownOwner !== intentOwner) {
+            fail(403, "this delivery intent belongs to a different account");
+          }
           if (original) return clone(original);
           // The referenced plan was pruned (or the file was hand-edited):
-          // fall through and create fresh, replacing the stale intent.
+          // fall through and create fresh, replacing the stale intent — a
+          // legitimate same-owner retry keeps working after the bounded plan
+          // store ages the original out.
           delete this.deliveryIntents[intentId];
         }
       }
@@ -427,7 +469,7 @@ export class TaskPlanEngine {
         updatedAt: at,
       };
       if (intentId) {
-        this.deliveryIntents[intentId] = { planId: plan.id, acceptedAt: at };
+        this.deliveryIntents[intentId] = { planId: plan.id, acceptedAt: at, ownerId: intentOwner };
         // Bounded ledger: drop the OLDEST intent past the cap.
         const ids = Object.keys(this.deliveryIntents);
         if (ids.length > MAX_INTENTS) {
@@ -917,6 +959,7 @@ export class TaskPlanEngine {
   private tx<T>(fn: () => T): T {
     if (this.depth > 0) return fn();
     const before: TaskPlanFile = clone({ version: 1, plans: this.plans, transitions: this.transitions });
+    const beforeIntents = clone(this.deliveryIntents);
     this.depth = 1;
     try {
       const out = fn();
@@ -926,6 +969,7 @@ export class TaskPlanEngine {
       this.depth = 0;
       this.plans = before.plans;
       this.transitions = before.transitions;
+      this.deliveryIntents = beforeIntents;
       throw error;
     }
   }

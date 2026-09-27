@@ -113,7 +113,11 @@ test.describe("a send queued behind a busy bot keeps its receipt honest", () => 
 });
 
 test("a lost send response is recovered on reload as one message and one turn", async ({ harness, newPage, pairCodeFromCloud }, testInfo) => {
-  const page = await newPage({ messageSend503: true });
+  // The STRONGER fault: the POST is forwarded and the server's durable layer
+  // records the words; only the acknowledgement is lost (503 after commit).
+  // The reload below must converge from the durable record — not merely from
+  // an unadmitted parked row (that is the third test in this file).
+  const page = await newPage({ messageSend503: { afterCommit: true } });
   await pairDesktop(page, harness, pairCodeFromCloud);
   await page.getByRole("button", { name: "Quick start — skip setup, just get me in", exact: true }).click();
   const composer = page.getByRole("textbox", { name: /^Message / });
@@ -182,15 +186,21 @@ test("a lost send response is recovered on reload as one message and one turn", 
     // SAFETY: this callback runs in the PAGE context, where test-file
     // variables do not exist; performance.memory is a Chromium-only
     // extension whose shape is fixed by the platform, not untrusted input.
-    const memory = (performance as { memory?: { usedJSHeapSize: number } }).memory;
+    // The NUMBER is read here — the object itself must never be divided
+    // (that was the TS2362 instrument defect: heapMB printed null forever).
+    const heapBytes = (performance as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize;
     const longTasks = await new Promise<number>((resolveTasks) => {
       let count = 0;
       const observer = new PerformanceObserver((list) => { count += list.getEntries().length; });
       observer.observe({ type: "longtask", buffered: false });
       setTimeout(() => { observer.disconnect(); resolveTasks(count); }, 2_000);
     });
-    return { longTasks, heapMB: memory !== undefined ? Math.round(memory / (1024 * 1024)) : null };
+    return { longTasks, heapMB: heapBytes === undefined ? null : Math.round(heapBytes / (1024 * 1024)) };
   });
+  // The instrument must MEASURE, not shrug: Chromium always exposes
+  // performance.memory, so null here means the probe broke — exactly the
+  // silent heapMB:null the audit caught.
+  expect(Number.isFinite(idle.heapMB ?? NaN), `heapMB must be a real measurement, got ${idle.heapMB}`).toBe(true);
   const timingSummary = JSON.stringify({ navigation: timing, idle });
   // One always-visible line: attachments only persist for failing runs.
   console.log(`app-timing ${timingSummary}`);

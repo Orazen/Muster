@@ -654,4 +654,10 @@ export interface TaskPlanCreateInput {
    * the SAME intentId gets the original plan back (201 → the original
    * record), not a duplicate run. */
   intentId?: string;
+  /** The authenticated session's account, server-owned at the route (never
+   * a client-claimable body field). Scopes the intent lookup so one account
+   * can never reconcile against — or be told about — another account's
+   * intent, and refuses a second creation under an id that already
+   * answered for one plan. */
+  intentOwnerId?: string;
 }
