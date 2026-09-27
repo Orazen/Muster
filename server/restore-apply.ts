@@ -78,7 +78,7 @@ export function stagingPathFor(dataDir: string): string {
 }
 
 /** Root for per-restore safety copies, outside the live tree. */
-function backupsRootFor(dataDir: string): string {
+export function backupsRootFor(dataDir: string): string {
   return `${dataDir}.restore-backups`;
 }
 
@@ -216,6 +216,32 @@ export interface ApplyResult {
 /** The boot hook: run BEFORE the Store is constructed. A commit that fails,
  * rolls back, or is refused keeps the pending file so the next boot retries,
  * and records the outcome in the receipt so the UI can say so honestly. */
+/** A backup directory for THIS attempt that no earlier attempt left behind.
+ *
+ * The name used to be the stamp alone, and the stamp is derived from
+ * `pending.createdAt` — so it is byte-identical on every boot. `commitRestoreV2`
+ * refuses when the directory already exists, which meant one attempt that died
+ * after creating it (mid-write, a full disk, a killed process) wedged the
+ * pending restore permanently: the pending file only clears on `committed`, so
+ * every later boot recomputed the same name and hit the same refusal. The
+ * operator's staged restore could then never be applied, and the only way out
+ * was to discard a bundle they might no longer have.
+ *
+ * A suffix is added only when the plain name is taken. The common case keeps
+ * the same readable name, no existing backup is ever reused or overwritten, and
+ * the receipt records exactly which directory was written — so the leftovers
+ * from the failed attempts remain for triage instead of being deleted on the
+ * operator's behalf. */
+function freshBackupDir(backupsRoot: string, stamp: string): string {
+  const plain = join(backupsRoot, stamp);
+  if (!existsSync(plain)) return plain;
+  for (let attempt = 2; attempt <= 50; attempt += 1) {
+    const candidate = join(backupsRoot, `${stamp}-${attempt}`);
+    if (!existsSync(candidate)) return candidate;
+  }
+  throw new Error(`no free backup directory beside ${plain} — 49 earlier attempts are still on disk`);
+}
+
 export function applyPendingRestore(dataDir: string): ApplyResult {
   const pending = readPendingRestore(dataDir);
   if (!pending) return { status: "nothing-pending" };
@@ -232,7 +258,7 @@ export function applyPendingRestore(dataDir: string): ApplyResult {
     capturePreMigrationSnapshot(dataDir, "pre-restore");
   }
   const stamp = new Date(pending.createdAt).toISOString().replace(/[:.]/g, "-");
-  const backupDir = join(backupsRootFor(dataDir), stamp);
+  const backupDir = freshBackupDir(backupsRootFor(dataDir), stamp);
   checkpointLiveDb(dataDir);
   let commit: CommitRestoreResult;
   try {
