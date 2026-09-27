@@ -22,7 +22,6 @@ const checkingRow = (page: Page, message: string) => page.getByRole("status").fi
 const peerReceiptSchema = z.object({ pid: z.number().optional() });
 const clientIntentSchema = z.object({ clientIntentId: z.string().optional() });
 const intentRowSchema = z.object({ intent_id: z.string(), state: z.string() });
-const performanceMemorySchema = z.object({ memory: z.object({ usedJSHeapSize: z.number() }).optional() });
 const peerReceipt = (raw: string) => peerReceiptSchema.parse(JSON.parse(raw));
 
 // The queue row of the acceptance table, web-exercisable: a send accepted
