@@ -504,6 +504,61 @@ const SUBSET_ROOT_FILES = new Set([
   "social.json",
 ]);
 
+const SOCIAL_FILE_NAME = "social.json";
+
+/** The owner-id fields inside social.json, which is staged as a SUBSET_ROOT_FILE
+ * and therefore used to land byte-for-byte.
+ *
+ * A friendship carries the owner of each side, a friend request the owner of
+ * each direction, and a profile its own. All of them are the account that
+ * produced the bundle, and the SSE social filter treats `ownerId` lists as
+ * authoritative for who may see a frame — so restoring them verbatim re-grants
+ * visibility the local accounts never had and re-attaches friendships between
+ * bots that are not theirs. Dropping them leaves the graph shaped but unowned,
+ * which is the same posture bots.json and groups.json already take.
+ *
+ * Enumerated rather than pattern-matched: a blanket "drop anything named *Id"
+ * would take bot and post ids with it. */
+const SOCIAL_DROPPED_OWNER_FIELDS = [
+  "ownerId",
+  "ownerAId",
+  "ownerBId",
+  "fromOwnerId",
+  "toOwnerId",
+] as const;
+
+/** Strip owner ids from every record in a social document, at any depth.
+ *
+ * The document is a fixed set of arrays of records, so one bounded pass over the
+ * known collections is enough — and being explicit about the collections means a
+ * future field cannot be missed by accident, it fails a test instead. */
+export function stripSocialOwnership(body: string): string | null {
+  // JSON.parse throws on malformed input, which is the common case here, so it
+  // is caught rather than left to the schema: the contract is "null means stage
+  // it unchanged", and that has to hold for unparseable input too.
+  let raw: unknown;
+  try {
+    raw = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  const parsed = socialDocumentSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const strip = (records: SocialRecord[]): SocialRecord[] =>
+    records.map((record) => {
+      const next = { ...record };
+      for (const field of SOCIAL_DROPPED_OWNER_FIELDS) delete next[field];
+      return next;
+    });
+  const doc = parsed.data;
+  return JSON.stringify({
+    ...doc,
+    profiles: strip(doc.profiles),
+    requests: strip(doc.requests),
+    friendships: strip(doc.friendships),
+  });
+}
+
 export interface BuildPayloadV2Options {
   dataDir: string;
   appVersion: string;
@@ -1516,6 +1571,17 @@ const RESTORE_FORMAT = "muster-restore-staging";
 /** The transcript is rebuilt from the payload's rows, never copied: the rows
  * are the data, the file is a rendering of them. */
 const STAGED_TRANSCRIPT = "messages.db";
+/** One social record. Schema-derived rather than a bare dictionary, so the
+ * element type the stripper works on has a declared contract. */
+const socialRecordSchema = z.record(z.string(), z.unknown());
+type SocialRecord = z.infer<typeof socialRecordSchema>;
+
+const socialDocumentSchema = z.object({
+  profiles: z.array(socialRecordSchema).catch([]),
+  requests: z.array(socialRecordSchema).catch([]),
+  friendships: z.array(socialRecordSchema).catch([]),
+});
+
 const BOTS_FILE_NAME = "bots.json";
 const GROUPS_FILE_NAME = "groups.json";
 const WORKSPACES_PREFIX = "workspaces/";
@@ -1951,6 +2017,17 @@ function buildStagedPlan(
     } else if (file.path === GROUPS_FILE_NAME && groupsText !== null) {
       const ported = portGroupRecords(groupsText, botIdMap, threadIdMap);
       if (ported !== null) staged = Buffer.from(JSON.stringify(ported, null, 2), "utf8");
+    } else if (file.path === SOCIAL_FILE_NAME) {
+      // social.json is in SUBSET_ROOT_FILES and so used to land byte-for-byte,
+      // carrying the producing account's owner ids into every friendship,
+      // request and profile. Stripped here for the same reason bots.json and
+      // groups.json are rewritten: the bundle is not evidence about who owns
+      // anything on this installation.
+      const stripped = stripSocialOwnership(body.toString("utf8"));
+      // A document we cannot parse is staged unchanged rather than dropped:
+      // losing a social graph is a downgrade, and the ids in it are only
+      // meaningful against accounts that do not exist here anyway.
+      if (stripped !== null) staged = Buffer.from(stripped, "utf8");
     }
     files.push({ path: stagedPath, body: staged });
   }

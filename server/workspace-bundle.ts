@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import type { Store } from "./store.ts";
-import { confinedTarget } from "./workspace-bundle-v2.ts";
+import { confinedTarget, RESTORE_DROPPED_BOT_FIELDS, RESTORE_DROPPED_GROUP_FIELDS } from "./workspace-bundle-v2.ts";
 import { workspaceDir } from "./workspace.ts";
 
 const BUNDLE_MAGIC = "muster-workspace-bundle";
@@ -190,6 +190,11 @@ const bundleBotSchema = z.object({
     .optional(),
 });
 const bundleGroupSchema = z.object({ id: z.string().min(1) });
+/** One bundle record, as the schemas above produce: an open record whose
+ * fields vary by version. Schema-derived rather than a bare dictionary so the
+ * helper below has a declared contract to work against. */
+const bundleRecordSchema = z.record(z.string(), z.unknown());
+type BundleRecord = z.infer<typeof bundleRecordSchema>;
 
 const workspaceSchema = z.object({
   bots: z.array(z.record(z.string(), z.unknown())),
@@ -198,6 +203,25 @@ const workspaceSchema = z.object({
   topics: z.record(z.string(), z.record(z.string(), z.string())),
   exportedAt: z.number(),
 });
+
+/** A bundle record with the fields a restore must not carry over.
+ *
+ * Ownership and machine-specific handles are the two classes that cannot
+ * transfer: whoever produced the bundle knows nothing about who owns what here,
+ * and a path or CLI handle from another machine is wrong on this one. v2 spells
+ * the list out as `RESTORE_DROPPED_*`; this is the same list applied on the v1
+ * path, so there is one policy in two places rather than two policies.
+ *
+ * The input is left untouched: the bundle object may be shared with a caller
+ * that wants to inspect exactly what arrived. */
+function withoutBundleOwnership(record: BundleRecord, dropped: readonly string[]): BundleRecord {
+  // The caller has already been through bundleBotSchema / bundleGroupSchema,
+  // which are z.record() shapes, so the record is an object by contract here and
+  // needs no runtime type test of its own.
+  const next = { ...record };
+  for (const field of dropped) delete next[field];
+  return next;
+}
 
 /** Restore a decrypted workspace: insert bots/groups preserving their
  * original ids (an id that already exists locally means it IS the same bot
@@ -222,9 +246,20 @@ export function restoreBundle(store: Store, dataDir: string, workspace: BundleWo
       result.skippedExisting += 1;
       continue;
     }
-    // SAFETY: the record passed bundleBotSchema (id + name validated); the
-    // array is the store's own public BotRecord[] field.
-    (store.bots as unknown[]).unshift(raw);
+    // The bundle is not evidence about who owns anything on THIS installation.
+    // v2 already drops these fields for exactly that reason
+    // (RESTORE_DROPPED_BOT_FIELDS lists ownerId); the v1 path unshifted the raw
+    // record, so a bundle from another account materialised bots and groups
+    // that the restoring user could not see under the ownsRecord guard — their
+    // own restored work, invisible and unusable. What replaces the dropped owner
+    // is the installation's own: the boot ownership migration and
+    // server/restore-apply.ts assign unowned records, so dropping is both the
+    // safe direction and the one already in use.
+    // SAFETY: `check` is the bundleBotSchema-validated record (id + name
+    // checked), and the array is the store's own public BotRecord[] field. The
+    // inner cast only erases the schema's record type for the helper, which
+    // takes the same object shape.
+    (store.bots as unknown[]).unshift(withoutBundleOwnership(check.data, RESTORE_DROPPED_BOT_FIELDS));
     existingBotIds.add(check.data.id);
     result.botsRestored += 1;
   }
@@ -233,8 +268,9 @@ export function restoreBundle(store: Store, dataDir: string, workspace: BundleWo
     const check = bundleGroupSchema.safeParse(raw);
     if (!check.success) continue;
     if (existingGroupIds.has(check.data.id)) continue;
-    // SAFETY: same boundary as bots — id validated by bundleGroupSchema.
-    (store.groups as unknown[]).unshift(raw);
+    // SAFETY: same boundary as bots — id validated by bundleGroupSchema,
+    // and the cast only erases the record type for the shared helper.
+    (store.groups as unknown[]).unshift(withoutBundleOwnership(check.data, RESTORE_DROPPED_GROUP_FIELDS));
     existingGroupIds.add(check.data.id);
     result.groupsRestored += 1;
   }
