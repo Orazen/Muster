@@ -24,6 +24,7 @@
 // server/desktop-grounding.ts and server/desktop-suggestions.ts.
 
 import type { StopReason } from "./desktop-grounding.ts";
+import { stripMcpToolPrefix } from "./mcp-tool-name.ts";
 
 /** The four stop reasons the study asks the guard to speak. `no_candidates`
  * also exists upstream and in `StopReason`; it names "nothing was detected",
@@ -101,9 +102,16 @@ const ACTION_TOOLS = new Set([
  * `mcp__server__tool` spelling, and an ACP title carrying arguments
  * ("click 412, 88") — only the first token is ever considered, so prose
  * that merely starts with a verb-shaped word is the whole risk here and it
- * errs toward counting (a stop asks a human; it never grants one). */
+ * errs toward counting (a stop asks a human; it never grants one).
+ *
+ * The mount prefix is cut by server/mcp-tool-name.ts, the same reader
+ * server/auto-approve.ts's approvalKey uses, so a screen action keeps
+ * counting as one for every server name — including a user-registered
+ * bridge named with an underscore (`mcp__cua_driver__click`). Reading the
+ * prefix with `mcp__[^_]+__` instead left that whole family un-counted and
+ * the budget silently stopped applying to it. */
 export function isDesktopActionTool(name: string): boolean {
-  const bare = name.replace(/^mcp__[^_]+__/, "").trim().split(/\s+/)[0] ?? "";
+  const bare = stripMcpToolPrefix(name).trim().split(/\s+/)[0] ?? "";
   return ACTION_TOOLS.has(bare.toLowerCase());
 }
 

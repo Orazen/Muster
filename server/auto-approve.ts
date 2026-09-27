@@ -10,6 +10,8 @@
 // backstop for the obvious catastrophes. Real containment is the
 // sandbox and the bot's own computer, not a regex.
 
+import { stripMcpToolPrefix } from "./mcp-tool-name.ts";
+
 const DESTRUCTIVE = [
   /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf]/i, // rm -rf, rm -fr, rm -r -f
   /\bmkfs\b|\bdiskutil\s+erase|\bdd\s+[^|]*\bof=\/dev\//i,
@@ -46,11 +48,16 @@ export function looksDestructive(text: string): boolean {
  * intends. Command tools are therefore keyed by their program —
  * `Bash:git`, `Bash:npm` — so the grant is as narrow as the thing you
  * actually looked at. Computed once, server-side, and echoed back by the
- * client so the two sides can never disagree about what was granted. */
+ * client so the two sides can never disagree about what was granted.
+ *
+ * The bare name comes from server/mcp-tool-name.ts — the same reader
+ * server/desktop-guardrails.ts's isDesktopActionTool uses — so a tool
+ * mounted by a user-registered server keeps its family no matter how the
+ * user spelled that server's name. */
 const COMMAND_TOOLS = new Set(["bash", "shell", "execute", "run_command", "computer_exec", "terminal"]);
 
 export function approvalKey(tool: string, summary: string): string {
-  const bare = tool.replace(/^mcp__[^_]+__/, "").toLowerCase();
+  const bare = stripMcpToolPrefix(tool).toLowerCase();
   if (!COMMAND_TOOLS.has(bare)) return tool;
   // first bare word of the command, skipping env assignments and sudo
   const words = summary.trim().split(/\s+/);

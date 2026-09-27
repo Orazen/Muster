@@ -407,6 +407,9 @@ export function normalizeGroupDefaultResponder(
   memberIds: string[],
   dm = false,
 ): GroupDefaultResponder {
+  // A restore or migration can hand us a record whose member list never
+  // materialized; treat a missing list as an empty room, not a crash.
+  if (!Array.isArray(memberIds)) return { kind: "mentions" };
   if (dm) return { kind: "mentions" };
   // Persisted rooms may predate this field's shape; only plain JSON objects
   // carry a decodable policy.

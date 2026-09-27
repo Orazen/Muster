@@ -71,7 +71,7 @@ import {
   statSync,
   unlinkSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { homedir, tmpdir } from "node:os";
 import { gunzipSync, gzipSync } from "node:zlib";
@@ -1653,6 +1653,20 @@ const stagingManifestSchema = z.object({
 
 type StagingManifest = z.infer<typeof stagingManifestSchema>;
 
+/** Whether a previously staged tree has already been committed once: the
+ * boot-time applier needs this to retry ONLY its de-weaponization step —
+ * the commit itself must never run twice (the consumed-manifest guard owns
+ * that), but a landed commit whose disarm failed keeps both the tree and the
+ * pending file alive precisely so a later boot can finish the disarm. */
+export function stagingManifestConsumed(stagingDir: string): boolean {
+  try {
+    const manifest = parseStagingManifest(readFileSync(join(stagingDir, RESTORE_MANIFEST), "utf8"));
+    return manifest !== null && manifest.consumedAt !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 /** Lenient on purpose: a bundle from another build carries fields this one
  * does not know, and the whole point of restoring is to keep them. */
 const botRecordSchema = z.looseObject({
@@ -2584,6 +2598,11 @@ function rollbackCommit(input: RollbackInput): string[] {
     (a, b) => b.split(sep).length - a.split(sep).length,
   );
   for (const dir of deepestFirst) {
+    // The backup-side chain is the record of the attempt and the seed of the
+    // retry: a rolled-back commit LEAVES its safety-copy directory behind, so
+    // the next boot names its way around it instead of the same path looking
+    // free and the receipt claiming a copy that is gone.
+    if (containsPath(input.backupDir, dir)) continue;
     try {
       rmdirSync(dir);
     } catch {
@@ -2592,6 +2611,10 @@ function rollbackCommit(input: RollbackInput): string[] {
   }
   return failures;
 }
+
+/** The one directory name a safety copy may live under INSIDE a data dir:
+ * reserved here so the guard and the boot-time applier cannot drift apart. */
+export const RESTORE_BACKUPS_DIR = ".restore-backups";
 
 /** Overlay a staged restore onto a live installation.
  *
@@ -2631,8 +2654,23 @@ export function commitRestoreV2(options: CommitRestoreV2Options): CommitRestoreR
   if (containsPath(dataDir, stagingDir)) {
     return refuse([{ path: stagingDir, detail: "the staging directory is the data directory or sits inside it" }]);
   }
-  if (containsPath(dataDir, backupDir)) {
+  // A safety copy INSIDE the live tree is allowed only under the reserved
+  // `.restore-backups` root — the FIRST segment of the backup's path relative
+  // to the data dir must be that directory, at any depth beneath it. The
+  // overlay commits by renaming exactly the manifest's paths and never sweeps
+  // other files, so a copy there survives a commit — and it must survive one,
+  // because it IS the rollback source. What stays forbidden is every other
+  // location inside the data dir (an overlay could never roll back into it)
+  // and any nesting the other way around. A staged bundle also may never
+  // declare an entry inside the backup directory; that check runs right after
+  // preflight below, where the entry list exists.
+  const backupInsideData = containsPath(dataDir, backupDir);
+  const backupInReservedNamespace = relative(dataDir, backupDir).split(sep)[0] === RESTORE_BACKUPS_DIR;
+  if (backupInsideData && !backupInReservedNamespace) {
     return refuse([{ path: backupDir, detail: "the backup directory is the data directory or sits inside it" }]);
+  }
+  if (backupInsideData && containsPath(backupDir, stagingDir)) {
+    return refuse([{ path: stagingDir, detail: "the staging directory sits inside the backup directory" }]);
   }
   if (containsPath(backupDir, dataDir)) {
     return refuse([{ path: dataDir, detail: "the data directory sits inside the backup directory" }]);
@@ -2677,6 +2715,12 @@ export function commitRestoreV2(options: CommitRestoreV2Options): CommitRestoreR
   }
   const preflight = preflightCommit(stagingDir, dataDir);
   if (!preflight.ok) return refuse(preflight.blocked);
+  // A bundle whose manifest declares an entry INSIDE the backup directory
+  // would let the payload overwrite its own rollback source; refuse before
+  // anything moves.
+  if (backupInsideData && preflight.entries.some((entry) => containsPath(backupDir, join(dataDir, entry.path)))) {
+    return refuse([{ path: "-", detail: "the bundle declares a file inside its own safety-copy directory" }]);
+  }
   const moved: string[] = [];
   const written: string[] = [];
   const createdDirs: string[] = [];

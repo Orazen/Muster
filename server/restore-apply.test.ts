@@ -5,7 +5,7 @@
 // export from A, stage into fresh B, apply at "boot", and check that B now
 // IS A's workspace with routines disabled and goals stopped. Nothing here
 // touches a real installation.
-import { mkdirSync, mkdtempSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -285,5 +285,117 @@ describe("pending restore apply", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+/** A commit that throws part-way leaves the live tree rolled back but keeps its
+ * safety copy; these two pin that a transient failure no longer wedges a
+ * staged restore, and that a disarm that could not be written is never filed
+ * under "committed". */
+describe("pending restore apply — transient failures", () => {
+  function pendingFor(b: string, stagedStagingDir: string): void {
+    writePendingRestore(b, {
+      version: 1,
+      format: PENDING_RESTORE_FORMAT,
+      stagingDir: stagedStagingDir,
+      createdAt: Date.now(),
+      source: "file",
+      reconsentRequired: [],
+    });
+  }
+
+  it("a rolled-back commit does not wedge the pending restore on the next boot", () => {
+    const root = makeRoot();
+    const a = makeInstallA(root);
+    const b = makeInstallB(root);
+    const staged = stageInto(b, exportFromA(a));
+    pendingFor(b, staged.stagingDir);
+    const createdAt = readPendingRestore(b)!.createdAt;
+    const backupsRoot = join(b, `${".restore-backups"}`);
+    const stamp = new Date(createdAt).toISOString().replace(/[:.]/g, "-");
+
+    // BOOT 1: the commit writes every staged file, then fails on the final
+    // "consume" step because the staging tree is no longer writable — the
+    // stand-in for an ENOSPC/EIO part-way through. It rolls back and leaves
+    // its safety copy behind.
+    chmodSync(staged.stagingDir, 0o500);
+    const first = applyPendingRestore(b);
+    chmodSync(staged.stagingDir, 0o700);
+    expect(first.status).toBe("rolled-back");
+    expect(existsSync(join(backupsRoot, stamp))).toBe(true);
+    expect(readPendingRestore(b)).not.toBeNull();
+    // the live tree is the pre-restore one again
+    const bots = JSON.parse(readFileSync(join(b, "bots.json"), "utf8"));
+    expect(bots[0].name).toBe("Local");
+
+    // BOOT 2 must reach the commit instead of refusing the leftover directory.
+    const second = applyPendingRestore(b);
+    expect(second.status).toBe("committed");
+    // the safety copy is preserved, not overwritten or dropped
+    expect(existsSync(join(backupsRoot, stamp))).toBe(true);
+    if (!second.commit?.backupDir) throw new Error("committed restore must name its safety copy");
+    expect(second.commit.backupDir).not.toBe(join(backupsRoot, stamp));
+    expect(existsSync(join(second.commit.backupDir, "bots.json"))).toBe(true);
+    expect(readLastReceipt(b)?.status).toBe("committed");
+    expect(readPendingRestore(b)).toBeNull();
+    // and the restore really is A's workspace
+    const restored = JSON.parse(readFileSync(join(b, "bots.json"), "utf8"));
+    expect(restored[0].name).toBe("Orchard");
+  });
+
+  it("keeps refusing when a safety copy name is genuinely taken and no free name remains", () => {
+    // The "already exists" guard itself is not weakened: this only pins that
+    // the retry names its way out of a leftover, never past a live copy it
+    // would otherwise have been handed.
+    const root = makeRoot();
+    const a = makeInstallA(root);
+    const b = makeInstallB(root);
+    const staged = stageInto(b, exportFromA(a));
+    pendingFor(b, staged.stagingDir);
+    const stamp = new Date(readPendingRestore(b)!.createdAt).toISOString().replace(/[:.]/g, "-");
+    mkdirSync(join(b, ".restore-backups", stamp), { recursive: true });
+    const applied = applyPendingRestore(b);
+    expect(applied.status).toBe("committed");
+    expect(applied.commit?.backupDir).toBe(join(b, ".restore-backups", `${stamp}-retry-1`));
+  });
+
+  it("downgrades the receipt when de-weaponization cannot write, instead of claiming a clean commit", () => {
+    const root = makeRoot();
+    const a = makeInstallA(root);
+    const b = makeInstallB(root);
+    const staged = stageInto(b, exportFromA(a));
+    pendingFor(b, staged.stagingDir);
+    // A directory where rewriteIfChanged's temp file belongs: the disarm
+    // cannot land, and the restored routine is still armed. This is the one
+    // outcome the module header forbids, so it must not be reported as
+    // "committed" with the failure nowhere.
+    mkdirSync(join(b, "routines.json.tmp"), { recursive: true });
+
+    const applied = applyPendingRestore(b);
+    expect(applied.status).toBe("failed");
+    expect(applied.error).toMatch(/routines/);
+    expect(applied.error).toMatch(/may still be enabled/);
+    // the goals disarm did land and is still reported as such
+    expect(applied.deWeaponized).toEqual(["goals"]);
+    expect(JSON.parse(readFileSync(join(b, "goals.json"), "utf8")).goals[0].status).toBe("stopped");
+    // the routine really is still armed — which is why this is not "committed"
+    expect(JSON.parse(readFileSync(join(b, "routines.json"), "utf8")).routines[0].enabled).toBe(true);
+    const receipt = readLastReceipt(b);
+    expect(receipt?.status).toBe("failed");
+    expect(receipt?.error).toMatch(/routines/);
+    // the safety copy of a landed commit stays named, and the pending file
+    // stays so a later boot can re-apply and re-try the disarm
+    expect(receipt?.backupDir).toBeDefined();
+    expect(readPendingRestore(b)).not.toBeNull();
+    expect(existsSync(stagingPathFor(b))).toBe(true);
+
+    // clear the obstruction: the next boot commits cleanly
+    rmSync(join(b, "routines.json.tmp"), { recursive: true, force: true });
+    const second = applyPendingRestore(b);
+    expect(second.status).toBe("committed");
+    expect(second.deWeaponized).toEqual(["routines"]);
+    expect(JSON.parse(readFileSync(join(b, "routines.json"), "utf8")).routines[0].enabled).toBe(false);
+    expect(readLastReceipt(b)?.status).toBe("committed");
+    expect(readPendingRestore(b)).toBeNull();
   });
 });

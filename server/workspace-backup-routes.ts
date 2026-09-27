@@ -1,8 +1,8 @@
 // The workspace-backup route family, extracted from server/index.ts behind
 // an ordered route table: capability advertisement, the hosted installation
 // wall, account-linked Google Drive connect/callback, the v2 portable
-// bundles (file, installation Drive, account Drive), and the snapshot-
-// automation entries (policy, run, passphrase store).
+// bundles (file, installation Drive, account Drive, Telegram), and the
+// snapshot-automation entries (policy, run, passphrase store).
 //
 // POSITION CONTRACT — this family is order-sensitive inside index.ts's
 // request handler:
@@ -43,7 +43,7 @@ import { rmSync } from "node:fs";
 
 import { z } from "zod";
 
-import type { AppConfig } from "./config.ts";
+import { loadConfig, saveConfig, type AppConfig } from "./config.ts";
 import { getDb, forwardedProtoOf, SELF_HOSTED } from "./auth.ts";
 import { json, readBody, isText } from "./http-helpers.ts";
 import * as accountDrive from "./account-drive.ts";
@@ -61,6 +61,7 @@ import {
   type PendingRestore,
 } from "./restore-apply.ts";
 import * as driveSync from "./drive-sync.ts";
+import * as telegramSync from "./telegram-sync.ts";
 import * as syncState from "./sync-state.ts";
 import type { WorkspaceBackupCapability } from "./contracts.ts";
 import { devicesForUser } from "./devices.ts";
@@ -273,11 +274,12 @@ function gateExplanation(reason: GateReason): string {
 /** The ordered family table. Order within the family mirrors the original
  * inline sequence exactly: capability → hosted wall → account connect +
  * callback → v2 status/export/verify/restore → account push/pull → discard →
- * installation-Drive push/pull → snapshot automation (policy, run,
- * passphrase store — after the wall, no session check) → device inventory
- * (session-scoped metadata; its path matches no earlier entry and the wall
- * claims only workspace/vault paths, so position within the table cannot
- * shadow it). */
+ * installation-Drive push/pull → v2 Telegram push/pull (the two transports a
+ * card moves the v2 bundle over, beside the Drive pair) → snapshot automation
+ * (policy, run, passphrase store — after the wall, no session check) → device
+ * inventory (session-scoped metadata; its path matches no earlier entry and
+ * the wall claims only workspace/vault paths, so position within the table
+ * cannot shadow it). */
 /** The one capability computation on this surface, shared by the
  * advertisement route and the Loop199 companion receipt so the two
  * documents cannot drift apart.
@@ -654,6 +656,73 @@ const routes: BackupRoute[] = [
         if (selected.error !== undefined) return json(res, 400, { error: selected.error });
         const out = stageV2Restore(passphrase, payload, "google-drive", ctx.dataDir(), selected.categories);
         if (out.ok) syncState.stampSync(ctx.requestUserId ?? "local", "pull", "google-drive");
+        json(res, out.ok ? 200 : out.status, out.body);
+      } catch (e) {
+        json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    },
+  },
+  {
+    // v2 Telegram push: the SAME bot/chat binding the v1 telegram route uses,
+    // carrying the v2 bundle instead of the v1 one. Declared here so the
+    // recovery and backup cards can move the same portable bundle over both
+    // transports: build → encrypt → upload → stamp, exactly the v2 Drive
+    // sequence. The uploaded file id is cached in `telegramSync.lastFileIdV2`
+    // — the v1 field stays the v1 bundle's, so a later pull can never hand
+    // one format's document to the other format's reader without saying so
+    // (stageV2Restore names a v1 payload in its error).
+    match: (method, path) => path === "/api/workspace/v2/telegram/push" && method === "POST",
+    handle: async (req, res, ctx) => {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const cfg = ctx.config();
+      const botToken = cfg.telegramSync?.botToken;
+      const chatId = cfg.telegramSync?.chatId;
+      if (!botToken || !chatId) return json(res, 400, { error: "Telegram is not connected yet — paste a @BotFather token and connect first" });
+      try {
+        const payload = bundleV2.buildPayloadV2({ dataDir: ctx.dataDir(), appVersion: ctx.appVersion() });
+        const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
+        const fileId = await telegramSync.pushBundle(botToken, chatId, bytes.toString("utf8"), driveSync.BUNDLE_V2_NAME);
+        if (!telegramSync.telegramConnectionMatches(cfg.telegramSync, botToken, chatId)) {
+          return json(res, 409, { error: "Telegram connection changed during upload — check the connection and try again." });
+        }
+        saveConfig({ telegramSync: { lastFileIdV2: fileId } });
+        Object.assign(cfg, loadConfig());
+        syncState.stampSync("local", "push", "telegram");
+        json(res, 200, { uploaded: fileId, counts: payload.counts, skipped: payload.skipped ?? [] });
+      } catch (e) {
+        json(res, 502, { error: e instanceof Error ? e.message : String(e) });
+      }
+    },
+  },
+  {
+    // v2 Telegram pull: restore the staged-at-boot bundle the push above
+    // uploaded. The cached v2 file id first (it survives Telegram's ~24h
+    // update retention), then the newest document visible in recent
+    // messages — the same order, and the same unbound-discovery mode, the
+    // v1 pull uses, so a machine that reconnects the bot can still recover.
+    match: (method, path) => path === "/api/workspace/v2/telegram/pull" && method === "POST",
+    handle: async (req, res, ctx) => {
+      const body = await readBody(req);
+      const passphrase = isText(body?.passphrase) ? body.passphrase : "";
+      if (passphrase.length < 8) return json(res, 400, { error: "passphrase must be at least 8 characters" });
+      const cfg = ctx.config();
+      const botToken = cfg.telegramSync?.botToken;
+      const chatId = cfg.telegramSync?.chatId ?? null;
+      if (!botToken) return json(res, 400, { error: "Telegram is not connected yet — paste a @BotFather token and connect first" });
+      try {
+        let fileId = cfg.telegramSync?.lastFileIdV2 ?? "";
+        if (!fileId) fileId = (await telegramSync.resolveLatestFileId(botToken, chatId)) ?? "";
+        if (!fileId) return json(res, 404, { error: "no workspace bundle in the Telegram chat yet — push from the other device first" });
+        const payloadText = await telegramSync.downloadBundle(botToken, fileId);
+        if (!telegramSync.telegramRestoreConnectionMatches(cfg.telegramSync, botToken, chatId)) {
+          return json(res, 409, { error: "Telegram connection changed during download — check the connection and try again." });
+        }
+        const selected = bundleV2.parseRestoreCategories(body ?? {});
+        if (selected.error !== undefined) return json(res, 400, { error: selected.error });
+        const out = stageV2Restore(passphrase, payloadText, "telegram", ctx.dataDir(), selected.categories);
+        if (out.ok) syncState.stampSync("local", "pull", "telegram");
         json(res, out.ok ? 200 : out.status, out.body);
       } catch (e) {
         json(res, 502, { error: e instanceof Error ? e.message : String(e) });

@@ -49,23 +49,60 @@ describe("app_changed helper", () => {
 });
 
 describe("isDesktopActionTool", () => {
+  // the verbs ACTION_TOOLS must match, spelled the way a driver reports them
+  const ACTION_NAMES = [
+    "click",
+    "type_text",
+    "press_key",
+    "scroll",
+    "hotkey",
+    "drag",
+    "invoke_menu",
+    "open_url",
+    "computer_batch",
+    "computer",
+  ];
+
   it("counts the local and cloud screen-action verbs", () => {
-    for (const tool of [
-      "click",
-      "type_text",
-      "press_key",
-      "scroll",
-      "hotkey",
-      "drag",
-      "invoke_menu",
-      "open_url",
-      "computer_batch",
-      "computer",
-    ]) {
+    for (const tool of ACTION_NAMES) {
       expect(isDesktopActionTool(tool)).toBe(true);
       // the MCP spelling the permission fold actually carries
       expect(isDesktopActionTool(`mcp__computer__${tool}`)).toBe(true);
     }
+  });
+
+  it("counts a screen action behind a server name containing an underscore", () => {
+    // a user-registered MCP server may be named with an underscore
+    // (server/custom-mcp.ts) and mounts as `mcp__<name>__<tool>`
+    // (server/drivers/claude.ts) — reading the prefix with `mcp__[^_]+__`
+    // left these uncounted, so the budget silently stopped applying
+    for (const tool of ACTION_NAMES) {
+      expect(isDesktopActionTool(`mcp__cua_driver__${tool}`)).toBe(true);
+      expect(isDesktopActionTool(`mcp__my_server__${tool}`)).toBe(true);
+      expect(isDesktopActionTool(`mcp__cua-driver-2__${tool}`)).toBe(true);
+    }
+  });
+
+  it("keeps the spellings that already counted, and the ones that never did", () => {
+    expect(isDesktopActionTool("mcp__cua__click")).toBe(true);
+    expect(isDesktopActionTool("mcp__ogb__computer_batch")).toBe(true);
+    expect(isDesktopActionTool("mcp__muster-computer__click")).toBe(true);
+    expect(isDesktopActionTool("mcp__cua__click 412, 88")).toBe(true);
+    expect(isDesktopActionTool("type_text Send the draft")).toBe(true);
+    expect(isDesktopActionTool("CLICK")).toBe(true);
+    // and an underscore in the SERVER segment must not turn a read into a write
+    for (const tool of ["screenshot", "get_desktop_state", "computer_exec", "browser_click", "Bash", "Read"]) {
+      expect(isDesktopActionTool(`mcp__my_server__${tool}`)).toBe(false);
+      expect(isDesktopActionTool(`mcp__cua_driver__${tool}`)).toBe(false);
+    }
+  });
+
+  it("degrades a malformed mount name to 'not a screen action', never to garbage", () => {
+    for (const name of ["mcp__", "mcp__cua", "mcp___click", "mcp__my_server__", "__click", "mcp", "", "   "]) {
+      expect(isDesktopActionTool(name)).toBe(false);
+    }
+    // no mount prefix means the whole name is the tool name, separator or not
+    expect(isDesktopActionTool("some__click")).toBe(false);
   });
 
   it("reads only the first token of an ACP title that carries arguments", () => {

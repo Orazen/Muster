@@ -8,8 +8,10 @@
 //   against the manifest entry → applier → local manifest commit.
 //
 // Two invariants the tests pin hard:
-//   - the pull phase IGNORES plan.upload: the journal owns push, so nothing
-//     is uploaded twice or outside retry semantics;
+//   - the pull phase IGNORES plan.upload as WORK: the journal owns push, so
+//     nothing is uploaded twice or outside retry semantics. It does REPORT an
+//     upload the journal can no longer produce, so a stranded local entry
+//     never shows up as a clean pass;
 //   - nothing is applied whose bytes disagree with the manifest entry that
 //     named it (§10's "download → verify → decrypt → merge → commit" — the
 //     verify is rev + checksum + tombstone identity, not just "it opened").
@@ -25,6 +27,8 @@ import type { DatabaseSync } from "node:sqlite";
 
 import {
   drainSyncChanges,
+  enqueueSyncChange,
+  syncChangeRows,
   type DrainResult,
   type SyncJournalRow,
 } from "./sync-journal.ts";
@@ -130,7 +134,10 @@ export async function runSyncPass(deps: SyncPassDeps): Promise<SyncPassResult> {
   }
 
   // --- push: the journal's own drain supplies claim/retry/dead-letter ----
-  const pushedEntries: SyncManifestEntry[] = [];
+  // The journal row that owns each push, kept beside its entry: the drain
+  // DELETEs the row on success, and if the manifest publish then fails the
+  // object is on the wire with no queue row behind it — see below.
+  const pushedRows: Array<{ row: SyncJournalRow; entry: SyncManifestEntry }> = [];
   result.journal = await drainSyncChanges(deps.db, {
     now: now(),
     transport: async (row) => {
@@ -158,29 +165,73 @@ export async function runSyncPass(deps: SyncPassDeps): Promise<SyncPassResult> {
       // save local per push: a crash mid-pass re-pushes (idempotent by name)
       // instead of losing the local commit
       deps.local.save(withManifestEntry(deps.local.load() ?? emptyDoc(now()), entry, now()));
-      pushedEntries.push(entry);
+      pushedRows.push({ row, entry });
       result.pushed.push({ objectId: row.objectId, rev: row.rev, fileName });
     },
   });
 
   // --- publish: merge pushed entries into remote's index, guard intact ---
-  if (pushedEntries.length > 0) {
+  if (pushedRows.length > 0) {
     let merged = remoteDoc;
-    for (const entry of pushedEntries) merged = withManifestEntry(merged, entry, now());
+    for (const pushed of pushedRows) merged = withManifestEntry(merged, pushed.entry, now());
     try {
       await deps.transport.saveRemoteManifest(packSyncManifest(merged, envelope), guard);
       remoteDoc = merged;
       result.manifestPublished = true;
     } catch (error) {
-      // objects are already on the wire; the next pass re-pushes by name
-      result.errors.push(`manifest publish failed: ${error instanceof Error ? error.message : String(error)}`);
+      // The objects are on the wire but the remote index does not name them,
+      // and the drain has already DELETEd their journal rows — so nothing
+      // would ever re-push them and the local manifest's claim would sit
+      // orphaned forever while every later pass reported itself clean. Re-queue
+      // the drained rows so a later pass retries them (the upload is idempotent
+      // by name). The upload itself did not fail, so the re-queue starts a
+      // fresh retry budget rather than charging this pass's outcome to the
+      // row's attempt counter: a guard mismatch is the DESIGNED outcome of two
+      // devices syncing one account, and the next pass merges onto the newer
+      // manifest it loads. A newer producer change meanwhile returns
+      // "stale"/"duplicate" and supersedes this one, never regressing the row.
+      let requeued = 0;
+      for (const pushed of pushedRows) {
+        const outcome = enqueueSyncChange(
+          deps.db,
+          {
+            objectId: pushed.row.objectId,
+            objectType: pushed.row.objectType,
+            rev: pushed.row.rev,
+            checksum: pushed.row.checksum,
+            tombstone: pushed.entry.tombstone,
+          },
+          now(),
+        );
+        if (outcome === "enqueued") requeued += 1;
+      }
+      result.errors.push(
+        `manifest publish failed: ${error instanceof Error ? error.message : String(error)}` +
+          (requeued === pushedRows.length
+            ? ` — ${requeued} pushed change(s) re-queued for the next pass`
+            : requeued > 0
+              ? ` — ${requeued} of ${pushedRows.length} pushed changes re-queued; the rest are superseded by newer local work`
+              : ` — no pushed change could be re-queued; the local manifest now claims revs the remote index does not`),
+      );
     }
   }
 
   // --- pull: reconcile, download the remote-er, verify, apply, commit ----
   const localDoc = deps.local.load() ?? emptyDoc(now());
   const plan = reconcileSyncObjects(localDoc.entries, remoteDoc.entries);
-  // plan.upload is deliberately ignored: the journal owns push.
+  // plan.upload is deliberately ignored as WORK: the journal owns push, and a
+  // row still waiting on its backoff is not this pass's business. It is not
+  // ignored as a REPORT though — a local entry the remote index does not name,
+  // with no queued row that will ever push it, is precisely the shape an
+  // orphaned push takes. Saying so keeps the pass from reporting clean while
+  // one exists, whatever the journal happens to hold.
+  const queued = new Set(syncChangeRows(deps.db).map((row) => row.objectId));
+  for (const entry of plan.upload) {
+    if (queued.has(entry.objectId)) continue;
+    result.errors.push(
+      `${entry.objectId}: the local manifest claims rev ${entry.rev} which the remote index does not, and no queued change will push it`,
+    );
+  }
   for (const conflict of plan.conflict) {
     result.conflicts.push({
       objectId: conflict.objectId,

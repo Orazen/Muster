@@ -225,6 +225,75 @@ describe("push half — journal → pack → upload → manifest publish", () =>
     expect(result.errors.join(" ")).toMatch(/guard mismatch/);
   });
 
+  it("re-queues a drained push when the manifest publish fails, so the next pass converges", async () => {
+    // The drain DELETEs the journal row on upload success, and the local
+    // manifest then claims a rev the remote index does not have. Without a
+    // re-queue nothing would ever re-push it and every later pass would
+    // report itself clean while the object sat orphaned on the wire.
+    const db = freshDb();
+    const drive = fakeDrive({ remote: doc([anEntryRemoteOther()]) });
+    drive.seedObject(anObjectOther());
+    let publishFails = true;
+    const base = drive.transport;
+    const flaky: SyncTransportDeps = {
+      ...base,
+      saveRemoteManifest: async (bytes, guard) => {
+        if (publishFails) throw new Error("guard mismatch");
+        await base.saveRemoteManifest(bytes, guard);
+      },
+    };
+    const local = localState();
+    enqueueSyncChange(db, { objectId: "memory:bot_alpha", objectType: "memory", rev: 1, checksum: sha256("memory content v1") }, T0);
+
+    const first = await runSyncPass(deps({ db, transport: flaky, local }));
+    expect(first.manifestPublished).toBe(false);
+    expect(first.errors.join(" ")).toMatch(/guard mismatch/);
+    // the row is back in the queue, not stranded
+    expect(syncChangeRows(db).map((row) => ({ objectId: row.objectId, rev: row.rev, state: row.state }))).toEqual([
+      { objectId: "memory:bot_alpha", rev: 1, state: "pending" },
+    ]);
+
+    // the other device publishes while this one is between passes: the guard
+    // moves on, and the retry merges onto the newer remote manifest
+    publishFails = false;
+    const second = await runSyncPass(deps({ db, transport: flaky, local }));
+    expect(second.journal).toEqual({ claimed: 1, drained: 1, failed: 0, dead: 0 });
+    expect(second.manifestPublished).toBe(true);
+    expect(drive.remote?.entries.map((entry) => entry.objectId).sort()).toEqual(["bot:other", "memory:bot_alpha"]);
+    expect(syncChangeRows(db)).toHaveLength(0);
+
+    // and the converged install is clean again
+    const third = await runSyncPass(deps({ db, transport: flaky, local }));
+    expect(third.errors).toEqual([]);
+    expect(third.pullApplied.length + third.pushed.length).toBe(0);
+  });
+
+  it("never reports a clean pass while a local entry the remote index lacks has no queued row", async () => {
+    // The journal is the retry mechanism; if it has lost the row, plan.upload
+    // is the only remaining evidence that this install's local manifest is
+    // ahead of the remote index, and the pass must say so rather than shrug.
+    const drive = fakeDrive({ remote: doc([anEntryRemoteOther()]) });
+    const local = localState(doc([entryOf(anObject())]));
+    const result = await runSyncPass(deps({ transport: drive.transport, local }));
+    expect(result.pushed).toHaveLength(0);
+    expect(result.errors.join(" ")).toMatch(/memory:bot_alpha/);
+    expect(result.errors.join(" ")).toMatch(/no queued change/);
+  });
+
+  it("does not call a merely pending queue row an orphan", async () => {
+    // A row still sitting in its retry backoff owns its upload; reporting it
+    // as stranded would be a false alarm on the ordinary path.
+    const db = freshDb();
+    const drive = fakeDrive({ remote: doc([anEntryRemoteOther()]) });
+    const failing: SyncTransportDeps = { ...drive.transport, upload: async () => { throw new Error("network down"); } };
+    const local = localState(doc([entryOf(anObject())]));
+    enqueueSyncChange(db, { objectId: "memory:bot_alpha", objectType: "memory", rev: 1, checksum: sha256("memory content v1") }, T0);
+    const result = await runSyncPass(deps({ db, transport: failing, local }));
+    expect(result.journal.failed).toBe(1);
+    expect(syncChangeRows(db)[0]!.state).toBe("pending");
+    expect(result.errors).toEqual([]);
+  });
+
   it("refuses to upload content that disagrees with its own journal row", async () => {
     const db = freshDb();
     enqueueSyncChange(db, { objectId: "memory:bot_alpha", objectType: "memory", rev: 1, checksum: sha256("memory content v1") }, T0);

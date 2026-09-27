@@ -22,7 +22,7 @@ import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 
 import { capturePreMigrationSnapshot } from "./snapshot-runner.ts";
-import { commitRestoreV2, type CommitRestoreResult, type ReconsentEntry } from "./workspace-bundle-v2.ts";
+import { commitRestoreV2, RESTORE_BACKUPS_DIR, stagingManifestConsumed, type CommitRestoreResult, type ReconsentEntry } from "./workspace-bundle-v2.ts";
 
 const PENDING_FILE = "pending-restore.json";
 const RECEIPT_FILE = "last-restore.json";
@@ -77,9 +77,14 @@ export function stagingPathFor(dataDir: string): string {
   return `${dataDir}.restore-staging`;
 }
 
-/** Root for per-restore safety copies, outside the live tree. */
+/** Root for per-restore safety copies. Kept INSIDE the data dir, in the one
+ * namespace commitRestoreV2 reserves for exactly this: the safety copy must
+ * travel with the workspace it protects — a portable bundle, a Drive pull,
+ * or a machine move otherwise leaves the pre-restore state behind on the old
+ * device, and a sibling path shares that fate. Exported so the boot-wedge
+ * suite can pin the same root the implementation uses. */
 export function backupsRootFor(dataDir: string): string {
-  return `${dataDir}.restore-backups`;
+  return join(dataDir, RESTORE_BACKUPS_DIR);
 }
 
 /** Record a staged restore for the next boot to apply. Throws if a restore is
@@ -133,23 +138,35 @@ export function readLastReceipt(dataDir: string): Receipt | null {
 const routinesDocSchema = z.object({ routines: z.array(z.record(z.string(), z.unknown())) });
 const goalsDocSchema = z.object({ goals: z.array(z.record(z.string(), z.unknown())) });
 
-function rewriteIfChanged<T>(file: string, doc: T): boolean {
+/** Returns null on success, the reason on failure. The reason is NOT
+ * swallowed: a rewrite that could not land means the restored file still has
+ * its routines armed, which is the one outcome the module header forbids, so
+ * the caller has to be able to say the disarm did not happen. */
+function rewriteIfChanged<T>(file: string, doc: T): string | null {
   try {
     write0600(`${file}.tmp`, JSON.stringify(doc, null, 2));
     renameSync(`${file}.tmp`, file);
-    return true;
-  } catch {
+    return null;
+  } catch (error) {
     try {
       rmSync(`${file}.tmp`, { force: true });
     } catch {
       /* the rename path is the contract; debris is cosmetic */
     }
-    return false;
+    return error instanceof Error ? error.message : String(error);
   }
 }
 
-function deWeaponize(dataDir: string): string[] {
+interface DeWeaponizeResult {
+  /** files whose disarmed content actually reached disk */
+  changed: string[];
+  /** one line per file that still needs disarming but could not be written */
+  failures: string[];
+}
+
+function deWeaponize(dataDir: string): DeWeaponizeResult {
   const changed: string[] = [];
+  const failures: string[] = [];
   const routinesFile = join(dataDir, "routines.json");
   try {
     if (existsSync(routinesFile)) {
@@ -160,7 +177,11 @@ function deWeaponize(dataDir: string): string[] {
           if (r.enabled !== false) { r.enabled = false; n += 1; }
           if (r.nextRunAt !== null) { r.nextRunAt = null; n += 1; }
         }
-        if (n > 0 && rewriteIfChanged(routinesFile, parsed.data)) changed.push("routines");
+        if (n > 0) {
+          const failure = rewriteIfChanged(routinesFile, parsed.data);
+          if (failure === null) changed.push("routines");
+          else failures.push(`routines.json could not be rewritten (${failure}) — restored routines may still be enabled`);
+        }
       }
     }
   } catch {
@@ -175,13 +196,17 @@ function deWeaponize(dataDir: string): string[] {
         for (const g of parsed.data.goals) {
           if (g.status === "active") { g.status = "stopped"; n += 1; }
         }
-        if (n > 0 && rewriteIfChanged(goalsFile, parsed.data)) changed.push("goals");
+        if (n > 0) {
+          const failure = rewriteIfChanged(goalsFile, parsed.data);
+          if (failure === null) changed.push("goals");
+          else failures.push(`goals.json could not be rewritten (${failure}) — restored goals may still be active`);
+        }
       }
     }
   } catch {
     /* see above */
   }
-  return changed;
+  return { changed, failures };
 }
 
 /** A previous process can die with the write-ahead log uncheckpointed, and
@@ -213,35 +238,66 @@ export interface ApplyResult {
   error?: string;
 }
 
-/** The boot hook: run BEFORE the Store is constructed. A commit that fails,
- * rolls back, or is refused keeps the pending file so the next boot retries,
- * and records the outcome in the receipt so the UI can say so honestly. */
-/** A backup directory for THIS attempt that no earlier attempt left behind.
- *
- * The name used to be the stamp alone, and the stamp is derived from
- * `pending.createdAt` — so it is byte-identical on every boot. `commitRestoreV2`
- * refuses when the directory already exists, which meant one attempt that died
- * after creating it (mid-write, a full disk, a killed process) wedged the
- * pending restore permanently: the pending file only clears on `committed`, so
- * every later boot recomputed the same name and hit the same refusal. The
- * operator's staged restore could then never be applied, and the only way out
- * was to discard a bundle they might no longer have.
- *
- * A suffix is added only when the plain name is taken. The common case keeps
- * the same readable name, no existing backup is ever reused or overwritten, and
- * the receipt records exactly which directory was written — so the leftovers
- * from the failed attempts remain for triage instead of being deleted on the
- * operator's behalf. */
-function freshBackupDir(backupsRoot: string, stamp: string): string {
-  const plain = join(backupsRoot, stamp);
-  if (!existsSync(plain)) return plain;
-  for (let attempt = 2; attempt <= 50; attempt += 1) {
-    const candidate = join(backupsRoot, `${stamp}-${attempt}`);
-    if (!existsSync(candidate)) return candidate;
+/** A safety copy is never overwritten, so commitRestoreV2 refusing an existing
+ * backup directory is a real guard and stays. What cannot stay is a name that
+ * is derived from `pending.createdAt` alone: a commit that throws mid-write
+ * rolls back but LEAVES its backup tree, the pending file survives a
+ * non-committed outcome, and the next boot recomputes the same stamp and hits
+ * the same refusal — forever, wedging a restore the operator may no longer be
+ * able to re-stage. The retry therefore takes the next free name under the same
+ * backups root: every safety copy is preserved, and only the NAME moves. */
+const MAX_BACKUP_ATTEMPTS = 64;
+
+function freeBackupDir(dataDir: string, stamp: string): string {
+  const root = backupsRootFor(dataDir);
+  let candidate = join(root, stamp);
+  for (let attempt = 1; attempt <= MAX_BACKUP_ATTEMPTS && existsSync(candidate); attempt += 1) {
+    candidate = join(root, `${stamp}-retry-${attempt}`);
   }
-  throw new Error(`no free backup directory beside ${plain} — 49 earlier attempts are still on disk`);
+  return candidate;
 }
 
+/** Retry ONLY the de-weaponization of an already-committed restore: the
+ * staging manifest is consumed, so the words are on disk and the commit is
+ * done. The fresh receipt carries the ORIGINAL safety-copy location forward;
+ * the pending file clears only when the disarm actually landed. */
+function finishDisarmOnly(dataDir: string, pending: PendingRestore): ApplyResult {
+  const deWeapon = deWeaponize(dataDir);
+  const armed = deWeapon.failures.length > 0;
+  const previous = readLastReceipt(dataDir);
+  const disarmError = armed
+    ? `the restore was written but de-weaponization did not complete: ${deWeapon.failures.join("; ")}`
+    : undefined;
+  const receipt: Receipt = {
+    appliedAt: Date.now(),
+    status: armed ? "failed" : "committed",
+    createdAt: pending.createdAt,
+    source: pending.source,
+    reconsentRequired: pending.reconsentRequired,
+  };
+  if (pending.counts !== undefined) receipt.counts = pending.counts;
+  if (disarmError !== undefined) receipt.error = disarmError;
+  if (previous?.backupDir !== undefined) receipt.backupDir = previous.backupDir;
+  try {
+    write0600(join(dataDir, RECEIPT_FILE), JSON.stringify(receipt, null, 2));
+  } catch {
+    /* receipt is best-effort; the restore itself is the contract */
+  }
+  if (!armed) {
+    clearPendingRestore(dataDir);
+    pruneStaging(pending.stagingDir);
+    return { status: "committed", pending, deWeaponized: deWeapon.changed };
+  }
+  return { status: "failed", pending, deWeaponized: deWeapon.changed, error: disarmError };
+}
+
+/** The boot hook: run BEFORE the Store is constructed. A commit that fails,
+ * rolls back, or is refused keeps the pending file so the next boot retries,
+ * and records the outcome in the receipt so the UI can say so honestly. A
+ * commit that lands but whose de-weaponization could not be written is
+ * `failed`, not `committed`, and keeps the pending file for the same reason:
+ * the staging manifest stays unconsumed, so a later boot retries ONLY the
+ * disarm via finishDisarmOnly — the commit itself never re-runs. */
 export function applyPendingRestore(dataDir: string): ApplyResult {
   const pending = readPendingRestore(dataDir);
   if (!pending) return { status: "nothing-pending" };
@@ -258,7 +314,10 @@ export function applyPendingRestore(dataDir: string): ApplyResult {
     capturePreMigrationSnapshot(dataDir, "pre-restore");
   }
   const stamp = new Date(pending.createdAt).toISOString().replace(/[:.]/g, "-");
-  const backupDir = freshBackupDir(backupsRootFor(dataDir), stamp);
+  if (stagingManifestConsumed(pending.stagingDir)) {
+    return finishDisarmOnly(dataDir, pending);
+  }
+  const backupDir = freeBackupDir(dataDir, stamp);
   checkpointLiveDb(dataDir);
   let commit: CommitRestoreResult;
   try {
@@ -278,15 +337,26 @@ export function applyPendingRestore(dataDir: string): ApplyResult {
       error: e instanceof Error ? e.message : String(e),
     };
   }
+  // De-weaponization runs BEFORE the receipt is written, because a disarm that
+  // could not land is part of this run's outcome: a restored workspace that
+  // still has armed routines must never be filed under "committed".
+  const deWeapon = commit.status === "committed" ? deWeaponize(dataDir) : { changed: [], failures: [] };
+  const armed = deWeapon.failures.length > 0;
+  const disarmError = armed
+    ? `the restore was written but de-weaponization did not complete: ${deWeapon.failures.join("; ")}`
+    : undefined;
   const receipt: Receipt = {
     appliedAt: Date.now(),
-    status: commit.status,
+    status: armed ? "failed" : commit.status,
     createdAt: pending.createdAt,
     source: pending.source,
     reconsentRequired: pending.reconsentRequired,
   };
   if (pending.counts !== undefined) receipt.counts = pending.counts;
-  if (commit.status !== "committed" && commit.error !== undefined) receipt.error = commit.error;
+  if (receipt.status !== "committed") {
+    if (disarmError !== undefined) receipt.error = disarmError;
+    else if (commit.error !== undefined) receipt.error = commit.error;
+  }
   if (commit.status !== "committed" && commit.blocked.length > 0) receipt.blocked = commit.blocked;
   if (commit.status === "committed") receipt.backupDir = backupDir;
   try {
@@ -294,13 +364,19 @@ export function applyPendingRestore(dataDir: string): ApplyResult {
   } catch {
     /* receipt is best-effort; the restore itself is the contract */
   }
-  if (commit.status === "committed") {
-    const deWeaponized = deWeaponize(dataDir);
+  if (commit.status !== "committed") {
+    return { status: receipt.status, pending, commit, error: commit.error };
+  }
+  if (!armed) {
     clearPendingRestore(dataDir);
     pruneStaging(pending.stagingDir);
-    return { status: "committed", pending, commit, deWeaponized };
+    return { status: "committed", pending, commit, deWeaponized: deWeapon.changed };
   }
-  return { status: receipt.status, pending, commit, error: commit.error };
+  // The commit landed and the staging tree is still unconsumed, so the pending
+  // file and the staging tree both stay: the next boot re-applies under a fresh
+  // safety-copy name and re-tries the disarm. Clearing them here would leave
+  // armed routines behind with nothing left to retry from.
+  return { status: "failed", pending, commit, deWeaponized: deWeapon.changed, error: disarmError };
 }
 
 /** The rename-swap consumes the staged files, leaving only the staging
