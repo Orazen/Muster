@@ -266,9 +266,9 @@ export const PROVIDER_RELOAD_SECTIONS: ReadonlySet<string> = new Set<string>([
  * Takes the PARSED patch rather than the raw request body, deliberately: a
  * section the patch schema rejects is not a section the caller can save, and a
  * section the operator did not actually change is not a reason to interrupt
- * anyone. The cast inside is on the parsed shape, whose every field is optional
- * by construction — see the completeness cases in config-reload-gate.test.ts. */
-export function providerReloadRequired(patch: Readonly<Partial<ConfigPatch>>): boolean {
+ * anyone. Every field of `ConfigPatch` is optional by construction, so this
+ * reads exactly the keys the caller supplied and nothing else. */
+export function providerReloadRequired(patch: Readonly<ConfigPatch>): boolean {
   return Object.keys(patch).some((key) => PROVIDER_RELOAD_SECTIONS.has(key));
 }
 
