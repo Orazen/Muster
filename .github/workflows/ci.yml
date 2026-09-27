@@ -31,6 +31,21 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
 
+  # The browser instrument compiles under its own tsconfig (DOM lib) and has
+  # shipped defects main's typecheck never saw (TS2362 on performance.memory
+  # compiled fine for the web project). Gate it separately.
+  e2e-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: npx tsc --noEmit -p tsconfig.e2e.json
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -45,7 +60,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test]
+    needs: [lint, typecheck, e2e-typecheck, test]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
