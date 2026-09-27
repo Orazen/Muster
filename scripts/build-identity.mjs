@@ -5,7 +5,10 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const IDENTITY_LIMITS = Object.freeze({ files: 4096, fileBytes: 32 * 1024 * 1024, totalBytes: 128 * 1024 * 1024, manifestBytes: 1024 * 1024 });
 
-export function createBuildMetadata(root, version, revisionClaim = process.env.MUSTER_SOURCE_REVISION) {
+// An EMPTY claim (a Docker ARG left at its default "") means "not supplied",
+// not "claim the empty string" — the validator would otherwise reject the
+// build for a value nobody intended to make.
+export function createBuildMetadata(root, version, revisionClaim = process.env.MUSTER_SOURCE_REVISION || undefined) {
   let revision = null;
   let dirty = null;
   // Environment claims and Git output are untyped runtime boundaries.

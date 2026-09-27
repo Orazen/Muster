@@ -39,6 +39,14 @@ COPY scripts scripts
 COPY public public
 COPY www www
 
+# Source provenance: the checked-out tree carries no .git, so the build
+# identity would otherwise record revision:null — the running revision could
+# never be verified against a tested SHA. The deploy pipeline stamps the exact
+# main commit it is shipping; a plain local `docker build` without the arg
+# keeps the historical (null) behavior instead of inventing a claim.
+ARG MUSTER_SOURCE_REVISION=""
+ENV MUSTER_SOURCE_REVISION=${MUSTER_SOURCE_REVISION}
+
 RUN pnpm build \
   && pnpm build:server
 
