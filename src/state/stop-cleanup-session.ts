@@ -106,13 +106,12 @@ export class StopCleanupSession {
       const { response, body } = await Promise.race([exchange, aborted]);
       if (!acceptsResult()) return;
       if (response.status === 401) {
-        this.active = false;
-        this.epoch++;
-        for (const request of this.requests.values()) request.abort();
-        this.requests.clear();
-        this.actions = {};
-        for (const listener of this.listeners) listener();
+        // An action denial is not proof of account expiry. AuthProvider checks
+        // that separately; its confirmed sign-out will detach this controller.
+        // Keep the original receipt if the check is unavailable or still valid.
         this.dependencies.onUnauthorized();
+        recovery = operation === "cleanup" ? { ...original!, message: RETRY_FAILED }
+          : { threadId: bot.threadId, receipt: null, message: body?.error ?? UNKNOWN_STOP };
         return;
       }
       if (response.ok && body?.ok === true) return;

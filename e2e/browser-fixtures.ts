@@ -10,7 +10,7 @@ type Harness = Awaited<ReturnType<typeof startPairingHarness>>;
  * the words, and only then answers 503 — the committed-send-whose-ack-was-
  * lost case, which exercises replay from the durable record itself. */
 type PageFailure = boolean | { messageSend503: true | { afterCommit: true } };
-interface MessageSendFailure { url: string | null; consoleErrors: number; afterCommit: boolean }
+interface MessageSendFailure { url: string | null; consoleErrors: number; fulfilled503: number; afterCommit: boolean }
 type Fixtures = {
   engineMode: FixtureEngineMode;
   harness: Harness;
@@ -43,7 +43,7 @@ const test = baseTest.extend<Fixtures>({
       const expectedPairFailure = expectedFailure === true;
       const send503Spec = expectedFailure && expectedFailure !== true ? expectedFailure.messageSend503 : false;
       const failedSend: MessageSendFailure | null = send503Spec
-        ? { url: null, consoleErrors: 0, afterCommit: send503Spec !== true }
+        ? { url: null, consoleErrors: 0, fulfilled503: 0, afterCommit: send503Spec !== true }
         : null;
       if (failedSend) sendFailures.push(failedSend);
       // A server fetch guard cannot stop the browser following OAuth or
@@ -69,6 +69,7 @@ const test = baseTest.extend<Fixtures>({
             if (response.status() < 400) {
               await route.fulfill({ status: 503, contentType: "application/json",
                 body: JSON.stringify({ error: "Owned fixture: the send was accepted but its acknowledgement was lost. Please retry." }) });
+              failedSend.fulfilled503 += 1;
             } else {
               await route.fulfill({ response });
             }
@@ -76,6 +77,7 @@ const test = baseTest.extend<Fixtures>({
           }
           await route.fulfill({ status: 503, contentType: "application/json",
             body: JSON.stringify({ error: "Owned fixture: first task was not sent. Please retry." }) });
+          failedSend.fulfilled503 += 1;
           return;
         }
         await route.continue();
@@ -107,8 +109,12 @@ const test = baseTest.extend<Fixtures>({
     try {
       await use(open);
       for (const failure of sendFailures) {
-        expect(failure.url, "The expected pre-forward message failure was exercised").not.toBeNull();
-        expect(failure.consoleErrors, "Exactly the intercepted message's single HTTP 503 error was consumed").toBe(1);
+        expect(failure.url, "The expected message failure was exercised").not.toBeNull();
+        expect(failure.fulfilled503, "Exactly one deliberate message HTTP 503 was fulfilled").toBe(1);
+        // Navigation may cancel browser console reporting after fulfillment.
+        // Fault delivery is asserted above; only one exact resource error is
+        // optional, and any repeated or unrelated error stays in errors.
+        expect(failure.consoleErrors).toBeLessThanOrEqual(1);
       }
       if (errors.length) await testInfo.attach("browser-errors", { body: errors.join("\n"), contentType: "text/plain" });
       expect(errors, "Unexpected browser errors or external requests").toEqual([]);

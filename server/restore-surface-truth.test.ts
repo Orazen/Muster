@@ -187,7 +187,9 @@ posixOnly("the restore surface tells the truth about the user's data", () => {
     // DATA_DIR; what is unproven here is the ROUTE's argument, asserted below.
     // And the two routes that write this now pass exactly the reader's key.
     const routeSource = readFileSync(join(SERVER_DIR, "workspace-backup-routes.ts"), "utf8");
-    const stamps = [...routeSource.matchAll(/stampSync\(([^,]+), "(push|pull)"/g)].map((m) => m[1]!.trim());
+    // Telegram has a separate installation-scoped bucket; this assertion is
+    // about the four Google routes and must not claim ownership over it.
+    const stamps = [...routeSource.matchAll(/stampSync\(([^,]+), "(?:push|pull)", "google-(?:account|drive)"/g)].map((m) => m[1]!.trim());
     expect(stamps.length, "expected the four Drive stamps to be found").toBeGreaterThanOrEqual(4);
     for (const key of stamps) {
       expect(key, `a Drive stamp still writes a hard-coded bucket: ${key}`).not.toBe('"local"');

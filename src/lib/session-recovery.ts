@@ -65,17 +65,24 @@ export function createSessionRecovery(
       cancel();
       publish({ user: null, session: null, status: "ready" });
     },
-    async refresh(): Promise<SessionSnapshot | null> {
+    async refresh({ background = false }: { background?: boolean } = {}): Promise<SessionSnapshot | null> {
       cancel();
       const current = generation;
       controller = new AbortController();
-      publish({ ...snapshot, status: "loading" });
+      // A rejected provider action must not replace a known workspace with a
+      // loading screen while we check whether its browser session still lives.
+      if (!background || !snapshot.user) publish({ ...snapshot, status: "loading" });
       try {
         const payload = await request(controller.signal);
         if (generation !== current) return null;
         publish({ user: payload?.user ?? null, session: payload?.session ?? null, status: "ready" });
       } catch {
         if (generation !== current) return null;
+        // Keep the last confirmed account/UI during an unavailable background
+        // check. The failed action keeps its error and can be retried; this is
+        // not a new successful verification. Explicit retries still expose the
+        // reconnect screen, and a successful null always clears the account.
+        if (background && snapshot.user) return { ...snapshot, status: "unavailable" };
         publish({ ...snapshot, status: "unavailable" });
       } finally {
         if (generation === current) controller = null;

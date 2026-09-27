@@ -228,7 +228,7 @@ interface FakeEngineEnvironment {
 }
 
 export async function startPairingHarness(
-  { staticDir = join(ROOT, "dist"), engineMode = "happy", calendarFixture = false, streamDelayMs = 0 }: { staticDir?: string; engineMode?: FixtureEngineMode; calendarFixture?: boolean; streamDelayMs?: number } = {},
+  { staticDir = process.env.MUSTER_E2E_STATIC_DIR ?? join(ROOT, "dist"), engineMode = "happy", calendarFixture = false, streamDelayMs = 0 }: { staticDir?: string; engineMode?: FixtureEngineMode; calendarFixture?: boolean; streamDelayMs?: number } = {},
   { waitForServer = waitForOwnedServer }: { waitForServer?: typeof waitForOwnedServer } = {},
 ): Promise<PairingHarness> {
   if (process.platform === "win32") throw new Error("Pairing fixture requires POSIX process groups");

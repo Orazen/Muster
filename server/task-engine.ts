@@ -74,6 +74,11 @@ const DEFAULT_HOLDER = "harness";
 const MAX_CONTEXT_FIELD = 200;
 const MAX_INTENTS = 500;
 
+/** Safety valve for `usedPlanIds`: an id that already answered for a live
+ * plan is refused before this grows anyway; the bound only matters for
+ * pathological churn over pruned plans. */
+const MAX_INTENTS_PER_INTENT = 8;
+
 /** Legal moves out of each status. Terminal states have none, and a plan
  * that is waiting keeps its wait: only an answered input, an approval
  * decision or an explicit control verb can carry it elsewhere. */
@@ -121,11 +126,14 @@ interface DeliveryIntentsFile {
  * request that accepted it (server-owned at the route), not a client claim:
  * the reconciliation lookup returns a plan only to the account that created
  * it, so one account can never materialize another's plan by guessing or
- * colliding on its intent id. */
+ * colliding on its intent id. `usedPlanIds` names the plans this intent has
+ * already answered for, so a second DIFFERENT creation under the same id is
+ * refused instead of silently rebinding the id to new work. */
 interface IntentRecord {
   planId: string;
   acceptedAt: number;
   ownerId?: string;
+  usedPlanIds?: string[];
 }
 
 const intentsFileSchema = z.object({
@@ -136,6 +144,7 @@ const intentsFileSchema = z.object({
       planId: z.string(),
       acceptedAt: z.number(),
       ownerId: z.string().optional(),
+      usedPlanIds: z.array(z.string()).optional(),
     }),
   ),
 }).partial();
@@ -439,10 +448,15 @@ export class TaskPlanEngine {
             fail(403, "this delivery intent belongs to a different account");
           }
           if (original) return clone(original);
-          // The referenced plan was pruned (or the file was hand-edited):
-          // fall through and create fresh, replacing the stale intent — a
-          // legitimate same-owner retry keeps working after the bounded plan
-          // store ages the original out.
+          // The plan this id already answered for was pruned: the id did its
+          // job. A second creation under it would silently rebind the id to
+          // different work, so it is named rather than allowed.
+          if ((known.usedPlanIds?.length ?? 0) > 0) {
+            fail(409, "this delivery intent already delivered a plan that has since been pruned — generate a new intent id for new work");
+          }
+          // The referenced plan was pruned (or the file was hand-edited)
+          // before this intent was ever used: fall through and create
+          // fresh, replacing the stale intent.
           delete this.deliveryIntents[intentId];
         }
       }
@@ -485,6 +499,20 @@ export class TaskPlanEngine {
       // scheduler waiting to pick up queued work. `start: false` is how a
       // caller opts out and holds the plan queued until it says go.
       if (input?.start !== false) this.startPlan(plan, input?.actorId, events);
+      if (intentId) {
+        // One intent id accepted ONE plan. A second creation with the same
+        // id is a client bug or a collision, not a retry — name it rather
+        // than rebinding the id to different work. The bound list mirrors
+        // the plans array's own unbounded growth per intent; each entry is
+        // a short id, and prune() removes plans the ledger has outlived.
+        const record = this.deliveryIntents[intentId];
+        if (record) {
+          record.usedPlanIds = [...(record.usedPlanIds ?? []), plan.id];
+          if (record.usedPlanIds.length > MAX_INTENTS_PER_INTENT) {
+            record.usedPlanIds = record.usedPlanIds.slice(-MAX_INTENTS_PER_INTENT);
+          }
+        }
+      }
       this.persist();
       this.publish(events, [plan]);
       return clone(plan);

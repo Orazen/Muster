@@ -52,7 +52,7 @@ async function expectSavedTask(page: Page, accountId: string, customTask: string
   }).toMatchObject({ version: 2, step: "first-task", customTask });
 }
 
-const setupLabels = ["Welcome", "Tour", "Engines", "Phone", "Teammate", "Permissions", "First task"];
+const setupLabels = ["Welcome", "Tour", "Engines", "Connections", "Teammate", "Permissions", "First task"];
 const shortViewport = { width: 320, height: 568 };
 const wideViewport = { width: 1440, height: 900 };
 
@@ -309,7 +309,7 @@ test("Permissions and First task retain exact draft fields across reload at 320p
   await expectStage(page, "Engines");
   await captureStageSizes(page, testInfo, "engines", [page.getByRole("button", { name: "Set up later", exact: true })]);
   await page.getByRole("button", { name: "Set up later", exact: true }).click();
-  await expectStage(page, "Phone");
+  await expectStage(page, "Connections");
   await captureStageSizes(page, testInfo, "phone", [page.getByRole("button", { name: "Not now", exact: true })]);
   await page.getByRole("button", { name: "Not now", exact: true }).click();
   await expectStage(page, "Teammate");
@@ -627,7 +627,7 @@ test("setup progress, keyboard focus and provider Settings preserve the current 
   await captureWizard(page, testInfo, "engines-after-provider-settings-escape-320.png");
 
   await keyboardActivate(page, button("Set up later"));
-  await expectStage(page, "Phone", true);
+  await expectStage(page, "Connections", true);
   await keyboardActivate(page, button("Not now"));
   await expectStage(page, "Teammate", true);
   const teammate = shell.getByLabel("Teammate name", { exact: true });

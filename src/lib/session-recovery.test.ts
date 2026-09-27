@@ -62,6 +62,18 @@ describe("session response boundaries", () => {
 });
 
 describe("session recovery lifecycle", () => {
+  it("keeps the known workspace during an unavailable background check and allows a confirmed-expiry retry", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response(payload()))
+      .mockResolvedValueOnce(response(null, 503)).mockResolvedValueOnce(response(null)));
+    const states: SessionSnapshot[] = [];
+    const recovery = createSessionRecovery(snapshot => states.push(snapshot));
+    await recovery.refresh();
+    states.length = 0;
+    expect(await recovery.refresh({ background: true })).toMatchObject({ status: "unavailable", user: { id: "fixture-owner" } });
+    expect(states).toEqual([]);
+    expect(await recovery.refresh({ background: true })).toEqual({ status: "ready", user: null, session: null });
+    expect(states).toEqual([{ status: "ready", user: null, session: null }]);
+  });
   it("recovers from startup 503 to the same account without any signed-out state", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response(null, 503)).mockResolvedValueOnce(response(payload())));
     const snapshots: SessionSnapshot[] = [];

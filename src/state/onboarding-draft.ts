@@ -33,7 +33,7 @@ export const ONBOARDING_STEPS = [
   { id: "welcome", label: "Welcome" },
   { id: "tour", label: "Tour" },
   { id: "engines", label: "Engines" },
-  { id: "phone", label: "Phone" },
+  { id: "phone", label: "Connections" },
   { id: "teammate", label: "Teammate" },
   { id: "permissions", label: "Permissions" },
   { id: "first-task", label: "First task" },

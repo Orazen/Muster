@@ -21,8 +21,6 @@ const RoutinesPage = lazy(() => import("@/components/RoutinesPage").then((m) => 
 const SocialView = lazy(() => import("@/components/SocialView").then((m) => ({ default: m.SocialView })));
 const Onboarding = lazy(() => import("@/components/Onboarding").then((m) => ({ default: m.Onboarding })));
 const StorageGate = lazy(() => import("@/components/StorageGate").then((m) => ({ default: m.StorageGate })));
-const TeamTemplates = lazy(() => import("@/components/TeamTemplates").then((m) => ({ default: m.TeamTemplates })));
-const OnboardingChat = lazy(() => import("@/components/OnboardingChat").then((m) => ({ default: m.OnboardingChat })));
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { hostBuild } from "@/lib/host-build";
@@ -44,6 +42,7 @@ import { installGazeTracking } from "@/lib/musterbot/gaze";
 import { PairPage } from "@/pages/PairPage";
 import { ClaimPage } from "@/pages/ClaimPage";
 import { DesktopShell } from "@/components/os/DesktopShell";
+import { setupSurface } from "@/state/setup-surface";
 import { resolveBotChatHandoff } from "@/state/bot-chat-route";
 
 function Shell() {
@@ -193,13 +192,16 @@ function Shell() {
     return <main className="flex h-full items-center justify-center p-6 text-ink-secondary" role="status">Opening bot conversation…</main>;
   }
 
-  // The classic wizard and the conversational hire are two first-run surfaces
-  // for the same moment, so only one may own the slot. The wizard claims it
-  // when its gate decision is "show" and storage is not already gating; the
-  // chat is the hosted empty-roster case. OnboardingChat self-gates on an
-  // empty roster but knows nothing of the wizard, so a fresh account with no
-  // seed bot and storageGate.required false used to render both at once.
-  const classicWizardActive = gateDecision === "show" && firstRun && state.config?.storageGate?.required !== true;
+  // One account-owned setup flow on web and desktop. Wait for identity,
+  // config and roster before deciding; empty roster is not a second gate.
+  const setup = setupSurface({
+    ready: state.rosterHydrated && Boolean(state.config),
+    gateDecision,
+    firstRun,
+    connectionReturn: ["connected", "connect-failed"].includes(new URLSearchParams(location.search).get("drive") ?? ""),
+    storage: state.config?.storageGate,
+  });
+  const classicWizardActive = setup === "wizard";
 
   return (
     <div className="flex h-full flex-col">
@@ -303,9 +305,7 @@ function Shell() {
       <CommandPalette />
       <ShortcutsSheet open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <NotificationStack />
-      {/* On hosted, the conversational onboarding replaces the classic wizard:
-          the assistant chats the user through role → pains → crew hire. The
-          wizard remains the desktop/local first-run. */}
+      {/* One account-owned setup flow on web and desktop. */}
       {classicWizardActive && (
         <Suspense fallback={null}>
         <Onboarding
@@ -316,20 +316,19 @@ function Shell() {
         />
         </Suspense>
       )}
-      {/* Storage sovereignty (decision 14): on hosted, the Drive connect step
-          gates the workspace and the conversational hire is the empty-roster
-          moment. Local desktop renders none of these (gate.required is false
-          there). */}
-      <Suspense fallback={null}><StorageGate /></Suspense>
-      <Suspense fallback={null}><TeamTemplates /></Suspense>
-      {!classicWizardActive && <Suspense fallback={null}><OnboardingChat /></Suspense>}
+      {/* Deferring setup preserves read access; required storage is still
+          enforced by the server. Resume the same flow, never a second modal. */}
+      {setup === "connection-notice" && <Suspense fallback={null}><StorageGate onSetup={() => {
+        setFirstRun(true);
+        setGateDecision("show");
+      }} /></Suspense>}
       {/* Guided product tour (OMB parity): coach marks over the real UI. It
           starts when the app surface is actually shown — a returning user's
           settled "hide" gate, or right after the first-run wizard completes
           (its onDone settles the same gate) — and never competes with the
           wizard or the hosted storage gate. Replayable from Settings →
           First-run tour; completion persists per browser. */}
-      {gateDecision === "hide" && state.config?.storageGate?.required !== true && (
+      {setup === "workspace" && gateDecision === "hide" && (
         <Suspense fallback={null}><ProductTour /></Suspense>
       )}
       </div>

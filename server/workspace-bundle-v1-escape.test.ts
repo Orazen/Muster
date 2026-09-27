@@ -82,7 +82,7 @@ async function restore(parts: MemoryWorkspace): Promise<{ memoryFilesRestored: n
 }
 
 describe("a v1 restore cannot write outside the data directory", () => {
-  it("refuses a memory key carrying a traversal, and still restores a safe one", async () => {
+  it("refuses a contaminated memory branch, then restores a clean bundle", async () => {
     // The target directory exists, so the write SUCCEEDS rather than throwing
     // ENOENT. Without that the case would pass by accident: an earlier draft
     // did exactly that, and proved nothing.
@@ -98,10 +98,14 @@ describe("a v1 restore cannot write outside the data directory", () => {
     for (const file of filesUnder(root)) {
       expect(file.startsWith(resolve(dataDir) + sep), `${file} escaped the data directory`).toBe(true);
     }
-    // The refusal must not take the legitimate file down with it.
-    expect(existsSync(join(dataDir, "memory", "legit.md")), "a safe key beside it still restores").toBe(true);
-    // And the escaped key is not counted as restored.
-    expect(result.memoryFilesRestored).toBe(1);
+    // The current restore policy refuses the entire global-memory branch
+    // when it contains a bad name; it must not partially trust the payload.
+    expect(existsSync(join(dataDir, "memory", "legit.md"))).toBe(false);
+    expect(result.memoryFilesRestored).toBe(0);
+    // Positive control: a clean bundle still restores through the same API.
+    const clean = await restore({ memory: { "legit.md": "a real memory file" } });
+    expect(existsSync(join(dataDir, "memory", "legit.md"))).toBe(true);
+    expect(clean.memoryFilesRestored).toBe(1);
   });
 
   it("refuses a topics entry whose bot id or topic filename carries a traversal", async () => {

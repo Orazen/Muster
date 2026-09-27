@@ -163,8 +163,26 @@ describe("account-scoped Stop recovery", () => {
     await first;
     expect(f.session.action("bot-a")).toEqual(EMPTY_STOP_ACTION);
   });
-  it("retires all recovery and pending requests on a confirmed expired session", async () => {
+  it("retains the exact cleanup receipt and other work while an unauthorized action requests a session check", async () => {
     const f = fixture();
+    await failedStop(f);
+    const otherResponse = deferred<Response>();
+    f.request.mockReturnValueOnce(otherResponse.promise).mockResolvedValueOnce(json({ error: "Provider refused" }, 401));
+    const otherStop = f.session.interrupt("bot-b");
+    await f.session.retry("bot-a");
+    expect(f.unauthorized).toHaveBeenCalledOnce();
+    expect(f.session.action("bot-a").recovery?.receipt).toBe(receipt);
+    expect(f.session.action("bot-b").pending).toBe("stop");
+    otherResponse.resolve(json({ ok: true }));
+    await otherStop;
+    f.request.mockResolvedValueOnce(json({ ok: true }));
+    await f.session.retry("bot-a");
+    expect(JSON.parse(String(f.request.mock.calls.at(-1)?.[1].body))).toEqual({ receipt });
+    expect(f.session.action("bot-a")).toEqual(EMPTY_STOP_ACTION);
+  });
+  it("retires all recovery when confirmed expiry detaches the account provider", async () => {
+    const f = fixture();
+    f.unauthorized.mockImplementation(f.detach);
     await failedStop(f);
     const otherResponse = deferred<Response>();
     f.request.mockReturnValueOnce(otherResponse.promise).mockResolvedValueOnce(json({ error: "Sign in" }, 401));

@@ -1,8 +1,8 @@
 import { createAuthClient } from "better-auth/client";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { createSessionRecovery, INITIAL_SESSION, SESSION_UNAVAILABLE, type SessionPayload } from "./session-recovery";
-import { noteKnownSession } from "./known-session";
 import { authDestination } from "./auth-navigation";
+import { sessionRecheck } from "./session-recheck";
 
 // The server always serves the API from the same origin/port as the UI
 // (both dev proxy and the packaged/hosted server put them together), so
@@ -73,13 +73,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loading = auth.status === "loading";
   const [capabilities, setCapabilities] = useState<AuthCapabilities>(NO_CAPABILITIES);
 
-  // Publish what we know to the module-level api() helper, which has no access
-  // to React state and used to treat every 401 as a dead session. `ready` with
-  // no user is the ONLY confirmed signed-out state; `loading` and `unavailable`
-  // publish null, so a transient failure cannot eject a working session.
-  useEffect(() => {
-    noteKnownSession(auth.status === "ready" ? Boolean(user) : null);
-  }, [auth.status, user]);
+  // Bind the account before newly mounted workspace passive effects start
+  // their API requests; a replaced binding fences requests from the old user.
+  useLayoutEffect(() => sessionRecheck.register(async () => { await recovery.refresh({ background: true }); }), [recovery, user?.id]);
 
   useEffect(() => {
     void recovery.refresh();

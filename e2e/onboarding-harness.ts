@@ -23,7 +23,7 @@ function operationFor(method: string, path: string): OnboardingOperation | null 
   return method === "PUT" && path === "/api/me/onboarding" ? "gate" : null;
 }
 
-export async function startOnboardingHarness() {
+export async function startOnboardingHarness(staticDir = join(ROOT, "dist")) {
   const rootDirectory = await mkdtemp(join(tmpdir(), "muster-onboarding-audit-"));
   const port = await freePortBlock([0, 1, 2], 37000, 1500);
   const serverUrl = `http://127.0.0.1:${port}`;
@@ -44,7 +44,7 @@ export async function startOnboardingHarness() {
   } }), { mode: 0o600 });
   // Expired trial exercises the real Free tier rather than inventing a cap.
   await writeFile(join(dataDirectory, "license.json"), JSON.stringify({ firstLaunchAt: "2020-01-01T00:00:00.000Z", license: null }), { mode: 0o600 });
-  const env = pairingServerEnvironment({ home, dataDirectory, companionDirectory, staticDir: join(ROOT, "dist"), port, webhookPort: port + 1, secret: randomBytes(32).toString("hex") });
+  const env = pairingServerEnvironment({ home, dataDirectory, companionDirectory, staticDir, port, webhookPort: port + 1, secret: randomBytes(32).toString("hex") });
   Object.assign(env, { OMB_PUBLIC_URL: url, OMB_PUBLIC_HOST: host, OMB_ALLOW_SIGNUPS: "true", GOOGLE_CLIENT_ID: randomBytes(24).toString("hex"), GOOGLE_CLIENT_SECRET: randomBytes(32).toString("hex") });
   let fault: Fault | null = null;
   const records: RequestRecord[] = [];

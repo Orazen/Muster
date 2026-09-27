@@ -163,6 +163,8 @@ posixOnly("account Drive can be disconnected", () => {
     const db = new DatabaseSync(join(dataDir, "auth.db"));
     try {
       const idOf = async (email: string): Promise<string> => {
+        // SAFETY: these fixture accounts were signed in against this owned server;
+        // its authenticated session response supplies the persisted user ID.
         const session = (await fetch(`${base}/api/auth/get-session`, {
           headers: { cookie: cookies.get(email), origin: base },
           redirect: "manual",
@@ -177,6 +179,8 @@ posixOnly("account Drive can be disconnected", () => {
         // Read the generation createDriveState just left behind rather than
         // assuming 0: both it and disconnectDrive advance the counter, and
         // saveDriveGrant refuses a stale value on purpose.
+        // SAFETY: createDriveState above inserts this numeric generation in the
+        // fixture database; absence remains explicit for the save precondition.
         const epoch = db
           .prepare("SELECT generation FROM drive_grant_generations WHERE userId = ?")
           .get(id) as { generation: number } | undefined;

@@ -230,19 +230,14 @@ export function formatTrend(trend: EvalTrend): string {
   return [...lines, "", verdict + labels, trend.limitation].join("\n");
 }
 
-/** The command-line body, run by `server/eval-trend-cli.ts` — and by nothing
- * else. It lives OUT of this module on purpose: when esbuild bundles an
- * entry, every inlined module shares the bundle's `import.meta.url`, so a
- * `import.meta.url === argv[1]` guard here fired inside EVERY sibling
- * bundle that inlined this file — `muster eval-trend` ran role-eval's CLI
- * block as an import side effect and exited 2 with the grader's error text.
- * Importing the trend logic (CLI, test, another bundle) must never start a
- * CLI; the returned number is the process exit code. */
+/** Command-line body for this module's direct-invocation guard below.
+ * Shared vocabulary comes from role-eval-kinds so bundling this entry never
+ * inlines the role grader's executable guard. Returns the process exit code. */
 export function runTrendCli(argv: string[]): number {
   const asJson = argv.includes("--json");
   const files = argv.filter((arg) => arg !== "--json");
   if (!files.length) {
-    console.error("Usage: node --experimental-strip-types server/eval-trend-cli.ts [--json] scorecard1.json [scorecard2.json ...]");
+    console.error("Usage: node --experimental-strip-types server/eval-trend.ts [--json] scorecard1.json [scorecard2.json ...]");
     return 2;
   }
   try {
@@ -259,11 +254,8 @@ export function runTrendCli(argv: string[]): number {
   }
 }
 
-/** Direct invocation only. The guard is SOUND here because this module is a
- * leaf again: nothing else imports it (the CLI spawns it, tests import
- * nothing but its exported functions, and the shared vocabulary lives in
- * role-eval-kinds.ts), so bundling cannot smear this guard into another
- * entry's module scope. Every other grader keeps this same invariant. */
+/** Direct invocation only. Executable entrypoints must not import each
+ * other: their guards would share import.meta.url inside an esbuild bundle. */
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   process.exitCode = runTrendCli(process.argv.slice(2));
 }

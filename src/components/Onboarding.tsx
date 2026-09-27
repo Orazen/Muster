@@ -30,8 +30,8 @@ import { AgentAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, consumeTourReplay, track } from "@/lib/analytics";
 import { writeOnboardingCompletion } from "@/lib/onboarding-chat";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
-import { EngineSetup } from "./EngineSetup";
-import { ProviderMark } from "./ProviderIcons";
+import { OnboardingProviders } from "./OnboardingProviders";
+import { OnboardingConnections } from "./OnboardingConnections";
 import { AGENT_CHARACTERS, AGENT_COLORS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor, type AgentState } from "@/lib/mascot";
 import { startVoiceTest, type VoiceTestHandle } from "@/lib/voice-test";
 import { api, useStore, type Bot } from "@/state/store";
@@ -75,7 +75,7 @@ const GUIDE_BEATS: ReadonlyArray<{ state: AgentState; line: string }> = [
   { state: "happy", line: "Hi! I'll set your team up in a minute." },
   { state: "thinking", line: "Here's what your bots can do." },
   { state: "working", line: "Checking which engines are installed…" },
-  { state: "notifying", line: "Your team can reach you anywhere." },
+  { state: "notifying", line: "Choose the apps you want to connect." },
   { state: "curious", line: "Let's shape your first teammate." },
   { state: "listening", line: "Let's check your voice setup." },
   { state: "celebrate", line: "All set — they're ready to work!" },
@@ -89,7 +89,7 @@ const STEP_QUESTIONS: ReadonlyArray<string> = [
   "First things first — who's setting this up?",
   "Shall I show you what you're getting before we start?",
   "Which engine should your bots run on?",
-  "Should approvals follow you to your phone?",
+  "Which apps should Muster connect to?",
   "What do you want off your plate first?",
   "Anything you want to switch on before we hand off?",
   "Handoff time — what should we try first?",
@@ -136,89 +136,6 @@ function WizardBubble({ text, busy = false }: { text: string; busy?: boolean }) 
         <span>{text}</span>
       </div>
     </div>
-  );
-}
-
-function StatusRow({
-  ok,
-  warn,
-  title,
-  detail,
-  mark,
-  children,
-}: {
-  ok: boolean;
-  warn?: boolean;
-  title: string;
-  detail?: string;
-  mark?: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <div className="flex items-start gap-3 rounded-xl bg-card p-3.5">
-      <span
-        className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full ${
-          ok ? "bg-[#00c97222] text-[#38d591]" : warn ? "bg-[#ff980022] text-[#ff9800]" : "bg-raised text-ink-secondary"
-        }`}
-      >
-        {ok ? <Check size={14} /> : <AlertTriangle size={13} />}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
-          {mark}
-          <span className="min-w-0 truncate">{title}</span>
-        </div>
-        {detail && <div className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">{detail}</div>}
-        {children}
-      </div>
-    </div>
-  );
-}
-
-interface EngineEntry {
-  instance: InstanceRow;
-  label: string;
-  readyNote: string;
-}
-
-function engineReady(instance: InstanceRow): boolean {
-  return (
-    instance.snapshot.state === "available" &&
-    (instance.access === "custom" || instance.snapshot.authenticated !== false)
-  );
-}
-
-function engineTitle({ instance, label }: EngineEntry): string {
-  const version = instance?.snapshot.version ? ` · ${instance.snapshot.version.split(" ")[0]}` : "";
-  return `${label}${version}`;
-}
-
-function ReadyTile(entry: EngineEntry) {
-  return (
-    <div className="flex items-start gap-2.5 rounded-xl bg-card p-3">
-      <ProviderMark driverKind={entry.instance.driverKind} size={17} />
-      <div className="min-w-0">
-        <div className="truncate text-[13.5px] font-medium text-ink">{engineTitle(entry)}</div>
-        <div className="mt-0.5 text-[12px] leading-snug text-ink-secondary">{entry.readyNote}</div>
-      </div>
-    </div>
-  );
-}
-
-function SetupRow(entry: EngineEntry) {
-  return (
-    <StatusRow
-      ok={false}
-      warn
-      title={engineTitle(entry)}
-      mark={<ProviderMark driverKind={entry.instance.driverKind} size={16} />}
-    >
-      <EngineSetup
-        instance={entry.instance}
-        className="mt-0.5"
-        intent={entry.instance.access === "custom" ? "inject" : "cloud"}
-      />
-    </StatusRow>
   );
 }
 
@@ -447,6 +364,9 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const { user } = useAuth();
 
   const [step, setStep] = useState(0);
+  const storageRequired = state.config?.storageGate?.required === true && state.config.storageGate.satisfied === false;
+  const [repairConnections, setRepairConnections] = useState(false);
+  const driveReturn = useRef(["connected", "connect-failed"].includes(new URLSearchParams(window.location.search).get("drive") ?? "")).current;
   // tour panel index for the "What your bots can do" step (step 1)
   const [tourStep, setTourStep] = useState(0);
   const [name, setName] = useState("");
@@ -532,7 +452,10 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     void serverGateDone().then((serverDone) => {
       if (cancelled) return;
       setDecided(true);
-      if (!replay && (serverDone || emailGateDone(user?.id))) {
+      const previouslyFinished = serverDone || emailGateDone(user?.id) || hasRealHistory;
+      if (!replay && previouslyFinished && (storageRequired || driveReturn)) {
+        setRepairConnections(true);
+      } else if (!replay && (serverDone || emailGateDone(user?.id))) {
         onDone();
       } else if (!replay && hasRealHistory) {
         setEmailGateDone(user?.id, "skipped");
@@ -585,8 +508,9 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     const firstTask = resolveInitialTaskDraft(stored, new URLSearchParams(window.location.search).get("template"));
     setSuggestion(firstTask.suggestion);
     setCustomTask(firstTask.customTask);
+    if (repairConnections || driveReturn) setStep(3);
     setDraftReady(true);
-  }, [user, decided]);
+  }, [user, decided, repairConnections, driveReturn]);
 
   // Persist the draft while the wizard is open — strictly after hydration,
   // so the first paint never overwrites the stored draft with pristine
@@ -799,6 +723,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
    * marks the gate done. */
   const finish = async (sendFirstTask = true) => {
     if (finishingRef.current || !finishSession.active) return;
+    if (storageRequired) {
+      setStep(3);
+      setSetupError("Connect Google Drive before creating your teammate. Gmail is optional.");
+      return;
+    }
     finishingRef.current = true;
     setCreating(true);
     setSetupError("");
@@ -880,19 +809,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       if (finishSession.active) setCreating(false);
     }
   };
-
-  const engines: EngineEntry[] = (instances ?? [])
-    .filter((instance) => instance.install)
-    .map((instance) => ({
-      instance,
-      label: instance.displayName,
-      readyNote:
-        instance.access === "custom"
-          ? "Installed — ready for a local model."
-          : "Installed — ready to power bots.",
-    }));
-  const readyEngines = engines.filter((e) => engineReady(e.instance));
-  const setupEngines = engines.filter((e) => !engineReady(e.instance));
 
   if (!decided || !draftReady) return null;
 
@@ -1020,109 +936,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
     (
       <div className="flex min-h-0 flex-col">
-        <h1 className="text-[18px] font-semibold text-ink">
-          {isDesktop ? "Your engines" : "Connect a provider"}
-        </h1>
-        <p className="mt-1 text-[13.5px] text-ink-secondary">
-          {isDesktop
-            ? "Bots run on AI tools installed on this computer — here's what we found."
-            : "Web bots run on API-key providers — Claude, GPT, Gemini and more. Paste a key now, or set it up later in Settings → Providers."}
-        </p>
-        {/* Status chips over the UNFILTERED instance list — the gate's own
-            evidence. The Ready/Needs-setup rows below stay install-filtered,
-            but the gate must show every engine the server considers
-            runnable (a key-only provider has no install block). */}
-        <fieldset className="wizard-chips m-0 mt-3 min-w-0 border-0 p-0" aria-label="Engine status">
-          {!instances ? (
-            <span className="chip" aria-disabled="true" style={{ background: "#fde68a1f", color: "#fde68a" }}>
-              <Loader2 size={14} className="shrink-0 animate-spin" /> Checking for engines…
-            </span>
-          ) : instances.length === 0 ? (
-            <span className="chip" aria-disabled="true" style={{ background: "#fde68a1f", color: "#fde68a" }}>
-              No engine detected yet
-            </span>
-          ) : (
-            instances.map((instance) =>
-              instance.snapshot.state === "available" ? (
-                <span
-                  key={instance.instanceId}
-                  className="chip"
-                  style={{ background: "#a7f3d0", color: "#101010" }}
-                >
-                  <ProviderMark driverKind={instance.driverKind} size={14} />
-                  {instance.displayName}
-                  <Check size={14} className="shrink-0" />
-                </span>
-              ) : (
-                <button
-                  key={instance.instanceId}
-                  type="button"
-                  disabled
-                  className="chip disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ProviderMark driverKind={instance.driverKind} size={14} />
-                  {instance.displayName}
-                </button>
-              ),
-            )
-          )}
-        </fieldset>
-        {/* Subscription path (free-trial spec): most people already pay for
-            ChatGPT Plus or Claude Pro — say out loud that those count, and
-            point desktop users at the CLI engines that use them directly.
-            No hosted inference, no new billing surface needed. */}
-        <div className="mt-3 rounded-lg border border-accent/25 bg-accent/8 px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-secondary">
-          {isDesktop ? (
-            <>
-              <span className="font-medium text-ink">Already have ChatGPT Plus or Claude Pro?</span> The
-              engines below log in with your existing subscription — no API key required for those.
-            </>
-          ) : (
-            <>
-              <span className="font-medium text-ink">Already have ChatGPT Plus or Claude Pro?</span> Download
-              the Muster desktop app to use your subscription directly through its CLI engines — no API
-              key needed. Or paste a provider key to stay on the web.
-            </>
-          )}
-        </div>
-        <div className="mt-4 flex min-h-0 flex-col gap-2.5 overflow-y-auto pr-1 [scrollbar-width:thin]">
-          {!instances ? (
-            <div className="flex items-center gap-2 py-6 text-ink-secondary">
-              <Loader2 size={16} className="animate-spin" /> Checking…
-            </div>
-          ) : (
-            <>
-              {readyEngines.length > 0 && (
-                <>
-                  <div className="text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">Ready</div>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {readyEngines.map((e) => (
-                      <ReadyTile key={e.label} {...e} />
-                    ))}
-                  </div>
-                </>
-              )}
-              {isDesktop && setupEngines.length > 0 && (
-                <>
-                  <div className={`text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary ${readyEngines.length ? "mt-2" : ""}`}>
-                    Needs setup
-                  </div>
-                  {setupEngines.map((e) => (
-                    <SetupRow key={e.label} {...e} />
-                  ))}
-                </>
-              )}
-            </>
-          )}
-        </div>
-        {!isDesktop && (
-          <button
-            onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "providers" })}
-            className="mt-4 w-full shrink-0 rounded-lg border border-hairline/60 bg-raised py-2.5 text-[14px] font-medium text-ink transition-colors hover:bg-raised-hover"
-          >
-            Add a provider key
-          </button>
-        )}
+        <OnboardingProviders instances={instances === null ? null : state.instances} isDesktop={isDesktop} />
         <button
           onClick={() => setStep(3)}
           className="mt-5 w-full shrink-0 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
@@ -1139,52 +953,27 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     ),
 
     (
-      // The video's "Your phone" beat: companion device promise, fully
-      // skippable. On the web the primary button opens this very server's
-      // /pair page; desktop IS the trusted device, so it just continues.
-      <div className="flex flex-col">
-        <h1 className="text-[18px] font-semibold text-ink">Your phone</h1>
-        <p className="mt-1 text-[13.5px] text-ink-secondary">
-          Your roster travels with you — check in and approve work from anywhere.
-        </p>
-        <div className="mt-4 flex flex-col gap-2.5">
-          {PHONE_POINTS.map(({ icon: Icon, title, detail }) => (
-            <div key={title} className="flex items-start gap-3 rounded-xl bg-card p-3.5">
-              <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary">
-                <Icon size={13} />
-              </span>
-              <div className="min-w-0">
-                <div className="text-[14px] font-medium text-ink">{title}</div>
-                <div className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">{detail}</div>
+      <div className="flex min-w-0 flex-col gap-4">
+        <OnboardingConnections />
+        <details className="rounded-xl border border-hairline/40 bg-card p-3.5 text-sm">
+          <summary className="cursor-pointer font-medium text-ink">Connect your phone or Watch</summary>
+          <div className="mt-3 flex flex-col gap-3 text-ink-secondary">
+            {PHONE_POINTS.map(({ icon: Icon, title, detail }) => (
+              <div key={title} className="flex items-start gap-2">
+                <Icon size={16} className="mt-0.5 shrink-0" />
+                <p><span className="font-medium text-ink">{title}</span><br />{detail}</p>
               </div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-5 flex gap-3">
-          <button
-            onClick={() => setStep(2)}
-            className="rounded-lg border border-hairline/40 px-4 py-2.5 text-[15px] text-ink-secondary hover:bg-raised hover:text-ink"
-          >
-            Back
-          </button>
-          <button
-            onClick={() => {
-              if (!isDesktop) window.open(`${window.location.origin}/pair`, "_blank", "noopener");
-              setStep(4);
-            }}
-            className="flex-1 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"
-          >
-            {isDesktop ? "Continue" : "Set up another device"}
+            ))}
+            <a href="/pair" target="_blank" rel="noopener noreferrer" className="min-h-11 rounded-lg border border-hairline px-3 py-2.5 text-center text-ink">Set up another device</a>
+          </div>
+        </details>
+        <div className="flex gap-3">
+          <button type="button" onClick={() => setStep(2)} className="min-h-11 rounded-lg border border-hairline/40 px-4 py-2.5 text-[15px] text-ink-secondary">Back</button>
+          <button type="button" onClick={() => repairConnections ? onDone() : setStep(4)} disabled={repairConnections && storageRequired} className="min-h-11 flex-1 rounded-lg bg-accent px-4 py-2.5 text-[15px] font-medium text-white disabled:opacity-50">
+            {repairConnections ? "Return to workspace" : "Continue"}
           </button>
         </div>
-        {!isDesktop && (
-          <button
-            onClick={() => setStep(4)}
-            className="mt-2 self-center text-[12px] text-ink-secondary hover:text-ink"
-          >
-            Not now
-          </button>
-        )}
+        {!repairConnections && <button type="button" onClick={() => setStep(4)} className="min-h-11 text-sm text-ink-secondary">Not now</button>}
       </div>
     ),
 
