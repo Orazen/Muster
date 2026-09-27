@@ -167,6 +167,16 @@ export interface AddFactInput {
   supersedes?: string;
 }
 
+/** Why a brain state change could not be made.
+ *
+ * `not_found` deliberately covers BOTH "no such id" and "not yours": the two
+ * must be indistinguishable from outside, or the id becomes an existence
+ * oracle across accounts. The state reasons are only ever returned for a fact
+ * the caller has already proved they own. */
+export type BrainWriteReason = "not_found" | "already_withdrawn" | "not_withdrawn";
+
+export type BrainWriteOutcome = { ok: true } | { ok: false; reason: BrainWriteReason };
+
 export class WorkspaceBrain {
   private facts: BrainFact[] = [];
 
@@ -289,24 +299,45 @@ export class WorkspaceBrain {
   }
 
   /** Withdrawal, not deletion — provenance stays queryable via `includingWithdrawn`. */
-  withdraw(factId: string, ownerId: string | undefined): boolean {
+  /** Withdraw a fact, reporting WHY it could not be done.
+   *
+   * Three different failures used to collapse into one `false`, and the route
+   * turned all three into 404 "no such fact" — so withdrawing a fact twice
+   * told the user their own memory did not exist.
+   *
+   * `not_owner` and `not_found` are deliberately NOT separated: telling a
+   * caller that an id exists in another account would make this an existence
+   * oracle across accounts, and the route's 404 must not leak. Only the case
+   * where the caller demonstrably owns the fact says more — and then it is
+   * about the fact's STATE, which they are entitled to know. */
+  withdrawOutcome(factId: string, ownerId: string | undefined): BrainWriteOutcome {
     const fact = this.facts.find((f) => f.id === factId);
-    if (!fact || fact.ownerId !== ownerId || fact.withdrawnAt) return false;
+    if (!fact || fact.ownerId !== ownerId) return { ok: false, reason: "not_found" };
+    if (fact.withdrawnAt) return { ok: false, reason: "already_withdrawn" };
     fact.withdrawnAt = Date.now();
     this.persist();
-    return true;
+    return { ok: true };
+  }
+
+  withdraw(factId: string, ownerId: string | undefined): boolean {
+    return this.withdrawOutcome(factId, ownerId).ok;
   }
 
   /** Restore a withdrawn fact to live. Corrections are not undone by
    * restore: the fact becomes visible again alongside its correction, and
    * the user re-chains with `supersedes` if they truly want to reverse a
    * correction — reverting a chain silently would rewrite provenance. */
-  restore(factId: string, ownerId: string | undefined): boolean {
+  restoreOutcome(factId: string, ownerId: string | undefined): BrainWriteOutcome {
     const fact = this.facts.find((f) => f.id === factId);
-    if (!fact || fact.ownerId !== ownerId || !fact.withdrawnAt) return false;
+    if (!fact || fact.ownerId !== ownerId) return { ok: false, reason: "not_found" };
+    if (!fact.withdrawnAt) return { ok: false, reason: "not_withdrawn" };
     delete fact.withdrawnAt;
     this.persist();
-    return true;
+    return { ok: true };
+  }
+
+  restore(factId: string, ownerId: string | undefined): boolean {
+    return this.restoreOutcome(factId, ownerId).ok;
   }
 
   /** The correction chain of a fact: its full lineage (ancestors, oldest

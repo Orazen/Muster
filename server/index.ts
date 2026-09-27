@@ -6022,9 +6022,18 @@ let requestUserEmail = "";
     }
     let brainMatch = path.match(/^\/api\/brain\/facts\/([\w-]+)\/withdraw$/);
     if (brainMatch && method === "POST") {
-      // Withdrawal is owner-checked inside the brain; a foreign id is 404.
-      const ok = workspaceBrain().withdraw(brainMatch[1], brainOwner);
-      return json(res, ok ? 200 : 404, ok ? { withdrawn: true } : { error: "no such fact" });
+      // Withdrawal is owner-checked inside the brain; a foreign id is 404 and
+      // is indistinguishable from a missing one, so this route cannot be used
+      // to probe another account's ids. A fact the caller DOES own that is
+      // already withdrawn now says so — it used to answer 404 "no such fact",
+      // which told a user their own memory did not exist. The sibling revert
+      // route already answered this case honestly with a 409.
+      const outcome = workspaceBrain().withdrawOutcome(brainMatch[1], brainOwner);
+      if (outcome.ok) return json(res, 200, { withdrawn: true });
+      if (outcome.reason === "already_withdrawn") {
+        return json(res, 409, { error: "that fact is already withdrawn", reason: outcome.reason });
+      }
+      return json(res, 404, { error: "no such fact" });
     }
     // History + rollback (plan item #2): a fact's correction lineage and a
     // way back. Revert mints a NEW fact superseding the latest descendant —
@@ -6037,8 +6046,14 @@ let requestUserEmail = "";
     }
     brainMatch = path.match(/^\/api\/brain\/facts\/([\w-]+)\/restore$/);
     if (brainMatch && method === "POST") {
-      const ok = workspaceBrain().restore(brainMatch[1], brainOwner);
-      return json(res, ok ? 200 : 404, ok ? { restored: true } : { error: "no such withdrawn fact" });
+      // Symmetric with withdraw: restoring something already live is not a
+      // missing fact. The 404 still covers both "no such id" and "not yours".
+      const outcome = workspaceBrain().restoreOutcome(brainMatch[1], brainOwner);
+      if (outcome.ok) return json(res, 200, { restored: true });
+      if (outcome.reason === "not_withdrawn") {
+        return json(res, 409, { error: "that fact is not withdrawn", reason: outcome.reason });
+      }
+      return json(res, 404, { error: "no such fact" });
     }
     brainMatch = path.match(/^\/api\/brain\/facts\/([\w-]+)\/revert$/);
     if (brainMatch && method === "POST") {
