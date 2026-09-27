@@ -126,6 +126,8 @@ describe("reconcileThread", () => {
       intent: { messageId: "server-msg-9", state: "dispatched" },
     }));
     expect(second.recovered.map((item) => item.receipt.messageId)).toEqual(["server-msg-9"]);
+    // SAFETY: same invariant as the read above — only park/retire write this
+    // file, and they store thread id -> pending-send arrays.
     raw = JSON.parse(store.getItem("muster:message-intents:v1") ?? "{}") as Record<string, PendingSend[]>;
     expect(raw["thread-1"]).toBeUndefined();
   });
@@ -133,10 +135,12 @@ describe("reconcileThread", () => {
   it("treats a non-string message id as no confirmation at all", async () => {
     const intent = pending();
     parkSend(store, intent);
-    // SAFETY: this body is deliberately malformed — a numeric id is exactly
-    // the wire garbage the reconciliation must refuse to trust.
-    const malformed: unknown = { message: { id: 12345 } };
-    const result = await reconcileThread(store, intent.threadId, async () => malformed as ReplayBody);
+    // This body is deliberately malformed: a numeric id is exactly the wire
+    // garbage reconciliation must refuse to trust. It enters through the
+    // JSON boundary rather than a cast, so the fixture stays honest about
+    // what it is handing the reconciler.
+    const malformed: ReplayBody = JSON.parse('{"message":{"id":12345}}');
+    const result = await reconcileThread(store, intent.threadId, async () => malformed);
     expect(result.recovered).toHaveLength(0);
     expect(result.accepted).toHaveLength(0);
     expect(result.unresolved.map((p) => p.intentId)).toEqual([intent.intentId]);

@@ -15,6 +15,16 @@ const rosterSchema = z.object({ bots: z.array(z.object({ id: z.string(), threadI
 const transcriptSchema = z.object({ bots: z.array(z.object({ messages: z.array(z.object({ text: z.string().optional() })).optional() })) });
 const checkingRow = (page: Page, message: string) => page.getByRole("status").filter({ hasText: `Checking delivery — ${message}` });
 
+// Parsed, not cast: these are all boundaries where untrusted or foreign-
+// written data enters the test. A peer receipt is written by the desktop
+// holder and a posted body comes off the wire, so each is decoded into a
+// shape this test can rely on rather than asserted into one.
+const peerReceiptSchema = z.object({ pid: z.number().optional() });
+const clientIntentSchema = z.object({ clientIntentId: z.string().optional() });
+const intentRowSchema = z.object({ intent_id: z.string(), state: z.string() });
+const performanceMemorySchema = z.object({ memory: z.object({ usedJSHeapSize: z.number() }).optional() });
+const peerReceipt = (raw: string) => peerReceiptSchema.parse(JSON.parse(raw));
+
 // The queue row of the acceptance table, web-exercisable: a send accepted
 // behind a busy bot must read "accepted", never "sent", and converge to a
 // terminal receipt without ever resending the words. The peer-capability
@@ -42,12 +52,12 @@ test.describe("a send queued behind a busy bot keeps its receipt honest", () => 
     await expect.poll(async () => {
       for (const name of await readdir(receipts)) {
         if (!name.endsWith(".session.json")) continue;
-        const session = JSON.parse(await readFile(join(receipts, name), "utf8")) as { pid?: number };
-        if (typeof session.pid === "number" && session.pid > 0) holderPid = session.pid;
+        const session = peerReceipt(await readFile(join(receipts, name), "utf8"));
+        if (session.pid !== undefined && session.pid > 0) holderPid = session.pid;
       }
       return holderPid;
     }).toBeGreaterThan(0);
-    const heldId = ((await (await firstSend).postDataJSON()) as { clientIntentId?: string }).clientIntentId ?? "";
+    const heldId = clientIntentSchema.parse(await (await firstSend).postDataJSON()).clientIntentId ?? "";
 
     // Turn 2 arrives while the bot is busy: durable words, queued dispatch.
     const queuedSend = page.waitForRequest((request) => request.method() === "POST" && /\/api\/bots\/[^/]+\/messages$/.test(new URL(request.url()).pathname));
@@ -59,7 +69,7 @@ test.describe("a send queued behind a busy bot keeps its receipt honest", () => 
     // The receipt says exactly what is true: stored and waiting, NOT sent.
     await expect(queuedRow.locator('[data-delivery="accepted"]')).toBeVisible();
     await expect(queuedRow.getByText("Accepted — waiting to send", { exact: true })).toBeVisible();
-    const queuedId = ((await (await queuedSend).postDataJSON()) as { clientIntentId?: string }).clientIntentId ?? "";
+    const queuedId = clientIntentSchema.parse(await (await queuedSend).postDataJSON()).clientIntentId ?? "";
 
     // The queue drains only when the held turn settles. In this engine mode
     // every settled turn replies "Owned held turn completed" — and every
@@ -70,8 +80,8 @@ test.describe("a send queued behind a busy bot keeps its receipt honest", () => 
     await expect.poll(async () => {
       for (const name of await readdir(receipts)) {
         if (!name.endsWith(".session.json")) continue;
-        const session = JSON.parse(await readFile(join(receipts, name), "utf8")) as { pid?: number };
-        if (typeof session.pid === "number" && session.pid > 0) {
+        const session = peerReceipt(await readFile(join(receipts, name), "utf8"));
+        if (session.pid !== undefined && session.pid > 0) {
           await writeFile(join(receipts, `${session.pid}.release`), "", { mode: 0o600 }).catch(() => {});
         }
       }
@@ -90,7 +100,9 @@ test.describe("a send queued behind a busy bot keeps its receipt honest", () => 
     // (order-free: row order is an implementation detail).
     const db = new DatabaseSync(join(harness.rootDirectory, "desktop", "data", "messages.db"), { readOnly: true });
     try {
-      const rows = db.prepare("SELECT intent_id, state FROM message_intents WHERE intent_id IN (?, ?)").all(heldId, queuedId) as Array<{ intent_id: string; state: string }>;
+      const rows = z.array(intentRowSchema).parse(
+        db.prepare("SELECT intent_id, state FROM message_intents WHERE intent_id IN (?, ?)").all(heldId, queuedId),
+      );
       expect(rows.map((row) => ({ intent_id: row.intent_id, state: row.state })).sort((a, b) => a.intent_id.localeCompare(b.intent_id))).toEqual([
         { intent_id: heldId, state: "dispatched" },
         { intent_id: queuedId, state: "dispatched" },
@@ -168,14 +180,14 @@ test("a lost send response is recovered on reload as one message and one turn", 
   // seconds of observed idleness (long tasks, heap) on the recovered page.
   const timing = await page.evaluate(() => performance.getEntriesByType("navigation")[0]?.toJSON() ?? {});
   const idle = await page.evaluate(async () => {
-    const memory = (performance as { memory?: { usedJSHeapSize: number } }).memory;
+    const memory = performanceMemorySchema.parse(performance).memory?.usedJSHeapSize;
     const longTasks = await new Promise<number>((resolveTasks) => {
       let count = 0;
       const observer = new PerformanceObserver((list) => { count += list.getEntries().length; });
       observer.observe({ type: "longtask", buffered: false });
       setTimeout(() => { observer.disconnect(); resolveTasks(count); }, 2_000);
     });
-    return { longTasks, heapMB: memory ? Math.round(memory.usedJSHeapSize / (1024 * 1024)) : null };
+    return { longTasks, heapMB: memory !== undefined ? Math.round(memory / (1024 * 1024)) : null };
   });
   const timingSummary = JSON.stringify({ navigation: timing, idle });
   // One always-visible line: attachments only persist for failing runs.
