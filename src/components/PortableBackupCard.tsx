@@ -84,12 +84,67 @@ function when(ts: number): string {
   return new Date(ts).toLocaleString();
 }
 
+type RestoreReceipt = z.infer<typeof v2StatusReply>["receipt"];
+type RestoreStatus = z.infer<typeof v2StatusReply>;
+
+/** The reason the last apply attempt did not apply, or null if it did (or
+ *  there is no receipt yet). Pure, and exported so the wording is testable
+ *  without a browser or a network.
+ *
+ *  This exists because of a real dead end. The pending panel used to say
+ *  "Quit and reopen Muster to apply it" unconditionally — correct for a
+ *  restore that has not been tried yet, and useless for one that has already
+ *  been refused, because the refusal is a precondition (an account that
+ *  vanished, a policy gate) and re-running the identical attempt cannot get
+ *  past it. The receipt naming the reason was rendered only when NOTHING was
+ *  pending, and a refusal leaves the staged file in place — so the two always
+ *  coexisted and the reason was only ever shown after the operator had already
+ *  discarded the bundle that explained it. */
+export function restoreRefusalReason(receipt: RestoreReceipt | null | undefined): string | null {
+  if (!receipt || receipt.status === "committed") return null;
+  return receipt.error ?? receipt.blocked?.[0]?.detail ?? "no reason was recorded";
+}
+
+/** What the pending-restore panel should say, and whether reopening Muster
+ *  genuinely applies the staged restore. `reopenApplies` is the load-bearing
+ *  field: it is the promise the panel makes, and the two states contradict. */
+export type PendingRestoreNotice = {
+  reopenApplies: boolean;
+  text: string;
+};
+
+/** The pending-restore notice. Split out because the two branches make
+ *  opposite promises — "reopen and it applies" vs "reopening will not help" —
+ *  and a mutation that collapses them (e.g. always taking the refusal branch,
+ *  or never) must be able to fail a test. */
+export function pendingRestoreNotice(status: RestoreStatus | null): PendingRestoreNotice {
+  if (!status?.pending) return { reopenApplies: false, text: "" };
+  const { source, createdAt } = status.pending;
+  const stamp = when(createdAt);
+  const refusal = restoreRefusalReason(status.receipt);
+  if (refusal) {
+    return {
+      reopenApplies: false,
+      text:
+        `A restore staged from ${source} at ${stamp} is waiting, but the last attempt did not apply: ${refusal}. ` +
+        `Reopening Muster will try the same thing again — stage a fresh bundle, or discard this one below.`,
+    };
+  }
+  return {
+    reopenApplies: true,
+    text:
+      `A restore staged from ${source} at ${stamp} is waiting. ` +
+      `Quit and reopen Muster to apply it — your current data is kept as a safety copy.`,
+  };
+}
+
 export function PortableBackupCard() {
   const [passphrase, setPassphrase] = useState("");
   const [step, setStep] = useState<Step>({ kind: "idle" });
   const [ready, setReady] = useState(false);
   const [accountDrive, setAccountDrive] = useState<{ available: boolean; connected: boolean } | null>(null);
   const [status, setStatus] = useState<z.infer<typeof v2StatusReply> | null>(null);
+  const notice = pendingRestoreNotice(status);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [snapshots, setSnapshots] = useState<SnapshotInfo[] | null>(null);
@@ -318,16 +373,19 @@ export function PortableBackupCard() {
 
       {status?.pending && (
         <div className="mt-2 rounded-lg border border-warning/40 bg-warning/10 p-2.5 text-[12px] leading-relaxed text-ink">
-          <div>
-            A restore staged from {status.pending.source} at {when(status.pending.createdAt)} is waiting.
-            Quit and reopen Muster to apply it — your current data is kept as a safety copy.
-          </div>
+          <div>{notice.text}</div>
           <button type="button" disabled={busy} onClick={() => void discard()} className={cn(button, "mt-1.5")}>
             <X size={12} /> Discard staged restore
           </button>
         </div>
       )}
-      {!status?.pending && status?.receipt && (
+      {/* The receipt renders whether or not a restore is pending. It used to be
+          gated on `!status?.pending`, which hid exactly the receipt that
+          explains why a pending restore is stuck: a refusal is written on boot,
+          the pending file survives it, so the two always coexisted and the
+          reason was only ever shown once the operator had already discarded the
+          bundle that explained it. */}
+      {status?.receipt && (
         <div className="mt-2 text-[12px] text-ink-secondary">
           Last restore ({status.receipt.source}, {when(status.receipt.appliedAt)}):{" "}
           {status.receipt.status === "committed" ? "applied" : `${status.receipt.status}${status.receipt.error ? ` — ${status.receipt.error}` : ""}${status.receipt.blocked?.length ? ` — ${status.receipt.blocked[0].detail}` : ""}`}
