@@ -55,6 +55,17 @@
 .auth-submit:disabled, .auth-google:disabled { opacity: .55; cursor: wait; }
 .auth-link { color: var(--auth-accent); font-size: 12px; font-weight: 600; text-decoration: none; cursor: pointer; }
 .auth-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* A `button.auth-link` is a control, not a run of inline text, so WCAG 2.2
+   SC 2.5.8 (24x24 minimum target) applies and the inline-text exception does
+   not. At 12px with no padding it measured 121x18 — an 18px-tall target for
+   "Get a pairing code", which is the one control on this page a phone user has
+   to hit to get unstuck. The text, colour and weight are untouched, so this
+   still reads as a link; only the box grows, by the 6px it needed.
+   Measured via getBoundingClientRect rather than a pseudo-element: a grown
+   `::after` does widen the clickable region, but it is invisible to
+   getBoundingClientRect, to Lighthouse and to switch-control tooling, which is
+   exactly the tooling that has to be satisfied. */
+button.auth-link { min-height: 24px; display: inline-flex; align-items: center; }
 .auth-recovery { text-align: right; margin-top: -5px; }
 .auth-footer { margin-top: 23px; text-align: center; color: var(--auth-muted); font-size: 12px; line-height: 1.7; }
 .auth-notice { padding: 12px 14px; border: 1px solid #deded2; border-radius: 8px; background: #f4f4eb; color: #46473d; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
