@@ -29,7 +29,7 @@ import {
   readAttachment,
   saveAttachment,
 } from "./attachments.ts";
-import type { JsonValue } from "./schema.ts";
+import type { JsonObject, JsonValue } from "./schema.ts";
 import { modelAcceptsImages } from "./contracts.ts";
 import { isSameOrigin, needsSameOriginMutationCheck } from "./origin-gate.ts";
 import { MESSAGE_SEND_VERSION, requireMessageThread } from "./message-send-contract.ts";
@@ -1137,13 +1137,13 @@ function broadcast<P extends FrameIdentity>(payload: P) {
 const FRAME_SCAN_MAX_DEPTH = 6;
 const FRAME_SCAN_MAX_PROBES = 64;
 function frameOwnerIds(
-  value: unknown,
+  value: JsonValue,
   found = new Set<string>(),
   depth = 0,
   budget = { left: FRAME_SCAN_MAX_PROBES },
 ): Set<string> {
   if (depth > FRAME_SCAN_MAX_DEPTH || budget.left <= 0) return found;
-  if (typeof value === "string") {
+  if (isText(value)) {
     budget.left -= 1;
     const bot = store.bot(value);
     if (bot?.ownerId) found.add(bot.ownerId);
@@ -1155,8 +1155,12 @@ function frameOwnerIds(
     for (const item of value) frameOwnerIds(item, found, depth + 1, budget);
     return found;
   }
-  if (value && typeof value === "object") {
-    for (const item of Object.values(value)) frameOwnerIds(item, found, depth + 1, budget);
+  // SAFETY: every remaining JsonValue member is a number, boolean, null or a
+  // JsonObject. A number or boolean yields [] from Object.values, so the walk
+  // is a no-op for them, and null is excluded because Object.values(null)
+  // throws. Only a JsonObject can name a record, which is the whole point.
+  if (value !== null) {
+    for (const item of Object.values(value as JsonObject)) frameOwnerIds(item, found, depth + 1, budget);
   }
   return found;
 }
@@ -1183,7 +1187,12 @@ function visibleToClient(client: SseClient, payload: FrameIdentity): boolean {
   // sits in the payload. A frame naming records from two accounts has no correct
   // audience, so it is shown to neither — dropping it is the only safe answer,
   // and it is the same direction the fail-safe bias takes everywhere else.
-  const owners = frameOwnerIds(payload);
+  // SAFETY: broadcast payloads are assembled as plain, JSON-serialisable
+  // objects and are JSON.stringify'd onto the wire, so a frame's contents are
+  // JsonValue by the time they reach the filter. Asserted once here rather than
+  // retyping FrameIdentity, which every call site in this file would then have
+  // to satisfy.
+  const owners = frameOwnerIds(payload as JsonValue);
   if (owners.size > 0) return [...owners].every((id) => id === client.userId);
   const botId = isText(payload.botId) ? payload.botId : null;
   if (botId) {
