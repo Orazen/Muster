@@ -58,6 +58,46 @@ describe("pairing codes", () => {
     expect(consumeCode(code, "other-ip", T0 + 2000)).toBe("user-a");
   });
 
+  it("does not spend the guessing budget on a CORRECT redemption", () => {
+    // The defect: the attempt was charged before the code was looked at, so
+    // every successful pair counted against the same 20 the guesses did. An
+    // office behind one NAT shares an IP, so the twentieth teammate to pair
+    // correctly locked out the twenty-first — and the error said "too many
+    // attempts", pointing at a typo they had not made.
+    const ip = "203.0.113.7";
+    for (let i = 0; i < 25; i++) {
+      const { code } = createCode(`user-${i}`, T0);
+      expect(consumeCode(code, ip, T0 + 1000 + i)).toBe(`user-${i}`);
+    }
+  });
+
+  it("still charges a wrong code, so guessing is not free", () => {
+    // The other half: a success clearing the budget must not become a way to
+    // reset it mid-guess, since a correct code is exactly what a guesser lacks.
+    const { code } = createCode("user-a", T0);
+    const ip = "203.0.113.8";
+    for (let i = 0; i < 20; i++) {
+      expect(() => consumeCode("WRONGCOD", ip, T0 + 1000 + i)).toThrow(VerifyError);
+    }
+    expect(() => consumeCode(code, ip, T0 + 2000)).toThrow(/too many attempts/);
+  });
+
+  it("clears the budget on success so a shared IP recovers immediately", () => {
+    // 19 failures leaves the IP one attempt short of the lockout, so the next
+    // call is decided by whether the redemption clears the budget. If it does
+    // not, the following wrong code reads count=20 and answers 429 — the exact
+    // "too many attempts" a teammate behind a shared NAT would have hit for
+    // doing nothing wrong.
+    const ip = "203.0.113.9";
+    for (let i = 0; i < 19; i++) expect(() => consumeCode("WRONGCOD", ip, T0 + 1000 + i)).toThrow(/isn't valid/);
+    const a = createCode("user-a", T0).code;
+    expect(consumeCode(a, ip, T0 + 2000)).toBe("user-a");
+    // Budget is back to zero, so this is an ordinary rejection again.
+    expect(() => consumeCode("WRONGCOD", ip, T0 + 2001)).toThrow(/isn't valid/);
+    const b = createCode("user-b", T0).code;
+    expect(consumeCode(b, ip, T0 + 2002)).toBe("user-b");
+  });
+
   it("refuses to mint a code without an owning user", () => {
     expect(() => createCode("", T0)).toThrow();
   });

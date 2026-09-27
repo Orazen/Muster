@@ -173,19 +173,28 @@ export class VerifyError extends Error {
 export function consumeCode(code: string, ip = "unknown", now = Date.now()): string {
   const normalized = String(code ?? "").trim().toUpperCase();
   if (!normalized) throw new VerifyError("enter the code shown on muster.today/pair");
+  // Lockout check comes FIRST, before the code is even looked at: a throttled IP
+  // gets 429 while holding the RIGHT code, or the throttle would not throttle.
   const window = verifyAttempts.get(ip);
-  if (!window || window.windowStart + VERIFY_WINDOW_MS <= now) {
-    verifyAttempts.set(ip, { count: 1, windowStart: now });
-  } else {
-    window.count++;
-    if (window.count > MAX_VERIFIES_PER_WINDOW) {
-      throw new VerifyError("too many attempts — wait a few minutes and try again", 429);
-    }
+  if (window && window.windowStart + VERIFY_WINDOW_MS > now && window.count >= MAX_VERIFIES_PER_WINDOW) {
+    throw new VerifyError("too many attempts — wait a few minutes and try again", 429);
   }
   sweepExpired(now);
   const entry = pending.get(normalized);
   if (!entry || entry.expiresAt <= now) {
     pending.delete(normalized);
+    // Only a FAILED attempt is charged. This used to count the attempt before
+    // the code was looked at, which meant a correct redemption still spent the
+    // budget — so the twentieth successful pair locked out the twenty-first
+    // teammate. That is not hypothetical: an office or a family behind one NAT
+    // shares a single IP, and every teammate there pairs through it. The
+    // throttle exists to slow code-guessing, and a right answer is the opposite
+    // of a guess. claim.ts has always charged failures only; this matches it.
+    if (!window || window.windowStart + VERIFY_WINDOW_MS <= now) {
+      verifyAttempts.set(ip, { count: 1, windowStart: now });
+    } else {
+      window.count++;
+    }
     persistStore();
     // Why. Silent rejections made "isn't valid" undebuggable — we couldn't
     // tell a typo from a restart race from a stale tab. Log enough to tell
@@ -196,6 +205,10 @@ export function consumeCode(code: string, ip = "unknown", now = Date.now()): str
     throw new VerifyError("that code isn't valid — generate a fresh one on muster.today/pair");
   }
   pending.delete(normalized);
+  // A redemption proves the holder knows the code, so it clears the guessing
+  // budget rather than spending it. Without this, an IP that just paired
+  // correctly stays one attempt from a lockout it did nothing to earn.
+  verifyAttempts.delete(ip);
   persistStore();
   console.log(`[pair] consumed ${normalized.slice(0, 2)}*** from ip ${ip}`);
   return entry.userId;

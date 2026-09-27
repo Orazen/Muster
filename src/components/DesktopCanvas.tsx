@@ -13,6 +13,27 @@ interface CanvasDesktop {
   image: string;
 }
 
+/** The heading a tile wears. A per-bot tile is that bot's desktop and names it;
+ *  a shared tile is one desktop every bot drives, so naming a teammate there is
+ *  a fiction — the server sends an empty botId for exactly that case, and this
+ *  is the one place that renders the distinction.
+ *
+ *  Exported for the test: the pre-fix build called `botName(desktop.botId)`
+ *  unconditionally, and on a shared tile `botName` fell through to its `"Desktop"`
+ *  default or, worse, matched whichever arbitrary bot id the server's dedupe
+ *  had kept. Neither is distinguishable from correct at a glance, which is why
+ *  it survived. */
+export function canvasTileTitle(desktop: Pick<CanvasDesktop, "botId" | "label">, nameOf: (id: string) => string): string {
+  if (desktop.label === SHARED_DESKTOP_LABEL) return "All bots";
+  // A per-bot tile whose id no longer resolves is a deleted bot: say so rather
+  // than printing an empty heading.
+  return desktop.botId ? nameOf(desktop.botId) : "Desktop";
+}
+
+/** The server's label for the one desktop every bot shares. Matched against the
+ *  wire value, so a rename on either side shows up as a failing test. */
+export const SHARED_DESKTOP_LABEL = "shared";
+
 /** Ask the server for one snapshot of every running local desktop. */
 async function fetchCanvas(): Promise<CanvasDesktop[]> {
   const res = await fetch("/api/local-computer/canvas-screenshots", {
@@ -106,10 +127,10 @@ export default function DesktopCanvas({ onClose }: { onClose: () => void }) {
             style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(480px, 100%), 1fr))` }}
           >
             {desktops.map((desktop) => (
-              <figure key={desktop.botId} className="overflow-hidden rounded-xl border border-hairline/40 bg-inset">
+              <figure key={`${desktop.label}:${desktop.botId}`} className="overflow-hidden rounded-xl border border-hairline/40 bg-inset">
                 <figcaption className="flex items-center justify-between border-b border-hairline/40 px-3 py-1.5 text-[12px] text-ink-secondary">
-                  <span className="font-medium text-ink">{botName(desktop.botId)}</span>
-                  <span>{desktop.label === "shared" ? "Shared desktop" : "Own desktop"}</span>
+                  <span className="font-medium text-ink">{canvasTileTitle(desktop, botName)}</span>
+                  <span>{desktop.label === SHARED_DESKTOP_LABEL ? "Shared desktop" : "Own desktop"}</span>
                 </figcaption>
                 <CanvasFrame image={desktop.image} />
               </figure>

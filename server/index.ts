@@ -4951,6 +4951,40 @@ function clientIpForLimiting(req: IncomingMessage): string {
   return req.socket.remoteAddress ?? "unknown";
 }
 
+/** Did this request arrive over TLS? The proxy tells us when it terminates TLS
+ *  for us; a directly-TLS listener sets the socket flag. Loopback http — the
+ *  desktop app, a LAN self-host — answers false to both, which is exactly what
+ *  the cookie attributes below need to know. */
+function requestIsSecure(req: IncomingMessage): boolean {
+  const forwarded = headerString(req.headers, "x-forwarded-proto");
+  // A proxy chain appends, so "http,https" means the client hop was plaintext
+  // and the last hop to us was not; the FIRST value is the client's protocol.
+  if (forwarded?.trim()) return forwarded.split(",")[0].trim() === "https";
+  // SAFETY: `encrypted` is declared on tls.TLSSocket, not on the net.Socket
+  // that http.IncomingMessage.socket is typed as. The cast is a widening read
+  // of one optional boolean, and `=== true` means a socket without the field
+  // answers false — so the untyped case fails to "not secure", which is the
+  // same direction as a missing proxy header.
+  return (req.socket as { encrypted?: boolean }).encrypted === true;
+}
+
+/** The one session cookie every bridged sign-in writes: the OAuth handoff, the
+ *  desktop pair redeem, the self-host claim, and the browser redeem.
+ *
+ *  Why. All four previously hard-coded no `Secure` flag, on comments asserting
+ *  an http-only deployment — one of which called muster.today "plain loopback
+ *  HTTP". Two of these routes are the public https cloud's own front door, so
+ *  the browser was told to keep a session credential over a connection that
+ *  permits it to be downgraded. The fix is the attribute, gated on the request
+ *  rather than assumed: adding it unconditionally would break the desktop and
+ *  every LAN self-host, because a `Secure` cookie is simply not sent back over
+ *  plain http — pairing would appear to work and log nobody in, the same
+ *  failure mode the signed-cookie work already fixed once. */
+function bridgedSessionCookie(req: IncomingMessage, token: string, expiresAt: Date): string {
+  const secure = requestIsSecure(req) ? "; Secure" : "";
+  return `better-auth.session_token=${signedSessionCookieValue(token)}; Path=/; HttpOnly; SameSite=Lax${secure}; Expires=${expiresAt.toUTCString()}`;
+}
+
 // Small fixed-window limiter for the few PRE-GATE routes that trigger an
 // outbound fetch (oauth/finish/exchange, pair/redeem). Without it, a single
 // unauthenticated loop can hold hundreds of concurrent upstream requests —
@@ -5589,7 +5623,7 @@ let requestUserEmail = "";
       });
       res.setHeader(
         "Set-Cookie",
-        `better-auth.session_token=${signedSessionCookieValue(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}`,
+        bridgedSessionCookie(req, token, expiresAt),
       );
       return json(res, 200, { ok: true, email: errBody.email });
     }
@@ -5682,10 +5716,12 @@ let requestUserEmail = "";
       // the SIGNED form `<token>.<hmac>` — get-session verifies the signature
       // with the auth secret before touching the DB, and a bare token verified
       // to null on every redeem (pairing "worked" while logging nobody in).
-      // No Secure flag: the desktop serves plain loopback HTTP.
+      // Secure is decided per-request by bridgedSessionCookie: the desktop
+      // serves plain loopback HTTP and must not get it, the cloud front door
+      // must.
       res.setHeader(
         "Set-Cookie",
-        `better-auth.session_token=${signedSessionCookieValue(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}`,
+        bridgedSessionCookie(req, token, expiresAt),
       );
       return json(res, 200, { ok: true, email: identity.email, name: identity.name ?? "" });
     }
@@ -5732,11 +5768,11 @@ let requestUserEmail = "";
         userAgent: req.headers["user-agent"],
       });
       // Same signed cookie shape pair/redeem sets (see that comment for why
-      // the value must be the signed form). No Secure flag: self-hosts
-      // serve plain HTTP on the LAN.
+      // the value must be the signed form). Self-hosts serve plain HTTP on the
+      // LAN, so Secure follows the request rather than being assumed off.
       res.setHeader(
         "Set-Cookie",
-        `better-auth.session_token=${signedSessionCookieValue(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}`,
+        bridgedSessionCookie(req, token, expiresAt),
       );
       return json(res, 200, { ok: true, email: owner.email, name: owner.name });
     }
@@ -5760,12 +5796,13 @@ let requestUserEmail = "";
           ip: req.socket.remoteAddress ?? undefined,
           userAgent: req.headers["user-agent"],
         });
-        // Same signed cookie shape pair/claim sets (see that comment for
-        // why the value must be the signed form). No Secure flag matches
-        // the neighboring redeem, which serves plain loopback HTTP.
+        // Same signed cookie shape pair/claim sets (see that comment for why
+        // the value must be the signed form). This is the cloud's own browser
+        // front door, so it is the case that DOES get Secure — decided from the
+        // request, not from an assumption about the deployment.
         res.setHeader(
           "Set-Cookie",
-          `better-auth.session_token=${signedSessionCookieValue(token)}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}`,
+          bridgedSessionCookie(req, token, expiresAt),
         );
         return json(res, 200, { ok: true, email: user.email, name: user.name });
       } catch (e) {
@@ -8997,7 +9034,14 @@ let requestUserEmail = "";
             const status = await containerComputerStatus(undefined, undefined, target);
             if (status.container !== "running") return null;
             const image = await containerComputerScreenshot(undefined, undefined, target);
-            return { botId, label: target.label, image };
+            // A shared-mode tile is ONE desktop that every bot drives, so it
+            // has no bot identity. The dedupe above keeps the last entry in
+            // `bodies` under the shared key, and its botId is therefore an
+            // arbitrary bot — the client used to resolve that into a name and
+            // label an everyone-shares desktop with whichever teammate happened
+            // to sort last. Empty is the honest answer; the client keys and
+            // titles on `label`.
+            return { botId: target.label === "shared" ? "" : botId, label: target.label, image };
           } catch {
             // one sleepy or missing desktop never blanks the whole canvas
             return null;
