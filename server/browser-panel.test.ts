@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  agentPageForToolEvent,
+  agentPageFromChip,
   findChromeSync,
   freeCdpPort,
   isNavigableUrl,
@@ -439,6 +441,43 @@ describe("isNavigableUrl", () => {
     expect(isNavigableUrl("http://1.1.1.1")).toBe(true);
     expect(isNavigableUrl("http://172.32.0.1")).toBe(true);
     expect(isNavigableUrl("http://8.8.8.8")).toBe(true);
+  });
+});
+
+describe("agent browsing breadcrumb", () => {
+  it("prefers the driver's structured page over the cropped chip title", () => {
+    // the whole bug: the title is a 200-char display crop, so a longer URL
+    // in it is cut mid-string. The structured page is the real target.
+    const url = `https://example.com/search?q=${"x".repeat(300)}&page=2`;
+    const cropped = `browser_browser_navigate → ${url}`.slice(0, 200);
+    expect(agentPageForToolEvent({ title: cropped, browserPage: { tool: "browser_browser_navigate", url } }))
+      .toEqual({ tool: "browser_browser_navigate", url });
+  });
+
+  it("falls back to the title only when the driver sent no page field", () => {
+    expect(agentPageForToolEvent({ title: "browser_browser_navigate → https://example.com/a" }))
+      .toEqual({ tool: "browser_browser_navigate", url: "https://example.com/a" });
+    expect(agentPageForToolEvent({ title: "read_file → https://example.com/a" })).toBeNull();
+    expect(agentPageForToolEvent({})).toBeNull();
+  });
+
+  it("honours an explicit null rather than inventing a page from the title", () => {
+    // a browser-shaped chip the driver could not resolve a URL for
+    expect(agentPageForToolEvent({ title: "browser_browser_navigate → https://example.com/a", browserPage: null }))
+      .toBeNull();
+  });
+
+  it("refuses a structured page whose URL is not a public http/https address", () => {
+    for (const url of ["file:///etc/passwd", "javascript:alert(1)", "not a url", `https://example.com/${"x".repeat(9000)}`]) {
+      expect(agentPageForToolEvent({ browserPage: { tool: "browser_browser_navigate", url } })).toBeNull();
+    }
+  });
+
+  it("re-parsing a cropped chip never yields a usable breadcrumb (the defect, pinned)", () => {
+    const url = `https://example.com/search?q=${"y".repeat(300)}`;
+    const cropped = `browser_browser_navigate → ${url}`.slice(0, 200);
+    // proves the title path alone is lossy — why the driver carries the page
+    expect(agentPageFromChip(cropped)?.url).not.toBe(url);
   });
 });
 

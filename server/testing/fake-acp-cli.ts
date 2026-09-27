@@ -346,6 +346,17 @@ function handle(msg: any) {
         out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "Internal error: Agent error", data: '402 {"detail":"No active subscription found.\\nSubscribe to start using Droid.","status":402,"title":"Payment Required","displayToUser":true,"requestId":"fra1::regression"}' } });
         return;
       }
+      if (mode === "long-url-navigate") {
+        // A navigate whose URL is far longer than the chat chip's 200-char
+        // display crop. The driver must still report the page whole: the
+        // human's Browser panel navigates this exact address.
+        const url = `https://example.com/search?q=${"fixture".repeat(40)}&page=2`;
+        out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "long-url", title: "browser_browser_navigate", rawInput: { url } } } });
+        out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", toolCallId: "long-url", status: "completed" } } });
+        out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "navigated" } } } });
+        out({ jsonrpc: "2.0", id: msg.id, result: {} });
+        return;
+      }
       if (mode === "quota-error" || mode === "quota-after-progress") {
         if (mode === "quota-after-progress") {
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "quota-progress", title: "Owned work already started" } } });

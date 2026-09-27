@@ -33,6 +33,7 @@ import type {
 } from "../../contracts.ts";
 import { newEventId, newId } from "../../contracts.ts";
 import { computerProxyEnv } from "../../container-computer.ts";
+import { isAgentPageUrl } from "../../browser-panel.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { type JsonObject, type JsonValue } from "../../schema.ts";
 
@@ -53,7 +54,17 @@ const isCount = (v: JsonValue): v is number =>
 const urlFromInput = (value: JsonValue | undefined): string | undefined =>
   value !== undefined && isText(value) ? value : undefined;
 
-export function browserChipTitle(u: { title?: JsonValue; rawInput?: JsonValue }): string {
+/** The page a browser chip acted on, as the panel needs it. */
+export type AgentBrowserPageRef = { tool: string; url: string };
+
+/** A browser chip's two separate facts: the display string, and the page
+ * it acted on. They are not the same fact — the title is cropped to fit a
+ * chat chip, while the human's Browser panel navigates the page — so a URL
+ * longer than the crop survives on `page` whole and the breadcrumb cannot
+ * end up pointing at a truncated address. */
+export type BrowserChip = { title: string; page: AgentBrowserPageRef | null };
+
+export function browserChip(u: { title?: JsonValue; rawInput?: JsonValue }): BrowserChip {
   const input = u.rawInput;
   // SAFETY: ACP tool_call rawInput is untyped JSON from the engine; after
   // ruling out null, undefined and arrays, an "object" value is exactly a
@@ -67,7 +78,8 @@ export function browserChipTitle(u: { title?: JsonValue; rawInput?: JsonValue })
     : undefined;
   const command = urlFromInput(record?.command);
   const name = command ?? (u.title !== undefined && isText(u.title) ? u.title : "tool");
-  return /^browser_/i.test(name) && url ? `${name} → ${url}` : name;
+  const page = /^browser_/i.test(name) && url !== undefined && isAgentPageUrl(url) ? { tool: name, url } : null;
+  return { title: page ? `${page.tool} → ${page.url}` : name, page };
 }
 
 /** Classify a JSON-RPC error frame by its `data` payload — the shared floor
@@ -483,12 +495,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             case "tool_call": {
               toolContexts.remember(u);
+              const chip = browserChip(u);
               emit({
                 ...base(threadId, turnId),
                 type: "item.started",
                 itemType: "tool",
                 itemId: u.toolCallId,
-                title: browserChipTitle(u).slice(0, 200),
+                title: chip.title.slice(0, 200),
+                // the page travels whole — the title above is a display
+                // crop, and the panel must not navigate a truncated URL
+                browserPage: chip.page,
               });
               break;
             }

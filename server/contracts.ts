@@ -114,7 +114,18 @@ export type RuntimeEvent = RuntimeEventBase &
          * delta, a thread total, a per-step figure) and must never be summed. */
         usage?: { input: number; output: number };
       }
-    | { type: "item.started"; itemType: "tool" | "reasoning"; title?: string }
+    | {
+        type: "item.started";
+        itemType: "tool" | "reasoning";
+        title?: string;
+        /** The page a browser chip acted on, carried whole and structured.
+         * `title` is a display string and gets cropped; the panel's "Open
+         * in preview" must navigate the real URL, so a driver that knows
+         * the page says so here instead of having it re-parsed back out of
+         * a truncated chip. Explicit null means "browser-shaped chip with
+         * no usable page"; an absent field means "driver reports no page". */
+        browserPage?: { tool: string; url: string } | null;
+      }
     | { type: "item.updated"; itemType: "tool" | "reasoning"; tokens?: number | null }
     | { type: "item.completed"; itemType: "tool"; ok: boolean }
     | { type: "item.completed"; itemType: "assistant_text"; text: string }

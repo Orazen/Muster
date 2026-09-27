@@ -732,13 +732,42 @@ function previewLinkFor(botId: string): string | null {
 /** The agent's browser is headless and per-turn, so the panel mirrors it
  * from breadcrumbs instead of a screencast: a browser-tool chip whose
  * title carries the page it acted on ("browser_browser_navigate → url").
- * Returns null for any other chip. */
+ * Returns null for any other chip.
+ *
+ * This reads the DISPLAY string, which drivers crop to fit a chat chip, so
+ * a long URL comes back mid-string and the panel would open a page that
+ * does not exist. Drivers that know the page carry it whole on the event's
+ * `browserPage` field instead (see the `item.started` contract); the fold
+ * prefers that and falls back to this only for chips from drivers that
+ * report nothing structured. */
 export function agentPageFromChip(title: string): { tool: string; url: string } | null {
   const separator = title.indexOf(" → ");
   if (separator === -1) return null;
   const tool = title.slice(0, separator);
   const url = title.slice(separator + 3).trim();
-  return /^browser_/i.test(tool) && /^https?:\/\//i.test(url) ? { tool, url } : null;
+  return /^browser_/i.test(tool) && isAgentPageUrl(url) ? { tool, url } : null;
+}
+
+/** A breadcrumb URL the panel is willing to mirror. Same public http/https
+ * shape `isNavigableUrl` accepts, minus the DNS lookup: this runs on the
+ * event path where a chip is recorded, and the panel re-validates the URL
+ * properly before it navigates. Bounded so a pathological engine payload
+ * cannot grow the frame payload without limit. */
+export const isAgentPageUrl = (url: string): boolean => url.length <= 8000 && /^https?:\/\//i.test(url.trim());
+
+/** The breadcrumb for one tool chip: the driver's structured page when it
+ * sent one, otherwise the title re-parsed for drivers that report nothing
+ * structured. An explicit null is honoured — that driver said "browser-
+ * shaped chip, no usable page", and re-parsing its cropped title would
+ * invent one. */
+export function agentPageForToolEvent(event: {
+  title?: string;
+  browserPage?: { tool: string; url: string } | null;
+}): { tool: string; url: string } | null {
+  if (event.browserPage !== undefined) {
+    return event.browserPage !== null && isAgentPageUrl(event.browserPage.url) ? event.browserPage : null;
+  }
+  return agentPageFromChip(event.title ?? "");
 }
 
 export function panelState(botId: string): BrowserPanelState {

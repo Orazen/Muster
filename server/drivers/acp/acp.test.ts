@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ensureDirs } from "../../config.ts";
-import type { ProviderInstance } from "../../contracts.ts";
+import { agentPageForToolEvent } from "../../browser-panel.ts";
+import type { ProviderInstance, RuntimeEvent } from "../../contracts.ts";
 import type { JsonValue } from "../../schema.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
@@ -382,6 +383,28 @@ describe("ACP turns (fake CLI)", () => {
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true });
     expect(recorder.events.some((e) => e.provider === "geminiAgent")).toBe(true);
+  });
+
+  it("carries a long navigate URL whole, not cropped to the chat chip", async () => {
+    await create(GrokAgentDriver, "long-url-navigate");
+    await instance.adapter.sendTurn({ threadId: "t-long-url", text: "browse", model: "grok-4.5" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const started = recorder.events.find(
+      (e): e is Extract<RuntimeEvent, { type: "item.started" }> => e.type === "item.started" && e.itemType === "tool",
+    )!;
+    // the display string is cropped to fit a chip...
+    expect(started.title?.length).toBe(200);
+    expect(started.title?.endsWith("q=fixturefixture")).toBe(false);
+    // ...but the page the human's Browser panel opens is the real address
+    const page = started.browserPage;
+    expect(page).toEqual({
+      tool: "browser_browser_navigate",
+      url: `https://example.com/search?q=${"fixture".repeat(40)}&page=2`,
+    });
+    expect(page!.url.length).toBeGreaterThan(200);
+    // and it is exactly what the panel would navigate, not a broken prefix
+    expect(agentPageForToolEvent({ title: started.title, browserPage: page })).toEqual(page);
   });
 
   it("rejects a second turn while one is in flight", async () => {

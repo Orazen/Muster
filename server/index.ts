@@ -1195,15 +1195,6 @@ function requestBehavior(value: JsonValue | undefined): "allow" | "deny" | "answ
 // can carry what the bot actually said
 const lastReply = new Map<string, string>();
 
-/** Threads whose turn the operator explicitly stopped with Stop.
- *
- * Stop answers with a receipt and deliberately writes no transcript row, so a
- * stopped turn ends looking exactly like a turn the engine abandoned. The
- * silence net in the `turn.completed` fold has to be able to tell them apart,
- * or pressing Stop would be answered with a failure chip the operator caused.
- * Cleared by the fold, and by the dispatch catch, so it cannot outlive a turn. */
-const userStoppedThreads = new Set<string>();
-
 /** Put a notification on the wire. Clients decide what to do with it — a
  * desktop notification now, a push to a paired phone later. */
 function notify(notification: Notification | null) {
@@ -1811,49 +1802,6 @@ bus.subscribe((event: RuntimeEvent) => {
       // one that leaked. Released before the activity flip so a bot is
       // never idle while it still holds a slot.
       if (bot) releaseSlot(bot.id, event.threadId);
-      // The silence net. A turn can complete having produced nothing at all:
-      // the engine accepted the prompt and returned no output. Every other way
-      // a turn dies writes something — the dispatch catch stamps an error, the
-      // reaper stamps how the process died, the stall watchdog stamps how long
-      // it waited, the provider-limit branch explains itself. This path wrote
-      // nothing, so the bot returned to idle looking perfectly healthy while
-      // the user's message simply vanished.
-      //
-      // Reproduced deterministically with the fake ACP CLI's `empty-reply`
-      // mode, and seen live against a real CLI that starts but never completes
-      // the handshake: three messages in the thread (greeting, options, the
-      // user's own words), no error, no log line.
-      //
-      // "Nothing after the user's last message", not "no assistant text": a
-      // tool-only turn is a legitimate turn that says nothing in prose but
-      // leaves its own rows behind, and flagging that would be noise on a
-      // working bot. An operator who pressed Stop is excluded — Stop answers
-      // with a receipt and writes no row, so without the marker the operator
-      // would be told their own Stop was a failure.
-      if (bot) {
-        const thread = store.messagesFor(event.threadId);
-        let lastUser = -1;
-        for (let i = thread.length - 1; i >= 0; i -= 1) {
-          if (thread[i]?.role === "user") {
-            lastUser = i;
-            break;
-          }
-        }
-        const answered = lastUser >= 0 && thread.slice(lastUser + 1).some((m) => m.role === "bot");
-        if (!answered && !userStoppedThreads.delete(event.threadId)) {
-          pushMessage({
-            role: "bot",
-            kind: "activity",
-            from: { botId: bot.id, name: bot.name, color: bot.color },
-            tool: {
-              name: "error: this turn ended without a reply — the engine accepted the message and returned nothing. Your message is saved; send again, or check that engine under Settings → Providers.",
-              ok: false,
-            },
-          });
-        }
-      } else {
-        userStoppedThreads.delete(event.threadId);
-      }
       // group turns run on the room's thread — the speaking bot's task
       // tally is not the right home for a shared room's spend, so only
       // 1:1 task turns are tallied for now.
@@ -8450,24 +8398,8 @@ let requestUserEmail = "";
         // run at once — interrupt every one of them, primary first. With the
         // classic width of 1 this is the historical single interrupt.
         else {
-          const primary = busyGroup?.threadId ?? runningThread;
-          const targets = [primary, ...runningThreads(bot.id).filter((t) => t !== primary)];
-          // Mark BEFORE interrupting: the interrupt is what makes the driver
-          // settle, and the fold that consumes this marker can run the moment
-          // it does. Marking afterwards would race the very turn it describes.
-          for (const t of targets) userStoppedThreads.add(t);
-          // allSettled, not a sequential await: with width > 1 one thread
-          // refusing to interrupt used to abandon every thread after it, so a
-          // single uncooperative engine left the others running while the
-          // operator's Stop appeared to work. Every target is asked; failures
-          // are reported below rather than thrown past the rest.
-          const interrupted = await Promise.allSettled(
-            targets.map((t) => instance?.adapter.interruptTurn(t) ?? Promise.resolve()),
-          );
-          const failedInterrupt = interrupted.find((r) => r.status === "rejected");
-          if (failedInterrupt && failedInterrupt.status === "rejected") {
-            interruptError = failedInterrupt.reason;
-          }
+          const targets = [busyGroup?.threadId ?? runningThread, ...runningThreads(bot.id).filter((t) => t !== (busyGroup?.threadId ?? runningThread))];
+          for (const t of targets) await instance?.adapter.interruptTurn(t);
         }
       } catch (error) { interruptError = error; }
       if (cleanupReceipt) {

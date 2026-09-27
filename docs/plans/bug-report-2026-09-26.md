@@ -253,3 +253,102 @@ Findings 4, 5, 10–15 are CLI/eval files. 6, 7 are `server/workspace-brain.ts`
 every CONFIRMED finding can be rebuilt from the harness patterns in
 `server/workspace-brain-harness.test.ts`, `server/pairing-harness.test.ts`,
 and `server/fleet-mcp.test.ts`.
+
+---
+
+# Second sweep — 2026-09-27 (hunts 5–8: durable delivery, and dogfooding the agent-browsing fix)
+
+Four more hunts were dispatched; two were throttled by the concurrency
+limit and never started (routines/approvals/why-journal, and
+backup/Drive/snapshots — **still unaudited**, re-dispatch before assuming
+those surfaces are clean). The two that ran produced the findings below.
+Numbers restart at 1 and do not collide with the sweep above; cite them
+as "sweep 2, item N".
+
+## Fixed in this sweep
+
+**S2-1 (was CONFIRMED broken, live): long URLs corrupt the agent-browsing
+breadcrumb, so "Open in preview" opens a page that does not exist.**
+`server/drivers/acp/core.ts` crops a tool chip to 200 characters for the
+chat, then `server/index.ts:1606` re-parsed that *already-cropped* string
+to recover the URL the panel should navigate. Any navigate URL longer
+than ~175 characters (a search query, a signed link) was stored
+truncated — the dogfooding agent reproduced it end to end and watched the
+preview land on a 404. The display crop is legitimate; re-deriving a
+navigation target from a display string is not. The page now travels as
+structured data: the `item.started` event carries a `browserPage` field
+computed before the crop, and the fold prefers it. `agentPageForToolEvent`
+keeps the title re-parse only for drivers that send no structured field,
+and honours an explicit `null` rather than inventing a page. Fixed with
+13 new tests, including one that drives a real turn through the fake ACP
+CLI with a 300-character URL and asserts the event carries it whole — the
+first coverage this pipeline has ever had (`browserChip`,
+`agentPageForChip`, and the `/frame` `agent` field had none at all).
+Verified: 121/121 across the ACP, browser-panel and panel-view suites,
+server typecheck clean, oxlint clean on the touched files.
+
+**S2-2 (hardened in passing): the breadcrumb accepted any URL the engine
+sent.** The old parse only checked the `http(s)://` prefix and had no
+length bound, so a multi-megabyte URL from a hostile or broken engine
+would land in the `/frame` payload. Breadcrumb URLs are now bounded at
+8000 characters (matching the client's own schema) and still re-validated
+by `isNavigableUrl` before the panel ever navigates.
+
+## Reported, not fixed — the owning lane is mid-flight
+
+**S2-3 (P2, SUSPECTED): an async dispatch failure leaves a delivery
+receipt stuck at `dispatched` forever.** The fire-and-forget dispatch in
+`server/index.ts:3206-3250` has a catch, but it never reverts the intent,
+even though `driverInvoked === false` proves nothing was ever sent. The
+drain path has the same shape. A user reads "dispatched" on a message
+that was never delivered and has no way to learn otherwise.
+
+**S2-4 (P3, CONFIRMED): the drain flips a receipt, then continues
+without running, reverting, or giving up.** `server/steer-queue.ts:206`
+flips the state before the `!last` check at line 215; when the queued
+message has vanished, the receipt is left in a state that means nothing.
+
+**S2-5 (P3, SUSPECTED): replaying a receipt whose transcript was deleted
+returns a raw 410** (`server/store.ts:864`) instead of the documented
+duplicate refusal, which breaks client resend — the client cannot tell a
+refusal from a broken server.
+
+**S2-6 (P3): a cloud pairing code opened on the desktop `/pair` origin
+shows a redeem button that cannot work.** The code's mode is inferred
+from the code's alphabet, not from the origin it is opened on, so a user
+who pastes a cloud code into the desktop app is offered a doomed button
+rather than the working "enter it in Muster Desktop" path. Product call
+on what the right fallback is; the honest fix is to detect the mismatch
+and show the desktop instruction instead of a button that 400s.
+
+**S2-7 (P3): the agent-browsing breadcrumb is memory-only** — it lives in
+a `Map` cleared by any restart, so after a server restart the panel shows
+no agent page until the agent happens to navigate again. Documented as
+accepted in the code comment; a persisted "last page per bot" would need
+its own retention decision.
+
+**S2-8 (P3): the stale-bundle warning prints on every `muster eval`
+invocation**, so a permanently-out-of-date `dist-server` turns into
+log noise that trains people to ignore it.
+
+**S2-9 (coverage): `SteerDrainIntentHooks` and the batch SQL are
+untested, and `server/message-db.test.ts` contains zero intent
+references** despite a harness test claiming intent coverage. Anything
+the drain path depends on is currently unverified by the suite.
+
+**S2-10 (heads-up, not a defect): the untracked
+`e2e/message-recovery.e2e.spec.ts` fails `npm run lint`** — a type
+assertion at line 84 has no `SAFETY:` justification, which the
+anti-slop rules require. It will fail CI the moment it is committed;
+the fix is a one-line comment, but the file belongs to the lane that
+wrote it.
+
+## What this sweep changed about how to test here
+
+The truncation defect survived the first sweep because every test that
+touched it asserted the display string — the one value that is *meant*
+to be lossy. A test that pins a display crop cannot catch a bug in what
+the crop feeds. The rule this adds: **when a value is cropped, truncated,
+or formatted for a human, the test must assert the un-cropped source of
+truth separately**, or the crop silently becomes the contract.
+
