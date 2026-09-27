@@ -11,6 +11,15 @@
 > in `server/index.ts`, which another agent holds. These are reproduced
 > defects observed on a fixture deployment, **not** any claim about the
 > codebase's overall posture.
+>
+> **Also confirmed by reading the code, in the backup/restore family:**
+> the v1 restore path joins an unvalidated bundle-supplied key onto the
+> data directory, so a `..`-bearing `.md` key escapes it (S4-3); and two
+> backup cards plus the first-run recovery card call
+> `/api/workspace/v2/telegram/push|pull`, routes that exist nowhere in the
+> server, so Telegram recovery is a dead button while the UI promises it
+> works (S4-7). v1 also restores bot records with `ownerId` intact (S4-4)
+> and v2 restores `social.json` unrewritten (S4-5). See "Fourth sweep".
 
 **Status update (2026-09-27, second).** Fixed and on main, each with tests: items
 **1's stale-bundle enabler** (the runtime resolver now runs newer source
@@ -505,7 +514,157 @@ up to 2000 run receipts with full output. Latent today (the UI filters
 client-side); fix is to 400 on a present-but-unparseable bound, matching
 `?limit` at `:7944`.
 
+---
+
+# Fourth sweep — 2026-09-27 (backup, restore, Drive sync, snapshots)
+
+One hunt over the portability family. Baseline first: **19 files, 355
+tests, 0 failed** — none of the findings below are pre-existing test
+failures, they are gaps the suite does not cover. Probes ran against the
+real modules on owned fixtures, no network, 8845 untouched. Cite as
+"sweep 4, item N".
+
+**All thirteen are unfixed.** The four client-side ones (S4-7, S4-8 and
+their tests) are the only findings in any sweep that this lane could have
+taken immediately; they were left in place so the whole family lands as
+one reviewed change rather than half of it.
+
+### P2
+
+**S4-1: a failed manifest publish orphans the pushed object and silently
+halts convergence.** `server/sync-pass.ts:166-183` uploads the object,
+saves the *local* manifest entry, then publishes the merged remote
+manifest. When `saveRemoteManifest` throws — the `modifiedTime` guard
+firing, which is the *designed* outcome when two devices sync one account
+— the journal row is already `DELETE`d (`sync-journal.ts:219`) and the
+local manifest claims a rev the remote index does not have. The comment
+at `:175` says "the next pass re-pushes by name"; it does not, because
+the next pass computes `plan.upload` and explicitly ignores it (`:183`).
+With no journal row, nothing ever re-pushes. Probe: pass 1 pushes, the
+publish fails, and passes 2 and 3 report a **completely clean result** —
+no push, no error, no conflict — while the object sits orphaned in Drive
+forever. Aggravated by `server/index.ts:502` discarding the boot
+flush's result (`void syncEngine.flush()`) and no sync event being
+recorded, so an automatic failure has no user-visible trace at all. The
+existing `sync-pass.test.ts:211` only asserts pass 1.
+
+**S4-2: one transient commit failure wedges the pending restore
+permanently, and the UI hides why.** `restore-apply.ts:234` derives
+`backupDir` from `pending.createdAt`; `commitRestoreV2` refuses if it
+already exists. A commit that throws mid-write rolls back but leaves
+`backupDir` on disk, and the pending file clears only on `committed`
+(`:271`), so every subsequent boot recomputes the same stamp and hits the
+same refusal. The operator's staged restore can never be applied except
+by discarding a bundle they may no longer have. `PortableBackupCard.tsx:330`
+renders the receipt only when `!status?.pending`, so the UI shows only
+"A restore staged … is waiting" and never the refusal reason.
+
+**S4-3: v1 restore writes files at bundle-supplied paths with only a
+`.md` check.** `workspace-bundle.ts:256-261` does
+`join(dataDir, "memory", key)` with `key` straight from the bundle, and
+the topics branch at `:264-273` validates neither `botId` nor the topic
+filename. Only the `workspaces/<botId>/MEMORY.md` branch validates its
+id (`:247`). A key like `../../../../Users/x/.ssh/authorized_keys.md`
+escapes the data directory. Reachable through the Drive and Telegram
+pull routes. The threat model is bounded — the v1 key is the deployment
+signing secret — but this is precisely what the contract names at
+`portable-backup-contract-2026-09-12.md:46` ("must not be reused
+blindly"), and v2 already has the right rule in `confinedTarget`. Fix:
+run both v1 branches through the v2 confinement check.
+
+**S4-4: v1 restore inserts bot/group records with `ownerId` intact.**
+`:226` and `:236` `unshift` the raw record; v2 strips it
+(`workspace-bundle-v2.ts:1522-1534`). On a multi-account install,
+restoring a v1 bundle materialises bots and groups owned by whoever made
+it — invisible to the restoring user under the `ownsBot` guard.
+
+**S4-5: v2 restore writes `social.json` byte-for-byte, keeping foreign
+owner ids.** `SUBSET_ROOT_FILES` includes it (`:488`) and only
+`bots.json`/`groups.json` are rewritten (`:1943`). The probe shows
+`ownerId`/`ownerAId`/`ownerBId` surviving intact. Two consequences: a
+bundle from another account re-attaches another account's friendships;
+and a restore onto a new machine writes a social graph that every read
+path filters out, while the receipt reports `committed` with no
+re-consent entry — a never-lose violation presented as success. Fix: a
+`portSocialRecords` pass mirroring `portGroupRecords`.
+
+**S4-6: there is no Drive disconnect anywhere in the product.**
+`disconnectDrive` exists at `drive-grants.ts:128` and is referenced only
+from tests — no route, no UI. The account connect route stores
+long-lived `accessToken` + `refreshToken`, and a user who connected it
+can never revoke it from Muster. The sibling Calendar card already ships
+the matching "Disconnecting removes access…" sentence.
+
+**S4-7: two cards call `/api/workspace/v2/telegram/push|pull`, which no
+route implements.** `PortableBackupCard.tsx:279,287` and
+`RecoveryCard.tsx:145`. The server implements `/api/workspace/telegram/*`
+(no `v2/`) and those handle the **v1** bundle, while the cards send the
+v2 stage/export schemas. Desktop gets a 404, hosted a 403. RecoveryCard
+advertises "Muster can pull your last portable backup from your own Drive
+**or Telegram** right now" — half that sentence is a dead button.
+
+**S4-8: RecoveryCard's Drive button uses the installation-scoped route,
+which cannot work on the device it targets.** It calls
+`/api/workspace/v2/drive/pull`, which reads the *installation* Drive
+config and 400s when absent. A newly provisioned device — the card's
+stated use case — has no installation Drive connection. The route that
+does work (`/api/workspace/google/pull`, account-linked and explicitly
+kept reachable on hosted) is never called from the recovery surface.
+
+### P3
+
+**S4-9:** the companion receipt reads per-user sync stamps that every
+writer stamps as the literal `"local"` (`workspace-backup-routes.ts:333`
+vs `:516,528,560,586`), so on any install with a session the phone/watch
+reports `lastPushAt: null` forever after confirmed pushes.
+
+**S4-10:** duplicate bot `id`s in a bundle are not rejected
+(`workspace-bundle-v2.ts:1840-1861` checks thread and message ids but
+not record ids) — the second record becomes unreachable and
+`StagedCounts` under-reports. Silent record loss inside a "staged, counts
+shown" restore.
+
+**S4-11:** a failed de-weaponization rewrite is silent
+(`restore-apply.ts:151-185`) — `rewriteIfChanged` returns `false` on a
+write failure, the caller ignores it, so a read-only `routines.json`
+keeps `enabled: true` with a live `nextRunAt` while the receipt reads
+`committed`. That is the one outcome the module header says must not
+happen.
+
+**S4-12:** a new stage can land in a stale pending's staging tree
+(`workspace-backup-routes.ts:171-184`): the order is stage-then-write-pending,
+so a 409 from `writePendingRestore` leaves a fresh tree on disk, and the
+next boot commits the **new** bytes under the **old** receipt's counts.
+
+**S4-13:** two stale module headers claim the v2 bundle family is not
+wired to any route or UI (`workspace-bundle-v2.ts:50-53`). Both modules
+are live. Documentation drift the contract asks to be kept honest.
+
 ### Verified clean in this sweep (do not re-audit)
+
+Route-table ownership and the hosted wall (every workspace/vault path is
+denied 403 on `SELF_HOSTED` before any body parse or file open); payload
+minimality (no route returns a token, passphrase or foreign Drive id;
+`no response ever carries the passphrase` holds by construction); token
+handling (zero `console.*` across the whole family; account routes
+re-check userId+sessionId around every external call, and the Drive
+transport re-reads its token mid-download and 409s on a swap); **v2 path
+safety** (no spawn/argv anywhere; every write goes
+`isSafeRelativePath` → `confinedTarget` → `writeFileAtomic`, symlinks
+skipped on export, and `preflightCommit` `realpath`s every intermediate
+directory on both sides — the browser-panel tar fix done properly); the
+v2 crypto envelope (version-before-key, AEAD over schema/kdf/counts/
+hash/keySlots, bounded KDF params, capped inflation, eleven named verify
+checks); the `modifiedTime` guard (stat-before-download,
+re-stat-and-refuse-before-write, refuses to create over an existing
+manifest — S4-1 is the *opposite* failure, losing a push rather than
+overwriting good data); retention never deleting the last known-healthy
+recovery point, under every policy including all-zeros; the CSRF
+origin/`sec-fetch-site` gate on every mutating family route; restore
+preview fidelity (no preview surface exists to drift; the card sends no
+`categories` so the staged set is exactly the verified set); v1 bundle
+detection returning an explicit, honest "that is a v1 bundle" message.
+
 
 Dispatch subtask bounds (1→400, 6→201, 7→400, enforced twice); dispatch
 to a memberless room fails honestly with `no_members`; routines cannot
