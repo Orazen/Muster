@@ -1,5 +1,17 @@
 # Bug report — 2026-09-26 sweep (read before picking up a fix)
 
+> **THREE P1 CROSS-ACCOUNT DEFECTS, reproduced live on a two-account
+> fixture — read the "Third sweep" section first.**
+> `POST /api/routines` and `POST /api/briefing/schedule` schedule
+> unattended work on another account's bot with no ownership check (S3-1);
+> the SSE tenant filter matches only top-level `botId`/`groupId`/`threadId`,
+> so every routine *and every bot* frame is delivered to every signed-in
+> stream, transcripts included (S3-2); and the routine-run `seen`/`cancel`
+> routes have no ownership guard (S3-3). All three are unfixed — they land
+> in `server/index.ts`, which another agent holds. These are reproduced
+> defects observed on a fixture deployment, **not** any claim about the
+> codebase's overall posture.
+
 **Status update (2026-09-27, second).** Fixed and on main, each with tests: items
 **1's stale-bundle enabler** (the runtime resolver now runs newer source
 over an older bundle with a warning), **4** (pair --redeem retired
@@ -351,4 +363,159 @@ to be lossy. A test that pins a display crop cannot catch a bug in what
 the crop feeds. The rule this adds: **when a value is cropped, truncated,
 or formatted for a human, the test must assert the un-cropped source of
 truth separately**, or the crop silently becomes the contract.
+
+---
+
+# Third sweep — 2026-09-27 (routines, approvals, why-journal, plan rehearsal, desktop budget)
+
+One hunt over the never-audited surfaces: routines and the approval
+family. All evidence is live — two real hosted accounts (`alice`/`bob`)
+driven through the repo's own multi-tenant harness
+(`pairingServerEnvironment` + `waitForOwnedServer`), on owned ports, with
+8845 untouched. Baseline first: 129/129 green across the nine existing
+routines/approval suites.
+
+**None of these are fixed — every one lands in `server/index.ts` or a
+driver file that another agent currently holds.** They are reported for
+the integrator. Numbers restart again; cite as "sweep 3, item N".
+
+### P1 — cross-account, reproduced live
+
+**S3-1: any signed-in account can schedule unattended work on another
+account's bot.** `POST /api/routines` (`server/index.ts:6269`) and
+`POST /api/briefing/schedule` (`:6936`) take `botId` from the request
+body and call `routines.create()` with no ownership check. The
+multi-tenant choke point at `:5801-5819` only pattern-matches
+`/api/bots/`, `/api/groups/`, `/api/threads/`, and its own comment says
+body-addressed routes must call `ownsRecord` themselves. These two do
+not — and the comment directly above `ownsRoutine` lists the routes it
+guards as "list, run, patch, delete", which is exactly how create slips
+through. Verified by reading the code as well as by probe: Bob's cookie,
+Alice's `botId`, `201`, and the routine lands enabled in *Alice's*
+calendar with Bob's prompt. The GET list is filtered, so it is invisible
+in Bob's UI and unattributable in Alice's. Fix: resolve `body.botId`,
+`store.bot(id)`, and 404 unless `ownsRecord` — the pattern already used
+at `:6510`.
+
+**S3-2: the SSE tenant filter does not cover routine or bot frames.**
+`visibleToClient` (`:1109-1140`) matches only *top-level*
+`payload.botId` / `groupId` / `threadId` and otherwise returns `true`.
+`RoutineEvent` (`server/routines.ts:153-156`) is
+`{kind:"routine", routine}` — the `botId` is nested, so every routine
+frame reaches every signed-in stream. Same for
+`broadcast({kind:"bot", bot: wireBot(bot)})` at `:928` and the richer
+variants at `:3324`, `:7766`, `:7910`, `:8171`, `:8739-8771`: the probe
+received another account's bot record *including transcript messages*.
+This one is pre-existing and wider than the routines surface that was
+assigned. Fix: stamp identity onto the frame at the broadcast sites and
+teach `visibleToClient` to resolve a nested `bot.id` / `routine.botId` /
+`run.botId` as a belt-and-braces second gate.
+
+**S3-3: `/api/routine-runs/:id/seen` and `/cancel` have no ownership
+check.** `:6293-6299` sits outside the choke point's matchers and, unlike
+the four routes immediately above it, carries no `ownsRoutine` guard. The
+probe marked another account's run seen (200, returning that run's name
+and prompt) and stamped `seenAt`, which drives the red "needs attention"
+dot — so it also suppresses another account's failure alerts. `/cancel`
+is the same unguarded code; it could not be landed live only because the
+fixture bot had no engine and the run had already settled.
+
+### P2
+
+**S3-4: `ownsRoutine` fails open when the bot record is gone.**
+`:6251-6254` returns `!b || ownsRecord(b)` — a missing bot means
+"visible to everyone". `disableForBot` disables the routine on bot
+delete but leaves the definition and its full prompt on disk. Probe:
+Alice creates a routine, deletes her bot, and Bob's `GET /api/routines`
+returns her routine and prompt. The same fail-open shape exists in
+`visibleToClient` (`:1121`, `:1125`).
+
+**S3-5: `autoDecision` only ever sees the first 200 characters of a
+command.** Every driver crops the permission summary before emitting —
+`claude.ts:220-225`, `codex.ts:277-284`, `acp/core.ts:436` — and
+`auto-approve.ts:87` runs `looksDestructive` / `looksSensitive` over
+that crop. `"echo " + "a"*200 + " && sudo rm -rf / --no-preserve-root"`
+is approved. This is not a clever agent defeating the guard, it is a
+dumb long echo; the module's own comment disclaims only the former. Fix:
+carry the untruncated command on `request.opened` as its own field and
+scan that, keeping `summary` for the card subtitle. *(Stated as a wiring
+defect, not as any claim about posture.)*
+
+**S3-6: in `fullAuto` the driver approves before the harness records
+anything.** `codex.ts:273-275` answers the permission RPC inside the
+driver, paired with `sandbox:"danger-full-access"` and
+`approvalPolicy:"never"`; `antigravity.ts:127` **defaults `fullAuto` to
+true** and turns it into `--dangerously-skip-permissions`;
+`claude.ts:538` uses `bypassPermissions`. Because the answer never
+becomes a `request.opened`, there is no card, no notify, no
+`decisions.record()`, nothing in `/api/audit`, and nothing in the why or
+rehearsal evidence chain. `grep -rn fullAuto src/` returns nothing — the
+flag has no UI surface, and for Antigravity the permissive value is the
+default a user gets without asking for it.
+
+**S3-7: the 15-minute permission timeout is invisible.** Both drivers
+`finish("deny", DENY_TIMEOUT_NOTE, "timeout")`; the note goes to the
+agent, and the harness only sees `request.resolved` with
+`source:"timeout"`. The fold at `:1760-1776` sets `dismissed: source !==
+"user"`, and `OptionCard.tsx:70` returns null for a dismissed card — the
+card is removed from the transcript with no chip, no notify, no
+`runtime.error`. A human who steps away for fifteen minutes returns to an
+approval that vanished for no stated reason, indistinguishable from the
+bot giving up. Fix: add `note?: string` to `request.resolved`, push an
+activity chip, and leave the card visible.
+
+**S3-8: plan-rehearsal evidence can be forged from the very string being
+approved.** `currentPlan(event.summary, …)` accepts a plan stated in
+`summary`, but `summary` is the *bot-authored tool-call text*, not an
+assistant statement. A bot whose recent tools are Read and Bash writes a
+Bash command containing `PLAN TOOLS:\n- Read\n- Bash` and the human's card
+shows a full-match rehearsal badge for a plan the bot just invented
+inside the string under review. The thread guard at `:1636` prevents
+cross-thread evidence but says nothing about authorship. Fix: accept
+`summary` only for engines with no assistant text stream, and stamp the
+card with which source produced the plan.
+
+### P3
+
+**S3-9: `isDesktopActionTool` cannot strip an MCP server name containing
+an underscore.** `desktop-guardrails.ts:106` uses `/^mcp__[^_]+__/`, but
+`custom-mcp.ts:32` explicitly allows underscores in server names.
+`mcp__cua__click` matches; `mcp__cua_driver__click` does not — so
+`desktopAsk` is false and the over-budget gate returns the auto-approved
+answer. A user who names their computer-use bridge with an underscore
+gets unbounded unattended screen actions. Fix: split on the **last**
+`__`, and use one shared helper in both this file and `auto-approve.ts:53`
+so the two can never disagree again.
+
+**S3-10: the approval card's `held` line states a falsehood on unattended
+turns.** `:1746` claims "auto mode stopped to ask" whenever the asker has
+`autoApprove`, but `auto-approve.ts:85` returns `null` for an unattended
+turn *before* any destructive check — nothing destructive was detected and
+auto mode never evaluated. Every webhook-driven ask carries a false
+reason.
+
+**S3-11: `approvalWhy` has no staleness bound and no turn identity**
+(`approval-why.ts:31-39`) — a long-lived main thread attaches an entry
+from days earlier in the same visual slot as immediate context. Bot
+scoping itself is correct and verified.
+
+**S3-12: a malformed `?from`/`?to` widens the window instead of
+erroring** (`:6256-6267`) — `?from=garbage` means "no filter", returning
+up to 2000 run receipts with full output. Latent today (the UI filters
+client-side); fix is to 400 on a present-but-unparseable bound, matching
+`?limit` at `:7944`.
+
+### Verified clean in this sweep (do not re-audit)
+
+Dispatch subtask bounds (1→400, 6→201, 7→400, enforced twice); dispatch
+to a memberless room fails honestly with `no_members`; routines cannot
+double-fire (3× `runNow` → exactly 1 `startTurn`, 2 left `queued`; two
+routines at one instant → 1 dispatch); routines cannot fire for a deleted
+bot; destination-thread liveness; why-journal cross-bot/thread leakage
+(one file per thread + `assertThreadId`, plus a thread guard on the card
+path); duplicate `itemId` invalidates a rehearsal run; `GET /api/bots/:id/why`
+scoping (Bob gets 404 on Alice's bot); a `question` request can never be
+auto-answered by kind confusion; `markSeen` idempotence; run snapshots
+are immutable under later routine edits; `canTransition` is a strict DAG.
+
 
