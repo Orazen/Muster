@@ -46,31 +46,53 @@ interface App {
   base: string;
   stop: () => Promise<void>;
   bots: () => Promise<z.infer<typeof botsEnvelope>["bots"]>;
-  call: (method: string, path: string, body?: unknown) => Promise<{ status: number; text: string }>;
+  call: (method: string, path: string, body?: RequestBody) => Promise<{ status: number; text: string }>;
   botOnHangingEngine: () => Promise<string>;
 }
 
-async function bootWith(parallelThreads?: unknown): Promise<App> {
+/** The `parallelThreads` config this harness writes, as a named type rather
+ * than an unparsed value — the anti-slop rules require a concrete contract. */
+interface ParallelThreadsFixture {
+  default?: number;
+  perBot?: Record<string, number>;
+}
+
+/** The server config this harness writes: a named contract rather than an open
+ * dictionary, so the lint rules have something concrete to check. */
+interface ServerConfigFixture {
+  instances: Record<
+    string,
+    { driver: string; environment?: Record<string, string>; config?: { cli: string; fullAuto?: boolean } }
+  >;
+  parallelThreads?: ParallelThreadsFixture;
+}
+
+/** A request body this harness actually sends. */
+interface RequestBody {
+  text?: string;
+  title?: string;
+  name?: string;
+  modelSelection?: { instanceId: string; model: string };
+}
+
+async function bootWith(parallelThreads?: ParallelThreadsFixture): Promise<App> {
   const port = await freePortBlock([0, 1]);
   const base = `http://127.0.0.1:${port}`;
   const home = mkdtempSync(join(tmpdir(), "omb-parallel-"));
   mkdirSync(join(home, ".muster"), { recursive: true });
-  writeFileSync(
-    join(home, ".muster", "config.json"),
-    JSON.stringify({
-      // hang: the prompt never resolves, so a turn stays in flight until
-      // something settles it. That is what makes a second concurrent turn
-      // observable at all.
-      instances: {
-        hanger: {
-          driver: "grokAgent",
-          environment: { FAKE_ACP_MODE: "hang" },
-          config: { cli: FAKE_CLI, fullAuto: true },
-        },
+  // hang: the prompt never resolves, so a turn stays in flight until something
+  // settles it. That is what makes a second concurrent turn observable at all.
+  const config: ServerConfigFixture = {
+    instances: {
+      hanger: {
+        driver: "grokAgent",
+        environment: { FAKE_ACP_MODE: "hang" },
+        config: { cli: FAKE_CLI, fullAuto: true },
       },
-      ...(parallelThreads === undefined ? {} : { parallelThreads }),
-    }),
-  );
+    },
+  };
+  if (parallelThreads) config.parallelThreads = parallelThreads;
+  writeFileSync(join(home, ".muster", "config.json"), JSON.stringify(config));
 
   const child: ChildProcess = spawn(process.execPath, ["--experimental-strip-types", "server/index.ts"], {
     cwd: join(SERVER_DIR, ".."),
@@ -90,7 +112,7 @@ async function bootWith(parallelThreads?: unknown): Promise<App> {
     await new Promise((r) => setTimeout(r, 250));
   }
 
-  const call = async (method: string, path: string, body?: unknown) => {
+  const call = async (method: string, path: string, body?: RequestBody) => {
     const res = await fetch(`${base}${path}`, {
       method,
       headers: body ? { "content-type": "application/json" } : undefined,
