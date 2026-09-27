@@ -1,6 +1,7 @@
 import { createAuthClient } from "better-auth/client";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { createSessionRecovery, INITIAL_SESSION, SESSION_UNAVAILABLE, type SessionPayload } from "./session-recovery";
+import { noteKnownSession } from "./known-session";
 import { authDestination } from "./auth-navigation";
 
 // The server always serves the API from the same origin/port as the UI
@@ -71,6 +72,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const { user, session } = auth;
   const loading = auth.status === "loading";
   const [capabilities, setCapabilities] = useState<AuthCapabilities>(NO_CAPABILITIES);
+
+  // Publish what we know to the module-level api() helper, which has no access
+  // to React state and used to treat every 401 as a dead session. `ready` with
+  // no user is the ONLY confirmed signed-out state; `loading` and `unavailable`
+  // publish null, so a transient failure cannot eject a working session.
+  useEffect(() => {
+    noteKnownSession(auth.status === "ready" ? Boolean(user) : null);
+  }, [auth.status, user]);
 
   useEffect(() => {
     void recovery.refresh();

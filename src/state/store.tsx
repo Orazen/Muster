@@ -23,6 +23,7 @@ import { currentCall } from "@/lib/call";
 import { newIntentId, parkSend, reconcileThread, retireSend, type PendingSend } from "@/lib/message-intent";
 import { soulMdFor, type AgentTemplate } from "@/lib/agent-templates";
 import { seedDraft } from "@/lib/drafts";
+import { isSessionConfirmedSignedOut } from "@/lib/known-session";
 import { showNotification } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { readChatSelection, resolveChatSelection, saveChatSelection } from "./chat-selection";
@@ -1176,7 +1177,22 @@ export async function api(path: string, init?: RequestInit): Promise<any> {
     // .catch(() => {}) sinks — the user got a permanently EMPTY app
     // (blank transcript, no bots) instead of a login page. Bounce to
     // sign-in once, preserving where they were.
-    if (res.status === 401 && !window.location.pathname.startsWith("/sign") && window.location.pathname !== "/pair") {
+    //
+    // The redirect is now conditional on the app CONFIRMING it is signed out,
+    // not on the status code alone. Three endpoints answer 401 to a genuinely
+    // signed-in user on a local install, because `requestUserId` is only
+    // assigned under SELF_HOSTED — and any 401 was enough to navigate, so
+    // saving a provider API key dumped a signed-in user on the sign-in page,
+    // which then greeted them by name. `AuthProvider` already knows the
+    // session; `loading` and `unavailable` both mean "we do not know" and must
+    // not throw anyone out of a working session. A real expiry still redirects,
+    // because a confirmed signed-out is exactly the empty-app case above.
+    if (
+      res.status === 401
+      && isSessionConfirmedSignedOut()
+      && !window.location.pathname.startsWith("/sign")
+      && window.location.pathname !== "/pair"
+    ) {
       window.location.href = `/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
     }
     throw new Error(body.error ?? `${res.status} ${res.statusText}`);
@@ -1237,7 +1253,12 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
     getAccountId: () => accountRef.current,
     getBot: (botId) => stateRef.current.rosterHydrated ? stateRef.current.bots.find((bot) => bot.id === botId) : undefined,
     request: (url, init) => fetch(url, init),
+    // The same rule as the api() helper, and this path had NO pathname
+    // exclusion at all: a 401 from interrupt or stop-cleanup ejected from any
+    // page, signed in or not. Guarded for the same reason — an in-flight stop
+    // must not navigate a user whose session is fine.
     onUnauthorized: () => {
+      if (!isSessionConfirmedSignedOut()) return;
       window.location.href = `/sign-in?next=${encodeURIComponent(window.location.pathname + window.location.search)}`;
     },
   }), [accountId]);
