@@ -1,18 +1,28 @@
 # Bug report — 2026-09-26 sweep (read before picking up a fix)
 
-**Status update (2026-09-27).** Fixed and on main, each with tests: items
+**Status update (2026-09-27, second).** Fixed and on main, each with tests: items
 **1's stale-bundle enabler** (the runtime resolver now runs newer source
 over an older bundle with a warning), **4** (pair --redeem retired
 honestly — it no longer touches the network, so it cannot burn a code;
 both copy surfaces point at working flows), **5** (sessions --json
 carries a display prefix, never a raw token), **8** (inbox reads the last
-activity chip like the mascot), **10, 12, 13, 14, 15** (eval trend and
-graders), and **19**. Items **6 and 7** were claimed and are being fixed
-by the lane that owns workspace-brain. Item **20** is left as pinned: the
+activity chip like the mascot), **9** (a carried /pair code no longer
+rides a query string — the gate stashes the return path in same-tab
+session storage and restores the fragment after sign-in), **10, 12, 13,
+14, 15** (eval trend and graders), **19**, and **21's** org-name cap,
+operator-gated Organization card, and the no-change branding blur that
+used to send a config PUT (the most accidental trigger of item 2) on
+every blur. Items **6 and 7** were claimed and landed by the lane that
+owns workspace-brain. Item **20** is left as pinned: the
 throttle-counts-successes behavior is deliberately locked by a security
-test, so changing it is an owner decision. Still open: **1, 2, 3, 17**
-(all `server/index.ts`, integrator lane), **9, 18** (auth/entry lane),
-**21** (cosmetic).
+test, so changing it is an owner decision.
+
+**Open, with the file occupied as of this writing:** items **1, 2 (the
+server-side reload gate — the integrator has it staged mid-commit), 3,
+17**, and **21's** canvas-tile label — all `server/index.ts`, integrator
+lane. **18** stays with the auth lane. Do not race the shared file: the
+sweep's own history has one index-corruption incident from concurrent
+staging, and the fix list is not worth a second.
 
 Four parallel hunts over the freshest surfaces, all evidence live: an
 isolated boot per the repo's own harness pattern (owned data dirs, owned

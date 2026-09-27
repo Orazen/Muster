@@ -114,6 +114,7 @@ import {
   localVmMaxInstances,
   localVmMode,
   parseConfigPatch,
+  providerReloadRequired,
   saveConfig,
   withInstanceCli,
   EVENTS_DIR,
@@ -9691,10 +9692,17 @@ let requestUserEmail = "";
         saveConfig(patch);
         Object.assign(cfg, loadConfig());
       }
-      // provider keys change the fleet; a profile or voice edit must not
-      // kill in-flight turns with a pointless reload — no driver reads
-      // either, and picking a voice mid-turn should be free
-      if (Object.keys(patch).some((k) => k !== "profile" && k !== "tts")) await reloadProviders();
+      // Only a section the engine registry actually bakes in may tear the
+      // fleet down. reloadProviders() disposes every engine on purpose and
+      // settles every busy bot with "turn interrupted — provider settings
+      // changed" — correct for a changed credential, and destructive for
+      // anything else. This used to be a denylist of `profile`/`tts`, so a
+      // cosmetic save (an org name, a retention window, a thread width, a
+      // default effort) killed every in-flight turn in the deployment, for an
+      // operator who had done nothing that could affect a turn. The set now
+      // lives in config.ts next to the schema, and is exactly what
+      // instanceConfigs() reads.
+      if (providerReloadRequired(patch)) await reloadProviders();
       // Account sync: the profile the onboarding wizard saves used to live
       // only in config.json — a deployment-wide blob — so the signed-in
       // account's name stayed whatever it signed up with and the wizard

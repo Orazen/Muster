@@ -221,6 +221,57 @@ export function parseStoredConfig(value: JsonValue): AppConfig {
   return parsed.data;
 }
 
+/** Every top-level config section, taken from the schema itself through zod's
+ * public `keyof()` so the list cannot fall behind the shape it describes.
+ * Exported for the gate's own regression test. */
+export const CONFIG_SECTIONS: readonly string[] = Object.freeze(appConfigSchema.keyof().options);
+
+/** The sections whose change genuinely requires rebuilding the engine registry.
+ *
+ * `reloadProviders()` is destructive BY DESIGN: it disposes every engine on
+ * purpose and settles every busy bot with "turn interrupted — provider
+ * settings changed". That is correct when an engine is holding a credential
+ * that just changed, and it is catastrophic when it is not.
+ *
+ * The set is exactly what `instanceConfigs()` reads — the one function that
+ * builds the registry's instance map and injects per-instance credential
+ * environment. Anything not listed here is read live, per turn or per request,
+ * and so is already in effect the moment it is saved; disposing the fleet for
+ * it destroys work for no reason.
+ *
+ * An ALLOWLIST, not the denylist of `profile`/`tts` this replaces. The two
+ * failure modes are not symmetric:
+ *
+ *  - a false positive (a live section listed here) destroys an in-flight turn
+ *    fleet-wide, silently, for an operator who did nothing that could affect
+ *    one — which is the bug this replaces;
+ *  - a false negative (a registry section missing) means the change lands on
+ *    the next restart instead of immediately, which is visible and recoverable.
+ *
+ * So the cost of a mistake here is asymmetric, and the list errs toward not
+ * reloading. `server/config-reload-gate.test.ts` fails if a new section is
+ * added without being classified, which is the way this gate rotted in the
+ * first place: a denylist nobody remembers to extend. */
+export const PROVIDER_RELOAD_SECTIONS: ReadonlySet<string> = new Set<string>([
+  "box", // BOX_TOKEN is injected as per-instance environment
+  "customProviders", // adds/removes registry entries
+  "instances", // the registry's own instance map
+  "opencodeGo", // OPENCODE_API_KEY environment
+  "providers", // per-driver API keys: the fleet's credentials
+  "xai", // XAI_API_KEY, and whether the grokApi instance exists at all
+]);
+
+/** Does this patch require tearing down and rebuilding the engine registry?
+ *
+ * Takes the PARSED patch rather than the raw request body, deliberately: a
+ * section the patch schema rejects is not a section the caller can save, and a
+ * section the operator did not actually change is not a reason to interrupt
+ * anyone. The cast inside is on the parsed shape, whose every field is optional
+ * by construction — see the completeness cases in config-reload-gate.test.ts. */
+export function providerReloadRequired(patch: Readonly<Partial<ConfigPatch>>): boolean {
+  return Object.keys(patch).some((key) => PROVIDER_RELOAD_SECTIONS.has(key));
+}
+
 export function parseConfigPatch(value: JsonValue): ConfigPatch {
   const parsed = appConfigPatchSchema.safeParse(value);
   if (!parsed.success) {
