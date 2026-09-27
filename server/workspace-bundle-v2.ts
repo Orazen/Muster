@@ -1963,6 +1963,23 @@ function buildStagedPlan(
         blocked: [{ path: BOTS_FILE_NAME, detail: "the bot store is not a JSON array of bot records" }],
       };
     }
+    // Refuse a duplicate bot id rather than collapsing it. A `Set` would drop
+    // the second record silently: the counts then report the UNIQUE number
+    // while N+1 records are written, and `store.bot(id)` — a linear find —
+    // makes every record after the first unreachable by id. So a restore could
+    // stage a fleet, announce it, and then resolve a name to the wrong bot.
+    // The thread and message ids above already chose refusal over collapse for
+    // exactly this reason; record ids were the one place that did not.
+    const seenRecordIds = new Set<string>();
+    for (const record of botRecords) {
+      if (seenRecordIds.has(record.id)) {
+        return {
+          ok: false,
+          blocked: [{ path: `${BOTS_FILE_NAME}/${record.id}`, detail: "duplicate bot id" }],
+        };
+      }
+      seenRecordIds.add(record.id);
+    }
     for (const record of botRecords) botIds.add(record.id);
   }
   let groupsText: string | null = null;

@@ -164,6 +164,17 @@ const stageV2Restore = (
   // decisions and social rows all reference bots by id.
   const stageOptions: bundleV2.StageRestoreV2Options = { stagingDir: stagingPathFor(dataDir), remapIds: false };
   if (categories !== undefined) stageOptions.categories = categories;
+  // Refuse BEFORE staging anything, not after. `writePendingRestore` below
+  // throws "a staged restore is already waiting" whenever a record exists, so
+  // staging first meant a second restore attempt could write a whole tree of
+  // new bytes and then fail to record them — leaving the OLD record pointing at
+  // the NEW bytes, which the next boot would commit under the old counts.
+  // Checking first means the ordered pair never reaches the half state, and it
+  // costs nothing: this runs before any file is opened, matching the wall's
+  // existing "refuse before any body parsing" posture.
+  if (readPendingRestore(dataDir)) {
+    return { ok: false, status: 409, body: { error: "a staged restore is already waiting for restart — discard it before staging another" } };
+  }
   const staged = bundleV2.stageRestoreV2(decrypt.payload, stageOptions);
   if (staged.status !== "staged") {
     return { ok: false, status: 400, body: { status: staged.status, error: staged.error ?? "the restore was refused", blocked: staged.blocked } };
@@ -180,6 +191,17 @@ const stageV2Restore = (
     if (staged.counts !== undefined) pending.counts = staged.counts;
     writePendingRestore(dataDir, pending);
   } catch (e) {
+    // The pre-check above removes the known reason this can fail, but the
+    // invariant that matters is "never leave a staging tree nothing points at".
+    // stageRestoreV2 cleans up after ITS OWN failures; this catch covers the
+    // one it cannot see, so the rollback lives here too — the same
+    // rmSync the shipped discard route uses, in the same swallow-because-it-is
+    // best-effort posture clearPendingRestore uses.
+    try {
+      rmSync(stagingPathFor(dataDir), { recursive: true, force: true });
+    } catch {
+      /* best effort: the refusal below is the real answer either way */
+    }
     return { ok: false, status: 409, body: { error: e instanceof Error ? e.message : String(e) } };
   }
   return {
@@ -513,7 +535,13 @@ const routes: BackupRoute[] = [
           await access.assertCurrent();
           const snapshotId = await accountDrive.drivePushFor(accessToken, bytes.toString("utf8"), access.assertCurrent);
           await access.assertCurrent();
-          syncState.stampSync("local", "push", "google-account");
+          // The owner's own bucket, not the literal "local". The companion
+          // receipt READS `requestUserId ?? "local"`, so stamping "local" here
+          // wrote a file nothing ever read and left lastPushAt/lastPullAt null
+          // forever on any signed-in install. `binding.userId` was proven equal
+          // to ctx.requestUserId by the check above, so this is the same key the
+          // reader uses.
+          syncState.stampSync(binding.userId, "push", "google-account");
           return json(res, 200, { uploaded: snapshotId, counts: payload.counts, skipped: payload.skipped ?? [] });
         }
         const snapshotId = isText(body?.snapshotId) ? body.snapshotId : undefined;
@@ -525,7 +553,7 @@ const routes: BackupRoute[] = [
         const selected = bundleV2.parseRestoreCategories(body ?? {});
         if (selected.error !== undefined) return json(res, 400, { error: selected.error });
         const out = stageV2Restore(passphrase, payloadText, "google-account", ctx.dataDir(), selected.categories);
-        if (out.ok) syncState.stampSync("local", "pull", "google-account");
+        if (out.ok) syncState.stampSync(binding.userId, "pull", "google-account");
         json(res, out.ok ? 200 : out.status, out.body);
       } catch (e) {
         json(res, 502, { error: e instanceof Error ? e.message : String(e) });
@@ -557,7 +585,11 @@ const routes: BackupRoute[] = [
         const payload = bundleV2.buildPayloadV2({ dataDir: ctx.dataDir(), appVersion: ctx.appVersion() });
         const bytes = bundleV2.encryptBundleV2(payload, { passphrase });
         const uploaded = await driveSync.uploadBundle(token.accessToken, bytes.toString("utf8"), driveSync.BUNDLE_V2_NAME);
-        syncState.stampSync("local", "push", "google-drive");
+        // Same key the companion receipt reads (`requestUserId ?? "local"`), so
+        // a signed-in install's stamp is not written where nothing looks for it.
+        // With no session this is still exactly "local", so a desktop install is
+        // byte-identical to before.
+        syncState.stampSync(ctx.requestUserId ?? "local", "push", "google-drive");
         json(res, 200, { uploaded: uploaded.id, counts: payload.counts, skipped: payload.skipped ?? [] });
       } catch (e) {
         json(res, 502, { error: e instanceof Error ? e.message : String(e) });
@@ -583,7 +615,7 @@ const routes: BackupRoute[] = [
         const selected = bundleV2.parseRestoreCategories(body ?? {});
         if (selected.error !== undefined) return json(res, 400, { error: selected.error });
         const out = stageV2Restore(passphrase, payload, "google-drive", ctx.dataDir(), selected.categories);
-        if (out.ok) syncState.stampSync("local", "pull", "google-drive");
+        if (out.ok) syncState.stampSync(ctx.requestUserId ?? "local", "pull", "google-drive");
         json(res, out.ok ? 200 : out.status, out.body);
       } catch (e) {
         json(res, 502, { error: e instanceof Error ? e.message : String(e) });

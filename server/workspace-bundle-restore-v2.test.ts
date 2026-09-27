@@ -1688,6 +1688,38 @@ describe("workspace bundle v2 restore", () => {
     );
     expect(none.creates).toEqual([]);
   });
+  it("refuses a bundle carrying two bot records with the same id", () => {
+    // A `Set` used to collapse these, so the restore reported the UNIQUE count
+    // while N+1 records were written, and `store.bot(id)` — a linear find —
+    // left every record after the first unreachable by id. A staged restore that
+    // announces a fleet and then resolves a name to the wrong bot is worse than
+    // a refusal, and the thread/message ids above already chose refusal over
+    // collapse for exactly this reason.
+    const root = mkdtempSync(join(tmpdir(), "omb-dupe-bot-"));
+    try {
+      // Two records, one id: the second is a copy of the first under a new name,
+      // which is the shape a merge or a hand-edited bots.json produces.
+      // Entry 1 becomes a RENAME of entry 0 — same id, new name — which is the
+      // shape a merge or a hand-edited bots.json produces. Built with a spread
+      // rather than a JSON round trip so the element type stays the literal's.
+      const dupe = BOT_RECORDS.map((record, index) =>
+        index === 1 ? { ...BOT_RECORDS[0]!, name: "Impostor" } : record,
+      );
+      const ids = dupe.map((record) => record.id);
+      expect(new Set(ids).size, "the fixture must actually contain a duplicate id").toBe(ids.length - 1);
+      const fixture = writeFixture(root, { botsJson: JSON.stringify(dupe, null, 2) });
+      const sealed = exportBundle(fixture);
+      const stagingDir = join(root, "staging");
+      const staged = stageRestoreV2(openPayload(sealed), { stagingDir });
+      expect(staged.status).toBe("refused");
+      expect(staged.blocked).toEqual([{ path: `bots.json/${BOT_ONE}`, detail: "duplicate bot id" }]);
+      // A refusal writes nothing at all — the staging directory is not created.
+      expect(existsSync(stagingDir)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
 });
 
 /** The fixture plus the automation/history roots the base fixture leaves out,
