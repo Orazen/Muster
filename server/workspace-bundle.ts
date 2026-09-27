@@ -10,11 +10,12 @@
 // shape — docs/plans/account-sync-portable-profile.md.
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { z } from "zod";
 
 import type { Store } from "./store.ts";
+import { confinedTarget } from "./workspace-bundle-v2.ts";
 import { workspaceDir } from "./workspace.ts";
 
 const BUNDLE_MAGIC = "muster-workspace-bundle";
@@ -254,21 +255,30 @@ export function restoreBundle(store: Store, dataDir: string, workspace: BundleWo
       continue;
     }
     if (!key.endsWith(".md")) continue;
-    const dir = join(dataDir, "memory");
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const target = join(dir, key);
-    if (existsSync(target)) continue;
-    writeFileSync(target, text, { mode: 0o600 });
+    // The bundle names its own write target, so the target is confined to the
+    // data directory by the same rule v2 uses. A key carrying `..` used to
+    // write anywhere the process could reach: this is the "must not be reused
+    // blindly" clause of the portable-backup contract, and the v1 key is the
+    // deployment signing secret, so a bundle from elsewhere must not get to
+    // choose its own destination.
+    const confined = confinedTarget(dataDir, join("memory", key));
+    if (!confined) continue;
+    mkdirSync(dirname(confined), { recursive: true, mode: 0o700 });
+    if (existsSync(confined)) continue;
+    writeFileSync(confined, text, { mode: 0o600 });
     result.memoryFilesRestored += 1;
   }
   for (const [botId, topics] of Object.entries(parsed.data.topics)) {
-    const dir = join(workspaceDir(botId), "memory");
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // Both halves come from the bundle: `botId` builds a directory and `name`
+    // builds a file inside it. Neither was validated, so the same confinement
+    // rule applies to the whole relative path, built once from the two parts.
     for (const [name, text] of Object.entries(topics)) {
       if (!name.endsWith(".md")) continue;
-      const target = join(dir, name);
-      if (existsSync(target)) continue;
-      writeFileSync(target, text, { mode: 0o600 });
+      const confined = confinedTarget(dataDir, join("workspaces", botId, "memory", name));
+      if (!confined) continue;
+      mkdirSync(dirname(confined), { recursive: true, mode: 0o700 });
+      if (existsSync(confined)) continue;
+      writeFileSync(confined, text, { mode: 0o600 });
       result.memoryFilesRestored += 1;
     }
   }

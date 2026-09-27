@@ -169,8 +169,13 @@ export function isSafeRelativePath(path: string): boolean {
 /** Resolve a stored path under a data directory, or null when the result
  * escapes it. Belt and braces on top of `isSafeRelativePath`: a symlinked
  * intermediate component is the caller's problem, but escaping the root by
- * string arithmetic never should be. */
-function confinedTarget(dataDir: string, path: string): string | null {
+ * string arithmetic never should be.
+ *
+ * Exported because the v1 restore path in workspace-bundle.ts needs the same
+ * rule — it was building write targets with a bare `join(dataDir, "memory", key)`
+ * and checking only the `.md` extension, so a key carrying `..` wrote outside
+ * the data directory. One rule, two callers, rather than a third near-copy. */
+export function confinedTarget(dataDir: string, path: string): string | null {
   if (!isSafeRelativePath(path)) return null;
   const root = resolve(dataDir);
   const target = resolve(root, path);
