@@ -311,6 +311,28 @@ export function PortableBackupCard() {
       return stageResult(data);
     });
 
+  /** Remove Muster's stored Drive grant for this account. Local deletion only:
+   *  the authorization itself is revoked in the user's Google account, so the
+   *  button's title says that rather than implying this undid it. Without this
+   *  the only way to drop the grant was to delete the install's database, which
+   *  the privacy policy used to admit out loud. */
+  const accountDisconnect = () =>
+    run("Disconnecting your Google Drive…", async (request) => {
+      const data = await readWorkspaceReply(
+        request,
+        "/api/workspace/google/connection",
+        undefined,
+        z.object({ disconnected: z.literal(true) }),
+        undefined,
+        "DELETE",
+      );
+      if (!data) return null;
+      setAccountDrive({ available: true, connected: false });
+      setSnapshots(null);
+      setSelectedSnapshotId(null);
+      return "Drive disconnected. Backups already in your Drive are still there.";
+    });
+
   const loadSnapshots = () =>
     run("Listing your backups…", async (request) => {
       const data = await readWorkspaceReply(request, "/api/workspace/google/snapshots", undefined, snapshotsReply);
@@ -443,6 +465,9 @@ export function PortableBackupCard() {
               </button>
               <button type="button" disabled={busy} onClick={() => void loadSnapshots()} className={button} title="List every backup in your Drive so you can restore an older one">
                 <ChevronDown size={13} /> Choose older backup…
+              </button>
+              <button type="button" disabled={busy} onClick={() => void accountDisconnect()} className={button} title="Delete Muster's stored Drive tokens on this install. Your Google authorization is revoked separately, in your Google account.">
+                <X size={13} /> Disconnect my Drive
               </button>
             </>
           ) : (

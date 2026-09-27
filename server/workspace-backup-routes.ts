@@ -49,7 +49,7 @@ import { json, readBody, isText } from "./http-helpers.ts";
 import * as accountDrive from "./account-drive.ts";
 import { googleDriveConnectConfigured } from "./google-auth.ts";
 import { companionStatus } from "./companion-status.ts";
-import { consumeDriveState } from "./drive-grants.ts";
+import { consumeDriveState, disconnectDrive } from "./drive-grants.ts";
 import * as bundleV2 from "./workspace-bundle-v2.ts";
 import {
   clearPendingRestore,
@@ -383,6 +383,44 @@ const routes: BackupRoute[] = [
         json(res, 200, { url });
       } catch {
         json(res, 501, ACCOUNT_DRIVE_OFF);
+      }
+    },
+  },
+  {
+    // Account-linked Google Drive DISCONNECT — the verb the connect route never
+    // had. Until now the only way to see this grant was to delete the install's
+    // database, and the privacy policy said so out loud. A grant a user cannot
+    // withdraw is not consent they gave.
+    //
+    // Scope, deliberately narrow: this removes Muster's LOCAL record of the
+    // grant and nothing else. It does NOT revoke the authorization at Google —
+    // that lives in the user's Google account, and pretending otherwise would
+    // make the button lie. `disconnectDrive` advances the grant generation, so
+    // any in-flight `accountDriveAccess` assertion self-invalidates rather than
+    // needing a second guard here.
+    //
+    // Guards are the connect route's, verbatim: 501 with no session or no
+    // credential pair (so a request without an account row can never reach the
+    // database), 401 if the caller's session is not the one the grant belongs
+    // to, and the same-origin / sec-fetch-site check, because a cross-site
+    // request should not be able to disconnect anything.
+    match: (method, path) => method === "DELETE" && path === "/api/workspace/google/connection",
+    handle: async (req, res, ctx) => {
+      if (!ctx.requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
+      if (!googleDriveConnectConfigured()) return json(res, 501, ACCOUNT_DRIVE_OFF);
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      const origin = req.headers.origin;
+      if ((origin && origin !== requestOrigin(req)) || req.headers["sec-fetch-site"] === "cross-site") {
+        return json(res, 403, { error: "Open Drive settings in Muster to disconnect." });
+      }
+      try {
+        const binding = await ctx.session?.();
+        if (!binding || binding.userId !== ctx.requestUserId) return json(res, 401, { error: "Sign in again to disconnect Drive." });
+        disconnectDrive(getDb(), binding.userId);
+        json(res, 200, { disconnected: true });
+      } catch {
+        json(res, 502, { error: "Google Drive could not be disconnected — try again." });
       }
     },
   },

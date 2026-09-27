@@ -99,8 +99,9 @@ specific data or a security investigation.</li>
 <li><strong>Revoking access.</strong> You can remove Muster's authorization in your
 <a href="https://myaccount.google.com/connections">Google account connections</a>. Revocation prevents further
 authorized access; it does not automatically erase credentials or copies already stored by Muster. The workspace
-backup interface currently has no Drive-disconnect control. Request removal of stored account credentials from the
-operator and manage existing app-data backups separately in Google Drive.</li>
+workspace backup settings can also disconnect Drive, which deletes Muster's stored tokens for your account on this
+install immediately; it does not remove the app-data backups already in your Drive, so manage those separately there.
+For removal of any other stored account credentials, ask the operator.</li>
 </ul>
 
 <h2>5. AI model providers and local processing</h2>
