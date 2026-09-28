@@ -19,6 +19,8 @@ struct ChatListView: View {
     @State private var searching = false
     @State private var showingWalkie = false
     @State private var showingUpdates = false
+    /// The staged share whose destination is being chosen, if any.
+    @State private var shareChooser: SharedText?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -42,6 +44,32 @@ struct ChatListView: View {
 
                 ScrollView {
                     LazyVStack(spacing: 0) {
+                        // Text shared in from another app waits here, above
+                        // everything, because it arrived on purpose and will
+                        // not send itself. Tapping a row asks which
+                        // conversation it belongs to — silently picking one
+                        // would put words in a thread nobody chose.
+                        if query.isEmpty && !session.sharedTexts.isEmpty {
+                            HStack {
+                                Text("Shared with Muster")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Color.secondary)
+                                Spacer()
+                            }
+                            .padding(.top, 10)
+                            .padding(.bottom, 4)
+
+                            ForEach(session.sharedTexts) { shared in
+                                Button {
+                                    Haptics.selection()
+                                    shareChooser = shared
+                                } label: {
+                                    SharedTextRow(shared: shared)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
                         if query.isEmpty {
                             ForEach(session.state.pendingApprovals, id: \.message.id) { pending in
                                 if let chat = chat(forThread: pending.threadId) {
@@ -133,6 +161,20 @@ struct ChatListView: View {
                     // answered there, under its own view lease.
                     showingUpdates = false
                     path.append(chat)
+                }
+            }
+            .sheet(item: $shareChooser) { shared in
+                // The draft is written by ChatView, not by this sheet: only a
+                // mounted conversation holds the composer lease an edit
+                // requires. So this records the choice and navigates, and
+                // ChatView applies it on the way in.
+                ShareTargetSheet(shared: shared, chats: session.state.chatSummaries) { chat in
+                    shareChooser = nil
+                    session.chooseShareTarget(shared.id, chat: chat)
+                    path.append(chat)
+                } onDiscard: {
+                    shareChooser = nil
+                    session.discardSharedText(shared.id)
                 }
             }
             .fullScreenCover(isPresented: $showingWalkie) {

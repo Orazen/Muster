@@ -46,6 +46,10 @@ struct CompanionApp: App {
                     switch phase {
                     case .active:
                         session.connect()
+                        // A share extension stages its bundle in the shared
+                        // container while this app is not running, so the next
+                        // foreground is the only moment to collect one.
+                        session.adoptStagedShares()
                         Task { await session.refreshNotificationAuthorization() }
                     case .background: session.disconnect()
                     case .inactive: break

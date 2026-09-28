@@ -44,6 +44,13 @@ targets:
       # the watch does, and reads the fleet snapshot from the shared group.
       - target: MusterFleetWidget
         embed: true
+      # The door for text coming IN. Embedded like the watch and the widget:
+      # a share extension is a separate appex that writes a small bundle into
+      # the shared group, and the app collects it on the next foreground.
+      # Without the app-group entitlement on both sides that exchange is
+      # silent, which is why the extension's own file says so.
+      - target: MusterShareExtension
+        embed: true
     entitlements:
       path: App/MusterCompanion.entitlements
       properties:
@@ -291,6 +298,41 @@ targets:
         CURRENT_PROJECT_VERSION: "9"
         SWIFT_VERSION: "5.9"
         SKIP_INSTALL: YES
+
+  # The share extension — the only way text enters this app from another app.
+  #
+  # It has no view and no network: it unwraps UIKit item providers, writes one
+  # small JSON bundle into the shared group, and completes. The app reads that
+  # bundle on the next foreground and stages the words into a composer draft
+  # the owner still has to send. The accept-or-refuse rules live in
+  # CompanionCore (ShareIntake/ShareStaging) so `swift test` covers them with
+  # no simulator involved, which is the only way they are covered at all.
+  MusterShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShareExtension
+        excludes:
+          - "Info.plist"
+          - "ShareExtension.entitlements"
+    dependencies:
+      - package: CompanionCore
+        product: CompanionCore
+    entitlements:
+      path: ShareExtension/ShareExtension.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion.share
+        DEVELOPMENT_TEAM: 7375K23WFU
+        CODE_SIGN_STYLE: Automatic
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "9"
+        SWIFT_VERSION: "5.9"
+        SKIP_INSTALL: YES
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Share to Muster
 
   MusterOwnedUITests:
     type: bundle.ui-testing

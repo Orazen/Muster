@@ -338,6 +338,14 @@ struct ChatView: View {
             if seedLease == nil { seedLease = session.viewSeedConversation(chat) }
             if composerLease == nil { composerLease = session.viewComposer(composerContext) }
             if approvalLease == nil { approvalLease = session.viewApprovalConversation(chat) }
+            // Only now, with a live composer lease: a share the owner chose
+            // this conversation for becomes the draft text. Nothing is sent —
+            // the field is focused and they press Send themselves.
+            if let shareId = session.pendingShare(for: chat),
+               session.routeSharedText(shareId, into: chat, lease: composerLease) {
+                session.consumePendingShare(shareId)
+                composerFocused = true
+            }
         }
         .onChange(of: session.seedSessionId) { _, _ in
             if let seedLease { session.leaveSeedConversation(seedLease) }

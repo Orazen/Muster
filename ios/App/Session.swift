@@ -82,6 +82,18 @@ final class Session: ObservableObject {
     /// banner reaches the roster before the stream has folded the bot — the
     /// first frame that carries it satisfies the request and clears it.
     @Published var pendingOpenThreadId: String?
+    /// Shared text waiting for a conversation to go into. Never sent from
+    /// here: `routeSharedText` only ever hands text to the composer, and the
+    /// owner still presses Send.
+    @Published private(set) var sharedTexts: [SharedText] = []
+    /// Why the last share was refused, if it was one the owner should hear
+    /// about. See `ShareIntake.report`.
+    @Published private(set) var shareNotice: String?
+    /// A staged share and the conversation the owner picked for it. Applied
+    /// by ChatView rather than here, because only a mounted conversation has
+    /// the composer lease that `edit` requires.
+    @Published var pendingShareId: UUID?
+    @Published var pendingShareThreadId: String?
 
     private func clearLocalFirstStatus() {
         localFirstStatus = nil
@@ -98,6 +110,10 @@ final class Session: ObservableObject {
             composerCoordinator.bind(sessionId: seedSessionId, transport: client)
             approvalViewLease = nil
             approvalCoordinator.bind(sessionId: seedSessionId, transport: client)
+            // Staged shares belong to the pairing that was live when they
+            // arrived, so the queue is keyed to the same session id. No
+            // client means no pairing, and an unpaired phone stages nothing.
+            shareIntake.bind(sessionId: client == nil ? nil : seedSessionId)
             clearLocalFirstStatus()
         }
     }
@@ -117,6 +133,11 @@ final class Session: ObservableObject {
         readState: { [weak self] in self?.state ?? CompanionState() },
         changed: { [weak self] in self?.approvalActions = $0 },
         unauthorized: { [weak self] in self?.status = .unauthorized }
+    )
+    private lazy var shareIntake = ShareIntake(
+        readState: { [weak self] in self?.state ?? CompanionState() },
+        changed: { [weak self] in self?.sharedTexts = $0 },
+        noticeChanged: { [weak self] in self?.shareNotice = $0 }
     )
     private var approvalViewLease: ApprovalViewLease?
     private var streamTask: Task<Void, Never>?
@@ -517,6 +538,64 @@ final class Session: ObservableObject {
     func submitComposer(_ context: ComposerContext, lease: ComposerViewLease?) {
         composerCoordinator.submit(context, lease: lease)
     }
+
+    // MARK: - Inbound shares
+    //
+    // A share never sends itself. It becomes text in a composer draft that
+    // the owner still presses Send on, so every fence the composer already
+    // has — foreground, view lease, live target, messageSendVersion, the
+    // 1 MB body guard, and clearing only on a verified 202 — still applies to
+    // shared text exactly as it does to a typed one.
+
+    /// Pull in anything the share extension left in the shared container.
+    /// Called when the app comes forward, because that is the only moment the
+    /// container is readable with a paired session behind it.
+    func adoptStagedShares() {
+        ShareIntakeBridge.shared.adoptStagedShares(into: shareIntake)
+    }
+
+    /// Record which conversation a staged share was chosen for. This does not
+    /// write a draft: the composer refuses edits without a live view lease and
+    /// the roster has none, so the text is applied by ChatView once its lease
+    /// exists. That is the same two-step shape `pendingOpenThreadId` already
+    /// uses for a notification.
+    func chooseShareTarget(_ id: UUID, chat: Chat) {
+        pendingShareId = id
+        pendingShareThreadId = chat.threadId
+    }
+
+    /// The staged share `chat` was chosen for, if any.
+    func pendingShare(for chat: Chat) -> UUID? {
+        guard pendingShareThreadId == chat.threadId, let id = pendingShareId,
+              sharedTexts.contains(where: { $0.id == id }) else { return nil }
+        return id
+    }
+
+    func consumePendingShare(_ id: UUID) {
+        guard pendingShareId == id else { return }
+        pendingShareId = nil
+        pendingShareThreadId = nil
+    }
+
+    /// Hand a staged share to a conversation's composer. Returns false when
+    /// the share could not be routed, which leaves it staged rather than
+    /// dropping words the owner can still see and retry.
+    @discardableResult
+    func routeSharedText(_ id: UUID, into chat: Chat, lease: ComposerViewLease?) -> Bool {
+        let context = composerContext(for: chat)
+        guard let route = shareIntake.route(id, for: context,
+                                            existingDraft: composerCoordinator.draft(for: context).text) else {
+            return false
+        }
+        // Through the coordinator, not around it: the draft's revision has to
+        // move, so a send already in flight for the old text cannot clear
+        // this one when its receipt lands.
+        composerCoordinator.edit(route.joined, context: context, lease: lease)
+        return composerCoordinator.draft(for: context).text == route.joined
+    }
+
+    func discardSharedText(_ id: UUID) { shareIntake.discard(id) }
+    func clearShareNotice() { shareIntake.clearNotice() }
 
     func viewApprovalConversation(_ chat: Chat) -> ApprovalViewLease {
         let lease = approvalCoordinator.enter(composerContext(for: chat))

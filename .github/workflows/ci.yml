@@ -98,6 +98,56 @@ jobs:
       - run: pnpm test:desktop-lifecycle
       - run: pnpm test:packaged-server
 
+  # The companion's portable core: 537 XCTest cases covering the wire models,
+  # the SSE parser, the state fold, the composer and seed fences, approval
+  # receipts, the watch handoff, and inbound share intake. `swift test` is
+  # exactly the command TESTING.md stage 1 tells a new machine to run, so CI
+  # runs the same thing a person would.
+  #
+  # WHY THIS NEEDS A DIFFERENT RUNNER. Every other job here is Node on
+  # ubuntu-latest, and Swift does not exist there. This job is the only place
+  # a change to ios/Sources/CompanionCore can fail a pull request — before it
+  # landed, the entire iOS test suite was documentation, not a gate, and a
+  # wire-model regression could only be found by whoever remembered to run it.
+  #
+  # COST. This is the one job in the workflow that needs a macOS runner, and
+  # macOS runners are billed at multiples of the Linux rate (roughly 10x on
+  # GitHub-hosted macOS, and they are arm64 by default). It is a single,
+  # short job — `swift test` for the package is seconds once the toolchain is
+  # warm, and the package has no external dependencies to fetch — but it does
+  # move the workflow off a purely Linux bill. That is a deliberate trade:
+  # an unverified mobile core is the more expensive risk, because nothing else
+  # in this workflow can see it.
+  #
+  # WHAT IT DOES NOT COVER. This builds and tests the `ios` package only. It
+  # does not build `ios/App`, `ios/Watch`, or the extensions, so it would not
+  # catch a break in the app target, the share extension, the watch target, or
+  # the XcodeGen spec. Those need a simulator and are tracked separately in
+  # TESTING.md; making them a gate means `xcodebuild` on a runner with a
+  # simulator runtime, which is a larger change than adding a job.
+  #
+  # NOT LISTED IN `build`'s `needs` on purpose: that list is another agent's
+  # slice and the instruction for this change was to add a job, not to edit
+  # existing ones. This job still fails the workflow when it fails — a
+  # required check is red either way — but `build` will still have run. Add
+  # `swift-tests` to that list to make it gate the build as well.
+  swift-tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      # The package declares macOS 13, iOS 17 and watchOS 10, and
+      # `swift test` builds the host macOS slice of CompanionCore — the UI-free
+      # part, which is exactly the part intended to be testable without Xcode.
+      # macos-15 is pinned rather than `-latest` on purpose: a runner image
+      # bump that changes the Swift version should show up as a reviewable
+      # diff, not as a surprise the day the suite goes red.
+      - name: Show the toolchain
+        run: swift --version
+      - name: Build the package
+        run: swift build --package-path ios
+      - name: Run the core tests
+        run: swift test --package-path ios
+
   build:
     runs-on: ubuntu-latest
     needs: [lint, typecheck, e2e-typecheck, test-shard, test-integrations]

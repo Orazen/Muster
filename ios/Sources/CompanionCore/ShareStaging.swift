@@ -35,6 +35,10 @@ public enum ShareStaging {
     public static let maximumCandidates = 8
     public static let filePrefix = "muster-share-"
     public static let fileSuffix = ".json"
+    /// Inside the app group. Named here rather than in each process because a
+    /// disagreement about this one string is a share that silently goes
+    /// nowhere — the writer writes to a directory the reader never looks in.
+    public static let directoryName = "ShareInbox"
 
     /// The one name a staged bundle may have. Deterministic in the id, so the
     /// writer and the reader cannot disagree about it.

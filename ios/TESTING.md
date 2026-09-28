@@ -57,6 +57,12 @@ swift test
 `Sources/` is the only product `swift test` builds; `App/` is compiled in
 stage 3.
 
+**CI runs this too.** A `swift-tests` job runs the identical
+`swift test --package-path ios` on a macOS runner, so stage 1 is now a gate on
+every pull request rather than something a person has to remember. It covers
+the package only: `App/`, `Watch/` and the extensions are still outside it, and
+still need stage 3.
+
 A trailing `Test run with 0 tests in 0 suites passed` is expected and not a
 problem: that is swift-testing finding none of its own tests, because these are
 XCTest.
@@ -259,6 +265,47 @@ port — only the route to it is different.
 
 ---
 
+## Sharing text INTO the app
+
+The companion could always hand a file *out* through the share sheet. Text
+coming *in* is newer: a share extension stages one small bundle in the shared
+app group, the app collects it on the next foreground, and the words wait in
+the roster until you pick a conversation for them.
+
+**Nothing is ever sent for you.** A share becomes a prefilled, editable draft
+in the conversation you chose, and you press Send yourself. That is not a
+limitation being worked around — it is the design. A message in a bot's thread
+is an instruction the bot will act on, and text from another app has not been
+read by anyone yet. If a draft was already being written, the shared text is
+added *below* it and nothing you typed is lost.
+
+Testing it, cheapest first:
+
+1. **The rules, without a device.** `swift test --package-path ios` covers
+   every accept-or-refuse decision: what counts as text, the size cap in UTF-8
+   bytes, whitespace-only shares, invalid UTF-8, the bounded queue, the
+   staging wire format, and the two properties that matter most — a share can
+   never destroy a draft already in progress, and a share staged under one
+   pairing can never surface under another.
+2. **The hand-off, on a Mac or a simulator.** Share a few words into Muster
+   from Safari or Notes. Confirm the app does not appear to send anything: on
+   the next foreground the roster shows a "Shared with Muster" row reading
+   *Waiting to send*, and nothing is posted until you press Send. Sharing the
+   *same* text twice must show one row, not two — the anti-replay fence.
+3. **Device-only, still open.** A physical iPhone, the share sheet from a
+   third-party app, and the interaction between the extension and a real
+   container are **not verified**. The extension, the two roster views and the
+   app-group reader have no automated coverage at all; they need a simulator
+   run and a real share to establish. Simulator evidence would not settle the
+   physical-device question either.
+
+Two honest caveats. The share extension writes into the app group, so a build
+without that group on **both** sides stages nothing and shares appear to do
+nothing at all — check the entitlements before debugging anything else. And
+staged text is cleared on unpair, deliberately: a share made while looking at
+one computer must not turn up as a draft on another.
+
+
 ## What is expected not to work
 
 Not built yet, so not bugs:
@@ -268,6 +315,8 @@ Not built yet, so not bugs:
   APNs relay with project-owned Apple credentials.
 - **No voice or routine management.** Tasks, SQLite transcript search/export,
   reactions, and edit/version switching are available from the conversation UI.
+- **Only text can be shared in.** Photos, files and spreadsheets are refused
+  with a reason rather than guessed at; there is no importer for them.
 
 (Two entries that used to sit on this list have since shipped: replies stream
 token by token as the provider emits them, and each bot has a computer panel —

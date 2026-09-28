@@ -27,8 +27,16 @@ final class ShareStagingTests: XCTestCase {
         XCTAssertTrue(decoded.candidates.isEmpty)
     }
 
-    func testFilenameIsTheOnlyNameTheReaderAccepts() {
-        XCTAssertEqual(ShareStaging.filename(for: id), "muster-share-6F1B0A2E-1111-4222-8333-444455556666.json")
+    func testTheDirectoryNameIsAPlainRelativeName() {
+        // This is appended to the app-group container, so anything that could
+        // escape it — or that the other process might spell differently — is a
+        // bug waiting to happen.
+        XCTAssertEqual(ShareStaging.directoryName, "ShareInbox")
+        XCTAssertFalse(ShareStaging.directoryName.contains("/"))
+        XCTAssertFalse(ShareStaging.directoryName.contains(".."))
+    }
+
+    func testFilenameIsTheOnlyNameTheReaderAccepts() {        XCTAssertEqual(ShareStaging.filename(for: id), "muster-share-6F1B0A2E-1111-4222-8333-444455556666.json")
         XCTAssertEqual(ShareStaging.stagedId(inFilename: ShareStaging.filename(for: id)), id)
         // Anything else in the shared container is not ours to open.
         for name in ["", "notes.json", "muster-share-.json", "muster-share-6f1b0a2e-1111-4222-8333-444455556666.json",
@@ -90,6 +98,23 @@ final class ShareStagingTests: XCTestCase {
         XCTAssertFalse(payload.declaredText)
         XCTAssertTrue(payload.declaredLink)
         XCTAssertEqual(payload.candidates, [Data("note".utf8)])
+    }
+
+    func testTheReaderRejectsABundleWhoseIdDisagreesWithItsFilename() throws {
+        // The app decides which files to open by name, but the id inside the
+        // bundle is what fences a re-read. If the two disagree, either the
+        // file is not the one it claims to be or the writer has a bug, and
+        // staging it under the inner id would stage words this reader cannot
+        // account for. The comparison the app makes is spelled out here so
+        // the two processes cannot drift apart.
+        let other = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+        let data = try XCTUnwrap(ShareStaging.encode(share(candidates: [Data("note".utf8)])))
+        let decoded = try XCTUnwrap(ShareStaging.decode(data))
+        XCTAssertEqual(decoded.id, id)
+
+        let mismatchedName = ShareStaging.filename(for: other)
+        XCTAssertNotEqual(ShareStaging.stagedId(inFilename: mismatchedName), decoded.id)
+        XCTAssertNotNil(ShareStaging.decode(data), "the bytes still decode; only the pairing is wrong")
     }
 
     func testAStagedBundleIdIsWhatFencesAReRead() throws {
