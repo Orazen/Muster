@@ -1,7 +1,8 @@
 /** Owned, offline fixtures for the cloud-to-desktop browser pairing tests. */
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { access, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -227,6 +228,49 @@ interface FakeEngineEnvironment {
   FAKE_ACP_STREAM_DELAY_MS?: string;
 }
 
+/** Browser tests run against the PREBUILT bundle in `dist/`, not live
+ * source. A stale bundle silently re-tests old UI and produces failures that
+ * vanish on rebuild (the command-palette Tab-trap fix needed exactly this
+ * rebuild before its e2e evidence meant anything). Refuse to start when any
+ * src/** source file is newer than the bundle. CI builds fresh in a clean
+ * checkout and never trips; set MUSTER_E2E_ALLOW_STALE_UI=1 to bypass
+ * deliberately, e.g. when reproducing against a historical bundle. */
+export async function assertBuiltUiIsCurrent(
+  builtUi: string,
+  sourcesRoot = join(ROOT, "src"),
+): Promise<void> {
+  if (process.env.MUSTER_E2E_ALLOW_STALE_UI === "1") return;
+  const bundle = await stat(join(builtUi, "index.html"));
+  const newest = await newestSourceUnder(sourcesRoot, bundle.mtimeMs);
+  if (newest) {
+    throw new Error(
+      `Built UI at ${builtUi} is older than ${newest}; browser tests would verify stale UI. Run \`npx vite build\` first (CI builds fresh and never trips this).`,
+    );
+  }
+}
+
+/** Newest tracked-style source file strictly newer than mtimeMs, or null.
+ * Non-source extensions (docs, scratch, artifacts) never count as newer. */
+async function newestSourceUnder(directory: string, mtimeMs: number): Promise<string | null> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      const found = await newestSourceUnder(path, mtimeMs);
+      if (found) return found;
+    } else if (/\.(ts|tsx|css)$/.test(entry.name)) {
+      const stats = await stat(path).catch(() => null);
+      if (stats && stats.mtimeMs > mtimeMs) return path;
+    }
+  }
+  return null;
+}
+
 export async function startPairingHarness(
   { staticDir = process.env.MUSTER_E2E_STATIC_DIR ?? join(ROOT, "dist"), engineMode = "happy", calendarFixture = false, streamDelayMs = 0 }: { staticDir?: string; engineMode?: FixtureEngineMode; calendarFixture?: boolean; streamDelayMs?: number } = {},
   { waitForServer = waitForOwnedServer }: { waitForServer?: typeof waitForOwnedServer } = {},
@@ -234,6 +278,7 @@ export async function startPairingHarness(
   if (process.platform === "win32") throw new Error("Pairing fixture requires POSIX process groups");
   const builtUi = resolve(staticDir);
   await access(join(builtUi, "index.html"));
+  await assertBuiltUiIsCurrent(builtUi);
   const rootDirectory = await mkdtemp(join(tmpdir(), "muster-pairing-e2e-"));
   const permissionOutcomePath = engineMode !== "happy" ? join(rootDirectory, "desktop", "permission-outcome.json") : undefined;
   const children: OwnedChild[] = [];

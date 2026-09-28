@@ -42,6 +42,7 @@
     "dev:desktop": "electron .",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "typecheck": "tsc -b && tsc -p tsconfig.server.json",
+    "check:ci": "npm run typecheck && npx tsc --noEmit -p tsconfig.e2e.json",
     "test": "vitest run && pnpm broker:test && pnpm test:updater && pnpm test:desktop-lifecycle && pnpm test:packaged-server",
     "test:desktop-lifecycle": "node --test electron/server-lifecycle.node-test.mjs",
     "test:updater": "node --test electron/updater-coordinator.node-test.mjs",
