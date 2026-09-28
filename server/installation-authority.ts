@@ -249,6 +249,34 @@ export class InstallationRegistry {
     return record ?? null;
   }
 
+  /** Re-mint the one-time credential for an installation proven by its
+   * CURRENT, UNEXPIRED credential — the machine's own renewal path, no
+   * session involved (the old credential stops working at mint time, so
+   * one live secret per installation stays true). Expiry stays final: an
+   * expired credential authenticates nothing and refreshes nothing; a
+   * machine that let its credential die re-registers through its owner's
+   * session, which re-mints for the same stable client key. Revocation is
+   * the only other door out, and it is final. */
+  refresh(installationId: string, credential: string, now = Date.now()): RegisterOutcome | null {
+    const digest = hashCredential(credential);
+    const record = this.file.installations.find(
+      (row) =>
+        row.id === installationId &&
+        row.revokedAt === null &&
+        row.credentialHash !== null &&
+        row.credentialExpiresAt !== null &&
+        row.credentialExpiresAt > now &&
+        row.credentialHash === digest,
+    );
+    if (!record) return null;
+    const credential2 = randomBytes(32).toString("base64url");
+    record.credentialHash = hashCredential(credential2);
+    record.credentialExpiresAt = now + CREDENTIAL_TTL_MS;
+    record.lastSeenAt = now;
+    this.save();
+    return { record, credential: credential2, reactivated: false };
+  }
+
   /** The owner's own view. Rows of other accounts never leave the file. */
   list(ownerId: string): Array<Pick<InstallationRecord, "id" | "label" | "platform" | "capabilities" | "createdAt" | "lastSeenAt" | "revokedAt">> {
     return this.file.installations

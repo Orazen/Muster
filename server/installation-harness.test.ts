@@ -257,4 +257,54 @@ describe("installation authority over real HTTP", () => {
     });
     expect(anonymous.status).toBe(401);
   });
+
+  it("the credential routes prove the bearer alone: self, refresh, and the negative doors", async () => {
+    // No bearer at all: the credential routes never consult a session.
+    expect((await request("/api/installations/self")).status).toBe(401);
+    expect((await request("/api/installations/refresh", "POST")).status).toBe(401);
+    // A session cookie is NOT a machine identity: register answers a
+    // credential, but the bearer routes reject cookie-only calls.
+    expect((await request("/api/installations/self", "GET", alice)).status).toBe(401);
+    const registered = z.object({ installation: installationWire, credential: z.string(), credentialExpiresAt: z.number() }).parse(
+      await (await request("/api/installations/register", "POST", alice, {
+        clientKey: "bearer-consumer", label: "Garage PC", platform: "linux",
+      })).json(),
+    );
+    const bearer = (credential: string) => ({
+      headers: { origin: base, authorization: `Bearer ${credential}` },
+      redirect: "error" as const,
+      signal: AbortSignal.timeout(10_000),
+    });
+    // The machine sees itself with the bearer alone.
+    const self = await fetch(`${base}/api/installations/self`, bearer(registered.credential));
+    expect(self.status).toBe(200);
+    const seen = z.object({ installation: installationWire }).parse(await self.json());
+    expect(seen.installation.id).toBe(registered.installation.id);
+    // Renewal: the current credential mints a fresh one; the old stops working.
+    const renewed = await fetch(`${base}/api/installations/refresh`, { ...bearer(registered.credential), method: "POST" });
+    expect(renewed.status).toBe(200);
+    const next = z.object({ credential: z.string(), credentialExpiresAt: z.number() }).parse(await renewed.json());
+    expect(next.credential).not.toBe(registered.credential);
+    expect((await fetch(`${base}/api/installations/self`, bearer(registered.credential))).status).toBe(401);
+    expect((await fetch(`${base}/api/installations/self`, bearer(next.credential))).status).toBe(200);
+    // A garbage bearer is refused, not crashed.
+    expect((await fetch(`${base}/api/installations/self`, bearer("not-a-real-credential"))).status).toBe(401);
+  });
+
+  it("a revoked installation loses its bearer mid-flight: refresh and self both refuse", async () => {
+    const registered = z.object({ installation: installationWire, credential: z.string() }).parse(
+      await (await request("/api/installations/register", "POST", alice, {
+        clientKey: "revoked-consumer", label: "Lost laptop", platform: "windows",
+      })).json(),
+    );
+    const bearer = (credential: string) => ({
+      headers: { origin: base, authorization: `Bearer ${credential}` },
+      redirect: "error" as const,
+      signal: AbortSignal.timeout(10_000),
+    });
+    expect((await fetch(`${base}/api/installations/self`, bearer(registered.credential))).status).toBe(200);
+    expect((await request("/api/installations/revoke", "POST", alice, { id: registered.installation.id })).status).toBe(200);
+    expect((await fetch(`${base}/api/installations/self`, bearer(registered.credential))).status).toBe(401);
+    expect((await fetch(`${base}/api/installations/refresh`, { ...bearer(registered.credential), method: "POST" })).status).toBe(401);
+  });
 });

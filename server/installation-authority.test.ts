@@ -105,6 +105,28 @@ describe("installation authority", () => {
     expect(store.authenticate(rotated!.credential!, 3_000)?.id).toBe(id);
   });
 
+  it("refresh re-mints for a proven current credential and kills the old one", () => {
+    const store = registry();
+    const created = store.register(BASE, 1_000);
+    const id = created.record.id;
+    const renewed = store.refresh(id, created.credential!, 2_000);
+    expect(renewed?.credential).toMatch(/^[A-Za-z0-9_-]{43,128}$/);
+    expect(renewed?.credential).not.toBe(created.credential);
+    expect(renewed?.record.id).toBe(id);
+    expect(store.authenticate(created.credential!, 3_000)).toBeNull();
+    expect(store.authenticate(renewed!.credential!, 3_000)?.id).toBe(id);
+  });
+
+  it("an expired credential refreshes nothing, and a revoked row is unreachable to refresh", () => {
+    const store = registry();
+    const created = store.register(BASE, 1_000);
+    const id = created.record.id;
+    const late = 1_000 + 24 * 60 * 60_000 + 1;
+    expect(store.refresh(id, created.credential!, late)).toBeNull();
+    store.revoke("owner-1", id, 2_000);
+    expect(store.refresh(id, created.credential!, 3_000)).toBeNull();
+  });
+
   it("revocation is durable: a restart (fresh registry) cannot resurrect it", () => {
     const store = registry();
     const created = store.register(BASE, 1_000);

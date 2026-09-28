@@ -791,6 +791,13 @@ export function isPublicApiPath(path: string): boolean {
     path === "/api/pair/verify" ||
     // the desktop's local redeem endpoint — same code-as-credential story
     path === "/api/pair/redeem" ||
+    // Installation credentials are machine identity, not a login: the bearer
+    // routes authenticate with the registry's one-time credential instead of
+    // a session (see server/installation-routes.ts). The session routes in
+    // that same table stay behind this gate on purpose — registering,
+    // listing, rotating and revoking are the OWNER's acts.
+    path === "/api/installations/self" ||
+    path === "/api/installations/refresh" ||
     // Self-host claim redeem: the phone that scanned the `muster up` QR has
     // no session yet — the single-use, 10-minute, per-IP-throttled code IS
     // the credential (see server/claim.ts). Minting codes is NOT public:

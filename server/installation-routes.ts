@@ -5,16 +5,17 @@
 // (installation-authority.ts list/revoke already drop foreign rows; the
 // cross-account pin is server/installation-harness.test.ts).
 //
-// Deliberately minimal: the credential's CONSUMER is a future runner/endpoint
-// adapter, not this route table. No route accepts a credential here —
-// registration attaches a machine the owner can see; authenticating WITH the
-// credential is a later slice's decision, so nothing in this file can leak a
-// bearer into a response it does not already own.
+// Deliberately split by proof: the SESSION routes (register/list/rotate/
+// revoke) never accept a credential — registration attaches a machine the
+// owner can see and control — and the CREDENTIAL routes (self/refresh) never
+// accept a session — a machine proves itself with its bearer alone. Nothing
+// in this file leaks a bearer into a response it does not already own: the
+// credential appears in a body only at mint time (register/rotate/refresh).
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { z } from "zod";
 
-import { InstallationRegistry, platformWire } from "./installation-authority.ts";
+import { InstallationRegistry, platformWire, type InstallationRecord } from "./installation-authority.ts";
 import { json, readBody, isText } from "./http-helpers.ts";
 
 interface RegistryContext {
@@ -47,6 +48,22 @@ interface RegistrationResponse {
   };
   reactivated: boolean;
   credential?: string;
+  /** The minted credential's absolute expiry, so the machine can renew in
+   * time instead of guessing the TTL. Absent only from older servers. */
+  credentialExpiresAt?: number;
+}
+
+/** The public wire shape of an installation row — never owner, never digest. */
+function publicInstallationView(record: InstallationRecord): RegistrationResponse["installation"] {
+  const { id, label, platform, capabilities, createdAt, lastSeenAt, revokedAt } = record;
+  return { id, label, platform, capabilities, createdAt, lastSeenAt, revokedAt };
+}
+
+/** The bearer token from the Authorization header, or null. */
+function bearerCredential(req: IncomingMessage): string | null {
+  const header = req.headers.authorization;
+  const match = /^Bearer\s+(\S+)$/i.exec(header?.trim() ?? "");
+  return match?.[1] ?? null;
 }
 
 const routes: Route[] = [
@@ -75,12 +92,16 @@ const routes: Route[] = [
         return json(res, 503, { error: "The installation registry could not be saved — nothing was registered." });
       }
       // Same public shape as the list view, so clients parse one wire form.
-      const { id, label, platform, capabilities, createdAt, lastSeenAt, revokedAt } = outcome.record;
       const response: RegistrationResponse = {
-        installation: { id, label, platform, capabilities, createdAt, lastSeenAt, revokedAt },
+        installation: publicInstallationView(outcome.record),
         reactivated: outcome.reactivated,
       };
-      if (outcome.credential !== undefined) response.credential = outcome.credential;
+      if (outcome.credential !== undefined) {
+        response.credential = outcome.credential;
+        // null expiry (older row shape) is omitted rather than sent as null,
+        // so every client that parses the field sees a real number.
+        if (outcome.record.credentialExpiresAt !== null) response.credentialExpiresAt = outcome.record.credentialExpiresAt;
+      }
       return json(res, outcome.reactivated ? 200 : 201, response);
     },
   },
@@ -112,7 +133,43 @@ const routes: Route[] = [
         return json(res, 503, { error: "The installation registry could not be saved — the old credential still works." });
       }
       if (!outcome) return json(res, 404, { error: "No such installation under this account." });
-      return json(res, 200, { credential: outcome.credential! });
+      return json(res, 200, { credential: outcome.credential!, credentialExpiresAt: outcome.record.credentialExpiresAt });
+    },
+  },
+  {
+    // The machine's own view of itself: proves the bearer, answers with the
+    // same public shape the owner sees. No session is consulted — a machine
+    // identity is not a login.
+    match: (method, path) => method === "GET" && path === "/api/installations/self",
+    handle: async (req, res, ctx) => {
+      const registry = ctx.registry();
+      if (!registry) return json(res, 503, { error: "The installation registry is unavailable." });
+      const credential = bearerCredential(req);
+      if (!credential) return json(res, 401, { error: "Present an installation credential as a bearer token." });
+      const record = registry.authenticate(credential);
+      if (!record) return json(res, 401, { error: "This installation credential is unknown, expired, or revoked." });
+      res.setHeader("Cache-Control", "no-store");
+      return json(res, 200, { installation: publicInstallationView(record) });
+    },
+  },
+  {
+    // The machine's renewal path: a CURRENT, UNEXPIRED credential proves the
+    // installation and is exchanged for a fresh one-time credential (the old
+    // one stops working at mint time). An expired credential refreshes
+    // nothing — the owner re-registers through a session, same stable id.
+    match: (method, path) => method === "POST" && path === "/api/installations/refresh",
+    handle: async (req, res, ctx) => {
+      const registry = ctx.registry();
+      if (!registry) return json(res, 503, { error: "The installation registry is unavailable." });
+      const credential = bearerCredential(req);
+      if (!credential) return json(res, 401, { error: "Present an installation credential as a bearer token." });
+      const record = registry.authenticate(credential);
+      if (!record) return json(res, 401, { error: "This installation credential is unknown, expired, or revoked." });
+      const outcome = registry.refresh(record.id, credential);
+      if (!registry.isDurable || !outcome) {
+        return json(res, 503, { error: "The installation registry could not be saved — keep presenting the current credential." });
+      }
+      return json(res, 200, { credential: outcome.credential!, credentialExpiresAt: outcome.record.credentialExpiresAt });
     },
   },
   {
