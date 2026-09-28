@@ -88,7 +88,11 @@ afterAll(async () => {
   await new Promise<void>((resolve) => api.close(() => resolve()));
 });
 
-describe.sequential("Composio Sessions", () => {
+// Plain describe: fileParallelism is false for the whole suite (vite.config),
+// so file-level sequencing already serializes this suite's store mutations —
+// and vitest 5 removed describe.sequential entirely (vitest5 PR). This suite
+// also runs correctly under vitest 4 today, which the CI shards prove.
+describe("Composio Sessions", () => {
   it("accepts only project API keys", async () => {
     await expect(prepareProjectSession("old_key")).rejects.toThrow(/start with ak_/i);
     await expect(prepareProjectSession("ak_wrong")).rejects.toThrow(/invalid project key/i);
