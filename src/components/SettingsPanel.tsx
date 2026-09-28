@@ -1,13 +1,9 @@
 import { ChevronDown, ChevronLeft, Crown, FolderOpen, Globe, MousePointerClick, Camera, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, useStore, type Bot } from "@/state/store";
-import { AgentAvatar } from "./Avatar";
-import { AgentBotAvatar } from "./AgentBotAvatar";
+import { TeammateAppearance } from "./TeammateAppearance";
 import {
-  AGENT_CHARACTERS,
   stateForBot,
-  AGENT_COLORS,
-  AGENT_COLOR_NAMES,
 } from "@/lib/mascot";
 import { ModelPicker } from "./ModelPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -584,6 +580,8 @@ function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
 
 export function SettingsPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
+  const panelRef = useRef<HTMLElement>(null);
+  const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [voices, setVoices] = useState<Array<{ id: string; label: string; description?: string }>>([]);
   const [voicesLoading, setVoicesLoading] = useState(false);
   const patch = (
@@ -621,6 +619,50 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const currentChief = state.bots.find((candidate) => candidate.chiefOfStaff);
 
   useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const resize = () => setCompact(media.matches);
+    media.addEventListener("change", resize);
+    return () => media.removeEventListener("change", resize);
+  }, []);
+
+  useEffect(() => {
+    if (!compact || state.appSettingsOpen) return;
+    const panel = panelRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    panel?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !panel || (event.key !== "Escape" && event.key !== "Tab")) return;
+      // A nested picker or global command dialog owns the keyboard while it
+      // is open, even if focus is still on the button that opened it.
+      const anotherDialogOwnsKey = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]'))
+        .some(dialog => dialog !== panel && dialog.getClientRects().length > 0
+          && (event.key === "Escape" || !panel.contains(dialog)));
+      if (anotherDialogOwnsKey) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        dispatch({ type: "toggleSettings", open: false });
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'))
+        .filter(element => element.getClientRects().length > 0 && element.tabIndex >= 0);
+      const first = items[0], last = items.at(-1);
+      if (!first || !last) { event.preventDefault(); panel.focus(); return; }
+      const active = document.activeElement;
+      if (event.shiftKey && (active === panel || active === first || !panel.contains(active))) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (active === panel || active === last || !panel.contains(active))) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [compact, dispatch, state.appSettingsOpen]);
+
+  useEffect(() => {
     if (!state.config?.tts?.configured) {
       setVoices([]);
       return;
@@ -637,10 +679,11 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   }, [state.config?.tts?.configured]);
 
   return (
-    <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
+    <aside ref={panelRef} role={compact ? "dialog" : undefined} aria-modal={compact || undefined} aria-label="Bot settings" tabIndex={-1} className="animate-panel-in fixed inset-y-0 right-0 z-30 flex h-full w-full min-w-0 max-w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel outline-none md:relative md:z-auto">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button
+          aria-label="Back to conversation"
           onClick={() => dispatch({ type: "toggleSettings", open: false })}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
         >
@@ -648,6 +691,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         </button>
         <span className="text-[15px] font-semibold text-ink">Settings</span>
         <button
+          aria-label="Close bot settings"
           onClick={() => dispatch({ type: "toggleSettings", open: false })}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
         >
@@ -656,77 +700,18 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 pb-5">
-        <div className="flex justify-center py-5" data-testid="bot-avatar-preview">
-          <AgentBotAvatar
-            character={bot.character ?? "star"}
+        <div className="flex flex-col gap-4">
+          <TeammateAppearance
+            key={bot.id}
+            name={bot.name}
+            title={bot.title}
+            character={bot.character}
             color={bot.color}
             state={activeState}
-            size={112}
-            label={bot.name}
+            seed={bot.id}
+            onChange={patch}
+            onReset={() => patch({ color: "orange", character: "flower", mascotExpression: null })}
           />
-        </div>
-
-        <div className="flex flex-col gap-4">
-          <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
-            <div className="flex items-center justify-between border-b border-hairline/40 px-3 py-2.5">
-              <span className="rounded-lg bg-raised px-3 py-1.5 text-[14px] font-medium text-ink">
-                Bot
-              </span>
-              <button
-                onClick={() => patch({ color: "orange", character: "star", mascotExpression: null })}
-                className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
-              >
-                Reset
-              </button>
-            </div>
-
-            <div className="p-3">
-              <div className="mb-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-                Character
-              </div>
-              <div className="mb-4 grid grid-cols-2 gap-2">
-                {AGENT_CHARACTERS.map((character) => (
-                  <button
-                    key={character}
-                    onClick={() => patch({ character })}
-                    className={cn(
-                      "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-raised",
-                      (bot.character ?? "star") === character && "ring-2 ring-accent-border",
-                    )}
-                    title={character.charAt(0).toUpperCase() + character.slice(1)}
-                    aria-label={`Use the ${character} character`}
-                  >
-                    <AgentAvatar
-                      color={bot.color}
-                      character={character}
-                      state={activeState}
-                      size={42}
-                      animated={character === "cursor" ? false : true}
-                    />
-                  </button>
-                ))}
-              </div>
-
-              <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-                Color
-              </div>
-              <div className="flex flex-wrap gap-2.5">
-                {AGENT_COLOR_NAMES.map((color) => (
-                  <button
-                    key={color}
-                    onClick={() => patch({ color })}
-                    className={cn(
-                      "size-8 rounded-full border-2 border-transparent transition-transform hover:scale-110",
-                      bot.color === color && "ring-2 ring-accent-border ring-offset-2 ring-offset-card",
-                    )}
-                    style={{ backgroundColor: AGENT_COLORS[color] }}
-                    title={color}
-                    aria-label={`Use ${color} mascot color`}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
 
           <Field label="Name">
             <input

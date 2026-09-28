@@ -317,8 +317,8 @@ test("Permissions and First task retain exact draft fields across reload at 320p
   await page.getByLabel("Teammate name", { exact: true }).fill(teammateName);
   const role = "Research — café, market notes and weekly planning for a small independent team";
   await page.getByLabel("Teammate role (optional)", { exact: true }).fill(role);
-  await page.getByRole("button", { name: "heart", exact: true }).click();
-  await page.getByRole("button", { name: "teal", exact: true }).click();
+  await page.getByRole("button", { name: "Use the heart character", exact: true }).click();
+  await page.getByRole("button", { name: "Use teal mascot color", exact: true }).click();
   await page.getByRole("button", { name: "Tune its personality (optional)", exact: true }).click();
   await page.getByRole("slider", { name: "Companion to Coworker", exact: true }).fill("73");
   await captureStageSizes(page, testInfo, "teammate-expanded", [
@@ -336,8 +336,8 @@ test("Permissions and First task retain exact draft fields across reload at 320p
   await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page.getByLabel("Teammate name", { exact: true })).toHaveValue(teammateName);
   await expect(page.getByLabel("Teammate role (optional)", { exact: true })).toHaveValue(role);
-  await expect(page.getByRole("button", { name: "heart", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "teal", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Use the heart character", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Use teal mascot color", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("slider", { name: "Companion to Coworker", exact: true })).toHaveValue("73");
   await toFirstTask(page, teammateName);
   const raw = "  Keep my résumé draft exactly as entered  ";
@@ -388,8 +388,8 @@ test("ambiguous legacy step restarts review and preserves saved fields", async (
   await toTeammate(page);
   await expect(page.getByLabel("Teammate name", { exact: true })).toHaveValue("Saved Scout");
   await expect(page.getByLabel("Teammate role (optional)", { exact: true })).toHaveValue("Local research");
-  await expect(page.getByRole("button", { name: "purple", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "heart", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Use purple mascot color", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Use the heart character", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("slider", { name: "Companion to Coworker", exact: true })).toHaveValue("62");
   await expect(page.getByRole("slider", { name: "Concise to Thorough", exact: true })).toHaveValue("71");
   await toFirstTask(page, "Saved Scout");

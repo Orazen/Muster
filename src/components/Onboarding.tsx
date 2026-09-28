@@ -26,13 +26,13 @@ import type { LucideIcon } from "lucide-react";
 import "./onboarding-chat.css";
 import { AgentBotAvatar } from "@/components/AgentBotAvatar";
 import { speaker } from "@/lib/tts";
-import { AgentAvatar } from "./Avatar";
+import { TeammateAppearance } from "./TeammateAppearance";
 import { identifyEmail, setEmailGateDone, emailGateDone, serverGateDone, consumeTourReplay, track } from "@/lib/analytics";
 import { writeOnboardingCompletion } from "@/lib/onboarding-chat";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { OnboardingProviders } from "./OnboardingProviders";
 import { OnboardingConnections } from "./OnboardingConnections";
-import { AGENT_CHARACTERS, AGENT_COLORS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor, type AgentState } from "@/lib/mascot";
+import { AGENT_CHARACTERS, AGENT_COLOR_NAMES, type AgentCharacter, type AgentColor, type AgentState } from "@/lib/mascot";
 import { startVoiceTest, type VoiceTestHandle } from "@/lib/voice-test";
 import { api, useStore, type Bot } from "@/state/store";
 import { useAuth } from "@/lib/auth";
@@ -1022,71 +1022,17 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             className="mt-2 w-full max-w-sm rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
           />
         )}
-        {/* Vellum-style: centered column, avatar front-and-center, scroll strips below */}
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4">
-          <div className="flex items-center justify-center py-2">
-            <AgentAvatar
-              color={botColor}
-              character={botCharacter}
-              size={160}
-              state={botName.trim() ? "happy" : "idle"}
-              animated
-            />
-          </div>
-
-          {(botName.trim() || botRole.trim()) && (
-            <p className="-mt-1 text-center">
-              <span className="text-[16px] font-semibold text-ink">{botName.trim() || "Your teammate"}</span>
-              {botRole.trim() && <span className="ml-1.5 text-[13px] text-ink-secondary">· {botRole.trim()}</span>}
-            </p>
-          )}
-
-          {/* Shape strip — horizontal scroll, musterbot shapes */}
-          <div className="w-full max-w-md overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <div className="flex gap-2">
-              {AGENT_CHARACTERS.filter((c) => !["cursor", "lottie", "star", "capsule"].includes(c)).map((sh) => (
-                <button
-                  key={sh}
-                  onClick={() => setBotCharacter(sh)}
-                  aria-label={sh}
-                  aria-pressed={botCharacter === sh}
-                  className={`flex size-[52px] shrink-0 items-center justify-center rounded-xl border transition ${
-                    botCharacter === sh ? "border-accent bg-raised" : "border-hairline/30 hover:bg-raised"
-                  }`}
-                >
-                  <AgentAvatar color={botColor} character={sh} size={38} state="idle" animated={false} />
-                </button>
-              ))}
-              <button
-                onClick={() => setBotCharacter("blob")}
-                aria-label="Blob"
-                aria-pressed={botCharacter === "blob"}
-                className={`flex size-[52px] shrink-0 items-center justify-center rounded-xl border transition ${
-                  botCharacter === "blob" ? "border-accent bg-raised" : "border-hairline/30 hover:bg-raised"
-                }`}
-              >
-                <AgentAvatar color={botColor} character="blob" size={38} state="idle" animated={false} seed="picker-blob" />
-              </button>
-            </div>
-          </div>
-
-          {/* Colour strip — horizontal scroll */}
-          <div className="w-full max-w-md overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <div className="flex gap-1.5">
-              {AGENT_COLOR_NAMES.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setBotColor(c)}
-                  aria-label={c}
-                  aria-pressed={botColor === c}
-                  className={`size-7 shrink-0 rounded-full transition ${
-                    botColor === c ? "ring-2 ring-accent ring-offset-1 ring-offset-app" : "hover:brightness-110"
-                  }`}
-                  style={{ background: AGENT_COLORS[c] }}
-                />
-              ))}
-            </div>
-          </div>
+        <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-4 pt-3">
+          <TeammateAppearance
+            name={botName}
+            title={botRole}
+            character={botCharacter}
+            color={botColor}
+            onChange={(patch) => {
+              if (patch.character) setBotCharacter(patch.character);
+              if (patch.color) setBotColor(patch.color);
+            }}
+          />
 
           {/* Identity */}
           <input

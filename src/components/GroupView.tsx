@@ -1,6 +1,6 @@
 // A room: several bots + you in one shared thread. The sidebar and call view
-// carry the personality; avatars inside the room stay still so a busy group
-// does not become a wall of competing motion. Plain messages go to the room's
+// carry the personality; only the current room speaker animates in its member
+// strip, while transcript avatars stay still. Plain messages go to the room's
 // default responder; @mentions override that routing.
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ChevronDown, Folder, FolderOpen, Pin, Search } from "lucide-react";
@@ -24,6 +24,7 @@ import { PrivacyNotice } from "./PrivacyNotice";
 import { Composer } from "./Composer";
 import { ConnectorCard } from "./ConnectorCard";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
+import { GroupParticipants } from "./GroupParticipants";
 import { ReactionBar, ReactionChips } from "./Reactions";
 import { ApprovalCard } from "./ApprovalCard";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -474,9 +475,8 @@ export function GroupView({ group }: { group: Group }) {
   return (
     <main className="glass-shell-main relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <GroupCallOverlay group={group} members={members} />
-      {/* Header: static member agents; a ring + dot marks the working bot.
-          Wraps at narrow widths — the name truncates and the controls flow
-          onto their own lines instead of forcing the document wide. */}
+      {/* Controls keep their routing behavior; the named member strip scrolls
+          separately so long identities never push the room wider. */}
       <div
         className={cn(
           "flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-5 py-3",
@@ -503,28 +503,9 @@ export function GroupView({ group }: { group: Group }) {
           <GroupCallButton group={group} members={members} />
           {!group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
           {!group.dm && <DefaultResponderSelect group={group} members={members} />}
-          {members.map((b) => (
-            <span
-              key={b.id}
-              title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}
-              className={cn(
-                "relative inline-flex rounded-full",
-                group.busyBotId === b.id && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",
-              )}
-            >
-              <AgentBotAvatar
-                character={b.character}
-                seed={b.id}
-                color={b.color}
-                state={normalizeState(b.mascotExpression) ?? "happy"}
-                size={24}
-                animated={false}
-              />
-              {group.busyBotId === b.id && (
-                <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-app bg-accent" />
-              )}
-            </span>
-          ))}
+        </div>
+        <div className="mt-2 min-w-0 basis-full" style={noDrag}>
+          <GroupParticipants members={members} busyBotId={group.busyBotId} />
         </div>
       </div>
 
@@ -609,22 +590,14 @@ export function GroupView({ group }: { group: Group }) {
           aria-label={`Room ${group.name}`}
         >
           {group.messages.length === 0 && (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-center">
-              <div className="flex -space-x-2">
-                {members.slice(0, 3).map((b) => (
-                  <AgentBotAvatar
-                    key={b.id}
-                    character={b.character}
-                    seed={b.id}
-                    color={b.color}
-                    state="happy"
-                    size={44}
-                    animated={false}
-                  />
-                ))}
+            <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-4 py-12 text-center sm:py-20">
+              <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-ink-secondary">Your room</div>
+              <div className="max-w-full break-words text-[22px] font-semibold tracking-tight text-ink [overflow-wrap:anywhere]">{group.name}</div>
+              <div className="w-full max-w-[460px]">
+                <GroupParticipants members={members} busyBotId={group.busyBotId} variant="welcome" />
+                {!members.length && <p className="text-[13px] text-ink-secondary">No agents in this room.</p>}
               </div>
-              <div className="text-[17px] font-semibold text-ink">{group.name}</div>
-              <div className="max-w-[380px] text-[14px] text-ink-secondary">
+              <div className="max-w-[380px] text-[14px] leading-relaxed text-ink-secondary [overflow-wrap:anywhere]">
                 {groupResponseHint(group, members)}
               </div>
             </div>
