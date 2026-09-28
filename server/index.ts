@@ -206,6 +206,12 @@ import {
   redeemBoundHandoffCode,
   EXCHANGE_VERSION,
 } from "./desktop-auth.ts";
+import {
+  beginDesktopSignInAttempt,
+  cancelDesktopSignInAttempt,
+  isAttemptRedirect,
+  redeemDesktopSignInAttempt,
+} from "./desktop-attempts.ts";
 import { startAccountMerge, spendAccountMergeToken } from "./account-merge.ts";
 import { mergeUserVault } from "./user-keys.ts";
 import { PROVIDER_DRIVER_ENV, DATA_DIR } from "./config.ts";
@@ -5584,12 +5590,13 @@ let requestUserEmail = "";
 (async () => {
   const params = new URLSearchParams(location.hash.slice(1));
   const code = params.get("code");
+  const state = params.get("state");
   const next = params.get("next") || "/app";
   const msg = document.getElementById("msg");
   if (!code) { msg.textContent = "No sign-in code found — start again from Muster."; msg.className = "err"; return; }
   const destination = next ? decodeURIComponent(next) : "/app";
   try {
-    const r = await fetch("/oauth/finish/exchange", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify({ code }) });
+    const r = await fetch("/oauth/finish/exchange", { method: "POST", headers: {"content-type":"application/json"}, body: JSON.stringify({ code, state }) });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || "sign-in failed");
     msg.innerHTML = "Signed in as <b>" + (data.email || "your account") + "</b>.<br>You can close this window and return to <b>" + destination + "</b>.";
@@ -5611,12 +5618,24 @@ let requestUserEmail = "";
       }
       const body = await readBody(req);
       const code = isText(body.code) ? body.code : "";
+      // Per-attempt proof (server/desktop-attempts.ts): the page must echo
+      // the attempt `state`, and the exchange must run on the loopback
+      // origin the attempt was started from. A cancelled or superseded
+      // attempt has no custody row, so a late or replayed redirect cannot
+      // install a session even while its cloud code is still valid. Only
+      // after the proof does the attempt release its PKCE verifier, which
+      // the cloud exchange requires for a bound code and which never
+      // touches the renderer, the browser, or any log.
+      const attemptProof = redeemDesktopSignInAttempt({ state: isText(body.state) ? body.state : undefined, redirect: requestOrigin(req) });
+      if (!attemptProof.ok) {
+        return json(res, 409, { error: "this sign-in attempt was cancelled or is no longer current — start again from Muster" });
+      }
       let upstream: Response;
       try {
         upstream = await fetch(`${cloudUrl.replace(/\/$/, "")}/api/desktop-auth/exchange`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ code }),
+          body: JSON.stringify({ code, code_verifier: attemptProof.verifier }),
           redirect: "error",
           signal: AbortSignal.timeout(10_000),
         });
@@ -5642,6 +5661,29 @@ let requestUserEmail = "";
         bridgedSessionCookie(req, token, expiresAt),
       );
       return json(res, 200, { ok: true, email: errBody.email });
+    }
+    if (method === "POST" && path === "/oauth/attempt/begin") {
+      // The renderer asks its OWN local server to mint the attempt: state +
+      // PKCE verifier with server-held custody (server/desktop-attempts.ts).
+      // The verifier never reaches the renderer, the browser, or any log —
+      // only its S256 challenge does. The redirect must be a loopback URL
+      // (the one this server serves); a new begin supersedes the previous
+      // attempt, so two overlapping handoffs cannot both complete.
+      const beginBody = await readBody(req);
+      const redirect = isText(beginBody?.redirect) ? beginBody.redirect.trim() : "";
+      if (!redirect || !isAttemptRedirect(redirect)) {
+        return json(res, 400, { error: "a loopback redirect is required" });
+      }
+      const attempt = beginDesktopSignInAttempt(redirect);
+      return json(res, 200, { state: attempt.state, codeChallenge: attempt.codeChallenge });
+    }
+    if (method === "POST" && path === "/oauth/attempt/cancel") {
+      // The user gave up: withdraw the attempt so a late cloud redirect has
+      // no custody to satisfy. The state arrives in a JSON body.
+      const cancelBody = await readBody(req);
+      const state = isText(cancelBody?.state) ? cancelBody.state : "";
+      if (!state) return json(res, 400, { error: "a sign-in state is required" });
+      return json(res, 200, { cancelled: cancelDesktopSignInAttempt(state.trim()) });
     }
 
     // ── cloud ↔ desktop identity pairing ───────────────────────────────

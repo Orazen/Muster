@@ -12,10 +12,26 @@ export function GoogleSignIn({ next, onError }: { next: string; onError: (messag
   const [pairFallback, setPairFallback] = useState(false);
   const launching = useRef(false);
   const attempt = useRef(0);
+  /** The live handoff attempt: what the start URL carries and what a give-up
+   * must withdraw. The verifier never appears here — the local server keeps
+   * it (server/desktop-attempts.ts) and releases it only to the proven
+   * finish exchange. */
+  const pendingAttempt = useRef<{ state: string } | null>(null);
   const configured = capabilities.socialProviders.includes("google");
   const handoff = Boolean(capabilities.desktopOAuth) && !configured;
 
-  useEffect(() => () => { attempt.current += 1; }, []);
+  const cancelAttempt = () => {
+    const live = pendingAttempt.current;
+    pendingAttempt.current = null;
+    if (!live) return;
+    void fetch("/oauth/attempt/cancel", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ state: live.state }),
+    }).catch(() => undefined);
+  };
+
+  useEffect(() => () => { attempt.current += 1; cancelAttempt(); }, []);
 
   useEffect(() => {
     if (!waiting) return;
@@ -26,6 +42,7 @@ export function GoogleSignIn({ next, onError }: { next: string; onError: (messag
       active = false;
       controller.abort();
       clearTimeout(timer);
+      cancelAttempt();
       setWaiting(false);
       onError("Sign-in took too long. Please try again or use a pairing code.");
     }, 180_000);
@@ -73,8 +90,33 @@ export function GoogleSignIn({ next, onError }: { next: string; onError: (messag
       // snapshot is not sufficient to decide whether a cookie exists.
       await signOut();
       if (currentAttempt !== attempt.current) return;
+      // Mint the per-attempt binding first: the local server keeps the PKCE
+      // verifier and only releases it to the proven finish exchange. The
+      // challenge rides the start URL; the state comes back on the finish
+      // fragment so a stale or cancelled attempt cannot install a session.
+      const redirect = window.location.origin;
+      let binding: { state: string; codeChallenge: string } | null = null;
+      try {
+        const begin = await fetch("/oauth/attempt/begin", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ redirect }),
+        });
+        if (!begin.ok) throw new Error("attempt begin failed");
+        // SAFETY: /oauth/attempt/begin answers exactly {state, codeChallenge}
+        // (server/index.ts); both fields are server-minted opaque strings.
+        binding = (await begin.json()) as { state: string; codeChallenge: string };
+      } catch {
+        if (currentAttempt === attempt.current) onError("Could not start Google sign-in. Please try again.");
+        return;
+      }
+      if (currentAttempt !== attempt.current) {
+        cancelAttempt();
+        return;
+      }
+      pendingAttempt.current = { state: binding.state };
       const cloud = (capabilities.pairingCloudUrl ?? "https://muster.today").replace(/\/$/, "");
-      const url = `${cloud}/desktop-auth/start?redirect=${encodeURIComponent(window.location.origin)}&next=${encodeURIComponent(authDestination(next))}`;
+      const url = `${cloud}/desktop-auth/start?redirect=${encodeURIComponent(redirect)}&next=${encodeURIComponent(authDestination(next))}&state=${encodeURIComponent(binding.state)}&code_challenge=${encodeURIComponent(binding.codeChallenge)}&code_challenge_method=S256`;
       if (window.ogb?.openAuthHandoff) {
         if (!await window.ogb.openAuthHandoff(url)) throw new Error("handoff unavailable");
       } else if (window.ogb?.openExternal) {
@@ -88,6 +130,7 @@ export function GoogleSignIn({ next, onError }: { next: string; onError: (messag
       }
       if (currentAttempt === attempt.current) setWaiting(true);
     } catch {
+      cancelAttempt();
       if (currentAttempt === attempt.current) onError("Could not open Google sign-in. Please try again.");
     } finally {
       launching.current = false;
@@ -107,7 +150,7 @@ export function GoogleSignIn({ next, onError }: { next: string; onError: (messag
     </button>
     {waiting && <div className="auth-handoff-status" role="status">
       <p className="auth-hint">Complete sign-in in the window that opened, then return here.</p>
-      <button className="auth-link" type="button" onClick={() => setWaiting(false)}>Cancel waiting</button>
+      <button className="auth-link" type="button" onClick={() => { cancelAttempt(); setWaiting(false); }}>Cancel waiting</button>
     </div>}
     {pairFallback && <div className="auth-handoff-status" role="status">
       <p className="auth-hint">Finish sign-in in your browser, then use its pairing code to connect this app.</p>
