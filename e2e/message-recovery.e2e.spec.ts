@@ -118,14 +118,21 @@ test("a lost send response is recovered on reload as one message and one turn", 
   // The reload below must converge from the durable record — not merely from
   // an unadmitted parked row (that is the third test in this file).
   const page = await newPage({ messageSend503: { afterCommit: true } });
+  const productTour = page.getByRole("dialog", { name: "Product tour", exact: true });
+  // This test owns focus, so it must also own the optional tour's dismissal.
+  // The shared handler could otherwise click Skip during a later assertion.
+  await page.removeLocatorHandler(productTour);
   await pairDesktop(page, harness, pairCodeFromCloud);
   await page.getByRole("button", { name: "Quick start — skip setup, just get me in", exact: true }).click();
   const composer = page.getByRole("textbox", { name: /^Message / });
   await expect(composer).toBeVisible();
-  // The optional tour must be fully gone BEFORE the send: its late Skip
-  // handler can otherwise land between the send and the focus assertion
-  // below and steal focus for reasons that have nothing to do with receipts.
-  await expect(page.getByRole("dialog", { name: "Product tour", exact: true })).toHaveCount(0);
+  // ProductTour is lazy-mounted after setup closes. Absence alone is not
+  // completion: wait for its real Skip control and persisted acknowledgement
+  // before typing, keeping the send's immediate focus invariant meaningful.
+  await expect(productTour).toBeVisible();
+  await productTour.getByRole("button", { name: "Skip", exact: true }).click();
+  await expect(productTour).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("muster.productTour.done.v1"))).toBe("1");
   const message = `Recovery probe ${randomUUID()}`;
   const firstSend = page.waitForRequest(
     (request) => request.method() === "POST" && /\/api\/bots\/[^/]+\/messages$/.test(new URL(request.url()).pathname),
