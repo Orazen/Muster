@@ -136,7 +136,7 @@ describe("containerComputerStatus", () => {
       "/usr/bin/which docker": "docker\n",
       "/usr/bin/which podman": "podman\n",
       "docker info --format {{.ServerVersion}}": new Error("daemon stopped"),
-      "podman info --format {{.ServerVersion}}": "5.0\n",
+      "podman info --format {{.Version.Version}}": "5.0\n",
       [`podman image inspect ${IMAGE}`]: preparedImageInspect(),
       [`podman inspect ${CONTAINER}`]: JSON.stringify([
         {
@@ -154,6 +154,55 @@ describe("containerComputerStatus", () => {
     expect(status.image).toBe(true);
     expect(status.container).toBe("stopped");
     expect(status.network).toBe("loopback");
+  });
+
+  // Shape captured from a real Podman 6.1.2 rootless desktop on macOS.
+  const podmanInspect = {
+    ...READY_INSPECT,
+    Config: { ...READY_INSPECT.Config, Image: `localhost/${IMAGE}` },
+    Image: "managed-image-id",
+    HostConfig: { ...READY_INSPECT.HostConfig, Privileged: false,
+      CapDrop: ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL", "CAP_NET_BIND_SERVICE", "CAP_SETFCAP", "CAP_SETPCAP", "CAP_SYS_CHROOT"], CapAdd: [] },
+    EffectiveCaps: ["CAP_SETGID", "CAP_SETUID"], BoundingCaps: ["CAP_SETGID", "CAP_SETUID"],
+  };
+  function podmanStatusRunner(overrides: Partial<typeof podmanInspect> = {}) {
+    return runner({
+      "/usr/bin/which podman": "podman",
+      "podman info --format {{.Version.Version}}": "6.1.2",
+      [`podman image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`podman inspect ${CONTAINER}`]: JSON.stringify([{ ...podmanInspect, ...overrides }]),
+      [versionProbe.replace("docker", "podman")]: `cua-driver ${CUA_DRIVER_VERSION}`,
+      [statusProbe.replace("docker", "podman")]: "running",
+      [healthProbe.replace("docker", "podman")]: JSON.stringify({ schema_version: "1", overall: "ok", checks: [] }),
+      [readinessProbe.replace("docker", "podman")]: "{}",
+      [readinessRead.replace("docker", "podman")]: validPng.toString("base64"),
+    });
+  }
+
+  it("recognizes Podman's local tag and effective capability representation", async () => {
+    const fake = podmanStatusRunner();
+    const status = await containerComputerStatus(fake.run, "darwin");
+    expect(status).toMatchObject({ runtime: "podman", imageMatches: true, security: "hardened", desktopReady: true, ready: true });
+  });
+
+  it.each([
+    { EffectiveCaps: ["CAP_SETGID", "CAP_SETUID", "CAP_SYS_ADMIN"] },
+    { BoundingCaps: ["CAP_SETGID", "CAP_SETUID", "CAP_NET_ADMIN"] },
+    { EffectiveCaps: undefined },
+    { HostConfig: { ...podmanInspect.HostConfig, Privileged: true } },
+  ])("refuses extra or unknown Podman privileges: %j", async overrides => {
+    const status = await containerComputerStatus(podmanStatusRunner(overrides).run, "darwin");
+    expect(status.security).toBe("unsafe");
+    expect(status.ready).toBe(false);
+  });
+
+  it.each([
+    { Image: "different-image-id" },
+    { Config: { ...podmanInspect.Config, Image: `remote.example/${IMAGE}` } },
+  ])("does not loosen image identity checks for Podman's local alias: %j", async overrides => {
+    const status = await containerComputerStatus(podmanStatusRunner(overrides).run, "darwin");
+    expect(status.imageMatches).toBe(false);
+    expect(status.ready).toBe(false);
   });
 
   it("uses Apple container's actual system and inspect commands", async () => {
@@ -518,14 +567,14 @@ describe("containerComputerAction", () => {
     const fake = runner({
       "/usr/bin/which docker": new Error("missing"),
       "/usr/bin/which podman": "podman\n",
-      "podman info --format {{.ServerVersion}}": "6.1.1\n",
+      "podman info --format {{.Version.Version}}": "6.1.1\n",
       "podman info --format {{.Host.MemTotal}}": "2147483648\n",
       [`podman image inspect ${IMAGE}`]: preparedImageInspect(),
       [`podman inspect ${CONTAINER}`]: new Error("missing container"),
     });
 
     await expect(containerComputerAction("run", fake.run, "darwin")).rejects.toThrow(
-      /2 GiB of memory.*podman machine set --memory 8192/s,
+      /2 GiB of memory.*podman machine set --memory 6144/s,
     );
     expect(fake.calls.some((call) => call.startsWith("podman run "))).toBe(false);
   });
@@ -535,7 +584,7 @@ describe("containerComputerAction", () => {
       "/usr/bin/which docker": "docker\n",
       "/usr/bin/which podman": new Error("missing"),
       "docker info --format {{.ServerVersion}}": "29\n",
-      "docker info --format {{.Host.MemTotal}}": "8589934592\n",
+      "docker info --format {{.MemTotal}}": "8589934592\n",
       [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
       [`docker inspect ${CONTAINER}`]: new Error("missing container"),
     });
@@ -562,224 +611,209 @@ describe("containerComputerAction", () => {
 });
 
 describe("runtime install", () => {
-  it("offers a Homebrew command on macOS and nothing elsewhere", () => {
+  it("offers a CLI-only install on Mac and Windows", () => {
     expect(runtimeInstallCommand("darwin")).toEqual({ command: "brew install podman", manager: "Homebrew" });
-    expect(runtimeInstallCommand("win32")).toBeNull();
+    expect(runtimeInstallCommand("win32")?.command).toContain("--id RedHat.Podman ");
+    expect(runtimeInstallCommand("win32")?.command).not.toContain("Podman-Desktop");
     expect(runtimeInstallCommand("linux")).toBeNull();
   });
 
-  it("gates the install on the package manager being present", async () => {
-    const brewUp: CommandRunner = async (cmd, args) => {
-      expect(cmd).toBe("brew");
-      expect(args).toEqual(["--version"]);
-      return { stdout: "Homebrew 4.0\n" };
-    };
-    await expect(canAutoInstallRuntime("darwin", brewUp)).resolves.toEqual({ installable: true });
-    const brewDown: CommandRunner = async () => {
-      throw new Error("command not found");
-    };
-    const gate = await canAutoInstallRuntime("darwin", brewDown);
-    expect(gate.installable).toBe(false);
-    expect(gate.reason).toMatch(/Homebrew is not installed/);
+  it.each(["darwin", "win32"] as const)("checks %s package-manager availability", async (platform) => {
+    const calls: string[] = [];
+    const gate = await canAutoInstallRuntime(platform, async (cmd, args) => {
+      calls.push([cmd, ...args].join(" ")); return { stdout: "1.0" };
+    });
+    expect(gate).toEqual({ installable: true, manager: platform === "darwin" ? "Homebrew" : "WinGet" });
+    expect(calls).toEqual([platform === "darwin" ? "brew --version" : "winget.exe --version"]);
+    const unavailable = await canAutoInstallRuntime(platform, async () => { throw new Error("missing"); });
+    expect(unavailable.installable).toBe(false);
+    expect(unavailable.reason).toContain(platform === "darwin" ? "brew.sh" : "Microsoft Store");
   });
 
-  it("runs brew install podman and verifies the binary landed", async () => {
-    const shells: string[] = [];
-    // The runner doubles as the brew gate: one call for `brew --version`,
-    // one for `podman --version` after the shell ran.
-    const verifier: CommandRunner = async (cmd, args) => {
-      expect(args).toEqual(["--version"]);
-      return { stdout: cmd === "brew" ? "Homebrew 4.0\n" : "5.2.0\n" };
+  it.each(["darwin", "win32"] as const)("installs with native argv then verifies the binary on %s", async (platform) => {
+    const calls: string[] = [];
+    await installContainerRuntime("podman", platform, async (cmd, args) => {
+      calls.push([cmd, ...args].join(" ")); return { stdout: "1.0" };
+    });
+    expect(calls[1]).toBe(runtimeInstallCommand(platform)?.command);
+    expect(calls.at(-1)).toBe("podman --version");
+    expect(calls.some(c => c.includes("/bin/sh"))).toBe(false);
+  });
+
+  it("reports a successful installer that did not install the binary", async () => {
+    await expect(installContainerRuntime("podman", "darwin", async cmd => {
+      if (cmd === "podman") throw new Error("missing"); return { stdout: "ok" };
+    })).rejects.toThrow(/finished but podman still is not answering/);
+  });
+
+  it("preserves install errors and verifies already-installed responses", async () => {
+    await expect(installContainerRuntime("podman", "darwin", async (_cmd, args) => {
+      if (args[0] === "install") throw new Error("Xcode CLT required"); return { stdout: "ok" };
+    })).rejects.toThrow(/Could not install podman.*Xcode CLT/);
+    await expect(installContainerRuntime("podman", "darwin", async (_cmd, args) => {
+      if (args[0] === "install") throw new Error("already installed"); return { stdout: "ok" };
+    })).resolves.toBeUndefined();
+  });
+
+  it("refuses unsupported installations without executing anything", async () => {
+    let calls = 0;
+    const fake = async () => { calls++; return { stdout: "ok" }; };
+    await expect(installContainerRuntime("podman", "linux", fake)).rejects.toThrow(/one-click install/);
+    await expect(installContainerRuntime("docker", "darwin", fake)).rejects.toThrow(/one-click install/);
+    expect(calls).toBe(0);
+  });
+
+  it("allows the install action before any runtime is present", async () => {
+    let installed = false;
+    const fake: CommandRunner = async (cmd, args) => {
+      if (cmd === "brew") { if (args[0] === "install") installed = true; return { stdout: "ok" }; }
+      if (installed && ((cmd === "/usr/bin/which" && args[0] === "podman") || (cmd === "podman" && args[0] === "--version"))) return { stdout: "podman" };
+      throw new Error("unavailable");
     };
-    await expect(
-      installContainerRuntime("podman", "darwin", verifier, async (cmd) => {
-        shells.push(cmd);
-      }),
-    ).resolves.toBeUndefined();
-    expect(shells).toEqual(["brew install podman"]);
+    const after = await containerComputerAction("runtimeInstall", fake, "darwin");
+    expect(installed).toBe(true);
+    expect(after.runtime).toBe("podman");
+    expect(after.daemonUp).toBe(false);
   });
 
-  it("reports honestly when brew finishes but the binary is still absent", async () => {
-    // brew gate passes; the post-install podman --version is what fails.
-    const gateOnly: CommandRunner = async (cmd) => {
-      if (cmd === "brew") return { stdout: "Homebrew 4.0\n" };
-      throw new Error("command not found");
-    };
-    await expect(
-      installContainerRuntime("podman", "darwin", gateOnly, async () => undefined),
-    ).rejects.toThrow(/finished but podman still is not answering/);
-  });
-
-  it("surfaces real install failures and accepts already-installed as success", async () => {
-    const gateOk: CommandRunner = async (cmd) => {
-      if (cmd === "brew") return { stdout: "Homebrew 4.0\n" };
-      return { stdout: "5.2.0\n" };
-    };
-    await expect(
-      installContainerRuntime("podman", "darwin", gateOk, async () => {
-        throw new Error("brew: formulae require Xcode CLT");
-      }),
-    ).rejects.toThrow(/Could not install podman.*Xcode CLT/s);
-    await expect(
-      installContainerRuntime("podman", "darwin", gateOk, async () => {
-        throw new Error("Warning: podman 5.2.0 already installed");
-      }),
-    ).resolves.toBeUndefined();
-  });
-
-  it("refuses to install on platforms without a supported command", async () => {
-    let shellTouched = false;
-    await expect(
-      installContainerRuntime("podman", "linux", async () => ({ stdout: "" }), async () => {
-        shellTouched = true;
-      }),
-    ).rejects.toThrow(/does not have a one-click install for this platform/);
-    expect(shellTouched).toBe(false);
-  });
-
-  it("action skips install when a runtime already exists", async () => {
-    const daemonUp: CommandRunner = async () => ({ stdout: "6.1.1\n" });
-    // containerComputerAction uses the real installContainerRuntime; the
-    // existing-runtime early return must fire before any shell call. The
-    // runner's `podman info` response means status resolves runtime=docker.
-    const before = await containerComputerStatus(daemonUp, "darwin");
-    expect(before.runtime).toBe("docker");
-    await expect(containerComputerAction("runtimeInstall", daemonUp, "darwin", SHARED_LOCAL_VM_TARGET)).resolves.toBeDefined();
+  it("skips install when a runtime already exists", async () => {
+    const calls: string[] = [];
+    await containerComputerAction("runtimeInstall", async (cmd, args) => { calls.push([cmd, ...args].join(" ")); return { stdout: "6.1.1" }; }, "darwin");
+    expect(calls.some(c => c.startsWith("brew") || c.startsWith("winget"))).toBe(false);
   });
 });
 
 describe("canAutoStartRuntime", () => {
-  it("is true for every runtime except docker on Linux, which needs sudo", () => {
+  it("offers only supported starts without sudo", () => {
     expect(canAutoStartRuntime("docker", "darwin")).toBe(true);
     expect(canAutoStartRuntime("docker", "win32")).toBe(true);
     expect(canAutoStartRuntime("podman", "linux")).toBe(true);
     expect(canAutoStartRuntime("podman", "darwin")).toBe(true);
+    expect(canAutoStartRuntime("podman", "win32")).toBe(true);
     expect(canAutoStartRuntime("container", "darwin")).toBe(true);
+    expect(canAutoStartRuntime("container", "win32")).toBe(false);
     expect(canAutoStartRuntime("docker", "linux")).toBe(false);
-  });
-
-  it("is false with no runtime at all", () => {
     expect(canAutoStartRuntime(null, "darwin")).toBe(false);
   });
 });
 
 describe("startContainerRuntime", () => {
-  const daemonUp: CommandRunner = async () => ({ stdout: "6.1.1\n" });
-  const daemonDown: CommandRunner = async () => {
-    throw new Error("cannot connect");
+  const windows = {
+    success: { attempts: 14, gapMs: 0, probeTimeoutMs: 1, initialDelayMs: 0 },
+    failed: { attempts: 2, gapMs: 0, probeTimeoutMs: 1, initialDelayMs: 0 },
   };
-
-  it("treats an already-running podman machine as success when the daemon answers", async () => {
-    // The field bug: `podman machine start` exits non-zero with "already
-    // running" — the desired end state — and the panel stayed red forever.
-    await expect(
-      startContainerRuntime("podman", "darwin", daemonUp, async () => {
-        throw new Error('Error: unable to start "podman-machine-default": already running');
-      }),
-    ).resolves.toBeUndefined();
-  });
-
-  it("keeps probing while a cold API forwarder warms up instead of failing once", async () => {
-    // The second field bug: right after machine start, the first `podman
-    // info` can lose the race with the gvproxy/SSH forwarder. The daemon is
-    // UP — the user's own terminal proves it — so one failed probe must not
-    // read as "not answering yet". Probes continue until the window closes.
+  const machine = { Name: "podman-machine-default", Default: true, Running: false };
+  function fixture({ machines = [machine], connections = [], answersAt = 2, failCommand = "", failure = "startup failed" }: {
+    machines?: Array<{ Name: string; Default: boolean; Running: boolean }>;
+    connections?: Array<{ Name: string; URI: string; Default: boolean }>;
+    answersAt?: number; failCommand?: string; failure?: string;
+  } = {}) {
+    const calls: string[] = [];
     let probes = 0;
-    const warming: CommandRunner = async () => {
-      probes += 1;
-      if (probes < 3) throw new Error("cannot connect");
-      return { stdout: "6.1.2\n" };
-    };
-    await expect(
-      startContainerRuntime("podman", "darwin", warming, async () => undefined, { success: { attempts: 5, gapMs: 1, probeTimeoutMs: 1, initialDelayMs: 1 } }),
-    ).resolves.toBeUndefined();
-    expect(probes).toBe(3);
-  });
-
-  it("gives a first-ever machine start its full boot window before declaring it dead", async () => {
-    // The field report: "the command finished but podman is not answering
-    // yet" on a FIRST machine start — the old 10×1.5 s window (~15 s) closed
-    // long before a fresh AppleHV VM's API forwarder answered (30–90 s). The
-    // success window must be far larger than the failed window.
-    let probes = 0;
-    const lateUp: CommandRunner = async () => {
-      probes += 1;
-      if (probes < 12) throw new Error("cannot connect");
-      return { stdout: "6.1.3\n" };
-    };
-    await expect(
-      startContainerRuntime("podman", "darwin", lateUp, async () => undefined, { success: { attempts: 14, gapMs: 1, probeTimeoutMs: 1, initialDelayMs: 1 } }),
-    ).resolves.toBeUndefined();
-    expect(probes).toBe(12);
-  });
-
-  it("verifies the daemon after a clean start and fails honestly when it never answers", async () => {
-    let probes = 0;
-    const neverUp: CommandRunner = async () => {
-      probes += 1;
-      throw new Error("cannot connect");
-    };
-    await expect(
-      startContainerRuntime("podman", "darwin", neverUp, async () => undefined, { success: { attempts: 6, gapMs: 1, probeTimeoutMs: 1, initialDelayMs: 1 } }),
-    ).rejects.toThrow(/not answering yet/);
-    // The window is bounded, not infinite — but bounded by the SUCCESS
-    // window (the widest), not the old 10-attempt failed window.
-    expect(probes).toBe(6);
-  });
-
-  it("still surfaces real start failures when the daemon is down", async () => {
-    await expect(
-      // A failed start pays only the short failed window (10×1.5 s worst
-      // case is > the default 20 s test timeout) — bound it for the test.
-      startContainerRuntime("podman", "darwin", daemonDown, async () => {
-        throw new Error("podman machine start: SSH handshake failed");
-      }, { failed: { attempts: 2, gapMs: 1, probeTimeoutMs: 1, initialDelayMs: 1 } }),
-    ).rejects.toThrow(/Could not start podman.*SSH handshake/s);
-  });
-
-  it("fails fast with an install hint when the binary is missing, without burning the probe window", async () => {
-    let probes = 0;
-    const probeCounter: CommandRunner = async () => {
-      probes += 1;
-      throw new Error("cannot connect");
-    };
-    await expect(
-      startContainerRuntime("podman", "darwin", probeCounter, async () => {
-        throw new Error("/bin/sh: podman: command not found");
-      }),
-    ).rejects.toThrow(/podman is not installed/);
-    expect(probes).toBe(0); // no window is spent on a guaranteed ENOENT
-  });
-
-  it("creates a missing machine with init instead of hiding its errors", async () => {
-    const commands: string[] = [];
-    const recordingShell = async (cmd: string) => {
-      if (commands.length === 0) {
-        commands.push(cmd);
-        // The shell reports failure like execFile does — stderr rides the
-        // error message, which is exactly what the old 2>/dev/null hid.
-        throw new Error("podman machine init: virtualization framework unavailable");
+    const run: CommandRunner = async (cmd, args) => {
+      const command = [cmd, ...args].join(" "); calls.push(command);
+      if (command === failCommand) throw new Error(failure);
+      if (args[0] === "info") {
+        if (cmd === "podman") expect(args).toEqual(["info", "--format", "{{.Version.Version}}"]);
+        if (++probes < answersAt) throw new Error("not answering");
+        return { stdout: "6.1.2" };
       }
-      commands.push(cmd); // machine start succeeds on the retry
+      if (args[0] === "machine" && args[1] === "list") return { stdout: JSON.stringify(machines) };
+      if (args[0] === "system") return { stdout: JSON.stringify(connections) };
+      return { stdout: "" };
     };
-    await expect(
-      startContainerRuntime("podman", "darwin", daemonUp, recordingShell, { failed: { attempts: 1, gapMs: 1, probeTimeoutMs: 1, initialDelayMs: 1 } }),
-    ).resolves.toBeUndefined();
-    // The init guard is a real inspect-or-init, not a blind init with stderr
-    // discarded: a failed init must surface its own message.
-    expect(commands[0]).toContain("podman machine inspect");
-    expect(commands[0]).toContain("podman machine init");
-    expect(commands[0]).not.toMatch(/init 2>\/dev\/null/);
+    return { run, calls, probes: () => probes };
+  }
+
+  it("does not restart or initialize a healthy runtime", async () => {
+    const fake = fixture({ answersAt: 1 });
+    await startContainerRuntime("podman", "darwin", fake.run, windows);
+    expect(fake.calls).toEqual(["podman info --format {{.Version.Version}}"]);
   });
 
-  it("refuses sudo-requiring starts before touching the shell", async () => {
-    let shellTouched = false;
-    await expect(
-      startContainerRuntime("docker", "linux", daemonUp, async () => {
-        shellTouched = true;
-      }),
-    ).rejects.toThrow(/needs sudo/);
-    expect(shellTouched).toBe(false);
+  it.each(["darwin", "win32"] as const)("creates a missing machine and starts it with native argv on %s", async platform => {
+    const fake = fixture({ machines: [] });
+    await startContainerRuntime("podman", platform, fake.run, windows);
+    expect(fake.calls).toContain(platform === "darwin" ? "podman machine init --memory 6144 --cpus 2" : "podman machine init");
+    expect(fake.calls).toContain("podman machine start podman-machine-default");
+    expect(fake.calls.some(c => /sh |stop|rm |reset|set |connection default/.test(c))).toBe(false);
+    expect(fake.calls.includes("wsl.exe --status")).toBe(false); // Hyper-V is valid without WSL.
+  });
+
+  it("resumes the selected existing machine without reinitializing or resizing", async () => {
+    const fake = fixture({ machines: [{ Name: "my-work", Default: true, Running: false }] });
+    await startContainerRuntime("podman", "darwin", fake.run, windows);
+    expect(fake.calls).toContain("podman machine start my-work");
+    expect(fake.calls.some(c => /init|machine set|machine stop/.test(c))).toBe(false);
+  });
+
+  it("waits for a running machine without trying to start it again", async () => {
+    const fake = fixture({ machines: [{ ...machine, Running: true }], answersAt: 12 });
+    await startContainerRuntime("podman", "darwin", fake.run, windows);
+    expect(fake.probes()).toBe(12);
+    expect(fake.calls.some(c => c.includes("machine start"))).toBe(false);
+  });
+
+  it("bounds readiness retries and preserves a real init failure without starting", async () => {
+    const missing = fixture({ machines: [], answersAt: 99, failCommand: "podman machine init --memory 6144 --cpus 2", failure: "virtualization unavailable" });
+    await expect(startContainerRuntime("podman", "darwin", missing.run, windows)).rejects.toThrow(/virtualization unavailable/);
+    expect(missing.calls.some(c => c.includes("machine start"))).toBe(false);
+    expect(missing.probes()).toBe(3);
+    const down = fixture({ answersAt: 99 });
+    await expect(startContainerRuntime("podman", "darwin", down.run, windows)).rejects.toThrow(/not answering yet/);
+    expect(down.probes()).toBe(15);
+  });
+
+  it("treats a concurrent start as success only after the daemon answers", async () => {
+    const fake = fixture({ failCommand: "podman machine start podman-machine-default", failure: "already running" });
+    await expect(startContainerRuntime("podman", "darwin", fake.run, windows)).resolves.toBeUndefined();
+    expect(fake.probes()).toBe(2);
+  });
+
+  it("explains missing WSL without installing or shutting down distributions", async () => {
+    const fake = fixture({ machines: [], answersAt: 99, failCommand: "podman machine init", failure: "WSL missing" });
+    await expect(startContainerRuntime("podman", "win32", fake.run, windows)).rejects.toThrow(/wsl --install --no-distribution/);
+    expect(fake.calls.some(c => c.includes("machine start") || c.includes("--shutdown") || c.includes("wsl.exe --install"))).toBe(false);
+  });
+
+  it("refuses ambiguous machine selection", async () => {
+    const fake = fixture({ machines: [{ ...machine, Default: false }, { Name: "other", Default: false, Running: false }], answersAt: 99 });
+    await expect(startContainerRuntime("podman", "darwin", fake.run, windows)).rejects.toThrow(/Choose the default/);
+    expect(fake.calls.some(c => c.includes("machine start") || c.includes("machine init"))).toBe(false);
+  });
+
+  it("finds an existing rootful default without changing connections", async () => {
+    const fake = fixture({ machines: [{ ...machine, Default: false }, { Name: "other", Default: false, Running: false }],
+      connections: [{ Name: "other-root", URI: "ssh://root@127.0.0.1:50123/run/podman/podman.sock", Default: true }] });
+    await startContainerRuntime("podman", "darwin", fake.run, windows);
+    expect(fake.calls).toContain("podman machine start other");
+    expect(fake.calls.some(c => c.includes("connection default"))).toBe(false);
+  });
+
+  it("never resolves a remote connection to a local machine by name alone", async () => {
+    const fake = fixture({ machines: [{ ...machine, Default: false }, { Name: "other", Default: false, Running: false }], answersAt: 99,
+      connections: [{ Name: "other-root", URI: "ssh://root@remote.example/run/podman/podman.sock", Default: true }] });
+    await expect(startContainerRuntime("podman", "darwin", fake.run, windows)).rejects.toThrow(/Choose the default/);
+    expect(fake.calls.some(c => c.includes("machine start"))).toBe(false);
+  });
+
+  it("does not invoke machine commands for daemonless Linux Podman", async () => {
+    const fake = fixture();
+    await startContainerRuntime("podman", "linux", fake.run, windows);
+    expect(fake.calls.every(c => c.startsWith("podman info"))).toBe(true);
+  });
+
+  it("launches Docker Desktop with native Windows PowerShell", async () => {
+    const fake = fixture();
+    await startContainerRuntime("docker", "win32", fake.run, windows);
+    expect(fake.calls.some(c => c.startsWith("powershell.exe -NoProfile -NonInteractive -Command Start-Process"))).toBe(true);
+    expect(fake.calls.some(c => /colima|open -a|\/bin\/sh/.test(c))).toBe(false);
+  });
+
+  it("refuses privileged starts before running commands", async () => {
+    const fake = fixture();
+    await expect(startContainerRuntime("docker", "linux", fake.run, windows)).rejects.toThrow(/needs sudo/);
+    expect(fake.calls).toEqual([]);
   });
 });
 
@@ -843,8 +877,8 @@ describe("setupCommands", () => {
     expect(commands.run).not.toContain("--memory-swap");
   });
 
-  it("offers the supported Podman Desktop installer on Windows", () => {
-    expect(setupCommands(null, "win32").install).toBe("winget install -e --id RedHat.Podman-Desktop");
+  it("offers the CLI-only Podman installer on Windows", () => {
+    expect(setupCommands(null, "win32").install).toBe(runtimeInstallCommand("win32")?.command);
   });
 });
 

@@ -1,6 +1,6 @@
 // One-place setup and lifecycle for the shared, isolated Local VM, plus the
 // desktop isolation setting (shared singleton vs one desktop per bot).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -16,49 +16,15 @@ import {
 import { Card, CommandLine } from "./SettingsPrimitives";
 import { RaisedButton } from "./ui/raised-button";
 import { cn } from "@/lib/cn";
+import {
+  LOCAL_VM_STAGE_LABELS, localVmInstallManager, localVmNeedsRecreate, localVmSetupReady,
+  requestLocalVmStatus, runLocalVmSetup,
+  type LocalVmAction as Action, type LocalVmStatus as Status, type LocalVmSetupStage,
+} from "@/lib/local-vm-setup";
 
-type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate" | "runtimeStart" | "runtimeInstall";
-
-interface Status {
-  platform: string;
-  runtime: string | null;
-  available: string[];
-  daemonUp: boolean;
-  image: boolean;
-  imageMatches: boolean;
-  managed: boolean;
-  container: "running" | "stopped" | "missing";
-  network: "loopback" | "unsafe" | "unknown";
-  security: "hardened" | "unsafe" | "unknown";
-  persistence: "durable" | "unsafe" | "unknown";
-  desktopReady: boolean;
-  desktop_starting: boolean;
-  ready: boolean;
-  problem: string | null;
-  image_ref: string;
-  base_image_ref: string;
-  driver_version: string;
-  container_name: string;
-  workspace_path: string;
-  workspace_guest_path: string;
-  viewer_url: string;
-  idle_timeout_ms: number;
-  mode?: "shared" | "perBot";
-  max_instances?: number;
-  /** One-click install offer, computed per status read. Absent on older
-   * servers — the optional chain in the UI keeps that rendering. */
-  runtime_install?: { installable: boolean; reason?: string };
-  commands: {
-    install: string | null;
-    runtimeStart: string | null;
-    pull: string | null;
-    run: string | null;
-    start: string | null;
-    stop: string | null;
-    remove: string | null;
-    view: string;
-  };
-}
+type PendingAction = Action | "configure";
+// Multiple failed-turn cards can mount the hook at once. Never race their writes.
+let localVmActionInFlight = false;
 
 function Step({ n, title, done, children }: { n: number; title: string; done: boolean; children?: React.ReactNode }) {
   return (
@@ -87,7 +53,7 @@ function ActionButton({
   danger = false,
 }: {
   action: Action;
-  pending: Action | null;
+  pending: PendingAction | null;
   children: React.ReactNode;
   onClick: () => void;
   danger?: boolean;
@@ -123,39 +89,42 @@ function clampMaxDesktops(value: number): number {
   return Math.min(MAX_DESKTOPS_MAX, Math.max(MAX_DESKTOPS_MIN, Math.trunc(value)));
 }
 
-/** Everything the quick-setup card and the full section need: the live VM
- * status plus the one-click chain (start runtime → prepare image → create
- * VM). Extracted so the chat's error card can embed real setup, not a
- * pointer to Settings. */
+/** One lifecycle controller for both setup surfaces. Status polling may recover
+ * its own read error, but only an explicit retry clears an action failure. */
 export function useLocalVmSetup() {
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState<Action | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [stage, setStage] = useState<LocalVmSetupStage | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const operation = useRef(false);
+  const pollController = useRef<AbortController | null>(null);
 
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch("/api/local-computer", { signal });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error ?? `Status request failed (${response.status})`);
-    // SAFETY: /api/local-computer serves the Status shape by contract; a
-    // malformed body falls back to {} above and renders as an idle panel.
-    setStatus(body as Status);
-    setError(null);
+  const read = useCallback(async (signal?: AbortSignal) => {
+    const current = await requestLocalVmStatus(undefined, signal);
+    if (!signal?.aborted) {
+      setStatus(current);
+      setStatusError(null);
+    }
+    return current;
   }, []);
 
   useEffect(() => {
     let active = true;
     let timer: number | undefined;
-    let controller: AbortController | undefined;
     const poll = async () => {
-      controller = new AbortController();
       try {
-        await refresh(controller.signal);
+        if (!operation.current && !localVmActionInFlight) {
+          const controller = new AbortController();
+          pollController.current = controller;
+          await read(controller.signal);
+        }
       } catch (e) {
         if (active && !(e instanceof DOMException && e.name === "AbortError")) {
           setStatus(null);
-          setError(e instanceof Error ? e.message : String(e));
+          setStatusError(e instanceof Error ? e.message : String(e));
         }
       } finally {
         if (active) {
@@ -167,65 +136,88 @@ export function useLocalVmSetup() {
     void poll();
     return () => {
       active = false;
-      controller?.abort();
+      pollController.current?.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [refresh, refreshKey]);
+  }, [read, refreshKey]);
 
-  const post = useCallback(async (action: Exclude<Action, "recreate">) => {
-    const response = await fetch(`/api/local-computer/${action}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error ?? `${action} failed`);
-    // SAFETY: the action endpoints answer with the same Status shape the
-    // poll endpoint serves; the UI re-polls, so a stale body self-heals.
-    setStatus(body as Status);
+  const runExclusive = useCallback(async (action: PendingAction, work: () => Promise<void>) => {
+    // React state updates do not take effect synchronously; the ref closes the
+    // same-frame double-click and auto/manual overlap before any network call.
+    if (operation.current) return;
+    if (localVmActionInFlight) {
+      setActionError("Another Local VM setup action is still running. Wait, then re-check.");
+      return;
+    }
+    operation.current = true;
+    localVmActionInFlight = true;
+    pollController.current?.abort();
+    setPending(action);
+    setActionError(null);
+    try {
+      await work();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      operation.current = false;
+      localVmActionInFlight = false;
+      setPending(null);
+      setStage(null);
+      setLoading(false);
+    }
   }, []);
 
-  const runAutoSetup = useCallback(async () => {
-    setPending("run");
-    setError(null);
-    try {
-      let current = status;
-      if (current?.runtime && !current.daemonUp) {
-        if (current.runtime === "docker" && current.platform === "linux") {
-          throw new Error("Starting docker on Linux needs sudo — run the command shown below yourself, then continue.");
-        }
-        await post("runtimeStart");
-        current = await (await fetch("/api/local-computer")).json();
-        setStatus(current);
-      }
-      if (current && !current.image) {
-        await post("pull");
-        current = await (await fetch("/api/local-computer")).json();
-        setStatus(current);
-      }
-      if (current && current.container === "missing" && current.image) {
-        await post("run");
-        current = await (await fetch("/api/local-computer")).json();
-        setStatus(current);
-      }
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPending(null);
-    }
-  }, [post, refresh, status]);
+  const post = useCallback(async (action: Exclude<Action, "recreate">) => {
+    const current = await requestLocalVmStatus(action);
+    setStatus(current);
+  }, []);
 
-  return { status, loading, pending, error, runAutoSetup, refresh: () => setRefreshKey((key) => key + 1) };
+  const act = useCallback(async (action: Action) => {
+    if (operation.current || localVmActionInFlight) return;
+    if (action === "remove" && !window.confirm("Delete the Local VM? Files and browser sign-ins in its durable workspace will remain.")) return;
+    if (action === "recreate" && !window.confirm("Replace the existing Local VM with the pinned image and safety limits? Files and browser sign-ins in its durable workspace will remain.")) return;
+    await runExclusive(action, async () => {
+      if (action === "recreate") {
+        await post("remove");
+        await post("run");
+      } else await post(action);
+      await read();
+    });
+  }, [post, read, runExclusive]);
+
+  const runAutoSetup = useCallback(() => runExclusive("run", async () => {
+    await runLocalVmSetup({ read, post, onStage: setStage });
+  }), [post, read, runExclusive]);
+
+  const saveIsolation = useCallback((mode: IsolationMode, maxInstances: number) => runExclusive("configure", async () => {
+    const response = await fetch("/api/config", {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ localVm: { mode, maxInstances } }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `Saving failed (${response.status})`);
+    await read();
+  }), [read, runExclusive]);
+
+  return {
+    status, loading, pending, stage, error: actionError ?? statusError, act, runAutoSetup, saveIsolation,
+    refresh: () => {
+      if (operation.current) return;
+      setActionError(null);
+      setLoading(true);
+      setRefreshKey((key) => key + 1);
+    },
+  };
 }
 
 /** Compact one-click setup embedded wherever a failed turn points at the
  * Local VM: shows the live status and the same auto-setup chain the full
  * Settings section offers, in a card a fraction of the size. */
 export function LocalVmQuickSetup() {
-  const { status, loading, pending, error, runAutoSetup } = useLocalVmSetup();
-  const ready = status?.ready === true;
-  const canAutoSetup = Boolean(status?.runtime) && !ready;
+  const { status, loading, pending, stage, error, runAutoSetup, refresh } = useLocalVmSetup();
+  const ready = status ? localVmSetupReady(status) : false;
+  const canAutoSetup = Boolean(status && (status.runtime || status.runtime_install?.installable)) && !ready;
+  const perBot = status?.mode === "perBot";
   return (
     <div className="mt-3 w-full rounded-xl border border-hairline/50 bg-panel/60 p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -236,7 +228,7 @@ export function LocalVmQuickSetup() {
           )}
         >
           {loading ? <Loader2 size={12} className="animate-spin" /> : ready ? <Check size={12} /> : <Circle size={9} />}
-          {loading ? "Checking…" : !status ? "Status unavailable" : ready ? "Local VM ready" : (status.problem ?? "Not ready")}
+          {loading ? "Checking…" : !status ? "Status unavailable" : ready ? (perBot ? "Ready for per-bot desktops" : "Local VM ready") : (status.problem ?? "Not ready")}
         </span>
         {canAutoSetup && (
           <button
@@ -245,11 +237,18 @@ export function LocalVmQuickSetup() {
             className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
           >
             {pending !== null ? <Loader2 size={13} className="animate-spin" /> : <Wrench size={12} />}
-            {pending !== null ? "Setting up…" : "Set up automatically"}
+            {stage ? LOCAL_VM_STAGE_LABELS[stage] : "Set up automatically"}
           </button>
         )}
       </div>
-      {error && <div className="mt-2 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] text-danger">{error}</div>}
+      {status && !ready && !status.runtime && status.runtime_install?.installable && (
+        <div className="mt-2 text-[12px] text-ink-secondary">
+          Install Podman with {localVmInstallManager(status)}. First setup downloads the desktop and may take several minutes.
+          {status.platform === "win32" && " Windows may ask permission to install Podman; WSL 2 and a restart may be required."}
+        </div>
+      )}
+      {error && <div role="alert" className="mt-2 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] text-danger">{error}</div>}
+      {!loading && (error || !status) && <button onClick={refresh} disabled={pending !== null} className="mt-2 text-[12px] text-accent">Re-check</button>}
       {!canAutoSetup && !loading && status && !ready && !status.runtime && (
         <div className="mt-2 text-[12px] text-ink-secondary">
           Install a container runtime first — App Settings → Local VM has the one-line command.
@@ -262,40 +261,22 @@ export function LocalVmQuickSetup() {
 /** Radio pair + cap input persisted to /api/config {localVm}. The server
  * refuses a per-bot → shared switch while bots still hold their own desktops,
  * so its error text is surfaced verbatim here. */
-function DesktopIsolationCard({ status }: { status: Status | null }) {
+function DesktopIsolationCard({ status, busy, save }: {
+  status: Status | null;
+  busy: boolean;
+  save: (mode: IsolationMode, maxInstances: number) => Promise<void>;
+}) {
   const [mode, setMode] = useState<IsolationMode>("shared");
   const [maxInstances, setMaxInstances] = useState(4);
   const [hydrated, setHydrated] = useState(false);
   const [editingMax, setEditingMax] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Poll refreshes must not stomp in-progress edits; only the server's saved
-  // values flow back in while the user is not typing or saving.
+  // Poll refreshes must not stomp in-progress edits.
   useEffect(() => {
-    if (!status?.mode || saving || editingMax) return;
+    if (!status?.mode || busy || editingMax) return;
     setMode(status.mode);
     setMaxInstances(status.max_instances ?? 4);
     setHydrated(true);
-  }, [status?.mode, status?.max_instances, saving, editingMax]);
-
-  const save = async (nextMode: IsolationMode, nextMax: number) => {
-    setSaving(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/config", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ localVm: { mode: nextMode, maxInstances: nextMax } }),
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error ?? `Saving failed (${response.status})`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
+  }, [status?.mode, status?.max_instances, busy, editingMax]);
 
   const options: Array<{ value: IsolationMode; label: string; detail: string }> = [
     {
@@ -330,7 +311,7 @@ function DesktopIsolationCard({ status }: { status: Status | null }) {
               name="desktop-isolation"
               className="mt-0.5 accent-[var(--color-accent)]"
               checked={mode === option.value}
-              disabled={saving || !hydrated}
+              disabled={busy || !hydrated}
               onChange={() => {
                 setMode(option.value);
                 void save(option.value, clampMaxDesktops(maxInstances));
@@ -353,7 +334,7 @@ function DesktopIsolationCard({ status }: { status: Status | null }) {
             max={MAX_DESKTOPS_MAX}
             step={1}
             value={maxInstances}
-            disabled={saving || !hydrated}
+            disabled={busy || !hydrated}
             onFocus={() => setEditingMax(true)}
             onBlur={() => {
               setEditingMax(false);
@@ -364,175 +345,33 @@ function DesktopIsolationCard({ status }: { status: Status | null }) {
             onChange={(e) => setMaxInstances(e.target.valueAsNumber)}
             className="w-20 rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-center text-[13px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
           />
-          {saving && <Loader2 size={13} className="animate-spin text-ink-secondary" />}
+          {busy && <Loader2 size={13} className="animate-spin text-ink-secondary" />}
         </div>
-        {error && <div className="rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
       </div>
     </Card>
   );
 }
 
 export function LocalComputerSection() {
-  const [status, setStatus] = useState<Status | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState<Action | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch("/api/local-computer", { signal });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error ?? `Status request failed (${response.status})`);
-    // SAFETY: /api/local-computer serves the Status shape by contract; a
-    // malformed body falls back to {} above and renders as an idle panel.
-    setStatus(body as Status);
-    setError(null);
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    let timer: number | undefined;
-    let controller: AbortController | undefined;
-    const poll = async () => {
-      controller = new AbortController();
-      try {
-        await refresh(controller.signal);
-      } catch (e) {
-        if (active && !(e instanceof DOMException && e.name === "AbortError")) {
-          setStatus(null);
-          setError(e instanceof Error ? e.message : String(e));
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-          timer = window.setTimeout(() => void poll(), 5000);
-        }
-      }
-    };
-    void poll();
-    return () => {
-      active = false;
-      controller?.abort();
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [refresh, refreshKey]);
-
-  const post = async (action: Exclude<Action, "recreate">) => {
-    const response = await fetch(`/api/local-computer/${action}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body.error ?? `${action} failed`);
-    // SAFETY: the action endpoints answer with the same Status shape the
-    // poll endpoint serves; the UI re-polls, so a stale body self-heals.
-    setStatus(body as Status);
-  };
-
-  const act = async (action: Action) => {
-    if (
-      action === "remove" &&
-      !window.confirm("Delete the Local VM? Files and browser sign-ins in its durable workspace will remain.")
-    ) return;
-    if (
-      action === "recreate" &&
-      !window.confirm("Replace the existing Local VM with the pinned image and safety limits? Files and browser sign-ins in its durable workspace will remain.")
-    ) return;
-    setPending(action);
-    setError(null);
-    try {
-      if (action === "recreate") {
-        await post("remove");
-        await post("run");
-      } else {
-        await post(action);
-      }
-      // The desktop starts after the container process; keep the progress
-      // state honest and let the regular poll mark it Ready a few seconds on.
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const [autoSetupRunning, setAutoSetupRunning] = useState(false);
-
-  // Steps 2-4 chained into one click, in order, stopping and reporting
-  // exactly where it failed if any step does. Step 1 (installing the
-  // runtime itself) is never included here — that's new software on the
-  // user's machine, the one thing this can't quietly do on their behalf,
-  // same category as the Apple/Google developer-account limitations
-  // elsewhere in this app.
-  const runAutoSetup = async () => {
-    setAutoSetupRunning(true);
-    setError(null);
-    try {
-      let current = status;
-      // Step 1, when the gate allows it: install the runtime itself. Only
-      // offered where the command is plain and user-level (Homebrew); the
-      // gate's reason is the honest message when it isn't.
-      if (current && !current.runtime) {
-        if (current.runtime_install?.installable) {
-          await post("runtimeInstall");
-          current = await (await fetch("/api/local-computer")).json();
-          setStatus(current);
-        } else if (current.runtime_install?.reason) {
-          throw new Error(current.runtime_install.reason);
-        }
-      }
-      if (current?.runtime && !current.daemonUp) {
-        if (current.runtime === "docker" && current.platform === "linux") {
-          throw new Error("Starting docker on Linux needs sudo — run the command shown below yourself, then continue.");
-        }
-        await post("runtimeStart");
-        current = await (await fetch("/api/local-computer")).json();
-        setStatus(current);
-      }
-      if (current && !current.image) {
-        await post("pull");
-        current = await (await fetch("/api/local-computer")).json();
-        setStatus(current);
-      }
-      if (current && current.container === "missing" && current.image) {
-        await post("run");
-        current = await (await fetch("/api/local-computer")).json();
-        setStatus(current);
-      }
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setAutoSetupRunning(false);
-    }
-  };
-
+  const { status, loading, pending, stage, error, act, runAutoSetup, saveIsolation, refresh } = useLocalVmSetup();
+  const autoSetupRunning = stage !== null;
   const c = status?.commands;
-  const ready = status?.ready === true;
-  const existing = status?.container !== "missing";
-  // A stopped container is a normal pause — one click restarts it and the
-  // workspace is intact. Recreate is only for containers that are wrong
-  // (old image, unmanaged, unsafe network/security/persistence).
-  const needsRecreate = Boolean(
-    existing &&
-      status?.container !== "stopped" &&
-      (!status?.imageMatches ||
-        !status?.managed ||
-        status?.network === "unsafe" ||
-        status?.security === "unsafe" ||
-        status?.persistence === "unsafe"),
-  );
+  const perBot = status?.mode === "perBot";
+  const ready = status ? localVmSetupReady(status) : false;
+  const existing = Boolean(status && status.container !== "missing");
+  const needsRecreate = Boolean(status && !perBot && localVmNeedsRecreate(status));
+  const installManager = status ? localVmInstallManager(status) : "Homebrew";
   const unavailable = !loading && !status;
   const host = status?.platform === "darwin" ? "Mac" : "computer";
 
   return (
     <>
-      <DesktopIsolationCard status={status} />
+      <DesktopIsolationCard status={status} busy={pending !== null} save={saveIsolation} />
       <Card
         title="Local VM"
-        subtitle={`A shared Cua Linux sandbox on this ${host} for bots to browse and work in — isolated, backed by one durable workspace, and automatically recycled after 8 hours without activity.`}
+        subtitle={perBot
+          ? `Cua Linux desktops on this ${host}, created separately for each bot and recycled after 8 hours without activity.`
+          : `A shared Cua Linux sandbox on this ${host} for bots to browse and work in — isolated, backed by one durable workspace, and automatically recycled after 8 hours without activity.`}
       >
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -542,19 +381,16 @@ export function LocalComputerSection() {
             )}
           >
             {loading ? <Loader2 size={12} className="animate-spin" /> : ready ? <Check size={12} /> : <Circle size={9} />}
-            {loading ? "Checking…" : unavailable ? "Status unavailable" : ready ? "Ready" : (status?.problem ?? "Not ready")}
+            {loading ? "Checking…" : unavailable ? "Status unavailable" : ready ? (perBot ? "Ready for per-bot desktops" : "Ready") : (status?.problem ?? "Not ready")}
           </span>
           <button
-            onClick={() => {
-              setLoading(true);
-              setRefreshKey((key) => key + 1);
-            }}
+            onClick={refresh}
             disabled={loading || pending !== null}
             className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
           >
             <RefreshCw size={12} /> Re-check
           </button>
-          {ready && (
+          {ready && !perBot && (
             <a
               href={status?.viewer_url ?? c?.view}
               target="_blank"
@@ -565,15 +401,15 @@ export function LocalComputerSection() {
             </a>
           )}
         </div>
-        {error && <div className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
+        {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
       </Card>
 
-      <Card title="Setup" subtitle="Once a container runtime is open, Muster prepares Cua and the VM for you.">
+      <Card title="Setup" subtitle="First setup downloads and builds the Cua desktop and may take several minutes. Keep Muster open while it finishes.">
         <div className="flex flex-col gap-4">
           {status?.runtime_install?.installable && !status?.runtime && (
             <div className="flex items-center justify-between gap-3 rounded-xl border border-accent/25 bg-accent/5 px-3.5 py-3">
               <div className="text-[13px] text-ink-secondary">
-                No runtime installed — Muster can install podman via Homebrew, then prepare the desktop and create the VM.
+                No runtime installed — Muster can install Podman via {installManager}, then {perBot ? "prepare desktops for each bot" : "prepare the desktop and start the VM"}.
               </div>
               <button
                 onClick={() => void runAutoSetup()}
@@ -581,14 +417,14 @@ export function LocalComputerSection() {
                 className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
               >
                 {autoSetupRunning && <Loader2 size={13} className="animate-spin" />}
-                Set up automatically
+                {stage ? LOCAL_VM_STAGE_LABELS[stage] : "Set up automatically"}
               </button>
             </div>
           )}
-          {status?.runtime && !status.ready && !needsRecreate && (
+          {status?.runtime && !ready && !needsRecreate && (
             <div className="flex items-center justify-between gap-3 rounded-xl border border-accent/25 bg-accent/5 px-3.5 py-3">
               <div className="text-[13px] text-ink-secondary">
-                Runtime installed — start it, prepare the desktop, and create the VM in one step.
+                Runtime installed — start it and prepare {perBot ? "desktops for each bot" : "the Local VM"} in one step.
               </div>
               <button
                 onClick={() => void runAutoSetup()}
@@ -596,18 +432,19 @@ export function LocalComputerSection() {
                 className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
               >
                 {autoSetupRunning && <Loader2 size={13} className="animate-spin" />}
-                Set up automatically
+                {stage ? LOCAL_VM_STAGE_LABELS[stage] : "Set up automatically"}
               </button>
             </div>
           )}
           <Step n={1} title="Install a container runtime" done={Boolean(status?.runtime)}>
             <div className="text-[13px] leading-relaxed text-ink-secondary">
               Podman and Colima are free. Docker Desktop may require a paid licence for larger companies and government use.
+              {status?.platform === "win32" && " Windows may ask permission to install Podman; WSL 2 and a restart may be required."}
             </div>
             {status?.runtime_install?.installable && !status?.runtime && (
               <div className="flex items-center gap-2">
                 <ActionButton action="runtimeInstall" pending={pending} onClick={() => void act("runtimeInstall")}>
-                  Install podman with Homebrew
+                  Install Podman with {installManager}
                 </ActionButton>
               </div>
             )}
@@ -663,7 +500,9 @@ export function LocalComputerSection() {
             {c?.pull && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">Show base-image download</summary><div className="mt-2"><CommandLine command={c.pull} /></div></details>}
           </Step>
 
-          <Step n={4} title={needsRecreate ? "Replace the older or unsafe VM" : "Create and start the Local VM"} done={ready}>
+          {perBot ? (
+            <div className="text-[13px] text-ink-secondary">Each bot’s desktop is created automatically when its first turn needs it.</div>
+          ) : <Step n={4} title={needsRecreate ? "Replace the older or unsafe VM" : "Create and start the Local VM"} done={ready}>
             {needsRecreate ? (
               <>
                 <div className="flex gap-2 text-[13px] text-warning">
@@ -686,7 +525,7 @@ export function LocalComputerSection() {
               <ActionButton action="run" pending={pending} onClick={() => void act("run")}>Create Local VM</ActionButton>
             ) : null}
             {c?.run && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">Show command</summary><div className="mt-2"><CommandLine command={c.run} /></div></details>}
-          </Step>
+          </Step>}
         </div>
       </Card>
 
@@ -701,9 +540,9 @@ export function LocalComputerSection() {
 
       <Card
         title="Safety and storage"
-        subtitle={`Cua Driver operates only the VM's desktop. Exactly one private host folder is mounted at ${status?.workspace_guest_path ?? "/home/cua/workspace"}; files and browser profiles there survive VM replacement, while everything elsewhere in the VM remains disposable. The password-protected viewer is available only on this machine. Docker and Podman runs are limited to 4 GB memory, 2 CPUs and 512 processes; all Linux capabilities are dropped except the two the desktop supervisor needs to switch to its unprivileged user. The VM can still reach the internet, and bots share it one at a time.`}
+        subtitle={`Cua Driver operates only the VM's desktop. Exactly one private host folder is mounted at ${status?.workspace_guest_path ?? "/home/cua/workspace"}; files and browser profiles there survive VM replacement, while everything elsewhere in the VM remains disposable. The password-protected viewer is available only on this machine. Docker and Podman runs are limited to 4 GB memory, 2 CPUs and 512 processes; all Linux capabilities are dropped except the two the desktop supervisor needs to switch to its unprivileged user. The VM can still reach the internet. ${perBot ? "Each bot uses its own desktop." : "Bots share it one at a time."}`}
       >
-        {existing && (
+        {existing && !perBot && (
           <div className="flex flex-wrap gap-2">
             {status?.container === "running" && (
               <ActionButton action="stop" pending={pending} onClick={() => void act("stop")}>
@@ -716,6 +555,7 @@ export function LocalComputerSection() {
           </div>
         )}
         <div className="mt-3 break-all text-[11px] text-ink-secondary">
+          {status?.platform === "darwin" && status.runtime === "podman" && <>A new Podman machine uses 6 GB memory and 2 CPUs. · </>}
           Durable workspace: {status?.workspace_path ?? "not created"} ·{" "}
           Cua Driver: {status?.driver_version ?? "0.20.0"} · Local image: {status?.image_ref ?? "not prepared"}
           {status?.base_image_ref ? <> · Base: {status.base_image_ref}</> : null}

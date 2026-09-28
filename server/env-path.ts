@@ -12,7 +12,7 @@
 import { execFile } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, delimiter, dirname, extname, join } from "node:path";
+import { basename, delimiter, dirname, extname, join, win32 } from "node:path";
 
 /** nvm keeps every node version's bin dir separately; newest first so a
  * CLI installed under the latest node wins. */
@@ -53,23 +53,28 @@ function knownDirs(): string[] {
  * launch, but only at launch: a CLI installed while the app is running is
  * invisible until it restarts, because Windows never pushes PATH changes
  * into a live process. Scanning the standard install locations recovers
- * those without a restart — `~/.grok/bin` (the x.ai installer) and
- * `%APPDATA%\npm` (global npm shims), plus `%LOCALAPPDATA%\agy\bin`, cover
- * every engine we ship an install command for. */
-function windowsKnownDirs(): string[] {
-  const home = homedir();
-  const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
-  const localAppData = process.env.LOCALAPPDATA ?? join(home, "AppData", "Local");
+ * those without a restart, including Podman's user/machine installers and
+ * WinGet's app-execution alias. Explicit inputs and Windows path semantics
+ * let discovery be verified without depending on the test host's platform. */
+export function windowsKnownDirs(home = homedir(), env: NodeJS.ProcessEnv = process.env): string[] {
+  const appData = env.APPDATA ?? win32.join(home, "AppData", "Roaming");
+  const localAppData = env.LOCALAPPDATA ?? win32.join(home, "AppData", "Local");
+  const programFiles = env.ProgramFiles ?? env.PROGRAMFILES ?? `${env.SystemDrive ?? env.SYSTEMDRIVE ?? "C:"}\\Program Files`;
   return [
-    join(appData, "npm"), // npm -g shims: claude, codex
-    join(home, ".grok", "bin"), // x.ai installer
-    join(localAppData, "agy", "bin"), // Antigravity installer
-    join(home, ".local", "bin"), // claude native installer
-    join(home, ".claude", "local"),
-    join(home, "bin"), // Factory droid installer (%USERPROFILE%\bin)
-    join(home, ".bun", "bin"),
-    join(home, ".deno", "bin"),
-    join(home, "go", "bin"),
+    win32.join(appData, "npm"), // npm -g shims: claude, codex
+    win32.join(home, ".grok", "bin"), // x.ai installer
+    win32.join(localAppData, "agy", "bin"), // Antigravity installer
+    win32.join(home, ".local", "bin"), // claude native installer
+    win32.join(home, ".claude", "local"),
+    win32.join(home, "bin"), // Factory droid installer (%USERPROFILE%\bin)
+    win32.join(home, ".bun", "bin"),
+    win32.join(home, ".deno", "bin"),
+    win32.join(home, "go", "bin"),
+    win32.join(localAppData, "Programs", "Podman"), // Podman 6 user install
+    win32.join(programFiles, "Podman"), // Podman 6 machine install
+    win32.join(programFiles, "RedHat", "Podman"), // earlier Podman installers
+    win32.join(programFiles, "Docker", "Docker", "resources", "bin"),
+    win32.join(localAppData, "Microsoft", "WindowsApps"), // WinGet app-execution alias
   ];
 }
 
@@ -89,6 +94,13 @@ let cachedProfile = process.env.MUSTER_PROFILE_ROOT;
 export function resetPathCache(): void {
   cached = null;
   probed = false;
+}
+
+/** Re-scan standard install locations during status polling without sourcing
+ * the user's login shell again. Keep its last result and probe state; explicit
+ * engine re-probes still use resetPathCache() to refresh shell configuration. */
+export function refreshKnownPathCache(): void {
+  cached = null;
 }
 
 /** Current best PATH, synchronously. Cheap after the first call. */

@@ -12,8 +12,9 @@ import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { z } from "zod";
 
-import { augmentedPath } from "./env-path.ts";
+import { augmentedPath, refreshKnownPathCache } from "./env-path.ts";
 import { DATA_DIR } from "./config.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
@@ -405,6 +406,7 @@ export async function containerComputerStatus(
   platform: NodeJS.Platform = process.platform,
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
 ): Promise<ContainerComputerStatus> {
+  if (runner === sh) refreshKnownPathCache();
   const status = emptyStatus(platform, target);
   // Apple's `container` CLI is macOS-only. Ignoring an unrelated executable
   // with that generic name off macOS avoids false detection.
@@ -417,7 +419,7 @@ export async function containerComputerStatus(
       try {
         await runner(
           candidate,
-          candidate === "container" ? ["system", "status"] : ["info", "--format", "{{.ServerVersion}}"],
+          runtimeHealthArgs(candidate),
           // A cold `podman info` right after a machine start opens an SSH
           // tunnel and rebuilds the inventory; 10s timed out on real Macs and
           // left the panel reading a healthy daemon as down. When nothing is
@@ -501,6 +503,7 @@ export async function containerComputerStatus(
         Config?: { Image?: string; Labels?: Record<string, string>; Env?: string[] };
         HostConfig?: {
           PortBindings?: Record<string, Array<{ HostIp?: string }> | null>;
+          Privileged?: boolean;
           Memory?: number;
           MemorySwap?: number;
           NanoCpus?: number;
@@ -516,6 +519,8 @@ export async function containerComputerStatus(
         }>;
         State?: { Running?: boolean; StartedAt?: string };
         Image?: string;
+        EffectiveCaps?: string[];
+        BoundingCaps?: string[];
       }>;
       const detail = inspected[0];
       status.container = detail?.State?.Running ? "running" : "stopped";
@@ -523,13 +528,13 @@ export async function containerComputerStatus(
       containerStartedAt = Number.isFinite(startedAtMs) ? startedAtMs : null;
       status.network = dockerPortsAreLocal(detail?.HostConfig?.PortBindings) ? "loopback" : "unsafe";
       status.imageMatches =
-        detail?.Config?.Image === IMAGE &&
+        (detail?.Config?.Image === IMAGE || (status.runtime === "podman" && detail?.Config?.Image === `localhost/${IMAGE}`)) &&
         imageLabelsMatch(detail?.Config?.Labels) &&
         status.image_id !== null &&
         normalizeImageId(detail?.Image) === status.image_id;
       status.managed = containerLabelsMatch(detail?.Config?.Labels);
       status.persistence = dockerWorkspaceMountIsSafe(detail?.Mounts, platform, target) ? "durable" : "unsafe";
-      status.security = dockerSecurityIsHardened(detail?.HostConfig, detail?.Config?.Labels) ? "hardened" : "unsafe";
+      status.security = dockerSecurityIsHardened(detail?.HostConfig, detail?.Config?.Labels, status.runtime === "podman" ? { effective: detail?.EffectiveCaps, bounding: detail?.BoundingCaps } : undefined) ? "hardened" : "unsafe";
       status.viewer_url = viewerUrl(viewerPassword(detail?.Config?.Env), target.viewerPort);
     }
   } catch {
@@ -689,6 +694,7 @@ function appleWorkspaceMountIsSafe(
 function dockerSecurityIsHardened(
   config:
     | {
+        Privileged?: boolean;
         Memory?: number;
         MemorySwap?: number;
         NanoCpus?: number;
@@ -698,8 +704,9 @@ function dockerSecurityIsHardened(
       }
     | undefined,
   labels: Record<string, string> | undefined,
+  podmanCaps?: { effective?: string[]; bounding?: string[] },
 ): boolean {
-  if (!config) return false;
+  if (!config || config.Privileged) return false;
   // Runtimes that reject --memory/--cpus outright record the waiver label at
   // run time; capability drops are never waived.
   if (labels?.[LIMITS_LABEL] !== "none") {
@@ -712,6 +719,14 @@ function dockerSecurityIsHardened(
     ) {
       return false;
     }
+  }
+  if (podmanCaps) {
+    // Podman expands --cap-drop ALL into individual defaults, and omits
+    // CapAdd entries already in its defaults. Inspect the resulting kernel
+    // capability sets instead of interpreting Docker's flag representation.
+    const onlySupervisorCaps = (caps: string[] | undefined) =>
+      caps?.map(cap => cap.toLowerCase().replace(/^cap_/, "")).sort().join(",") === "setgid,setuid";
+    return config.Privileged === false && onlySupervisorCaps(podmanCaps.effective) && onlySupervisorCaps(podmanCaps.bounding);
   }
   const capDrop = (config.CapDrop ?? []).map((cap) => cap.toLowerCase());
   const capAdd = (config.CapAdd ?? [])
@@ -899,7 +914,7 @@ async function removeLegacyOwnedVm(
  * cases rather than blocking a setup it cannot actually read. */
 async function hostMemoryBytes(runtime: Runtime, runner: CommandRunner): Promise<number | null> {
   try {
-    const { stdout } = await runner(runtime, ["info", "--format", "{{.Host.MemTotal}}"]);
+    const { stdout } = await runner(runtime, ["info", "--format", runtime === "podman" ? "{{.Host.MemTotal}}" : "{{.MemTotal}}"]);
     const bytes = Number(stdout.trim());
     const SANE_MINIMUM = 256 * 1024 * 1024; // no real daemon VM is smaller
     return Number.isSafeInteger(bytes) && bytes >= SANE_MINIMUM ? bytes : null;
@@ -928,7 +943,6 @@ export async function containerComputerAction(
   if (runner === sh && platform === process.platform) screenshotStatusCache = null;
   const before = await containerComputerStatus(runner, platform, target);
   const runtime = before.runtime;
-  if (!runtime) throw Object.assign(new Error(before.problem ?? "No container runtime is installed"), { status: 409 });
 
   // The one action that runs BEFORE the daemon is up — that is the whole
   // point of it, so it has to be checked ahead of the daemonUp gate below,
@@ -938,6 +952,7 @@ export async function containerComputerAction(
     await installContainerRuntime("podman", platform, runner);
     return containerComputerStatus(runner, platform, target);
   }
+  if (!runtime) throw Object.assign(new Error(before.problem ?? "No container runtime is installed"), { status: 409 });
   if (action === "runtimeStart") {
     if (before.daemonUp) return before;
     await startContainerRuntime(runtime, platform, runner);
@@ -957,7 +972,9 @@ export async function containerComputerAction(
       const gib = Math.round(hostMem / 1024 ** 3);
       const fix =
         runtime === "podman"
-          ? "podman machine stop && podman machine set --memory 8192 && podman machine start"
+          ? platform === "win32"
+            ? "increase the Podman VM memory to at least 6 GiB (WSL: review your Windows .wslconfig memory limit; changing it affects all WSL distributions), then retry"
+            : "when your other containers are idle, run podman machine stop && podman machine set --memory 6144 && podman machine start"
           : "raise the Docker/colima VM memory to at least 8 GiB (Docker Desktop: Settings → Resources, or colima start --memory 8)";
       throw Object.assign(
         new Error(`The ${runtime} machine has about ${gib} GiB of memory, but the desktop needs at least 4 GiB — ${fix}`),
@@ -1187,24 +1204,23 @@ export function setupCommands(
   platform: NodeJS.Platform = process.platform,
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
 ) {
-  const install =
-    platform === "darwin"
-      ? "brew install podman; podman machine init; podman machine start"
-      : platform === "win32"
-        ? "winget install -e --id RedHat.Podman-Desktop"
-        : null;
+  const install = runtimeInstallCommand(platform)?.command ?? null;
   const runtimeStart =
-    runtime === "container"
+    runtime === "container" && platform === "darwin"
       ? "container system start"
-      : runtime === "podman" && platform !== "linux"
-        ? platform === "darwin"
-          ? "podman machine init 2>/dev/null; podman machine start; podman info --format '{{.ServerVersion}}'"
-          : "podman machine init; podman machine start; podman info"
+      : runtime === "podman"
+        ? platform === "linux"
+          ? "podman info"
+          : platform === "win32"
+            ? "podman machine start; podman info"
+            : "podman machine start && podman info"
         : runtime === "docker" && platform === "darwin"
           ? "colima start || open -a Docker"
-          : runtime === "docker" && platform === "linux"
-            ? "sudo systemctl start docker"
-            : null;
+          : runtime === "docker" && platform === "win32"
+            ? 'Start-Process -FilePath "$env:ProgramFiles\\Docker\\Docker\\Docker Desktop.exe"'
+            : runtime === "docker" && platform === "linux"
+              ? "sudo systemctl start docker"
+              : null;
 
   if (!runtime) {
     return {
@@ -1237,25 +1253,79 @@ export function setupCommands(
   };
 }
 
-/** Whether runtimeStart's command can be run by Muster itself: every case
- * except docker-on-linux, which needs sudo — a password prompt Muster has
- * no way to satisfy programmatically, and running anything as root without
- * the user watching it happen isn't a line to cross quietly. */
-export function canAutoStartRuntime(runtime: Runtime | null, platform: NodeJS.Platform): boolean {
-  return runtime !== null && !(runtime === "docker" && platform === "linux");
+/** Podman's info schema differs from Docker's; using ServerVersion for it
+ * throws a template error even when its VM is healthy. */
+export function runtimeHealthArgs(runtime: Runtime): string[] {
+  return runtime === "container" ? ["system", "status"]
+    : ["info", "--format", runtime === "podman" ? "{{.Version.Version}}" : "{{.ServerVersion}}"];
 }
 
-/** Actually run the runtime-start command — only ever called after
- * canAutoStartRuntime() confirmed it doesn't need sudo. Uses a real shell
- * (not CommandRunner, which is scoped to "runtime <args>" invocations) since
- * these are heterogeneous commands: launching a GUI app, a VM manager, or a
- * system service, not the container runtime CLI itself.
- *
- * The start command's exit code is NOT the truth — `podman machine start` on
- * an already-running machine exits non-zero with "already running", which IS
- * the desired end state (the field bug: the Local VM panel stayed red forever
- * because of it). So a failed start is followed by a daemon probe through the
- * same runner the status panel uses: if the daemon answers, the start worked. */
+export function canAutoStartRuntime(runtime: Runtime | null, platform: NodeJS.Platform): boolean {
+  return runtime !== null && !(runtime === "docker" && platform === "linux")
+    && (runtime !== "container" || platform === "darwin");
+}
+
+/** Use argv on every platform, never a Unix shell on Windows. Do not
+ * reset machines, change the default connection, or resize an existing VM. */
+async function startRuntimeProcess(runtime: Runtime, platform: NodeJS.Platform, runner: CommandRunner): Promise<void> {
+  if (runtime === "podman") {
+    if (platform === "linux") return; // Podman is daemonless on Linux.
+    const { stdout } = await runner("podman", ["machine", "list", "--format", "json"], 20_000);
+    const parsed = z.array(z.object({
+      Name: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/), Running: z.boolean(), Default: z.boolean().optional(),
+    })).safeParse(JSON.parse(stdout));
+    if (!parsed.success) {
+      throw new Error("Podman returned an unreadable machine list. Update Podman and try Re-check.");
+    }
+    const machines = parsed.data;
+    let selected = machines.find(m => m.Default === true) ?? (machines.length === 1 ? machines[0] : undefined);
+    if (machines.length > 1 && !selected) {
+      // Podman lists rootful connections as <machine>-root, so the machine
+      // list's Default flag can be false even for the selected machine.
+      const connections = z.array(z.object({ Name: z.string(), URI: z.string(), Default: z.boolean() }))
+        .safeParse(JSON.parse((await runner("podman", ["system", "connection", "list", "--format", "json"], 20_000)).stdout));
+      if (connections.success) {
+        const connection = connections.data.find(c => c.Default);
+        try {
+          if (!connection) throw new Error("No default connection");
+          const url = new URL(connection.URI);
+          if (url.protocol === "ssh:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
+            selected = machines.find(m => connection.Name === m.Name || connection.Name === `${m.Name}-root`);
+          }
+        } catch { /* A remote or invalid connection is never guessed. */ }
+      }
+    }
+    if (machines.length > 0 && !selected) {
+      throw new Error("More than one Podman machine exists. Choose the default in Podman Desktop, then Re-check.");
+    }
+    if (!selected) {
+      // Windows defaults to WSL, which shares its resources with other WSL
+      // distributions. Never edit .wslconfig or shut them down from here.
+      try {
+        await runner("podman", ["machine", "init", ...(platform === "darwin" ? ["--memory", "6144", "--cpus", "2"] : [])], 10 * 60_000);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (platform === "win32" && /wsl|0x8007019e|0x80370102|0x800701bc/i.test(message)) {
+          throw new Error(`Podman could not prepare WSL 2. Install or update WSL with wsl --install --no-distribution, restart Windows if requested, then retry setup. ${message}`);
+        }
+        throw error;
+      }
+    }
+    if (!selected?.Running) {
+      await runner("podman", ["machine", "start", selected?.Name ?? "podman-machine-default"], 4 * 60_000);
+    }
+    return;
+  }
+  if (runtime === "container") {
+    await runner("container", ["system", "start"], 4 * 60_000);
+  } else if (platform === "win32") {
+    await runner("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      "Start-Process -FilePath (Join-Path $env:ProgramFiles 'Docker\\Docker\\Docker Desktop.exe')"], 30_000);
+  } else {
+    try { await runner("colima", ["start"], 4 * 60_000); }
+    catch { await runner("/usr/bin/open", ["-a", "Docker"], 30_000); }
+  }
+}
 
 /** How long and how hard to wait for the daemon after a start attempt. A
  * first-ever `podman machine start` boots a fresh AppleHV/Linux VM and its
@@ -1294,7 +1364,6 @@ export async function startContainerRuntime(
   runtime: Runtime,
   platform: NodeJS.Platform = process.platform,
   runner: CommandRunner = sh,
-  shell?: (command: string) => Promise<void>,
   windows: RuntimeProbeWindows = {},
 ): Promise<void> {
   const window_ = { ...PROBE_WINDOWS, ...windows };
@@ -1303,25 +1372,9 @@ export async function startContainerRuntime(
       status: 409,
     });
   }
-  // A machine that doesn't exist yet is created by init; the inspect guard
-  // makes re-running idempotent WITHOUT hiding init's real errors (the old
-  // `2>/dev/null` swallowed them, so a failed init read as a mysterious
-  // "not answering yet" downstream).
-  const command =
-    runtime === "container"
-      ? "container system start"
-      : runtime === "podman"
-        ? "podman machine inspect >/dev/null 2>&1 || podman machine init; podman machine start"
-        : "colima start || open -a Docker";
-  const shellRun = promisify(execFile);
-  const runShell = shell ?? (async (cmd: string) => {
-    // Starting a VM/daemon can genuinely take a while on first run — same
-    // generous timeout the image-prepare and container actions already use.
-    await shellRun("/bin/sh", ["-c", cmd], { timeout: 4 * 60_000, env: { ...process.env, PATH: augmentedPath() } });
-  });
   const probeOnce = async (timeoutMs: number) => {
     try {
-      await runner(runtime, runtime === "container" ? ["system", "status"] : ["info", "--format", "{{.ServerVersion}}"], timeoutMs);
+      await runner(runtime, runtimeHealthArgs(runtime), timeoutMs);
       return true;
     } catch {
       return false;
@@ -1341,8 +1394,9 @@ export async function startContainerRuntime(
     }
     return false;
   };
+  if (await probeOnce(20_000)) return;
   try {
-    await runShell(command);
+    await startRuntimeProcess(runtime, platform, runner);
   } catch (e) {
     // "already running" is success by definition; anything else still gets
     // one daemon check before failing, because a half-reported start (the
@@ -1358,11 +1412,12 @@ export async function startContainerRuntime(
         { status: 409 },
       );
     }
-    if (!/already running/i.test(message) && !(await daemonAnswers(window_.failed))) {
+    if (!(await daemonAnswers(window_.failed))) {
       throw Object.assign(new Error(`Could not start ${runtime}: ${message}`), {
         status: 500,
       });
     }
+    return;
   }
   // A start that "succeeded" without the daemon ever answering is the cold
   // `podman info` case: give the API forwarder its full boot window before
@@ -1375,74 +1430,58 @@ export async function startContainerRuntime(
   }
 }
 
-/** The package-manager install command per platform, or null where Muster
- * ships no one-click install. Installation is new software on the user's
- * machine — the same category as developer accounts elsewhere in this app —
- * so the auto-setup button appears ONLY where the command is plain,
- * user-level and well-known: Homebrew on macOS. Windows' winget shim is
- * offered as a displayed command, never run from the app; Linux has too
- * many package managers to guess. */
-export function runtimeInstallCommand(platform: NodeJS.Platform = process.platform): { command: string; manager: string } | null {
-  if (platform === "darwin") return { command: "brew install podman", manager: "Homebrew" };
+/** Install the CLI only; a separate Podman Desktop application is not
+ * required. The user initiates this through the install/setup button. */
+function runtimeInstaller(platform: NodeJS.Platform) {
+  if (platform === "darwin") return { executable: "brew", args: ["install", "podman"], manager: "Homebrew" };
+  if (platform === "win32") return { executable: "winget.exe", args: ["install", "--exact", "--id", "RedHat.Podman", "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--disable-interactivity"], manager: "WinGet" };
   return null;
 }
 
-/** Whether the install action can run from the app: a package manager must
- * exist on the augmented PATH (the GUI-launch fix), and the platform must
- * be one with a supported command. Detection runs `brew --version` style
- * probes through the normal runner so tests can stub availability. */
+export function runtimeInstallCommand(platform: NodeJS.Platform = process.platform): { command: string; manager: string } | null {
+  const install = runtimeInstaller(platform);
+  return install ? { command: [install.executable, ...install.args].join(" "), manager: install.manager } : null;
+}
+
 export async function canAutoInstallRuntime(
   platform: NodeJS.Platform = process.platform,
   runner: CommandRunner = sh,
-): Promise<{ installable: boolean; reason?: string }> {
-  const install = runtimeInstallCommand(platform);
-  if (!install) return { installable: false, reason: "Muster does not have a one-click install for this platform — use the command shown in step 1." };
+): Promise<{ installable: boolean; manager?: string; reason?: string }> {
+  const install = runtimeInstaller(platform);
+  if (!install) return { installable: false, reason: "Install Podman or Docker using your system's package manager, then Re-check." };
+  if (runner === sh) refreshKnownPathCache();
   try {
-    const manager = install.manager === "Homebrew" ? "brew" : install.manager.toLowerCase();
-    await runner(manager, ["--version"], 15_000);
-    return { installable: true };
+    await runner(install.executable, ["--version"], 15_000);
+    return { installable: true, manager: install.manager };
   } catch {
-    return { installable: false, reason: `${install.manager} is not installed — install it from brew.sh, or run the command in step 1 yourself.` };
+    return { installable: false, manager: install.manager, reason: install.manager === "Homebrew"
+      ? "Homebrew is not installed. Install it from brew.sh, or install Podman from podman.io, then Re-check."
+      : "WinGet is not available. Install App Installer from the Microsoft Store, or install Podman from podman.io, then Re-check." };
   }
 }
 
-/** Run the runtime install command, then verify the binary actually landed.
- * Brew can exit 0 while warning (a cask already installed, a skipped
- * formula), so the verification is `runtime --version` through the runner —
- * the same binary the rest of the panel will use. */
 export async function installContainerRuntime(
   runtime: Runtime,
   platform: NodeJS.Platform = process.platform,
   runner: CommandRunner = sh,
-  shell?: (command: string) => Promise<void>,
 ): Promise<void> {
-  const install = runtimeInstallCommand(platform);
-  if (!install) {
-    throw Object.assign(new Error("Muster does not have a one-click install for this platform — use the command shown in step 1."), { status: 409 });
+  const install = runtimeInstaller(platform);
+  if (!install || runtime !== "podman") {
+    throw Object.assign(new Error("Muster does not have a one-click install for this runtime on this platform."), { status: 409 });
   }
   const gate = await canAutoInstallRuntime(platform, runner);
   if (!gate.installable) throw Object.assign(new Error(gate.reason ?? "install unavailable"), { status: 409 });
-  const shellRun = promisify(execFile);
-  const runShell = shell ?? (async (cmd: string) => {
-    // Package downloads dwarf VM starts — brew's own progress and the
-    // image-prepare budget both argue for the 10-minute ceiling.
-    await shellRun("/bin/sh", ["-c", cmd], { timeout: 10 * 60_000, env: { ...process.env, PATH: augmentedPath() } });
-  });
   try {
-    await runShell(install.command);
+    await runner(install.executable, install.args, 10 * 60_000);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    // Brew exits non-zero with "already installed" in some flows; verify
-    // before believing either direction.
     if (!/already installed/i.test(message)) throw Object.assign(new Error(`Could not install ${runtime}: ${message}`), { status: 500 });
   }
+  if (runner === sh) refreshKnownPathCache();
   try {
     await runner(runtime, ["--version"], 20_000);
   } catch {
-    throw Object.assign(
-      new Error(`The ${install.manager} command finished but ${runtime} still is not answering — try Re-check, or install it manually: ${install.command}`),
-      { status: 500 },
-    );
+    throw Object.assign(new Error(`The ${install.manager} command finished but ${runtime} still is not answering — Re-check, or reopen Muster after completing the installer.`), { status: 500 });
   }
 }
 

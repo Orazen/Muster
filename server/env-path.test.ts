@@ -1,17 +1,54 @@
 // PATH augmentation contract (issues #8, #12): a CLI living in a
 // well-known install dir — or an nvm bin dir — must be findable even
 // when the process itself started with a bare GUI PATH.
-import { execFile } from "node:child_process";
+import childProcess, { execFile } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import { syncBuiltinESMExports } from "node:module";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { augmentedPath, resetPathCache, resetPathCacheForTests, splitCliString } from "./env-path.ts";
+import { augmentedPath, refreshKnownPathCache, resetPathCache, resetPathCacheForTests, splitCliString, windowsKnownDirs } from "./env-path.ts";
 import { resolveCli } from "./procs.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const posixIt = it.skipIf(process.platform === "win32");
+
+describe("Windows runtime discovery paths", () => {
+  it("finds current and legacy Podman installs plus WinGet and Docker outside the inherited PATH", () => {
+    const paths = windowsKnownDirs("C:\\Users\\Muster User", {
+      APPDATA: "D:\\Profile Data\\Roaming",
+      LOCALAPPDATA: "D:\\Profile Data\\Local",
+      ProgramFiles: "D:\\Applications",
+    });
+    expect(paths).toEqual(expect.arrayContaining([
+      "D:\\Profile Data\\Local\\Programs\\Podman",
+      "D:\\Applications\\Podman",
+      "D:\\Applications\\RedHat\\Podman",
+      "D:\\Applications\\Docker\\Docker\\resources\\bin",
+      "D:\\Profile Data\\Local\\Microsoft\\WindowsApps",
+      "D:\\Profile Data\\Roaming\\npm",
+      "C:\\Users\\Muster User\\.local\\bin",
+    ]));
+    expect(paths.some((path) => path.startsWith("C:\\Program Files"))).toBe(false);
+  });
+
+  it("uses profile and system-drive fallbacks when installer environment roots are absent", () => {
+    const paths = windowsKnownDirs("E:\\Users\\Muster", { SystemDrive: "E:" });
+    expect(paths).toEqual(expect.arrayContaining([
+      "E:\\Users\\Muster\\AppData\\Local\\Programs\\Podman",
+      "E:\\Users\\Muster\\AppData\\Local\\Microsoft\\WindowsApps",
+      "E:\\Program Files\\Podman",
+      "E:\\Program Files\\RedHat\\Podman",
+    ]));
+  });
+
+  it("honors upper-case Program Files environment keys without falling back to the system drive", () => {
+    const paths = windowsKnownDirs("C:\\Users\\Muster", { PROGRAMFILES: "F:\\Program Files" });
+    expect(paths).toContain("F:\\Program Files\\Podman");
+    expect(paths).not.toContain("C:\\Program Files\\Podman");
+  });
+});
 
 describe("augmentedPath", () => {
   afterEach(() => {
@@ -106,6 +143,46 @@ describe("augmentedPath", () => {
     }
   });
 
+  posixIt("refreshes newly installed standard paths while preserving the login-shell result without re-probing", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-path-refresh-"));
+    const shell = join(scratch, "fake-login-shell");
+    const rcOnlyBin = join(scratch, "rc-only", "bin");
+    const versions = join(homedir(), ".nvm", "versions", "node");
+    mkdirSync(versions, { recursive: true });
+    const newVersion = mkdtempSync(join(versions, "v99.0.0-refresh-"));
+    const newBin = join(newVersion, "bin");
+    writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s' '${rcOnlyBin}'\n`);
+    chmodSync(shell, 0o755);
+    const previousShell = process.env.SHELL;
+    const previousVitest = process.env.VITEST;
+    const shellCalls = vi.spyOn(childProcess, "execFile");
+    syncBuiltinESMExports();
+    try {
+      process.env.SHELL = shell;
+      delete process.env.VITEST;
+      resetPathCacheForTests();
+      expect(augmentedPath().split(delimiter)).not.toContain(newBin);
+      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin), { timeout: 6_000 });
+      expect(shellCalls).toHaveBeenCalledTimes(1);
+
+      mkdirSync(newBin);
+      expect(augmentedPath().split(delimiter)).not.toContain(newBin);
+      refreshKnownPathCache();
+      expect(augmentedPath().split(delimiter)).toEqual(expect.arrayContaining([newBin, rcOnlyBin]));
+      expect(shellCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      shellCalls.mockRestore();
+      syncBuiltinESMExports();
+      if (previousShell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = previousShell;
+      if (previousVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = previousVitest;
+      resetPathCacheForTests();
+      rmSync(scratch, { recursive: true, force: true });
+      rmSync(newVersion, { recursive: true, force: true });
+    }
+  });
+
   it("skips known dirs that do not exist", () => {
     resetPathCacheForTests();
     const parts = augmentedPath().split(delimiter);
@@ -113,15 +190,21 @@ describe("augmentedPath", () => {
     expect(parts).not.toContain(join(homedir(), ".volta", "bin"));
   });
 
-  it.skipIf(process.platform !== "win32")("finds Antigravity installed after launch", () => {
+  it.skipIf(process.platform !== "win32")("finds runtimes and WinGet installed after launch when PATH is rescanned", () => {
     const previous = process.env.LOCALAPPDATA;
     const localAppData = mkdtempSync(join(tmpdir(), "omb-localappdata-"));
     try {
       process.env.LOCALAPPDATA = localAppData;
-      const agyBin = join(localAppData, "agy", "bin");
-      mkdirSync(agyBin, { recursive: true });
       resetPathCacheForTests();
-      expect(augmentedPath().split(delimiter)).toContain(agyBin);
+      const paths = [
+        join(localAppData, "agy", "bin"),
+        join(localAppData, "Programs", "Podman"),
+        join(localAppData, "Microsoft", "WindowsApps"),
+      ];
+      for (const path of paths) expect(augmentedPath().split(delimiter)).not.toContain(path);
+      for (const path of paths) mkdirSync(path, { recursive: true });
+      resetPathCache();
+      for (const path of paths) expect(augmentedPath().split(delimiter)).toContain(path);
     } finally {
       if (previous === undefined) delete process.env.LOCALAPPDATA;
       else process.env.LOCALAPPDATA = previous;
