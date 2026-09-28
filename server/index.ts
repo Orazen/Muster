@@ -290,6 +290,8 @@ import {
 } from "./restore-apply.ts";
 import { handleCalendarRoute } from "./calendar-routes.ts";
 import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
+import { InstallationRegistry, registryPathFor } from "./installation-authority.ts";
+import { handleInstallationRoute } from "./installation-routes.ts";
 import { handleMemoryRoute } from "./memory-routes.ts";
 import * as openconnector from "./openconnector.ts";
 import * as connectedApps from "./connected-apps.ts";
@@ -3526,6 +3528,14 @@ taskPlans.start();
 // interrupted holds as unknown spend rather than silently reopening the cap.
 const usageAllowance = new UsageAllowance(cfg.usage?.allowance, Date.now, join(DATA_DIR, "usage-allowance-ledger.json"));
 
+// Stable installation authority (research slice 3): one first-class row per
+// INSTALLATION — stable id, owner, hashed one-time credential, capabilities,
+// durable revocation — persisted beside the other ledgers. Additive: nothing
+// here changes session or companion behavior; the credential's consumer is a
+// later runner adapter. A corrupt file reads as empty authority; a restart
+// re-reads the file, so a revocation cannot be resurrected in-process.
+const installationRegistry = new InstallationRegistry(registryPathFor(DATA_DIR));
+
 // Webhook definitions are independent from calendar schedules, but every
 // delivery joins the same RoutineManager queue. That keeps unattended work
 // ordered behind a busy AGENT and gives webhook runs the same durable receipts.
@@ -5966,6 +5976,21 @@ let requestUserEmail = "";
         config: () => cfg,
         appVersion,
         dataDir: () => DATA_DIR,
+        session: async () => {
+          const headers = new Headers();
+          const cookie = z.string().safeParse(req.headers.cookie);
+          if (cookie.success) headers.set("cookie", cookie.data);
+          const current = await auth.api.getSession({ headers }).catch(() => null);
+          return current?.user?.id && current.session?.id ? { userId: current.user.id, sessionId: current.session.id } : null;
+        },
+      })
+    ) {
+      return;
+    }
+
+    if (
+      await handleInstallationRoute(req, res, method, path, {
+        registry: () => installationRegistry,
         session: async () => {
           const headers = new Headers();
           const cookie = z.string().safeParse(req.headers.cookie);
