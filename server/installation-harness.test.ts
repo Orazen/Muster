@@ -38,7 +38,7 @@ describe("installation authority over real HTTP", () => {
   let base = "";
   let port = 0;
   let child: ChildProcess | undefined;
-  let env: Record<string, string>;
+  let env: NodeJS.ProcessEnv;
   const children: ChildProcess[] = [];
   const ports: number[] = [];
   let alice: Account;
