@@ -311,6 +311,7 @@ import { snapshotPassphraseStore } from "./snapshot-runner.ts";
 import { driveSyncTransport, localSyncManifestStore, startSyncEngine } from "./sync-wiring.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimerPool } from "./local-vm-idle.ts";
+import { localVmPreviewTarget } from "./local-vm-preview.ts";
 import { LocalVmLeasePool } from "./local-vm-lease.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
@@ -9043,7 +9044,11 @@ let requestUserEmail = "";
     // what the user's machine can host: which runtime is installed, whether
     // its daemon is up, and whether the desktop image and container exist
     if (method === "GET" && path === "/api/local-computer") {
-      const status = await containerComputerStatus();
+      const target = localVmPreviewTarget(url.searchParams.get("botId"), {
+        bot: (id) => store.bot(id), ownsRecord, desktopTargetForBot,
+      });
+      if (!target) return json(res, 404, { error: "no such bot" });
+      const status = await containerComputerStatus(undefined, undefined, target);
       // The one-click install offer is computed per status read: brew may
       // have been installed since boot (resetPathCache runs on re-probe).
       const installGate = status.runtime ? { installable: false, reason: "A container runtime is already installed." } : await canAutoInstallRuntime();
@@ -9100,8 +9105,12 @@ let requestUserEmail = "";
       }
     }
     if (method === "POST" && path === "/api/local-computer/screenshot") {
-      localVmIdles.forTarget(SHARED_LOCAL_VM_TARGET.key).touch();
-      return json(res, 200, { image: await containerComputerScreenshot() });
+      const target = localVmPreviewTarget(url.searchParams.get("botId"), {
+        bot: (id) => store.bot(id), ownsRecord, desktopTargetForBot,
+      });
+      if (!target) return json(res, 404, { error: "no such bot" });
+      localVmIdles.forTarget(target.key).touch();
+      return json(res, 200, { image: await containerComputerScreenshot(undefined, undefined, target) });
     }
 
     // Desktop canvas (OMB parity #10): read-only snapshots of every local

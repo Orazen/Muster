@@ -131,7 +131,7 @@ function ControlHold({ botId }: { botId: string }) {
 
 export function ComputerPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
-  const { capabilities, ready: capabilitiesReady, error: capabilitiesError } = useDesktopCapabilities();
+  const { capabilities, ready: capabilitiesReady, error: capabilitiesError, enableError, canEnable } = useDesktopCapabilities();
   const localAvailable = capabilities.localComputer.available;
   const [phase, setPhase] = useState<Phase>("checking");
   const [boxState, setBoxState] = useState<string | null>(null);
@@ -208,22 +208,32 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         setPhase("vm-unavailable");
         return;
       }
-      api("/api/local-computer")
-        .then((status) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const readVm = async () => {
+        try {
+          const status = await api(`/api/local-computer?botId=${encodeURIComponent(bot.id)}`);
           if (!alive) return;
-          if (status.ready) setPhase("vm");
+          if (status.ready) { setError(null); setPhase("vm"); }
           else {
-            setError(`${status.problem ?? "The Local VM is not ready"}. Open App Settings → Local VM.`);
+            setVmFrame(null);
+            setError(status.mode === "perBot" && status.container === "missing" && status.daemonUp && status.image
+              ? "This bot’s Local VM starts with its next task."
+              : `${status.problem ?? "The Local VM is not ready"}. Open App Settings → Local VM.`);
             setPhase("vm-unavailable");
           }
-        })
-        .catch((e) => {
+        } catch (e) {
           if (!alive) return;
-          setError(e.message);
+          setVmFrame(null);
+          setError(e instanceof Error ? e.message : String(e));
           setPhase("vm-unavailable");
-        });
+        } finally {
+          if (alive) timer = setTimeout(() => void readVm(), 3000);
+        }
+      };
+      void readVm();
       return () => {
         alive = false;
+        clearTimeout(timer);
       };
     }
     if (bot.computer === "cloud" && !cloudSupported) {
@@ -250,8 +260,8 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           setPhase(autoLocal ? "local" : "unconfigured");
           return;
         }
-        if (!status.box && autoLocal) {
-          setPhase("local");
+        if (!status.box && isAuto && selectedInstance?.driverKind !== "boxAgent") {
+          setPhase(autoLocal ? "local" : "unconfigured");
           return;
         }
         setPhase("starting");
@@ -310,7 +320,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       if (vmInFlight.current) return;
       vmInFlight.current = true;
       try {
-        const { image } = await api("/api/local-computer/screenshot", { method: "POST" });
+        const { image } = await api(`/api/local-computer/screenshot?botId=${encodeURIComponent(bot.id)}`, { method: "POST" });
         if (alive && isText(image)) setVmFrame(image);
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : String(e));
@@ -324,7 +334,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [phase]);
+  }, [phase, bot.id]);
 
   // local preview: frames from the Electron main process. The FIRST capture
   // attempt is what makes macOS show the Screen Recording prompt (there is
@@ -380,28 +390,23 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   };
 
   const openVmSettings = () => {
-    window.sessionStorage.setItem("muster.settings.section", "computer");
-    dispatch({ type: "toggleAppSettings", open: true });
+    dispatch({ type: "toggleAppSettings", open: true, section: "computer" });
   };
 
   const emptyState = {
     checking: "Checking…",
     starting: "Starting your bot's computer…",
-    unconfigured: "No cloud computer configured",
+    unconfigured: state.config?.box.configured ? "No existing cloud computer for Auto" : "No cloud computer configured",
     "local-unavailable": localComputerRepair({
       platform: capabilities.host.platform,
       reasonCode: capabilities.localComputer.reasonCode,
+      packaged: capabilities.host.packaged,
+      failure: enableError,
     }).message,
     "vm-unavailable": "The Local VM isn't available for this bot",
     off: "This bot's computer is off",
     error: "Couldn't reach the computer",
   } satisfies Record<Exclude<Phase, "ready" | "local" | "vm">, string>;
-
-  // The privacy repair for a blocked local session: named app, exact panes.
-  const localRepair = localComputerRepair({
-    platform: capabilities.host.platform,
-    reasonCode: capabilities.localComputer.reasonCode,
-  });
 
   return (
     <aside className="glass-panel animate-panel-in flex h-full w-[min(400px,100vw)] min-w-0 max-w-full shrink-0 flex-col border-l-0">
@@ -475,19 +480,6 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                   Open Settings
                 </button>
               )}
-              {phase === "local-unavailable" && localRepair.panes.length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {localRepair.panes.map((pane) => (
-                    <button
-                      key={pane}
-                      onClick={() => window.ogb?.permOpenSettings?.(pane)}
-                      className="rounded-lg bg-raised px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
-                    >
-                      {pane === "screen" ? "Open Screen Recording settings" : "Open Accessibility settings"}
-                    </button>
-                  ))}
-                </div>
-              )}
               {phase === "vm-unavailable" && (
                 <button
                   onClick={openVmSettings}
@@ -511,12 +503,14 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         {phase === "unconfigured" && (
           <div className="mt-3 rounded-xl bg-card p-4">
             <div className="mb-3 text-[13px] text-ink-secondary">
-              Add a Box API key to give this bot a cloud computer — it spins up right here.
+              {state.config?.box.configured
+                ? "Choose Cloud to create a computer for this bot, or choose Local VM to use an isolated desktop on this machine."
+                : "Add a Box API key, then choose Cloud to give this bot a cloud computer."}
             </div>
-            <ApiKeyRow
+            {!state.config?.box.configured && <ApiKeyRow
               section="box"
               onSaved={(configured) => configured && setRetry((n) => n + 1)}
-            />
+            />}
           </div>
         )}
 
@@ -556,16 +550,16 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 (capabilitiesError
                   ? "Auto uses a cloud box when one exists. Availability of this Mac could not be confirmed. "
                   : localAvailable
-                  ? "Auto uses a cloud box when one exists, otherwise this computer. "
-                  : "Auto uses a cloud box when one is configured; otherwise computer use stays off. ")}
+                  ? "Auto uses an existing cloud box, otherwise this computer. "
+                  : "Auto uses an existing cloud box; otherwise computer use stays off. Choose Local VM to use the isolated desktop. ")}
               Pick where this bot's computer lives. <b className="text-ink">Local VM</b> is a Cua-controlled Linux desktop
-              in a container on this machine — free and separate from your own desktop. Set it up in App
-              Settings → Local VM.
+              in a container on this machine, separate from your own desktop. It does not need Mac screen permissions.
+              Set it up in App Settings → Local VM. The Browser panel is separate from these computer modes.
           </div>
           {/* macOS-style segmented control: a recessed track with a raised
               thumb. Long names move to the tooltip — five segments can't
               afford "This computer" at this width. */}
-          <ComputerAccessControl />
+          {(bot.computer === "local" || (!bot.computer && capabilities.host.platform === "darwin" && phase !== "ready" && phase !== "starting")) && <ComputerAccessControl />}
           <div className="mt-3 flex flex-wrap gap-0.5 rounded-[10px] bg-inset p-0.5">
             {(
               [
@@ -581,7 +575,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                   (mode === "cloud" && !cloudSupported) ||
                   (mode === "opensandbox" && !opensandboxSupported) ||
                   (mode === "vm" && !vmSupported) ||
-                  (mode === "local" && (!localAvailable || !computerToolSupported));
+                  (mode === "local" && ((!localAvailable && !canEnable) || !computerToolSupported));
                 // Only Claude's own driver and ACP-protocol engines (Codex,
                 // Gemini CLI, and similar) mount MCP tools today — the direct-
                 // API drivers (OpenAI, DeepSeek, OpenCode Zen, and the rest)
@@ -601,7 +595,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                         ? "This model engine's driver doesn't mount computer tools yet" + switchEngineHint
                         : mode === "local" && !computerToolSupported
                         ? "This model engine's driver doesn't mount computer tools yet" + switchEngineHint
-                        : mode === "local" && !localAvailable
+                        : mode === "local" && !localAvailable && !canEnable
                           ? capabilitiesError
                             ? "Computer access could not be confirmed"
                             : capabilities.localComputer.reasonCode === "computer-access-off"

@@ -26,6 +26,7 @@ import { z } from "zod";
 import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { seedConnectedGoogleRow } from "./testing/storage-gate.ts";
 import type { JsonValue } from "./schema.ts";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
@@ -227,6 +228,29 @@ describe.skipIf(process.platform === "win32")("host operations belong to the ope
     const patched = await request(local, "/api/instances/ghost", "PATCH", { cli: "/opt/ghost/local-only" });
     expect(patched.status).toBe(200);
     expect(instances.parse(await patched.json()).instances.find((row) => row.instanceId === "ghost")?.cli).toBe("/opt/ghost/local-only");
+  });
+
+  it("refuses foreign and missing bot previews while preserving the host-operator guard", async () => {
+    seedConnectedGoogleRow(hosted.data, member.id);
+    const created = await request(hosted, "/api/bots", "POST", {}, member);
+    expect(created.status).toBe(201);
+    const { bot } = z.object({ bot: z.object({ id: z.string() }) }).parse(await created.json());
+    const before = configBytes(hosted);
+    for (const [path, method] of [["/api/local-computer", "GET"], ["/api/local-computer/screenshot", "POST"]]) {
+      for (const id of [bot.id, "missing-preview-bot", ""]) {
+        const response = await request(hosted, `${path}?botId=${encodeURIComponent(id)}`, method, undefined, operator);
+        expect(response.status).toBe(404);
+        expect(await json(response)).toEqual({ error: "no such bot" });
+      }
+      // A member cannot access installation runtimes even for their own bot.
+      const memberResponse = await request(hosted, `${path}?botId=${bot.id}`, method, undefined, member);
+      expect(memberResponse.status).toBe(404);
+      expect(await json(memberResponse)).toEqual(NO_RESOURCE);
+      const localMissing = await request(local, `${path}?botId=missing-preview-bot`, method);
+      expect(localMissing.status).toBe(404);
+      expect(await json(localMissing)).toEqual({ error: "no such bot" });
+    }
+    expect(configBytes(hosted)).toBe(before);
   });
 
   /** Delete, never truncate: `ran()` is an existence check, and an emptied

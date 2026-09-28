@@ -191,23 +191,38 @@ const cftVersionResponseSchema = z.object({
   channels: z.object({ Stable: z.object({ version: z.string() }) }),
 });
 
-function cftRootDir(): string {
-  return join(DATA_DIR, "browsers", "chrome-for-testing");
+function cftRootDir(dataDir = DATA_DIR): string {
+  return join(dataDir, "browsers", "chrome-for-testing");
 }
 
-function cftBinaryPath(version: string): string {
-  if (process.platform === "darwin") {
-    return join(cftRootDir(), version, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing");
-  }
-  if (process.platform === "win32") return join(cftRootDir(), version, "chrome-win64", "chrome.exe");
-  return join(cftRootDir(), version, "chrome-linux64", "chrome");
+/** Google's archive URL and its extracted top-level folder both include
+ * the platform. Keep them together so a successful download resolves to
+ * the executable that actually exists inside that archive. */
+export function chromeForTestingAsset(
+  version: string,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+) {
+  if (!CFT_VERSION_RE.test(version)) throw new Error("invalid Chrome for Testing version");
+  const target = platform === "darwin" ? arch === "arm64" ? "mac-arm64" : "mac-x64"
+    : platform === "win32" ? "win64" : "linux64";
+  const folder = `chrome-${target}`;
+  const archive = `${folder}.zip`;
+  const app = platform === "darwin" ? `${folder}/Google Chrome for Testing.app` : null;
+  const binary = app ? `${app}/Contents/MacOS/Google Chrome for Testing`
+    : `${folder}/${platform === "win32" ? "chrome.exe" : "chrome"}`;
+  return { archive, url: `${CFT_ARCHIVE_HOST}/${version}/${target}/${archive}`, binary, app };
+}
+
+function cftBinaryPath(version: string, dataDir = DATA_DIR): string {
+  return join(cftRootDir(dataDir), version, ...chromeForTestingAsset(version).binary.split("/"));
 }
 
 /** Newest fully-installed CfT build, or null. The .installed marker is
  * written only after a successful extract, so a half-download from a killed
  * start attempt never looks installed. */
-function findInstalledCft(): string | null {
-  const root = cftRootDir();
+function findInstalledCft(dataDir = DATA_DIR): string | null {
+  const root = cftRootDir(dataDir);
   if (!existsSync(root)) return null;
   let versions: string[] = [];
   try {
@@ -216,7 +231,7 @@ function findInstalledCft(): string | null {
     return null;
   }
   for (const v of versions.sort(compareVersions).reverse()) {
-    const bin = cftBinaryPath(v);
+    const bin = cftBinaryPath(v, dataDir);
     if (existsSync(bin) && existsSync(join(root, v, ".installed"))) return bin;
   }
   return null;
@@ -259,24 +274,16 @@ async function downloadTo(url: string, dest: string): Promise<void> {
 
 /** One-shot Chrome for Testing install. Everything in the URLs is
  * server-constant — never user input. */
-export async function installChromeForTesting(): Promise<string> {
-  const existing = findInstalledCft();
+export async function installChromeForTesting(dataDir = DATA_DIR): Promise<string> {
+  const existing = findInstalledCft(dataDir);
   if (existing) return existing;
   const version = await resolveCftVersion();
-  const root = join(cftRootDir(), version);
-  const platform =
-    process.platform === "darwin"
-      ? process.arch === "arm64"
-        ? "mac-arm64"
-        : "mac-x64"
-      : process.platform === "win32"
-        ? "win64"
-        : "linux64";
-  const zipName = `chrome-${platform}.zip`;
-  const zipPath = join(root, zipName);
+  const root = join(cftRootDir(dataDir), version);
+  const asset = chromeForTestingAsset(version);
+  const zipPath = join(root, asset.archive);
   mkdirSync(root, { recursive: true });
   try {
-    await downloadTo(`${CFT_ARCHIVE_HOST}/${version}/${zipName}`, zipPath);
+    await downloadTo(asset.url, zipPath);
     // argv-only, no shell: the archive path and the destination are
     // arguments, never concatenated into a command line for an interpreter
     // to re-parse. The previous form built a PowerShell -Command string from
@@ -293,18 +300,13 @@ export async function installChromeForTesting(): Promise<string> {
       );
       extract.on("error", reject);
     });
-    const bin = cftBinaryPath(version);
+    const bin = cftBinaryPath(version, dataDir);
     if (!existsSync(bin)) throw new Error("archive extracted but the Chrome binary is missing");
     if (process.platform !== "win32") {
       try {
         chmodSync(bin, 0o755);
       } catch {
         /* already executable */
-      }
-      if (process.platform === "darwin") {
-        // CfT zips carry the quarantine xattr; a headless spawn would trip
-        // Gatekeeper's first-run assessment otherwise. Best effort.
-        spawn("xattr", ["-dr", "com.apple.quarantine", join(root, "Google Chrome for Testing.app")], { stdio: "ignore" });
       }
     }
     writeFileSync(join(root, ".installed"), version);

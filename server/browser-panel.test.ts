@@ -4,19 +4,22 @@
 // auto-install under DATA_DIR), and the container launch flags that keep
 // the panel spawner honest about when Chromium runs sandboxless.
 import { ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { crc32 } from "node:zlib";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   agentPageForToolEvent,
   agentPageFromChip,
+  chromeForTestingAsset,
   findChromeSync,
   freeCdpPort,
   isNavigableUrl,
+  installChromeForTesting,
   latestFrame,
   mintPreviewSignature,
   navigatePanel,
@@ -478,6 +481,90 @@ describe("agent browsing breadcrumb", () => {
     const cropped = `browser_browser_navigate → ${url}`.slice(0, 200);
     // proves the title path alone is lossy — why the driver carries the page
     expect(agentPageFromChip(cropped)?.url).not.toBe(url);
+  });
+});
+
+/** A real, uncompressed one-file ZIP. The fixture executable is plain text
+ * and never launched; exercising the host's extractor catches archive
+ * directory mistakes that a mocked existsSync would conceal. */
+function browserArchiveFixture(path: string, content: Buffer): Buffer {
+  const name = Buffer.from(path);
+  const checksum = crc32(content);
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt32LE(checksum, 14);
+  local.writeUInt32LE(content.length, 18);
+  local.writeUInt32LE(content.length, 22);
+  local.writeUInt16LE(name.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt32LE(checksum, 16);
+  central.writeUInt32LE(content.length, 20);
+  central.writeUInt32LE(content.length, 24);
+  central.writeUInt16LE(name.length, 28);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + name.length, 12);
+  end.writeUInt32LE(local.length + name.length + content.length, 16);
+  return Buffer.concat([local, name, content, central, name, end]);
+}
+
+describe("Chrome for Testing installation", () => {
+  const version = "140.0.7339.82";
+  const layouts: Array<[NodeJS.Platform, string, string, string]> = [
+    ["darwin", "arm64", "mac-arm64", "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"],
+    ["darwin", "x64", "mac-x64", "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"],
+    ["win32", "x64", "win64", "chrome-win64/chrome.exe"],
+    ["linux", "x64", "linux64", "chrome-linux64/chrome"],
+  ];
+  let scratch: string;
+  beforeEach(() => { scratch = mkdtempSync(join(tmpdir(), "bpanel-install-")); });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it.each(layouts)("uses Google's published URL and archive layout for %s/%s", (platform, arch, target, binary) => {
+    const asset = chromeForTestingAsset(version, platform, arch);
+    expect(asset).toMatchObject({
+      archive: `chrome-${target}.zip`,
+      url: `https://storage.googleapis.com/chrome-for-testing-public/${version}/${target}/chrome-${target}.zip`,
+      binary,
+    });
+    expect(asset.app).toBe(platform === "darwin" ? `chrome-${target}/Google Chrome for Testing.app` : null);
+  });
+
+  it("rejects a non-version before building a URL or filesystem path", () => {
+    expect(() => chromeForTestingAsset("../outside", "darwin", "arm64")).toThrow("invalid Chrome for Testing version");
+  });
+
+  it("downloads, extracts and reuses the actual nested archive layout", async () => {
+    const layout = layouts.find(([platform, arch]) => platform === process.platform && arch === process.arch);
+    if (!layout) throw new Error(`no archive fixture for ${process.platform}/${process.arch}`);
+    const [, , target, binary] = layout;
+    const content = Buffer.from("browser installer fixture; never execute\n");
+    const zip = browserArchiveFixture(binary, content);
+    const feed = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions.json";
+    const url = `https://storage.googleapis.com/chrome-for-testing-public/${version}/${target}/chrome-${target}.zip`;
+    const fetchFixture = vi.fn(async (input: string | URL | Request) => {
+      if (input === feed) return Response.json({ channels: { Stable: { version } } });
+      if (input === url) return new Response(new Uint8Array(zip));
+      return new Response("unexpected archive address", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchFixture);
+    const expected = join(scratch, "browsers", "chrome-for-testing", version, ...binary.split("/"));
+    await expect(installChromeForTesting(scratch)).resolves.toBe(expected);
+    expect(readFileSync(expected)).toEqual(content);
+    const root = join(scratch, "browsers", "chrome-for-testing", version);
+    expect(readFileSync(join(root, ".installed"), "utf8")).toBe(version);
+    expect(existsSync(join(root, `chrome-${target}.zip`))).toBe(false);
+    await expect(installChromeForTesting(scratch)).resolves.toBe(expected);
+    expect(fetchFixture).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -5,9 +5,8 @@ import { combinePermissionRead } from "./desktop-permission-probe.mjs";
 const HOST_BUNDLE_ID = "com.muster.app";
 const CUA_ENV = { CUA_DRIVER_RS_TELEMETRY_ENABLED: "0" };
 
-/** What the host itself reports about its own TCC identity, when the
- * adapter can ask it. `bundleId` is the app macOS actually keys the grant
- * to — for the driver that is NOT Muster's bundle id.
+/** A standalone daemon's own TCC identity. Embedded daemons inherit the
+ * requesting app's identity and must never use this separate app's grants.
  * @typedef {{ bundleId: string, accessibility: boolean, screenRecording: boolean }} HostPermissionStatus
  */
 
@@ -21,7 +20,7 @@ function missingFor(status) {
 
 /** The name a person will actually see in System Settings, next to the id
  * so a row with two similarly named entries is unambiguous. */
-export function hostPermissionFailureReason(status) {
+export function standalonePermissionFailureReason(status) {
   const missing = missingFor(status);
   if (missing.length === 0) return null;
   const pane = missing.length === 1
@@ -29,12 +28,12 @@ export function hostPermissionFailureReason(status) {
     : "Accessibility and Screen Recording";
   return (
     `${pane} must be granted to CuaDriver (${status.bundleId}) in System Settings → Privacy & Security. ` +
-    "macOS grants privacy per app, so granting Muster does not grant the driver that takes the screenshot — " +
+    "This standalone driver has its own macOS privacy grants. " +
     "open the pane, add CuaDriver, then try again"
   );
 }
 
-export function createCuaRuntime({ connectionStore, resolveDriverBinary, loadEmbeddedSdk, wantEmbedded, standaloneSocket, socketAlive, platform = process.platform, requestDesktopPermissions = null, hostPermissionStatus = null }) {
+export function createCuaRuntime({ connectionStore, resolveDriverBinary, loadEmbeddedSdk, wantEmbedded, standaloneSocket, socketAlive, platform = process.platform, requestDesktopPermissions = null, standalonePermissionStatus = null }) {
   let connection = { mode: "unavailable", reason: "computer-access-off" };
   let initialized = false;
   let stopped = false;
@@ -83,19 +82,10 @@ export function createCuaRuntime({ connectionStore, resolveDriverBinary, loadEmb
         failurePrefix = "embedded host failed";
         const sdk = await loadEmbeddedSdk();
         if (!active(attempt)) return connection;
-        // The host's own TCC identity decides this, not ours: the driver
-        // binary is a separately-signed app (com.trycua.driver), and macOS
-        // keys Screen Recording to the binary that captures. Asking the host
-        // first is what turns "I granted it and it still says no" into a
-        // message that names the app the grant actually belongs to.
-        if (hostPermissionStatus) {
-          const host = await hostPermissionStatus();
-          if (!active(attempt)) return connection;
-          if (host) {
-            const named = hostPermissionFailureReason(host);
-            if (named !== null) throw new Error(named);
-          }
-        }
+        // The embedded daemon is a direct child of this app and retains its
+        // macOS responsibility chain. The SDK probes run in Electron main,
+        // so they measure Muster. A default-socket standalone CuaDriver read
+        // measures another app and cannot grant or deny this activation.
         const permissions = sdk.requestMacOSPermissions();
         if (!sdk.hasRequiredMacOSPermissions(permissions)) {
           // macOS 15+ preflights cache per-process and keep reporting denied
@@ -110,7 +100,7 @@ export function createCuaRuntime({ connectionStore, resolveDriverBinary, loadEmb
             : { granted: false, reason: [!permissions.accessibility && "Accessibility", !permissions.screenRecording && "Screen Recording"].filter(Boolean).join(" and ") };
           if (!combined.granted) {
             const missing = combined.reason;
-            throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings, then try again`);
+            throw new Error(`${missing || "macOS permissions"} required for Muster (${HOST_BUNDLE_ID}); grant Muster access in System Settings → Privacy & Security, then try again`);
           }
         }
         if (!active(attempt)) return connection;
@@ -125,6 +115,14 @@ export function createCuaRuntime({ connectionStore, resolveDriverBinary, loadEmb
       } else {
         const alive = await socketAlive(standaloneSocket);
         if (!active(attempt)) return connection;
+        if (alive && standalonePermissionStatus) {
+          const status = await standalonePermissionStatus();
+          if (!active(attempt)) return connection;
+          if (status) {
+            const reason = standalonePermissionFailureReason(status);
+            if (reason !== null) throw new Error(reason);
+          }
+        }
         next = alive ? {
           mode: "standalone", socketPath: standaloneSocket, mcpCommand: binary,
           mcpArgs: ["mcp"], mcpEnv: { ...CUA_ENV },

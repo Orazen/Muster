@@ -1,87 +1,90 @@
-// Loop201: the embedded host's failure message must name the app macOS
-// actually keys the grant to.
-//
-// The bug this pins, with the evidence that produced it: the CuaDriver
-// daemon runs as its own signed app (com.trycua.driver, TeamID YCK386LBJ7)
-// and was refusing to serve with
-// `--cua-internal-gate-missing-screen-recording`, while Muster
-// (com.muster.app, TeamID 7375K23WFU) was reported as granted. A person
-// granting Muster changed nothing for the driver, and the old message —
-// "Accessibility and Screen Recording required" — never said which app had
-// to be added in System Settings. Now the host's own status is read first,
-// and the refusal names the app, the id, and the pane.
+// Embedded Cua is spawned by Electron main and inherits Muster's TCC grants.
+// The default-socket CuaDriver daemon owns a different identity: its grants
+// cannot permit or deny embedded startup. No native permission APIs run here.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { createCuaRuntime, standalonePermissionFailureReason } from "./cua-runtime.mjs";
 
-import { createCuaRuntime, hostPermissionFailureReason } from "./cua-runtime.mjs";
-
-/** The minimum the runtime needs; the permission path is what is under test. */
-function harness({ host, sdkGranted = true, empirical = null }) {
-  const store = { value: { mode: "unavailable", reason: "computer-access-off" }, persist(next) { this.value = next; } };
+function harness({ standalone, embedded = true, sdkGranted = true, empirical = null }) {
+  const counts = { standaloneReads: 0, prompts: 0, starts: 0 };
   const sdk = {
-    requestMacOSPermissions: () => ({ accessibility: sdkGranted, screenRecording: sdkGranted }),
+    requestMacOSPermissions: () => {
+      counts.prompts++;
+      return { accessibility: sdkGranted, screenRecording: sdkGranted };
+    },
     hasRequiredMacOSPermissions: (read) => read.accessibility === true && read.screenRecording === true,
     EmbeddedCuaDriverHost: class {
-      constructor() {}
-      async start() { throw new Error("must not start without permissions"); }
+      async start() { counts.starts++; return { socketPath: "/owned-fixture/embedded.sock" }; }
       async stop() {}
     },
   };
-  return createCuaRuntime({
-    connectionStore: store,
-    resolveDriverBinary: () => "/tmp/cua-driver",
+  const runtime = createCuaRuntime({
+    connectionStore: { persist() {} },
+    resolveDriverBinary: () => "/owned-fixture/cua-driver",
     loadEmbeddedSdk: async () => sdk,
-    wantEmbedded: () => true,
-    standaloneSocket: "/tmp/socket",
-    socketAlive: async () => false,
+    wantEmbedded: () => embedded,
+    standaloneSocket: "/owned-fixture/standalone.sock",
+    socketAlive: async () => true,
     platform: "darwin",
     requestDesktopPermissions: empirical === null ? null : async () => empirical,
-    hostPermissionStatus: host === undefined ? null : async () => host,
+    standalonePermissionStatus: async () => { counts.standaloneReads++; return standalone; },
   });
+  runtime.initialize();
+  return { runtime, counts };
 }
 
-describe("hostPermissionFailureReason", () => {
-  it("names the app, its bundle id and the pane when the host is missing a grant", () => {
-    const reason = hostPermissionFailureReason({ bundleId: "com.trycua.driver", accessibility: true, screenRecording: false });
-    assert.ok(reason !== null);
-    assert.match(reason, /Screen Recording/);
-    assert.match(reason, /CuaDriver/);
-    assert.match(reason, /com\.trycua\.driver/);
+const deniedStandalone = { bundleId: "com.trycua.driver", accessibility: false, screenRecording: false };
+const allowedStandalone = { bundleId: "com.trycua.driver", accessibility: true, screenRecording: true };
+
+describe("standalone permission repair", () => {
+  it("names the standalone app, bundle and missing pane", () => {
+    const reason = standalonePermissionFailureReason({ ...deniedStandalone, accessibility: true });
+    assert.ok(reason.includes("Screen Recording must be granted to CuaDriver (com.trycua.driver)"));
+    assert.match(reason, /Privacy & Security/);
     assert.match(reason, /add CuaDriver/);
   });
-
-  it("lists both permissions when the host has neither", () => {
-    const reason = hostPermissionFailureReason({ bundleId: "com.trycua.driver", accessibility: false, screenRecording: false });
-    assert.match(reason ?? "", /Accessibility and Screen Recording/);
+  it("lists both missing permissions", () => {
+    assert.match(standalonePermissionFailureReason(deniedStandalone), /Accessibility and Screen Recording/);
   });
-
-  it("returns null when the host has both, so the normal path continues", () => {
-    assert.equal(
-      hostPermissionFailureReason({ bundleId: "com.trycua.driver", accessibility: true, screenRecording: true }),
-      null,
-    );
+  it("returns no repair when both standalone grants are present", () => {
+    assert.equal(standalonePermissionFailureReason(allowedStandalone), null);
   });
 });
 
-describe("embedded host start", () => {
-  it("fails with the named-app message when the host is denied, even though this process reads granted", async () => {
-    const runtime = harness({
-      host: { bundleId: "com.trycua.driver", accessibility: true, screenRecording: false },
-      sdkGranted: true,
-      empirical: { accessibility: true, screenRecording: true },
-    });
-    runtime.initialize();
-    const connection = await runtime.start();
-    assert.match(connection.reason, /embedded host failed/);
-    assert.match(connection.reason, /com\.trycua\.driver/);
-    assert.match(connection.reason, /Privacy & Security/);
+describe("embedded permission owner", () => {
+  it("starts allowed embedded access without reading denied standalone grants", async () => {
+    const { runtime, counts } = harness({ standalone: deniedStandalone });
+    try {
+      assert.equal((await runtime.start()).mode, "embedded");
+      assert.deepEqual(counts, { standaloneReads: 0, prompts: 1, starts: 1 });
+    } finally { await runtime.stop(); }
   });
-
-  it("keeps the legacy message when no host read is available", async () => {
-    const runtime = harness({ host: undefined, sdkGranted: false, empirical: { accessibility: false, screenRecording: false } });
-    runtime.initialize();
-    const connection = await runtime.start();
-    assert.match(connection.reason, /embedded host failed/);
-    assert.match(connection.reason, /Accessibility and Screen Recording required/);
+  it("cannot use allowed standalone grants to enable denied Muster access", async () => {
+    const { runtime, counts } = harness({ standalone: allowedStandalone, sdkGranted: false,
+      empirical: { accessibility: false, screenRecording: false } });
+    try {
+      const connection = await runtime.start();
+      assert.equal(connection.mode, "unavailable");
+      assert.ok(connection.reason.includes("Accessibility and Screen Recording required for Muster (com.muster.app)"));
+      assert.doesNotMatch(connection.reason, /CuaDriver/);
+      assert.deepEqual(counts, { standaloneReads: 0, prompts: 2, starts: 0 });
+    } finally { await runtime.stop(); }
+  });
+  it("keeps fresh Muster evidence authoritative despite an unavailable standalone reader", async () => {
+    const { runtime, counts } = harness({ standalone: null, sdkGranted: false,
+      empirical: { accessibility: true, screenRecording: true } });
+    try {
+      assert.equal((await runtime.start()).mode, "embedded");
+      assert.deepEqual(counts, { standaloneReads: 0, prompts: 2, starts: 1 });
+    } finally { await runtime.stop(); }
+  });
+  it("names CuaDriver only when the selected standalone daemon is denied", async () => {
+    const { runtime, counts } = harness({ embedded: false, standalone: { ...deniedStandalone, accessibility: true } });
+    try {
+      const connection = await runtime.start();
+      assert.equal(connection.mode, "unavailable");
+      assert.match(connection.reason, /Screen Recording must be granted to CuaDriver/);
+      assert.deepEqual(counts, { standaloneReads: 1, prompts: 0, starts: 0 });
+    } finally { await runtime.stop(); }
   });
 });

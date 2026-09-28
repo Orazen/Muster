@@ -103,6 +103,17 @@ describe("desktop capability session", () => {
     expect(f.enableComputerAccess).toHaveBeenCalledTimes(1);
   });
 
+  it("clears an obsolete enable failure when the native host later confirms access", async () => {
+    const f = fixture(); f.attach(); await settle();
+    f.enableComputerAccess.mockResolvedValueOnce({ mode: "unavailable", reason: "Screen Recording required for Muster" });
+    await f.session.enable();
+    expect(f.session.getSnapshot().enableError).toContain("Screen Recording");
+    f.getCapabilities.mockResolvedValue(on);
+    await f.session.refresh();
+    expect(f.session.getSnapshot()).toMatchObject({ capabilities: on, enableError: null });
+    expect(f.enableComputerAccess).toHaveBeenCalledTimes(1);
+  });
+
   it("does not publish a read or enable completion after provider disposal", async () => {
     const f = fixture(); f.attach(); await settle();
     const native = deferred<{ mode: string }>(); f.enableComputerAccess.mockReturnValue(native.promise);

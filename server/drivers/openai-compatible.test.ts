@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { RuntimeEvent, SendTurnInput } from "../contracts.ts";
 import { createOpenAICompatibleDriver } from "./openai-compatible.ts";
 import { DeepSeekDriver } from "./deepseek.ts";
 import { MistralDriver } from "./mistral.ts";
@@ -6,6 +10,11 @@ import { GroqDriver } from "./groq.ts";
 import { TogetherDriver } from "./together.ts";
 import { FireworksDriver } from "./fireworks.ts";
 import { OpenRouterDriver } from "./openrouter.ts";
+
+interface BrowserFixtureMessage {
+  content: string | null;
+  tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+}
 
 function sseChunk(delta: string) {
   return `data: ${JSON.stringify({ choices: [{ delta: { content: delta } }] })}\n\n`;
@@ -84,6 +93,64 @@ describe("createOpenAICompatibleDriver (generic factory)", () => {
     const call = vi.mocked(fetch).mock.calls[0];
     expect(call[0]).toBe("https://api.test-provider.example/v1/chat/completions");
     expect(new Headers(call[1]?.headers).get("authorization")).toBe("Bearer key-123");
+  });
+
+  it("admits an OpenRouter browser mount, executes its MCP navigation and answers from the result", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "muster-browser-tools-"));
+    const fixture = join(directory, "browser.mjs");
+    const called = join(directory, "called.json");
+    const exited = join(directory, "exited");
+    // An owned real stdio process, with no network or browser profile. Its
+    // recorded arguments prove the model's requested tool actually ran.
+    writeFileSync(fixture, `
+      import { createInterface } from "node:readline";
+      import { writeFileSync } from "node:fs";
+      process.on("SIGTERM", () => process.exit(0));
+      process.on("exit", () => writeFileSync(${JSON.stringify(exited)}, "exited"));
+      createInterface({ input: process.stdin }).on("line", line => {
+        const message = JSON.parse(line);
+        if (message.id === undefined) return;
+        let result;
+        if (message.method === "initialize") result = { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "owned-browser", version: "1" } };
+        else if (message.method === "tools/list") result = { tools: [{ name: "browser_navigate", inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"] } }] };
+        else if (message.method === "tools/call") {
+          writeFileSync(${JSON.stringify(called)}, JSON.stringify(message.params));
+          result = { content: [{ type: "text", text: "Fixture page title: Example Domain" }], isError: false };
+        }
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }) + "\\n");
+      });
+    `);
+    const jsonResponse = (message: BrowserFixtureMessage) => new Response(JSON.stringify({ choices: [{ message }], usage: { prompt_tokens: 5, completion_tokens: 2 } }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    const fetchMock = vi.mocked(global.fetch);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ content: null, tool_calls: [
+      { id: "navigation", type: "function", function: { name: "browser__browser_navigate", arguments: JSON.stringify({ url: "https://example.com" }) } },
+    ] })).mockResolvedValueOnce(jsonResponse({ content: "The page title is Example Domain." }));
+    const instance = await OpenRouterDriver.create({ instanceId: "owned-browser-router", displayName: undefined, enabled: true,
+      environment: { OPENROUTER_API_KEY: "fixture-only" }, config: OpenRouterDriver.decodeConfig({}) });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent(event => events.push(event));
+    try {
+      // Match dispatch admission: a browser toggle alone cannot mount tools
+      // when this advertised capability is absent. This failed before the fix.
+      const integrations: SendTurnInput["integrations"] = instance.adapter.capabilities.customMcp === true
+        ? { custom: [{ name: "browser", command: process.execPath, args: [fixture], env: { HOME: directory, TMPDIR: directory } }] }
+        : undefined;
+      await instance.adapter.sendTurn({ threadId: "owned-browser-turn", text: "Open example.com and tell me its title", integrations });
+      await vi.waitFor(() => expect(events.some(event => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      const first = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+      expect(first.tools).toContainEqual(expect.objectContaining({ function: expect.objectContaining({ name: "browser__browser_navigate" }) }));
+      expect(JSON.parse(readFileSync(called, "utf8"))).toEqual({ name: "browser_navigate", arguments: { url: "https://example.com" } });
+      const second = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+      expect(second.messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "navigation", content: "Fixture page title: Example Domain" });
+      expect(events).toContainEqual(expect.objectContaining({ type: "item.completed", text: "The page title is Example Domain." }));
+      expect(events).toContainEqual(expect.objectContaining({ type: "turn.completed", ok: true }));
+      await vi.waitFor(() => expect(existsSync(exited)).toBe(true), { timeout: 5_000 });
+    } finally {
+      await instance.dispose();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("text-only turns keep string content even on a vision driver", async () => {

@@ -491,6 +491,10 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
             sessionModelSwitch: "in-session",
             computerMcp: capabilityOverrides?.computerMcp ?? true,
             composioMcp: capabilityOverrides?.composioMcp ?? true,
+            // The shared tool loop mounts integrations.custom, including
+            // each bot's opted-in browser. Dispatch consults this flag before
+            // handing those servers to the driver.
+            customMcp: true,
             // every factory-built driver reads turn.transcript directly
             transcriptReplay: true,
             // Vision twins get ONE switch that does the whole job: `images`

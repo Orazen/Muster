@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { DesktopCapabilitySession, permissionRequestPresentationDestination, type DesktopCapabilityState, type PermissionRequestDestination, type PrivacyPane } from "@/lib/desktop";
+import { DesktopCapabilitySession, localComputerRepair, permissionRequestPresentationDestination, type DesktopCapabilityState, type PermissionRequestDestination, type PrivacyPane } from "@/lib/desktop";
 
 type DesktopState = DesktopCapabilityState & {
   refresh(): Promise<void>;
@@ -32,10 +32,13 @@ export function ComputerAccessView({ state, onEnable, onRefresh, onOpenSettings 
   /** Optional: absent on surfaces that only report capabilities. The
    * Settings repair path is offered only when this session has already made
    * its permission request — one path per tap, never both. */
-  onOpenSettings?(): void;
+  onOpenSettings?(pane: PrivacyPane): void;
 }) {
   const errors = [...new Set([state.enableError, state.error].filter((value) => value !== null))];
   const available = state.capabilities.localComputer.available;
+  const repair = localComputerRepair({ platform: state.capabilities.host.platform,
+    packaged: state.capabilities.host.packaged, reasonCode: state.capabilities.localComputer.reasonCode,
+    failure: state.enableError });
   const settingsDestination = permissionRequestPresentationDestination({
     hasPermissionNow: available,
     hasAttemptedSystemPrompt: state.permissionRequestAttempted,
@@ -51,7 +54,7 @@ export function ComputerAccessView({ state, onEnable, onRefresh, onOpenSettings 
                   : available ? "This Mac is enabled for this session." : "Computer access is off for this session."}
           </p>
           <p>Available to bots assigned This Mac, and Auto when it uses this Mac, until you quit Muster. Each bot’s Off setting still blocks computer use.</p>
-          <p>macOS may ask for Accessibility and Screen Recording permissions.</p>
+          <p>macOS may ask for Accessibility and Screen Recording permissions. Local VM and Browser work separately from this Mac access.</p>
           {!available && (
             <button type="button" onClick={onEnable} disabled={!state.ready || state.enabling || state.refreshing} aria-busy={state.enabling}
               className="w-full whitespace-normal break-words rounded-lg bg-accent px-3 py-2 font-medium text-white disabled:opacity-50">
@@ -61,19 +64,19 @@ export function ComputerAccessView({ state, onEnable, onRefresh, onOpenSettings 
           {/* The repair path (tiptour destination pattern): after this
               session's request, a permission still off opens System Settings
               instead of asking again. Report-only — it claims no grant. */}
-          {!available && settingsDestination === "systemSettings" && onOpenSettings && !state.enabling && !state.refreshing && (
-            <button type="button" onClick={onOpenSettings}
+          {!available && settingsDestination === "systemSettings" && onOpenSettings && !state.enabling && !state.refreshing && repair.panes.map((pane) => (
+            <button key={pane} type="button" onClick={() => onOpenSettings(pane)}
               className="w-full whitespace-normal break-words rounded-lg bg-raised px-3 py-2 font-medium text-ink hover:bg-raised-hover">
-              Open Privacy Settings
+              {pane === "screen" ? "Open Screen Recording settings" : "Open Accessibility settings"}
             </button>
-          )}
+          ))}
         </>
       ) : (
         <p>{state.capabilities.host.platform === "darwin"
           ? "Update the desktop app to enable computer access for a session."
           : "Session computer control requires the macOS desktop app."}</p>
       )}
-      {errors.map((error) => <p key={error} role="alert" className="break-words text-danger">{error}</p>)}
+      {errors.map((error) => <p key={error} role="alert" className="break-words text-danger">{error === state.enableError && repair.panes.length ? repair.message : error}</p>)}
       {state.error && (
         <button type="button" onClick={onRefresh} disabled={state.refreshing || state.enabling} className="w-full whitespace-normal rounded-lg bg-raised px-3 py-2 text-ink disabled:opacity-50">Retry capability check</button>
       )}
@@ -90,5 +93,5 @@ export function ComputerAccessControl() {
     void state.enable().catch(() => {}).finally(() => { inFlight.current = false; });
   };
   return <ComputerAccessView state={state} onEnable={enable} onRefresh={() => { void state.refresh().catch(() => {}); }}
-    onOpenSettings={() => { state.openPrivacySettings("accessibility"); }} />;
+    onOpenSettings={(pane) => { state.openPrivacySettings(pane); }} />;
 }

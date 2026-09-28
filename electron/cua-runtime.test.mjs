@@ -213,6 +213,51 @@ describe("session computer access runtime", () => {
 });
 
 describe("desktop permission probe overriding a stale SDK preflight", () => {
+  it("never reads unrelated standalone permissions before starting allowed embedded access", async () => {
+    let standaloneReads = 0;
+    const f = fixture("darwin", {
+      standalonePermissionStatus: async () => {
+        standaloneReads++;
+        return { bundleId: "com.trycua.driver", accessibility: false, screenRecording: false };
+      },
+    });
+    f.runtime.initialize();
+    expect((await f.runtime.start()).mode).toBe("embedded");
+    expect(standaloneReads).toBe(0);
+    expect(f.counts).toMatchObject({ permissions: 1, starts: 1 });
+  });
+  it("never grants denied embedded access from another app's allowed permissions", async () => {
+    let standaloneReads = 0;
+    const f = fixture("darwin", {
+      standalonePermissionStatus: async () => {
+        standaloneReads++;
+        return { bundleId: "com.trycua.driver", accessibility: true, screenRecording: true };
+      },
+      requestDesktopPermissions: async () => ({ accessibility: false, screenRecording: false }),
+    });
+    f.runtime.initialize();
+    f.control.permissions = { accessibility: false, screenRecording: false };
+    const connection = await f.runtime.start();
+    expect(connection.mode).toBe("unavailable");
+    expect(connection.reason).toContain("required for Muster (com.muster.app)");
+    expect(connection.reason).not.toContain("CuaDriver");
+    expect(standaloneReads).toBe(0);
+    expect(f.counts).toMatchObject({ permissions: 2, starts: 0 });
+  });
+  it("does not attach after shutdown during a standalone permission read", async () => {
+    const permissionRead = deferred();
+    const f = fixture("darwin", { standalonePermissionStatus: () => permissionRead.promise });
+    f.control.embedded = false;
+    f.runtime.initialize();
+    const start = f.runtime.start();
+    await Promise.resolve();
+    const stop = f.runtime.stop();
+    permissionRead.resolve({ bundleId: "com.trycua.driver", accessibility: true, screenRecording: true });
+    await start; await stop;
+    expect(f.disk().reason).toBe("desktop-host-stopped");
+    expect(f.persisted.every((entry) => entry.mode === "unavailable")).toBe(true);
+    expect(f.counts).toMatchObject({ permissions: 0, starts: 0 });
+  });
   it("starts the embedded host when fresh evidence proves both permissions the preflight denies", async () => {
     const f = fixture("darwin", {
       requestDesktopPermissions: async () => ({ accessibility: true, screenRecording: true }),
@@ -226,7 +271,7 @@ describe("desktop permission probe overriding a stale SDK preflight", () => {
     expect(f.disk()).toEqual(connection);
     expect(f.counts).toMatchObject({ permissions: 2, starts: 1 });
   });
-  it("keeps the exact legacy message when the fresh evidence also proves nothing", async () => {
+  it("names Muster and both missing permissions when fresh evidence also proves nothing", async () => {
     const f = fixture("darwin", {
       requestDesktopPermissions: async () => ({ accessibility: false, screenRecording: false }),
     });
@@ -235,7 +280,7 @@ describe("desktop permission probe overriding a stale SDK preflight", () => {
     const connection = await f.runtime.start();
     expect(connection).toEqual({
       mode: "unavailable",
-      reason: "embedded host failed: Accessibility and Screen Recording required; grant access in System Settings, then try again",
+      reason: "embedded host failed: Accessibility and Screen Recording required for Muster (com.muster.app); grant Muster access in System Settings → Privacy & Security, then try again",
     });
     expect(f.counts.starts).toBe(0);
   });
@@ -246,16 +291,16 @@ describe("desktop permission probe overriding a stale SDK preflight", () => {
     f.runtime.initialize();
     f.control.permissions = { accessibility: false, screenRecording: false };
     expect((await f.runtime.start()).reason).toBe(
-      "embedded host failed: Screen Recording required; grant access in System Settings, then try again",
+      "embedded host failed: Screen Recording required for Muster (com.muster.app); grant Muster access in System Settings → Privacy & Security, then try again",
     );
   });
-  it("fails byte-identically to the legacy path when no probe is injected", async () => {
+  it("names Muster when the SDK denies and no fresh probe is injected", async () => {
     const f = fixture();
     f.runtime.initialize();
     f.control.permissions = { accessibility: false, screenRecording: false };
     const connection = await f.runtime.start();
     expect(connection.reason).toBe(
-      "embedded host failed: Accessibility and Screen Recording required; grant access in System Settings, then try again",
+      "embedded host failed: Accessibility and Screen Recording required for Muster (com.muster.app); grant Muster access in System Settings → Privacy & Security, then try again",
     );
     expect(f.counts).toMatchObject({ permissions: 1, starts: 0 });
   });
@@ -279,7 +324,7 @@ describe("desktop permission probe overriding a stale SDK preflight", () => {
     f.runtime.initialize();
     f.control.permissions = { accessibility: false, screenRecording: false }; // stale all session — only the probe can see the grant
     expect((await f.runtime.start()).reason).toBe(
-      "embedded host failed: Accessibility and Screen Recording required; grant access in System Settings, then try again",
+      "embedded host failed: Accessibility and Screen Recording required for Muster (com.muster.app); grant Muster access in System Settings → Privacy & Security, then try again",
     );
     granted = true;
     const connection = await f.runtime.start();

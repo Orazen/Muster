@@ -148,23 +148,31 @@ describe("permission presentation destination", () => {
     }));
 
   it("offers the repair path only after this session's request", () => {
-    expect(renderRepair()).not.toContain("Open Privacy Settings");
-    const html = renderRepair({ permissionRequestAttempted: true });
-    expect(html.match(/Open Privacy Settings/g)).toHaveLength(1);
+    expect(renderRepair()).not.toContain("Open Screen Recording settings");
+    const html = renderRepair({ permissionRequestAttempted: true, enableError: "Accessibility and Screen Recording required for Muster" });
+    expect(html.match(/Open Screen Recording settings/g)).toHaveLength(1);
+    expect(html.match(/Open Accessibility settings/g)).toHaveLength(1);
     expect(html).toContain("Enable for this session");
   });
 
   it("withholds the repair path while a request is in flight or access is on", () => {
-    expect(renderRepair({ permissionRequestAttempted: true, enabling: true })).not.toContain("Open Privacy Settings");
-    expect(renderRepair({ permissionRequestAttempted: true, refreshing: true })).not.toContain("Open Privacy Settings");
-    expect(renderRepair({ permissionRequestAttempted: true, capabilities: { ...base.capabilities, localComputer: { available: true, support: "supported" } } }))
-      .not.toContain("Open Privacy Settings");
+    expect(renderRepair({ permissionRequestAttempted: true, enableError: "Screen Recording required", enabling: true })).not.toContain("Open Screen Recording settings");
+    expect(renderRepair({ permissionRequestAttempted: true, enableError: "Screen Recording required", refreshing: true })).not.toContain("Open Screen Recording settings");
+    expect(renderRepair({ permissionRequestAttempted: true, enableError: "Screen Recording required", capabilities: { ...base.capabilities, localComputer: { available: true, support: "supported" } } }))
+      .not.toContain("Open Screen Recording settings");
+  });
+
+  it("does not send a missing-driver failure to unrelated privacy settings", () => {
+    const html = renderRepair({ permissionRequestAttempted: true, enableError: "cua-driver binary not found" });
+    expect(html).not.toContain("Open Screen Recording settings");
+    expect(html).not.toContain("Open Accessibility settings");
+    expect(html).toContain("cua-driver binary not found");
   });
 
   it("renders no dead control on a surface that never offered the handler", () => {
     const html = renderToStaticMarkup(createElement(ComputerAccessView, {
-      state: { ...base, ready: true, permissionRequestAttempted: true }, onEnable: vi.fn(), onRefresh: vi.fn(),
+      state: { ...base, ready: true, permissionRequestAttempted: true, enableError: "Screen Recording required" }, onEnable: vi.fn(), onRefresh: vi.fn(),
     }));
-    expect(html).not.toContain("Open Privacy Settings");
+    expect(html).not.toContain("Open Screen Recording settings");
   });
 });

@@ -31,18 +31,9 @@ export type DesktopBridge = Pick<NonNullable<Window["ogb"]>, "platform"> &
  * control permission; mic/screen/speech are the voice and preview panes. */
 export type PrivacyPane = NonNullable<Parameters<NonNullable<DesktopBridge["permOpenSettings"]>>[0]>;
 
-/** The repair a blocked computer-access session needs: words plus the exact
- * privacy panes to open, or none when a pane cannot help.
- *
- * WHY this exists as a named contract: the failure is easy to misread in both
- * directions. macOS keys privacy grants to the BINARY that uses them, and the
- * screenshots for local computer control are taken by CuaDriver
- * (`com.trycua.driver`) — a separately signed app — not by Muster. A person
- * who grants Screen Recording to Muster, as the old copy invited them to, has
- * changed nothing for the driver, and then concludes the app is broken. The
- * honest repair names the app that needs the grant and opens the exact panes;
- * "computer access is off" (a user preference) gets no privacy buttons at all,
- * because a settings pane cannot fix a toggle. */
+/** Repair the reported host failure without conflating it with Local VM.
+ * Packaged embedded control inherits Muster's macOS permissions. A separate
+ * CuaDriver daemon has its own grants and must explicitly identify itself. */
 export interface LocalComputerRepair {
   message: string;
   panes: PrivacyPane[];
@@ -51,23 +42,33 @@ export interface LocalComputerRepair {
 export function localComputerRepair(input: {
   platform: string;
   reasonCode: string | undefined;
+  packaged?: boolean;
+  failure?: string | null;
 }): LocalComputerRepair {
   const { platform } = input;
   const reasonCode = input.reasonCode ?? "";
-  if (platform !== "mac") {
+  const failure = input.failure ?? "";
+  if (platform !== "darwin" && platform !== "mac") {
     return { message: "CUA Driver isn't ready for local computer control.", panes: [] };
   }
-  if (reasonCode === "computer-access-off") {
+  if (reasonCode === "computer-access-off" && !failure) {
     return { message: "Computer access is off for this session. Enable it below.", panes: [] };
   }
   if (reasonCode === "desktop-upgrade-required" || reasonCode === "unsupported-platform") {
     return { message: "Local computer control requires the desktop app.", panes: [] };
   }
+  const screen = /screen[ -]recording/i.test(`${reasonCode} ${failure}`);
+  const accessibility = /accessibility/i.test(`${reasonCode} ${failure}`);
+  if (!screen && !accessibility) {
+    return { message: failure || "This Mac is not ready. Try enabling access below.", panes: [] };
+  }
+  const app = /CuaDriver|com\.trycua\.driver/.test(failure)
+    ? "CuaDriver"
+    : input.packaged === false ? "the app named in the macOS permission prompt" : "Muster";
+  const permissions = [screen && "Screen Recording", accessibility && "Accessibility"].filter(Boolean).join(" and ");
   return {
-    message:
-      "Computer access needs Screen Recording and Accessibility for CuaDriver. macOS grants privacy per app — " +
-      "in System Settings add CuaDriver (not just Muster), then try again.",
-    panes: ["screen", "accessibility"],
+    message: `Allow ${permissions} for ${app} in System Settings → Privacy & Security, then try enabling access again. If macOS asks you to quit and reopen the app, do that before retrying. Local VM and Browser do not need these Mac permissions.`,
+    panes: [...(screen ? ["screen" as const] : []), ...(accessibility ? ["accessibility" as const] : [])],
   };
 }
 
@@ -197,7 +198,8 @@ export class DesktopCapabilitySession {
     this.update({ refreshing: true, error: null });
     try {
       const capabilities = await loadDesktopCapabilities(this.bridge);
-      if (this.current(epoch) && request === this.request) this.update({ capabilities, ready: true, refreshing: false });
+      if (this.current(epoch) && request === this.request) this.update({ capabilities, ready: true, refreshing: false,
+        enableError: capabilities.localComputer.available ? null : this.state.enableError });
     } catch (cause) {
       if (this.current(epoch) && request === this.request) {
         const error = cause instanceof Error && cause.message.trim() ? cause.message : "Could not refresh desktop capabilities. Try again.";
