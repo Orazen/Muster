@@ -48,6 +48,8 @@
     "bench:observation": "node --experimental-strip-types scripts/bench-observation.ts",
     "bench:roles": "vitest run server/role-eval-harness.test.ts",
     "test:watch": "vitest",
+    "test:related": "vitest related --run",
+    "test:shard": "vitest run --shard",
     "test:cua": "pnpm build:cua && node scripts/smoke-cua.mjs",
     "test:cua-container": "node scripts/smoke-cua-container.mjs",
     "check:electron": "node --check electron/main.mjs && node --check electron/companion.mjs && node --check electron/terminal-launch.mjs && node --check electron/preload.cjs && node --check electron/capabilities.cjs && node --check electron/cua-connection.cjs && node --check electron/cua.mjs && node --check electron/speech.mjs",

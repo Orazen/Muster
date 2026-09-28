@@ -46,7 +46,44 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: npx tsc --noEmit -p tsconfig.e2e.json
 
-  test:
+  # The suite is one serial job today: `fileParallelism: false` in vite.config.ts
+  # runs 418 files one at a time, and the measured total is ~12 minutes. Split
+  # it across four runners, which is where the wall clock actually goes.
+  #
+  # What this deliberately does NOT change: fileParallelism stays false inside
+  # every shard, so each shard is still strictly serial and keeps whatever
+  # determinism the suite has today. Sharding is the runner boundary, not a
+  # change in how tests share a machine. 44 of those files spawn a real
+  # `node server/index.ts` (10,752 lines, type-stripped at runtime), which is
+  # most of the cost — and that load is exactly what makes in-process
+  # parallelism flaky, so parallelism is bought here rather than assumed.
+  #
+  # Measured on one shard: 108 files / 1674 tests / 231 s, so four in parallel
+  # land near 4 minutes against 12. Shard balance is vitest's own, not a
+  # hand-maintained list, so adding a slow test file cannot silently unbalance
+  # it.
+  test-shard:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: npx vitest run --shard=${{ matrix.shard }}/4
+
+  # `pnpm test` is not only vitest: it also runs the broker, the updater
+  # coordinator, the desktop lifecycle and the packaged-server check, and the
+  # last one builds the server first. Those stay in one job so the build they
+  # depend on happens exactly once, and so a failure in any of them still
+  # reads as its own named job rather than as a mysterious shard.
+  test-integrations:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -56,11 +93,14 @@ jobs:
           node-version: '24'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+      - run: pnpm broker:test
+      - run: pnpm test:updater
+      - run: pnpm test:desktop-lifecycle
+      - run: pnpm test:packaged-server
 
   build:
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, e2e-typecheck, test]
+    needs: [lint, typecheck, e2e-typecheck, test-shard, test-integrations]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
