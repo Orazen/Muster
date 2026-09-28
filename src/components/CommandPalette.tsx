@@ -108,6 +108,33 @@ export function CommandPalette() {
       // shield the window listeners other modals hang their own Esc on
       e.stopPropagation();
       setOpen(false);
+    } else if (e.key === "Tab") {
+      // aria-modal promises exclusive keyboard scope, but the palette has no
+      // focus-trap of its own, so native tabbing walks into the page behind
+      // the backdrop whenever focus starts or moves outside the dialog (e.g.
+      // ⌘K opened above a dialog that yields its Tab trap to us). Bubbles here
+      // only when the event originates inside the palette; a soft trap keeps
+      // in-range native movement, matching the compact Bot settings pattern.
+      const region = e.currentTarget;
+      const focusables = Array.from(
+        region.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.getClientRects().length > 0 && element.tabIndex >= 0);
+      const first = focusables[0];
+      const last = focusables.at(-1);
+      if (!first || !last) {
+        e.preventDefault();
+        return;
+      }
+      const active = region.ownerDocument.activeElement;
+      if (e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      } else if (!e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      }
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
       setCursor(entries.length ? (selected + 1) % entries.length : 0);
