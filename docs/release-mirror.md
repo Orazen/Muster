@@ -156,6 +156,26 @@ mirror, not assumed from local fixtures.
   checks on Electron 44.4.5 / Node 24.21.0. This does not verify a real
   installed upgrade, authenticated renderer journey or Google sign-in.
 
+- 2026-09-28 (v1.22.1, run 36486475646): all seven release jobs passed,
+  including the four platform builds and mirror promotion. Published source:
+  `cd6f6414f023e62b35b28926144fea23f03cd367`; publication timestamp:
+  `2026-09-28T21:51:42Z`. Both public domains returned identical complete
+  1.22.1 metadata and all three updater feeds. Downloaded arm64 DMG and ZIP
+  sizes, SHA-256 checksums and feed SHA-512 hashes matched. The downloaded
+  app passed strict signing, notarization/Gatekeeper and **14/14** isolated
+  native runtime/server checks (Electron 44.4.5 / Node 24.21.0). Public
+  acceptance passed **46/46** checks, including that native aggregate.
+  Platform jobs separately passed **56/56** native checks across Mac arm64,
+  Mac Intel, Windows and Linux; Linux also passed the packaged launch smoke.
+  Source gates: Mac **440 files / 6,337 passed / 8 skipped / 0 failed**;
+  Linux **440 / 6,336 / 9 / 0**; fresh-build browser **133/133**; exact-source
+  CI **9/9 jobs**. The extra Linux skip is the macOS Keychain check.
+  Windows remains unsigned. Real installed upgrades, authenticated renderer
+  journeys and Windows VM acceptance remain separate. The download page
+  displays 1.22.1 and its checksums, but its legacy unsigned/self-hosting copy
+  and browser-based Mac CPU guessing still require correction. Hosted web
+  and backend report 1.22.1; hosted source revision is still unattested.
+
 For checksum text files such as `SHA256SUMS-macos-arm64.txt`, use the
 published release assets. They are not mirror URLs. The mirror exposes
 stable-file SHA-256 checksums in `latest.json` and updater-target SHA-512
@@ -174,7 +194,7 @@ installer, signing and platform acceptance gates remain separate. The mirror
 does not yet copy uploaded blockmaps, so full-download fallback is expected;
 successful differential updating has not been verified. CLI build/verification
 runs in the source release workflow. The latest mirror receipt recorded here
-is 1.22.0; later source commits are not evidence of a newer published installer.
+is 1.22.1; later source commits are not evidence of a newer published installer.
 A source version bump or locally built candidate still does not publish an
 installer.
 
