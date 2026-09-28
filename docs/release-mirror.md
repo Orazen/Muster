@@ -144,6 +144,22 @@ mirror, not assumed from local fixtures.
   `releases/{id}` and the assets sub-resource were fresh; the workflow now
   downloads through the assets sub-resource, and the mirror was promoted
   through the same remote helper (generation `release-1.16.0-7d74cc5d…`).
+- 2026-09-28 (v1.22.0, run 36460431961): all seven release jobs passed,
+  including all four platform builds and mirror promotion. Published source:
+  `7c55f0abc02d68cd84c33b48ba1de88cfd55bd76`; publication timestamp:
+  `2026-09-28T18:10:50Z`. Public GETs on both muster.today and
+  muster.orazen.online returned identical complete `latest.json` metadata
+  and identical macOS, Windows and Linux update feeds for 1.22.0. The
+  downloaded arm64 DMG and updater ZIP matched their published sizes,
+  SHA-256 checksums and feed SHA-512 hashes. The Mac app passed strict code
+  signing, notarization/Gatekeeper and 14/14 isolated native runtime/server
+  checks on Electron 44.4.5 / Node 24.21.0. This does not verify a real
+  installed upgrade, authenticated renderer journey or Google sign-in.
+
+For checksum text files such as `SHA256SUMS-macos-arm64.txt`, use the
+published release assets. They are not mirror URLs. The mirror exposes
+stable-file SHA-256 checksums in `latest.json` and updater-target SHA-512
+hashes in its feeds; compare downloaded immutable files with those records.
 
 Serving configuration verified from the public edge on 2026-09-23: internal
 dot directories and state (`.incoming`, `.generations`, `.current`,
@@ -157,8 +173,8 @@ interruption/locking and an ephemeral loopback HTTP server. Native updater,
 installer, signing and platform acceptance gates remain separate. The mirror
 does not yet copy uploaded blockmaps, so full-download fallback is expected;
 successful differential updating has not been verified. CLI build/verification
-runs in the source release workflow, and the mirror currently serves 1.16.0
-(two consecutive candidates have passed release and deployment acceptance).
+runs in the source release workflow. The latest mirror receipt recorded here
+is 1.22.0; later source commits are not evidence of a newer published installer.
 A source version bump or locally built candidate still does not publish an
 installer.
 
