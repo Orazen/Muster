@@ -62,6 +62,10 @@ function toggleTrayWindow() {
       preload: path.join(__dirname, "preload.cjs"),
     },
   });
+  // Every window reports its own renderer health. A window that loads and then
+  // never paints is indistinguishable from the background colour, and used to
+  // leave nothing at all in the log.
+  reportRendererHealth(trayWindow, "tray");
   trayWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
@@ -344,6 +348,47 @@ function slog(line) {
   }
 }
 
+/** Make a window's renderer explain itself when it goes wrong.
+ *
+ *  Every window here is created with `backgroundColor: "#070707"`, so a
+ *  renderer that loads a URL and then never paints is indistinguishable from a
+ *  black rectangle — and this file used to log NOTHING in that case. It hooked
+ *  `did-fail-load`, which only fires when the load itself fails; a renderer
+ *  that loads fine and then throws, is killed by the GPU process, or is blocked
+ *  from executing script produced a completely silent black screen. That is not
+ *  a hypothetical: a real install on a maintainer's machine did exactly this,
+ *  and the log ended cleanly at startup with nothing to go on.
+ *
+ *  Three signals, all previously unobserved:
+ *  - `render-process-gone` — the renderer died. This is the one that matters
+ *    most, and the only one that fires for a GPU kill or an OOM.
+ *  - `console-message` — renderer errors and warnings, which is where a thrown
+ *    exception or a CSP refusal shows up.
+ *  - `unresponsive` — the renderer is alive but not answering, which looks
+ *    exactly like a black screen from the user's side.
+ *
+ *  Deliberately a function rather than three copies at three window sites: the
+ *  gap existed precisely because the hook was easy to forget, so the next
+ *  window gets it for free. `slog` cannot throw, so calling this early in a
+ *  window's life is safe. */
+function reportRendererHealth(win, label) {
+  const contents = win.webContents;
+  contents.on("render-process-gone", (_event, details) => {
+    slog(`[${label}] renderer gone: reason=${details.reason} exitCode=${details.exitCode} url=${contents.getURL() || "(none)"}`);
+  });
+  contents.on("console-message", (_event, level, message, line, sourceId) => {
+    // 0=verbose 1=info 2=warning 3=error. Info and verbose are noise in a
+    // startup log; warnings and errors are the ones a user needs to see.
+    if (level < 2) return;
+    slog(`[${label}] renderer ${level === 3 ? "error" : "warn"}: ${message} (${sourceId}:${line})`);
+  });
+  win.on("unresponsive", () => slog(`[${label}] renderer unresponsive at ${contents.getURL() || "(none)"}`));
+  win.webContents.on("did-fail-load", (failEvent, code, description, failedUrl, isMainFrame) => {
+    if (isMainFrame && code !== -3) slog(`[${label}] load failed: ${failedUrl} (${code}) ${description ?? ""}`.trim());
+  });
+  return win;
+}
+
 async function startServerOn(port, onExit, signal) {
   if (signal.aborted) return null;
   const entry = path.join(process.resourcesPath, "server", "index.js");
@@ -521,6 +566,7 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
     },
   });
+  reportRendererHealth(win, "main");
 
   const contents = win.webContents;
   appContents.add(contents);
@@ -754,6 +800,7 @@ ipcMain.handle("desktop:open-remote-client", async (event, rawUrl) => {
   });
   remoteClientWindows.set(partition, win);
   win.on("closed", () => remoteClientWindows.delete(partition));
+  reportRendererHealth(win, "remote-client");
   win.webContents.setWindowOpenHandler(({ url: popup }) => {
     // Popups from the remote surface go to the system browser, like any web
     // page — never a second in-app window we would have to police.
@@ -810,6 +857,7 @@ function openHandoffWindow(startUrl) {
       sandbox: true,
     },
   });
+  reportRendererHealth(handoffWindow, "signin-handoff");
   handoffWindow.once("ready-to-show", () => handoffWindow?.show());
   handoffWindow.on("closed", () => {
     handoffWindow = null;
