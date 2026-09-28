@@ -490,7 +490,10 @@ function payloadKeyFor(envelope: BundleEnvelope, options: DecryptBundleV2Options
 // Export — build the payload
 // ---------------------------------------------------------------------------
 
-const SUBSET_ROOT_FILES = new Set([
+/** Exported (not just used here) so the restore catalog can report the subset
+ * it actually enforced. A promise about what a portable record contains is
+ * only worth reading if it was generated from the list the scan enforced. */
+export const SUBSET_ROOT_FILES = new Set([
   "bots.json",
   "groups.json",
   "MEMORY.md",
@@ -503,6 +506,28 @@ const SUBSET_ROOT_FILES = new Set([
   "decisions.json",
   "social.json",
 ]);
+
+/** The data-directory entries a portable record must never carry, named so a
+ * user can be told what will not come back before they choose one.
+ *
+ * These are not excluded by a special case: `scanSubset` skips every root entry
+ * that is not in `SUBSET_ROOT_FILES`, so this list is a *report* of an
+ * exclusion that is already total, not the mechanism. It is exported for
+ * server/restore-catalog.ts so the read-only "what can I restore" document and
+ * the scan cannot drift: the moment a credential file is added to the subset
+ * (which would be a serious regression) the disjointness case in the catalog
+ * suite fails, instead of the document quietly going stale.
+ *
+ *   auth.db     - sessions, the per-user Drive/Calendar grants, account rows
+ *   auth.secret - the installation signing secret a v1 key was derived from
+ *   config.json - provider keys and every transport token (Drive refresh
+ *                 token, Telegram bot token), i.e. every grant
+ */
+export const RESTORE_EXCLUDED_ROOT_FILES = [
+  "auth.db",
+  "auth.secret",
+  "config.json",
+] as const;
 
 const SOCIAL_FILE_NAME = "social.json";
 

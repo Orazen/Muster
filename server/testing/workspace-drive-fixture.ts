@@ -16,6 +16,22 @@ const settingsSchema = z.object({ directory: z.string(), refreshToken: z.string(
 const entrySchema = z.object({ operation: z.enum(["refresh", "list", "upload", "download", "exchange"]), mode: modeSchema, credentialsMatch: z.boolean() });
 interface FixtureTokenResponse { access_token: string; refresh_token: string; expires_in: number; id_token?: string; scope?: string; token_type?: string }
 const fixtureFileId = "owned-workspace-file";
+/** One synthetic Google account's transport identity and its own app-data
+ *  folder. Real `drive.appdata` is scoped to the Google account behind the
+ *  bearer token, so two accounts on one Muster install have DISJOINT record sets
+ *  and a listing made with one token cannot see the other's records. The
+ *  fixture models that: it is the only reason a two-account test can fail for
+ *  the right reason instead of passing because both accounts shared a store. */
+const accountRecordSchema = z.object({
+  key: z.string().min(1),
+  googleSubject: z.string().min(1),
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1),
+});
+type AccountRecord = z.infer<typeof accountRecordSchema>;
+const PRIMARY_ACCOUNT_KEY = "primary";
+const ACCOUNTS_FILE = "accounts.json";
+const SNAPSHOTS_DIR = "snapshots";
 
 /** Its credential values are synthetic and must remain in owned fixture files. */
 export function createWorkspaceDriveFixture(directory: string) {
@@ -28,6 +44,27 @@ export function createWorkspaceDriveFixture(directory: string) {
   const journalPath = join(directory, "transport.jsonl");
   writeFileSync(settingsPath, JSON.stringify(settings), { mode: 0o600 });
   writeFileSync(controlPath, JSON.stringify({ mode: "ok" }), { mode: 0o600 });
+  const readAccounts = (): AccountRecord[] => {
+    const path = join(directory, ACCOUNTS_FILE);
+    if (!existsSync(path)) return [];
+    try { return z.array(accountRecordSchema).parse(JSON.parse(readFileSync(path, "utf8"))); }
+    catch { return []; }
+  };
+  /** Register another synthetic Google account with its own tokens and its own
+   *  app-data folder. Call it BEFORE the child boots: the child's transport
+   *  installs once, at preload, and reads its account list then. The primary
+   *  account is the one the fixture has always had and keeps its store path, so
+   *  a suite that never calls this is entirely unaffected. */
+  const createAccount = (key: string): AccountRecord => {
+    const record: AccountRecord = {
+      key,
+      googleSubject: `owned-google-${key}-${randomBytes(8).toString("hex")}`,
+      accessToken: randomBytes(24).toString("hex"),
+      refreshToken: randomBytes(24).toString("hex"),
+    };
+    writeFileSync(join(directory, ACCOUNTS_FILE), JSON.stringify([...readAccounts(), record]), { mode: 0o600 });
+    return record;
+  };
   return {
     preloadPath: fileURLToPath(import.meta.url),
     env: { MUSTER_DRIVE_FIXTURE: settingsPath, GOOGLE_CLIENT_ID: settings.clientId, GOOGLE_CLIENT_SECRET: settings.clientSecret },
@@ -39,7 +76,34 @@ export function createWorkspaceDriveFixture(directory: string) {
     networkLog: join(directory, "outbound-attempts.txt"),
     heldExchangePath: join(directory, "exchange-held"),
     heldDownloadPath: join(directory, "download-held"),
-    setConsent(consent: { nonce: string; verifier: string; googleSub?: string; scope?: string }) {
+    createAccount,
+    /** The key the fixture's own account is registered under, when a suite wants
+     *  to address it by key rather than through the token it was handed. */
+    primaryAccountKey: PRIMARY_ACCOUNT_KEY,
+    /** The record ids stored in one account's app-data folder, upload order.
+     *  The read side a two-account test needs: the only way to assert what the
+     *  transport actually HOLDS for an account, as opposed to what a route said
+     *  about it. */
+    accountRecordIds(key: string): string[] {
+      const folder = key === PRIMARY_ACCOUNT_KEY ? join(directory, SNAPSHOTS_DIR) : join(directory, SNAPSHOTS_DIR, key);
+      const manifest = join(folder, "manifest.json");
+      if (!existsSync(manifest)) return [];
+      try { return z.array(z.object({ id: z.string() })).parse(JSON.parse(readFileSync(manifest, "utf8"))).map((row) => row.id); }
+      catch { return []; }
+    },
+    /** The ciphertext one uploaded record is stored as, or null when no account
+     *  holds it. The read side for "what did this account actually put in
+     *  Drive" — a test that could otherwise only inspect a route's claims. */
+    snapshotPayload(id: string): string | null {
+      for (const key of [PRIMARY_ACCOUNT_KEY, ...readAccounts().map((account) => account.key)]) {
+        const path = key === PRIMARY_ACCOUNT_KEY
+          ? join(directory, SNAPSHOTS_DIR, `${id}.payload`)
+          : join(directory, SNAPSHOTS_DIR, key, `${id}.payload`);
+        if (existsSync(path)) return readFileSync(path, "utf8");
+      }
+      return null;
+    },
+    setConsent(consent: { nonce: string; verifier: string; googleSub?: string; scope?: string; account?: string }) {
       writeFileSync(join(directory, "consent.json"), JSON.stringify(consent), { mode: 0o600 });
     },
     setMode(mode: DriveFixtureMode) { writeFileSync(controlPath, JSON.stringify({ mode }), { mode: 0o600 }); },
@@ -63,19 +127,50 @@ function installTransport(settingsPath: string): void {
     if (!credentialsMatch) throw new Error("Synthetic Drive credential boundary mismatch");
   };
   const json = (body: string, status = 200) => new Response(body, { status, headers: { "content-type": "application/json" } });
-  const snapshotsManifest = () => owned("snapshots/manifest.json");
-  const snapshotEntrySchema = z.object({ id: z.string(), name: z.string(), createdTime: z.string(), size: z.string() });
-  const readSnapshots = (): Array<z.infer<typeof snapshotEntrySchema>> => {
-    if (!existsSync(snapshotsManifest())) return [];
-    try { return z.array(snapshotEntrySchema).parse(JSON.parse(readFileSync(snapshotsManifest(), "utf8"))); }
+  // The consent currently on file, which is also WHICH Google account is
+  // completing it. Unset means the primary account — the fixture's only account
+  // unless a suite calls createAccount — so every existing suite is unaffected.
+  const readConsent = () => {
+    if (!existsSync(owned("consent.json"))) return null;
+    return z.object({ nonce: z.string(), verifier: z.string(), googleSub: z.string().optional(), scope: z.string().optional(), account: z.string().optional() })
+      .parse(JSON.parse(readFileSync(owned("consent.json"), "utf8")));
+  };
+  // Registered before this child booted. Read from the file rather than from
+  // settings.json because the transport is installed once, at preload, exactly
+  // like settings.json — an account created afterwards could not reach a child
+  // that is already running.
+  const readAccounts = (): AccountRecord[] => {
+    if (!existsSync(owned(ACCOUNTS_FILE))) return [];
+    try { return z.array(accountRecordSchema).parse(JSON.parse(readFileSync(owned(ACCOUNTS_FILE), "utf8"))); }
     catch { return []; }
   };
-  const storeSnapshot = (id: string, name: string, payload: string) => {
-    mkdirSync(owned("snapshots"), { recursive: true });
-    writeFileSync(owned(`snapshots/${id}.payload`), payload, { mode: 0o600 });
-    const manifest = readSnapshots();
+  const primaryAccount = (): AccountRecord => ({ key: PRIMARY_ACCOUNT_KEY, googleSubject: settings.googleSubject, accessToken: settings.accessToken, refreshToken: settings.refreshToken });
+  const accountByKey = (key: string): AccountRecord | null =>
+    key === PRIMARY_ACCOUNT_KEY ? primaryAccount() : (readAccounts().find((account) => account.key === key) ?? null);
+  const accountByToken = (token: string): AccountRecord | null =>
+    [primaryAccount(), ...readAccounts()].find((account) => account.accessToken === token) ?? null;
+  const accountByRefreshToken = (token: string): AccountRecord | null =>
+    [primaryAccount(), ...readAccounts()].find((account) => account.refreshToken === token) ?? null;
+  /** Each account's own app-data folder. The primary keeps the directory the
+   *  fixture has always used, because account-drive-roundtrip.test.ts reads an
+   *  uploaded snapshot straight out of it. */
+  const appDataDir = (account: AccountRecord) => account.key === PRIMARY_ACCOUNT_KEY
+    ? owned(SNAPSHOTS_DIR)
+    : join(settings.directory, SNAPSHOTS_DIR, account.key);
+  const snapshotsManifest = (account: AccountRecord) => join(appDataDir(account), "manifest.json");
+  const snapshotEntrySchema = z.object({ id: z.string(), name: z.string(), createdTime: z.string(), size: z.string() });
+  const readSnapshots = (account: AccountRecord): Array<z.infer<typeof snapshotEntrySchema>> => {
+    const manifest = snapshotsManifest(account);
+    if (!existsSync(manifest)) return [];
+    try { return z.array(snapshotEntrySchema).parse(JSON.parse(readFileSync(manifest, "utf8"))); }
+    catch { return []; }
+  };
+  const storeSnapshot = (account: AccountRecord, id: string, name: string, payload: string) => {
+    mkdirSync(appDataDir(account), { recursive: true });
+    writeFileSync(join(appDataDir(account), `${id}.payload`), payload, { mode: 0o600 });
+    const manifest = readSnapshots(account);
     manifest.push({ id, name, createdTime: new Date().toISOString(), size: String(payload.length) });
-    writeFileSync(snapshotsManifest(), JSON.stringify(manifest), { mode: 0o600 });
+    writeFileSync(snapshotsManifest(account), JSON.stringify(manifest), { mode: 0o600 });
   };
   globalThis.fetch = async (input, init) => {
     const request = new Request(input, init);
@@ -88,7 +183,11 @@ function installTransport(settingsPath: string): void {
         // Consent-code exchange for the opt-in Drive connect. Same credential
         // boundary as refresh: client id/secret must match the captured ones
         // and the redirect_uri must be this deployment's own callback path.
-        const consent = existsSync(owned("consent.json")) ? z.object({ nonce: z.string(), verifier: z.string(), googleSub: z.string().optional(), scope: z.string().optional() }).parse(JSON.parse(readFileSync(owned("consent.json"), "utf8"))) : null;
+        const consent = readConsent();
+        // Which Google account is completing consent, and therefore which
+        // subject and token pair the exchange mints. Naming an account is how a
+        // suite gives two Muster accounts two different Google accounts.
+        const consenting = (consent?.account !== undefined ? accountByKey(consent.account) : null) ?? primaryAccount();
         record("exchange", mode, body.size === (consent ? 6 : 5) && (!consent || body.get("code_verifier") === consent.verifier) && body.get("client_id") === settings.clientId
           && body.get("client_secret") === settings.clientSecret && body.get("grant_type") === "authorization_code"
           && body.get("redirect_uri")?.includes("/api/workspace/google/callback") === true);
@@ -106,23 +205,33 @@ function installTransport(settingsPath: string): void {
         if (mode === "refresh-error") return json('{"error":"fixture exchange refused"}', 503);
         const idToken = consent ? await new SignJWT({ nonce: consent.nonce })
           .setProtectedHeader({ alg: "RS256", kid: "owned-drive-key" }).setIssuer("https://accounts.google.com")
-          .setAudience(settings.clientId).setSubject(consent.googleSub ?? settings.googleSubject).setIssuedAt().setExpirationTime("5m")
+          .setAudience(settings.clientId).setSubject(consent.googleSub ?? consenting.googleSubject).setIssuedAt().setExpirationTime("5m")
           .sign(await importPKCS8(settings.privateKey, "RS256")) : undefined;
         const response: FixtureTokenResponse = {
-          access_token: settings.accessToken, refresh_token: settings.refreshToken, expires_in: 3600,
+          access_token: consenting.accessToken, refresh_token: consenting.refreshToken, expires_in: 3600,
         };
         if (consent) { response.id_token = idToken; response.scope = consent.scope ?? "openid https://www.googleapis.com/auth/drive.appdata"; response.token_type = "Bearer"; }
         return json(JSON.stringify(response));
       }
-      record("refresh", mode, body.size === 4 && body.get("refresh_token") === settings.refreshToken
+      // A refresh mints for the account the refresh token belongs to, never for
+      // whoever happens to be asking. An unknown refresh token is a credential
+      // boundary violation, exactly like an unknown bearer token below.
+      const refreshing = accountByRefreshToken(body.get("refresh_token") ?? "");
+      record("refresh", mode, body.size === 4 && refreshing !== null
         && body.get("client_id") === settings.clientId && body.get("client_secret") === settings.clientSecret
         && body.get("grant_type") === "refresh_token");
       if (mode === "refresh-error") return json('{"error":"fixture refresh refused"}', 503);
-      const refreshed = { access_token: settings.accessToken, expires_in: 3600 };
+      // SAFETY: `record` above throws unless the refresh token resolved to a
+      // registered account, so this is non-null on every line below.
+      const refreshed = { access_token: refreshing!.accessToken, expires_in: 3600 };
       return json(JSON.stringify(existsSync(owned("consent.json")) ? { ...refreshed, token_type: "Bearer" } : refreshed));
     }
     if (url.origin !== "https://www.googleapis.com") return blocked();
-    const authorized = request.headers.get("authorization") === `Bearer ${settings.accessToken}`;
+    // The bearer token IS the account. Drive's appDataFolder is scoped to the
+    // Google identity behind it, so the account resolved here decides which
+    // records a list can see and which a download can reach.
+    const caller = accountByToken((request.headers.get("authorization") ?? "").replace(/^Bearer /u, ""));
+    const authorized = caller !== null;
     if (url.pathname === "/drive/v3/files" && request.method === "GET") {
       if (url.searchParams.get("spaces") !== "appDataFolder" || !(url.searchParams.get("q")?.includes("muster-workspace") ?? false)) return blocked();
       const q = url.searchParams.get("q") || "";
@@ -131,7 +240,7 @@ function installTransport(settingsPath: string): void {
       // Immutable snapshot searches use "name contains"; legacy v1/v2 bundle
       // searches use "name =" on the single owned file id.
       if (q.includes("name contains")) {
-        return json(JSON.stringify({ files: readSnapshots().slice().reverse().map((s) => ({ id: s.id, name: s.name, createdTime: s.createdTime, size: s.size })) }));
+        return json(JSON.stringify({ files: readSnapshots(caller!).slice().reverse().map((s) => ({ id: s.id, name: s.name, createdTime: s.createdTime, size: s.size })) }));
       }
       const v2 = q.includes("muster-workspace-v2.enc") === true;
       return json(JSON.stringify({ files: existsSync(owned(v2 ? "uploaded-bundle-v2.txt" : "uploaded-bundle.txt")) ? [{ id: fixtureFileId }] : [] }));
@@ -173,7 +282,7 @@ function installTransport(settingsPath: string): void {
       // stale device can never clobber the newest backup.
       if (/^muster-workspace-v2-[0-9]+-[0-9a-f]{8}\.enc$/.test(name)) {
         const id = `snap-${randomBytes(6).toString("hex")}`;
-        storeSnapshot(id, name, payload);
+        storeSnapshot(caller!, id, name, payload);
         return json(JSON.stringify({ id, name }));
       }
       throw new Error(`Fixture does not recognize bundle name: ${name}`);
@@ -200,10 +309,14 @@ function installTransport(settingsPath: string): void {
         const storedV2 = existsSync(owned("uploaded-bundle-v2.txt"));
         return new Response(readFileSync(owned(storedV2 ? "uploaded-bundle-v2.txt" : "uploaded-bundle.txt"), "utf8"));
       }
-      // Immutable v2 snapshots are downloaded by the id assigned at upload time.
-      const snapshot = readSnapshots().find((s) => s.id === fileId);
+      // Immutable v2 snapshots are downloaded by the id assigned at upload time,
+      // and only out of the CALLER's own app-data folder. An id that exists for
+      // another Google account is a 404 here, exactly as Drive answers one: this
+      // is the boundary a two-account test rests on, so it has to be real rather
+      // than "the fixture only ever had one account anyway".
+      const snapshot = readSnapshots(caller!).find((s) => s.id === fileId);
       if (!snapshot) return Response.json({ error: { message: "Snapshot not found" } }, { status: 404 });
-      return new Response(readFileSync(owned(`snapshots/${fileId}.payload`), "utf8"));
+      return new Response(readFileSync(join(appDataDir(caller!), `${fileId}.payload`), "utf8"));
     }
     return blocked();
   };

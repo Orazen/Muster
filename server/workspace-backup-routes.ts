@@ -47,6 +47,7 @@ import { loadConfig, saveConfig, type AppConfig } from "./config.ts";
 import { getDb, forwardedProtoOf, SELF_HOSTED } from "./auth.ts";
 import { json, readBody, isText } from "./http-helpers.ts";
 import * as accountDrive from "./account-drive.ts";
+import * as restoreCatalog from "./restore-catalog.ts";
 import { googleDriveConnectConfigured } from "./google-auth.ts";
 import { companionStatus } from "./companion-status.ts";
 import { consumeDriveState, disconnectDrive } from "./drive-grants.ts";
@@ -273,7 +274,8 @@ function gateExplanation(reason: GateReason): string {
 
 /** The ordered family table. Order within the family mirrors the original
  * inline sequence exactly: capability → hosted wall → account connect +
- * callback → v2 status/export/verify/restore → account push/pull → discard →
+ * callback → v2 status/export/verify/restore → account restore catalog →
+ *  account push/pull → discard →
  * installation-Drive push/pull → v2 Telegram push/pull (the two transports a
  * card moves the v2 bundle over, beside the Drive pair) → snapshot automation
  * (policy, run, passphrase store — after the wall, no session check) → device
@@ -530,21 +532,56 @@ const routes: BackupRoute[] = [
     },
   },
   {
+    // The account-scoped restore catalog (server/restore-catalog.ts). This is
+    // the route the "which portable record do I restore" selector reads, so the
+    // answer has to be readable BEFORE a record is chosen: whose records these
+    // are, and what a restore will not bring back. Neither was sayable before —
+    // the reply was raw transport metadata with no owner on it, and the
+    // credential/grant exclusion existed only as a `skipped` entry inside a
+    // sealed payload nobody can read before decrypting it.
+    //
+    // It stays exactly where it is — after the hosted installation wall, with no
+    // session check of its own beyond the account guard — because it is a
+    // restore-path surface, and it moves no bytes: one Drive list call, no
+    // download, no stage.
+    //
+    // `snapshots` is retained unchanged as the shipped client contract (the same
+    // rows, the same `modifiedTime desc` order); the catalog is additive beside
+    // it. When the card moves to `records`, `snapshots` can go — that is a
+    // one-line deletion, and keeping both until then is cheaper than a client
+    // that silently falls back to "newest" for a day.
     match: (_method, path) => path === "/api/workspace/google/snapshots" && _method === "GET",
     handle: async (req, res, ctx) => {
       if (!ctx.requestUserId) return json(res, 501, ACCOUNT_DRIVE_OFF);
+      // A listing of the user's Drive contents: never cached, never referrable.
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Referrer-Policy", "no-referrer");
       try {
         const binding = await ctx.session?.();
         if (!binding || binding.userId !== ctx.requestUserId) return json(res, 401, { error: "Sign in again." });
+        // ONE account id for the whole handler. The grant is looked up by it, the
+        // listing is bound to it and the catalog is stamped with it, so "whose
+        // records are these" is not a question this handler can answer three
+        // different ways.
+        const accountId = binding.userId;
         const guard = async () => {
           const current = await ctx.session?.();
           if (!current || current.userId !== binding.userId || current.sessionId !== binding.sessionId) throw new Error("Drive session changed");
         };
-        const access = await accountDrive.accountDriveAccess(getDb(), binding.userId, requestOrigin(req), guard);
+        const access = await accountDrive.accountDriveAccess(getDb(), accountId, requestOrigin(req), guard);
         await access.assertCurrent();
         const snapshots = await accountDrive.driveListSnapshotsFor(access.grant.accessToken, access.assertCurrent);
         await access.assertCurrent();
-        json(res, 200, { snapshots });
+        json(res, 200, {
+          ...restoreCatalog.buildRestoreCatalog({
+            accountId,
+            listedForUserId: accountId,
+            grant: { generation: access.grant.generation },
+            connectConfigured: googleDriveConnectConfigured(),
+            snapshots,
+          }),
+          snapshots,
+        });
       } catch (e) {
         json(res, 502, { error: e instanceof Error ? e.message : String(e) });
       }
