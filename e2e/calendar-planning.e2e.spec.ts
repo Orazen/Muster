@@ -6,6 +6,10 @@ test("Calendar planning preserves the current draft and attachments, rejects sta
   const page = await newPage();
   await pairDesktop(page, harness, pairCodeFromCloud);
   await page.getByRole("button", { name: "Quick start — skip setup, just get me in", exact: true }).click();
+  // A seeded bot is already visible to the API while setup is still saving.
+  // Wait for the actual completion surface before reloading this page; otherwise
+  // navigation can cancel its roster request and leave onboarding unfinished.
+  await expect(page.getByRole("region", { name: "Set up Muster", exact: true })).toBeHidden();
   const roster = z.object({ bots: z.array(z.object({ id: z.string(), name: z.string() })) }).parse(await (await page.context().request.get(`${harness.desktopUrl}/api/bots`)).json());
   const bot = roster.bots[0];
   expect(bot).toBeDefined();

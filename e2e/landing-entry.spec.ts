@@ -16,6 +16,7 @@ const CONTENT_TYPES = new Map([
 ]);
 
 interface LandingOptions {
+  controlledClock?: boolean;
   userAgent?: string;
   manifest?: unknown;
   manifestBody?: string;
@@ -78,6 +79,9 @@ const test = baseTest.extend<{
           await route.continue();
         });
         const page = await context.newPage();
+        // Install before page scripts schedule timers; mixing native and fake
+        // timer IDs can make later cancellation checks undefined.
+        if (options.controlledClock) await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });
         page.on("pageerror", (error) => errors.push(error.message));
         page.on("console", (message) => {
           // A deliberately refused metadata response emits a browser resource
@@ -87,6 +91,7 @@ const test = baseTest.extend<{
           if (message.type() === "error") errors.push(`${message.location().url}: ${message.text()}`);
         });
         await page.goto(landingUrl, { waitUntil: "networkidle" });
+        if (options.controlledClock) await page.clock.pauseAt(new Date("2026-01-01T00:05:00Z"));
         return page;
       });
       if (errors.length) await testInfo.attach("landing-browser-errors", { body: errors.join("\n"), contentType: "text/plain" });
@@ -284,8 +289,7 @@ test("workspace messages render as text and leave network and browser storage un
 });
 
 test("workspace teammates retain separate drafts and pending replies stay in their conversation", async ({ openLanding }) => {
-  const page = await openLanding(1440);
-  await page.clock.install();
+  const page = await openLanding(1440, false, true, { controlledClock: true });
   const demo = page.locator("#workspace-demo");
   const input = demo.locator("[data-demo-input]");
   const messages = demo.locator("[data-demo-messages]");
@@ -311,15 +315,16 @@ test("workspace teammates retain separate drafts and pending replies stay in the
 });
 
 test("reset cancels pending workspace replies and clears every teammate draft", async ({ openLanding }) => {
-  const page = await openLanding(390);
-  await page.clock.install();
+  const page = await openLanding(390, false, true, { controlledClock: true });
   const demo = page.locator("#workspace-demo");
   const input = demo.locator("[data-demo-input]");
   await input.fill("This pending task must disappear after reset.");
   await demo.getByRole("button", { name: "Send demo message", exact: true }).click();
+  await expect(demo.locator("[data-demo-status]")).toHaveText("Preparing a sample…");
   await demo.getByRole("button", { name: "Nova · Research", exact: true }).click();
   await input.fill("Nova's draft must also disappear.");
   await demo.locator("[data-demo-reset]").click();
+  await expect(demo.locator("[data-demo-notice]")).toHaveText("Demo reset. Sample messages and drafts cleared.");
   await page.clock.runFor(1000);
   await expect(demo.locator("[data-demo-status]")).toHaveText("Ready for a task");
   for (const name of ["Milo · Daily planning", "Scout · Email drafts", "Nova · Research", "Atlas · Projects"]) {
@@ -409,7 +414,7 @@ for (const width of [320, 390, 768, 1440]) {
 }
 
 test("product tabs support roving keyboard focus without rotating on their own", async ({ openLanding }) => {
-  const page = await openLanding(768);
+  const page = await openLanding(768, false, true, { controlledClock: true });
   const showcase = page.locator("[data-product-showcase]");
   const tabs = showcase.getByRole("tablist", { name: "Explore Muster", exact: true });
   const personal = tabs.getByRole("tab", { name: "Personal", exact: true });
@@ -438,7 +443,6 @@ test("product tabs support roving keyboard focus without rotating on their own",
     await expect(tabs.locator('[tabindex="0"]')).toHaveCount(1);
     await expect(showcase.locator('[role="tabpanel"]:visible')).toHaveCount(1);
   }
-  await page.clock.install();
   await page.clock.fastForward(30_000);
   await expect(desktop).toHaveAttribute("aria-selected", "true");
   await expect(desktop).toBeFocused();

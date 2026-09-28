@@ -92,7 +92,8 @@ describe("augmentedPath", () => {
       resetPathCacheForTests();
 
       augmentedPath();
-      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin));
+      // Match the probe's 5-second budget, with room for its callback to run.
+      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin), { timeout: 6_000 });
 
       resetPathCache();
       expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin);

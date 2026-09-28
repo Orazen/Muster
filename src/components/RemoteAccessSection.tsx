@@ -1,7 +1,7 @@
 // App Settings → Remote access. The same companion sidecar the Companion
 // section controls, presented the way OpenMausBot presents it: a phone or
-// another computer connects to THIS machine, over Secure HTTPS, Tailscale, or
-// direct Wi-Fi, and the panel says which of those is actually available.
+// another computer connects to THIS machine over Tailscale or the local
+// network. Discovering an address does not verify public HTTPS or reachability.
 //
 // The Companion section stays the terse toggle; this is the fuller surface for
 // when someone is actually pairing a device and needs the connection details,
@@ -251,11 +251,11 @@ export function RemoteAccessSection() {
             <div className="text-[14px] text-ink">{state.enabled ? "On" : "Off"}</div>
             <div className="mt-0.5 text-[13px] text-ink-secondary">
               {!state.enabled
-                ? "Nothing on this computer is reachable from the network."
+                ? "Muster's companion is off on this computer."
                 : !address
                   ? `Listening on port ${state.port} — no network address yet.`
                   : tailnet
-                    ? `Enter ${tailnet}:${state.port} on your phone — that works from anywhere on your tailnet.`
+                    ? `Enter ${tailnet}:${state.port} on a device connected to the same tailnet.`
                     : `Listening on ${address}:${state.port}.`}
             </div>
           </div>
@@ -303,7 +303,7 @@ export function RemoteAccessSection() {
 
       <Card
         title="Pair a phone or another computer"
-        subtitle="Create a one-time code, then scan it with the Muster app or open the link in a browser. Codes work once and expire after five minutes."
+        subtitle="Create a one-time code for the Muster app on your other device, or copy the link and open it with Muster installed. Codes work once and expire after five minutes."
       >
         <div className="flex flex-col gap-2" role="radiogroup" aria-label="Access scope">
           <ChoiceRow
@@ -426,34 +426,30 @@ export function RemoteAccessSection() {
       </Card>
 
       <Card
-        title="Pair from this computer"
-        subtitle="Recommended — the simplest setup, and it keeps working when the paired device leaves this Wi-Fi."
+        title="Connection availability"
+        subtitle="Pairing uses the address shown above. This setting does not verify a public HTTPS address for this computer."
       >
         <div className="text-[13px] text-ink-secondary">
-          {/* What the link actually is. The previous copy here promised "this
-              computer's secure address", and the link it produces is
-              `muster://pair?address=<host>:<port>` — a bare host and port with
-              no scheme, so nothing about the transport is secure. What actually
-              makes it safe is the high-entropy one-time token in that same link,
-              and saying so is both true and more useful than a promise about the
-              address. Overstating this is how a user ends up believing a tunnel
-              is unnecessary. */}
-          {state.enabled
-            ? "Open a pairing code above. The link carries a one-time token that cannot be guessed or reused, so the code itself is the credential — not the address. It points at your tailnet address when you have one, otherwise this computer's Wi-Fi address; reaching it from outside your network needs the tunnel setup below."
-            : "Turn on remote access to pair a device."}
+          {!state.enabled
+            ? "Turn on remote access to find this computer's network address."
+            : !address
+              ? "No network address is available yet. Connect this computer to a network and check again."
+              : tailnet
+                ? "The pairing link uses Tailscale. Both devices must be on the same tailnet, with access allowed by its network rules."
+                : "The pairing link uses a local network address. Keep both devices on the same network; this link does not provide access away from it."}
         </div>
       </Card>
 
       <Card
         title="Tailscale pairing"
-        subtitle="Optional — for people who already use Tailscale. Pairing from this computer above remains the recommended setup."
+        subtitle="Connect both devices to the same tailnet. Remote access depends on their connection and your tailnet's access rules."
       >
         <div className="text-[13px] text-ink-secondary">
           {state.tailscale
             ? tailnet
               ? `This computer is on a tailnet as ${tailnet}.`
               : "This computer is on a tailnet, but its MagicDNS name could not be read — iPhones can't dial a bare tailnet address."
-            : "Not on a tailnet. Install Tailscale on both devices to reach this computer from anywhere."}
+            : "No tailnet connection detected. Set up Tailscale on both devices if you want to connect outside your local network."}
         </div>
       </Card>
 
@@ -461,13 +457,19 @@ export function RemoteAccessSection() {
         title="Direct Wi-Fi pairing"
         subtitle="Use this only when both devices are nearby and the network allows devices to see each other."
       >
-        <button
-          disabled={busy || !state.enabled}
+        {tailnet ? (
+          <div className="text-[13px] text-ink-secondary">
+            {state.lan
+              ? `The pairing link above uses Tailscale. On the same Wi-Fi, you can enter ${state.lan}:${state.port} and the pairing code in the Muster app instead.`
+              : "The pairing link above uses Tailscale. No Wi-Fi address is available for direct pairing."}
+          </div>
+        ) : <button
+          disabled={busy || !state.enabled || !address}
           onClick={beginPairing}
           className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-raised disabled:opacity-40"
         >
           Pair on this Wi-Fi
-        </button>
+        </button>}
       </Card>
 
       <Card
@@ -575,40 +577,14 @@ export function RemoteAccessSection() {
       </Card>
 
       <Card
-        title="Connect your domain"
-        subtitle="Optional — put a name you own in front of remote access, the way OpenMausBot's custom-domain setup does."
+        title="Connect using a domain"
+        subtitle="Use an existing HTTPS Muster address in Connect to another computer above. This panel does not configure a domain or publish this computer to the internet."
       >
-        <ol className="flex flex-col gap-2.5 text-[13px] leading-relaxed text-ink-secondary">
-          <li className="flex gap-2.5">
-            <span className="font-medium text-ink">1.</span>
-            <span>
-              In your DNS provider, create a <span className="text-ink">CNAME</span> record — for example
-              <span className="font-mono text-[12.5px] text-ink"> muster.yourdomain.com</span> — pointing at the
-              hostname of the machine running Muster (its Tailscale name, or the host you already reach it at).
-            </span>
-          </li>
-          <li className="flex gap-2.5">
-            <span className="font-medium text-ink">2.</span>
-            <span>
-              For a machine behind NAT, run a Cloudflare Tunnel from that machine:
-              <span className="mt-1 block font-mono text-[12px] text-ink">cloudflared tunnel --url http://localhost:8799</span>
-              then point the CNAME at the tunnel's
-              <span className="font-mono text-[12.5px] text-ink"> &lt;id&gt;.cfargotunnel.com</span> hostname instead.
-            </span>
-          </li>
-          <li className="flex gap-2.5">
-            <span className="font-medium text-ink">3.</span>
-            <span>
-              Pair through the domain: open this page's pairing link, or paste
-              <span className="font-mono text-[12.5px] text-ink"> https://muster.yourdomain.com/claim#CODE</span> into
-              the Connect card above. Certificates are managed by Cloudflare for tunnels, or by your reverse proxy
-              for a direct CNAME.
-            </span>
-          </li>
-        </ol>
+        <div className="text-[13px] leading-relaxed text-ink-secondary">
+          Use the sign-in or pairing link provided by that Muster server. The companion code above pairs the Muster app with this computer; it does not sign you in to another web workspace.
+        </div>
         <div className="mt-3 text-[12px] text-ink-secondary">
-          Only the pairing address changes — the paired device still talks to the same server, and this computer's
-          companion port stays loopback-plus-LAN as before.
+          Entering a domain here does not change the address in your companion pairing link or verify that another device can reach it.
         </div>
       </Card>
 
