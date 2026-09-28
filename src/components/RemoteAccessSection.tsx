@@ -426,19 +426,27 @@ export function RemoteAccessSection() {
       </Card>
 
       <Card
-        title="Secure HTTPS pairing"
+        title="Pair from this computer"
         subtitle="Recommended — the simplest setup, and it keeps working when the paired device leaves this Wi-Fi."
       >
         <div className="text-[13px] text-ink-secondary">
+          {/* What the link actually is. The previous copy here promised "this
+              computer's secure address", and the link it produces is
+              `muster://pair?address=<host>:<port>` — a bare host and port with
+              no scheme, so nothing about the transport is secure. What actually
+              makes it safe is the high-entropy one-time token in that same link,
+              and saying so is both true and more useful than a promise about the
+              address. Overstating this is how a user ends up believing a tunnel
+              is unnecessary. */}
           {state.enabled
-            ? "Open a pairing code above; the link it produces already points at this computer's secure address."
-            : "Turn on remote access to enable secure pairing."}
+            ? "Open a pairing code above. The link carries a one-time token that cannot be guessed or reused, so the code itself is the credential — not the address. It points at your tailnet address when you have one, otherwise this computer's Wi-Fi address; reaching it from outside your network needs the tunnel setup below."
+            : "Turn on remote access to pair a device."}
         </div>
       </Card>
 
       <Card
         title="Tailscale pairing"
-        subtitle="Optional — for people who already use Tailscale. Secure HTTPS above remains the recommended setup."
+        subtitle="Optional — for people who already use Tailscale. Pairing from this computer above remains the recommended setup."
       >
         <div className="text-[13px] text-ink-secondary">
           {state.tailscale

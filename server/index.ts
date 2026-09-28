@@ -281,7 +281,6 @@ import * as browserPanel from "./browser-panel.ts";
 const { agentPageForToolEvent } = browserPanel;
 import * as workspaceBundle from "./workspace-bundle.ts";
 import {
-  applyPendingRestore,
 } from "./restore-apply.ts";
 import { handleCalendarRoute } from "./calendar-routes.ts";
 import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
@@ -335,6 +334,7 @@ import { WebhookManager } from "./webhooks.ts";
 import { VaultManager } from "./vault-manager.ts";
 import { buildBriefing } from "./briefing.ts";
 import { buildReceipt, receiptFinishedAt, renderReceiptText } from "./receipts.ts";
+import { bootWithRestoreFirst } from "./boot-order.ts";
 import { receiptFindings } from "./receipt-findings.ts";
 import { executeWorkflow, webagentsManifest, webagentsMarkdown } from "./agent-workflow.ts";
 import { buildWrapped, renderWrappedText } from "./wrapped.ts";
@@ -686,8 +686,13 @@ let bootSelection = { instanceId: "", model: "" };
 // before the message database opens — so the live process never overwrites
 // what the swap just wrote. Routines come back disabled and goals stopped;
 // nothing a restore brought back acts on its own.
-applyPendingRestore(DATA_DIR);
-const store = new Store(() => bootSelection);
+//
+// The order is enforced by `bootWithRestoreFirst` rather than left as a bare
+// statement under a comment, because it is the single load-bearing line in the
+// restore feature and it could not otherwise be tested: importing this module
+// starts the server. server/boot-order.test.ts proves the store factory is not
+// reached until the restore has been applied.
+const { store } = bootWithRestoreFirst(DATA_DIR, () => new Store(() => bootSelection));
 /** Local desktop is one installation; hosted legacy records belong to primary. */
 function peerOwnerOf(bot: { ownerId?: string }): string {
   return SELF_HOSTED ? (bot.ownerId || primaryUserId() || "") : "local";
@@ -5254,7 +5259,13 @@ let requestUserEmail = "";
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     res.setHeader("X-Frame-Options", "SAMEORIGIN");
     res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
-    if (req.headers["x-forwarded-proto"] === "https") {
+    // `requestIsSecure`, not a bare `=== "https"`. A proxy chain appends, so
+    // "https, http" reaches here as a two-value string and the strict
+    // comparison was false — meaning the two TLS signals in this file
+    // disagreed: the cookie got `Secure` from the chain-aware read while HSTS
+    // did not. One notion of "was this request https", used by both, so they
+    // cannot drift again.
+    if (requestIsSecure(req)) {
       res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     }
     // Better Auth bounces OAuth failures (expired state cookie after 5 min

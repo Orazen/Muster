@@ -31,8 +31,28 @@ function dismissed(): boolean {
   }
 }
 
+/** Which Drive transport a restore should use. Two exist and they are not
+ *  interchangeable: the account route reads THIS user's own grant, so it is the
+ *  one that can find a backup pushed from another machine, while the v2 route
+ *  reads the installation's `driveSync.refreshToken` and answers "Google Drive
+ *  is not connected yet" on a host that never connected one.
+ *
+ *  `connected` is null until the capability answers, and the card renders the
+ *  button disabled in that window — guessing here would be the same class of
+ *  bug this exists to fix, so the unknown case is the caller's to handle.
+ *
+ *  Exported so the choice is testable: a component that fetches in an effect
+ *  and renders six buttons has no seam, and the route it picks is the entire
+ *  defect. */
+export function driveRestoreRoute(connected: boolean | null): string {
+  return connected ? "/api/workspace/google/pull" : "/api/workspace/v2/drive/pull";
+}
+
 export function RecoveryCard() {
   const [ready, setReady] = useState(false);
+  /** Whether the signed-in account has its own Drive grant, as opposed to the
+   *  installation-wide one. Null until the capability answers. */
+  const [accountDriveConnected, setAccountDriveConnected] = useState<boolean | null>(null);
   const [passphrase, setPassphrase] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<{ error: boolean; text: string } | null>(null);
@@ -45,7 +65,14 @@ export function RecoveryCard() {
       if (!request) return;
       try {
         const cap = await readWorkspaceCapability(request);
-        if (cap) request.commit(() => setReady(cap.workspaceBackupAvailable));
+        // Keep the whole capability: the Drive button needs to know whether
+        // the ACCOUNT is connected, which is a different transport from the
+        // installation one. Throwing it away is what made this card always call
+        // the wrong route.
+        if (cap) request.commit(() => {
+          setReady(cap.workspaceBackupAvailable);
+          setAccountDriveConnected(cap.accountDrive.connected);
+        });
       } catch {
         /* fail closed — no card off an unconfirmed capability */
       } finally {
@@ -139,7 +166,25 @@ export function RecoveryCard() {
         className={cn(input, "mt-2")}
       />
       <div className="mt-2 flex flex-wrap gap-1.5">
-        <button type="button" disabled={busy !== null} onClick={() => pull("Pulling from Drive…", "/api/workspace/v2/drive/pull")} className={button}>
+        {/* Two Drive transports exist and they are not interchangeable. The
+            account-linked route reads THIS user's own grant, so it is the one
+            that can find a backup they pushed from another machine; the v2
+            route reads the installation's `driveSync.refreshToken` and answers
+            "Google Drive is not connected yet" on a host that never connected
+            one. Before this, a user with a perfectly good account grant was
+            told Drive was not connected — by a card whose only job is to get
+            their backup back. */}
+        <button
+          type="button"
+          disabled={busy !== null || accountDriveConnected === null}
+          onClick={() =>
+            pull("Pulling from Drive…", driveRestoreRoute(accountDriveConnected))
+          }
+          className={button}
+          title={accountDriveConnected
+            ? "Restore from this account's own Google Drive"
+            : "Restore from this installation's Google Drive connection"}
+        >
           <HardDriveDownload size={12} /> Drive
         </button>
         <button type="button" disabled={busy !== null} onClick={() => pull("Pulling from Telegram…", "/api/workspace/v2/telegram/pull")} className={button}>
