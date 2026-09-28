@@ -123,6 +123,56 @@ export const manifestDocSchema = z
 
 export type SyncManifestDoc = z.infer<typeof manifestDocSchema>;
 
+/** One entry upsert, entries kept in stable id order so identical states
+ * serialize to identical bytes. Lives here, beside the schema it has to
+ * satisfy and beside reconcileSyncObjects — every manifest merge in the
+ * codebase is now in this one file, and sync-pass.ts re-exports it for the
+ * S2c producers that imported it from there. */
+export const withManifestEntry = (
+  base: SyncManifestDoc,
+  entry: SyncManifestEntry,
+  now: number,
+): SyncManifestDoc => ({
+  schema: 1,
+  updatedAt: now,
+  entries: [...base.entries.filter((existing) => existing.objectId !== entry.objectId), entry].sort(
+    (a, b) => (a.objectId < b.objectId ? -1 : a.objectId > b.objectId ? 1 : 0),
+  ),
+});
+
+/** What merging a PUSHED entry into the remote index did, which is not the
+ * same question as "which entry is in the doc afterwards". */
+export type ManifestMerge =
+  /** the index did not name this rev: the push is now named. */
+  | { kind: "applied"; doc: SyncManifestDoc }
+  /** the index already named exactly this rev and checksum. */
+  | { kind: "unchanged"; doc: SyncManifestDoc }
+  /** the index already names a NEWER rev — kept, never regressed. */
+  | { kind: "superseded"; doc: SyncManifestDoc }
+  /** same rev, different bytes: §10's conflict. Kept, and reported, never
+   *  silently overwritten by whichever writer happened to run last. */
+  | { kind: "conflicted"; doc: SyncManifestDoc };
+
+/** Merge a pushed entry into the index the way a PUBLISH must: a stale
+ * writer may add what it holds, but it may never move the index backwards
+ * (a stale rev must not un-delete an object another install tombstoned at a
+ * higher rev) and it may never decide an equal-rev conflict by writing last.
+ * `withManifestEntry` is unconditional because a producer owns its own local
+ * doc; a publisher does not own the shared one. */
+export function mergePublishedEntry(
+  base: SyncManifestDoc,
+  entry: SyncManifestEntry,
+  now: number,
+): ManifestMerge {
+  const existing = base.entries.find((candidate) => candidate.objectId === entry.objectId);
+  if (existing === undefined) return { kind: "applied", doc: withManifestEntry(base, entry, now) };
+  if (existing.rev > entry.rev) return { kind: "superseded", doc: base };
+  if (existing.rev < entry.rev) return { kind: "applied", doc: withManifestEntry(base, entry, now) };
+  return existing.checksum === entry.checksum
+    ? { kind: "unchanged", doc: base }
+    : { kind: "conflicted", doc: base };
+}
+
 export interface PackSyncOptions {
   passphrase: string;
   appVersion: string;

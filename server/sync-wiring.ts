@@ -19,7 +19,12 @@
 //          the load never saw); the save re-stats and refuses any
 //          mismatch before writing. The stat→write window that remains
 //          after that is real: documented here, not hidden behind a
-//          header the API does not have.
+//          header the API does not have. What the ENGINE owes that window
+//          is a rule, not a lock — sync-pass.ts owns it: a publish only
+//          ever moves the index forward, and an install whose entries the
+//          window erased puts them back on its next pass, from its own
+//          durable local manifest. No provider change is needed for that
+//          and none is made here; this layer's contract is unchanged.
 //
 //   2. localSyncManifestStore — this install's view of remote, persisted
 //      as plain JSON and validated by the SAME schema as the sealed
