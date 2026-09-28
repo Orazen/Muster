@@ -5,6 +5,8 @@ import { defineConfig } from "@playwright/test";
 // two-server topology (cloud + desktop) because that IS the system.
 export default defineConfig({
   testDir: "./e2e",
+  // Vitest also owns unit tests in this directory. Collect only browser specs.
+  testMatch: "**/*.spec.ts",
   timeout: 120_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
