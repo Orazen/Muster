@@ -9625,11 +9625,58 @@ let requestUserEmail = "";
     // zero browser tools (the mount is skipped when the binary is absent).
     if (path === "/api/browser-status" && method === "GET") {
       const mount = resolveObscuraMount(DATA_DIR, (name) => findCliCandidates(name)[0]);
-      const botsWithBrowser = store.bots.filter((b) => b.browser === true && !b.hidden).map((b) => ({ id: b.id, name: b.name }));
+      // Per-bot ground truth, because "the binary exists" and "this bot has a
+      // browser" are different claims and only the first one was ever checked.
+      //
+      // The mount needs THREE things and each one fails silently: the toggle
+      // must be on, the obscura binary must exist, AND the bot's engine adapter
+      // must declare `customMcp`. Only 4 of the 29 drivers do — so a bot on
+      // `grokagent`, `codex`, `google`, `local` and 21 others showed the
+      // settings card reading "available, 1 bot enabled" while every turn ran
+      // with zero browser tools, and the bot could only say it had no browser.
+      // The card was actively reassuring the user about a capability the engine
+      // could not mount.
+      //
+      // `effective` is the single question the UI should ask: will this bot
+      // actually get the tools? The three reasons are named separately so the
+      // fix is different for each — install the binary, pick a supporting
+      // engine, or turn the toggle on — and none of them is "retry".
+      const bots = store.bots.filter((b) => !b.hidden).map((b) => ({ bot: b, on: b.browser === true }));
+      const resolved = await Promise.all(
+        bots.map(async ({ bot, on }) => {
+          const instance = await resolveInstanceForBot(bot);
+          const engineSupports = instance?.adapter.capabilities.customMcp === true;
+          const engineId = instance?.instanceId ?? bot.modelSelection.instanceId ?? null;
+          const effective = on && Boolean(mount) && engineSupports;
+          const reason = !on
+            ? "off"
+            : !mount
+              ? "not-installed"
+              : !engineSupports
+                ? "engine-unsupported"
+                : null;
+          return {
+            id: bot.id,
+            name: bot.name,
+            enabled: on,
+            engineId,
+            engineSupportsBrowser: engineSupports,
+            effective,
+            reason,
+          };
+        }),
+      );
+      const botsWithBrowser = resolved.filter((entry) => entry.enabled);
       return json(res, 200, {
         available: Boolean(mount),
         command: mount?.command ?? null,
-        bots: botsWithBrowser,
+        bots: botsWithBrowser.map(({ id, name }) => ({ id, name })),
+        // The per-bot detail is additive: `bots` keeps its exact shape so an
+        // older client is unaffected, and `status` is the new ground truth.
+        status: resolved,
+        /** How many bots the toggle claims and the engine cannot honour. This is
+         *  the number a user needs above everything else on this card. */
+        blockedCount: resolved.filter((entry) => entry.enabled && !entry.effective).length,
         tools: OBSCURA_TOOLS.length,
       });
     }
