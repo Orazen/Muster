@@ -351,15 +351,25 @@ test.describe("hosted workspace capability", () => {
     } finally { db.close(); }
     await page.setViewportSize(shortViewport);
     await page.reload();
-    const dialog = page.getByRole("dialog", { name: "Connect your storage", exact: true });
-    await expect(dialog).toContainText("does not start automatic backups or sync");
-    await expect(dialog).toContainText("still stored on Muster’s server");
-    await expect(dialog).not.toContainText("no copy");
-    const surface = await dialog.locator(":scope > div").evaluate(node => getComputedStyle(node).backgroundColor);
+    // The required-connection repair opens the ONE setup surface's
+    // Connections stage. A returning reload with required-but-unsatisfied
+    // storage remounts that surface straight at Connections (repair mode),
+    // where the honest-storage copy the old modal carried lives on the Drive
+    // card — and no second modal competes with the wizard.
+    const setup = page.getByRole("region", { name: "Set up Muster", exact: true });
+    await expect(setup).toBeVisible();
+    await expect(page.getByTestId("onboarding-stage-title")).toHaveText("Connections");
+    await expect(page.getByRole("dialog", { name: "Connect your storage" })).toHaveCount(0);
+    const drive = setup.getByRole("region", { name: "Google Drive setup", exact: true });
+    await expect(drive).toContainText("does not grant access to your other files");
+    await expect(drive).toContainText("or turn on automatic backup and sync");
+    await expect(drive).toContainText("still stored on Muster’s server");
+    await expect(drive).not.toContainText("no copy");
+    const surface = await drive.evaluate(node => getComputedStyle(node).backgroundColor);
     expect(surface).toMatch(/^rgb\(/); // Opaque theme surface; no app text bleeding through.
 
-    const connect = dialog.getByRole("button", { name: "Connect Google Drive", exact: true });
-    await capture(page, testInfo, "drive-consent-320", connect, dialog);
+    const connect = drive.getByRole("button", { name: "Connect Google Drive", exact: true });
+    await capture(page, testInfo, "drive-consent-320", connect, drive);
     expect(guarded.writes).toEqual([]);
     await connect.click();
     await expect(page).toHaveURL(/accounts\.google\.com\/o\/oauth2/);
