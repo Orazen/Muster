@@ -10,7 +10,53 @@ const rosterSchema = z.object({ bots: z.array(z.object({
 const setup = (page: Page) => page.getByRole("region", { name: "Set up Muster", exact: true });
 const appearance = (page: Page) => page.getByRole("region", { name: "Teammate appearance", exact: true });
 
+/** Long enough to span one animation tick of every entrance these surfaces
+ * sit inside (`.animate-panel-in` is 240ms, `.wizard-step-in` is 180ms). */
+const SETTLE_MS = 200;
+
+/** One animation frame, bounded so a throttled tab still returns promptly. */
+const nextFrame = (surface: Locator) => surface.evaluate(() => new Promise<void>(done => {
+  const timer = setTimeout(done, 250);
+  requestAnimationFrame(() => { clearTimeout(timer); done(); });
+}));
+
+/** The settled box of `surface`, as a key comparable between samples. */
+const boxKey = (surface: Locator) => surface.evaluate(node => {
+  const rect = node.getBoundingClientRect();
+  return {
+    key: [rect.left, rect.top, rect.right, rect.bottom, node.scrollWidth, node.clientWidth].join("/"),
+    // A box can be momentarily still between two ticks of a running
+    // animation, so the animation state is part of "settled", not extra.
+    animating: (() => {
+      for (let el: Element | null = node; el; el = el.parentElement)
+        if (el.getAnimations().some(animation => animation.playState === "running")) return true;
+      return false;
+    })(),
+  };
+});
+
+/** A single sample cannot tell a held layout from one still animating: this
+ * waits for the surface and its ancestors to have no running animation AND to
+ * hold the same box for a whole settle window. Same idea, same reason and the
+ * same window as `scrollHeld` in the onboarding draft spec.
+ *
+ * Every surface this file measures is inside an entrance animation that
+ * translates it — the settings panel slides 28px in over 240ms — and sampling
+ * mid-flight reads a right edge the user never sees: 328 against a 321 limit
+ * at 320px, 1288 against 1281 at 1280px. */
+async function settled(surface: Locator): Promise<void> {
+  let heldSince = 0;
+  let previous = "";
+  await expect.poll(async () => {
+    await nextFrame(surface);
+    const { key, animating } = await boxKey(surface);
+    if (animating || key !== previous) { previous = key; heldSince = Date.now(); return false; }
+    return Date.now() - heldSince >= SETTLE_MS;
+  }, { timeout: 15_000, message: "The measured surface must come to rest before its geometry is evidence" }).toBe(true);
+}
+
 async function insideWidth(surface: Locator) {
+  await settled(surface);
   const bounds = await surface.evaluate(node => {
     const rect = node.getBoundingClientRect();
     return { left: rect.left, right: rect.right, width: innerWidth, scroll: node.scrollWidth, client: node.clientWidth };
