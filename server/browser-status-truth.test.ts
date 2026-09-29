@@ -78,6 +78,9 @@ type BrowserStatus = {
 async function get(path: string): Promise<BrowserStatus> {
   const response = await fetch(`${base}${path}`, { headers: { cookie, origin: base }, redirect: "manual" });
   expect(response.status).toBe(200);
+  // SAFETY: BrowserStatus above is the route's declared wire shape; the tests
+  // below assert exactly these fields, and a shape drift fails an assertion
+  // rather than crashing on a missing field.
   return (await response.json()) as BrowserStatus;
 }
 
@@ -232,7 +235,9 @@ posixOnly("browser status tells the truth about each bot", () => {
     for (const entry of status.bots) {
       expect(Object.keys(entry).sort()).toEqual(["id", "name"]);
     }
-    expect(typeof status.tools).toBe("number");
-    expect(typeof status.available).toBe("boolean");
+    // SAFETY: get() parses the body into BrowserStatus, whose tools is a
+    // number and available a boolean; these assert the WIRE carries them.
+    expect(status.tools).toEqual(expect.any(Number));
+    expect(status.available).toEqual(expect.any(Boolean));
   });
 });
