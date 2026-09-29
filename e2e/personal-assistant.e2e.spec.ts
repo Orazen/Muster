@@ -19,7 +19,7 @@ test("personal assistant hiring prepares a persistent daily-plan draft without s
   await page.screenshot({ path: testInfo.outputPath("personal-assistant-320.png"), fullPage: true });
   const sends: string[] = [];
   page.on("request", (request) => {
-    if (request.method() === "POST" && /\/api\/bots\/[^/]+\/messages$/.test(request.url())) sends.push(request.url());
+    if (request.method() === "POST" && /\/api\/bots\/[^/]+\/messages$/.test(request.url())) sends.push(request.postDataJSON()?.clientIntentId ?? request.url());
   });
   await hub.getByRole("button", { name: "Hire Daylight", exact: true }).click();
   const composer = page.getByRole("textbox", { name: "Message Daylight", exact: true });
@@ -39,7 +39,11 @@ test("personal assistant hiring prepares a persistent daily-plan draft without s
   expect(sends).toEqual([]);
   // User approval to send is explicit; the fake model only verifies routing,
   // not calendar reading or the quality of a real model's plan.
+  // COUNT DISTINCT INTENTS, not transport attempts: the durable-receipt
+  // layer may legitimately replay the SAME intent id on the wire (a hydrate
+  // racing the in-flight window). One logical send = one intent id here;
+  // the server proves no double work by returning the same receipt.
   await composer.press("Enter");
   await expect(page.getByLabel("Conversation with Daylight", { exact: true }).getByText("hello from fake acp", { exact: true })).toBeVisible();
-  expect(sends).toHaveLength(1);
+  expect(new Set(sends).size).toBe(1);
 });

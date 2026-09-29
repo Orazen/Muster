@@ -1230,6 +1230,10 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
   // Durable send receipts: the ledger lives in localStorage (same store the
   // drafts use) so a parked intent survives a reload, not just a reconnect.
   const intentStore = useLocalStorageBackend();
+  // Intent ids whose POST is currently in flight (park→202 window). The
+  // reconcile sweep skips these on mid-session hydrates; a reload starts a
+  // new session with an empty set, so genuinely lost responses still sweep.
+  const inFlightIntentIds = useRef<Set<string>>(new Set());
   const stopCleanup = useMemo(() => new StopCleanupSession({
     accountId,
     getAccountId: () => accountRef.current,
@@ -1403,6 +1407,7 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
           // reconnect sweep never replays this record (shared storage).
           const pendingSend: PendingSend = { intentId, threadId, botId: action.botId, text: action.text, createdAt: Date.now(), accountId };
           parkSend(intentStore, pendingSend);
+          inFlightIntentIds.current.add(intentId);
           rawDispatch({ type: "messageDelivery", threadId, intentId, state: "checking", text: action.text });
           api(`/api/bots/${action.botId}/messages`, {
             method: "POST",
@@ -1424,6 +1429,7 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
               // are terminal and retire the ledger entry.
               const state = body.intent?.state === "unknown" ? "unknown" : body.intent?.state === "accepted" ? "accepted" : "sent";
               if (state === "sent" || state === "unknown") retireSend(intentStore, threadId, intentId);
+              inFlightIntentIds.current.delete(intentId);
               // Belt-and-braces echo: the SSE frame normally delivers the
               // user's bubble, but a missed or replayed frame must not hide
               // the send. messageAdded dedupes by id, so a later stream
@@ -1445,10 +1451,12 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
               });
             })
             .catch(() => {
-              // The response was lost — NOT necessarily the send. The record
-              // stays parked for reconnect reconciliation (which replays the
-              // SAME id); keep the compact "checking" state and drop any
-              // optimistic bubble so a duplicate can never be authored here.
+              // The response was lost — NOT necessarily the send. The request
+              // is over, so future sweeps are allowed to reconcile this id
+              // (replaying the SAME one); keep the compact "checking" state
+              // and drop any optimistic bubble so a duplicate can never be
+              // authored here.
+              inFlightIntentIds.current.delete(intentId);
               rawDispatch({ type: "messageDelivery", threadId, intentId, state: "checking", text: action.text });
               rawDispatch({ type: "error", message: "Checking delivery — your message will be reconciled when the connection returns." });
             });
@@ -1769,6 +1777,14 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
       if (!alive) return;
       const parked = allPendingSends(intentStore, accountId);
       const botByThread = new Map(stateRef.current.bots.map((bot) => [bot.threadId, bot] as const));
+      // Mid-session hydrates must not replay records whose POST is still in
+      // flight — the send path parks before the request and retires on the
+      // 202, so a hydrate landing inside that window would race a second
+      // POST on the wire. A "checking" record mounted in THIS session is
+      // such an in-flight send; the same state after a page reload is a
+      // genuinely lost response and MUST sweep (there is no live request).
+      const inFlight = new Set(inFlightIntentIds.current);
+      const sweepable = parked.filter((record) => !inFlight.has(record.intentId));
       // One fold per confirmed receipt: add the echoed ORIGINAL message to
       // the receipt's OWN thread (messageAdded dedupes by id), then state
       // the delivery truthfully — terminal receipts retire the record,
@@ -1800,7 +1816,11 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
       // was a "checking delivery" row on a thread nobody was looking at. The
       // receipt remains keyed to its original thread even when that thread
       // is unmounted; opening it supplies the matching transcript later.
-      for (const pending of parked) {
+      // EXCEPT records this session is still sending: a mid-session hydrate
+      // landing inside park→202 would race a second POST on the wire (the
+      // server dedupes it safely, but the duplicate is still wrong). After a
+      // page reload nothing is in flight, so the full sweep runs.
+      for (const pending of sweepable) {
         void reconcileThread(intentStore, pending.threadId, (record, lookup) =>
           api(`/api/bots/${record.botId}/messages`, {
             method: "POST",
@@ -2006,15 +2026,11 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
           rawDispatch({ type: "socialRefresh" });
           break;
         case "webhook":
-          // Webhooks are owner-scoped server-side; a scoped client filters
-          // foreign frames here so another account's hook never folds into
-          // this session's settings. Frames without an owner are legacy
-          // desktop/desktop-unrestricted traffic and stay unconditional.
-          if (frame.webhook.owner && accountId && frame.webhook.owner !== accountId) break;
+          // The server scopes hosted streams and replay. Local desktop rows
+          // may be unowned even when this client has a signed-in account.
           rawDispatch({ type: "webhookPatched", webhook: frame.webhook });
           break;
         case "webhook.attempt":
-          if (frame.attempt.owner && accountId && frame.attempt.owner !== accountId) break;
           rawDispatch({ type: "webhookAttempted", attempt: frame.attempt });
           break;
         case "webhook.deleted":
