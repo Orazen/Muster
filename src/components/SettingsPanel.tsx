@@ -7,6 +7,7 @@ import {
 } from "@/lib/mascot";
 import { ModelPicker } from "./ModelPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { browserBlockedCount, browserCardVerdict, type BrowserStatus } from "@/lib/browser-status";
 import { cn } from "@/lib/cn";
 import { requestNotificationPermission } from "@/lib/notify";
 import { botUsage, costCaption, formatTokens, formatUsd } from "@/lib/usage";
@@ -461,13 +462,13 @@ function SoulCard({ botId }: { botId: string }) {
  * (the mount is skipped when the binary is missing) — the status pill
  * makes that state impossible to miss. */
 function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
-  const [status, setStatus] = useState<{ available: boolean; command: string | null; tools: number } | null>(null);
+  const [status, setStatus] = useState<BrowserStatus | null>(null);
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
 
   useEffect(() => {
     api("/api/browser-status")
-      .then((data: { available: boolean; command: string | null; tools: number }) => setStatus(data))
+      .then((data: BrowserStatus) => setStatus(data))
       .catch(() => setStatus(null));
   }, []);
 
@@ -484,13 +485,60 @@ function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
     } finally {
       setInstalling(false);
       api("/api/browser-status")
-        .then((data: { available: boolean; command: string | null; tools: number }) => setStatus(data))
+        .then((data: BrowserStatus) => setStatus(data))
         .catch(() => {});
     }
   };
 
   const enabled = Boolean(bot.browser);
   const available = status?.available === true;
+  // The pill above is about this MACHINE ("Ready on this machine"), which is
+  // true and worth keeping. Whether THIS bot can use the browser is a separate
+  // claim, and it needs the engine as well as the binary — so it is decided in
+  // one tested place rather than re-derived in this component.
+  const verdict = browserCardVerdict(status, bot.id, enabled);
+  const blocked = browserBlockedCount(status);
+
+  // What this card may claim about this bot. `null` means "the binary is
+  // missing", which is the install prompt below. Every other case is a
+  // sentence the server has actually backed.
+  const copy = (() => {
+    if (verdict.kind === "engine-unsupported") {
+      // The toggle is a claim the product cannot honour. Say so, and name the
+      // thing the user can change — silently running without a browser is the
+      // failure this replaces.
+      const subject = blocked > 1 ? `${blocked} bots have this on, but their engines can't run a browser.` : "This bot's engine can't run a browser.";
+      const scope = blocked > 1 ? " for these bots" : " for this bot";
+      return (
+        <>
+          {subject}{" "}
+          {verdict.engineId ? (
+            <>Pick a different engine{scope} (currently <span className="text-ink">{verdict.engineId}</span>) or turn this off — until then, tasks run without a browser.</>
+          ) : (
+            <>No engine is selected{scope}, so tasks run without a browser until one that supports it is chosen.</>
+          )}
+        </>
+      );
+    }
+    if (verdict.kind === "ready") {
+      return (
+        <>This bot gets {verdict.tools} browser tools on its next task — it can open real pages, fill forms and
+        screenshot what it sees. Try it in chat: <span className="text-ink">"open example.com and screenshot it."</span></>
+      );
+    }
+    if (verdict.kind === "blocked-missing-binary") {
+      return <>The browser engine is no longer on this machine, so this bot's tasks run without a browser.</>;
+    }
+    if (verdict.kind === "unknown") {
+      // Status loaded but says nothing about this bot yet. No claim either
+      // way is better than a confident one the server has not made.
+      return <>Checking what this bot's engine supports…</>;
+    }
+    if (verdict.kind === "off") {
+      return <>Turn on to let this bot drive a real headless browser — navigate, click, fill, screenshot.</>;
+    }
+    return null;
+  })();
 
   return (
     <div className="rounded-xl bg-card p-4">
@@ -528,7 +576,10 @@ function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
         </button>
       </div>
 
-      {enabled && (
+      {/* Only for a bot that will actually receive them. Showing "Navigate &
+          click" to a bot whose engine cannot mount a browser is the same lie
+          the status sentence used to tell. */}
+      {enabled && verdict.kind === "ready" && (
         <div className="mt-3 grid grid-cols-3 gap-2">
           {[
             { icon: MousePointerClick, label: "Navigate & click" },
@@ -544,16 +595,7 @@ function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
       )}
 
       <div className="mt-2.5 text-[13px] leading-relaxed text-ink-secondary">
-        {available ? (
-          enabled ? (
-            <>
-              This bot gets {status?.tools ?? 14} browser tools on its next task — it can open real pages, fill forms and
-              screenshot what it sees. Try it in chat: <span className="text-ink">"open example.com and screenshot it."</span>
-            </>
-          ) : (
-            <>Turn on to let this bot drive a real headless browser — navigate, click, fill, screenshot.</>
-          )
-        ) : (
+        {copy ?? (
           <>
             The browser engine isn't on this machine yet.{" "}
             {installError && <span className="text-danger">{installError} </span>}
