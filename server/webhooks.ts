@@ -124,6 +124,8 @@ export interface WebhookManagerOptions {
   now?: () => number;
   emit?: (event: WebhookManagerEvent) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
+  /** Actual deployment operator; missing identity denies account access to legacy rows. */
+  operatorUserId?: () => string | null;
   /** Does `viewer`'s account own this bot? Gates bot (re)assignment so a
    * webhook can never be pointed at — or re-pointed to — another account's
    * AGENT. Desktop passes a constant true. */
@@ -155,17 +157,15 @@ const MAX_PENDING_RUNS = 3;
 
 const runOnSchema = z.enum(["agent", "cloud", "opensandbox"]);
 const eventTypesSchema = z.array(z.string()).max(20).optional();
-/** Scope key for one viewer: "all" sees every webhook (desktop/no-session
- * compatibility); anything else restricts to rows whose owner matches, with
- * unowned legacy rows reserved to the operator ("local"). */
+/** Desktop keeps its existing implicit local authority. Hosted account access
+ * uses the authenticated account plus the deployment's actual operator ID. */
 export type WebhookViewer = { kind: "all" } | { kind: "account"; owner: string };
 
-const OWNERLESS_IS_LOCAL = "local";
-
-/** True when `viewer` may see a row stored under `owner`. */
-function ownerVisible(viewer: WebhookViewer, owner: string | undefined): boolean {
+/** Shared by management, live events and replay. "local" is a historical
+ * storage marker from1.23.0, never an account credential or a public audience. */
+export function webhookOwnerVisible(viewer: WebhookViewer, owner: string | undefined, operatorUserId: string | null): boolean {
   if (viewer.kind === "all") return true;
-  if (owner === undefined) return viewer.owner === OWNERLESS_IS_LOCAL;
+  if (owner === undefined || owner === "local") return operatorUserId !== null && viewer.owner === operatorUserId;
   return owner === viewer.owner;
 }
 const triggerInputSchema = z.object({
@@ -390,7 +390,7 @@ export class WebhookManager {
    * rows are the operator's); the desktop viewer sees everything. */
   list(viewer: WebhookViewer): WebhookTrigger[] {
     return this.webhooks
-      .filter((trigger) => ownerVisible(viewer, trigger.owner))
+      .filter((trigger) => webhookOwnerVisible(viewer, trigger.owner, this.options.operatorUserId?.() ?? null))
       .map(publicTrigger);
   }
 
@@ -399,7 +399,7 @@ export class WebhookManager {
    * its payload preview or run id. */
   listAttempts(viewer: WebhookViewer): WebhookAttempt[] {
     const mine = new Set(
-      this.webhooks.filter((trigger) => ownerVisible(viewer, trigger.owner)).map((trigger) => trigger.id),
+      this.webhooks.filter((trigger) => webhookOwnerVisible(viewer, trigger.owner, this.options.operatorUserId?.() ?? null)).map((trigger) => trigger.id),
     );
     return this.attempts.filter((attempt) => mine.has(attempt.webhookId)).map((attempt) => ({ ...attempt }));
   }
@@ -408,7 +408,7 @@ export class WebhookManager {
    * same null, so a scoped caller can answer a blank 404 either way. */
   private findFor(viewer: WebhookViewer, id: string): StoredWebhookTrigger | undefined {
     const trigger = this.webhooks.find((candidate) => candidate.id === id);
-    return trigger && ownerVisible(viewer, trigger.owner) ? trigger : undefined;
+    return trigger && webhookOwnerVisible(viewer, trigger.owner, this.options.operatorUserId?.() ?? null) ? trigger : undefined;
   }
 
   /** Refuse pointing a webhook at a bot outside the viewer's account — on
@@ -432,7 +432,7 @@ export class WebhookManager {
       createdAt: now,
       updatedAt: now,
       deliveryCount: 0,
-      owner: viewer.kind === "account" ? viewer.owner : OWNERLESS_IS_LOCAL,
+      owner: viewer.kind === "account" ? viewer.owner : undefined,
     };
     this.webhooks.unshift(trigger);
     this.save();

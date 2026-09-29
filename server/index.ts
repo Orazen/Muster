@@ -339,7 +339,7 @@ import { clampGeneratedTitle, generatedTitlePrompt } from "./generated-titles.ts
 import { UsageAllowance } from "./usage-allowance.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
-import { WebhookManager, type WebhookViewer } from "./webhooks.ts";
+import { WebhookManager, webhookOwnerVisible, type WebhookViewer } from "./webhooks.ts";
 import { VaultManager } from "./vault-manager.ts";
 import { buildBriefing } from "./briefing.ts";
 import { buildReceipt, receiptFinishedAt, renderReceiptText } from "./receipts.ts";
@@ -1208,9 +1208,8 @@ function visibleToClient(client: SseClient, payload: FrameIdentity): boolean {
   if (!client.userId) return true;
   // Webhook frames are owner-stamped by the webhook manager itself (the
   // ownership lives on the webhook row, not on a bot/group record the
-  // generic scanner could resolve). An ownerless webhook frame is legacy
-  // deployment-wide traffic; a stamped one goes to its owner only — the
-  // fail-safe direction used everywhere else in this filter.
+  // generic scanner could resolve). Legacy/local rows follow the same actual
+  // operator rule as management. This predicate also protects SSE replay.
   if (payload.kind === "webhook" || payload.kind === "webhook.attempt" || payload.kind === "webhook.deleted") {
     // SAFETY: webhook frames are assembled by the webhook manager with the
     // owner on the shape shown; the guards below re-derive it as unknown.
@@ -1222,7 +1221,7 @@ function visibleToClient(client: SseClient, payload: FrameIdentity): boolean {
         : isText(wide.webhook?.owner)
           ? wide.webhook.owner
           : undefined;
-    return owner ? owner === client.userId : true;
+    return webhookOwnerVisible({ kind: "account", owner: client.userId }, owner, primaryUserId());
   }
   // Social frames are the one kind whose audience is decided by the payload
   // itself: the manager stamps exactly the owner ids allowed to see it (a
@@ -3739,6 +3738,7 @@ export const computerControl = new ComputerControl((botId) => {
 const CONTROL_TOKEN = randomBytes(24).toString("hex");
 
 const webhooks = new WebhookManager({
+  operatorUserId: primaryUserId,
   emit: broadcast,
   botState: (botId) => {
     const bot = store.bot(botId);

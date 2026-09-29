@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   WebhookManager,
+  webhookOwnerVisible,
   type WebhookManagerOptions,
   type WebhookTrigger,
   type WebhookViewer,
@@ -215,5 +216,61 @@ describe("WebhookManager", () => {
       h.manager.receive(webhook.endpointId, secret, { payload: { index }, eventName: "push", deliveryId: `delivery-${index}` });
     }
     expect(() => h.manager.receive(webhook.endpointId, secret, { payload: { overflow: true }, eventName: "push" })).toThrow("rate limit");
+  });
+});
+
+
+describe("Webhook legacy ownership", () => {
+  const operator: WebhookViewer = { kind: "account", owner: "actual-operator-id" };
+  const member: WebhookViewer = { kind: "account", owner: "member-id" };
+  const marker: WebhookViewer = { kind: "account", owner: "local" };
+
+  it.each([undefined, "local"])("reserves legacy owner %s to the actual operator, never a marker account", (owner) => {
+    expect(webhookOwnerVisible(operator, owner, operator.owner)).toBe(true);
+    expect(webhookOwnerVisible(member, owner, operator.owner)).toBe(false);
+    expect(webhookOwnerVisible(marker, owner, operator.owner)).toBe(false);
+    expect(webhookOwnerVisible(operator, owner, null)).toBe(false);
+    expect(webhookOwnerVisible({ kind: "all" }, owner, null)).toBe(true);
+  });
+
+  it("keeps named ownership exclusive even from the deployment operator", () => {
+    expect(webhookOwnerVisible(member, member.owner, operator.owner)).toBe(true);
+    expect(webhookOwnerVisible(operator, member.owner, operator.owner)).toBe(false);
+  });
+
+  it("keeps new desktop rows unowned while authorizing their hosted operator", () => {
+    const h = harness();
+    h.options.operatorUserId = () => operator.owner;
+    const created = create(h.manager);
+    expect(created.webhook.owner).toBeUndefined();
+    h.manager.receive(created.webhook.endpointId, created.secret, { payload: { private: "operator fixture" } });
+    expect(h.manager.list(operator).map((w) => w.id)).toEqual([created.webhook.id]);
+    expect(h.manager.listAttempts(operator)).toHaveLength(1);
+    for (const denied of [member, marker]) {
+      expect(h.manager.list(denied)).toEqual([]);
+      expect(h.manager.listAttempts(denied)).toEqual([]);
+      expect(h.manager.rotateSecret(denied, created.webhook.id)).toBeNull();
+      expect(h.manager.test(denied, created.webhook.id)).toBeNull();
+      expect(h.manager.update(denied, created.webhook.id, { enabled: false })).toBeNull();
+      expect(h.manager.remove(denied, created.webhook.id)).toBe(false);
+    }
+    expect(h.manager.update(operator, created.webhook.id, { name: "Still mine" })?.name).toBe("Still mine");
+  });
+
+  it("preserves existing local-marker rows and credentials through a restart", () => {
+    const h = harness();
+    h.options.operatorUserId = () => operator.owner;
+    // Recreate the serialized row produced by41a4147 without granting a
+    // made-up account any authority in the new code.
+    const original = create(h.manager, marker);
+    const reloaded = new WebhookManager(h.options);
+    expect(reloaded.list(operator)[0]).toMatchObject({ id: original.webhook.id, endpointId: original.webhook.endpointId, owner: "local" });
+    expect(reloaded.list(marker)).toEqual([]);
+    expect(reloaded.list(member)).toEqual([]);
+    expect(reloaded.authorize(original.webhook.endpointId, original.secret)).toBe(true);
+    reloaded.receive(original.webhook.endpointId, original.secret, { payload: { private: "legacy payload" } });
+    expect(reloaded.listAttempts(operator)[0]?.preview).toContain("legacy payload");
+    expect(reloaded.listAttempts(member)).toEqual([]);
+    expect(new WebhookManager(h.options).listAttempts(operator)).toHaveLength(1);
   });
 });
