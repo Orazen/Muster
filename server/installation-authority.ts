@@ -153,8 +153,44 @@ export class InstallationRegistry {
     return this.durable;
   }
 
-  private save(): void {
-    this.durable = persist(this.path, this.file);
+  /** Apply a change to a COPY of the registry, persist it, and adopt it in
+   * memory only if the write actually reached disk.
+   *
+   * Every mutator used to edit `this.file` in place and then call
+   * `persist`, which only flipped a `durable` flag. So a failed write left
+   * memory disagreeing with the file, and the three routes — which all already
+   * promised the opposite — were telling installations something untrue:
+   * "nothing was registered" for a row that existed in memory, and "the old
+   * credential still works" for a credential whose hash had already been
+   * replaced. On a machine that could not write the registry, a failed
+   * rotation 401'd the old credential immediately and then, after a restart
+   * that reloaded the unchanged file, accepted it again.
+   *
+   * Copying also keeps the returned record honest: adopting the draft means
+   * the object handed back is the one that is on disk, not the pre-commit
+   * object the caller was already holding.
+   */
+  private commit(change: (draft: RegistryFile) => void): boolean {
+    const draft: RegistryFile = {
+      version: this.file.version,
+      installations: this.file.installations.map((row) => ({ ...row, capabilities: [...row.capabilities] })),
+    };
+    change(draft);
+    if (!persist(this.path, draft)) {
+      // The change is discarded whole. `this.file` still describes the last
+      // durable state, so a caller that retries changes nothing it did not mean to.
+      this.durable = false;
+      return false;
+    }
+    this.file = draft;
+    this.durable = true;
+    return true;
+  }
+
+  /** The committed row, by id. Always read back from `this.file` after a
+   * commit: the pre-commit object belongs to the previous generation. */
+  private row(id: string): InstallationRecord | null {
+    return this.file.installations.find((row) => row.id === id) ?? null;
   }
 
   /** Register (or re-attach) an installation for an owner. Idempotent per
@@ -166,21 +202,25 @@ export class InstallationRegistry {
    * second row, and "one live secret per installation" stays strictly true.
    * A revoked row stays revoked — re-registering after a revocation is a NEW
    * installation with a NEW id, never a resurrection. */
-  register(input: RegisterInput, now = Date.now()): RegisterOutcome {
+  register(input: RegisterInput, now = Date.now()): RegisterOutcome | null {
     const clientKey = input.clientKey.trim();
     const existing = this.file.installations.find(
       (row) => row.ownerId === input.ownerId && row.clientKey === clientKey && row.revokedAt === null,
     );
     if (existing) {
-      existing.lastSeenAt = now;
-      if (existing.label !== input.label) existing.label = input.label;
+      const id = existing.id;
       const credential = randomBytes(32).toString("base64url");
-      existing.credentialHash = hashCredential(credential);
-      existing.credentialExpiresAt = now + CREDENTIAL_TTL_MS;
-      this.save();
-      return { record: existing, credential, reactivated: true };
+      const committed = this.commit((draft) => {
+        const row = draft.installations.find((candidate) => candidate.id === id);
+        if (!row) throw new Error("the row vanished from the draft");
+        row.lastSeenAt = now;
+        if (row.label !== input.label) row.label = input.label;
+        row.credentialHash = hashCredential(credential);
+        row.credentialExpiresAt = now + CREDENTIAL_TTL_MS;
+      });
+      if (!committed) return null;
+      return { record: this.row(id)!, credential, reactivated: true };
     }
-    if (this.file.installations.length >= REGISTRY_CAP) this.evict(now);
     const record: InstallationRecord = {
       id: randomBytes(12).toString("base64url"),
       ownerId: input.ownerId,
@@ -194,12 +234,18 @@ export class InstallationRegistry {
       lastSeenAt: now,
       revokedAt: null,
     };
-    this.file.installations.push(record);
     const credential = randomBytes(32).toString("base64url");
     record.credentialHash = hashCredential(credential);
     record.credentialExpiresAt = now + CREDENTIAL_TTL_MS;
-    this.save();
-    return { record, credential, reactivated: false };
+    // The table bound and the insert are ONE change: evicting to make room and
+    // then failing the write would drop rows on disk for a row that never
+    // landed.
+    const committed = this.commit((draft) => {
+      if (draft.installations.length >= REGISTRY_CAP) evictFrom(draft, now);
+      draft.installations.push({ ...record, capabilities: [...record.capabilities] });
+    });
+    if (!committed) return null;
+    return { record: this.row(record.id)!, credential, reactivated: false };
   }
 
   /** Issue a fresh one-time credential for an existing active row. The
@@ -211,11 +257,15 @@ export class InstallationRegistry {
     );
     if (!record) return null;
     const credential = randomBytes(32).toString("base64url");
-    record.credentialHash = hashCredential(credential);
-    record.credentialExpiresAt = now + CREDENTIAL_TTL_MS;
-    record.lastSeenAt = now;
-    this.save();
-    return { record, credential, reactivated: false };
+    const committed = this.commit((draft) => {
+      const row = draft.installations.find((candidate) => candidate.id === installationId);
+      if (!row) throw new Error("the row vanished from the draft");
+      row.credentialHash = hashCredential(credential);
+      row.credentialExpiresAt = now + CREDENTIAL_TTL_MS;
+      row.lastSeenAt = now;
+    });
+    if (!committed) return null;
+    return { record: this.row(installationId)!, credential, reactivated: false };
   }
 
   /** Owner-scoped revocation: only the owning account can revoke, and the
@@ -226,11 +276,16 @@ export class InstallationRegistry {
       (row) => row.id === installationId && row.ownerId === ownerId && row.revokedAt === null,
     );
     if (!record) return false;
-    record.revokedAt = now;
-    record.credentialHash = null;
-    record.credentialExpiresAt = null;
-    this.save();
-    return true;
+    // A revocation that cannot be written must not half-happen. In memory it
+    // would read as revoked while the file still said active, so a restart
+    // quietly un-revoked the installation.
+    return this.commit((draft) => {
+      const row = draft.installations.find((candidate) => candidate.id === installationId);
+      if (!row) throw new Error("the row vanished from the draft");
+      row.revokedAt = now;
+      row.credentialHash = null;
+      row.credentialExpiresAt = null;
+    });
   }
 
   /** Prove a bearer credential. Returns the record only when the digest
@@ -270,11 +325,18 @@ export class InstallationRegistry {
     );
     if (!record) return null;
     const credential2 = randomBytes(32).toString("base64url");
-    record.credentialHash = hashCredential(credential2);
-    record.credentialExpiresAt = now + CREDENTIAL_TTL_MS;
-    record.lastSeenAt = now;
-    this.save();
-    return { record, credential: credential2, reactivated: false };
+    // The machine's own renewal path. This is the one that mattered most: a
+    // failed write here used to replace the hash in memory and then tell the
+    // caller to keep presenting the credential it had just invalidated.
+    const committed = this.commit((draft) => {
+      const row = draft.installations.find((candidate) => candidate.id === installationId);
+      if (!row) throw new Error("the row vanished from the draft");
+      row.credentialHash = hashCredential(credential2);
+      row.credentialExpiresAt = now + CREDENTIAL_TTL_MS;
+      row.lastSeenAt = now;
+    });
+    if (!committed) return null;
+    return { record: this.row(installationId)!, credential: credential2, reactivated: false };
   }
 
   /** The owner's own view. Rows of other accounts never leave the file. */
@@ -290,17 +352,18 @@ export class InstallationRegistry {
    * that can never authenticate again (revoked, or credential expired with
    * no return) go first, then the least-recently-seen; the bound wins over
    * any individual row. */
-  private evict(now: number): void {
+}
+
+function evictFrom(file: RegistryFile, now: number): void {
     const neverAgain = (row: InstallationRecord): boolean =>
       row.revokedAt !== null || row.credentialExpiresAt === null || row.credentialExpiresAt <= now;
-    const candidates = [...this.file.installations].sort((a, b) => {
+    const candidates = [...file.installations].sort((a, b) => {
       const aNever = neverAgain(a) ? 0 : 1;
       const bNever = neverAgain(b) ? 0 : 1;
       return aNever - bNever || a.lastSeenAt - b.lastSeenAt;
     });
     for (const row of candidates) {
-      if (this.file.installations.length < REGISTRY_CAP) break;
-      this.file.installations = this.file.installations.filter((other) => other.id !== row.id);
+      if (file.installations.length < REGISTRY_CAP) break;
+      file.installations = file.installations.filter((other) => other.id !== row.id);
     }
-  }
 }

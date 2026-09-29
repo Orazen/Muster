@@ -88,7 +88,10 @@ const routes: Route[] = [
         label: parsed.data.label,
         platform: parsed.data.platform,
       });
-      if (!registry.isDurable) {
+      // `null` and `!isDurable` are the same event seen twice: the write did
+      // not reach disk, so the registry discarded the change. Nothing was
+      // registered, and the caller is told exactly that.
+      if (!outcome || !registry.isDurable) {
         return json(res, 503, { error: "The installation registry could not be saved — nothing was registered." });
       }
       // Same public shape as the list view, so clients parse one wire form.
@@ -129,10 +132,15 @@ const routes: Route[] = [
       const id = isText(body?.id) ? body.id : "";
       if (!id) return json(res, 400, { error: "Which installation?" });
       const outcome = registry.rotate(session.userId, id);
-      if (!registry.isDurable) {
-        return json(res, 503, { error: "The installation registry could not be saved — the old credential still works." });
+      if (outcome === null) {
+        // A 404 here is only right for a row that does not exist. When the
+        // write failed the row does exist and its credential is untouched, so
+        // the old credential still works and a retry is safe.
+        if (!registry.isDurable) {
+          return json(res, 503, { error: "The installation registry could not be saved — the old credential still works." });
+        }
+        return json(res, 404, { error: "No such installation under this account." });
       }
-      if (!outcome) return json(res, 404, { error: "No such installation under this account." });
       return json(res, 200, { credential: outcome.credential!, credentialExpiresAt: outcome.record.credentialExpiresAt });
     },
   },
