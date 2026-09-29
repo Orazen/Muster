@@ -1,5 +1,13 @@
 # Build context sent to Docker — keep it small and hermetic.
-.git
+# Only revision metadata is exposed to the read-only build-context mount.
+# Git config (which may contain clone credentials), objects and logs stay out.
+.git/**
+!.git/HEAD
+!.git/packed-refs
+!.git/refs
+.git/refs/**
+!.git/refs/heads
+!.git/refs/heads/**
 .gitignore
 node_modules
 dist

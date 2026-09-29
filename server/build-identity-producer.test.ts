@@ -1,15 +1,119 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 // @ts-expect-error The build producer is plain Node ESM, also used by the bundler.
-import { createBuildMetadata, IDENTITY_LIMITS, webBuildIdentityPlugin, writeBuildIdentity } from "../scripts/build-identity.mjs";
+import { createBuildMetadata, IDENTITY_LIMITS, readBuildContextRevision, webBuildIdentityPlugin, writeBuildIdentity } from "../scripts/build-identity.mjs";
 
 const roots: string[] = [];
 function fixture() { const root = mkdtempSync(join(tmpdir(), "muster-identity-")); roots.push(root); return root; }
 afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+describe("Docker build-context source identity", () => {
+  const sha = "a".repeat(40);
+  function context(head = sha) {
+    const root = fixture(); mkdirSync(join(root, ".git"));
+    writeFileSync(join(root, ".git", "HEAD"), head + "\n");
+    return root;
+  }
+  function ref(root: string, value = sha) {
+    mkdirSync(join(root, ".git", "refs", "heads", "release"), { recursive: true });
+    writeFileSync(join(root, ".git", "refs", "heads", "release", "next"), value + "\n");
+  }
+  it("observes detached HEAD without Git config or an object database", () => {
+    const root = context(sha.toUpperCase());
+    expect(readBuildContextRevision(root)).toBe(sha);
+    vi.stubEnv("MUSTER_SOURCE_CONTEXT", root);
+    expect(createBuildMetadata(fixture(), "1.2.3").source).toEqual({ revision: sha, dirty: null });
+  });
+  it("resolves a nested loose ref from the same context and keeps dirtiness unknown", () => {
+    const root = context("ref: refs/heads/release/next"); ref(root);
+    vi.stubEnv("MUSTER_SOURCE_CONTEXT", root);
+    expect(createBuildMetadata(fixture(), "1.2.3").source).toEqual({ revision: sha, dirty: null });
+  });
+  it("resolves an exact packed ref when the loose ref does not exist", () => {
+    const root = context("ref: refs/heads/main");
+    writeFileSync(join(root, ".git", "packed-refs"), `# pack-refs with: peeled\n${"b".repeat(40)} refs/heads/main-old\n${sha} refs/heads/main\n^${"c".repeat(40)}\n`);
+    expect(readBuildContextRevision(root)).toBe(sha);
+  });
+  it("does not revive a stale packed value when the loose ref is corrupt", () => {
+    const root = context("ref: refs/heads/release/next"); ref(root, "broken");
+    writeFileSync(join(root, ".git", "packed-refs"), `${sha} refs/heads/release/next\n`);
+    expect(readBuildContextRevision(root)).toBeNull();
+  });
+  it("rejects conflicting duplicate packed references", () => {
+    const root = context("ref: refs/heads/main");
+    writeFileSync(join(root, ".git", "packed-refs"), `${sha} refs/heads/main\n${"b".repeat(40)} refs/heads/main\n`);
+    expect(readBuildContextRevision(root)).toBeNull();
+  });
+  it.each(["ref: ../outside", "ref: refs/heads/../../config", "ref: refs/heads/branch..name", "ref: refs/heads/a.lock", "ref: refs/heads//main", "ref: refs/heads/a\\b", "x".repeat(513), "b".repeat(64)])("refuses malformed or escaping HEAD %s", head => {
+    expect(readBuildContextRevision(context(head))).toBeNull();
+  });
+  it("does not follow a Git worktree pointer outside the context", () => {
+    const root = fixture(); const outside = context();
+    writeFileSync(join(root, ".git"), `gitdir: ${join(outside, ".git")}\n`);
+    expect(readBuildContextRevision(root)).toBeNull();
+  });
+  it.each(["git", "head", "ref", "parent", "packed"])("refuses a symlink at %s", kind => {
+    const root = fixture(); const outside = fixture();
+    writeFileSync(join(outside, "value"), sha);
+    if (kind === "git") {
+      mkdirSync(join(outside, "metadata")); writeFileSync(join(outside, "metadata", "HEAD"), sha);
+      symlinkSync(join(outside, "metadata"), join(root, ".git"));
+    } else {
+      mkdirSync(join(root, ".git"));
+      if (kind === "head") symlinkSync(join(outside, "value"), join(root, ".git", "HEAD"));
+      else {
+        writeFileSync(join(root, ".git", "HEAD"), "ref: refs/heads/main\n");
+        if (kind === "parent") symlinkSync(outside, join(root, ".git", "refs"));
+        else if (kind === "packed") symlinkSync(join(outside, "value"), join(root, ".git", "packed-refs"));
+        else {
+          mkdirSync(join(root, ".git", "refs", "heads"), { recursive: true });
+          symlinkSync(join(outside, "value"), join(root, ".git", "refs", "heads", "main"));
+        }
+      }
+    }
+    expect(readBuildContextRevision(root)).toBeNull();
+  });
+  it("bounds packed metadata and rejects non-files", () => {
+    const root = context("ref: refs/heads/main");
+    writeFileSync(join(root, ".git", "packed-refs"), `${"#".repeat(256 * 1024)}\n${sha} refs/heads/main\n`);
+    expect(readBuildContextRevision(root)).toBeNull();
+    rmSync(join(root, ".git", "packed-refs")); mkdirSync(join(root, ".git", "packed-refs"));
+    expect(readBuildContextRevision(root)).toBeNull();
+  });
+  it("keeps missing context metadata unknown instead of borrowing the local checkout", () => {
+    vi.stubEnv("MUSTER_SOURCE_CONTEXT", fixture());
+    expect(createBuildMetadata(resolve(dirname(fileURLToPath(import.meta.url)), ".."), "1.2.3").source)
+      .toEqual({ revision: null, dirty: null });
+    expect(createBuildMetadata(fixture(), "1.2.3", sha).source).toEqual({ revision: sha, dirty: null });
+  });
+  it("rejects an explicit claim that conflicts with the observed build context", () => {
+    vi.stubEnv("MUSTER_SOURCE_CONTEXT", context());
+    expect(() => createBuildMetadata(fixture(), "1.2.3", "b".repeat(40))).toThrow("Source revision claim conflicts with build context");
+    expect(createBuildMetadata(fixture(), "1.2.3", sha.toUpperCase()).source).toEqual({ revision: sha, dirty: null });
+  });
+  it.skipIf(process.platform === "win32")("executes both real Docker build commands with the same source-context binding", () => {
+    const project = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+    const dockerfile = readFileSync(join(project, "Dockerfile"), "utf8");
+    const buildStep = dockerfile.match(/RUN --mount=type=bind,source=\.,target=\/muster-source,readonly \\\n([\s\S]+?)\n\n/);
+    expect(buildStep).not.toBeNull();
+    const root = context(); const bin = join(root, "bin"); mkdirSync(bin);
+    const record = join(root, "commands.jsonl");
+    const fakePnpm = join(bin, "pnpm");
+    writeFileSync(fakePnpm, `#!${process.execPath}\nimport {appendFileSync} from 'node:fs';\nimport {createBuildMetadata} from ${JSON.stringify(new URL("../scripts/build-identity.mjs", import.meta.url).href)};\nappendFileSync(${JSON.stringify(record)},JSON.stringify({command:process.argv.slice(2),source:createBuildMetadata(process.cwd(),'1.2.3').source})+'\\n');\n`);
+    chmodSync(fakePnpm, 0o700);
+    const command = buildStep![1].replaceAll("/muster-source", root);
+    execFileSync("sh", ["-c", command], { cwd: root, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, MUSTER_SOURCE_REVISION: "" } });
+    expect(readFileSync(record, "utf8").trim().split("\n").map(line => JSON.parse(line)))
+      .toEqual(["build", "build:server"].map(command => ({ command: [command], source: { revision: sha, dirty: null } })));
+    const runtime = dockerfile.slice(dockerfile.indexOf(" AS runtime\n"));
+    expect(runtime).not.toContain("MUSTER_SOURCE_CONTEXT");
+    expect(runtime).not.toMatch(/COPY[^\n]*(?:\.git|muster-source)/);
+  });
+});
 describe("build identity producer", () => {
   it("keeps source archives unknown and creates distinct build identifiers", () => {
     const root = fixture();

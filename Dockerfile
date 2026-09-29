@@ -39,21 +39,20 @@ COPY scripts scripts
 COPY public public
 COPY www www
 
-# Source provenance: the checked-out tree carries no .git, so the build
-# identity would otherwise record revision:null — the running revision could
-# never be verified against a tested SHA. The deploy pipeline stamps the exact
-# main commit it is shipping; a plain local `docker build` without the arg
-# keeps the historical (null) behavior instead of inventing a claim.
+# Read revision metadata from the same immutable context used by COPY, not
+# a webhook's possibly newer main SHA. .dockerignore exposes only HEAD/refs;
+# this read-only mount is never copied into a build layer or runtime image.
+# Source archives without that metadata may still supply an explicit claim.
 ARG MUSTER_SOURCE_REVISION=""
 ENV MUSTER_SOURCE_REVISION=${MUSTER_SOURCE_REVISION}
-# Opt-in refusal: a production build that cannot name its own source cannot be
-# checked against a tested SHA. Left off, a plain local `docker build` (no .git,
-# no arg) still produces the historical revision:null rather than failing.
+# Opt-in refusal when neither context metadata nor an explicit claim can name
+# the source. Archives remain allowed unless provenance is required.
 ARG MUSTER_REQUIRE_PROVENANCE=""
 ENV MUSTER_REQUIRE_PROVENANCE=${MUSTER_REQUIRE_PROVENANCE}
 
-RUN pnpm build \
-  && pnpm build:server
+RUN --mount=type=bind,source=.,target=/muster-source,readonly \
+  MUSTER_SOURCE_CONTEXT=/muster-source pnpm build \
+  && MUSTER_SOURCE_CONTEXT=/muster-source pnpm build:server
 
 # ── runtime stage: slim Node image with just the built artifacts.
 FROM node:22-slim AS runtime

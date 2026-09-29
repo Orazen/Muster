@@ -1,9 +1,62 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const IDENTITY_LIMITS = Object.freeze({ files: 4096, fileBytes: 32 * 1024 * 1024, totalBytes: 128 * 1024 * 1024, manifestBytes: 1024 * 1024 });
+
+/** Observe only the whitelisted metadata in a BuildKit context snapshot.
+ * No Git executable, config, object database, worktree pointer or parent repo
+ * is consulted. These bytes identify the checkout; they cannot prove clean. */
+export function readBuildContextRevision(contextRoot) {
+  try {
+    const base = realpathSync(contextRoot);
+    const readMetadata = (parts, limit) => {
+      let path = base;
+      for (const part of [".git", ...parts]) {
+        path = join(path, part);
+        if (lstatSync(path).isSymbolicLink()) throw new Error("Linked revision metadata");
+      }
+      const stat = lstatSync(path);
+      if (!stat.isFile() || stat.size > limit) throw new Error("Invalid revision metadata size");
+      const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try {
+        const before = fstatSync(fd);
+        if (!before.isFile() || before.size > limit) throw new Error("Invalid revision metadata size");
+        const bytes = Buffer.alloc(limit + 1);
+        let length = 0;
+        while (length < bytes.length) {
+          const count = readSync(fd, bytes, length, bytes.length - length, null);
+          if (!count) break;
+          length += count;
+        }
+        const after = fstatSync(fd);
+        if (length !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) throw new Error("Revision metadata changed");
+        return bytes.subarray(0, length).toString("utf8").trim();
+      } finally { closeSync(fd); }
+    };
+    const head = readMetadata(["HEAD"], 512);
+    const valid = value => /^[a-fA-F0-9]{40}$/.test(value);
+    if (valid(head)) return head.toLowerCase();
+    const match = /^ref: (refs\/heads\/[A-Za-z0-9._/-]+)$/.exec(head);
+    if (!match) return null;
+    const ref = match[1];
+    const parts = ref.split("/");
+    if (parts.some(part => !part || part === "." || part === ".." || part.endsWith(".lock")) || ref.includes("..")) return null;
+    let revision;
+    try {
+      const loose = readMetadata(parts, 128);
+      // A malformed loose ref must not fall back to an older packed value.
+      revision = valid(loose) ? loose.toLowerCase() : null;
+    } catch (error) {
+      if (error.code !== "ENOENT") return null;
+      const packed = readMetadata(["packed-refs"], 256 * 1024);
+      const rows = packed.split(/\r?\n/).map(line => line.split(" ")).filter(row => row[1] === ref);
+      revision = rows.length === 1 && rows[0].length === 2 && valid(rows[0][0]) ? rows[0][0].toLowerCase() : null;
+    }
+    return readMetadata(["HEAD"], 512) === head ? revision : null;
+  } catch { return null; }
+}
 
 // An EMPTY claim (a Docker ARG left at its default "") means "not supplied",
 // not "claim the empty string" — the validator would otherwise reject the
@@ -15,7 +68,11 @@ export function createBuildMetadata(root, version, revisionClaim = process.env.M
   // oxlint-disable-next-line anti-slop/no-runtime-typeof
   const validRevision = (value) => typeof value === "string" && /^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/.test(value);
   if (revisionClaim !== undefined && !validRevision(revisionClaim)) throw new Error("Invalid source revision claim");
-  try {
+  const sourceContext = process.env.MUSTER_SOURCE_CONTEXT;
+  if (sourceContext) {
+    revision = readBuildContextRevision(sourceContext);
+    if (revision !== null && revisionClaim !== undefined && revision !== revisionClaim.toLowerCase()) throw new Error("Source revision claim conflicts with build context");
+  } else try {
     const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000, maxBuffer: 1024 * 1024 }).trim();
     // Never borrow provenance from an unrelated parent checkout.
     if (realpathSync(git("rev-parse", "--show-toplevel")) === realpathSync(root)) {
@@ -47,8 +104,8 @@ export function createBuildMetadata(root, version, revisionClaim = process.env.M
  *  logic in a test proved nothing, because deleting the real guard left the
  *  copy green.
  *
- *  Opt-in: a plain local `docker build` has no .git and no arg, and inventing a
- *  claim for it would be worse than admitting ignorance. */
+ *  Opt-in: a source archive can have no revision metadata or explicit claim;
+ *  inventing a revision would be worse than admitting ignorance. */
 export function assertProvenanceClaimed(metadata, requireProvenance = process.env.MUSTER_REQUIRE_PROVENANCE) {
   if (requireProvenance === "1" && metadata.source.revision === null) {
     throw new Error([
