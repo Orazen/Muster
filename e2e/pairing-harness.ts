@@ -33,6 +33,10 @@ export function pairingServerEnvironment(options: ServerEnvironmentOptions): Nod
     PATH: [dirname(process.execPath), "/usr/bin", "/bin"].join(delimiter),
     // Prevent the server's GUI PATH discovery from loading a login shell.
     VITEST: "true",
+    // VITEST suppresses login-shell discovery, but system PATH entries and
+    // GUI PATH augmentation still expose real Docker/Podman installations.
+    // Guard native probes before server imports, including Node descendants.
+    NODE_OPTIONS: `--import=${new URL("./no-host-containers.mjs", import.meta.url).href}`,
     NODE_ENV: "test",
     OMB_HOST: "127.0.0.1",
     OMB_PORT: String(options.port),
