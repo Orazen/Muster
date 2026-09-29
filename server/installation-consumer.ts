@@ -28,10 +28,19 @@ import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import { platformWire } from "./installation-authority.ts";
 
-const CONSUMER_VERSION = 1;
+const CONSUMER_VERSION = 2;
+/** Version 1 predates authority binding: a credential in a v1 file was minted
+ *  by whichever server that data directory last pointed at, and nothing in the
+ *  file recorded which. Those files fail closed below rather than being
+ *  trusted or silently upgraded. */
+const LEGACY_CONSUMER_VERSION = 1;
 
 const persistedWire = z.object({
   version: z.literal(CONSUMER_VERSION),
+  /** The origin this credential was minted by and may be sent to. A
+   *  credential is a bearer for ONE authority; without this, pointing the same
+   *  data directory at a different base URL shipped the old secret there. */
+  authority: z.string().min(1),
   clientKey: z.string().min(1),
   label: z.string().min(1),
   platform: platformWire,
@@ -43,6 +52,9 @@ const persistedWire = z.object({
 
 export interface PersistedInstallation {
   version: typeof CONSUMER_VERSION;
+  /** The origin this credential belongs to. A credential minted by one server
+   *  is never presented to another; see loadPersistedInstallation. */
+  authority: string;
   clientKey: string;
   label: string;
   platform: z.infer<typeof platformWire>;
@@ -56,14 +68,77 @@ export function installationConsumerPath(dataDir: string): string {
   return `${dataDir}/installation-credential.json`;
 }
 
-export function loadPersistedInstallation(path: string): PersistedInstallation | null {
-  if (!existsSync(path)) return null;
+/** Read persisted state for ONE authority.
+ *
+ * `authority` is required, not optional: the whole point is that a caller
+ * cannot read a credential without saying where it is going, so an omitted
+ * authority is not a way to bypass the check. Mismatched or legacy state comes
+ * back with its credential and installation id cleared and its stable client
+ * key intact, which is a machine that knows who it is and must explicitly
+ * re-attach — not one that is holding a secret for someone else.
+ */
+/** The authority a base URL names. Compared as an ORIGIN so a trailing slash,
+ *  a path prefix or a default port does not read as a different server — the
+ *  comparison is about which server, not which spelling. */
+function authorityOf(baseUrl: string): string {
   try {
-    return persistedWire.parse(JSON.parse(readFileSync(path, "utf8")));
+    return new URL(baseUrl).origin;
+  } catch {
+    return baseUrl.trim();
+  }
+}
+
+export function loadPersistedInstallation(path: string, authority: string): PersistedInstallation | null {
+  if (!existsSync(path)) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
   } catch {
     // Corrupt state never presents a secret it cannot vouch for.
     return null;
   }
+  const parsed = persistedWire.safeParse(raw);
+  if (parsed.success) {
+    // Normalise HERE as well as in the constructor. Normalising only at the
+    // write site meant the comparison depended on which caller asked, so the
+    // same origin spelled with a trailing slash or an explicit :443 read as a
+    // different server and locked a healthy machine out of its own credential.
+    if (parsed.data.authority !== authorityOf(authority)) return unbound(parsed.data);
+    return parsed.data;
+  }
+  // A v1 file parses as a v2 file with `authority` missing, so it lands here.
+  // Keep the machine's identity, drop everything that is a secret for a server
+  // this file never named.
+  const legacy = z.object({
+    version: z.literal(LEGACY_CONSUMER_VERSION),
+    clientKey: z.string().min(1),
+    label: z.string().min(1),
+    platform: platformWire,
+  }).safeParse(raw);
+  if (legacy.success) {
+    return {
+      version: CONSUMER_VERSION,
+      authority,
+      clientKey: legacy.data.clientKey,
+      label: legacy.data.label,
+      platform: legacy.data.platform,
+      installationId: null,
+      credential: null,
+      credentialExpiresAt: null,
+      updatedAt: 0,
+    };
+  }
+  return null;
+}
+
+/** Same file, read by a different authority: identity kept, secret dropped. */
+function unbound(state: PersistedInstallation): PersistedInstallation {
+  return {
+    ...state,
+    installationId: null,
+    credential: null,
+    credentialExpiresAt: null,
+  };
 }
 
 export type InstallationConsumerStatus =
@@ -105,6 +180,9 @@ export class InstallationConsumer {
   private state: PersistedInstallation;
   private fetchJson: FetchLike;
   private baseUrl: string;
+  /** The origin whose credential this machine may present. Fixed at
+   *  construction, which is what makes it a fence rather than a mutable field. */
+  private authority: string;
   private durable = true;
   /** Absolute time the credential must be renewed before, by the injected clock. */
   private renewBeforeMs = 60 * 60_000;
@@ -116,8 +194,10 @@ export class InstallationConsumer {
     this.path = installationConsumerPath(dataDirectory);
     this.baseUrl = baseUrl;
     this.fetchJson = fetchJson;
-    this.state = loadPersistedInstallation(this.path) ?? {
+    this.authority = authorityOf(this.baseUrl);
+    this.state = loadPersistedInstallation(this.path, this.authority) ?? {
       version: CONSUMER_VERSION,
+      authority: this.authority,
       clientKey: `inst-${randomBytes(12).toString("base64url")}`,
       label: "This machine",
       platform: "macos",
