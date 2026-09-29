@@ -15,6 +15,7 @@ import { readFileSync, statSync, unlinkSync, type Stats } from "node:fs";
 import { writeFileAtomic } from "./atomic.ts";
 import { retainForReplay } from "./sse-replay.ts";
 import { pickSeedEngine } from "./model-selection.ts";
+import { prepareModelSelectionPatch } from "./bot-profile.ts";
 import { createServer, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import { extname, isAbsolute, join } from "node:path";
@@ -140,7 +141,7 @@ import { LivenessReaper } from "./liveness.ts";
 import type { WatchedTurn } from "./turn-watchdog.ts";
 import { buildModelContext } from "./model-context.ts";
 import { buildNotification, type Notification } from "./notify.ts";
-import { isEffortLevel, type RequestOutcome, type RuntimeEvent } from "./contracts.ts";
+import type { RequestOutcome, RuntimeEvent } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
@@ -8333,11 +8334,11 @@ let requestUserEmail = "";
       // be offline would cost the copy all of them. Letting it through is
       // safe — startTurn refuses to run a turn on an unavailable instance
       // anyway, so an unverifiable level never reaches a CLI.
-      const nextSelection: { instanceId?: string; effort?: string } | undefined = body.modelSelection;
-      if (nextSelection?.effort !== undefined) {
-        if (!isEffortLevel(nextSelection.effort)) {
-          return json(res, 400, { error: `effort "${String(nextSelection.effort)}" is not recognized` });
-        }
+      const preparedSelection = body.modelSelection === undefined ? undefined
+        : prepareModelSelectionPatch(body.modelSelection, existing?.modelSelection);
+      if (preparedSelection && !preparedSelection.ok) return json(res, 400, { error: preparedSelection.error });
+      const nextSelection = preparedSelection?.selection;
+      if (preparedSelection?.explicitEffort && nextSelection?.effort !== undefined) {
         const target = registry.get(nextSelection.instanceId ?? existing?.modelSelection.instanceId ?? "");
         // typed as strings, not levels: this is the boundary that decides
         // whether the value *is* a level, so it must not assert that it is
@@ -8360,9 +8361,10 @@ let requestUserEmail = "";
         if (field === "name" && !value.trim()) return json(res, 400, { error: "name must not be empty" });
       }
       const patch: Parameters<typeof store.patchBot>[1] = {};
-      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "computer", "color", "character", "mascotExpression", "pinned", "hidden", "speakReplies", "voice"] as const) {
+      for (const key of ["name", "title", "description", "notifications", "unread", "computer", "color", "character", "mascotExpression", "pinned", "hidden", "speakReplies", "voice"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
+      if (nextSelection) patch.modelSelection = nextSelection;
       // Muster Vault (lite): set/raise/clear the bot's lifetime token
       // budget. null clears; the schema bounds the number.
       if (body.tokenBudget !== undefined) {

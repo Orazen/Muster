@@ -6,12 +6,96 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
-import type { ModelSelection } from "./contracts.ts";
+import { EFFORT_LEVELS, type ModelSelection } from "./contracts.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { AGENT_CHARACTERS, Store, type BotRecord, type OptionCardData, type StoreChange } from "./store.ts";
 import { AGENT_CHARACTERS as SHARED_CHARACTERS, type AgentCharacter } from "./agent-character.ts";
+import { prepareModelSelectionPatch } from "./bot-profile.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
+
+describe("saved bot profile recovery", () => {
+  beforeEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
+
+  it("repairs a minimal saved profile without losing its conversation or choosing a provider", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Keep my original task" });
+    const messages = store.messagesFor(bot.threadId);
+    const raw = { id: bot.id, name: bot.name, threadId: bot.threadId, tasks: bot.tasks, createdAt: bot.createdAt,
+      unknownFutureField: { retained: true }, autoApprove: false, browser: false, computer: "off" };
+    const path = join(DATA_DIR, "bots.json");
+    writeFileSync(path, JSON.stringify([raw]));
+    const recovered = new Store(() => { throw new Error("recovery must not choose a provider"); });
+    expect(recovered.bot(bot.id)).toMatchObject({ ...raw, title: "", description: "", color: "orange",
+      notifications: false, unread: false, resumeCursors: {}, modelSelection: { instanceId: "", model: "" } });
+    expect(recovered.messagesFor(bot.threadId)).toEqual(messages);
+    const saved = readFileSync(path, "utf8");
+    const inode = statSync(path).ino;
+    const reloaded = new Store(() => { throw new Error("reload must not choose a provider"); });
+    expect(reloaded.bot(bot.id)).toEqual(recovered.bot(bot.id));
+    expect(readFileSync(path, "utf8")).toBe(saved);
+    expect(statSync(path).ino).toBe(inode);
+  });
+
+  it("preserves configured unavailable engines, future fields and permission choices", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const raw = { ...bot, modelSelection: { instanceId: "removed-engine", model: "private-model", effort: "high", future: { retained: true } },
+      resumeCursors: { old: "cursor", future: { retained: true } }, browser: false, autoApprove: false,
+      alwaysAllow: [], computer: "off", notifications: true, unread: true, future: ["keep"] };
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify([raw]));
+    expect(new Store(selection).bot(bot.id)).toEqual({ ...raw, activity: "idle", busy: false });
+  });
+
+  it.each([null, [], "invalid"])("repairs malformed cursor map %j once", resumeCursors => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const path = join(DATA_DIR, "bots.json");
+    writeFileSync(path, JSON.stringify([{ ...bot, resumeCursors }]));
+    expect(new Store(selection).bot(bot.id)?.resumeCursors).toEqual({});
+    const inode = statSync(path).ino;
+    expect(new Store(selection).bot(bot.id)?.resumeCursors).toEqual({});
+    expect(statSync(path).ino).toBe(inode);
+  });
+
+  it.each([
+    { input: null, expectedInstance: "" }, { input: [], expectedInstance: "" },
+    { input: "invalid", expectedInstance: "" }, { input: { instanceId: "offline" }, expectedInstance: "offline" },
+    { input: { instanceId: 7, model: false }, expectedInstance: "" },
+  ])(
+    "canonicalizes saved selection $input without provider lookup", ({ input: modelSelection, expectedInstance }) => {
+      const store = new Store(selection);
+      const bot = store.createBot({}, { seedMessages: false });
+      writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify([{ ...bot, modelSelection }]));
+      expect(new Store(() => { throw new Error("unexpected provider choice"); }).bot(bot.id)?.modelSelection)
+        .toEqual({ instanceId: expectedInstance, model: "" });
+    },
+  );
+});
+
+describe("model selection partial update compatibility", () => {
+  const previous = { instanceId: "offline", model: "chosen", effort: "high" };
+  it.each(EFFORT_LEVELS)("accepts the canonical %s effort", effort => {
+    const result = prepareModelSelectionPatch({ effort }, previous);
+    expect(result.ok && result.selection.effort).toBe(effort);
+  });
+  it.each([null, [], "invalid", {}, { future: true }, { instanceId: 1 }, { model: false }, { effort: "turbo" }])(
+    "rejects malformed patch %j", patch => expect(prepareModelSelectionPatch(patch, previous).ok).toBe(false),
+  );
+  it.each([
+    [{ instanceId: "offline" }, previous],
+    [{ instanceId: "other" }, { instanceId: "other", model: "" }],
+    [{ model: "" }, { ...previous, model: "" }],
+    [{ effort: "low" }, { ...previous, effort: "low" }],
+    [{ instanceId: "offline", model: "chosen" }, { instanceId: "offline", model: "chosen" }],
+    [{ instanceId: "", model: "" }, { instanceId: "", model: "" }],
+  ])("completes %j while retaining full-selection effort reset", (patch, expected) => {
+    const result = prepareModelSelectionPatch(patch, previous);
+    expect(result.ok && result.selection).toEqual(expected);
+    expect(previous).toEqual({ instanceId: "offline", model: "chosen", effort: "high" });
+  });
+});
 
 describe("Store", () => {
   beforeEach(() => {

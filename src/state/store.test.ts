@@ -3,6 +3,44 @@ import { describe, expect, it } from "vitest";
 import { initialState, prepareUnreadAnnouncement, reducer, visibleMessages, type Bot, type Group, type Message } from "./store";
 import { buildWorkspaceSummary } from "../components/os/workspace-state";
 
+describe("incomplete bot profile ingress", () => {
+  const minimal = { id: "legacy", threadId: "original-thread", name: "Saved teammate", messages: [
+    { id: "kept-message", role: "user", kind: "text", text: "Keep this", at: 1 },
+  ] };
+  // The wire boundary can violate the static type; reproduce the installed
+  // record without inventing data for it before the production reducer runs.
+  // @ts-expect-error Deliberately reproduce an incomplete record received from an older backend.
+  const incoming: Bot = minimal;
+  it.each(["hydrate", "botAdded", "botPatched"] as const)("repairs %s before UI consumers render", type => {
+    const next = reducer(initialState, type === "hydrate" ? { type, bots: [incoming], groups: [] } : { type, bot: incoming });
+    expect(next.bots[0]).toMatchObject({ ...minimal, title: "", description: "", color: "orange", notifications: false,
+      unread: false, modelSelection: { instanceId: "", model: "" } });
+    expect(next.bots[0].messages).toEqual(minimal.messages);
+    expect(next.bots[0].autoApprove).toBeUndefined();
+    expect(next.bots[0].computer).toBeUndefined();
+  });
+  it("merges known partial announcements before normalization and preserves transcripts", () => {
+    const loaded = reducer(initialState, { type: "hydrate", bots: [incoming], groups: [] });
+    const picked = reducer(loaded, { type: "setModel", botId: incoming.id,
+      selection: { instanceId: "offline", model: "chosen", effort: "high" } });
+    const patch = { id: incoming.id, name: "Renamed", notifications: true };
+    // @ts-expect-error Older wire announcements can omit required profile fields.
+    const next = reducer(picked, { type: "botPatched", bot: patch });
+    expect(next.bots[0].modelSelection).toEqual(picked.bots[0].modelSelection);
+    expect(next.bots[0].threadId).toBe(incoming.threadId);
+    expect(next.bots[0].messages).toEqual(minimal.messages);
+    expect(next.bots[0].notifications).toBe(true);
+  });
+  it("keeps explicit unconfigured selection and task-switch transcript authoritative", () => {
+    const loaded = reducer(initialState, { type: "hydrate", bots: [incoming], groups: [] });
+    const next = reducer(loaded, { type: "botPatched", bot: { ...loaded.bots[0],
+      threadId: "next-thread", messages: [], modelSelection: { instanceId: "", model: "" } } });
+    expect(next.bots[0].threadId).toBe("next-thread");
+    expect(next.bots[0].messages).toEqual([]);
+    expect(next.bots[0].modelSelection).toEqual({ instanceId: "", model: "" });
+  });
+});
+
 describe("conversation visibility and unread replies", () => {
   const bot: Bot = {
     id: "selected-bot", threadId: "selected-thread", name: "Scout", title: "", description: "",

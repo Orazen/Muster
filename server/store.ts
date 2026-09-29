@@ -6,6 +6,7 @@ import { existsSync, readFileSync, mkdirSync, rmSync, unlinkSync } from "node:fs
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { normalizeBotCursors, normalizeBotProfile } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR } from "./config.ts";
 import * as mdb from "./message-db.ts";
@@ -490,6 +491,11 @@ export class Store {
     // Bots that were mid-turn are remembered (takeStartupLosses) so the
     // server can say so in their thread instead of silently idling them.
     let botsMigrated = false;
+    this.bots = this.bots.map(bot => {
+      const normalized = { ...normalizeBotProfile(bot), resumeCursors: normalizeBotCursors(bot.resumeCursors) };
+      if (JSON.stringify(normalized) !== JSON.stringify(bot)) botsMigrated = true;
+      return normalized;
+    });
     let chiefSeen = false;
     let groupsMigrated = false;
     for (const b of this.bots) {

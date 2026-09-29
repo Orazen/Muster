@@ -15,6 +15,7 @@ import {
   type ReactNode,
 } from "react";
 import type { EffortLevel } from "../../server/contracts.ts";
+import { normalizeBotProfile } from "../../server/bot-profile";
 import type { AgentCharacter, AgentColor } from "@/lib/mascot";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { SocialProfile, SocialPostView, SocialState } from "@/lib/social";
@@ -652,7 +653,7 @@ export function reducer(state: AppState, action: Action): AppState {
         prev?: T,
       ): T =>
         !incoming.messages?.length && prev?.messages?.length ? ({ ...incoming, messages: prev.messages } as T) : incoming;
-      const bots = action.bots.map((b) => keepTranscripts(b, prevById.get(b.id)));
+      const bots = action.bots.map((b) => normalizeBotProfile(keepTranscripts(b, prevById.get(b.id))));
       const groups = (action.groups ?? []).map((g) => keepTranscripts(g, prevGroupById.get(g.id)));
       const selectedId = resolveChatSelection(state.selectedId, bots, groups);
       return { ...state, bots, groups, selectedId, rosterHydrated: true };
@@ -816,7 +817,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         // An HTTP create/import response and its SSE broadcast can race. Fold
         // both paths without ever showing the same bot twice.
-        bots: [action.bot, ...state.bots.filter((bot) => bot.id !== action.bot.id)],
+        bots: [normalizeBotProfile(action.bot), ...state.bots.filter((bot) => bot.id !== action.bot.id)],
         activeView: "chat",
         selectedId: action.bot.id,
       };
@@ -837,7 +838,7 @@ export function reducer(state: AppState, action: Action): AppState {
       if (!before) {
         return {
           ...state,
-          bots: [{ ...action.bot, messages: action.bot.messages ?? [] }, ...state.bots],
+          bots: [normalizeBotProfile({ ...action.bot, messages: action.bot.messages ?? [] }), ...state.bots],
         };
       }
       const next = action.bot.chiefOfStaff
@@ -849,7 +850,7 @@ export function reducer(state: AppState, action: Action): AppState {
           }
         : state;
       const switchedThread = action.bot.threadId !== before.threadId;
-      return updateBot(next, action.bot.id, (b) => ({
+      return updateBot(next, action.bot.id, (b) => normalizeBotProfile({
         ...b,
         ...action.bot,
         // Ordinary bot patches omit messages and must preserve the current
