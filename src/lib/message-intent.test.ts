@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { allPendingSends, newIntentId, parkSend, reconcileThread, retireSend, type PendingSend, type ReplayBody } from "./message-intent.js";
+import { allPendingSends, newIntentId, parkSend, receiptThreadId, reconcileThread, retireSend, type PendingSend, type ReplayBody } from "./message-intent.js";
 
 function memoryStorage(): Storage {
   const map = new Map<string, string>();
@@ -192,5 +192,101 @@ describe("newIntentId", () => {
     const id = newIntentId();
     expect(id).toMatch(/^[\w.-]{8,128}$/);
     expect(newIntentId()).not.toBe(newIntentId());
+  });
+});
+
+describe("reconciliation eligibility at the request boundary", () => {
+  it("queries an accepted row without querying or retiring an active send in the same thread", async () => {
+    const older = pending({ intentId: "accepted-A", accountId: "owner" });
+    const active = pending({ intentId: "active-B", accountId: "owner" });
+    parkSend(store, older);
+    parkSend(store, active);
+    const inFlight = new Set([active.intentId]);
+    const lookedUp: string[] = [];
+    const folded: string[] = [];
+    const unresolved = await reconcileThread(store, older.threadId, async (record, lookup) => {
+      expect(lookup).toBe(true);
+      lookedUp.push(record.intentId);
+      return { intent: { messageId: "older-message", threadId: older.threadId, state: "accepted" } };
+    }, item => folded.push(item.pending.intentId), record => !inFlight.has(record.intentId));
+    expect(lookedUp).toEqual([older.intentId]);
+    expect(folded).toEqual([older.intentId]);
+    expect(unresolved).toEqual([]);
+    expect(allPendingSends(store)).toEqual([older, active]);
+  });
+
+  it("keeps foreign and unstamped rows untouched even when the thread has an eligible account row", async () => {
+    const mine = pending({ intentId: "mine", accountId: "owner" });
+    const foreign = pending({ intentId: "foreign", accountId: "another-owner" });
+    const legacy = pending({ intentId: "legacy" });
+    for (const record of [mine, foreign, legacy]) parkSend(store, record);
+    const lookedUp: string[] = [];
+    await reconcileThread(store, mine.threadId, async record => {
+      lookedUp.push(record.intentId);
+      return { intent: { messageId: "owned-message", threadId: mine.threadId, state: "dispatched" } };
+    }, undefined, record => record.accountId === "owner");
+    expect(lookedUp).toEqual([mine.intentId]);
+    expect(allPendingSends(store)).toEqual([foreign, legacy]);
+  });
+
+  it("rechecks eligibility after a preceding asynchronous lookup instead of capturing a stale set", async () => {
+    const first = pending({ intentId: "first", accountId: "owner" });
+    const second = pending({ intentId: "second", accountId: "owner" });
+    parkSend(store, first);
+    parkSend(store, second);
+    const inFlight = new Set<string>();
+    let releaseFirst: (response: ReplayBody) => void = () => { throw new Error("Deferred response was not initialized"); };
+    const firstResponse = new Promise<ReplayBody>(resolve => { releaseFirst = resolve; });
+    const lookedUp: string[] = [];
+    const sweep = reconcileThread(store, first.threadId, async record => {
+      lookedUp.push(record.intentId);
+      return firstResponse;
+    }, undefined, record => !inFlight.has(record.intentId));
+    expect(lookedUp).toEqual([first.intentId]);
+    inFlight.add(second.intentId);
+    releaseFirst({ intent: { messageId: "first-message", state: "dispatched" } });
+    await sweep;
+    expect(lookedUp).toEqual([first.intentId]);
+    expect(allPendingSends(store)).toEqual([second]);
+  });
+
+  it("can reconcile a previously skipped record on the next sweep with its original id and receipt destination", async () => {
+    const record = pending({ accountId: "owner" });
+    parkSend(store, record);
+    let eligible = false;
+    const seen: Array<[string, boolean]> = [];
+    const destinations: string[] = [];
+    const send = async (current: PendingSend, lookup: boolean): Promise<ReplayBody> => {
+      seen.push([current.intentId, lookup]);
+      return { intent: { messageId: "original-message", threadId: "original-destination", state: "dispatched" } };
+    };
+    await reconcileThread(store, record.threadId, send, item => destinations.push(item.receipt.threadId), () => eligible);
+    expect(seen).toEqual([]);
+    expect(allPendingSends(store)).toEqual([record]);
+    eligible = true;
+    await reconcileThread(store, record.threadId, send, item => destinations.push(item.receipt.threadId), () => eligible);
+    expect(seen).toEqual([[record.intentId, true]]);
+    expect(destinations).toEqual(["original-destination"]);
+    expect(allPendingSends(store)).toEqual([]);
+  });
+});
+
+describe("receipt destination", () => {
+  it("uses the admitted destination even when the current conversation changes", () => {
+    expect(receiptThreadId({ intent: { threadId: "admitted-thread" } }, "captured-thread"))
+      .toBe("admitted-thread");
+  });
+
+  it.each([
+    "{}",
+    '{"intent":{}}',
+    '{"intent":{"threadId":""}}',
+    '{"intent":{"threadId":"  "}}',
+    '{"intent":{"threadId":42}}',
+    '{"intent":{"threadId":null}}',
+    '{"intent":{"threadId":{"id":"another-thread"}}}',
+    '{"intent":{"threadId":{"toString":"not-a-function"}}}',
+  ])("keeps the captured destination for an older or malformed reply: %s", encoded => {
+    expect(receiptThreadId(JSON.parse(encoded), "captured-thread")).toBe("captured-thread");
   });
 });

@@ -20,7 +20,7 @@ import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { SocialProfile, SocialPostView, SocialState } from "@/lib/social";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
-import { allPendingSends, newIntentId, parkSend, reconcileThread, retireSend, type PendingSend } from "@/lib/message-intent";
+import { allPendingSends, newIntentId, parkSend, receiptThreadId, reconcileThread, retireSend, type PendingSend } from "@/lib/message-intent";
 import { soulMdFor, type AgentTemplate } from "@/lib/agent-templates";
 import { seedDraft } from "@/lib/drafts";
 import { showNotification } from "@/lib/notify";
@@ -1413,7 +1413,7 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
             method: "POST",
             body: JSON.stringify({ text: action.text, clientIntentId: intentId }),
           })
-            .then((body: { message?: Message; intent?: { messageId: string; state: "accepted" | "dispatched" | "unknown" } }) => {
+            .then((body: { message?: Message; intent?: { messageId: string; threadId?: string; state: "accepted" | "dispatched" | "unknown" } }) => {
               const messageId = body.intent?.messageId ?? body.message?.id;
               // A 2xx that names no message confirms NOTHING: keep the
               // record parked and the compact checking row up (with the
@@ -1423,28 +1423,27 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
                 rawDispatch({ type: "messageDelivery", threadId, intentId, state: "checking", text: action.text });
                 return;
               }
+              const destination = receiptThreadId(body, threadId);
               // "accepted" means durable but NOT yet sent (queued behind a
               // busy turn): the chip says so, and the record stays parked so
               // reconnect replays keep converging it. Only dispatched/unknown
               // are terminal and retire the ledger entry.
               const state = body.intent?.state === "unknown" ? "unknown" : body.intent?.state === "accepted" ? "accepted" : "sent";
               if (state === "sent" || state === "unknown") retireSend(intentStore, threadId, intentId);
-              inFlightIntentIds.current.delete(intentId);
               // Belt-and-braces echo: the SSE frame normally delivers the
               // user's bubble, but a missed or replayed frame must not hide
               // the send. messageAdded dedupes by id, so a later stream
               // copy of the same message is a no-op. A replayed intent
               // folds the ORIGINAL bubble — never a second one.
               if (body.message) {
-                const current = stateRef.current.bots.find((b) => b.id === action.botId);
-                if (current) rawDispatch({ type: "messageAdded", threadId: current.threadId, message: body.message });
+                rawDispatch({ type: "messageAdded", threadId: destination, message: body.message });
               }
               // The durable receipt's honest state: dispatched reads "sent",
               // unknown stays visibly uncertain. The chip carries the
               // original message id so it renders beside the right row.
               rawDispatch({
                 type: "messageDelivery",
-                threadId,
+                threadId: destination,
                 intentId,
                 state,
                 messageId,
@@ -1456,9 +1455,14 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
               // (replaying the SAME one); keep the compact "checking" state
               // and drop any optimistic bubble so a duplicate can never be
               // authored here.
-              inFlightIntentIds.current.delete(intentId);
               rawDispatch({ type: "messageDelivery", threadId, intentId, state: "checking", text: action.text });
               rawDispatch({ type: "error", message: "Checking delivery — your message will be reconciled when the connection returns." });
+            })
+            .finally(() => {
+              // Every settled request leaves the in-flight window, including
+              // a 2xx response without a usable acknowledgement. Its parked
+              // words must remain eligible for same-session reconciliation.
+              inFlightIntentIds.current.delete(intentId);
             });
           break;
         }
@@ -1777,14 +1781,12 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
       if (!alive) return;
       const parked = allPendingSends(intentStore, accountId);
       const botByThread = new Map(stateRef.current.bots.map((bot) => [bot.threadId, bot] as const));
-      // Mid-session hydrates must not replay records whose POST is still in
-      // flight — the send path parks before the request and retires on the
-      // 202, so a hydrate landing inside that window would race a second
-      // POST on the wire. A "checking" record mounted in THIS session is
-      // such an in-flight send; the same state after a page reload is a
-      // genuinely lost response and MUST sweep (there is no live request).
-      const inFlight = new Set(inFlightIntentIds.current);
-      const sweepable = parked.filter((record) => !inFlight.has(record.intentId));
+      // Eligibility is rechecked inside reconcileThread immediately before
+      // each lookup: another pending row in the same thread must not bypass
+      // this account's boundary or an active send's in-flight window.
+      const canReconcile = (record: PendingSend) =>
+        alive && record.accountId === accountId && !inFlightIntentIds.current.has(record.intentId);
+      const threadIds = new Set(parked.filter(canReconcile).map((record) => record.threadId));
       // One fold per confirmed receipt: add the echoed ORIGINAL message to
       // the receipt's OWN thread (messageAdded dedupes by id), then state
       // the delivery truthfully — terminal receipts retire the record,
@@ -1820,13 +1822,14 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
       // landing inside park→202 would race a second POST on the wire (the
       // server dedupes it safely, but the duplicate is still wrong). After a
       // page reload nothing is in flight, so the full sweep runs.
-      for (const pending of sweepable) {
-        void reconcileThread(intentStore, pending.threadId, (record, lookup) =>
+      for (const threadId of threadIds) {
+        void reconcileThread(intentStore, threadId, (record, lookup) =>
           api(`/api/bots/${record.botId}/messages`, {
             method: "POST",
             body: JSON.stringify({ text: record.text, clientIntentId: record.intentId, reconcile: lookup }),
           }),
           foldReceipt,
+          canReconcile,
         ).then((unresolved) => {
           if (!alive) return;
           // A record the server could not confirm stays parked, but it must

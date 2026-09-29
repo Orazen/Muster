@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 // Durable send intents, client side: the composer's "did my words arrive?"
 // ledger. On send, one immutable id and the exact words are parked BEFORE
 // the request leaves; the server's receipt (or a reconnect replay) folds
@@ -20,8 +22,8 @@ export interface PendingSend {
   /** The signed-in account that parked this send (W0). The reconnect sweep
    * replays only the CURRENT account's records — a shared browser profile
    * must never carry one account's parked words into another's session.
-   * Records written before this field existed never sweep; they still
-   * reconcile on their thread's own hydration. */
+   * Records written before this field existed stay parked and never
+   * enter automatic account-scoped recovery. */
   accountId?: string;
 }
 
@@ -97,6 +99,15 @@ export interface ReplayBody {
 /** The wire's id contract: only a primitive string is an id. */
 const isText = <T,>(value: T): value is T & string => String(value) === value;
 
+/** The receipt names where admission happened. Older or malformed replies
+ * fall back to the send's captured destination, never the currently open task. */
+const receiptThreadSchema = z.string().refine(value => value.trim().length > 0);
+
+export function receiptThreadId(body: ReplayBody, originalThreadId: string): string {
+  const destination = receiptThreadSchema.safeParse(body.intent?.threadId);
+  return destination.success ? destination.data : originalThreadId;
+}
+
 const messageIdOf = (body: ReplayBody): string | undefined => {
   if (body.intent?.messageId !== undefined) return body.intent.messageId;
   const id = body.message?.id;
@@ -134,6 +145,7 @@ export async function reconcileThread(
   threadId: string,
   send: (pending: PendingSend, lookup: boolean) => Promise<ReplayBody>,
   onReceipt?: (item: RecoveredReceiptItem | AcceptedReceiptItem) => void,
+  isEligible?: (pending: PendingSend) => boolean,
 ): Promise<PendingSend[]> {
   const now = Date.now();
   const values = read(store);
@@ -143,13 +155,17 @@ export async function reconcileThread(
   write(store, values);
   const unresolved: PendingSend[] = [];
   for (const pending of pendingList) {
+    // A thread can contain another account's parked row or a request still
+    // in flight. Recheck at the actual lookup boundary, including after a
+    // previous asynchronous lookup; skipped records stay parked untouched.
+    if (isEligible && !isEligible(pending)) continue;
     try {
       const body = await send(pending, true);
       const messageId = messageIdOf(body);
       const state = body.intent?.state;
       // The receipt's destination outranks the record's: the parked words
       // stay bound to the thread they were first accepted for.
-      const destination = isText(body.intent?.threadId) ? body.intent.threadId : threadId;
+      const destination = receiptThreadId(body, threadId);
       // Only a TERMINAL receipt retires the record. "accepted" means the
       // words are durable but still waiting to send (a busy bot's in-memory
       // queue): keep replaying on every reconnect until the send is
@@ -173,8 +189,8 @@ export async function reconcileThread(
  * scoped reconnect sweep. With `accountId` set, only records that account
  * parked are returned — shared-storage records from another signed-in
  * account stay parked and invisible to this session. Records written before
- * per-record accounts existed are likewise left for their thread's own
- * hydration path. */
+ * per-record accounts existed are likewise excluded from account-scoped
+ * automatic recovery. */
 export function allPendingSends(store: Store, accountId?: string): PendingSend[] {
   const now = Date.now();
   const values = read(store);
