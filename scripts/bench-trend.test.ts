@@ -121,6 +121,9 @@ function appendLine(file, record) {
 // retained history needs an identity first — without one, a rerun's record and
 // the re-downloaded copy of it are indistinguishable and history double-counts.
 describe("mergeTrends", () => {
+  // SAFETY: every field TrendRecord requires is listed explicitly above, and
+  // `over` is spread last so a caller may override any of them rather than
+  // introduce a field the record does not declare.
   const record = (over: Partial<TrendRecord> = {}): TrendRecord => ({
     recordedAt: "2026-09-29T03:17:00.000Z",
     source: "simulated",
