@@ -289,6 +289,7 @@ import * as workspaceBundle from "./workspace-bundle.ts";
 import {
 } from "./restore-apply.ts";
 import { handleCalendarRoute } from "./calendar-routes.ts";
+import { FOLLOW_UP_ROUTE_PREFIX, handleFollowUpRoute } from "./follow-up-routes.ts";
 import { handleWorkspaceBackupRoute } from "./workspace-backup-routes.ts";
 import { InstallationRegistry, registryPathFor } from "./installation-authority.ts";
 import { handleInstallationRoute } from "./installation-routes.ts";
@@ -6010,6 +6011,39 @@ let requestUserEmail = "";
         enrollment: calendarEnrollment, enrollmentBotName: botId => store.bot(botId)?.name ?? "Bot",
         clientId: process.env.GOOGLE_CLIENT_ID?.trim() ?? "",
         clientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? "",
+      })) return;
+    }
+
+    // ── follow-up proposals (server/follow-up-routes.ts) ───────────────
+    // Durable, account-owned suggestion rows: read plus the bounded control
+    // actions. The family resolves its own authority — a real account
+    // session, that account's own workspace from its current membership, and
+    // the plan's own bot and original thread — because loopback has no session
+    // at the gate above and a workspace-scoped resource is not what
+    // ownsRecord answers. The session is re-resolved after every await, as the
+    // Calendar family above does. Registered above the shared multi-tenant
+    // guard, which only matches bot/group/thread subjects named in the URL.
+    //
+    // No source reader is wired here on purpose: building a Calendar
+    // observation is the next slice, so proposing answers 503 rather than
+    // inventing evidence. Read and control are live and owner-scoped now.
+    if (path === FOLLOW_UP_ROUTE_PREFIX || path.startsWith(`${FOLLOW_UP_ROUTE_PREFIX}/`)) {
+      const followUpHeaders = new Headers();
+      for (const [key, value] of Object.entries(req.headers)) {
+        if (value !== undefined) followUpHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
+      }
+      if (await handleFollowUpRoute(req, res, method, path, {
+        db: getDb, origin: requestOrigin(req),
+        session: async () => {
+          const current = await auth.api.getSession({ headers: followUpHeaders }).catch(() => null);
+          return current?.user?.id && current.session?.id ? { userId: current.user.id, sessionId: current.session.id } : null;
+        },
+        operator: () => primaryUserId(),
+        lookups: {
+          plan: id => taskPlans?.plan(id) ?? null,
+          bot: id => store.bot(id),
+          taskByThread: (botId, threadId) => store.taskByThread(botId, threadId) ?? null,
+        },
       })) return;
     }
 
