@@ -39,6 +39,83 @@ function newConsumer(dataDirectory: string, responder: Parameters<typeof stubFet
 }
 
 describe("InstallationConsumer", () => {
+  it("a heartbeat 401 that arrives after a refresh does NOT erase the new credential", async () => {
+    // A6. The heartbeat sends one credential and, on a 401, cleared whatever
+    // was in state when the response landed. A refresh that completed while
+    // the heartbeat was in flight was therefore erased by the older 401: the
+    // machine reported "unregistered" while holding a working new secret, and
+    // nothing but a restart or a manual re-attach recovered it. A 401 is a
+    // statement about the credential that was SENT.
+    const dataDirectory = mkdtempSync(join(tmpdir(), "inst-consumer-a6-"));
+    try {
+      let release401: () => void = () => {};
+      const gate = new Promise<void>((resolve) => { release401 = resolve; });
+      let refreshCalls = 0;
+
+      // Built by hand rather than through newConsumer: the shared stub's
+      // responder is synchronous, so it cannot hold a response open. The
+      // ordering being tested IS a response arriving late.
+      const consumer = new InstallationConsumer({
+        dataDirectory,
+        baseUrl: "https://cloud.test",
+        fetchJson: async (input: string): Promise<Response> => {
+          if (input.includes("/api/installations/register")) {
+            return new Response(JSON.stringify({ installation: installationView, credential: "secret-one", reactivated: false, credentialExpiresAt: NOW + 7_200_000 }), { status: 200 });
+          }
+          if (input.includes("/api/installations/refresh")) {
+            refreshCalls += 1;
+            return new Response(JSON.stringify({ credential: "secret-two-rotated", credentialExpiresAt: NOW + 7_200_000 }), { status: 200 });
+          }
+          // The heartbeat is in flight and will be told, eventually, that the
+          // credential it carried is no good.
+          await gate;
+          return new Response(undefined, { status: 401 });
+        },
+      }, NOW);
+
+      await consumer.registerThroughOwner("session=1", { clientKey: consumer.clientKey, label: "L", platform: "macos" }, NOW);
+      expect(consumer.status).not.toBe("unregistered");
+
+      // Hold the heartbeat open, refresh, and only then let the 401 land.
+      const heartbeat = consumer.heartbeat(NOW);
+      const renewed = await consumer.refreshCredential(NOW + 1_000);
+      expect(refreshCalls).toBe(1);
+      expect(renewed.credential).toBe("secret-two-rotated");
+      expect(loadPersistedInstallation(installationConsumerPath(dataDirectory))?.credential).toBe("secret-two-rotated");
+
+      release401();
+      const report = await heartbeat;
+
+      const after = loadPersistedInstallation(installationConsumerPath(dataDirectory));
+      expect(after?.credential, "a stale 401 erased a working credential").toBe("secret-two-rotated");
+      expect(after?.installationId).toBe(installationView.id);
+      expect(report.status, "a stale answer about an old credential was believed").not.toBe("out-of-sync");
+      expect(consumer.status).not.toBe("unregistered");
+    } finally {
+      rmSync(dataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("still goes out-of-sync when the 401 belongs to the credential it is answering for", async () => {
+    // The fence must not become a way to keep a genuinely dead credential.
+    const dataDirectory = mkdtempSync(join(tmpdir(), "inst-consumer-a6b-"));
+    try {
+      const { consumer } = newConsumer(dataDirectory, (url) =>
+        url.includes("/register")
+          ? { status: 200, body: { installation: installationView, credential: "secret-one", reactivated: false, credentialExpiresAt: NOW + 7_200_000 } }
+          : url.includes("/self")
+            ? { status: 401 }
+            : { status: 500 });
+      await consumer.registerThroughOwner("session=1", { clientKey: consumer.clientKey, label: "L", platform: "macos" }, NOW);
+      const report = await consumer.heartbeat(NOW);
+      expect(report.status, "a real 401 must still unregister the machine").toBe("out-of-sync");
+      expect(consumer.status).toBe("unregistered");
+      expect(loadPersistedInstallation(installationConsumerPath(dataDirectory))?.credential).toBeNull();
+    } finally {
+      rmSync(dataDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("starts unregistered with a stable client key persisted before any credential exists", () => {
     const dataDirectory = mkdtempSync(join(tmpdir(), "inst-consumer-"));
     try {

@@ -202,15 +202,28 @@ export class InstallationConsumer {
     if (this.state.credential === null || this.state.installationId === null) {
       return { status: "unregistered", installationId: null, expiresAt: null, refreshed: false };
     }
+    // The credential THIS request carried, captured before the await. A 401
+    // may only ever clear its own credential.
+    const sent = this.state.credential;
     let response: Response;
     try {
       response = await this.fetchJson(`${this.baseUrl}/api/installations/self`, {
-        headers: { authorization: `Bearer ${this.state.credential}` },
+        headers: { authorization: `Bearer ${sent}` },
       });
     } catch (error) {
       throw new Error(`Installation heartbeat transport failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (response.status === 401) {
+      // A 401 is a statement about the credential that was sent, not about
+      // whatever happens to be in state now. Before this, a refresh that
+      // completed while the heartbeat was in flight was erased by the
+      // heartbeat's older 401: the machine came back "unregistered" while
+      // holding a perfectly good new secret, and only a restart or a manual
+      // re-attach could recover it. If state has moved on, this response is
+      // stale and carries no information about the current credential.
+      if (this.state.credential !== sent) {
+        return this.reportForCurrentCredential(now);
+      }
       this.state.installationId = null;
       this.state.credential = null;
       this.state.credentialExpiresAt = null;
@@ -225,6 +238,18 @@ export class InstallationConsumer {
     const expiresAt = this.state.credentialExpiresAt;
     const status: InstallationConsumerStatus = expiresAt !== null && expiresAt - now < this.renewBeforeMs ? "expiring" : "active";
     return { status, installationId: body.installation.id, expiresAt, refreshed: false };
+  }
+
+  /** The honest report when the caller has told us nothing about the current
+   *  credential: derive it from the credential actually held, exactly as a
+   *  successful heartbeat does, rather than defaulting to out-of-sync. */
+  private reportForCurrentCredential(now: number): ConsumerReport {
+    if (this.state.credential === null || this.state.installationId === null) {
+      return { status: "unregistered", installationId: null, expiresAt: null, refreshed: false };
+    }
+    const expiresAt = this.state.credentialExpiresAt;
+    const status: InstallationConsumerStatus = expiresAt !== null && expiresAt - now < this.renewBeforeMs ? "expiring" : "active";
+    return { status, installationId: this.state.installationId, expiresAt, refreshed: false };
   }
 
   /** Exchange the current credential for a fresh one before it expires. The
