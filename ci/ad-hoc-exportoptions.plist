@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Ad-hoc: the private-release-testing path. Registered devices only, so
+	     it needs no distribution certificate — but it still needs a team, and
+	     it still needs a plist at this exact path, which is what Xcode Cloud's
+	     export action passes. -->
+	<key>destination</key>
+	<string>export</string>
+	<key>method</key>
+	<string>ad-hoc</string>
+	<key>teamID</key>
+	<string>7375K23WFU</string>
+	<!-- Automatic: Xcode Cloud manages the certificates and profiles for this
+	     team. Naming profiles by hand here would require inventing names that
+	     have to match the account exactly, and a wrong name fails the export
+	     with a different, more confusing error than a missing file. -->
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>allowProvisioningUpdates</key>
+	<true/>
+	<key>stripSwiftSymbols</key>
+	<true/>
+</dict>
+</plist>

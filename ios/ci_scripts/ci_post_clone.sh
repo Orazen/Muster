@@ -12,6 +12,28 @@ else
 fi
 [ -f "$ios_dir/project.yml" ] || fail "Missing ios/project.yml in the checked-out repository."
 
+# The App Store Connect workflow passes its three export options plists by
+# path (`ci/<name>-exportoptions.plist`, resolved against the repository root).
+# They were never committed, so every export step died with xcodebuild's
+# opaque exit 70 and not one line of the build log named a missing file — the
+# archive step had already passed, so the log read as a signing problem.
+# Check them here, where the failure can say what is wrong, and before the
+# slow xcodegen download rather than twenty minutes after it.
+if [ -n "${CI_PRIMARY_REPOSITORY_PATH:-}" ]; then
+  repo_dir="$CI_PRIMARY_REPOSITORY_PATH"
+else
+  repo_dir=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+fi
+spec_team=$(sed -n 's/.*DEVELOPMENT_TEAM: *\([A-Z0-9]*\).*/\1/p' "$ios_dir/project.yml" | head -1)
+[ -n "$spec_team" ] || fail "Could not read DEVELOPMENT_TEAM from ios/project.yml."
+for export_plist in ad-hoc app-store development; do
+  path="$repo_dir/ci/$export_plist-exportoptions.plist"
+  [ -f "$path" ] || fail "Missing $path. The export action passes this file by path; without it xcodebuild exits 70 without saying the file is absent."
+  plutil -lint "$path" >/dev/null 2>&1 || fail "$path is not a readable plist."
+  export_team=$(plutil -extract teamID raw "$path" 2>/dev/null || true)
+  [ "$export_team" = "$spec_team" ] || fail "$path names teamID ${export_team:-<none>} but ios/project.yml signs with $spec_team."
+done
+
 # Match the generator used for local validation. A runner's other version must
 # not silently change the generated project; download only this checked release.
 xcodegen_version=2.46.0
