@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { z } from "zod";
 import { clearRunRecordAt, inspectRecordedServer, parseRunRecord, parseSetupInstances, readRunRecordAt, stopRecordedServer } from "../cli/runtime-contracts.mjs";
 
 const run = promisify(execFile);
@@ -227,6 +229,33 @@ describe("CLI command integration with owned fixture processes", () => {
     writeFileSync(path, "{unreadable");
     await expect(run(process.execPath, [cliPath, command], { env: { ...process.env, MUSTER_DIR: home }, timeout: 5000 })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("could not be verified") });
     expect(readFileSync(path, "utf8")).toBe("{unreadable");
+  });
+
+  it.skipIf(process.platform === "win32")("stores local session cookies with owner-only permissions", async () => {
+    const server = createServer((_req, res) => {
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "set-cookie": "better-auth.session_token=fixture-session.signature; Path=/; HttpOnly",
+      });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = z.object({ port: z.number().int().min(1).max(65_535) }).parse(server.address());
+    const home = directory();
+    const configPath = join(home, "cli.json");
+    const args = [cliPath, "pair", "--local", "--port", String(address.port), "--email", "fixture@example.test", "--password", "synthetic-fixture-password"];
+    const originalUmask = process.umask(0);
+    try {
+      await run(process.execPath, args, { env: { ...process.env, MUSTER_DIR: home }, timeout: 5000 });
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
+      chmodSync(configPath, 0o644);
+      await run(process.execPath, args, { env: { ...process.env, MUSTER_DIR: home }, timeout: 5000 });
+      expect(statSync(configPath).mode & 0o777).toBe(0o600);
+      expect(readFileSync(configPath, "utf8")).not.toContain("synthetic-fixture-password");
+    } finally {
+      process.umask(originalUmask);
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve(undefined)));
+    }
   });
 
   it("refuses malformed stop records without reporting success", async () => {

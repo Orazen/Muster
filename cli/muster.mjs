@@ -22,7 +22,7 @@
 //   muster status --json             machine-readable (agent callers)
 
 import { homedir, networkInterfaces } from "node:os";
-import { existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
@@ -58,8 +58,11 @@ function loadConfig() {
 }
 
 function saveConfig(patch) {
-  mkdirSync(join(CONFIG_PATH, ".."), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify({ ...loadConfig(), ...patch }, null, 2) + "\n");
+  mkdirSync(join(CONFIG_PATH, ".."), { recursive: true, mode: 0o700 });
+  writeFileSync(CONFIG_PATH, JSON.stringify({ ...loadConfig(), ...patch }, null, 2) + "\n", { mode: 0o600 });
+  // Existing files keep their old mode on writeFileSync, so enforce the same
+  // owner-only boundary for cookies saved by older CLI versions.
+  if (process.platform !== "win32") chmodSync(CONFIG_PATH, 0o600);
 }
 
 function apiConfig() {
