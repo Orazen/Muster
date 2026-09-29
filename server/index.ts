@@ -212,7 +212,7 @@ import {
   isAttemptRedirect,
   redeemDesktopSignInAttempt,
 } from "./desktop-attempts.ts";
-import { startAccountMerge, spendAccountMergeToken } from "./account-merge.ts";
+import { startAccountMerge, readAccountMergeToken, spendAccountMergeToken, mergeHasActiveWork, bindAccountMergeTarget } from "./account-merge.ts";
 import { mergeUserVault } from "./user-keys.ts";
 import { PROVIDER_DRIVER_ENV, DATA_DIR } from "./config.ts";
 import * as tts from "./tts/index.ts";
@@ -3489,6 +3489,7 @@ async function startTurn(
 // only owner of provider sessions, approvals, tools, computers and messages.
 routines = new RoutineManager({
   emit: broadcast,
+  webhookRunAllowed: (run) => webhooks.canRunQueued(run),
   botState: (botId) => {
     const bot = store.bot(botId);
     return !bot ? "missing" : bot.busy ? "busy" : "ready";
@@ -3526,7 +3527,6 @@ routines = new RoutineManager({
     notify(buildNotification("done", bot, run.threadId ?? "", `Sentry "${run.routineName}" spotted a change`));
   },
 });
-routines.start();
 
 // ── agent social layer (server/social.ts) ──────────────────────────────
 // Profiles + friend graph state; every frame carries socialOwnerIds so the
@@ -3741,6 +3741,11 @@ const CONTROL_TOKEN = randomBytes(24).toString("hex");
 
 const webhooks = new WebhookManager({
   operatorUserId: primaryUserId,
+  executionViewer: (owner) => {
+    if (!SELF_HOSTED) return { kind: "all" };
+    const account = owner && owner !== "local" ? owner : primaryUserId();
+    return account ? { kind: "account", owner: account } : null;
+  },
   emit: broadcast,
   botState: (botId) => {
     const bot = store.bot(botId);
@@ -3760,6 +3765,8 @@ const webhooks = new WebhookManager({
   cancelQueued: (webhookId, message) => routines!.cancelQueuedWebhook(webhookId, message),
   pendingRuns: (webhookId) => routines!.activeWebhookRunCount(webhookId),
 });
+// Restored webhook queues need both managers before their authority is checked.
+routines.start();
 
 let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
@@ -9364,22 +9371,68 @@ let requestUserEmail = "";
       const body = await readBody(req);
       const token = isText(body?.token) ? body.token.trim() : "";
       if (!token) return json(res, 400, { error: "paste the merge code from your other account" });
-      const intent = spendAccountMergeToken(token, requestUserId);
+      const intent = readAccountMergeToken(token, requestUserId);
       if (!intent) return json(res, 400, { error: "that merge code is unknown, expired, or already used" });
       const sourceUserId = requestUserId;
       const targetUserId = intent.targetUserId;
-      const [moved, kept] = mergeUserVault(DATA_DIR, sourceUserId, targetUserId);
+      // The oldest auth row is still the deployment operator. Deleting it
+      // would give an unrelated next-oldest account legacy data/privileges.
+      if (sourceUserId === primaryUserId()) return json(res, 409, {
+        error: "Keep this deployment's original account and merge your other account into it instead.",
+        code: "OPERATOR_MERGE_UNSUPPORTED",
+      });
+      if (!findUserById(targetUserId)) return json(res, 400, { error: "The destination account is no longer available; create a new merge code" });
+      const sourceBots = store.bots.filter((bot) => bot.ownerId === sourceUserId);
+      if (mergeHasActiveWork(sourceBots, webhooks.list({ kind: "account", owner: sourceUserId }).map((hook) => hook.botId), routines!.listRuns())) {
+        return json(res, 409, { error: "Wait for your active work to finish, or stop it, then try this merge code again.", code: "MERGE_WORK_ACTIVE" });
+      }
+      try { bindAccountMergeTarget(join(DATA_DIR, "account-merges.json"), sourceUserId, targetUserId); }
+      catch (error) {
+        const conflict = z.object({ status: z.literal(409) }).safeParse(error);
+        return json(res, conflict.success ? 409 : 503, {
+          error: conflict.success && error instanceof Error ? error.message : "Merge recovery data could not be saved. No account data was moved; try again after storage is available.",
+          code: conflict.success ? "MERGE_DESTINATION_FIXED" : "MERGE_RECOVERY_UNAVAILABLE",
+        });
+      }
+      // No await between preflight and the synchronous transfer. Failures
+      // retain source authentication; retry with fresh two-account approval.
+      if (!spendAccountMergeToken(token, sourceUserId)) return json(res, 400, { error: "that merge code is unknown, expired, or already used" });
+      let moved: string[] = [], kept: string[] = [], webhooksTransferred = 0;
       let botsReassigned = 0;
-      for (const b of store.bots) {
-        if (b.ownerId === sourceUserId) {
+      try {
+        webhooksTransferred = webhooks.transferOwner(sourceUserId, targetUserId);
+        [moved, kept] = mergeUserVault(DATA_DIR, sourceUserId, targetUserId);
+        for (const b of sourceBots) {
           stopCleanups.invalidate(b.id);
           stopPeerDispatch(b.id);
-          store.patchBot(b.id, { ownerId: targetUserId });
+          try { store.patchBot(b.id, { ownerId: targetUserId }); }
+          catch (error) {
+            // patchBot changes memory before its atomic save. Keep a failed
+            // row eligible for a fresh-token retry in this same process.
+            b.ownerId = sourceUserId;
+            throw error;
+          }
           botsReassigned++;
         }
+        deleteAuthUser(sourceUserId);
+      } catch (error) {
+        console.error("[merge] migration interrupted:", error instanceof Error ? error.message : String(error));
+        return json(res, 503, {
+          error: "The merge could not finish. Some data may already have moved; transferred webhooks stay paused. Sign in to both accounts and create a fresh merge code from the same destination account to retry.",
+          code: "MERGE_RETRY_REQUIRED",
+        });
       }
-      deleteAuthUser(sourceUserId);
-      await reloadUserInstancesAll();
+      for (const client of sseClients) {
+        if (client.userId !== sourceUserId) continue;
+        client.res.end();
+        sseClients.delete(client);
+      }
+      let enginesNeedRefresh = false;
+      try { await reloadUserInstancesAll(); }
+      catch (error) {
+        enginesNeedRefresh = true;
+        console.error("[merge] account merged; engine refresh needs retry:", error instanceof Error ? error.message : String(error));
+      }
       broadcast({ kind: "config", ...configStatus(targetUserId) });
       console.log(
         `[merge] ${sourceUserId.slice(0, 8)}*** folded into ${targetUserId.slice(0, 8)}*** keys=${moved.length}+${kept.length} bots=${botsReassigned}`,
@@ -9390,6 +9443,9 @@ let requestUserEmail = "";
         movedKeys: moved,
         keptKeys: kept,
         botsReassigned,
+        webhooksTransferred,
+        webhooksPaused: true,
+        enginesNeedRefresh,
       });
     }
 

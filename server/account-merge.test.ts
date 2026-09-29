@@ -1,14 +1,21 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { setUserProviderKey, mergeUserVault, userProviderFlags } from "./user-keys.ts";
-import { startAccountMerge, spendAccountMergeToken } from "./account-merge.ts";
+import { startAccountMerge, readAccountMergeToken, spendAccountMergeToken, bindAccountMergeTarget, mergeHasActiveWork } from "./account-merge.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "muster-merge-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("account merge tokens", () => {
+  it("preflights without consuming the single-use approval", () => {
+    const token = startAccountMerge("target");
+    expect(readAccountMergeToken(token, "source")).toEqual({ targetUserId: "target" });
+    expect(readAccountMergeToken(token, "source")).toEqual({ targetUserId: "target" });
+    expect(spendAccountMergeToken(token, "source")).toEqual({ targetUserId: "target" });
+    expect(readAccountMergeToken(token, "source")).toBeNull();
+  });
   it("spends a valid token to its minting target", () => {
     const token = startAccountMerge("usr_target");
     const intent = spendAccountMergeToken(token, "usr_source");
@@ -24,6 +31,34 @@ describe("account merge tokens", () => {
   it("refuses self-merge without burning anything else", () => {
     const token = startAccountMerge("usr_same");
     expect(spendAccountMergeToken(token, "usr_same")).toBeNull();
+  });
+});
+
+describe("merge transfer recovery", () => {
+  it("durably binds a partial transfer to its original destination", () => {
+    const file = join(dir, "merges.json");
+    bindAccountMergeTarget(file, "source", "target");
+    const before = readFileSync(file, "utf8");
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+    bindAccountMergeTarget(file, "source", "target");
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(() => bindAccountMergeTarget(file, "source", "third-account")).toThrow("original destination");
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(() => bindAccountMergeTarget(file, "source", "source")).toThrow("two valid accounts");
+  });
+
+  it("fails closed for corrupt or unavailable recovery storage", () => {
+    const file = join(dir, "invalid-merges.json");
+    writeFileSync(file, "broken");
+    expect(() => bindAccountMergeTarget(file, "source", "target")).toThrow("needs repair");
+    expect(readFileSync(file, "utf8")).toBe("broken");
+    expect(() => bindAccountMergeTarget(join(file, "child.json"), "source", "target")).toThrow();
+  });
+
+  it.each(["running", "waiting"])("blocks %s webhook work but leaves queued/foreign jobs alone", (status) => {
+    expect(mergeHasActiveWork([], ["hook-bot"], [{ botId: "hook-bot", status }])).toBe(true);
+    expect(mergeHasActiveWork([{ id: "source-bot", busy: true }], [], [])).toBe(true);
+    expect(mergeHasActiveWork([{ id: "source-bot", busy: false }], [], [{ botId: "source-bot", status: "queued" }, { botId: "foreign", status }])).toBe(false);
   });
 });
 

@@ -20,6 +20,18 @@ export type RoutineRunOn = "agent" | "cloud" | "opensandbox";
 
 export type RoutineRunTrigger = "schedule" | "manual" | "webhook";
 
+/** Captured by the server at webhook admission, never supplied by a sender. */
+export type WebhookRunAuthority = { kind: "account"; owner: string } | { kind: "desktop" };
+const webhookAuthoritySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("account"), owner: z.string().min(1).refine((owner) => owner !== "local") }).strict(),
+  z.object({ kind: z.literal("desktop") }).strict(),
+]);
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- persisted webhook authority is parsed at this I/O boundary
+export function parseWebhookRunAuthority(value: unknown): WebhookRunAuthority | null {
+  const parsed = webhookAuthoritySchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
 export type RoutineRunStatus =
   | "queued"
   | "running"
@@ -98,6 +110,7 @@ export interface RoutineRun {
   /** Why this receipt exists. Kept optional so version-1 files migrate in place. */
   triggerSource?: RoutineRunTrigger;
   webhookId?: string;
+  webhookAuthority?: WebhookRunAuthority;
   deliveryId?: string;
   threadId?: string;
   startedAt?: number;
@@ -160,6 +173,9 @@ export interface RoutineManagerOptions {
   now?: () => number;
   emit?: (payload: RoutineEvent) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
+  /** Recheck a webhook's captured authority before creating a task. Missing
+   * authority/callback fails closed, including pre-upgrade queued rows. */
+  webhookRunAllowed?: (run: Readonly<RoutineRun>) => boolean;
   createTask: (botId: string, title: string, activate?: boolean) => { threadId: string } | null;
   /** Liveness probe for a dedicated destination thread: returns the thread
    * id when that bot owns this task right now, else null. Dispatch reuses
@@ -517,6 +533,7 @@ export class RoutineManager {
     runOn: RoutineRunOn;
     deliveryId: string;
     receivedAt: number;
+    webhookAuthority?: WebhookRunAuthority;
   }): RoutineRun {
     if (this.options.botState(input.botId) === "missing") {
       throw Object.assign(new Error("The assigned AGENT no longer exists"), { status: 410 });
@@ -533,6 +550,7 @@ export class RoutineManager {
       manual: false,
       triggerSource: "webhook",
       webhookId: input.webhookId,
+      webhookAuthority: input.webhookAuthority ? { ...input.webhookAuthority } : undefined,
       deliveryId: input.deliveryId,
       createdAt: this.now(),
     };
@@ -629,6 +647,16 @@ export class RoutineManager {
 
       for (const run of [...this.runs].reverse()) {
         if (run.status !== "queued") continue;
+        if (run.triggerSource === "webhook" || run.webhookId !== undefined) {
+          if (!parseWebhookRunAuthority(run.webhookAuthority) || !this.options.webhookRunAllowed?.(run)) {
+            run.status = "cancelled";
+            run.error = "Webhook permission or assignment changed; review it before sending a new delivery";
+            run.finishedAt = this.now();
+            this.save();
+            this.emitRun(run);
+            continue;
+          }
+        }
         const state = this.options.botState(run.botId);
         if (state === "busy") continue;
         if (state === "missing") {

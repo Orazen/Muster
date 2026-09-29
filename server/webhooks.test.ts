@@ -1,7 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as atomic from "./atomic.ts";
 
 import {
   WebhookManager,
@@ -66,7 +67,107 @@ function create(manager: WebhookManager, viewer: WebhookViewer = { kind: "all" }
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe("webhook execution ownership and transfer", () => {
+  const source = { kind: "account" as const, owner: "source-account" };
+  const target = { kind: "account" as const, owner: "target-account" };
+
+  it.each([false, true])("refuses stale target ownership before dispatch/capture (capture=%s)", (capture) => {
+    const h = harness();
+    let botOwner = source.owner;
+    h.options.botOwned = (viewer) => viewer.kind === "account" && viewer.owner === botOwner;
+    const created = h.manager.create(source, { name: "Owned", prompt: "Private", botId: "bot", enabled: !capture, verificationPending: capture });
+    botOwner = target.owner;
+    expect(() => h.manager.receive(created.webhook.endpointId, created.secret, { payload: "never execute" })).toThrow("no longer has permission");
+    expect(h.queued).toEqual([]);
+    expect(h.manager.list(source)[0]?.verificationSample).toBeUndefined();
+  });
+
+  it("snapshots authority and rejects edited, paused, deleted or transferred queue destinations", () => {
+    const h = harness();
+    let botOwner = source.owner;
+    h.options.botOwned = (viewer) => viewer.kind === "account" && viewer.owner === botOwner;
+    const { webhook, secret } = create(h.manager, source);
+    h.manager.receive(webhook.endpointId, secret, { payload: "accepted" });
+    const captured = h.queued[0]!;
+    expect(captured.webhookAuthority).toEqual(source);
+    expect(h.manager.canRunQueued(captured)).toBe(true);
+    botOwner = target.owner;
+    expect(h.manager.canRunQueued(captured)).toBe(false);
+    botOwner = source.owner;
+    h.manager.update(source, webhook.id, { enabled: false });
+    expect(h.manager.canRunQueued(captured)).toBe(false);
+    h.manager.update(source, webhook.id, { enabled: true, botId: "new-bot" });
+    expect(h.manager.canRunQueued(captured)).toBe(false);
+    h.manager.update(source, webhook.id, { botId: webhook.botId });
+    h.manager.transferOwner(source.owner, target.owner);
+    botOwner = target.owner;
+    h.manager.update(target, webhook.id, { enabled: true });
+    expect(new WebhookManager(h.options).canRunQueued(captured)).toBe(false);
+    h.manager.remove(target, webhook.id);
+    expect(h.manager.canRunQueued(captured)).toBe(false);
+  });
+
+  it("transfers named hooks paused with credentials/history intact and audience withdrawal", () => {
+    const h = harness();
+    const created = create(h.manager, source);
+    h.manager.receive(created.webhook.endpointId, created.secret, { payload: "private history", deliveryId: "original" });
+    const before = h.manager.listAttempts(source);
+    const legacy = create(h.manager);
+    h.emitted.length = 0;
+    expect(h.manager.transferOwner(source.owner, target.owner)).toBe(1);
+    expect(h.manager.list(source)).toEqual([]);
+    expect(h.manager.list(target)[0]).toMatchObject({ id: created.webhook.id, endpointId: created.webhook.endpointId, enabled: false, verificationPending: false });
+    expect(h.manager.listAttempts(target)).toEqual(before);
+    expect(h.manager.authorize(created.webhook.endpointId, created.secret)).toBe(true);
+    expect(() => h.manager.receive(created.webhook.endpointId, created.secret, { payload: "paused" })).toThrow("paused");
+    expect(h.cancelled).toContainEqual({ id: created.webhook.id, message: "The webhook's account was merged; review it before sending new work" });
+    expect(h.emitted.slice(0, 2)).toMatchObject([{ kind: "webhook.deleted", owner: source.owner }, { kind: "webhook", webhook: { owner: target.owner } }]);
+    const reloaded = new WebhookManager(h.options);
+    expect(reloaded.transferOwner(source.owner, target.owner)).toBe(0);
+    expect(reloaded.list(target)[0]?.enabled).toBe(false);
+    expect(reloaded.list(h.ALL).find(row => row.id === legacy.webhook.id)?.owner).toBeUndefined();
+    reloaded.update(target, created.webhook.id, { enabled: true });
+    expect(reloaded.receive(created.webhook.endpointId, created.secret, { payload: "retry", deliveryId: "original" }).duplicate).toBe(true);
+    expect(h.queued).toHaveLength(1);
+  });
+
+  it("keeps transfer memory and events unchanged on failed persist and permits a retry", () => {
+    const h = harness();
+    const created = create(h.manager, source);
+    const before = readFileSync(h.file, "utf8");
+    h.emitted.length = 0;
+    const write = vi.spyOn(atomic, "writeFileAtomic").mockImplementationOnce(() => { throw new Error("owned disk failure"); });
+    expect(() => h.manager.transferOwner(source.owner, target.owner)).toThrow("owned disk failure");
+    expect(h.manager.list(source).map(row => row.id)).toEqual([created.webhook.id]);
+    expect(h.manager.list(target)).toEqual([]);
+    expect(h.emitted).toEqual([]);
+    expect(readFileSync(h.file, "utf8")).toBe(before);
+    write.mockRestore();
+    expect(h.manager.transferOwner(source.owner, target.owner)).toBe(1);
+    expect(new WebhookManager(h.options).list(target)).toHaveLength(1);
+  });
+
+  it("resolves hosted legacy execution to the actual operator and keeps desktop local", () => {
+    const h = harness();
+    let operator: string | null = source.owner;
+    h.options.executionViewer = (owner) => owner && owner !== "local" ? { kind: "account", owner } : operator ? { kind: "account", owner: operator } : null;
+    h.options.botOwned = (viewer) => viewer.kind === "all" || viewer.owner === source.owner;
+    const created = create(h.manager);
+    h.manager.receive(created.webhook.endpointId, created.secret, { payload: "operator" });
+    expect(h.queued[0]?.webhookAuthority).toEqual(source);
+    operator = null;
+    expect(h.manager.canRunQueued(h.queued[0]!)).toBe(false);
+    expect(() => h.manager.receive(created.webhook.endpointId, created.secret, { payload: "no operator" })).toThrow("no longer has permission");
+    h.options.executionViewer = () => ({ kind: "all" });
+    h.manager.receive(created.webhook.endpointId, created.secret, { payload: "desktop" });
+    expect(h.queued[1]?.webhookAuthority).toEqual({ kind: "desktop" });
+    expect(h.manager.canRunQueued(h.queued[0]!)).toBe(false);
+    expect(h.manager.canRunQueued(h.queued[1]!)).toBe(true);
+  });
 });
 
 describe("WebhookManager", () => {

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -28,6 +28,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
     now: () => now,
     emit: (payload) => emitted.push(payload),
     botState: () => bot,
+    webhookRunAllowed: () => true,
     createTask: (_botId, _title, activate = false) => {
       taskActivations.push(activate);
       return { threadId: `thread-${++task}` };
@@ -249,6 +250,7 @@ describe("RoutineManager", () => {
       runOn: "cloud",
       deliveryId: "delivery-42",
       receivedAt,
+      webhookAuthority: { kind: "desktop" },
     });
     await h.manager.tick();
 
@@ -444,5 +446,77 @@ describe("overnight chain (iterations)", () => {
     expect(high.iterations).toBe(12);
     const updated = h.manager.update(high.id, { iterations: 0 });
     expect(updated!.iterations).toBe(1);
+  });
+});
+
+describe("queued webhook authority", () => {
+  function enqueue(h: ReturnType<typeof harness>) {
+    return h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "Owned webhook", prompt: "Private task", botId: "bot", runOn: "agent", deliveryId: "delivery", receivedAt: 1,
+      webhookAuthority: { kind: "account", owner: "source" } });
+  }
+
+  it("does not create a task when queued authority is withdrawn", async () => {
+    const h = harness();
+    h.setBot("busy");
+    enqueue(h);
+    await h.manager.tick();
+    expect(h.manager.listRuns()[0]?.status).toBe("queued");
+    h.options.webhookRunAllowed = () => false;
+    h.setBot("ready");
+    await h.manager.tick();
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "cancelled", webhookAuthority: { kind: "account", owner: "source" } });
+    expect(h.started).toEqual([]);
+    expect(h.taskActivations).toEqual([]);
+    expect(new RoutineManager(h.options).listRuns()[0]?.status).toBe("cancelled");
+  });
+
+  it("rechecks preserved authority after restart before a busy queue can run", async () => {
+    const h = harness();
+    h.setBot("busy");
+    enqueue(h);
+    await h.manager.tick();
+    h.options.webhookRunAllowed = (run) => run.webhookAuthority?.kind === "account" && run.webhookAuthority.owner === "new-owner";
+    const reloaded = new RoutineManager(h.options);
+    h.setBot("ready");
+    await reloaded.tick();
+    expect(reloaded.listRuns()[0]?.status).toBe("cancelled");
+    expect(h.taskActivations).toEqual([]);
+  });
+
+  it.each([undefined, { kind: "account", owner: "local" }, { kind: "unknown" }])("does not infer authority for an old or malformed queued record %j", async (authority) => {
+    const h = harness();
+    h.setBot("busy");
+    enqueue(h);
+    await h.manager.tick();
+    const file = h.options.file!;
+    const data = JSON.parse(readFileSync(file, "utf8"));
+    data.runs[0].webhookAuthority = authority;
+    writeFileSync(file, JSON.stringify(data));
+    const reloaded = new RoutineManager(h.options);
+    h.setBot("ready");
+    await reloaded.tick();
+    expect(reloaded.listRuns()[0]?.status).toBe("cancelled");
+    expect(h.started).toEqual([]);
+  });
+
+  it("fails closed without a live webhook checker", async () => {
+    const h = harness();
+    delete h.options.webhookRunAllowed;
+    enqueue(h);
+    await h.manager.tick();
+    expect(h.manager.listRuns()[0]?.status).toBe("cancelled");
+    expect(h.started).toEqual([]);
+  });
+
+  it("keeps cancelled pre-transfer work cancelled after new work is allowed", async () => {
+    const h = harness();
+    h.setBot("busy");
+    enqueue(h);
+    await h.manager.tick();
+    h.manager.cancelQueuedWebhook("hook", "Account transfer");
+    h.setBot("ready");
+    await h.manager.tick();
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "cancelled", error: "Account transfer" });
+    expect(h.taskActivations).toEqual([]);
   });
 });

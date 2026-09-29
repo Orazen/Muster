@@ -2,10 +2,11 @@
 // Never use an existing installation or a model/container runtime.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
@@ -125,6 +126,12 @@ describe.skipIf(process.platform === "win32")("webhook account isolation", () =>
           await delay(15);
         }
       },
+      async waitClosed() {
+        const deadline = Date.now() + 10_000;
+        while (!ended && !fault && Date.now() < deadline) await delay(15);
+        if (fault) throw fault;
+        expect(ended, "source session stream must close after its account is deleted").toBe(true);
+      },
       async close() { controller.abort(); await pump; },
     };
     streams.push(stream);
@@ -137,6 +144,30 @@ describe.skipIf(process.platform === "win32")("webhook account isolation", () =>
     for (const token of forbidden) expect(serialized).not.toContain(token);
   };
 
+  async function signUp(name: string): Promise<Account> {
+      const res = await request("/api/auth/sign-up/email", "POST", { name, email: `${name}-${randomBytes(8).toString("hex")}@example.test`, password: randomBytes(32).toString("base64url") });
+      expect(res.status).toBe(200);
+      const { user } = z.object({ user: z.object({ id: z.string() }) }).parse(await res.json());
+      const header = res.headers.getSetCookie().find(value => value.startsWith("better-auth.session_token="));
+      if (!header) throw new Error("Owned signup did not return a session");
+      seedConnectedGoogleRow(join(directory, "data"), user.id);
+      return { id: user.id, cookie: header.split(";")[0], botId: "" };
+    }
+
+  async function mergeToken(account: Account): Promise<string> {
+    const response = await request("/api/account/merge/start", "POST", {}, account);
+    expect(response.status).toBe(200);
+    return z.object({ token: z.string() }).parse(await response.json()).token;
+  }
+
+  async function accountWithBot(name: string): Promise<Account> {
+    const account = await signUp(name);
+    const response = await request("/api/bots", "POST", {}, account);
+    expect(response.status).toBe(201);
+    account.botId = z.object({ bot: z.object({ id: z.string() }) }).parse(await response.json()).bot.id;
+    return account;
+  }
+
   beforeAll(async () => {
     directory = mkdtempSync(join(tmpdir(), "muster-webhook-isolation-"));
     const data = join(directory, "data"), home = join(directory, "home"), companion = join(directory, "companion"), ui = join(directory, "ui");
@@ -148,17 +179,19 @@ describe.skipIf(process.platform === "win32")("webhook account isolation", () =>
     const port = await freePortBlock([0, 1], 49200, 8000);
     url = `http://127.0.0.1:${port}`; ingress = `http://127.0.0.1:${port + 1}`;
     env = pairingServerEnvironment({ home, dataDirectory: data, companionDirectory: companion, staticDir: ui, port, webhookPort: port + 1, secret: randomBytes(32).toString("hex") });
+    const faultInjector = join(directory, "merge-faults.mjs");
+    writeFileSync(faultInjector, `import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
+import {join} from 'node:path';
+const flag=${JSON.stringify(join(directory, "fail-merge-write"))};
+const data=${JSON.stringify(data)};
+const original=fs.renameSync;
+fs.renameSync=(from,to)=>{if(fs.existsSync(flag)&&to===join(data,fs.readFileSync(flag,'utf8')))throw new Error('owned merge persistence failure');return original(from,to);};
+syncBuiltinESMExports();
+`);
+    env.NODE_OPTIONS += ` --import=${pathToFileURL(faultInjector).href}`;
     Object.assign(env, { OMB_PUBLIC_HOST: `127.0.0.1:${port}`, OMB_ALLOW_SIGNUPS: "true", GOOGLE_CLIENT_ID: randomBytes(24).toString("hex"), GOOGLE_CLIENT_SECRET: randomBytes(24).toString("hex") });
     await start();
-    async function signUp(name: string): Promise<Account> {
-      const res = await request("/api/auth/sign-up/email", "POST", { name, email: `${name}-${randomBytes(8).toString("hex")}@example.test`, password: randomBytes(32).toString("base64url") });
-      expect(res.status).toBe(200);
-      const { user } = z.object({ user: z.object({ id: z.string() }) }).parse(await res.json());
-      const header = res.headers.getSetCookie().find(value => value.startsWith("better-auth.session_token="));
-      if (!header) throw new Error("Owned signup did not return a session");
-      seedConnectedGoogleRow(data, user.id);
-      return { id: user.id, cookie: header.split(";")[0], botId: "" };
-    }
     operator = await signUp("operator"); operator.botId = localBotId;
     alice = await signUp("alice"); bob = await signUp("bob");
     for (const account of [alice, bob]) {
@@ -269,6 +302,87 @@ describe.skipIf(process.platform === "win32")("webhook account isolation", () =>
     // The old capability still authenticates; capture-only rows are now paused.
     expect((await deliver(legacyHook(1), "after-restart")).status).toBe(409);
     expect((await deliver(legacyHook(1), "after-restart", "wrong-fixture-secret")).status).toBe(401);
+  }, 45_000);
+
+  it("refuses merging away the operator without consuming the merge token or exposing legacy hooks", async () => {
+    const source = await accountWithBot("operator-guard-source");
+    const token = await mergeToken(bob);
+    const before = readFileSync(join(directory, "data", "webhooks.json"), "utf8");
+    const denied = await request("/api/account/merge/complete", "POST", { token }, operator);
+    expect(denied.status).toBe(409);
+    expect(await denied.json()).toMatchObject({ code: "OPERATOR_MERGE_UNSUPPORTED" });
+    expect(readFileSync(join(directory, "data", "webhooks.json"), "utf8")).toBe(before);
+    for (const account of [alice, bob]) expect(JSON.stringify(await list(account))).not.toContain(legacy[1].id);
+    expect((await list(operator)).webhooks.some(h => h.id === legacy[1].id)).toBe(true);
+    // The same token still works for an eligible source account.
+    expect((await request("/api/account/merge/complete", "POST", { token }, source)).status).toBe(200);
+  });
+
+  it("transfers named hooks paused, preserves history/credentials and closes the source stream", async () => {
+    const source = await accountWithBot("merge-source");
+    const hook = await createHook(source, "merge-private-history");
+    expect((await deliver(hook, "merge-history-marker")).status).toBe(202);
+    const [oldStream, targetStream, foreignStream] = await Promise.all([openStream(source), openStream(bob), openStream(alice)]);
+    const merged = await request("/api/account/merge/complete", "POST", { token: await mergeToken(bob) }, source);
+    expect(merged.status).toBe(200);
+    expect(await merged.json()).toMatchObject({ botsReassigned: 1, webhooksTransferred: 1, webhooksPaused: true });
+    await oldStream.waitClosed();
+    expect(oldStream.frames.some(f => f.kind === "webhook.deleted" && hookId(f) === hook.id)).toBe(true);
+    await targetStream.waitFor(f => f.kind === "webhook" && hookId(f) === hook.id);
+    const mine = await list(bob);
+    expect(mine.webhooks.find(h => h.id === hook.id)).toMatchObject({ owner: bob.id, botId: source.botId, enabled: false, verificationPending: false });
+    expect(JSON.stringify(mine.attempts)).toContain("merge-history-marker");
+    expect((await request("/api/webhooks", "GET", undefined, source)).status).toBe(401);
+    expect((await deliver(hook, "same-credential-still-valid-but-paused")).status).toBe(409);
+    const barrier = await createHook(alice, "foreign-stream-barrier");
+    await foreignStream.waitFor(f => hookId(f) === barrier.id);
+    noForeign(foreignStream.frames, [hook.id, "merge-history-marker"]);
+    const replay = await openStream(bob, targetStream.cursor);
+    expect(replay.hello.resumed).toBe(true);
+    await replay.waitFor(f => f.kind === "webhook" && hookId(f) === hook.id);
+    expect(replay.frames.some(f => f.kind === "webhook.deleted" && hookId(f) === hook.id)).toBe(false);
+    await Promise.all([oldStream.close(), targetStream.close(), foreignStream.close(), replay.close()]);
+  });
+
+  it.each(["webhooks.json", "user-keys.json", "bots.json", "auth-delete"])("retains source authentication and binds partial retry to one target after %s fails", async (failure) => {
+    const source = await accountWithBot(`failure-${failure.replace(/[^a-z]/g, "")}`);
+    const hook = await createHook(source, "partial-transfer");
+    const flag = join(directory, "fail-merge-write");
+    const data = join(directory, "data");
+    // Empty fixture vault forces an actual merge save, without real keys.
+    writeFileSync(join(data, "user-keys.json"), JSON.stringify({ version: 2, salt: "owned-merge-fixture-salt", users: { [source.id]: {} } }));
+    let db: DatabaseSync | undefined;
+    if (failure === "auth-delete") {
+      db = new DatabaseSync(join(data, "auth.db"));
+      db.exec(`CREATE TRIGGER owned_merge_failure BEFORE DELETE ON user BEGIN SELECT RAISE(ABORT, 'owned auth delete failure'); END`);
+    } else writeFileSync(flag, failure);
+    const token = await mergeToken(bob);
+    try {
+      const first = await request("/api/account/merge/complete", "POST", { token }, source);
+      expect(first.status).toBe(503);
+      expect(await first.json()).toMatchObject({ code: "MERGE_RETRY_REQUIRED" });
+      expect((await request("/api/webhooks", "GET", undefined, source)).status).toBe(200);
+      expect((await request("/api/account/merge/complete", "POST", { token }, source)).status).toBe(400);
+      const wrongTarget = await request("/api/account/merge/complete", "POST", { token: await mergeToken(alice) }, source);
+      expect(wrongTarget.status).toBe(409);
+      expect(await wrongTarget.json()).toMatchObject({ code: "MERGE_DESTINATION_FIXED" });
+    } finally {
+      if (db) { db.exec("DROP TRIGGER owned_merge_failure"); db.close(); }
+      else unlinkSync(flag);
+    }
+    // A restart cannot erase the approved destination or grant the third account.
+    if (failure === "user-keys.json") {
+      await stop(); await start();
+      expect((await request("/api/account/merge/complete", "POST", { token: await mergeToken(alice) }, source)).status).toBe(409);
+    }
+    const resumed = await request("/api/account/merge/complete", "POST", { token: await mergeToken(bob) }, source);
+    expect(resumed.status).toBe(200);
+    const rows = await list(bob);
+    expect(rows.webhooks.filter(h => h.id === hook.id)).toHaveLength(1);
+    expect(rows.webhooks.find(h => h.id === hook.id)).toMatchObject({ enabled: false, verificationPending: false });
+    expect((await deliver(hook, "unchanged-credential")).status).toBe(409);
+    const bots = z.object({ bots: z.array(z.object({ id: z.string() })) }).parse(await (await request("/api/bots", "GET", undefined, bob)).json());
+    expect(bots.bots.some(bot => bot.id === source.botId)).toBe(true);
   }, 45_000);
 
   it("keeps local desktop events available with a signed-in account cookie", async () => {

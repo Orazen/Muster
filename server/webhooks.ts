@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
-import type { RoutineRunOn } from "./routines.ts";
+import { parseWebhookRunAuthority, type RoutineRunOn, type WebhookRunAuthority } from "./routines.ts";
 import { parseJson, schemaIssue, type JsonValue } from "./schema.ts";
 
 export interface WebhookTrigger {
@@ -126,6 +126,9 @@ export interface WebhookManagerOptions {
   botState: (botId: string) => "ready" | "busy" | "missing";
   /** Actual deployment operator; missing identity denies account access to legacy rows. */
   operatorUserId?: () => string | null;
+  /** Deployment authority for execution. Hosted wiring resolves legacy rows
+   * to its actual operator; standalone desktop callers retain local access. */
+  executionViewer?: (owner: string | undefined) => WebhookViewer | null;
   /** Does `viewer`'s account own this bot? Gates bot (re)assignment so a
    * webhook can never be pointed at — or re-pointed to — another account's
    * AGENT. Desktop passes a constant true. */
@@ -138,6 +141,7 @@ export interface WebhookManagerOptions {
     runOn: RoutineRunOn;
     deliveryId: string;
     receivedAt: number;
+    webhookAuthority: WebhookRunAuthority;
   }) => { id: string };
   cancelQueued?: (webhookId: string, message: string) => void;
   pendingRuns?: (webhookId: string) => number;
@@ -419,6 +423,47 @@ export class WebhookManager {
     if (!this.options.botOwned(viewer, botId)) fail(403, "Choose one of your own AGENTs for this webhook");
   }
 
+  private executionViewer(trigger: StoredWebhookTrigger): WebhookViewer | null {
+    if (this.options.executionViewer) return this.options.executionViewer(trigger.owner);
+    return trigger.owner && trigger.owner !== "local" ? { kind: "account", owner: trigger.owner } : { kind: "all" };
+  }
+
+  private executionAuthority(trigger: StoredWebhookTrigger): WebhookRunAuthority | null {
+    const viewer = this.executionViewer(trigger);
+    if (!viewer || !this.options.botOwned(viewer, trigger.botId)) return null;
+    return parseWebhookRunAuthority(viewer.kind === "all" ? { kind: "desktop" } : viewer);
+  }
+
+  /** Called again after queueing: an edited hook cannot redirect stored work,
+   * and a transferred bot cannot inherit another account's pending command. */
+  canRunQueued(run: { webhookId?: string; botId: string; webhookAuthority?: unknown }): boolean {
+    const captured = parseWebhookRunAuthority(run.webhookAuthority);
+    const trigger = this.webhooks.find((row) => row.id === run.webhookId);
+    if (!captured || !trigger?.enabled || trigger.botId !== run.botId || this.options.botState(run.botId) === "missing") return false;
+    const current = this.executionAuthority(trigger);
+    return current?.kind === captured.kind && (current.kind === "desktop" || (captured.kind === "account" && current.owner === captured.owner));
+  }
+
+  /** The authenticated merge caller has proved both named accounts. A paused
+   * candidate is persisted before memory/events change. Retrying is a no-op;
+   * capabilities and historical receipts keep their existing identities. */
+  transferOwner(source: string, target: string): number {
+    if (!source || !target || source === "local" || target === "local" || source === target) fail(400, "Choose two valid accounts to merge");
+    const moved = this.webhooks.filter((row) => row.owner === source);
+    if (!moved.length) return 0;
+    for (const row of moved) this.options.cancelQueued?.(row.id, "The webhook's account was merged; review it before sending new work");
+    const candidate = this.webhooks.map((row) => row.owner === source
+      ? { ...row, owner: target, enabled: false, verificationPending: false, updatedAt: this.now() }
+      : row);
+    this.save(candidate);
+    this.webhooks = candidate;
+    for (const row of moved) {
+      this.options.emit?.({ kind: "webhook.deleted", webhookId: row.id, owner: source });
+      this.emit(this.webhooks.find((current) => current.id === row.id)!);
+    }
+    return moved.length;
+  }
+
   create(viewer: WebhookViewer, input: JsonValue): CreatedWebhook {
     const clean = cleanInput(parseTriggerInput(input));
     this.requireBotOwned(viewer, clean.botId);
@@ -461,6 +506,9 @@ export class WebhookManager {
     if (patch.enabled === false) {
       this.options.cancelQueued?.(trigger.id, "The webhook was paused before this delivery started");
     }
+    // The queued callback also enforces this after restart; do not silently
+    // redirect an already accepted payload to a different bot.
+    if (patch.botId !== undefined) this.options.cancelQueued?.(trigger.id, "The webhook's assigned bot changed before this delivery started");
     this.save();
     this.emit(trigger);
     return publicTrigger(trigger);
@@ -512,7 +560,11 @@ export class WebhookManager {
   receive(endpointId: string, secret: string, event: WebhookEvent): WebhookReceiveResult {
     const trigger = this.webhooks.find((candidate) => candidate.endpointId === endpointId);
     if (!trigger || !secretMatches(secret, trigger.secretHash)) fail(401, "Invalid webhook URL or secret");
-    if (trigger.verificationPending && !trigger.enabled) return this.captureVerification(trigger, event);
+    if (trigger.verificationPending && !trigger.enabled) {
+      if (this.options.botState(trigger.botId) === "missing") fail(410, "The assigned AGENT no longer exists");
+      if (!this.executionAuthority(trigger)) fail(403, "The webhook no longer has permission to use its assigned bot");
+      return this.captureVerification(trigger, event);
+    }
     try {
       return this.dispatch(trigger, event);
     } catch (error) {
@@ -545,6 +597,8 @@ export class WebhookManager {
   private dispatch(trigger: StoredWebhookTrigger, event: WebhookEvent): WebhookReceiveResult {
     if (!trigger.enabled) fail(409, "This webhook is paused");
     if (this.options.botState(trigger.botId) === "missing") fail(410, "The assigned AGENT no longer exists");
+    const webhookAuthority = this.executionAuthority(trigger);
+    if (!webhookAuthority) fail(403, "The webhook no longer has permission to use its assigned bot");
 
     const allowed = trigger.eventTypes ?? [];
     if (allowed.length > 0 && (!event.eventName || !allowed.includes(event.eventName))) {
@@ -597,6 +651,7 @@ export class WebhookManager {
       runOn: trigger.runOn,
       deliveryId,
       receivedAt: now,
+      webhookAuthority,
     });
     this.deliveries.push({ key: `${trigger.endpointId}:${deliveryId}`, runId: run.id, at: now });
     if (this.deliveries.length > MAX_DELIVERIES) {
@@ -686,11 +741,11 @@ export class WebhookManager {
     this.options.emit?.({ kind: "webhook.attempt", attempt: { ...attempt, owner: trigger.owner } });
   }
 
-  private save(): void {
+  private save(webhooks = this.webhooks): void {
     mkdirSync(dirname(this.file), { recursive: true });
     writeFileAtomic(
       this.file,
-      JSON.stringify({ version: 1, webhooks: this.webhooks, deliveries: this.deliveries, attempts: this.attempts } satisfies WebhookFile, null, 2),
+      JSON.stringify({ version: 1, webhooks, deliveries: this.deliveries, attempts: this.attempts } satisfies WebhookFile, null, 2),
       { mode: 0o600 },
     );
   }
