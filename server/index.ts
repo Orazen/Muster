@@ -297,6 +297,7 @@ import * as openconnector from "./openconnector.ts";
 import * as connectedApps from "./connected-apps.ts";
 import { applyGzipHeaders, isText, json, negotiateStaticGzip, readBody } from "./http-helpers.ts";
 import { handleEmailOtpAuthRequest, isEmailOtpAuthPath } from "./email-otp-login.ts";
+import { handlePasswordResetRequest, isPasswordResetAuthPath } from "./password-reset.ts";
 import * as driveSync from "./drive-sync.ts";
 import * as accountDrive from "./account-drive.ts";
 import { googleDriveConnectConfigured } from "./google-auth.ts";
@@ -5359,6 +5360,13 @@ let requestUserEmail = "";
       // delegates to the same auth.handler this block would have called.
       if (method === "POST" && isEmailOtpAuthPath(path)) {
         await handleEmailOtpAuthRequest(req, res, path);
+        return;
+      }
+      // Password reset: the same swallowed-delivery problem one route over
+      // (server/password-reset.ts). Delegated, never replaced — the wrapper
+      // only decides what to answer when the mail provider refused.
+      if (method === "POST" && isPasswordResetAuthPath(path)) {
+        await handlePasswordResetRequest(req, res);
         return;
       }
       // Muster Cloud identity bridge — opt-in (server/muster-cloud.ts).

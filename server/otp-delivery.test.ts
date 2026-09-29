@@ -17,10 +17,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   clearDelivery,
+  clearDeliveryFor,
   deliveryKey,
   deliveryOutcome,
+  deliveryOutcomeFor,
   deliverySlotCount,
+  mailTransportFailing,
   recordDelivery,
+  recordDeliveryFor,
   resetDeliveries,
   shouldRecordDelivery,
 } from "./otp-delivery.ts";
@@ -97,6 +101,60 @@ describe("delivery outcome slot", () => {
     expect(deliveryOutcome("bulk-49@example.test")).toBeUndefined();
     // The most recent writes are the ones retained.
     expect(deliveryOutcome(`bulk-${MAX_TRACKED + 49}@example.test`)).toEqual({ ok: true });
+  });
+
+  it("keeps a password-reset verdict out of the sign-in slot", () => {
+    // The reset wrapper and the sign-in send policy both read-and-clear by
+    // mailbox. A shared bare key would let one route's answer decide the
+    // other's — the exact cross-contamination the retention gate above was
+    // written for, seen from the other side.
+    recordDeliveryFor("password-reset", "a@example.test", { ok: false, reason: "rejected", status: 422 });
+    expect(deliveryOutcome("a@example.test")).toBeUndefined();
+    expect(deliveryOutcomeFor("password-reset", "a@example.test")).toEqual({ ok: false, reason: "rejected", status: 422 });
+    clearDeliveryFor("password-reset", "a@example.test");
+    expect(deliveryOutcomeFor("password-reset", "a@example.test")).toBeUndefined();
+  });
+});
+
+describe("deployment transport verdict", () => {
+  it("is address-free, so a refusal cannot be read back as a fact about one", () => {
+    // The reason this is not stored per mailbox. The password-reset route
+    // learns a send failed only by attempting one, and better-auth attempts
+    // none for an address with no account — so a per-mailbox verdict would
+    // give a different status to a registered address than to an unregistered
+    // one, which is the account-existence oracle
+    // src/pages/ForgotPasswordPage.tsx is written to refuse. Keyed on nothing,
+    // every address reads the same transport state.
+    expect(mailTransportFailing()).toBe(false);
+    recordDeliveryFor("password-reset", "someone@example.test", { ok: false, reason: "transport" });
+    expect(mailTransportFailing()).toBe(true);
+  });
+
+  it("clears on the first send that goes out", () => {
+    // Otherwise the failure latches: every later request is refused and the
+    // one attempt that could prove recovery is itself never made.
+    recordDeliveryFor("password-reset", "a@example.test", { ok: false, reason: "transport" });
+    expect(mailTransportFailing()).toBe(true);
+    recordDeliveryFor("password-reset", "b@example.test", { ok: true });
+    expect(mailTransportFailing()).toBe(false);
+  });
+
+  it("is set by a failure on either channel, since both share the transport", () => {
+    recordDelivery("a@example.test", { ok: true });
+    expect(mailTransportFailing()).toBe(false);
+    recordDelivery("a@example.test", { ok: false, reason: "rejected", status: 500 });
+    expect(mailTransportFailing()).toBe(true);
+  });
+
+  it("expires like a mailbox verdict rather than latching forever", () => {
+    recordDeliveryFor("password-reset", "a@example.test", { ok: false, reason: "transport" });
+    const realNow = Date.now;
+    try {
+      Date.now = () => realNow() + 60_001;
+      expect(mailTransportFailing()).toBe(false);
+    } finally {
+      Date.now = realNow;
+    }
   });
 
   it("expires a verdict rather than letting it outlive its usefulness", () => {

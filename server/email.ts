@@ -24,7 +24,7 @@
  * server/otp-delivery.ts for why better-auth cannot answer that itself).
  */
 
-import { recordDelivery, shouldRecordDelivery, type DeliveryOutcome, type OtpCodeType } from "./otp-delivery.ts";
+import { recordDelivery, recordDeliveryFor, shouldRecordDelivery, type DeliveryOutcome, type OtpCodeType } from "./otp-delivery.ts";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY?.trim();
 const EMAIL_FROM = process.env.EMAIL_FROM?.trim() || "Muster <noreply@localhost>";
@@ -230,8 +230,24 @@ export async function sendLoginCodeEmail(
   if (shouldRecordDelivery(type)) recordDelivery(to, outcome);
 }
 
-export async function sendPasswordResetEmail(to: string, url: string): Promise<void> {
-  await sendEmail({
+/**
+ * Deliver the reset mail, and REPORT what happened.
+ *
+ * This used to return nothing and ignore `sendEmail`'s boolean, which is the
+ * same defect server/otp-delivery.ts was written to fix for sign-in codes: the
+ * outcome is the only honest signal, better-auth's `runInBackgroundOrAwait`
+ * swallows any rejection and still answers the route with success, and a
+ * server that records it and reports nothing has thrown the only copy away.
+ * The record lands on the "password-reset" channel rather than the sign-in
+ * one, so a reset verdict can never be read back as a code's.
+ *
+ * The link this carries is a credential: a token in the URL that sets a
+ * password. The body below the link is why the log lines on the
+ * unconfigured branch matter — with no transport the message text, reset link
+ * included, is written to the server's own output.
+ */
+export async function sendPasswordResetEmail(to: string, url: string): Promise<DeliveryOutcome> {
+  const outcome = await deliverEmail({
     to,
     subject: "Reset your Muster password",
     text: `Use this link to choose a new password:\n\n${url}\n\nThe link expires in an hour. If you did not ask for a reset, ignore this message — your password is unchanged.`,
@@ -241,4 +257,6 @@ export async function sendPasswordResetEmail(to: string, url: string): Promise<v
       { href: url, label: "Choose a new password" },
     ),
   });
+  recordDeliveryFor("password-reset", to, outcome);
+  return outcome;
 }

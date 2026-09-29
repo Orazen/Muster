@@ -14,6 +14,7 @@ import {
   sendPasswordResetEmail,
   sendVerificationEmail,
 } from "./email.ts";
+import { mailTransportFailing } from "./otp-delivery.ts";
 
 /**
  * Self-hosting is opt-in and mirrors the same signal server/index.ts uses:
@@ -444,7 +445,15 @@ export function authCapabilities() {
   const pairingCloudUrl = pairCloudUrl();
   return {
     emailVerification: isEmailConfigured() && SELF_HOSTED,
-    passwordReset: isEmailConfigured(),
+    // A transport that is configured but not delivering is the case
+    // server/email.ts's own header calls out: a reset button that silently
+    // drops the mail is worse than none. So this is not just "is a mailer
+    // configured" — while the last outbound message on this server did not
+    // go out, the flow stops being advertised, and the sign-in screen hides
+    // the link and /forgot-password says why. Keyed on the deployment's
+    // transport health rather than on any address, so it can never become an
+    // account-existence oracle; a successful send clears it.
+    passwordReset: isEmailConfigured() && !mailTransportFailing(),
     socialProviders: Object.keys(socialProviders()),
     // Manual sign-UP is off; existing accounts still sign in with a
     // password exactly as before — see the /api/auth/sign-up/email gate
