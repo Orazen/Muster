@@ -132,9 +132,13 @@ export function isPrivateOrReservedIpv6(groups: number[]): boolean {
     return isPrivateOrReservedIpv4(mapped);
   }
   const first = groups[0] ?? 0;
-  const second = groups[1] ?? 0;
-  if ((first & 0xfe) === 0xfc) return true; // fc00::/7 unique-local
-  if (first === 0xfe && (second & 0xc0) === 0x80) return true; // fe80::/10 link-local
+  // 16-bit masks against 16-bit groups. These were 8-bit (0xfe/0xfc/0xc0), so
+  // `first & 0xfe` could never equal 0xfc for a parsed group and the two
+  // native ranges below were unreachable — every fc00::/7 and fe80::/10 host
+  // classified as public. browser-panel.ts has always spelled the same two
+  // ranges out by hand; this is that one rule, expressed once.
+  if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 unique-local
+  if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
   return false;
 }
 
