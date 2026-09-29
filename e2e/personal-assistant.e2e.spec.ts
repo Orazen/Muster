@@ -17,9 +17,17 @@ test("personal assistant hiring prepares a persistent daily-plan draft without s
     return bounds !== null && bounds.x >= 0 && bounds.x + bounds.width <= 320;
   }).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("personal-assistant-320.png"), fullPage: true });
-  const sends: string[] = [];
+  const messagePosts: { intentId: string; reconcile: boolean }[] = [];
   page.on("request", (request) => {
-    if (request.method() === "POST" && /\/api\/bots\/[^/]+\/messages$/.test(request.url())) sends.push(request.postDataJSON()?.clientIntentId ?? request.url());
+    if (request.method() !== "POST" || !/\/api\/bots\/[^/]+\/messages$/.test(request.url())) return;
+    const body = z.object({
+      clientIntentId: z.string().optional(),
+      reconcile: z.boolean().optional(),
+    }).parse(request.postDataJSON());
+    messagePosts.push({
+      intentId: body.clientIntentId ?? "",
+      reconcile: body.reconcile ?? false,
+    });
   });
   await hub.getByRole("button", { name: "Hire Daylight", exact: true }).click();
   const composer = page.getByRole("textbox", { name: "Message Daylight", exact: true });
@@ -33,17 +41,20 @@ test("personal assistant hiring prepares a persistent daily-plan draft without s
   expect(assistant).toHaveLength(1);
   expect(assistant[0].description).toBe(PERSONAL_ASSISTANT_ROLE);
   expect(assistant[0].autoApprove).not.toBe(true);
-  expect(sends).toEqual([]);
+  expect(messagePosts).toEqual([]);
   await page.reload();
   await expect(composer).toHaveValue(DAILY_PLANNING_TASK);
-  expect(sends).toEqual([]);
+  expect(messagePosts).toEqual([]);
   // User approval to send is explicit; the fake model only verifies routing,
   // not calendar reading or the quality of a real model's plan.
-  // COUNT DISTINCT INTENTS, not transport attempts: the durable-receipt
-  // layer may legitimately replay the SAME intent id on the wire (a hydrate
-  // racing the in-flight window). One logical send = one intent id here;
-  // the server proves no double work by returning the same receipt.
   await composer.press("Enter");
-  await expect(page.getByLabel("Conversation with Daylight", { exact: true }).getByText("hello from fake acp", { exact: true })).toBeVisible();
-  expect(new Set(sends).size).toBe(1);
+  const conversation = page.getByLabel("Conversation with Daylight", { exact: true });
+  await expect(conversation.getByText("hello from fake acp", { exact: true })).toHaveCount(1);
+  await expect(conversation.getByText(DAILY_PLANNING_TASK, { exact: true })).toHaveCount(1);
+  const createRequests = messagePosts.filter((request) => !request.reconcile);
+  expect(createRequests).toHaveLength(1);
+  expect(createRequests[0]?.intentId).toMatch(/^[\w.-]{8,128}$/);
+  // Reconnect may POST a reconcile:true lookup with this same ID; that is not
+  // a second user message. Different IDs would represent distinct sends.
+  expect(new Set(messagePosts.map((request) => request.intentId)).size).toBe(1);
 });

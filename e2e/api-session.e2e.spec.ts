@@ -62,11 +62,16 @@ async function enterConnections(page: Page) {
   await signIn(page);
   await expect(wizard(page).getByTestId("onboarding-stage-title")).toHaveText("Connections");
   await expect(drive(page).getByRole("button", { name: "Connect Google Drive", exact: true })).toBeEnabled();
-  // Independent positive control: read the real session using this browser's
-  // cookie jar, bypassing page route fixtures and without logging its token.
-  const session = await page.context().request.get(`${harness.url}${sessionPath}`);
-  expect(session.status()).toBe(200);
-  expect((await session.json()).user.email).toBe(harness.email);
+  // Independent positive control: read the real session from the page's actual
+  // origin and cookie jar. No route fixture intercepts this endpoint, and no
+  // session token is logged.
+  const session = await page.evaluate(async (path) => {
+    const response = await fetch(path, { credentials: "include" });
+    return { status: response.status, bodyText: await response.text() };
+  }, sessionPath);
+  expect(session.status).toBe(200);
+  const sessionBody = z.object({ user: z.object({ email: z.string() }) }).parse(JSON.parse(session.bodyText));
+  expect(sessionBody.user.email).toBe(harness.email);
   await page.route(`${harness.url}/api/workspace/google/connect`, (route) => route.fulfill({
     status: 401, json: { error: driveError },
   }));

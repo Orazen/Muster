@@ -118,11 +118,14 @@ describe("augmentedPath", () => {
   posixIt("keeps the last login-shell PATH available during a rescan", async () => {
     const shell = join(homedir(), "fake-login-shell");
     const rcOnlyBin = join(homedir(), "rc-only", "bin");
+    const rescannedBin = join(homedir(), "rescanned-only", "bin");
     writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s' '${rcOnlyBin}'\n`);
     chmodSync(shell, 0o755);
 
     const previousShell = process.env.SHELL;
     const previousVitest = process.env.VITEST;
+    const shellCalls = vi.spyOn(childProcess, "execFile");
+    syncBuiltinESMExports();
     try {
       process.env.SHELL = shell;
       delete process.env.VITEST;
@@ -131,10 +134,18 @@ describe("augmentedPath", () => {
       augmentedPath();
       // Match the probe's 5-second budget, with room for its callback to run.
       await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin), { timeout: 6_000 });
+      expect(shellCalls).toHaveBeenCalledTimes(1);
 
+      // Give the rescan a distinct result so we can await its callback rather
+      // than leave it in flight to mutate the next test's cache.
+      writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s' '${rescannedBin}'\n`);
       resetPathCache();
       expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin);
+      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rescannedBin), { timeout: 6_000 });
+      expect(shellCalls).toHaveBeenCalledTimes(2);
     } finally {
+      shellCalls.mockRestore();
+      syncBuiltinESMExports();
       if (previousShell === undefined) delete process.env.SHELL;
       else process.env.SHELL = previousShell;
       if (previousVitest === undefined) delete process.env.VITEST;
