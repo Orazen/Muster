@@ -3,7 +3,7 @@
 // stubbed — the real REST shapes are index.ts's contract, re-tested here
 // only as far as this client maps them).
 import { PassThrough } from "node:stream";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -115,6 +115,50 @@ describe("loadFleetConfig", () => {
     expect(() => loadFleetConfig("/tmp/escape/../elsewhere")).toThrow(/MUSTER_DIR/);
     const bad = pairedDir({ base: "http://x", cookie: 42 });
     expect(() => loadFleetConfig(bad)).toThrow(/unreadable/);
+  });
+
+  it.skipIf(process.platform === "win32")("tightens a legacy world-readable config exactly like the CLI's read", () => {
+    const dir = pairedDir({ base: "https://fleet-fixture.invalid", cookie: "muster_session=abc" });
+    chmodSync(join(dir, "cli.json"), 0o644);
+    expect(loadFleetConfig(dir)).toEqual({ base: "https://fleet-fixture.invalid", cookie: "muster_session=abc" });
+    expect(statSync(join(dir, "cli.json")).mode & 0o777).toBe(0o600);
+  });
+
+  it("refuses an oversized or nonregular config instead of reading through it", () => {
+    const home = mkdtempSync(join(tmpdir(), "fleet-mcp-"));
+    dirs.push(home);
+    writeFileSync(join(home, "cli.json"), "x".repeat(128 * 1024 + 1));
+    expect(() => loadFleetConfig(home)).toThrow(/unreadable or unsafe/);
+    rmSync(join(home, "cli.json"));
+    mkdirSync(join(home, "cli.json"));
+    expect(() => loadFleetConfig(home)).toThrow(/unreadable or unsafe/);
+  });
+
+  it.skipIf(process.platform === "win32")("refuses linked configs and preserves the target bytes", () => {
+    const home = mkdtempSync(join(tmpdir(), "fleet-mcp-"));
+    dirs.push(home);
+    const target = join(home, "target.json");
+    const config = JSON.stringify({ base: "https://fleet-fixture.invalid", cookie: "muster_session=keep" });
+    writeFileSync(target, config, { mode: 0o600 });
+    for (const link of [symlinkSync, linkSync]) {
+      link(target, join(home, "cli.json"));
+      expect(() => loadFleetConfig(home)).toThrow(/unreadable or unsafe/);
+      expect(readFileSync(target, "utf8")).toBe(config);
+      rmSync(join(home, "cli.json"));
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("refuses a linked or group-writable selected directory", () => {
+    const home = mkdtempSync(join(tmpdir(), "fleet-mcp-"));
+    dirs.push(home);
+    const real = join(home, "real"), link = join(home, "link");
+    mkdirSync(real);
+    writeFileSync(join(real, "cli.json"), JSON.stringify({ base: "https://x", cookie: "c" }));
+    symlinkSync(real, link);
+    expect(() => loadFleetConfig(link)).toThrow(/unreadable or unsafe/);
+    expect(() => loadFleetConfig(real)).not.toThrow();
+    chmodSync(real, 0o770);
+    expect(() => loadFleetConfig(real)).toThrow(/unreadable or unsafe/);
   });
 });
 

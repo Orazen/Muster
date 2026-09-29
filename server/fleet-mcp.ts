@@ -23,7 +23,7 @@
 // CLI's `pair` writes. The cookie is a session credential read here; this
 // module does not mint or store new provider keys.
 import { createInterface } from "node:readline";
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, constants, fchmodSync, fstatSync, lstatSync, openSync, readFileSync, type Stats } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -138,28 +138,75 @@ function safeMusterDir(raw: string): string {
   return resolve(raw);
 }
 
-/** Read ~/.muster/cli.json — the exact config `muster pair` maintains.
- *  MUSTER_DIR override honored for tests, same as the CLI. */
+/** Read ~/.muster/cli.json — the exact config `muster pair` maintains —
+ *  with the same filesystem boundary the pairing CLI enforces now that it
+ *  writes 0600/0700 configs: refuse symlinks and hardlinks, foreign
+ *  ownership, nonregular files, oversized data, and linked or group/other-
+ *  writable directories, then read through O_NOFOLLOW and verify the open
+ *  descriptor still names the inspected file. A legacy group/world-readable
+ *  config is tightened to 0600 exactly like the CLI's own read, so the two
+ *  readers stay interchangeable; anything the CLI refuses fails closed here
+ *  too, instead of sending a session cookie through a path that could have
+ *  been redirected. MUSTER_DIR override honored for tests, same as the CLI. */
+const MAX_FLEET_CONFIG_BYTES = 128 * 1024;
+const fleetPosix = process.platform !== "win32";
+const sameFileIdentity = (a: Stats, b: Stats): boolean => a.dev === b.dev && a.ino === b.ino;
+const ownedByRunner = (stat: Stats): boolean => !fleetPosix || stat.uid === process.getuid?.();
+const unsafeConfig = (): Error => new Error("Pairing config is unreadable or unsafe. Run `muster pair` again.");
+
+/** Check the selected directory the way cli/credentials.mjs does: regular,
+ *  unlinked, owned and not group/other-writable. System ancestors such as
+ *  macOS /var are deliberately not inspected. */
+function checkFleetDirectory(directory: string): void {
+  let stat: Stats;
+  try {
+    stat = lstatSync(directory);
+  } catch {
+    throw new Error("Not paired. Run `muster pair` first.");
+  }
+  if (!stat.isDirectory() || stat.isSymbolicLink() || !ownedByRunner(stat)
+    || (fleetPosix && (stat.mode & 0o022))) throw unsafeConfig();
+}
+
 export function loadFleetConfig(dir?: string): FleetConfig {
   const musterDir = dir
     ? safeMusterDir(dir)
     : process.env.MUSTER_DIR
       ? safeMusterDir(process.env.MUSTER_DIR)
       : join(homedir(), ".muster");
+  checkFleetDirectory(musterDir);
   const path = join(musterDir, "cli.json");
-  // Read cli.json beneath the selected directory. This lexical check does
-  // not establish the filesystem destination of a symlink.
-  const resolved = resolve(path);
-  if (!resolved.startsWith(resolve(musterDir) + sep)) {
-    throw new Error("Config path escaped the Muster directory.");
-  }
-  if (!existsSync(path)) {
-    throw new Error("Not paired. Run `muster pair` first.");
-  }
+  let before: Stats;
   try {
-    return fleetConfigSchema.parse(parseJson(readFileSync(path, "utf8")));
+    before = lstatSync(path);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      throw new Error("Not paired. Run `muster pair` first.");
+    }
+    throw unsafeConfig();
+  }
+  if (!before.isFile() || before.nlink !== 1 || !ownedByRunner(before)
+    || before.size > MAX_FLEET_CONFIG_BYTES) throw unsafeConfig();
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || opened.nlink !== 1 || !ownedByRunner(opened)
+      || !sameFileIdentity(before, opened)) throw unsafeConfig();
+    if (fleetPosix) fchmodSync(fd, 0o600);
+    const bytes = readFileSync(fd, "utf8");
+    const after = fstatSync(fd);
+    const current = lstatSync(path);
+    if (Buffer.byteLength(bytes) > MAX_FLEET_CONFIG_BYTES || after.nlink !== 1
+      || !current.isFile() || current.nlink !== 1
+      || !sameFileIdentity(opened, current) || after.size !== Buffer.byteLength(bytes)) {
+      throw unsafeConfig();
+    }
+    return fleetConfigSchema.parse(parseJson(bytes));
   } catch {
-    throw new Error("Pairing config is unreadable. Run `muster pair` again.");
+    throw unsafeConfig();
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
