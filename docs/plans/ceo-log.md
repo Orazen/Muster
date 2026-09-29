@@ -9469,3 +9469,31 @@ EVIDENCE — 866b3a0, "The iOS export steps were passing a path to files that we
 NOT VERIFIED: that the exports now succeed. Making the file exist is the defect I could prove. Whether Xcode Cloud then has the right managed certificates for team 7375K23WFU is account configuration I cannot check from here and only a real run will answer. If the next build still fails, the log will at least get past the missing-file stage. Treat the next Xcode Cloud run as the receipt for this slice, not this commit.
 
 Process note carried forward from earlier this session: I once chained `git push` off a `grep`, which returns success whether the tests passed or failed, and pushed a red suite. The gate has to be the gate's own exit status.
+## Loop209 (2026-09-29) — C0 payment policy landed; I0 verified and held back
+
+GATE: verify Loop208's claims, then take the two new handoff plans at their named first slices (I0, C0).
+CHECK: every repo-local claim in both plans re-verified against origin/main; both slices run in separate worktrees; each mutation-checked by me rather than taken on trust.
+EXPECT: a landed, tested, mock-only payment policy; an honest account of a follow-up-proposal slice that is not finished.
+
+**Verification of the plans' factual claims — all true.** `dd77723` (W0) is in source. No Crossmint or payment code exists in `server/` or `src/` (zero matches). `server/billing.ts` is Stripe subscription billing, as the plan says. The Calendar day result carries `calendarId` and `complete` and no provider revision or observation envelope, which is exactly the prerequisite the plan flags. Neither `server/follow-up-proposals.ts` nor `server/agent-payment-policy.ts` existed.
+
+### C0 landed — d85f598, CI success
+
+`server/agent-payment-policy.ts` + 116 tests. A policy contract and a ledger, no SDK, no network, no key, no card, no wallet, no transaction. A test asserts that from source text (one import, zod; no fetch, node:http, process.env, setTimeout, Date.now, Math.random) and another walks every file in `server/` and `src/` asserting none import the module — which makes "no payment on startup, sign-in or ordinary fetch" checked rather than promised, and is also the rollback.
+
+**A real gap I found that the slice's own report claimed was covered.** The report listed "M1 authority (6) 6/6" including "owner-scoped lookup". I mutated `read` to fall back to "any record with this approval id" and the suite stayed green at 115/115. Owner isolation there is a property of the composite storage key, not a filter applied after the read, and the two existing authority tests both drive the refusal through the purchase path — one of which finds the record and then refuses on a session comparison — so neither noticed. Under that mutation an account that guessed or observed an opaque approval id would have received another account's amount, payee, item digest, buyer, provider, disclosure receipt and expiry, with nothing failing. Added the direct-read case (current and past revision); it now kills the mutation. Refusing a request is not the same property as not disclosing a record, and only the first had been proven.
+
+Four further mutations, each caught by my own runs: permitting the encrypted-card fallback (the plan's explicit exclusion), reporting a submitted run as anything but an unknown outcome, yielding between the budget check and the commit, and relaxing the integer-minor-unit guard.
+
+Suite on the landed tree: 447 files, 6543 passed, 8 skipped, 0 failed. Typecheck clean, oxlint clean apart from one pre-existing warning in an unrelated test.
+
+### I0 NOT landed — 87 passed / 16 failed, 4 typecheck errors
+
+Held back deliberately. A red slice is not committed, and this one is not close: the failures span quiet hours, a spring-forward DST boundary, snooze, grant generation, refresh, and concurrent accept/dismiss — not one systematic bug.
+
+Two diagnoses worth keeping, both confirmed by running rather than reading:
+
+1. **`payload-too-large` is a five-way catch-all.** `prepare()` returns that one reason when events, proposalType, capability, explanation or origin fails to parse, so a caller cannot tell a malformed payload from an oversized one. The failing case-7 tests trace to it: the injection fixture is 228 characters against `MAX_EVENT_SUMMARY = 160`, so the events array is rejected and the whole proposal is denied.
+2. **That is itself a finding, not just a bad fixture.** Shortening the injection to fit cleared 3 of the 16. But it means an over-long event summary makes a legitimate proposal VANISH — provider-supplied text changing the outcome by suppressing the card entirely. The plan's case 7 asks that injected text change no authority, and today it changes behaviour, by denial. Whether the module should bound the stored excerpt and mark it untrusted (defence in depth, survives a hostile provider) or reject the reader's own shape (the real reader already caps summaries, so it cannot normally arrive) is a policy decision, not a bug fix, and it is the owner's to make before I write the resolution.
+
+Remaining I0 failures (quiet hours, DST, snooze, grant epoch, refresh, concurrency ordering) are undiagnosed. Not claiming progress on them.
