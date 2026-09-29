@@ -18,7 +18,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +34,28 @@ let home: string;
 let base: string;
 let cookie = "";
 let stderr = "";
+/** A driver kind whose adapter does not declare `customMcp`, found at run time. */
+let dummyDriver = "";
+
+/** Find a driver that cannot mount a custom MCP server.
+ *
+ *  Read off disk rather than hard-coded, because the set changes: supporting
+ *  drivers went from four to nine while this test existed, and a pinned name
+ *  made it assert against a fact that had already moved. */
+function driverWithoutCustomMcp(): string | null {
+  const dir = join(ROOT, "server", "drivers");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".ts") && !f.includes(".test."));
+  for (const file of files) {
+    if (readFileSync(join(dir, file), "utf8").includes("customMcp")) continue;
+    const kind = file.replace(/\.ts$/, "");
+    // `local` composes the shared ACP core, which DOES declare customMcp, so a
+    // file that merely omits the token is not enough — the composed adapter is
+    // what the turn path reads. Skip the wrappers that delegate to it.
+    if (["local", "grokagent", "native", "retry", "local-inject", "acp"].includes(kind)) continue;
+    return kind;
+  }
+  return null;
+}
 
 type BotStatus = {
   id: string;
@@ -65,11 +87,21 @@ posixOnly("browser status tells the truth about each bot", () => {
     const data = join(home, "data");
     mkdirSync(data, { recursive: true });
     // A `config.json` of `{}` sends the server looking for an engine at boot
-    // over the network, which the outbound guard below then trips. Declaring a
-    // dummy instance keeps the fixture offline.
+    // over the network. Declaring a dummy instance keeps the fixture offline.
+    //
+    // The dummy deliberately uses a driver that CANNOT mount a custom MCP
+    // server, and it is DISCOVERED rather than hard-coded. The first version of
+    // this test pinned `local`, and it went stale the moment `local` began
+    // inheriting `customMcp` from the shared ACP core — supporting drivers went
+    // from four to nine and the test started failing on a true assertion about a
+    // fact that had simply changed. A test that pins which drivers support the
+    // browser is a test that will rot every time a driver is added.
+    const withoutMcp = driverWithoutCustomMcp();
+    if (!withoutMcp) throw new Error("every driver now supports customMcp; this fixture needs one that does not");
+    dummyDriver = withoutMcp;
     writeFileSync(
       join(data, "config.json"),
-      JSON.stringify({ instances: { dummy: { driver: "local", displayName: "Dummy" } } }),
+      JSON.stringify({ instances: { dummy: { driver: withoutMcp, displayName: "Dummy" } } }),
     );
     const port = await freePortBlock([0, 1]);
     base = `http://127.0.0.1:${port}`;
@@ -159,12 +191,12 @@ posixOnly("browser status tells the truth about each bot", () => {
   it("reports a bot whose engine cannot mount the browser as blocked, with the reason", async () => {
     // THE regression. `local` declares no `customMcp`, so this bot's toggle can
     // never produce browser tools — and the old reply said nothing at all.
-    const id = await createBot("OnLocal", true, "dummy");
+    const id = await createBot("OnUnsupportedEngine", true, "dummy");
     const status = await get("/api/browser-status");
     const entry = status.status.find((b) => b.id === id);
     expect(entry, "the new bot is absent from the per-bot status").toBeDefined();
     expect(entry!.enabled, "the toggle is on but status says off").toBe(true);
-    expect(entry!.engineSupportsBrowser, "local declares no customMcp but status says it supports the browser").toBe(false);
+    expect(entry!.engineSupportsBrowser, `the ${dummyDriver} driver declares no customMcp but status says it supports the browser`).toBe(false);
     expect(entry!.effective, "a bot that cannot mount the browser reports effective").toBe(false);
     // The reason must be the ENGINE, not "off" or "not-installed" — those are
     // different problems with different fixes, and collapsing them into one
