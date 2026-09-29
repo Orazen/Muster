@@ -22,7 +22,7 @@ beforeEach(() => {
   outDir = join(scratch, "release output");
   version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
   mkdirSync(join(sourceRoot, "cli"), { recursive: true });
-  for (const file of ["muster.mjs", "qr.mjs", "runtime-contracts.mjs"]) copyFileSync(join(root, "cli", file), join(sourceRoot, "cli", file));
+  for (const file of ["muster.mjs", "qr.mjs", "runtime-contracts.mjs", "credentials.mjs"]) copyFileSync(join(root, "cli", file), join(sourceRoot, "cli", file));
   writeFileSync(join(sourceRoot, "package.json"), JSON.stringify({ version }));
 });
 
@@ -59,7 +59,7 @@ describe("reproducible CLI release artifact", () => {
     const before = files();
     const secondRoot = join(scratch, "second source"), secondOutput = join(scratch, "second output");
     mkdirSync(join(secondRoot, "cli"), { recursive: true });
-    for (const file of ["muster.mjs", "qr.mjs", "runtime-contracts.mjs"]) copyFileSync(join(sourceRoot, "cli", file), join(secondRoot, "cli", file));
+    for (const file of ["muster.mjs", "qr.mjs", "runtime-contracts.mjs", "credentials.mjs"]) copyFileSync(join(sourceRoot, "cli", file), join(secondRoot, "cli", file));
     copyFileSync(join(sourceRoot, "package.json"), join(secondRoot, "package.json"));
     const second = await buildCliArtifact(options({ sourceRoot: secondRoot, outDir: secondOutput }));
     expect(second).toEqual(first);

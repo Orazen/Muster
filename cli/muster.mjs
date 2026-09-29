@@ -11,7 +11,7 @@
 //                                  -d keeps it running after the terminal closes
 //   muster stop                      stop the background server
 //   muster logs [n]                  last n lines of the background log
-//   muster pair [--cloud URL]        print/redeem a pairing code
+//   muster pair --email you@…        pair this CLI (hidden password prompt)
 //   muster bots                      roster: name, engine, state, budget
 //   muster send <bot> <text>         send a turn, print the reply
 //   muster watch <bot>               tail a thread live
@@ -30,6 +30,7 @@ import { createInterface } from "node:readline/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { renderTerminal } from "./qr.mjs";
+import { loadCliConfig, saveCliConfig, readPairPassword, rejectPasswordArgument, sessionCookie } from "./credentials.mjs";
 import { clearRunRecordAt, inspectRecordedServer, parseSetupInstances, readRunRecordAt, stopRecordedServer } from "./runtime-contracts.mjs";
 
 // Every on-disk path hangs off MUSTER_DIR (default ~/.muster). The env
@@ -48,19 +49,8 @@ const arg = (flag) => {
 const has = (flag) => process.argv.includes(flag);
 const [command = "help", subject, ...rest] = process.argv.slice(2);
 
-function loadConfig() {
-  if (!existsSync(CONFIG_PATH)) return {};
-  try {
-    return JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-function saveConfig(patch) {
-  mkdirSync(join(CONFIG_PATH, ".."), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify({ ...loadConfig(), ...patch }, null, 2) + "\n");
-}
+const loadConfig = () => loadCliConfig(CONFIG_PATH);
+const saveConfig = (patch) => saveCliConfig(CONFIG_PATH, patch);
 
 function apiConfig() {
   const cfg = loadConfig();
@@ -96,44 +86,59 @@ const lifetimeTokens = (bot) =>
 
 // ── commands ────────────────────────────────────────────────────────────
 
+// One sign-in shape for both pair targets. A transport failure is the most
+// common first-run outcome, so it names the next action instead of leaking a
+// bare fetch error; nothing is written to the config on any failure.
+async function signIn(base, email, password) {
+  let response;
+  try {
+    response = await fetch(`${base}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base, "user-agent": "muster-cli" },
+      body: JSON.stringify({ email, password }),
+      redirect: "error",
+    });
+  } catch {
+    throw new Error(base.startsWith("http://127.0.0.1")
+      ? `Could not reach a Muster server at ${base}. Start one with \`muster up\`, or pair against the cloud by dropping --local.`
+      : `Could not reach ${base}. Check the network connection, or pass --cloud with a different URL.`);
+  }
+  if (!response.ok) return { status: response.status };
+  return { status: response.status, headers: response.headers };
+}
+
 async function pair() {
+  const pairingArgs = process.argv.slice(3);
+  rejectPasswordArgument(pairingArgs);
+  const email = arg("--email");
+  if (!email || email.startsWith("--")) throw new Error("Usage: muster pair --email you@example.com [--local --port 8799 | --cloud URL] [--password-stdin]");
+  const password = await readPairPassword(pairingArgs);
   const local = has("--local");
   if (local) {
     const base = `http://127.0.0.1:${arg("--port") ?? 8799}`;
     // Local desktop installs have no session gate on a loopback owner
     // account; a CLI on the same machine just works once a user exists.
-    const signin = await fetch(`${base}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "content-type": "application/json", origin: base, "user-agent": "muster-cli" },
-      body: JSON.stringify({ email: arg("--email"), password: arg("--password") }),
-    });
-    if (!signin.ok) {
-      console.error(`Local sign-in failed (${signin.status}). Pass --email/--password of the desktop account.`);
+    const signin = await signIn(base, email, password);
+    if (!signin.headers) {
+      console.error(`Local sign-in failed (${signin.status}). Use the email and password of the desktop account.`);
       process.exit(1);
     }
-    const raw = signin.headers.getSetCookie().find((c) => c.startsWith("better-auth.session_token="));
-    const cookie = raw ? raw.split(";")[0] : "";
+    const cookie = sessionCookie(signin.headers, base);
     saveConfig({ base, cookie });
     console.log(`Paired with local harness at ${base}. Config: ${CONFIG_PATH}`);
     return;
   }
   const cloud = arg("--cloud") ?? CLOUD_DEFAULT;
-  const email = arg("--email") ?? console.error("usage: muster pair --email you@example.com --password ... [--cloud URL]") ?? process.exit(1);
-  const password = arg("--password") ?? process.exit(1);
-  const signin = await fetch(`${cloud}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: cloud, "user-agent": "muster-cli" },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!signin.ok) {
+  const signin = await signIn(cloud, email, password);
+  if (!signin.headers) {
     console.error(`Cloud sign-in failed (${signin.status}).`);
     process.exit(1);
   }
-  const raw = signin.headers.getSetCookie().find((c) => c.startsWith("better-auth.session_token="));
-  const cookie = raw ? raw.split(";")[0] : "";
+  const cookie = sessionCookie(signin.headers, cloud);
   const create = await fetch(`${cloud}/api/pair/create`, {
     method: "POST",
     headers: { "content-type": "application/json", cookie },
+    redirect: "error",
   });
   const { code } = await asJson(create);
   console.log(`Pairing code: ${code}\nOpen muster.orazen.online/pair on a signed-in device and press "Redeem on this device", or scan the QR with the phone you pair from.`);
@@ -635,7 +640,7 @@ async function claimSession(port) {
   });
   if (!create.ok) {
     console.error(`Could not mint a claim code (HTTP ${create.status}). Is the server on this machine?`);
-    console.error("Alternatively: `muster pair --local --port <port> --email .. --password ..`");
+    console.error("Alternatively: `muster pair --local --port <port> --email you@example.com` (hidden password prompt).");
     process.exit(1);
   }
   const { code } = await create.json();
@@ -644,12 +649,11 @@ async function claimSession(port) {
     headers: { "content-type": "application/json", "user-agent": "muster-cli" },
     body: JSON.stringify({ code }),
   });
-  const raw = redeem.headers.getSetCookie().find((c) => c.startsWith("better-auth.session_token="));
-  if (!redeem.ok || !raw) {
+  if (!redeem.ok) {
     console.error("Claim redemption failed — run `muster up` and pair by QR instead.");
     process.exit(1);
   }
-  const cfg = { base, cookie: raw.split(";")[0] };
+  const cfg = { base, cookie: sessionCookie(redeem.headers, base) };
   saveConfig(cfg);
   return cfg;
 }
@@ -909,8 +913,9 @@ const HELP = `muster — the CLI for your AI workforce
   muster setup                    guided first run: connect, pick an engine, meet your first bot
   muster stop                     stop the background server started with up -d
   muster logs [n]                 last n lines of the background server log (default 40)
-  muster pair [--local --port 8799 --email .. --password ..]
-              [--cloud URL --email .. --password ..] [--redeem CODE]
+  muster pair --email you@example.com [--local --port 8799 | --cloud URL]
+              [--password-stdin]  hidden password prompt; scripts may pipe secret-manager output
+  muster pair --redeem CODE      retired; use a signed-in browser's pairing page
   muster bots [--json]
   muster send <bot> <text>
   muster approve [allow|deny]

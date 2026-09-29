@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { z } from "zod";
 import { clearRunRecordAt, inspectRecordedServer, parseRunRecord, parseSetupInstances, readRunRecordAt, stopRecordedServer } from "../cli/runtime-contracts.mjs";
 
 const run = promisify(execFile);
@@ -234,5 +236,121 @@ describe("CLI command integration with owned fixture processes", () => {
     mkdirSync(join(home, "run"));
     writeFileSync(join(home, "run", "up.json"), '{"pid":0,"port":80}');
     await expect(run(process.execPath, [cliPath, "stop"], { env: { ...process.env, MUSTER_DIR: home }, timeout: 5000 })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("No stop signal was sent") });
+  });
+});
+
+// An owned sign-in endpoint: it exists only to answer the CLI's local pairing
+// request, and it is the only network peer these tests talk to.
+async function signInServer(cookie, status = 200) {
+  const server = createServer((_request, response) => {
+    const headers = { "content-type": "application/json" };
+    if (cookie) headers["set-cookie"] = cookie;
+    response.writeHead(status, headers);
+    response.end(JSON.stringify({ ok: status === 200 }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    port: z.object({ port: z.number().int().min(1).max(65_535) }).parse(server.address()).port,
+    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve(undefined))),
+  };
+}
+
+function pairCli(args, { home, input }) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [cliPath, "pair", ...args], { env: { ...process.env, MUSTER_DIR: home }, stdio: ["pipe", "pipe", "pipe"] });
+    children.push(child);
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk) => { stdout += chunk; });
+    child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (code) => resolve({ code, stdout, stderr }));
+    child.stdin.end(input ?? "");
+  });
+}
+
+describe("CLI pairing credential handling", () => {
+  it("refuses a password passed as an argument and writes no pairing", async () => {
+    const home = directory();
+    const result = await pairCli(["--local", "--port", "8799", "--email", "fixture@example.test", "--password", "synthetic-fixture-password"], { home });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("Passwords in command arguments are not supported");
+    expect(existsSync(join(home, "cli.json"))).toBe(false);
+  });
+
+  it("reports the pairing usage when no account email is given", async () => {
+    const home = directory();
+    const result = await pairCli(["--local", "--port", "8799", "--password-stdin"], { home, input: "synthetic-fixture-password\n" });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("muster pair --email you@example.com");
+    expect(existsSync(join(home, "cli.json"))).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")("stores a piped secret owner-only, and re-tightens a loosened pairing", async () => {
+    const fixture = await signInServer("better-auth.session_token=fixture-session.signature; Path=/; HttpOnly");
+    const home = directory();
+    const path = join(home, "cli.json");
+    const previousUmask = process.umask(0);
+    try {
+      const first = await pairCli(["--local", "--port", String(fixture.port), "--email", "fixture@example.test", "--password-stdin"], { home, input: "synthetic-fixture-password\n" });
+      expect(first.code).toBe(0);
+      expect(first.stdout).toContain("Paired with local harness");
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+      expect(readFileSync(path, "utf8")).not.toContain("synthetic-fixture-password");
+      expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({ base: `http://127.0.0.1:${fixture.port}`, cookie: "better-auth.session_token=fixture-session.signature" });
+
+      // An older CLI, or a manual fix, may have left the file group-readable.
+      chmodSync(path, 0o644);
+      const second = await pairCli(["--local", "--port", String(fixture.port), "--email", "fixture@example.test", "--password-stdin"], { home, input: "synthetic-fixture-password\n" });
+      expect(second.code).toBe(0);
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+    } finally {
+      process.umask(previousUmask);
+      await fixture.close();
+    }
+  });
+
+  it("keeps the working pairing when a later sign-in returns no session", async () => {
+    const granted = await signInServer("better-auth.session_token=fixture-session.signature; Path=/");
+    const home = directory();
+    const path = join(home, "cli.json");
+    try {
+      expect((await pairCli(["--local", "--port", String(granted.port), "--email", "fixture@example.test", "--password-stdin"], { home, input: "synthetic-fixture-password\n" })).code).toBe(0);
+    } finally {
+      await granted.close();
+    }
+    const before = readFileSync(path, "utf8");
+    const refused = await signInServer(undefined);
+    try {
+      const result = await pairCli(["--local", "--port", String(refused.port), "--email", "fixture@example.test", "--password-stdin"], { home, input: "synthetic-fixture-password\n" });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain("no usable session");
+    } finally {
+      await refused.close();
+    }
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it("names the next action when no local server is listening, and stores nothing", async () => {
+    const home = directory();
+    const result = await pairCli(["--local", "--port", "1", "--email", "fixture@example.test", "--password-stdin"], { home, input: "synthetic-fixture-password\n" });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("Could not reach a Muster server at http://127.0.0.1:1");
+    expect(result.stderr).toContain("muster up");
+    expect(result.stderr).not.toContain("fetch failed");
+    expect(existsSync(join(home, "cli.json"))).toBe(false);
+  });
+
+  it("reports a rejected sign-in without storing anything", async () => {
+    const fixture = await signInServer(undefined, 401);
+    const home = directory();
+    try {
+      const refused = await pairCli(["--local", "--port", String(fixture.port), "--email", "fixture@example.test", "--password-stdin"], { home, input: "wrong-fixture-password\n" });
+      expect(refused.code).toBe(1);
+      expect(refused.stderr).toContain("Local sign-in failed (401)");
+      expect(existsSync(join(home, "cli.json"))).toBe(false);
+    } finally {
+      await fixture.close();
+    }
   });
 });

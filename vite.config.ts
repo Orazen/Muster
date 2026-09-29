@@ -29,6 +29,7 @@ export default defineConfig({
     include: [
       "server/**/*.test.ts",
       "electron/**/*.test.mjs",
+      "cli/**/*.test.mjs",
       "src/**/*.test.ts",
       "companion/**/*.test.ts",
       "scripts/**/*.test.ts",
