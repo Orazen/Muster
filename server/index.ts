@@ -706,6 +706,14 @@ const { store } = bootWithRestoreFirst(DATA_DIR, () => new Store(() => bootSelec
 function peerOwnerOf(bot: { ownerId?: string }): string {
   return SELF_HOSTED ? (bot.ownerId || primaryUserId() || "") : "local";
 }
+/** Receipt-owner space (W0): message intents are scoped to the same owner the
+ * route gate already uses — the signed-in account id on hosted deployments,
+ * "local" on a one-user desktop. Session-less callers never reach here (the
+ * global /api gate above refuses them), so a defined requestUserId maps
+ * exactly onto the rows this session may see or collide with. */
+function messageSessionOwner(userId: string | undefined): string {
+  return SELF_HOSTED ? (userId || primaryUserId() || "") : "local";
+}
 function peerLeaseValid(lease: PeerLease): boolean {
   const bot = store.bot(lease.botId);
   const valid = peerCapabilities.current(lease) && !!bot &&
@@ -2511,6 +2519,7 @@ function admitIntentMessage(
   threadId: string,
   text: string,
   intentId: string,
+  owner: string,
   queuedFlag: boolean,
 ): IntentAdmission {
   const fingerprint = messageIntentFingerprint(text, threadId);
@@ -2518,8 +2527,12 @@ function admitIntentMessage(
   if (known) {
     if (known.fingerprint !== fingerprint) {
       // The receipt reports where the words ACTUALLY went — never silently
-      // re-bound to the replay's new text or destination.
-      return { outcome: "conflict", receipt: intentReceipt(intentId, known.threadId, known.messageId, known.state, known.acceptedAt) };
+      // re-bound to the replay's new text or destination. Ownership first
+      // (W0): a FOREIGN collision learns only "taken" — the answer carries
+      // no ids from another account (fingerprints include the thread id, so
+      // a foreign row always mismatches here).
+      const mine = known.owner === owner;
+      return { outcome: "conflict", receipt: intentReceipt(intentId, mine ? known.threadId : threadId, mine ? known.messageId : "", mine ? known.state : "accepted", mine ? known.acceptedAt : 0) };
     }
     const original = resolveIntentMessage(known);
     if (original) {
@@ -2534,11 +2547,11 @@ function admitIntentMessage(
       // join the (memory) steer queue: a restart loses only the auto-run
       // intent — the transcript words and the acceptance survive — and the
       // drain flips the receipt to dispatched before the provider sees them.
-      const message = store.admitMessage(threadId, text, { intentId, fingerprint }, { queued: true });
+      const message = store.admitMessage(threadId, text, { intentId, fingerprint, owner }, { queued: true });
       enqueueSteeredMessage(bot, message);
       return { outcome: "accepted", receipt: intentReceipt(intentId, threadId, message.id, "accepted", message.at), queued: true, message };
     }
-    const message = store.admitMessage(threadId, text, { intentId, fingerprint });
+    const message = store.admitMessage(threadId, text, { intentId, fingerprint, owner });
     mdbSetIntentDispatched(intentId, "dispatched", Date.now());
     return { outcome: "accepted", receipt: intentReceipt(intentId, threadId, message.id, "dispatched", message.at), queued: false, message };
   } catch (error) {
@@ -2546,7 +2559,10 @@ function admitIntentMessage(
     // rethrows; nothing else in this try carries that code.
     if ((error as { code?: string }).code === "INTENT_CONFLICT") {
       const raced = readIntentRow(intentId);
-      return { outcome: "conflict", receipt: intentReceipt(intentId, raced?.threadId ?? threadId, raced?.messageId ?? "", raced?.state ?? "accepted", raced?.acceptedAt ?? 0) };
+      // Same disclosure rule as the pre-admission conflict above: a raced
+      // row owned by ANOTHER account is reported as a bare "taken".
+      const mine = raced?.owner === owner;
+      return { outcome: "conflict", receipt: intentReceipt(intentId, mine && raced ? raced.threadId : threadId, mine && raced ? raced.messageId : "", mine && raced ? raced.state : "accepted", mine && raced ? raced.acceptedAt : 0) };
     }
     // A rejected admission emits nothing and starts no provider work: the
     // client keeps its draft and the error is the HTTP failure below.
@@ -8609,6 +8625,20 @@ let requestUserEmail = "";
     if (m && method === "PATCH") {
       return json(res, 405, { error: "Reload Muster and use the card's dedicated answer or permission action." });
     }
+    // Receipt lookup (W0, additive and read-only): the reconnect replay of a
+    // durable send receipt without the POST. It never admits, queues or
+    // dispatches — zero messages, zero provider turns — and the answer is
+    // owner-scoped BEFORE anything else: a foreign id and an unknown id get
+    // the same blank 404, so no other account's receipt is nameable.
+    if (path.startsWith("/api/messages/intents/") && method === "GET") {
+      const requested = path.slice("/api/messages/intents/".length);
+      if (!isValidMessageIntentId(requested)) return json(res, 400, { error: "invalid intent id" });
+      const row = readIntentRow(requested);
+      if (!row || row.owner !== messageSessionOwner(requestUserId)) {
+        return json(res, 404, { error: "no acknowledged send for this id" });
+      }
+      return json(res, 200, { intent: intentReceipt(row.intentId, row.threadId, row.messageId, row.state, row.acceptedAt) });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages$/);
     if (m && method === "POST") {
       // Same storage-sovereignty gate as bot creation: on hosted, work does
@@ -8637,12 +8667,50 @@ let requestUserEmail = "";
           return json(res, 400, { error: "clientIntentId must be 8-128 characters of letters, digits, dot, dash or underscore" });
         }
         const intentId = body.clientIntentId;
-        const admitted = admitIntentMessage(bot, threadId, text, intentId, body.queued === true);
+        // Reconnect recovery (W0): a client reconciling parked records after a
+        // lost response sends reconcile:true — a pure lookup flag. It can
+        // never CREATE: an unknown id is a blank 404 (no transcript row, no
+        // turn), and an owned mismatch is the same 409 as before, now with a
+        // body that carries the id but no foreign receipt. Explicit sends
+        // (the default) keep every v1 semantic.
+        const reconcile = body.reconcile === true;
+        const receiptOwner = messageSessionOwner(requestUserId);
+        if (reconcile) {
+          // Lookup-first: a reconcile must never CREATE. Only an OWNED row
+          // proceeds (to the replay or the owned-mismatch conflict below);
+          // an unknown or foreign id is the same blank 404 the GET endpoint
+          // answers — no transcript row, no queue entry, no provider turn.
+          const row = readIntentRow(intentId);
+          if (!row || row.owner !== receiptOwner) {
+            return json(res, 404, { error: "no acknowledged send for this id" });
+          }
+        }
+        const admitted = admitIntentMessage(bot, threadId, text, intentId, receiptOwner, body.queued === true);
         if (admitted.outcome === "conflict") {
+          if (reconcile) {
+            return json(res, 409, {
+              error: "this send id was accepted with different content",
+              code: "INTENT_CONFLICT",
+              intent: { intentId, state: "accepted" },
+            });
+          }
           return json(res, 409, {
             error: "this send was already accepted with different content",
             code: "INTENT_CONFLICT",
             intent: admitted.receipt,
+          });
+        }
+        if (reconcile) {
+          // The record was parked under a thread that has since moved on
+          // (task switch, another tab's change): fold by the RECEIPT's
+          // destination, not the reconnect path's — the words keep the
+          // thread they were originally accepted for.
+          return json(res, 202, {
+            ok: true,
+            threadId: admitted.receipt.threadId,
+            intent: admitted.receipt,
+            queued: admitted.queued || undefined,
+            message: admitted.message,
           });
         }
         // Dispatch for a first admission only — a replayed id is a lookup

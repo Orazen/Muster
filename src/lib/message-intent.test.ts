@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { newIntentId, parkSend, reconcileThread, retireSend, type PendingSend, type ReplayBody } from "./message-intent.js";
+import { allPendingSends, newIntentId, parkSend, reconcileThread, retireSend, type PendingSend, type ReplayBody } from "./message-intent.js";
 
 function memoryStorage(): Storage {
   const map = new Map<string, string>();
@@ -69,29 +69,36 @@ describe("pending send ledger", () => {
 });
 
 describe("reconcileThread", () => {
-  it("replays a pending intent and retires it on the original receipt", async () => {
+  it("replays a pending intent, reports the RECEIPT's destination, and retires it", async () => {
     const intent = pending();
     parkSend(store, intent);
-    const seen: PendingSend[] = [];
-    const result = await reconcileThread(store, intent.threadId, async (p) => {
-      seen.push(p);
-      return { message: { id: "server-msg-1" }, intent: { messageId: "server-msg-1", state: "dispatched" } };
-    });
+    const seen: Array<[PendingSend, boolean]> = [];
+    const receipts: Array<{ messageId: string; threadId: string; state: string }> = [];
+    const parked = await reconcileThread(
+      store,
+      intent.threadId,
+      async (p, lookup) => {
+        seen.push([p, lookup]);
+        // The record was parked under a thread that has since moved on:
+        // the receipt answers where the words ACTUALLY went.
+        return { message: { id: "server-msg-1" }, intent: { messageId: "server-msg-1", threadId: "thread-moved", state: "dispatched" } };
+      },
+      (item) => receipts.push(item.receipt),
+    );
     expect(seen).toHaveLength(1);
-    expect(seen[0]!.intentId).toBe(intent.intentId); // same id, never regenerated
-    expect(result.recovered).toHaveLength(1);
-    expect(result.recovered[0]!.receipt.messageId).toBe("server-msg-1");
-    expect(result.unresolved).toHaveLength(0);
+    expect(seen[0]![0]!.intentId).toBe(intent.intentId); // same id, never regenerated
+    expect(seen[0]![1]).toBe(true); // the replay is a LOOKUP, never a send
+    expect(parked).toHaveLength(0); // terminal receipt retires the record
+    expect(receipts).toEqual([{ messageId: "server-msg-1", threadId: "thread-moved", state: "dispatched" }]);
   });
 
   it("keeps the record parked when the server rejects the replay", async () => {
     const intent = pending();
     parkSend(store, intent);
-    const result = await reconcileThread(store, intent.threadId, async () => {
+    const parked = await reconcileThread(store, intent.threadId, async () => {
       throw new Error("transport down");
     });
-    expect(result.recovered).toHaveLength(0);
-    expect(result.unresolved.map((p) => p.intentId)).toEqual([intent.intentId]);
+    expect(parked.map((p) => p.intentId)).toEqual([intent.intentId]);
     // still parked for the next reconciliation
     // SAFETY: the ledger file is written only by park/retire above, so the
     // stored JSON maps thread ids to pending-send arrays.
@@ -102,30 +109,33 @@ describe("reconcileThread", () => {
   it("reports a local-only record unresolved when the server never saw the intent", async () => {
     const intent = pending();
     parkSend(store, intent);
-    const result = await reconcileThread(store, intent.threadId, async () => ({}));
-    expect(result.unresolved.map((p) => p.intentId)).toEqual([intent.intentId]);
+    const parked = await reconcileThread(store, intent.threadId, async () => ({}));
+    expect(parked.map((p) => p.intentId)).toEqual([intent.intentId]);
   });
 
   it("keeps an accepted (queued) receipt parked until a terminal state retires it", async () => {
     const intent = pending();
     parkSend(store, intent);
     // The bot was busy: durable words, still waiting to send.
-    const first = await reconcileThread(store, intent.threadId, async () => ({
+    const accepted: Array<{ pending: PendingSend; receipt: { messageId: string; threadId: string; state: string } }> = [];
+    await reconcileThread(store, intent.threadId, async () => ({
       message: { id: "server-msg-9" },
       intent: { messageId: "server-msg-9", state: "accepted" },
-    }));
-    expect(first.recovered).toHaveLength(0);
-    expect(first.accepted.map((item) => item.pending.intentId)).toEqual([intent.intentId]);
-    expect(first.accepted[0]!.receipt.messageId).toBe("server-msg-9");
+    }), (item) => accepted.push(item));
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]!.receipt.messageId).toBe("server-msg-9");
     // SAFETY: the ledger file is written only by park/retire above, so the
     // stored JSON maps thread ids to pending-send arrays.
     let raw = JSON.parse(store.getItem("muster:message-intents:v1") ?? "{}") as Record<string, PendingSend[]>;
     expect(raw["thread-1"]).toHaveLength(1); // still parked, still replaying
     // The queue drained while we were away: the terminal receipt retires it.
+    const secondReceipts: Array<{ messageId: string; threadId: string; state: string }> = [];
     const second = await reconcileThread(store, intent.threadId, async () => ({
       intent: { messageId: "server-msg-9", state: "dispatched" },
-    }));
-    expect(second.recovered.map((item) => item.receipt.messageId)).toEqual(["server-msg-9"]);
+    }), (item) => secondReceipts.push(item.receipt));
+    expect(second).toHaveLength(0); // retired
+    // No receipt destination means the record's own thread — the fallback.
+    expect(secondReceipts).toEqual([{ messageId: "server-msg-9", threadId: "thread-1", state: "dispatched" }]);
     // SAFETY: same invariant as the read above — only park/retire write this
     // file, and they store thread id -> pending-send arrays.
     raw = JSON.parse(store.getItem("muster:message-intents:v1") ?? "{}") as Record<string, PendingSend[]>;
@@ -140,10 +150,8 @@ describe("reconcileThread", () => {
     // JSON boundary rather than a cast, so the fixture stays honest about
     // what it is handing the reconciler.
     const malformed: ReplayBody = JSON.parse('{"message":{"id":12345}}');
-    const result = await reconcileThread(store, intent.threadId, async () => malformed);
-    expect(result.recovered).toHaveLength(0);
-    expect(result.accepted).toHaveLength(0);
-    expect(result.unresolved.map((p) => p.intentId)).toEqual([intent.intentId]);
+    const parked = await reconcileThread(store, intent.threadId, async () => malformed);
+    expect(parked.map((p) => p.intentId)).toEqual([intent.intentId]);
   });
 
   it("does not touch other threads while reconciling one", async () => {
@@ -155,6 +163,27 @@ describe("reconcileThread", () => {
     // stored JSON maps thread ids to pending-send arrays.
     const raw = JSON.parse(store.getItem("muster:message-intents:v1") ?? "{}") as Record<string, PendingSend[]>;
     expect(raw["thread-b"]).toHaveLength(1);
+  });
+});
+
+describe("account-scoped pending sweep (W0)", () => {
+  it("replays only the current account's records across a shared storage", () => {
+    const mine = pending({ intentId: newIntentId(), threadId: "thread-a", accountId: "acct-me" });
+    const theirs = pending({ intentId: newIntentId(), threadId: "thread-b", accountId: "acct-other" });
+    const legacy = pending({ intentId: newIntentId(), threadId: "thread-c" });
+    delete legacy.accountId; // the pre-W0 record shape: no account stamp at all
+    parkSend(store, mine);
+    parkSend(store, theirs);
+    parkSend(store, legacy);
+    const sweep = allPendingSends(store, "acct-me");
+    expect(sweep.map((entry) => entry.intentId)).toEqual([mine.intentId]);
+    // The other account's record is untouched — still parked, still there.
+    // SAFETY: the ledger file is written only by park/retire above, so the
+    // stored JSON maps thread ids to pending-send arrays.
+    const raw = JSON.parse(store.getItem("muster:message-intents:v1") ?? "{}") as Record<string, PendingSend[]>;
+    expect(raw["thread-b"]).toHaveLength(1);
+    // Without an account filter (single-user desktop) everything sweeps.
+    expect(allPendingSends(store)).toHaveLength(3);
   });
 });
 

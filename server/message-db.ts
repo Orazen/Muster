@@ -77,6 +77,29 @@ function open(): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS message_intents_thread ON message_intents(thread_id);
   `);
+  // Receipt OWNER (W0): a receipt belongs to the account whose session
+  // accepted it (peerOwnerOf space: account id when hosted, "local" on a
+  // one-user desktop). Every lookup and collision answer is scoped to that
+  // owner BEFORE any content decision, so a replayed foreign id can never
+  // disclose another account's receipt. Additive migration: legacy rows get
+  // owner "local" — on a desktop that is exactly right, and on a hosted
+  // deployment legacy receipts predate multi-account admits, so "local"
+  // matches only the operator, the same visibility rule as the unowned
+  // records in the route gate. Run once, guarded by PRAGMA, inside open().
+  // SAFETY: PRAGMA table_info returns one row per column with exactly the
+  // declared columns of this table; only the `name` field is read.
+  const ownerColumn = db.prepare("PRAGMA table_info(message_intents)").all() as Array<{ name: string }>;
+  if (!ownerColumn.some((column) => column.name === "owner")) {
+    db.exec("BEGIN");
+    try {
+      db.exec("ALTER TABLE message_intents ADD COLUMN owner TEXT;");
+      db.exec("UPDATE message_intents SET owner = 'local' WHERE owner IS NULL;");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   return db;
 }
 
@@ -602,6 +625,10 @@ export interface StoredMessageIntent {
   fingerprint: string;
   acceptedAt: number;
   state: MessageIntentState;
+  /** Owning account (peerOwnerOf space). Legacy rows read null and are
+   * normalized to "local" by intentOwnerOf — see the migration note in
+   * open(). */
+  owner: string | null;
 }
 
 // SAFETY: each row maps 1:1 to the message_intents columns.
@@ -612,6 +639,7 @@ const rowToIntent = (row: {
   fingerprint: string;
   accepted_at: number;
   state: string;
+  owner: string | null;
 }): StoredMessageIntent => ({
   intentId: row.intent_id,
   threadId: row.thread_id,
@@ -619,12 +647,13 @@ const rowToIntent = (row: {
   fingerprint: row.fingerprint,
   acceptedAt: row.accepted_at,
   state: row.state as MessageIntentState,
+  owner: row.owner,
 });
 
 export function readMessageIntent(intentId: string): StoredMessageIntent | null {
   // SAFETY: the select lists exactly this table's own columns.
   const row = db()
-    .prepare("SELECT intent_id, thread_id, message_id, fingerprint, accepted_at, state FROM message_intents WHERE intent_id = ?")
+    .prepare("SELECT intent_id, thread_id, message_id, fingerprint, accepted_at, state, owner FROM message_intents WHERE intent_id = ?")
     .get(intentId) as Parameters<typeof rowToIntent>[0] | undefined;
   return row ? rowToIntent(row) : null;
 }
@@ -635,7 +664,7 @@ export function readMessageIntent(intentId: string): StoredMessageIntent | null 
 export function appendMessageWithIntent(
   threadId: string,
   message: Message,
-  intent: { intentId: string; fingerprint: string },
+  intent: { intentId: string; fingerprint: string; owner?: string | null },
 ): void {
   const database = db();
   database.exec("BEGIN IMMEDIATE");
@@ -645,8 +674,8 @@ export function appendMessageWithIntent(
       .run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
     setActiveLeafQuiet(threadId, message.id);
     database
-      .prepare("INSERT INTO message_intents (intent_id, thread_id, message_id, fingerprint, accepted_at, state) VALUES (?, ?, ?, ?, ?, 'accepted')")
-      .run(intent.intentId, threadId, message.id, intent.fingerprint, message.at);
+      .prepare("INSERT INTO message_intents (intent_id, thread_id, message_id, fingerprint, accepted_at, state, owner) VALUES (?, ?, ?, ?, ?, 'accepted', ?)")
+      .run(intent.intentId, threadId, message.id, intent.fingerprint, message.at, intent.owner ?? null);
     database.exec("COMMIT");
   } catch (error) {
     database.exec("ROLLBACK");
@@ -654,6 +683,16 @@ export function appendMessageWithIntent(
   }
   // P4: one durable change -> one producer notification, after the commit.
   chatWasWritten(threadId);
+}
+
+/** Pin the owner of a row written before the owner column existed. Returns
+ * false when the row is gone; the caller treats that as a lost race and
+ * re-reads. */
+export function setMessageIntentOwner(intentId: string, owner: string): boolean {
+  const updated = db()
+    .prepare("UPDATE message_intents SET owner = ? WHERE intent_id = ? AND owner IS NULL")
+    .run(owner, intentId);
+  return updated.changes === 1;
 }
 
 /** The dispatch step began for this intent — persisted BEFORE the provider

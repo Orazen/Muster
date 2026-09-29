@@ -17,6 +17,12 @@ export interface PendingSend {
   text: string;
   /** Enqueued epoch ms — also the server-side acceptedAt expectation. */
   createdAt: number;
+  /** The signed-in account that parked this send (W0). The reconnect sweep
+   * replays only the CURRENT account's records — a shared browser profile
+   * must never carry one account's parked words into another's session.
+   * Records written before this field existed never sweep; they still
+   * reconcile on their thread's own hydration. */
+  accountId?: string;
 }
 
 const KEY = "muster:message-intents:v1";
@@ -85,7 +91,7 @@ export type CheckingPending = Pick<PendingSend, "intentId" | "threadId" | "text"
  * (for folding into the transcript) when the endpoint includes it. */
 export interface ReplayBody {
   message?: { id?: unknown };
-  intent?: { messageId?: string; state?: string };
+  intent?: { messageId?: string; threadId?: string; state?: string };
 }
 
 /** The wire's id contract: only a primitive string is an id. */
@@ -98,56 +104,91 @@ const messageIdOf = (body: ReplayBody): string | undefined => {
 };
 
 /** Reconnect reconciliation: replay every still-pending intent for a
- * thread against the endpoint. The server answers with the original
- * message and its durable receipt — a lookup, never a resend — or keeps
- * the record parked (transport/context failure). Local-only records (a
- * server that never received the request) surface as `unresolved` so the
- * caller can offer an explicit retry instead of guessing. */
-export interface ReconcileResult {
-  /** Terminal receipts the server confirmed (dispatched or lost). */
-  recovered: Array<{ pending: PendingSend; receipt: { messageId: string; state: string } }>;
-  /** Durable but NOT yet dispatched (state "accepted"): the words are
-   * stored server-side and queued behind a busy turn, so resending would
-   * duplicate them. The record stays parked and replays on the next
-   * reconnect until a terminal receipt retires it. */
-  accepted: Array<{ pending: PendingSend; receipt: { messageId: string; state: string }; message?: unknown }>;
-  /** Server never heard of this intent (or no server answered). */
-  unresolved: PendingSend[];
+ * thread against the endpoint. The server answers a replayed id with the
+ * ORIGINAL message and its durable receipt — a lookup, never a resend — or
+ * keeps the record parked (transport/context failure). Local-only records
+ * (a server that never received the request) surface as `unresolved` so the
+ * caller can offer an explicit retry instead of guessing.
+ *
+ * The replay always carries `lookup: true` (W0): a reconnect must never
+ * CREATE. An id the server cannot place in this account answers a blank 404
+ * and the record stays parked here. The receipt's OWN destination wins: a
+ * record parked under a thread that has since moved on (task switch) folds
+ * into the thread it was originally accepted for. */
+export interface RecoveredReceiptItem {
+  pending: PendingSend;
+  /** Terminal receipt; `threadId` is where the words ACTUALLY went. */
+  receipt: { messageId: string; threadId: string; state: string };
+}
+
+export interface AcceptedReceiptItem {
+  pending: PendingSend;
+  /** Durable receipt; `threadId` is where the words ACTUALLY went. */
+  receipt: { messageId: string; threadId: string; state: string };
+  /** The echoed original message, when the endpoint includes it. */
+  message?: unknown;
 }
 
 export async function reconcileThread(
   store: Store,
   threadId: string,
-  send: (pending: PendingSend) => Promise<ReplayBody>,
-): Promise<ReconcileResult> {
+  send: (pending: PendingSend, lookup: boolean) => Promise<ReplayBody>,
+  onReceipt?: (item: RecoveredReceiptItem | AcceptedReceiptItem) => void,
+): Promise<PendingSend[]> {
   const now = Date.now();
   const values = read(store);
   const pendingList = prune(values[threadId] ?? [], now);
   if (pendingList.length) values[threadId] = pendingList;
   else delete values[threadId];
   write(store, values);
-  const result: ReconcileResult = { recovered: [], accepted: [], unresolved: [] };
+  const unresolved: PendingSend[] = [];
   for (const pending of pendingList) {
     try {
-      const body = await send(pending);
+      const body = await send(pending, true);
       const messageId = messageIdOf(body);
       const state = body.intent?.state;
+      // The receipt's destination outranks the record's: the parked words
+      // stay bound to the thread they were first accepted for.
+      const destination = isText(body.intent?.threadId) ? body.intent.threadId : threadId;
       // Only a TERMINAL receipt retires the record. "accepted" means the
       // words are durable but still waiting to send (a busy bot's in-memory
       // queue): keep replaying on every reconnect until the send is
       // dispatched, lost, or confirmed — never assume "sent".
       if (messageId && state !== "accepted") {
-        result.recovered.push({ pending, receipt: { messageId, state: state ?? "sent" } });
+        onReceipt?.({ pending, receipt: { messageId, threadId: destination, state: state ?? "sent" } });
         retireSend(store, threadId, pending.intentId);
       } else if (messageId) {
-        result.accepted.push({ pending, receipt: { messageId, state: state ?? "accepted" }, message: body.message });
+        onReceipt?.({ pending, receipt: { messageId, threadId: destination, state: state ?? "accepted" }, message: body.message });
       } else {
-        result.unresolved.push(pending);
+        unresolved.push(pending);
       }
     } catch {
-      result.unresolved.push(pending);
+      unresolved.push(pending);
     }
   }
+  return unresolved;
+}
+
+/** Every thread's still-parked records (pruned first), for the account-
+ * scoped reconnect sweep. With `accountId` set, only records that account
+ * parked are returned — shared-storage records from another signed-in
+ * account stay parked and invisible to this session. Records written before
+ * per-record accounts existed are likewise left for their thread's own
+ * hydration path. */
+export function allPendingSends(store: Store, accountId?: string): PendingSend[] {
+  const now = Date.now();
+  const values = read(store);
+  const result: PendingSend[] = [];
+  for (const threadId of Object.keys(values)) {
+    const list = prune(values[threadId] ?? [], now);
+    if (list.length) values[threadId] = list;
+    else delete values[threadId];
+    for (const entry of list) {
+      if (accountId !== undefined && entry.accountId !== accountId) continue;
+      result.push(entry);
+    }
+  }
+  write(store, values);
   return result;
 }
 

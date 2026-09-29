@@ -23,6 +23,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -178,15 +179,69 @@ describe.skipIf(process.platform === "win32")("durable send intents across a dis
     expect(mine.status).toBe(202);
     const original = z.object({ intent: intentSchema }).parse(await mine.json());
     // Bob replays ALICE's intent id against BOB's own bot: the fingerprint
-    // (text + bob's thread) differs, so this is a conflict that names the
-    // original receipt — never a disclosure of alice's words in bob's thread.
+    // (text + bob's thread) differs, so this is a conflict — but a foreign
+    // collision learns only that the id is TAKEN (W0): the answer carries no
+    // message id, no thread id, no timestamp from another account.
     const cross = await send(bob, { text: "Private words", clientIntentId: intentId });
     expect(cross.status).toBe(409);
     const body = z.object({ intent: intentSchema }).parse(await cross.json());
-    expect(body.intent.messageId).toBe(original.intent.messageId);
-    expect(body.intent.threadId).toBe(alice.threadId);
+    expect(body.intent.intentId).toBe(intentId);
+    expect(body.intent.messageId).toBe("");
+    expect(body.intent.threadId).not.toBe(alice.threadId);
+    expect(body.intent.acceptedAt).toBe(0);
+    // The OWNER replaying the same id still gets the full original receipt
+    // (reconcile:true is a pure lookup — same id, same words).
+    const own = await send(alice, { text: "Private words", clientIntentId: intentId, reconcile: true });
+    expect(own.status).toBe(202);
+    const looked = z.object({ intent: intentSchema }).parse(await own.json());
+    expect(looked.intent.messageId).toBe(original.intent.messageId);
+    expect(looked.intent.threadId).toBe(alice.threadId);
     const bobTranscript = await transcriptOf(bob);
     expect(bobTranscript.messages.filter((m) => m.text === "Private words")).toHaveLength(0);
+  });
+
+  it("looks a receipt up read-only via GET: unknown and foreign ids are the same blank 404", async () => {
+    // An id alice never sent and a receipt that belongs to nobody the
+    // caller can name must be indistinguishable to bob.
+    const neverSent = `snd-${randomBytes(16).toString("hex")}`;
+    expect((await request(`/api/messages/intents/${neverSent}`, "GET", undefined, bob)).status).toBe(404);
+    const intentId = `snd-${randomBytes(16).toString("hex")}`;
+    const mine = await send(alice, { text: "Lookup words", clientIntentId: intentId });
+    expect(mine.status).toBe(202);
+    const admitted = z.object({ intent: intentSchema }).parse(await mine.json());
+    const foreign = await request(`/api/messages/intents/${intentId}`, "GET", undefined, bob);
+    expect(foreign.status).toBe(404);
+    const own = await request(`/api/messages/intents/${intentId}`, "GET", undefined, alice);
+    expect(own.status).toBe(200);
+    const body = z.object({ intent: intentSchema }).parse(await own.json());
+    expect(body.intent.messageId).toBe(admitted.intent.messageId);
+    expect(body.intent.threadId).toBe(alice.threadId);
+    // Malformed ids are refused without probing the ledger.
+    expect((await request("/api/messages/intents/short", "GET", undefined, alice)).status).toBe(400);
+    // Read-only means read-only: no lookup created anything anywhere.
+    const bobTranscript = await transcriptOf(bob);
+    expect(bobTranscript.messages.filter((m) => m.text === "Lookup words")).toHaveLength(0);
+  });
+
+  it("reconcile is a lookup only: an unknown id creates nothing, a known id folds the original", async () => {
+    const ghost = `snd-${randomBytes(16).toString("hex")}`;
+    const never = await send(alice, { text: "Recovery ghost", clientIntentId: ghost, reconcile: true });
+    expect(never.status).toBe(404);
+    const before = await transcriptOf(alice);
+    expect(before.messages.filter((m) => m.text === "Recovery ghost")).toHaveLength(0);
+    // A reconnecting client replays the SAME id and words after a lost
+    // response: 202 with the original receipt — never a re-queue, never a
+    // second transcript row.
+    const intentId = `snd-${randomBytes(16).toString("hex")}`;
+    const first = await send(alice, { text: "Parked words", clientIntentId: intentId });
+    expect(first.status).toBe(202);
+    const admitted = z.object({ intent: intentSchema }).parse(await first.json());
+    const replay = await send(alice, { text: "Parked words", clientIntentId: intentId, reconcile: true });
+    expect(replay.status).toBe(202);
+    const looked = z.object({ intent: intentSchema }).parse(await replay.json());
+    expect(looked.intent.messageId).toBe(admitted.intent.messageId);
+    const after = await transcriptOf(alice);
+    expect(after.messages.filter((m) => m.text === "Parked words")).toHaveLength(1);
   });
 
   it("refuses malformed intent ids without consuming them", async () => {
@@ -225,6 +280,27 @@ describe.skipIf(process.platform === "win32")("durable send intents across a dis
     const replay = await send(alice, { text: "Held for review", clientIntentId: intentId });
     const lookup = z.object({ intent: intentSchema }).parse(await replay.json());
     expect(lookup.intent.state).not.toBe("dispatched");
+  });
+
+  it("an accepted receipt stays readable after the account's Drive consent is disconnected", async () => {
+    // The acceptance criterion is explicit: lookup must not depend on the
+    // storage-sovereignty gate. Alice disconnects her Drive (fixture rows
+    // removed), and her already-accepted receipt still answers.
+    const intentId = `snd-${randomBytes(16).toString("hex")}`;
+    const mine = await send(alice, { text: "Consent-independent words", clientIntentId: intentId });
+    expect(mine.status).toBe(202);
+    const admitted = z.object({ intent: intentSchema }).parse(await mine.json());
+    const db = new DatabaseSync(join(directory, "data", "auth.db"));
+    try {
+      db.prepare("DELETE FROM drive_grants WHERE userId = ?").run(alice.id);
+      db.prepare("DELETE FROM account WHERE userId = ? AND providerId = 'google'").run(alice.id);
+    } finally {
+      db.close();
+    }
+    const looked = await request(`/api/messages/intents/${intentId}`, "GET", undefined, alice);
+    expect(looked.status).toBe(200);
+    const body = z.object({ intent: intentSchema }).parse(await looked.json());
+    expect(body.intent.messageId).toBe(admitted.intent.messageId);
   });
 
   it("reconciles across a fixture restart: the receipt survives, the words never re-send", async () => {

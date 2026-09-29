@@ -852,7 +852,7 @@ export class Store {
   admitMessage(
     threadId: string,
     text: string,
-    intent: { intentId: string; fingerprint: string; acceptedAt?: number },
+    intent: { intentId: string; fingerprint: string; acceptedAt?: number; owner?: string | null },
     opts: { queued?: boolean } = {},
   ): Message {
     const known = mdb.readMessageIntent(intent.intentId);
@@ -878,6 +878,10 @@ export class Store {
     };
     try {
       mdb.appendMessageWithIntent(threadId, full, intent);
+      // First-admission owner pin (W0): rows written before the owner column
+      // existed read as legacy; the admitting session claims it exactly once,
+      // before any lookup can observe it.
+      if (intent.owner) mdb.setMessageIntentOwner(intent.intentId, intent.owner);
     } catch (cause) {
       // A UNIQUE violation on the intent id means a concurrent request
       // admitted this intent first; re-read through the duplicate path so

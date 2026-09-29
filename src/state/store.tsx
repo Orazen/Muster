@@ -20,7 +20,7 @@ import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { SocialProfile, SocialPostView, SocialState } from "@/lib/social";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
-import { newIntentId, parkSend, reconcileThread, retireSend, type PendingSend } from "@/lib/message-intent";
+import { allPendingSends, newIntentId, parkSend, reconcileThread, retireSend, type PendingSend } from "@/lib/message-intent";
 import { soulMdFor, type AgentTemplate } from "@/lib/agent-templates";
 import { seedDraft } from "@/lib/drafts";
 import { showNotification } from "@/lib/notify";
@@ -1399,7 +1399,9 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
           // request leaves, so a lost response is a lookup on reconnect,
           // never a blind resend (first-slice request recovery).
           const intentId = newIntentId();
-          const pendingSend: PendingSend = { intentId, threadId, botId: action.botId, text: action.text, createdAt: Date.now() };
+          // W0: the account is stamped beside the words so a later account's
+          // reconnect sweep never replays this record (shared storage).
+          const pendingSend: PendingSend = { intentId, threadId, botId: action.botId, text: action.text, createdAt: Date.now(), accountId };
           parkSend(intentStore, pendingSend);
           rawDispatch({ type: "messageDelivery", threadId, intentId, state: "checking", text: action.text });
           api(`/api/bots/${action.botId}/messages`, {
@@ -1753,59 +1755,58 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
         handleFrame(entry.frame);
       }
     };
-    // Durable send receipts (first-slice request recovery): replay every
-    // still-parked intent for threads this account has mounted. The server
-    // answers a replayed id with the ORIGINAL message (a lookup, never a
-    // resend); a local-only record stays parked for the next reconnect.
-    // Called on stream open AND after each hydrate: on a page reload the
-    // stream opens before any bot is mounted, so onopen alone would never
-    // see the parked record — the hydrate boundary must catch it.
+    // Durable send receipts (first-slice request recovery + W0): replay the
+    // CURRENT ACCOUNT's parked records — not "whatever thread is mounted".
+    // A shared browser profile must never carry one account's parked words
+    // into another account's session, and a record parked under a thread
+    // that has since moved on must fold into the thread its RECEIPT names.
+    // The replay is a lookup (reconcile:true): an unknown or foreign id
+    // answers a blank 404 and the record stays parked — reconnect never
+    // creates. Called on stream open AND after each hydrate: on a page
+    // reload the stream opens before any bot is mounted, so onopen alone
+    // would never see the parked record — the hydrate boundary catches it.
     const reconcileParkedSends = () => {
-      for (const bot of stateRef.current.bots) {
-        void reconcileThread(intentStore, bot.threadId, (pending) =>
-          api(`/api/bots/${pending.botId}/messages`, {
+      const parked = allPendingSends(intentStore, accountId);
+      const botByThread = new Map(stateRef.current.bots.map((bot) => [bot.threadId, bot] as const));
+      // One fold per confirmed receipt: add the echoed ORIGINAL message to
+      // the receipt's OWN thread (messageAdded dedupes by id), then state
+      // the delivery truthfully — terminal receipts retire the record,
+      // "accepted" keeps it parked until a terminal state arrives.
+      const foldReceipt = (item: { pending: PendingSend; receipt: { messageId: string; threadId: string; state: string }; message?: unknown }) => {
+        const destination = item.receipt.threadId;
+        if (!botByThread.has(destination)) return; // not mounted: replays again next hydrate
+        if (item.message) {
+          // SAFETY: the replay body echoes the persisted Message shape this
+          // same account stored; messageAdded dedupes by id.
+          rawDispatch({ type: "messageAdded", threadId: destination, message: item.message as Message });
+        }
+        rawDispatch({
+          type: "messageDelivery",
+          threadId: destination,
+          intentId: item.pending.intentId,
+          state: item.receipt.state === "accepted" ? "accepted" : item.receipt.state === "unknown" ? "unknown" : "sent",
+          messageId: item.receipt.messageId,
+        });
+      };
+      for (const pending of parked) {
+        if (!botByThread.has(pending.threadId)) continue; // thread not mounted yet: try again next hydrate
+        void reconcileThread(intentStore, pending.threadId, (record, lookup) =>
+          api(`/api/bots/${record.botId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: pending.text, clientIntentId: pending.intentId }),
+            body: JSON.stringify({ text: record.text, clientIntentId: record.intentId, reconcile: lookup }),
           }),
-        ).then((result) => {
-          for (const item of result.recovered) {
-            rawDispatch({
-              type: "messageDelivery",
-              threadId: bot.threadId,
-              intentId: item.pending.intentId,
-              state: item.receipt.state === "unknown" ? "unknown" : "sent",
-              messageId: item.receipt.messageId,
-            });
-          }
-          // Durable but still queued behind a busy turn: show "Accepted —
-          // waiting to send" beside the folded ORIGINAL bubble and keep the
-          // record parked — the next reconnect replays until it dispatches.
-          for (const item of result.accepted) {
-            if (item.message) {
-              const current = stateRef.current.bots.find((b) => b.id === item.pending.botId);
-              if (current) {
-                // SAFETY: the replay body echoes the persisted Message shape
-                // this same account stored; messageAdded dedupes by id.
-                rawDispatch({ type: "messageAdded", threadId: current.threadId, message: item.message as Message });
-              }
-            }
-            rawDispatch({
-              type: "messageDelivery",
-              threadId: bot.threadId,
-              intentId: item.pending.intentId,
-              state: "accepted",
-              messageId: item.receipt.messageId,
-            });
-          }
+          foldReceipt,
+        ).then((unresolved) => {
           // A record the server could not confirm stays parked, but it must
           // not vanish from the transcript: surface it as a compact checking
           // row carrying the exact words, so "the message might not be sent"
           // is visible instead of silent (the reload path has no receipt yet).
-          for (const pending of result.unresolved) {
-            rawDispatch({ type: "messageDelivery", threadId: bot.threadId, intentId: pending.intentId, state: "checking", text: pending.text });
+          for (const record of unresolved) {
+            if (!botByThread.has(record.threadId)) continue;
+            rawDispatch({ type: "messageDelivery", threadId: record.threadId, intentId: record.intentId, state: "checking", text: record.text });
             // The record itself stays parked (full PendingSend re-parked so
             // botId/createdAt survive; reconcileThread only pruned it).
-            parkSend(intentStore, pending);
+            parkSend(intentStore, record);
           }
         });
       }

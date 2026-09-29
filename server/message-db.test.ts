@@ -9,14 +9,18 @@ import { DATA_DIR } from "./config.ts";
 import {
   closeMessageDb,
   appendMessage,
+  appendMessageWithIntent,
   deleteThread,
   insertMessage,
+  readMessageIntent,
   readThread,
   persistMessagePath,
   searchMessages,
   setActiveLeaf,
+  setMessageIntentOwner,
   updateMessage,
 } from "./message-db.ts";
+import { messageIntentFingerprint } from "./message-intent.ts";
 import { Store, type Message } from "./store.ts";
 import type { ModelSelection } from "./contracts.ts";
 
@@ -330,5 +334,73 @@ describe("message-db", () => {
     persistMessagePath(threadId, [a], b.id, b);
     closeMessageDb();
     expect(new Store(selection).activePath(threadId)).toEqual([{ ...a, parentId: null }, { ...b, parentId: a.id }]);
+  });
+});
+
+describe("message intent owner scope (W0)", () => {
+  beforeEach(() => {
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    mkdirSync(DATA_DIR, { recursive: true });
+  });
+  afterEach(() => closeMessageDb());
+
+  it("backfills legacy intent rows to the local owner without losing receipts", () => {
+    // A database written by the pre-owner schema: receipts with no owner.
+    const dbFile = join(DATA_DIR, "messages.db");
+    const legacy = new DatabaseSync(dbFile);
+    try {
+      legacy.exec(`
+        CREATE TABLE IF NOT EXISTS message_intents (
+          intent_id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          fingerprint TEXT NOT NULL,
+          accepted_at INTEGER NOT NULL,
+          state TEXT NOT NULL
+        );
+      `);
+      legacy
+        .prepare("INSERT INTO message_intents (intent_id, thread_id, message_id, fingerprint, accepted_at, state) VALUES (?, 't-legacy', 'm-legacy', '7:f:t', 1000, 'accepted')")
+        .run("intent-legacy-0001");
+    } finally {
+      legacy.close();
+    }
+    // First open migrates in place: the row keeps every field and gains the
+    // owner that matches the route gate's local rule.
+    const row = readMessageIntent("intent-legacy-0001");
+    expect(row?.owner).toBe("local");
+    expect(row?.state).toBe("accepted");
+    expect(row?.messageId).toBe("m-legacy");
+    // The migration is durable in the file, not a per-open repair.
+    const reopen = new DatabaseSync(dbFile, { readOnly: true });
+    try {
+      expect(reopen.prepare("SELECT owner FROM message_intents WHERE intent_id = ?").get("intent-legacy-0001")).toEqual({ owner: "local" });
+    } finally {
+      reopen.close();
+    }
+  });
+
+  it("writes the supplied owner, and only an ownerless caller gets an ownerless row", () => {
+    appendMessageWithIntent("t-ownerless", msg("m1", "words"), { intentId: "intent-ownless-001", fingerprint: "x" });
+    expect(readMessageIntent("intent-ownless-001")?.owner).toBeNull();
+    appendMessageWithIntent("t-owned", msg("m2", "words"), { intentId: "intent-owned2-01", fingerprint: "x", owner: "acct-bob" });
+    expect(readMessageIntent("intent-owned2-01")?.owner).toBe("acct-bob");
+  });
+
+  it("pins the owner at admission and never lets a later writer claim the row", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Owner probe" });
+    store.admitMessage(bot.threadId, "owned words", {
+      intentId: "intent-owned-0001",
+      fingerprint: messageIntentFingerprint("owned words", bot.threadId),
+      owner: "acct-alice",
+    });
+    expect(readMessageIntent("intent-owned-0001")?.owner).toBe("acct-alice");
+    // A second claim (another session racing the same legacy row) cannot
+    // take the row away from its first owner.
+    expect(setMessageIntentOwner("intent-owned-0001", "acct-bob")).toBe(false);
+    expect(readMessageIntent("intent-owned-0001")?.owner).toBe("acct-alice");
+    expect(setMessageIntentOwner("intent-missing-0001", "acct-bob")).toBe(false);
   });
 });
