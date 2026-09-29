@@ -8,8 +8,8 @@
 //     caller-provided store (the app uses Keychain, matching the CLI's
 //     owner-only file discipline; the transport itself never writes);
 //   - every request carries the session cookie, never credentials in URLs;
-//   - redirects are followed only when they carry no authorization (the
-//     shared APIRedirectPolicy), and sign-in rejects them outright;
+//   - sign-in and authenticated requests refuse every redirect before any
+//     credentials or mutation body can reach another destination;
 //   - SSE frames are parsed by CompanionCore's own SSEParser/Frame, so the
 //     desktop folds exactly what the phone folds.
 //
@@ -55,6 +55,24 @@ public struct ApprovalOutcome: Decodable, Sendable, Equatable {
 
 /// The desktop session client. Values, not singletons: tests build one
 /// against a fixture origin with an injected URLSession.
+private final class NativeRedirectPolicy: NSObject, URLSessionTaskDelegate, Sendable {
+    static let shared = NativeRedirectPolicy()
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+
+    static func validate(_ session: URLSession) throws {
+        // Background sessions do not honor this per-task redirect policy.
+        guard session.configuration.identifier == nil else {
+            throw URLError(.unsupportedURL)
+        }
+    }
+}
+
 public struct MusterTransport: Sendable {
     public let origin: URL
     private let account: HarnessAccount
@@ -66,11 +84,17 @@ public struct MusterTransport: Sendable {
         }
         self.origin = origin
         self.account = account
+        self.session = session ?? Self.makeSession()
+        try NativeRedirectPolicy.validate(self.session)
+    }
+
+    private static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         // The transport owns the cookie; no shared jar may leak it elsewhere.
         config.httpCookieAcceptPolicy = .never
         config.httpShouldSetCookies = false
-        self.session = session ?? URLSession(configuration: config)
+        config.urlCache = nil
+        return URLSession(configuration: config)
     }
 
     // MARK: - Requests
@@ -81,7 +105,8 @@ public struct MusterTransport: Sendable {
         }
         components.path = path
         guard let url = components.url else { throw MusterTransportError.badOrigin }
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
+        request.httpShouldHandleCookies = false
         request.httpMethod = method
         request.timeoutInterval = 20
         request.setValue("\(account.cookieName)=\(account.cookieValue)", forHTTPHeaderField: "Cookie")
@@ -108,7 +133,8 @@ public struct MusterTransport: Sendable {
     }
 
     private func send<T: Decodable>(_ request: URLRequest, as type: T.Type) async throws -> T {
-        let (data, response) = try await session.data(for: request)
+        try NativeRedirectPolicy.validate(session)
+        let (data, response) = try await session.data(for: request, delegate: NativeRedirectPolicy.shared)
         try Self.redirectGuard(response)
         try Self.check(response, data)
         do {
@@ -122,34 +148,36 @@ public struct MusterTransport: Sendable {
 
     /// Sign in and capture the session cookie the server sets. The secure
     /// name is only accepted from an HTTPS origin, mirroring the CLI.
-    public static func signIn(originText: String, email: String, password: String, mode: SignInMode, session: URLSession = .shared) async throws -> HarnessAccount {
+    public static func signIn(originText: String, email: String, password: String, mode: SignInMode, session: URLSession? = nil) async throws -> HarnessAccount {
         guard let origin = URL(string: originText), let host = origin.host, !host.isEmpty else {
             throw MusterTransportError.badOrigin
         }
         var components = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
         components.path = mode == .signIn ? "/api/auth/sign-in/email" : "/api/auth/sign-up/email"
-        var request = URLRequest(url: components.url!)
+        let ownsSession = session == nil
+        let session = session ?? makeSession()
+        defer { if ownsSession { session.finishTasksAndInvalidate() } }
+        try NativeRedirectPolicy.validate(session)
+        var request = URLRequest(url: components.url!, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
+        request.httpShouldHandleCookies = false
         request.httpMethod = "POST"
         request.timeoutInterval = 20
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(origin.absoluteString, forHTTPHeaderField: "Origin")
         request.setValue("muster-mac", forHTTPHeaderField: "User-Agent")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["email": email, "password": password, "name": mode == .signUp ? email : "Muster Desktop"])
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request, delegate: NativeRedirectPolicy.shared)
         try Self.redirectGuard(response)
         try Self.check(response, data)
         let headers = (response as? HTTPURLResponse)?.allHeaderFields ?? [:]
         let cookies = HTTPCookie.cookies(withResponseHeaderFields: headers as? [String: String] ?? [:], for: origin)
         let secureName = "__Secure-better-auth.session_token"
         let plainName = "better-auth.session_token"
-        let secure = cookies.first { $0.name == secureName }?.value
-        let plain = cookies.first { $0.name == plainName }?.value
-        if origin.scheme == "https" {
-            if let value = secure ?? plain {
-                return HarnessAccount(origin: originText, cookieName: secure ?? plainName, cookieValue: value)
-            }
-        } else if let value = plain {
-            return HarnessAccount(origin: originText, cookieName: plainName, cookieValue: value)
+        let secure = cookies.first { $0.name == secureName && !$0.value.isEmpty }
+        let plain = cookies.first { $0.name == plainName && !$0.value.isEmpty }
+        let cookie = origin.scheme == "https" ? (secure ?? plain) : plain
+        if let cookie {
+            return HarnessAccount(origin: originText, cookieName: cookie.name, cookieValue: cookie.value)
         }
         throw MusterTransportError.noSession
     }

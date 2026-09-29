@@ -33,6 +33,19 @@ public struct PendingSend: Identifiable, Equatable, Sendable {
     public var messageId: String?
 }
 
+// Internal seam for deterministic delayed-response tests. Production always
+// creates MusterTransport; callbacks remain bound to one connection lifetime.
+protocol NativeSessionTransport: Sendable {
+    func roster(messages: Int) async throws -> Fleet
+    func memory(botId: String) async throws -> String
+    func send(text: String, to botId: String, clientIntentId: String) async throws -> SendReceipt
+    func respond(botId: String, requestId: String, behavior: String, message: String?) async throws -> ApprovalOutcome
+    func events(lastEventId: String?, onEvent: @escaping @Sendable (StreamFrame) -> Void,
+                onHello: @escaping @Sendable (String, Bool) -> Void) async throws
+}
+
+extension MusterTransport: NativeSessionTransport {}
+
 @MainActor
 public final class LiveSessionModel: ObservableObject {
     // Connection
@@ -50,14 +63,28 @@ public final class LiveSessionModel: ObservableObject {
     // Appearance
     @Published public var appearance: Appearance = .system
 
-    private var transport: MusterTransport?
+    private var transport: (any NativeSessionTransport)?
+    private let makeTransport: @Sendable (HarnessAccount) throws -> any NativeSessionTransport
+    private var connectionID = UUID()
+    private var bootstrapTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
     private var streamTask: Task<Void, Never>?
     private var reconnectAttempt = 0
     private var lastStreamId: String?
     private var lastSeq: Int?
     private let transcriptPage = 50
 
-    public init() {}
+    public init() {
+        makeTransport = { try MusterTransport(account: $0) }
+    }
+
+    init(transportFactory: @escaping @Sendable (HarnessAccount) throws -> any NativeSessionTransport) {
+        makeTransport = transportFactory
+    }
+
+    private func isCurrent(_ id: UUID) -> Bool {
+        connectionID == id && account != nil && transport != nil
+    }
 
     // MARK: - Connection lifecycle
 
@@ -65,21 +92,35 @@ public final class LiveSessionModel: ObservableObject {
         disconnect()
         self.account = account
         state = .connecting
-        guard let transport = try? MusterTransport(account: account) else {
+        guard let transport = try? makeTransport(account) else {
             state = .failed("That address doesn't look right.")
             return
         }
         self.transport = transport
-        Task { await self.bootstrap() }
+        let id = connectionID
+        bootstrapTask = Task { [weak self] in
+            await self?.bootstrap(transport: transport, connectionID: id)
+        }
     }
 
     public func disconnect() {
+        // Invalidate first: a cancelled operation may already have queued its
+        // completion, or an injected transport may ignore cancellation.
+        connectionID = UUID()
+        bootstrapTask?.cancel()
+        bootstrapTask = nil
+        reconnectTask?.cancel()
+        reconnectTask = nil
         streamTask?.cancel()
         streamTask = nil
         transport = nil
         account = nil
         lastStreamId = nil
         lastSeq = nil
+        lastCursor = nil
+        reconnectAttempt = 0
+        selectedThreadId = nil
+        draft = ""
         fleet = Fleet(bots: [], groups: [])
         transcripts = [:]
         pendingSends = []
@@ -87,16 +128,19 @@ public final class LiveSessionModel: ObservableObject {
         state = .signedOut
     }
 
-    private func bootstrap() async {
-        guard let transport else { return }
+    private func bootstrap(transport: any NativeSessionTransport, connectionID id: UUID) async {
+        guard isCurrent(id), !Task.isCancelled else { return }
         do {
             let roster = try await transport.roster(messages: transcriptPage)
+            guard isCurrent(id), !Task.isCancelled else { return }
             applyRoster(roster)
             state = .live
-            openStream()
+            openStream(connectionID: id)
         } catch let error as MusterTransportError {
+            guard isCurrent(id), !Task.isCancelled else { return }
             state = .failed(Self.describe(error))
         } catch {
+            guard isCurrent(id), !Task.isCancelled else { return }
             state = .failed("Could not reach the server.")
         }
     }
@@ -114,29 +158,37 @@ public final class LiveSessionModel: ObservableObject {
     }
     // MARK: - Stream
 
-    private func openStream() {
+    private func openStream(connectionID id: UUID) {
+        guard isCurrent(id), let transport else { return }
         streamTask?.cancel()
-        let transport = self.transport
-        let streamId = lastStreamId
+        let lastEventId: String?
+        if let streamId = lastStreamId, let seq = lastSeq { lastEventId = "\(streamId):\(seq)" } else { lastEventId = nil }
+        let onEvent: @Sendable (StreamFrame) -> Void = { [weak self] streamFrame in
+            guard let model = self else { return }
+            Task { @MainActor in
+                guard model.isCurrent(id) else { return }
+                model.apply(streamFrame.frame)
+            }
+        }
+        let onHello: @Sendable (String, Bool) -> Void = { [weak self] cursor, resumed in
+            guard let model = self else { return }
+            Task { @MainActor in
+                guard model.isCurrent(id) else { return }
+                model.streamOpened(cursor: cursor, resumed: resumed, connectionID: id)
+            }
+        }
         streamTask = Task { [weak self] in
             do {
-                // Resume with the full "streamId:seq" cursor the server's
-                // hello taught us plus the newest seq we have folded.
-                let lastEventId: String?
-                if let streamId, let seq = self?.lastSeq { lastEventId = "\(streamId):\(seq)" } else { lastEventId = nil }
-                try await transport?.events(
-                    lastEventId: lastEventId,
-                    onEvent: { streamFrame in Task { @MainActor in self?.apply(streamFrame.frame) } },
-                    onHello: { cursor, resumed in Task { @MainActor in self?.streamOpened(cursor: cursor, resumed: resumed) } })
-                if !Task.isCancelled { Task { @MainActor in self?.streamDropped() } }
+                try await transport.events(lastEventId: lastEventId, onEvent: onEvent, onHello: onHello)
+                if !Task.isCancelled { self?.streamDropped(connectionID: id) }
             } catch {
-                if !Task.isCancelled { Task { @MainActor in self?.streamDropped() } }
+                if !Task.isCancelled { self?.streamDropped(connectionID: id) }
             }
         }
     }
 
-    private func streamOpened(cursor: String, resumed: Bool) {
-        // "<streamId>:<seq>" — split once; seq updates as frames arrive.
+    private func streamOpened(cursor: String, resumed: Bool, connectionID id: UUID) {
+        guard isCurrent(id) else { return }
         let parts = cursor.split(separator: ":", maxSplits: 1).map(String.init)
         if parts.count == 2 {
             lastStreamId = parts[0]
@@ -144,23 +196,30 @@ public final class LiveSessionModel: ObservableObject {
         }
         reconnectAttempt = 0
         if state != .live { state = .live }
-        if !resumed { Task { await self.rehydrate() } }
+        if !resumed { Task { await self.rehydrate(connectionID: id) } }
     }
 
-    private func streamDropped() {
-        guard state == .live else { return }
+    private func streamDropped(connectionID id: UUID) {
+        guard isCurrent(id) else { return }
+        switch state {
+        case .live, .degraded: break
+        default: return
+        }
         reconnectAttempt += 1
         let delay = min(pow(2.0, Double(reconnectAttempt)), 30.0)
         state = .degraded("reconnecting in \(Int(delay))s")
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            self?.openStream()
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            catch { return }
+            guard let self, self.isCurrent(id), !Task.isCancelled else { return }
+            self.openStream(connectionID: id)
         }
     }
 
-    private func rehydrate() async {
-        guard let transport else { return }
-        if let roster = try? await transport.roster(messages: transcriptPage) {
+    private func rehydrate(connectionID id: UUID) async {
+        guard isCurrent(id), let transport else { return }
+        if let roster = try? await transport.roster(messages: transcriptPage), isCurrent(id), !Task.isCancelled {
             applyRoster(roster)
         }
     }
@@ -211,7 +270,8 @@ public final class LiveSessionModel: ObservableObject {
             // A branch switch: the roster re-page is the honest source for
             // the now-visible branch.
             _ = threadId
-            Task { await self.rehydrate() }
+            let id = connectionID
+            Task { await self.rehydrate(connectionID: id) }
         case let .bot(bot):
             if let index = fleet.bots.firstIndex(where: { $0.id == bot.id }) {
                 var updated = fleet.bots
@@ -241,7 +301,8 @@ public final class LiveSessionModel: ObservableObject {
         case let .roomDeleted(groupId):
             fleet = Fleet(bots: fleet.bots, groups: fleet.groups.filter { $0.id != groupId })
         case .config:
-            Task { await self.rehydrate() }
+            let id = connectionID
+            Task { await self.rehydrate(connectionID: id) }
         default:
             break // screens/runtime/notify handled by later slices
         }
@@ -258,8 +319,10 @@ public final class LiveSessionModel: ObservableObject {
         pendingSends.append(pending)
         draft = ""
         guard let transport else { return }
+        let id = connectionID
         do {
             let receipt = try await transport.send(text: text, to: bot.id, clientIntentId: intentId)
+            guard isCurrent(id), !Task.isCancelled else { return }
             pending.state = receipt.state
             pending.messageId = receipt.messageId
             replacePending(pending)
@@ -269,9 +332,11 @@ public final class LiveSessionModel: ObservableObject {
                 pendingSends.removeAll { $0.id == pending.id }
             }
         } catch let error as MusterTransportError {
+            guard isCurrent(id), !Task.isCancelled else { return }
             pending.state = Self.describe(error)
             replacePending(pending)
         } catch {
+            guard isCurrent(id), !Task.isCancelled else { return }
             pending.state = "unknown"
             replacePending(pending)
         }
@@ -300,7 +365,9 @@ public final class LiveSessionModel: ObservableObject {
     // MARK: - Memory
 
     public func loadMemory(botId: String) async {
-        if let text = try? await transport?.memory(botId: botId) {
+        guard let transport else { return }
+        let id = connectionID
+        if let text = try? await transport.memory(botId: botId), isCurrent(id), !Task.isCancelled {
             memoryText[botId] = text
         }
     }
