@@ -1,6 +1,23 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 @import "@fontsource-variable/inter";
 @import "./components/chat/message-bubble.css";
+
+/* Scan the application, and only the application.
+ *
+ * Tailwind's automatic detection walks the project root, so every file with a
+ * class name in it became a source. The container build copies a fixed subset
+ * — src, the two entry documents, public, www, and the server-side trees — and
+ * a local checkout has the rest, so the two builds of one commit compiled
+ * different class sets into the stylesheet: nine utilities a local build emits
+ * and the deployed one does not, and five the reverse. Same source, different
+ * bytes, and no way to prove a served build matches a local one.
+ *
+ * Naming the sources makes the stylesheet a function of the application alone.
+ * Verified: the whole artifact manifest is byte-identical whether or not
+ * unrelated files exist, and the utilities that no component uses are gone. */
+@source "../src";
+@source "../index.html";
+@source "../tray.html";
 
 /* Grok Bot dark palette (pixel-sampled from the real app) */
 @theme {
