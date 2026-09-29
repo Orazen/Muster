@@ -1,6 +1,7 @@
 // Input contracts and daemon control for the dependency-free CLI bundle.
 import { createHash } from "node:crypto";
 import { readFileSync, unlinkSync } from "node:fs";
+import { get } from "node:http";
 
 /** @typedef {{ pid: number, port: number, fingerprint?: string }} RunRecord */
 /** @typedef {"matching" | "unreachable" | "mismatch"} ServerIdentity */
@@ -48,8 +49,47 @@ export function clearRunRecordAt(path, expected) {
   catch { return false; }
 }
 
+// Health identity is a bounded local control request. Do not route it through
+// Node's global fetch: affected Undici versions can throw an uncaught native
+// ToS error when the daemon closes a reused socket during shutdown.
+const HEALTH_BODY_LIMIT = 64 * 1024;
+
+/** @param {string} url @param {{ signal: AbortSignal }} options @returns {Promise<Response>} */
+function requestLoopbackHealth(url, { signal }) {
+  return new Promise((resolve, reject) => {
+    const request = get(url, { agent: false, signal }, (response) => {
+      response.once("error", reject);
+      const status = response.statusCode ?? 503;
+      // node:http never follows redirects. An error status does not need a
+      // response body; destroy it rather than draining an unbounded stream.
+      if (status < 200 || status >= 300) {
+        response.destroy();
+        resolve(new Response(null, { status: 503 }));
+        return;
+      }
+      const chunks = [];
+      let size = 0;
+      response.on("data", (chunk) => {
+        size += chunk.length;
+        if (size > HEALTH_BODY_LIMIT) {
+          reject(new Error("Muster health response exceeded its size limit"));
+          response.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.once("end", () => {
+        // Identity requires a JSON body, including for successful empty
+        // statuses where constructing a body-bearing Response is invalid.
+        resolve(new Response(status === 204 || status === 205 ? null : Buffer.concat(chunks), { status }));
+      });
+    });
+    request.once("error", reject);
+  });
+}
+
 /** @param {RunRecord} record @param {typeof fetch} request @returns {Promise<ServerIdentity>} */
-export async function inspectRecordedServer(record, request = fetch) {
+export async function inspectRecordedServer(record, request = requestLoopbackHealth) {
   if (!validRunTarget(record)) return "mismatch";
   try {
     const res = await request(`http://127.0.0.1:${record.port}/api/health`, { signal: AbortSignal.timeout(1_500), redirect: "error" });

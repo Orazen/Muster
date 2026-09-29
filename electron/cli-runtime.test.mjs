@@ -98,6 +98,84 @@ describe("CLI health identity", () => {
   });
 });
 
+async function healthFixture(handler) {
+  const server = createServer(handler);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = z.object({ port: z.number().int().min(1).max(65_535) }).parse(server.address()).port;
+  return {
+    record: { ...record, port },
+    close: () => new Promise((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve(undefined));
+      server.closeAllConnections();
+    }),
+  };
+}
+
+describe("CLI bounded loopback health transport", () => {
+  it("reads identity up to the exact body limit", async () => {
+    const prefix = JSON.stringify({ app: "muster", pid: record.pid, padding: "" });
+    const body = prefix.replace('"padding":""', `"padding":"${" ".repeat(64 * 1024 - Buffer.byteLength(prefix))}"`);
+    expect(Buffer.byteLength(body)).toBe(64 * 1024);
+    const fixture = await healthFixture((_request, response) => response.end(body));
+    try { expect(await inspectRecordedServer(fixture.record)).toBe("matching"); }
+    finally { await fixture.close(); }
+  });
+
+  it("rejects an over-limit stream even if its JSON claims the correct identity", async () => {
+    const body = JSON.stringify({ app: "muster", pid: record.pid, padding: " ".repeat(64 * 1024) });
+    const fixture = await healthFixture((_request, response) => response.end(body));
+    try { expect(await inspectRecordedServer(fixture.record)).toBe("unreachable"); }
+    finally { await fixture.close(); }
+  });
+
+  it("refuses redirects without contacting the destination", async () => {
+    let destinationRequests = 0;
+    const destination = await healthFixture((_request, response) => {
+      destinationRequests++;
+      response.end(JSON.stringify({ app: "muster", pid: record.pid }));
+    });
+    const fixture = await healthFixture((_request, response) => {
+      response.writeHead(302, { location: `http://127.0.0.1:${destination.record.port}/api/health` });
+      response.end();
+    });
+    try {
+      expect(await inspectRecordedServer(fixture.record)).toBe("unreachable");
+      expect(destinationRequests).toBe(0);
+    } finally { await fixture.close(); await destination.close(); }
+  });
+
+  it.each([503, 600])("rejects non-success status %s without trusting the body", async (status) => {
+    const fixture = await healthFixture((_request, response) => {
+      response.writeHead(status);
+      response.end(JSON.stringify({ app: "muster", pid: record.pid }));
+    });
+    try { expect(await inspectRecordedServer(fixture.record)).toBe("unreachable"); }
+    finally { await fixture.close(); }
+  });
+
+  it("bounds the whole request when a response never finishes", async () => {
+    const fixture = await healthFixture((_request, response) => { response.writeHead(200); response.write("{"); });
+    try { expect(await inspectRecordedServer(fixture.record)).toBe("unreachable"); }
+    finally { await fixture.close(); }
+  });
+
+  it("rejects a truncated body and does not infer identity from partial JSON", async () => {
+    const fixture = await healthFixture((_request, response) => {
+      response.writeHead(200, { "content-length": "1000" });
+      response.write('{"app":"muster"');
+      response.destroy();
+    });
+    try { expect(await inspectRecordedServer(fixture.record)).toBe("unreachable"); }
+    finally { await fixture.close(); }
+  });
+
+  it.each([204, 205])("treats empty successful status %s as an unreadable identity", async (status) => {
+    const fixture = await healthFixture((_request, response) => { response.writeHead(status); response.end(); });
+    try { expect(await inspectRecordedServer(fixture.record)).toBe("mismatch"); }
+    finally { await fixture.close(); }
+  });
+});
+
 describe("CLI daemon stop", () => {
   it.each(["mismatch", "unreachable"])("does not signal an existing unverified PID: %s", async (identity) => {
     const signal = vi.fn();
@@ -208,6 +286,25 @@ describe("CLI command integration with owned fixture processes", () => {
     const { child, path, home } = await fixtureServer();
     const exited = once(child, "exit");
     const result = await run(process.execPath, [cliPath, "stop"], { env: { ...process.env, MUSTER_DIR: home }, timeout: 5000 });
+    await exited;
+    expect(result.stdout).toContain(`Stopped Muster (PID ${child.pid}`);
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it("stops and clears its fixture even when native socket QoS marking throws", async () => {
+    const { child, path, home } = await fixtureServer();
+    const fault = join(home, "native-tos-failure.mjs");
+    // Fault injection exists only in this owned CLI subprocess. The product
+    // does not replace a prototype or suppress uncaught exceptions.
+    writeFileSync(fault, `import { Socket } from "node:net";
+      Socket.prototype.setTypeOfService = function () {
+        throw Object.assign(new Error("setTypeOfService EINVAL"), { code: "EINVAL", syscall: "setTypeOfService" });
+      };
+`);
+    const exited = once(child, "exit");
+    const result = await run(process.execPath, ["--import", fault, cliPath, "stop"], {
+      env: { ...process.env, MUSTER_DIR: home }, timeout: 5000,
+    });
     await exited;
     expect(result.stdout).toContain(`Stopped Muster (PID ${child.pid}`);
     expect(existsSync(path)).toBe(false);
