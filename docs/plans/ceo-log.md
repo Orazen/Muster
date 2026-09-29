@@ -9497,3 +9497,33 @@ Two diagnoses worth keeping, both confirmed by running rather than reading:
 2. **That is itself a finding, not just a bad fixture.** Shortening the injection to fit cleared 3 of the 16. But it means an over-long event summary makes a legitimate proposal VANISH — provider-supplied text changing the outcome by suppressing the card entirely. The plan's case 7 asks that injected text change no authority, and today it changes behaviour, by denial. Whether the module should bound the stored excerpt and mark it untrusted (defence in depth, survives a hostile provider) or reject the reader's own shape (the real reader already caps summaries, so it cannot normally arrive) is a policy decision, not a bug fix, and it is the owner's to make before I write the resolution.
 
 Remaining I0 failures (quiet hours, DST, snooze, grant epoch, refresh, concurrency ordering) are undiagnosed. Not claiming progress on them.
+## Loop210 (2026-09-29) — A5 failure-atomic installation registry; the browser card told the truth to the wrong bot
+
+GATE: with the CI flake assigned elsewhere, take the next open work from the audit (A5) and the gap I had left in the browser-status slice.
+CHECK: A5 reproduced by the audit, fixed, mutation-checked both ways; the browser card's per-bot truth verified by unit tests plus a real build.
+EXPECT: a registry whose failure mode matches what its routes already promise, and a card that cannot promise a bot tools its engine cannot mount.
+
+### A5 landed — 8d2a3d5, CI success
+
+`InstallationRegistry` mutated `this.file` in place and then called `persist`, which only flipped a `durable` flag. A write that never reached disk still left memory changed, and all three routes were already promising the opposite.
+
+- `refresh` (the machine's own renewal): replaced the credential hash in memory, then the route answered 503 "keep presenting the current credential" — the credential it had just invalidated. A machine that could not write its registry bricked itself: the old secret 401'd immediately and became valid again after a restart reloaded the unchanged file. This is the audit's reproduction, confirmed.
+- `rotate`: "the old credential still works" was equally untrue.
+- `register`: "nothing was registered" for a row that existed in memory.
+- `revoke`: the most serious — read as revoked in-process while the file said active, so a restart un-revoked the installation.
+
+Changes now apply to a copy, persist, and are adopted only once the write lands. A failed write discards the change whole, so `this.file` always describes the last durable state. Eviction for the table bound is part of the same change, so freeing space then failing no longer drops rows for a row that never landed. `register` now returns null when the write fails — a real type change, because the route previously had no way to say "refused", only a flag to read after. The rotate route's null now separates "no such row" (404) from "the write did not land" (503), which it could not before.
+
+Two mutations, both caught: adopting the draft regardless of persist success kills five cases including a pre-existing one about revocation durability; restoring the ORIGINAL in-place-then-save shape for `refresh` kills its case, so the test pins the original defect and not just the new structure.
+
+Two fixture bugs of my own, both caught by running rather than reading. The first denied writes by replacing the registry's directory with a file, which also deleted the registry, so the reload half of every case asserted against a file that no longer existed. The second restored write permission in the helper's own `finally`, before the test acted, so every case passed against a writable registry and proved nothing. The helper now leaves the denial in place; a process that cannot deny writes (root) skips loudly rather than passing quietly.
+
+### Browser card — d008036, CI success
+
+The server has reported per-bot ground truth since the earlier slice. The card never read any of it: its status type was `{available, command, tools}`, so it decided from `available` — a property of the server's filesystem — plus its own toggle. With the binary present and the toggle on it read "This bot gets 14 browser tools on its next task" for a bot whose engine cannot mount one, and drew the Navigate/Screenshot/Read tiles for them too.
+
+The decision moved to a pure tested module (`src/lib/browser-status.ts`), which is how the rest of `src/` keeps UI logic honest — there are no component tests in this repo, so the logic is tested directly. `unknown` is the fallback, not an optimistic default: an older server, a failed request, or a roster that changed under the card all produce no claim, because defaulting to "ready" would reintroduce the same lie by another route. The blocked case names the engine (the thing the user can change) and says tasks run without a browser until they do, and stays quiet while the toggle is off because nothing is being claimed. The machine-level pill is unchanged: "Ready on this machine" is a different claim and remains true.
+
+12 cases, 2 mutations caught: deciding from `available` instead of the bot's own `effective` kills four, and defaulting a missing row to "ready" kills the case written for it. `vite build` clean — the JSX is not covered by tests, so the build is the evidence that it parses.
+
+Suites: A5 448 files / 6551 passed; card 449 files / 6563 passed; 8 skipped, 0 failed on both. Typecheck and oxlint clean on both.
