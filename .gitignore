@@ -56,3 +56,6 @@ commit-audit-fixes.sh
 # SwiftPM build output for the native Mac prototype (M0)
 macos/.build/
 macos/.swiftpm/
+
+# Local app packaging output (rebuilt from `swift build -c release`)
+macos/build/

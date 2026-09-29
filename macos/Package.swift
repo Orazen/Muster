@@ -11,7 +11,7 @@ import PackageDescription
 // owner, per the native migration plan.
 let package = Package(
     name: "MusterMac",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     products: [
         .executable(name: "MusterMac", targets: ["MusterMac"])
     ],

@@ -42,7 +42,7 @@ struct ConversationView: View {
                 }
                 .padding(16)
             }
-            .onChange(of: model.selectedMessages.count) { _ in
+            .onChange(of: model.selectedMessages.count) { _, _ in
                 if let last = model.selectedMessages.last {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
