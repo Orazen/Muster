@@ -46,6 +46,23 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: npx tsc --noEmit -p tsconfig.e2e.json
 
+  # Every spec owns its server/data/browser context. Build first so these
+  # exercise this commit's UI, never a stale dist directory or a live account.
+  browser-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm build
+      - run: pnpm test:e2e
+
   # The suite is one serial job today: `fileParallelism: false` in vite.config.ts
   # runs 418 files one at a time, and the measured total is ~12 minutes. Split
   # it across four runners, which is where the wall clock actually goes.
@@ -126,11 +143,7 @@ jobs:
   # TESTING.md; making them a gate means `xcodebuild` on a runner with a
   # simulator runtime, which is a larger change than adding a job.
   #
-  # NOT LISTED IN `build`'s `needs` on purpose: that list is another agent's
-  # slice and the instruction for this change was to add a job, not to edit
-  # existing ones. This job still fails the workflow when it fails — a
-  # required check is red either way — but `build` will still have run. Add
-  # `swift-tests` to that list to make it gate the build as well.
+  # The final build waits for this core check as well as browser execution.
   swift-tests:
     runs-on: macos-15
     steps:
@@ -150,7 +163,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, e2e-typecheck, test-shard, test-integrations]
+    needs: [lint, typecheck, e2e-typecheck, browser-tests, test-shard, test-integrations, swift-tests]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

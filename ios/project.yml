@@ -320,6 +320,11 @@ targets:
         product: CompanionCore
     entitlements:
       path: ShareExtension/ShareExtension.entitlements
+      properties:
+        # ShareStaging writes into the same container the app drains on launch.
+        # XcodeGen must retain this grant when regenerating the extension.
+        com.apple.security.application-groups:
+          - group.com.muster.companion
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.muster.companion.share

@@ -1763,9 +1763,10 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
     // The replay is a lookup (reconcile:true): an unknown or foreign id
     // answers a blank 404 and the record stays parked — reconnect never
     // creates. Called on stream open AND after each hydrate: on a page
-    // reload the stream opens before any bot is mounted, so onopen alone
-    // would never see the parked record — the hydrate boundary catches it.
+    // reload the stream can open before any bot is mounted. Confirmed
+    // delivery must survive that ordering; hydration supplies the transcript.
     const reconcileParkedSends = () => {
+      if (!alive) return;
       const parked = allPendingSends(intentStore, accountId);
       const botByThread = new Map(stateRef.current.bots.map((bot) => [bot.threadId, bot] as const));
       // One fold per confirmed receipt: add the echoed ORIGINAL message to
@@ -1773,13 +1774,17 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
       // the delivery truthfully — terminal receipts retire the record,
       // "accepted" keeps it parked until a terminal state arrives.
       const foldReceipt = (item: { pending: PendingSend; receipt: { messageId: string; threadId: string; state: string }; message?: unknown }) => {
+        if (!alive) return;
         const destination = item.receipt.threadId;
-        if (!botByThread.has(destination)) return; // not mounted: replays again next hydrate
         if (item.message) {
           // SAFETY: the replay body echoes the persisted Message shape this
-          // same account stored; messageAdded dedupes by id.
+          // same account stored; messageAdded dedupes by id and ignores
+          // unmounted threads, whose transcripts arrive on hydration.
           rawDispatch({ type: "messageAdded", threadId: destination, message: item.message as Message });
         }
+        // Terminal receipts retire their parked record after this callback.
+        // Keep delivery even before its thread mounts or the next hydrate
+        // cannot recover the receipt again to show its Sent chip.
         rawDispatch({
           type: "messageDelivery",
           threadId: destination,
@@ -1793,9 +1798,8 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
       // task they have since switched away from were never once asked about:
       // the record sat in the ledger indefinitely and the only visible sign
       // was a "checking delivery" row on a thread nobody was looking at. The
-      // mount check that matters is inside foldReceipt, which declines to fold
-      // into a thread that is not on screen — the server is still asked, and
-      // an unmounted thread hydrates its own transcript when it is opened.
+      // receipt remains keyed to its original thread even when that thread
+      // is unmounted; opening it supplies the matching transcript later.
       for (const pending of parked) {
         void reconcileThread(intentStore, pending.threadId, (record, lookup) =>
           api(`/api/bots/${record.botId}/messages`, {
@@ -1804,6 +1808,7 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
           }),
           foldReceipt,
         ).then((unresolved) => {
+          if (!alive) return;
           // A record the server could not confirm stays parked, but it must
           // not vanish from the transcript: surface it as a compact checking
           // row carrying the exact words, so "the message might not be sent"
@@ -1839,8 +1844,8 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
         for (const frame of pendingFrames.splice(0)) handleFrame(frame);
         // a fresh snapshot may carry threads that parked frames were waiting on
         replayParked();
-        // ...and freshly mounted threads may be holding parked sends that a
-        // pre-mount onopen could not see (the reload recovery path)
+        // Refresh accepted/unconfirmed sends after hydration, when their
+        // transcript and any checking rows can be displayed together.
         reconcileParkedSends();
       });
     };

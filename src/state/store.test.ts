@@ -191,6 +191,50 @@ describe("duplicate message acknowledgements", () => {
   const request: Message = { id: "request", role: "user", kind: "text", text: "Draft a brief", at: 1, parentId: null };
   const reply: Message = { id: "reply", role: "bot", kind: "text", text: "Here is your brief", at: 2, parentId: request.id };
 
+  it("keeps a recovered receipt that arrives before the roster and transcript hydrate", () => {
+    // SSE opens before the roster request finishes. The echoed message has
+    // no mounted carrier yet, but its receipt must survive the later snapshot.
+    const beforeRoster = reducer(initialState, {
+      type: "messageAdded", threadId: bot.threadId, message: request,
+    });
+    const recovered = reducer(beforeRoster, {
+      type: "messageDelivery", threadId: bot.threadId, intentId: "recovered-intent",
+      state: "sent", messageId: request.id,
+    });
+    expect(recovered.bots).toEqual([]);
+
+    const hydrated = reducer(recovered, {
+      type: "hydrate", bots: [{ ...bot, messages: [request, reply] }], groups: [],
+    });
+    expect(hydrated.bots[0].messages).toEqual([request, reply]);
+    expect(hydrated.messageDelivery["recovered-intent"]).toMatchObject({
+      threadId: bot.threadId, messageId: request.id, state: "sent",
+    });
+  });
+
+  it("keeps an original-task receipt while another task is mounted and after switching back", () => {
+    const original = { ...bot, messages: [request, reply] };
+    const otherTask = { ...bot, threadId: "another-task", messages: [] };
+    const switched = reducer({ ...initialState, bots: [original] }, {
+      type: "taskSwitched", bot: otherTask,
+    });
+    const echoed = reducer(switched, {
+      type: "messageAdded", threadId: original.threadId, message: request,
+    });
+    const recovered = reducer(echoed, {
+      type: "messageDelivery", threadId: original.threadId, intentId: "original-intent",
+      state: "sent", messageId: request.id,
+    });
+    expect(recovered.bots[0]).toEqual(otherTask);
+    expect(Object.values(recovered.messageDelivery).filter((entry) => entry.threadId === otherTask.threadId)).toEqual([]);
+
+    const restored = reducer(recovered, { type: "taskSwitched", bot: original });
+    expect(restored.bots[0].messages).toEqual([request, reply]);
+    expect(restored.messageDelivery["original-intent"]).toMatchObject({
+      threadId: original.threadId, messageId: request.id, state: "sent",
+    });
+  });
+
   it("keeps the bot reply visible when completion retry echoes the earlier accepted user message", () => {
     const requested = reducer({ ...initialState, bots: [bot] }, {
       type: "messageAdded", threadId: bot.threadId, message: request,
