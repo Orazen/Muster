@@ -3,6 +3,14 @@
 # A packages list is required for `pnpm list` (electron-builder's collector).
 packages:
   - "."
+# Keep dependency fixes here so both pnpm 10 and 11 apply them.
+overrides:
+  "fast-uri@<3.2.0": ">=3.2.0"
+  "@xmldom/xmldom@<0.8.15": "0.8.15"
+  "sharp@<0.35.4": ">=0.35.4"
+  "js-yaml@<4.3.2": ">=4.3.2"
+  # This Miniflare version pins 7.29.0; 7.29.1 fixes its six Undici advisories.
+  "miniflare@5.20260923.0-alpha>undici": "7.29.1"
 allowBuilds:
   electron: true # postinstall downloads the Electron dist
   esbuild: true # postinstall validates the platform binary
