@@ -18,7 +18,7 @@
 // drivers/ nested; import.meta.url still resolves to the same location, so
 // that lookup is unaffected.
 import { build } from "esbuild";
-import { createBuildMetadata, writeBuildIdentity } from "./build-identity.mjs";
+import { assertProvenanceClaimed, createBuildMetadata, writeBuildIdentity } from "./build-identity.mjs";
 import { fileURLToPath } from "node:url";
 import childProcess from "node:child_process";
 import { dirname, join } from "node:path";
@@ -51,6 +51,9 @@ const ENTRY_POINTS = [
 const NATIVE_EXTERNALS = ["better-sqlite3"];
 
 const identity = createBuildMetadata(root, JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version);
+
+assertProvenanceClaimed(identity);
+
 
 await build({
   define: { __MUSTER_BUILD_IDENTITY__: JSON.stringify(identity) },

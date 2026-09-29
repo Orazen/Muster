@@ -37,6 +37,29 @@ export function createBuildMetadata(root, version, revisionClaim = process.env.M
   return { schema: 1, buildId: randomUUID(), source: { revision, dirty }, version };
 }
 
+/** Refuse a build that cannot name its own source, when the caller has asked
+ *  for that to be fatal.
+ *
+ *  A build with `revision: null` is not wrong, it is unprovable — and
+ *  `null` reads exactly like "nothing to check", so it survives review until
+ *  someone looks at /api/build-identity. Exported and called by the bundle
+ *  build so there is ONE implementation to be wrong about; a copy of this
+ *  logic in a test proved nothing, because deleting the real guard left the
+ *  copy green.
+ *
+ *  Opt-in: a plain local `docker build` has no .git and no arg, and inventing a
+ *  claim for it would be worse than admitting ignorance. */
+export function assertProvenanceClaimed(metadata, requireProvenance = process.env.MUSTER_REQUIRE_PROVENANCE) {
+  if (requireProvenance === "1" && metadata.source.revision === null) {
+    throw new Error([
+      "Refusing to build: MUSTER_REQUIRE_PROVENANCE=1 but this build has no source revision.",
+      "The deploy pipeline must pass --build-arg MUSTER_SOURCE_REVISION=$(git rev-parse HEAD).",
+      "A build with no revision cannot be checked against a tested SHA, which is the",
+      "whole point of shipping one. Set MUSTER_REQUIRE_PROVENANCE=0 to allow it anyway.",
+    ].join(" "));
+  }
+}
+
 export function writeBuildIdentity(root, metadata, artifact, selectedPaths, limits = IDENTITY_LIMITS) {
   if (artifact !== "web" && artifact !== "server") throw new Error("Invalid artifact scope");
   const base = realpathSync(root);

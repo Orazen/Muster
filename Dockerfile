@@ -46,6 +46,11 @@ COPY www www
 # keeps the historical (null) behavior instead of inventing a claim.
 ARG MUSTER_SOURCE_REVISION=""
 ENV MUSTER_SOURCE_REVISION=${MUSTER_SOURCE_REVISION}
+# Opt-in refusal: a production build that cannot name its own source cannot be
+# checked against a tested SHA. Left off, a plain local `docker build` (no .git,
+# no arg) still produces the historical revision:null rather than failing.
+ARG MUSTER_REQUIRE_PROVENANCE=""
+ENV MUSTER_REQUIRE_PROVENANCE=${MUSTER_REQUIRE_PROVENANCE}
 
 RUN pnpm build \
   && pnpm build:server

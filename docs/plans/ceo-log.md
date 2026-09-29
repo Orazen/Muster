@@ -9563,3 +9563,21 @@ Reviewed rather than assumed, and one of their commits answers a question I had 
 - `41a4147` / `8f1b55d` scope webhooks to their owning account across management, history and live events. Not independently reviewed this session; both CI green.
 
 Still open, not started: B1 (benchmark history — the workflow swallows a 403 on push and later runs do not load prior artifacts), the user's Mac black screen (needs Cmd+Option+I console output), and the audit's remaining non-P1 items.
+### B3 — deployment provenance · in progress at this entry
+
+Production reports `version: 1.23.0, source.revision: null`. Investigated rather than assumed, and the finding is narrower than "provenance is missing":
+
+- The mechanism was never broken. `createBuildMetadata` reads `MUSTER_SOURCE_REVISION`, and the Dockerfile already declared `ARG MUSTER_SOURCE_REVISION`. Verified locally: with the env set, the identity records HEAD exactly and the guard passes.
+- `.dockerignore` excludes `.git`, so the git fallback can never fire in an image. That is deliberate and documented.
+- So the real gap is that **nothing supplies the ARG and nothing fails when it does not**. `revision: null` reads like "no provenance, nothing to check" rather than "this build is unprovable", which is how it survived to production.
+
+The repo-side fix makes the silence impossible: an opt-in `MUSTER_REQUIRE_PROVENANCE` guard in the server bundle build refuses a build that cannot name its own source, and says exactly which build arg is missing. Opt-in because a plain local `docker build` has no `.git` and no arg, and inventing a claim for it would be worse than admitting ignorance.
+
+What is NOT done and cannot be done from here: setting the build arg in Dokploy. That is an external configuration, not a repository change, and it is the one step between this commit and a non-null revision in production. GET-only verification maintained; no deployment claimed.
+
+Two self-inflicted errors worth recording, both caught by running rather than reading:
+
+1. The first test **reimplemented the guard's condition inline**, so deleting the real guard from `bundle-server.mjs` left it passing 5/5. A test that restates the logic under test cannot fail when the logic is removed. The guard is now exported from `build-identity.mjs` and the test calls it, so there is one implementation to be wrong about.
+2. The next assertion checked for the env var's name inside `bundle-server.mjs`, which went stale the moment the guard moved into `build-identity.mjs`. It now asserts the bundle *calls* the guard, which is the property that matters.
+
+Full-suite note for this entry: in my sandbox the run reported 2 failures, both environmental and neither touching the changed files. `electron/cli-runtime.test.mjs` fails with a `node:net` `setTypeOfService` error and is a PRE-EXISTING flake — reproduced on a completely clean tree, where run 1 failed and run 2 passed. `server/session-persistence-harness.test.ts` fails with `kill EPERM` because the sandbox cannot signal a process it spawned. CI is the arbiter for the tree-wide number, and the commit is not pushed as green on my evidence alone.
