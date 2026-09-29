@@ -391,25 +391,33 @@ final class WatchSession: ObservableObject {
     /// never be retried.
     @discardableResult
     func adoptHandoff(_ handoff: CompanionHandoff) -> Bool {
-        pairingGeneration += 1
-        streamGeneration += 1
-        streamTask?.cancel()
-        streamTask = nil
-        restorePending = false
-        // A previous pairing's token has no business outliving its adoption.
-        if let old = connection?.id, old != handoff.connection.id { Keychain.remove(old) }
         do {
-            try Keychain.save(handoff.token, for: handoff.connection.id)
+            try WatchHandoffAdoption.perform(
+                handoff,
+                replacing: connection,
+                saveCredential: { try Keychain.save($0, for: $1) },
+                activate: { encoded in
+                    self.pairingGeneration += 1
+                    self.streamGeneration += 1
+                    self.streamTask?.cancel()
+                    self.streamTask = nil
+                    self.restorePending = false
+                    UserDefaults.standard.set(encoded, forKey: Self.connectionKey)
+                    self.connection = handoff.connection
+                    self.client = CompanionClient(connection: handoff.connection, token: handoff.token)
+                    self.state = CompanionState()
+                    self.status = .connecting
+                    self.reconnectDelay = 0
+                },
+                removeCredential: { Keychain.remove($0) }
+            )
         } catch {
-            status = .offline("Could not store the pairing from your phone: \(error.localizedDescription)")
+            // Keep the current connection usable; the receiver has not advanced
+            // trust and can retry this handoff when Keychain becomes available.
+            actionError = "Could not store the pairing from your phone: \(error.localizedDescription)"
             return false
         }
-        UserDefaults.standard.set(try? JSONEncoder().encode(handoff.connection), forKey: Self.connectionKey)
-        connection = handoff.connection
-        client = CompanionClient(connection: handoff.connection, token: handoff.token)
-        state = CompanionState()
-        status = .connecting
-        reconnectDelay = 0
+        actionError = nil
         connect()
         return true
     }

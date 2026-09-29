@@ -48,12 +48,17 @@ public struct HandoffTrustState: Codable, Equatable, Sendable {
     public var generation: UInt64
     /// Monotonic floor handed out to the next local pairing event.
     public var counter: UInt64
+    /// A tombstone at the current floor, including an unnumbered legacy one.
+    /// Optional for decoding state written before tombstones were persisted.
+    /// A legacy unpair at generation zero must not look like a fresh install.
+    public var pairingRevoked: Bool?
 
-    public init(connection: Connection? = nil, tokenFingerprint: String? = nil, generation: UInt64 = 0, counter: UInt64 = 0) {
+    public init(connection: Connection? = nil, tokenFingerprint: String? = nil, generation: UInt64 = 0, counter: UInt64 = 0, pairingRevoked: Bool? = nil) {
         self.connection = connection
         self.tokenFingerprint = tokenFingerprint
         self.generation = generation
         self.counter = counter
+        self.pairingRevoked = pairingRevoked
     }
 
     public var isPaired: Bool { connection != nil }
@@ -143,9 +148,9 @@ public struct WatchHandoffOrdering {
         // nothing, and dropped once it does, which is the conservative reading:
         // an unnumbered pairing cannot be shown to be newer than a numbered one.
         if let generation, generation < state.generation { return .stale }
-        if generation == nil && state.generation > 0 { return .stale }
+        if generation == nil && (state.generation > 0 || state.pairingRevoked == true) { return .stale }
 
-        if state.connection?.id == handoff.connection.id,
+        if state.connection == handoff.connection,
            state.tokenFingerprint == handoffTokenFingerprint(handoff.token) {
             // Same pairing, same token. Advance the floor so a later unnumbered
             // delivery is still correctly seen as stale, then no-op.
@@ -156,6 +161,16 @@ public struct WatchHandoffOrdering {
             }
             return .duplicate
         }
+        // Equal generations cannot carry a different authority. In particular,
+        // an unpair clears the connection but does not make this floor reusable.
+        // Only a truly fresh watch may accept a first event numbered zero.
+        if generation == state.generation,
+           state.isPaired || state.pairingRevoked == true || state.generation > 0 {
+            return .stale
+        }
+        // An old sender cannot prove that a different unnumbered pairing is
+        // newer. Keep first-install compatibility and exact redelivery only.
+        if generation == nil && state.isPaired { return .stale }
         return .adopt(handoff)
     }
 
@@ -170,6 +185,7 @@ public struct WatchHandoffOrdering {
             updated.generation = max(updated.generation, generation)
             updated.connection = nil
             updated.tokenFingerprint = nil
+            updated.pairingRevoked = true
             store.save(updated)
             return .unpair(generation: generation)
         }
@@ -179,6 +195,7 @@ public struct WatchHandoffOrdering {
         var updated = state
         updated.connection = nil
         updated.tokenFingerprint = nil
+        updated.pairingRevoked = true
         store.save(updated)
         return .unpair(generation: state.generation)
     }
@@ -190,6 +207,7 @@ public struct WatchHandoffOrdering {
         var updated = state
         updated.connection = handoff.connection
         updated.tokenFingerprint = handoffTokenFingerprint(handoff.token)
+        updated.pairingRevoked = false
         if let generation = handoff.generation {
             updated.generation = max(updated.generation, generation)
         }

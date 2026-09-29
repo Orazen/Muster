@@ -210,6 +210,114 @@ final class WatchHandoffOrderingTests: XCTestCase {
         XCTAssertNil(ordering.currentState().connection)
     }
 
+    func testEqualGenerationCannotChangeConnectionTokenOrEndpoint() {
+        let store = MemoryTrustStore()
+        let ordering = WatchHandoffOrdering(store: store)
+        let current = pairing("conn-a", token: "token-a", generation: 3)
+        ordering.commitAdoption(current)
+        var movedEndpoint = current
+        movedEndpoint.connection.host = "192.168.1.20"
+        let conflicting = [
+            pairing("conn-b", token: "token-a", generation: 3),
+            pairing("conn-a", token: "token-b", generation: 3),
+            movedEndpoint,
+        ]
+        let before = store.state
+        let saves = store.saves
+        for candidate in conflicting {
+            XCTAssertEqual(ordering.decidePairing(candidate), .stale)
+        }
+        XCTAssertEqual(store.state, before)
+        XCTAssertEqual(store.saves, saves)
+        XCTAssertEqual(ordering.decidePairing(current), .duplicate)
+    }
+
+    func testLegacyUnpairRejectsSameGenerationReplayAndAllowsFreshPairing() throws {
+        let store = MemoryTrustStore()
+        let ordering = WatchHandoffOrdering(store: store)
+        let old = pairing("conn-a", token: "token-a", generation: 3)
+        ordering.commitAdoption(old)
+        XCTAssertEqual(ordering.decideUnpair(generation: nil), .unpair(generation: 3))
+        XCTAssertEqual(ordering.decidePairing(old), .stale)
+
+        // Round-trip the actual persisted state, then build a new reducer.
+        let restored = MemoryTrustStore(try JSONDecoder().decode(
+            HandoffTrustState.self, from: JSONEncoder().encode(store.state)
+        ))
+        let restarted = WatchHandoffOrdering(store: restored)
+        XCTAssertEqual(restarted.decidePairing(old), .stale)
+        let fresh = pairing("conn-b", token: "token-b", generation: 4)
+        XCTAssertEqual(restarted.decidePairing(fresh), .adopt(fresh))
+        restarted.commitAdoption(fresh)
+        XCTAssertEqual(restarted.decidePairing(fresh), .duplicate)
+        XCTAssertEqual(restarted.currentState().pairingRevoked, false)
+    }
+
+    func testNumberedUnpairRejectsConflictingPairAtItsOwnGeneration() {
+        let ordering = WatchHandoffOrdering(store: MemoryTrustStore())
+        _ = ordering.decideUnpair(generation: 4)
+        XCTAssertEqual(ordering.decidePairing(pairing("conn-a", token: "token-a", generation: 4)), .stale)
+    }
+
+    func testLegacyZeroFloorUnpairSurvivesSerializationAndBlocksOldPair() throws {
+        let store = MemoryTrustStore()
+        let ordering = WatchHandoffOrdering(store: store)
+        let legacy = pairing("conn-a", token: "token-a", generation: nil)
+        XCTAssertEqual(ordering.decidePairing(legacy), .adopt(legacy))
+        ordering.commitAdoption(legacy)
+        XCTAssertEqual(ordering.decidePairing(legacy), .duplicate)
+        _ = ordering.decideUnpair(generation: nil)
+        let reloaded = MemoryTrustStore(try JSONDecoder().decode(
+            HandoffTrustState.self, from: JSONEncoder().encode(store.state)
+        ))
+        let restarted = WatchHandoffOrdering(store: reloaded)
+        XCTAssertEqual(restarted.decidePairing(legacy), .stale)
+        XCTAssertEqual(restarted.decidePairing(pairing("conn-a", token: "token-a", generation: 0)), .stale)
+        let fresh = pairing("conn-a", token: "token-new", generation: 1)
+        XCTAssertEqual(restarted.decidePairing(fresh), .adopt(fresh))
+    }
+
+    func testLegacyStateWithoutRevocationFieldStillDecodes() throws {
+        let data = Data(#"{"generation":0,"counter":0}"#.utf8)
+        let decoded = try JSONDecoder().decode(HandoffTrustState.self, from: data)
+        XCTAssertNil(decoded.pairingRevoked)
+        let ordering = WatchHandoffOrdering(store: MemoryTrustStore(decoded))
+        let legacy = pairing("conn-a", token: "token-a", generation: nil)
+        XCTAssertEqual(ordering.decidePairing(legacy), .adopt(legacy))
+    }
+
+    func testLegacyRevocationSurvivesReopeningItsOwnDefaultsStore() throws {
+        let suite = "com.muster.test.handoff.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let original = WatchHandoffOrdering(store: UserDefaultsHandoffTrustStore(defaults: defaults))
+        let old = pairing("conn-a", token: "token-a", generation: nil)
+        original.commitAdoption(old)
+        _ = original.decideUnpair(generation: nil)
+        XCTAssertTrue(defaults.synchronize())
+
+        let reopenedDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let reopened = WatchHandoffOrdering(store: UserDefaultsHandoffTrustStore(defaults: reopenedDefaults))
+        XCTAssertEqual(reopened.currentState().pairingRevoked, true)
+        XCTAssertEqual(reopened.decidePairing(old), .stale)
+        let fresh = pairing("conn-a", token: "token-new", generation: 1)
+        XCTAssertEqual(reopened.decidePairing(fresh), .adopt(fresh))
+    }
+
+    func testLegacyUnnumberedConflictCannotReplaceEstablishedPairing() {
+        let ordering = WatchHandoffOrdering(store: MemoryTrustStore())
+        ordering.commitAdoption(pairing("conn-a", token: "token-a", generation: nil))
+        XCTAssertEqual(ordering.decidePairing(pairing("conn-b", token: "token-b", generation: nil)), .stale)
+    }
+
+    func testNewerExactDuplicateAdvancesReplayFloor() {
+        let ordering = WatchHandoffOrdering(store: MemoryTrustStore())
+        ordering.commitAdoption(pairing("conn-a", token: "token-a", generation: 1))
+        XCTAssertEqual(ordering.decidePairing(pairing("conn-a", token: "token-a", generation: 7)), .duplicate)
+        XCTAssertEqual(ordering.currentState().generation, 7)
+        XCTAssertEqual(ordering.decidePairing(pairing("conn-b", token: "token-b", generation: 6)), .stale)
+    }
+
     // MARK: - The phone's counter
 
     func testGenerationCounterNeverRepeatsAndNeverGoesBackwards() {
