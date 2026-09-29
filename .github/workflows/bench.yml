@@ -1,85 +1,61 @@
 name: Bench
 
-# Nightly role-eval capture + trend. Runs the owned harness (real server,
-# fake ACP fleet) on a schedule and appends the graded scorecard to the
-# trend file committed in the repo, so score history survives runner churn.
-# This is the scheduled half of remaining-work item #1: the pipeline existed
-# and ran on demand; nothing ran it on a schedule or kept the numbers.
-
+# Nightly real-server capture with a fake ACP fleet, not a model-quality eval.
+# Accumulated history is retained in explicitly identified prior-run artifacts.
 on:
   schedule:
-    - cron: "17 3 * * *" # daily 03:17 UTC — off the hour, away from CI rush
+    - cron: "17 3 * * *"
   workflow_dispatch: {}
 
 permissions:
   contents: read
-  # Read-only access to this workflow's own artifacts, which is where the
-  # history lives. This is the narrowest grant that lets a later run load what
-  # earlier runs retained; it is not a PAT, and branch protection is untouched.
   actions: read
+
+concurrency:
+  group: role-eval-history
+  cancel-in-progress: false
 
 jobs:
   role-eval:
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-        with:
-          # The trend file is updated by a follow-up commit from the same
-          # workflow; the default GITHUB_TOKEN cannot push to a protected
-          # main, so the job falls back to uploading the record as an
-          # artifact when the push is refused (see below).
-          fetch-depth: 0
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
+      - name: Download the retained trend history
+        id: history
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BENCH_HISTORY_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node --experimental-strip-types scripts/bench-trend.ts history history
       - name: Run the per-role capture harness
+        id: capture
         env:
           BENCH_TREND_FILE: ${{ github.workspace }}/role-eval-trend.jsonl
-        run: pnpm bench:roles
-      - name: Download the retained trend history
-        # The history is the accumulated artifact chain, not a file on main.
-        # Earlier versions pushed to main from a `contents: read` token, which
-        # can never succeed on a protected branch; the failure was swallowed
-        # with `|| echo`, so every run reported success having persisted
-        # nothing, and no later run ever loaded what the artifact held.
-        uses: actions/download-artifact@v7
-        with:
-          pattern: role-eval-trend-*
-          path: history
-          merge-multiple: false
-      - name: Merge this run's record into the accumulated history
-        id: merge
-        if: always()
         run: |
           set -euo pipefail
-          produced=0
-          if [ -f role-eval-trend.jsonl ]; then produced=1; else echo "::warning::this run produced no trend record"; fi
-          # Find the newest .jsonl per artifact directory; the capture writes one.
-          mapfile -t prior < <(find history -name '*.jsonl' -type f 2>/dev/null | sort)
-          inputs=("${prior[@]}")
-          if [ "$produced" = "1" ]; then inputs+=("role-eval-trend.jsonl"); fi
-          if [ "${#inputs[@]}" = "0" ]; then
-            echo "::error::no trend history at all: capture produced nothing and no prior artifact exists"
-            echo "captured=false" >> "$GITHUB_OUTPUT"
-            echo "persisted=false" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
-          node --experimental-strip-types scripts/bench-trend.ts merge "${inputs[@]}" --file role-eval-trend.jsonl
-          echo "captured=${produced}" >> "$GITHUB_OUTPUT"
-          echo "persisted=true" >> "$GITHUB_OUTPUT"
+          pnpm bench:roles
+          test -s role-eval-trend.jsonl
+          echo "captured=true" >> "$GITHUB_OUTPUT"
+      - name: Merge this run's record into the accumulated history
+        id: merge
+        run: |
+          set -euo pipefail
+          mapfile -t prior < <(find history -name 'role-eval-trend.jsonl' -type f | sort)
+          node --experimental-strip-types scripts/bench-trend.ts merge "${prior[@]}" role-eval-trend.jsonl --file role-eval-trend.jsonl
       - name: Render the accumulated trend report
-        # The whole series, not just today's record — the report previously read
-        # only the temporary file this run produced.
-        if: always() && steps.merge.outputs.captured == 'true'
-        run: node --experimental-strip-types scripts/bench-trend.ts report --file role-eval-trend.jsonl | tee bench-trend-report.txt
+        id: report
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types scripts/bench-trend.ts report --file role-eval-trend.jsonl | tee bench-trend-report.txt
       - name: Upload the accumulated history
-        # This artifact is the next run's input, so retention is explicit rather
-        # than whatever the repository default happens to be.
-        if: always() && steps.merge.outputs.captured == 'true'
+        id: upload
         uses: actions/upload-artifact@v7
         with:
           name: role-eval-trend-${{ github.run_id }}
@@ -88,15 +64,22 @@ jobs:
             bench-trend-report.txt
           if-no-files-found: error
           retention-days: 90
+          overwrite: true
       - name: State capture and persistence separately
-        # A run that captured nothing is not a run that persisted a history, and
-        # one that did not persist is not silently a full success.
         if: always()
+        env:
+          CAPTURED: ${{ steps.capture.outputs.captured == 'true' }}
+          MERGED: ${{ steps.merge.outcome == 'success' }}
+          PERSISTED: ${{ steps.upload.outcome == 'success' && steps.upload.outputs.artifact-id != '' }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
         run: |
           {
             echo "## role-eval benchmark"
             echo ""
-            echo "- captured this run: ${{ steps.merge.outputs.captured }}"
-            echo "- history persisted: ${{ steps.merge.outputs.persisted }}"
-            echo "- retention: 90 days (artifact chain, not a file on main)"
+            echo "- captured this run: $CAPTURED"
+            echo "- history merged: $MERGED"
+            echo "- history persisted: $PERSISTED"
+            echo "- artifact ID: $ARTIFACT_ID"
+            echo "- retention: 90 days; a longer gap requires an explicit baseline restart"
+            echo "- scope: real server with fake ACP engines; not a model-quality benchmark"
           } >> "$GITHUB_STEP_SUMMARY"

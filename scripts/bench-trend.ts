@@ -11,7 +11,8 @@
 // The record is a projection, not a copy: per-role status plus the numeric
 // evidence a trend can act on (elapsed, tokens, cost). Labels and sources
 // are preserved verbatim so a trend can distinguish live from simulated.
-import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -50,6 +51,8 @@ export interface TrendRecord {
    *  workflow from GITHUB_RUN_ID; absent for local captures, which fall back
    *  to a timestamp+label key. */
   runId?: string;
+  /** GitHub increments this on rerun; disambiguates equal capture timestamps. */
+  runAttempt?: number;
   label: string;
   source: string;
   status: string;
@@ -103,6 +106,91 @@ export function projectScorecard(scorecard: ScorecardInput, recordedAt: string =
   };
 }
 
+/** The actual capture writer owns CI identity; local captures remain independent. */
+export function recordScorecard(scorecard: ScorecardInput, file: string, runId = process.env.GITHUB_RUN_ID, runAttempt = process.env.GITHUB_RUN_ATTEMPT): TrendRecord {
+  const record = projectScorecard(scorecard);
+  if (runId !== undefined) {
+    if (!/^\d+$/.test(runId)) throw new Error("GITHUB_RUN_ID must be a nonempty numeric run identity");
+    record.runId = runId;
+    if (runAttempt !== undefined) {
+      const attempt = Number(runAttempt);
+      if (!/^\d+$/.test(runAttempt) || !Number.isSafeInteger(attempt) || attempt < 1) throw new Error("GITHUB_RUN_ATTEMPT must be a positive integer");
+      record.runAttempt = attempt;
+    }
+  }
+  appendFileSync(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+  return record;
+}
+
+interface HistoryOptions {
+  repository: string;
+  branch: string;
+  currentRunId: string;
+  directory: string;
+}
+interface HistoryRun {
+  id: number;
+  status: string;
+  event: string;
+  head_branch: string;
+  head_repository: { full_name: string } | null;
+}
+interface HistoryArtifact { name: string; expired: boolean }
+interface HistoryResult { files: string[]; expired: number }
+type HistoryPage = { workflow_runs?: HistoryRun[]; artifacts?: HistoryArtifact[] };
+type GhRunner = (args: string[]) => string;
+const runGh: GhRunner = (args) => execFileSync("gh", args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+
+/** Download earlier main-branch Bench artifacts by explicit run identity.
+ * The ordinary download-artifact action defaults to the CURRENT run. Listing
+ * this workflow's completed runs and selecting each named artifact is required
+ * to load actual prior captures, including old one-record artifacts. */
+export function collectTrendHistory(options: HistoryOptions, gh: GhRunner = runGh): HistoryResult {
+  const { repository, branch, currentRunId, directory } = options;
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || !branch || !/^\d+$/.test(currentRunId)) {
+    throw new Error("History requires repository, branch and numeric current run identity");
+  }
+  const pages = (endpoint: string): HistoryPage[] => {
+    // SAFETY: the API envelope is checked here; every field used to select an
+    // artifact is checked below before constructing a command or local path.
+    const result = JSON.parse(gh(["api", "--paginate", "--slurp", endpoint])) as HistoryPage[];
+    if (!Array.isArray(result) || result.some((page) => !page || Array.isArray(page))) {
+      throw new Error("Invalid Actions history response");
+    }
+    return result;
+  };
+  const runs = pages(`repos/${repository}/actions/workflows/bench.yml/runs?branch=${encodeURIComponent(branch)}&status=completed&per_page=100`)
+    .flatMap((page) => {
+      if (!Array.isArray(page.workflow_runs)) throw new Error("Actions response is missing workflow runs");
+      return page.workflow_runs;
+    });
+  const files: string[] = [];
+  let expired = 0;
+  mkdirSync(directory, { recursive: true });
+  for (const run of runs.sort((a, b) => a.id - b.id)) {
+    if (!run || !Number.isSafeInteger(run.id) || run.id <= 0) throw new Error("Invalid prior workflow run identity");
+    if (String(run.id) === currentRunId || run.status !== "completed" || run.head_branch !== branch ||
+        run.head_repository?.full_name !== repository || !["schedule", "workflow_dispatch"].includes(run.event)) continue;
+    const expectedName = `role-eval-trend-${run.id}`;
+    const artifacts = pages(`repos/${repository}/actions/runs/${run.id}/artifacts?per_page=100`).flatMap((page) => {
+      if (!Array.isArray(page.artifacts)) throw new Error("Actions response is missing artifacts");
+      return page.artifacts;
+    });
+    const matching = artifacts.filter((artifact) => artifact?.name === expectedName);
+    for (const artifact of matching) {
+      if (artifact.expired !== true && artifact.expired !== false) throw new Error("Invalid artifact expiration state");
+      if (artifact.expired) { expired += 1; continue; }
+      const destination = resolve(directory, String(run.id));
+      gh(["run", "download", String(run.id), "--repo", repository, "--name", expectedName, "--dir", destination]);
+      const file = resolve(destination, "role-eval-trend.jsonl");
+      if (!existsSync(file) || readTrend(file).length === 0) throw new Error(`Prior run ${run.id} has no usable trend record`);
+      files.push(file);
+    }
+  }
+  if (expired > 0 && files.length === 0) throw new Error("All retained trend artifacts have expired; review an explicit baseline restart");
+  return { files, expired };
+}
+
 /** Parse a trend file into records. Tolerates a trailing blank line. */
 export function readTrend(trendPath: string): TrendRecord[] {
   if (!existsSync(trendPath)) return [];
@@ -132,19 +220,28 @@ export function trendRecordKey(record: TrendRecord): string {
   return record.runId && record.runId.trim() ? `run:${record.runId.trim()}` : `at:${record.recordedAt}|${record.label}`;
 }
 
-/** Merge trend files in order; a later group replaces an earlier record with
- *  the same identity, and the result is oldest-first by recordedAt.
+/** Keep the newest capture of each identity, oldest-first in the final series.
  *
- *  Order matters and is the point: a rerun must be able to correct its own
- *  earlier record, so "first wins" would be wrong. Corrupt input is not
- *  swallowed here — readTrend throws with a line number, and a history that
- *  cannot be parsed must not be silently replaced by a shorter one. */
+ *  Artifact download order is not capture order: run 101 can be rerun after
+ *  run 102, whose accumulated artifact still holds the old 101. Timestamp,
+ *  then attempt, prevent that stale copy from undoing the correction. Legacy
+ *  records with equal timestamp and attempt retain the later-input tie rule. */
 export function mergeTrends(groups: readonly (readonly TrendRecord[])[]): TrendRecord[] {
   const byKey = new Map<string, TrendRecord>();
   for (const group of groups) {
-    for (const record of group) byKey.set(trendRecordKey(record), record);
+    for (const record of group) {
+      const timestamp = Date.parse(record.recordedAt);
+      if (!Number.isFinite(timestamp)) throw new Error("Invalid trend capture timestamp");
+      if (record.runAttempt !== undefined && (!Number.isSafeInteger(record.runAttempt) || record.runAttempt < 1)) throw new Error("Invalid trend run attempt");
+      const key = trendRecordKey(record);
+      const previous = byKey.get(key);
+      if (!previous || timestamp > Date.parse(previous.recordedAt) ||
+          (timestamp === Date.parse(previous.recordedAt) && (record.runAttempt ?? 0) >= (previous.runAttempt ?? 0))) {
+        byKey.set(key, record);
+      }
+    }
   }
-  return [...byKey.values()].sort((a, b) => (a.recordedAt < b.recordedAt ? -1 : a.recordedAt > b.recordedAt ? 1 : 0));
+  return [...byKey.values()].sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt) || trendRecordKey(a).localeCompare(trendRecordKey(b)));
 }
 
 /** One human-readable trend line per record, oldest first. */
@@ -189,9 +286,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       if (!input) throw new Error("Usage: bench-trend.ts record <scorecard.json> [--file trend.jsonl]");
       if (statSync(input).size > 2_000_000) throw new Error("Scorecard exceeds 2 MB.");
       // SAFETY: projectScorecard re-validates every field before use.
-      const record = projectScorecard(JSON.parse(readFileSync(input, "utf8")) as ScorecardInput);
-      appendFileSync(trendPath(), `${JSON.stringify(record)}\n`, { mode: 0o600 });
+      const record = recordScorecard(JSON.parse(readFileSync(input, "utf8")) as ScorecardInput, trendPath());
       console.log(JSON.stringify({ recorded: record.recordedAt, status: record.status }));
+    } else if (mode === "history") {
+      const directory = resolve(process.argv[3] ?? "history");
+      const result = collectTrendHistory({ repository: process.env.GITHUB_REPOSITORY ?? "", branch: process.env.BENCH_HISTORY_BRANCH ?? "", currentRunId: process.env.GITHUB_RUN_ID ?? "", directory });
+      console.log(JSON.stringify({ downloaded: result.files.length, expired: result.expired }));
     } else if (mode === "merge") {
       // Accumulate history across runs. The workflow downloads the retained
       // artifacts into a directory and points this at every *.jsonl in it, so a

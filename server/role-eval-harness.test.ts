@@ -17,7 +17,7 @@
 // path production uses.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync, appendFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,7 +28,7 @@ import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-har
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { JsonObject } from "./schema.ts";
-import { projectScorecard } from "../scripts/bench-trend.ts";
+import { recordScorecard } from "../scripts/bench-trend.ts";
 import {
   ROLE_BENCHMARKS,
   scoreRoleCapture,
@@ -417,9 +417,9 @@ describe.skipIf(process.platform === "win32")("per-role benchmark capture harnes
     // a schema drift in the recorder fails this suite, not a nightly job.
     const trendFile = process.env.BENCH_TREND_FILE;
     if (trendFile) {
-      const record = projectScorecard(scorecard);
-      appendFileSync(trendFile, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+      const record = recordScorecard(scorecard, trendFile);
       expect(record.status).toBe("passed");
+      if (process.env.GITHUB_RUN_ID) expect(record.runId).toBe(process.env.GITHUB_RUN_ID);
     }
   }, 240_000);
 });
