@@ -17,6 +17,7 @@
 import AuthenticationServices
 import Foundation
 import SwiftUI
+import CompanionCore
 
 struct CloudIdentity: Codable, Equatable {
     let email: String
@@ -43,9 +44,8 @@ final class CloudAuth: NSObject, ObservableObject {
     @Published var error: String?
 
     private var webSession: ASWebAuthenticationSession?
-    /// The code currently being exchanged, so a duplicate delivery of the
-    /// same callback URL is idempotent.
-    private var inFlightCode: String?
+    private var attempt = CloudSignInAttempt()
+    private var exchangeTask: Task<Void, Never>?
 
     private override init() {
         super.init()
@@ -68,100 +68,105 @@ final class CloudAuth: NSObject, ObservableObject {
     }
 
     func signOut() {
+        cancelSignIn()
         store(nil)
         error = nil
     }
 
-    /// Step 1: present the cloud's Google sign-in in an ephemeral web sheet.
+    func cancelSignIn() {
+        // Invalidate first: cancellation/completion handlers can arrive later.
+        attempt.cancel()
+        exchangeTask?.cancel()
+        exchangeTask = nil
+        webSession?.cancel()
+        webSession = nil
+        signingIn = false
+    }
+
+    /// Start a bound handoff from this device; the verifier never enters a URL.
     func startSignIn() {
         guard !signingIn else { return }
+        cancelSignIn()
         error = nil
+        let proof: CloudSignInAttempt.Proof
+        do { proof = try attempt.begin() }
+        catch { self.error = "Could not prepare sign-in. Try again."; return }
         var components = URLComponents(url: Self.cloudBase, resolvingAgainstBaseURL: false)!
         components.path = "/desktop-auth/start"
-        components.queryItems = [
-            URLQueryItem(name: "redirect", value: Self.callbackURL.absoluteString),
-        ]
+        components.queryItems = [URLQueryItem(name: "redirect", value: Self.callbackURL.absoluteString)] + proof.queryItems
         let session = ASWebAuthenticationSession(url: components.url!, callbackURLScheme: Self.callbackScheme) { [weak self] callback, err in
             Task { @MainActor in
-                guard let self else { return }
-                self.signingIn = false
+                guard let self, self.attempt.activeID == proof.id else { return }
                 if let callback {
                     _ = self.handleCallback(callback)
-                } else if let err, (err as? ASWebAuthenticationSessionError)?.code != .canceledLogin {
-                    self.error = Self.friendly(err)
+                    // The sheet has finished. A malformed callback must not
+                    // leave a pending attempt active indefinitely.
+                    if !self.attempt.isExchanging, self.attempt.cancel(proof.id) {
+                        self.signingIn = false
+                        self.webSession = nil
+                        self.error = "This sign-in could not be verified. Start again from Muster."
+                    }
+                } else if !self.attempt.isExchanging, self.attempt.cancel(proof.id) {
+                    self.signingIn = false
+                    self.webSession = nil
+                    if let err, (err as? ASWebAuthenticationSessionError)?.code != .canceledLogin {
+                        self.error = Self.friendly(err)
+                    }
                 }
             }
         }
-        // Ephemeral: the sign-in cookie lives only for this handshake. The
-        // app keeps nothing but the finished identity.
         session.prefersEphemeralWebBrowserSession = true
         session.presentationContextProvider = self
         webSession = session
         signingIn = true
         guard session.start() else {
-            signingIn = false
+            cancelSignIn()
             error = "Could not open the sign-in window. Try again."
-            webSession = nil
             return
         }
     }
 
-    /// Step 2: catch `muster://oauth/finish#code=…`. Delivered either by the
-    /// web session's completion handler or by onOpenURL — the guard makes
-    /// both idempotent. Returns true when the URL was ours.
+    /// Both platform deliveries claim the same active local attempt. An idle,
+    /// foreign, replayed or unbound callback cannot start a code exchange.
     @discardableResult
     func handleCallback(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == Self.callbackScheme,
-              url.host?.lowercased() == "oauth",
-              url.path.isEmpty || url.path == "/finish"
-        else { return false }
-        let fragment = URLComponents(url: url, resolvingAgainstBaseURL: false)?.fragment ?? ""
-        let params = Self.fragmentParams(fragment)
-        guard let code = params["code"], !code.isEmpty else {
-            error = "Sign-in finished without a code. Start again."
+        switch attempt.claim(url) {
+        case .unrelated: return false
+        case .rejected, .duplicate: return true
+        case let .exchange(exchange):
+            signingIn = true
+            // A resulting canceledLogin completion sees isExchanging and
+            // cannot invalidate the already accepted callback.
+            webSession?.cancel()
+            webSession = nil
+            exchangeTask = Task { [weak self] in await self?.exchange(exchange) }
             return true
         }
-        guard !signingIn, inFlightCode == nil else { return true } // duplicate delivery
-        inFlightCode = code
-        signingIn = true
-        Task { [weak self] in
-            await self?.exchange(code: code)
-        }
-        return true
     }
 
-    /// Step 3: burn the one-time code against the cloud for the identity.
-    /// 90-second TTL, single-use — a retry that loses the race reports the
-    /// server's own "expired or used" text.
-    private func exchange(code: String) async {
-        defer {
-            inFlightCode = nil
-            signingIn = false
-        }
+    /// Exchange only with the fixed cloud endpoint, with no redirect replay.
+    private func exchange(_ exchange: CloudSignInAttempt.Exchange) async {
         var components = URLComponents(url: Self.cloudBase, resolvingAgainstBaseURL: false)!
         components.path = "/api/desktop-auth/exchange"
-        guard let url = components.url else {
-            error = "Sign-in is misconfigured."
-            return
-        }
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: components.url!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.timeoutInterval = 20
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["code": code])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        let session = URLSession(configuration: configuration, delegate: CloudIdentityRedirectPolicy.shared, delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["code": exchange.code, "code_verifier": exchange.verifier])
+            let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 let text = String(data: data, encoding: .utf8) ?? ""
                 throw CloudAuthError.server(Self.friendlyServerText(text))
             }
-            // Decode ONLY the fields this app needs, into named slots. The
-            // previous `[String: String]` decode of the whole body meant any
-            // field the server added — a version number, say — failed the
-            // decode outright, and the catch below then reported a NETWORK
-            // error for a sign-in that had actually worked. Unknown fields are
-            // ignored now, which is what a client and a server that version
-            // independently actually need.
+            guard http.value(forHTTPHeaderField: "x-muster-exchange-version") == String(CloudSignInAttempt.exchangeVersion) else {
+                throw CloudAuthError.server("This sign-in response could not be verified. Update Muster and try again.")
+            }
             struct ExchangeResponse: Decodable {
                 let email: String
                 let name: String?
@@ -170,11 +175,18 @@ final class CloudAuth: NSObject, ObservableObject {
             guard !decoded.email.isEmpty else {
                 throw CloudAuthError.server("The sign-in response had no account.")
             }
+            guard attempt.finish(exchange) else { return }
+            signingIn = false
+            exchangeTask = nil
             store(CloudIdentity(email: decoded.email, name: decoded.name ?? ""))
-        } catch let err as CloudAuthError {
-            error = err.message
         } catch {
-            self.error = "Could not reach muster.today to finish signing in. Check the network and try again."
+            // This includes cancellation: obsolete requests must not change
+            // the current identity, error, task reference or progress state.
+            guard attempt.finish(exchange) else { return }
+            signingIn = false
+            exchangeTask = nil
+            self.error = (error as? CloudAuthError)?.message
+                ?? "Could not reach muster.today to finish signing in. Check the network and try again."
         }
     }
 
@@ -196,18 +208,7 @@ final class CloudAuth: NSObject, ObservableObject {
         return "Sign-in did not finish. Try again."
     }
 
-    /// Fragment params without percent-decoding surprises: split on & then =,
-    /// exactly like PairingInvite does for its query.
-    private static func fragmentParams(_ fragment: String) -> [String: String] {
-        var out: [String: String] = [:]
-        for field in fragment.split(separator: "&") {
-            guard let equal = field.firstIndex(of: "=") else { continue }
-            let name = String(field[..<equal]).removingPercentEncoding ?? String(field[..<equal])
-            let value = String(field[field.index(after: equal)...]).removingPercentEncoding ?? ""
-            out[name] = value
-        }
-        return out
-    }
+
 }
 
 extension CloudAuth: ASWebAuthenticationPresentationContextProviding {
@@ -225,5 +226,16 @@ private enum CloudAuthError: LocalizedError {
         switch self {
         case let .server(text): return text
         }
+    }
+}
+
+/// Never forward the one-time code or verifier to a redirected destination.
+private final class CloudIdentityRedirectPolicy: NSObject, URLSessionTaskDelegate, Sendable {
+    static let shared = CloudIdentityRedirectPolicy()
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }
