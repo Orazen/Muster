@@ -15,28 +15,30 @@
 // toggle. The server started telling the truth per bot; this is the part that
 // decides what the card says about it.
 //
-// Pure and dependency-free so it can be tested directly, which is how the rest
-// of `src/` keeps its UI logic honest.
+// The decision and request lifetime are tested without a mounted UI.
 
-/** One bot's row from the server's `status` array. */
-export interface BrowserStatusEntry {
-  id: string;
-  name: string;
-  enabled: boolean;
-  engineId: string | null;
-  engineSupportsBrowser: boolean;
-  effective: boolean;
-  /** "off" | "not-installed" | "engine-unsupported" | null */
-  reason: string | null;
-}
+import { z } from "zod";
 
-export interface BrowserStatus {
-  available: boolean;
-  command: string | null;
-  tools: number;
-  status: BrowserStatusEntry[];
-  blockedCount: number;
-}
+const browserStatusEntrySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  enabled: z.boolean(),
+  engineId: z.string().nullable(),
+  engineSupportsBrowser: z.boolean(),
+  effective: z.boolean(),
+  reason: z.string().nullable(),
+});
+const browserStatusSchema = z.object({
+  available: z.boolean(),
+  command: z.string().nullable(),
+  tools: z.number().int().nonnegative(),
+  // Older servers only report the machine envelope. It remains valid, but
+  // cannot authorize a claim about a particular bot's tools.
+  status: z.array(browserStatusEntrySchema).optional(),
+  blockedCount: z.number().int().nonnegative().optional(),
+});
+export type BrowserStatusEntry = z.infer<typeof browserStatusEntrySchema>;
+export type BrowserStatus = z.infer<typeof browserStatusSchema>;
 
 export type BrowserCardVerdict =
   /** The binary is missing; offer the install path. */
@@ -67,17 +69,45 @@ export function browserCardVerdict(
   status: BrowserStatus | null,
   botId: string,
   enabled: boolean,
+  engineId?: string | null,
 ): BrowserCardVerdict {
-  if (status === null) return { kind: "unknown" };
-  if (!status.available) return { kind: "not-installed" };
-  const entry = status.status.find((row) => row.id === botId);
-  // A server that sent the envelope without this bot's row has not told us
-  // anything about this bot. Say nothing rather than assume.
-  if (entry === undefined) return { kind: "unknown" };
+  const parsed = browserStatusSchema.safeParse(status);
+  if (!parsed.success) return { kind: "unknown" };
+  const confirmed = parsed.data;
+  if (!confirmed.available) return { kind: "not-installed" };
+  const entry = confirmed.status?.find((row) => row.id === botId);
+  if (!entry) return { kind: "unknown" };
   if (!enabled) return { kind: "off" };
-  if (entry.effective) return { kind: "ready", tools: status.tools };
+  // Settings are optimistic until the bot's server frame arrives. An older
+  // row must not describe the newly selected toggle or engine.
+  if (entry.enabled !== enabled || (engineId && entry.engineId !== engineId)) return { kind: "unknown" };
+  if (entry.effective && entry.engineSupportsBrowser) return { kind: "ready", tools: confirmed.tools };
   if (entry.reason === "not-installed") return { kind: "blocked-missing-binary" };
-  return { kind: "engine-unsupported", engineId: entry.engineId };
+  if (entry.reason === "engine-unsupported" && !entry.engineSupportsBrowser) {
+    return { kind: "engine-unsupported", engineId: entry.engineId };
+  }
+  return { kind: "unknown" };
+}
+
+/** One effect-owned read. Closing or changing the card invalidates its result,
+ * even when a transport ignores AbortSignal or rejects after a newer request. */
+export function refreshBrowserStatus(
+  request: (signal: AbortSignal) => Promise<BrowserStatus>,
+  publish: (status: BrowserStatus | null) => void,
+): () => void {
+  const controller = new AbortController();
+  publish(null);
+  void Promise.resolve().then(() => {
+    if (controller.signal.aborted) return null;
+    return request(controller.signal);
+  }).then((reply) => {
+    if (controller.signal.aborted) return;
+    const parsed = browserStatusSchema.safeParse(reply);
+    publish(parsed.success ? parsed.data : null);
+  }).catch(() => {
+    if (!controller.signal.aborted) publish(null);
+  });
+  return () => controller.abort();
 }
 
 /**
@@ -87,6 +117,6 @@ export function browserCardVerdict(
  * fleet-wide misconfiguration. Zero renders nothing.
  */
 export function browserBlockedCount(status: BrowserStatus | null): number {
-  if (status === null) return 0;
-  return status.blockedCount;
+  const parsed = browserStatusSchema.safeParse(status);
+  return parsed.success ? parsed.data.blockedCount ?? 0 : 0;
 }

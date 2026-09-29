@@ -7,7 +7,7 @@ import {
 } from "@/lib/mascot";
 import { ModelPicker } from "./ModelPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
-import { browserBlockedCount, browserCardVerdict, type BrowserStatus } from "@/lib/browser-status";
+import { browserBlockedCount, browserCardVerdict, refreshBrowserStatus, type BrowserStatus } from "@/lib/browser-status";
 import { cn } from "@/lib/cn";
 import { requestNotificationPermission } from "@/lib/notify";
 import { botUsage, costCaption, formatTokens, formatUsd } from "@/lib/usage";
@@ -462,15 +462,20 @@ function SoulCard({ botId }: { botId: string }) {
  * (the mount is skipped when the binary is missing) — the status pill
  * makes that state impossible to miss. */
 function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
-  const [status, setStatus] = useState<BrowserStatus | null>(null);
+  const [snapshot, setSnapshot] = useState<{ key: string; status: BrowserStatus | null } | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const requestKey = JSON.stringify([bot.id, Boolean(bot.browser), bot.modelSelection]);
+  const status = snapshot?.key === requestKey ? snapshot.status : null;
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
 
-  useEffect(() => {
-    api("/api/browser-status")
-      .then((data: BrowserStatus) => setStatus(data))
-      .catch(() => setStatus(null));
-  }, []);
+  useEffect(() => refreshBrowserStatus(
+    (signal) => api("/api/browser-status", { signal }),
+    (confirmed) => setSnapshot({ key: requestKey, status: confirmed }),
+    // A server bot frame replaces modelSelection even when its values are
+    // unchanged. This rechecks after the debounced settings PATCH is saved,
+    // not only on the optimistic toggle before that PATCH reaches the server.
+  ), [requestKey, bot.modelSelection, refreshVersion]);
 
   const install = async () => {
     setInstalling(true);
@@ -484,9 +489,7 @@ function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
       setInstallError("Install failed — is the Muster server running?");
     } finally {
       setInstalling(false);
-      api("/api/browser-status")
-        .then((data: BrowserStatus) => setStatus(data))
-        .catch(() => {});
+      setRefreshVersion((version) => version + 1);
     }
   };
 
@@ -496,7 +499,7 @@ function BrowserCard({ bot, onToggle }: { bot: Bot; onToggle: () => void }) {
   // true and worth keeping. Whether THIS bot can use the browser is a separate
   // claim, and it needs the engine as well as the binary — so it is decided in
   // one tested place rather than re-derived in this component.
-  const verdict = browserCardVerdict(status, bot.id, enabled);
+  const verdict = browserCardVerdict(status, bot.id, enabled, bot.modelSelection.instanceId);
   const blocked = browserBlockedCount(status);
 
   // What this card may claim about this bot. `null` means "the binary is
