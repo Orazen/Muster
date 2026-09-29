@@ -267,3 +267,95 @@ test("an unconfirmed send stays visibly parked across reload without reaching th
   const bots = transcriptSchema.parse(await (await page.request.get(`${harness.desktopUrl}/api/bots?messages=50`)).json()).bots;
   expect(bots.some((bot) => (bot.messages ?? []).some((entry) => entry.text === message))).toBe(false);
 });
+
+/** The seam two halves of one fix have never shared a test for.
+ *
+ * 501dbbe added the client half of "preserve the original destination": the
+ * reconcile fold targets the RECEIPT's thread, falling back to the parked
+ * record's own. b0e64c0 added the server half: the destination of a reconcile
+ * is the durable intent row's thread, not the bot's current one. Each is
+ * correct alone and they are the same fix, but the case that actually breaks is
+ * the one between them — words parked in task A, the user starts task B, and the
+ * reconnect asks about them.
+ *
+ * Before the two halves, that produced a 409: the server fingerprinted the
+ * right words against the bot's CURRENT thread, missed the receipt it was
+ * holding, and told the user their delivered message was a conflict.
+ *
+ * What this pins, stated precisely: the SERVER half. Reverting the pin makes
+ * this test fail. Reverting the client half does NOT, and the reason is worth
+ * knowing rather than hiding — once the server answers with the row's own
+ * thread, that thread and the parked record's thread are the same value, so the
+ * client's fallback is indistinguishable on this path. The client half earns its
+ * keep on a different one, where a reply omits or mangles `intent.threadId`;
+ * that is covered by receiptThreadId's own unit cases, not here.
+ */
+test("a send parked in one task is recovered into THAT task after the user starts another", async ({ harness, newPage, pairCodeFromCloud }) => {
+  const page = await newPage({ messageSend503: { afterCommit: true } });
+  const productTour = page.getByRole("dialog", { name: "Product tour", exact: true });
+  await page.removeLocatorHandler(productTour);
+  await pairDesktop(page, harness, pairCodeFromCloud);
+  await page.getByRole("button", { name: "Quick start — skip setup, just get me in", exact: true }).click();
+  const composer = page.getByRole("textbox", { name: /^Message / });
+  await expect(composer).toBeVisible();
+  await expect(productTour).toBeVisible();
+  await productTour.getByRole("button", { name: "Skip", exact: true }).click();
+  await expect(productTour).toHaveCount(0);
+
+  const taskA = rosterSchema.parse(await (await page.request.get(`${harness.desktopUrl}/api/bots?messages=0`)).json()).bots[0]!.threadId;
+  const message = `Task-scoped recovery ${randomUUID()}`;
+  const firstSend = page.waitForRequest(
+    (request) => request.method() === "POST" && /\/api\/bots\/[^/]+\/messages$/.test(new URL(request.url()).pathname),
+  );
+  await composer.fill(message);
+  await composer.press("Enter");
+  const posted = clientIntentSchema.parse(await (await firstSend).postDataJSON());
+  const intentId = posted.clientIntentId ?? "";
+  expect(intentId).toMatch(/^snd-[0-9a-f]{32}$/);
+  // The words are durable server-side; only the acknowledgement was lost.
+  await expect(checkingRow(page, message)).toBeVisible();
+
+  // The user starts another task — the real product route, which genuinely
+  // moves the bot's current thread away from the one the words went into.
+  // The route refuses while the bot is mid-turn, so wait for it to be idle
+  // rather than asserting a status the product is right to reject.
+  const roster = async () => z.object({ bots: z.array(z.object({ id: z.string(), busy: z.boolean() })) })
+    .parse(await (await page.request.get(`${harness.desktopUrl}/api/bots?messages=0`)).json());
+  await expect.poll(async () => (await roster()).bots[0]!.busy, { timeout: 20_000, message: "the bot never went idle" }).toBe(false);
+  const bots = await roster();
+  const created = await page.request.post(`${harness.desktopUrl}/api/bots/${bots.bots[0]!.id}/tasks`, {
+    data: { title: "Task B" },
+  });
+  expect(created.status(), "starting a second task failed").toBe(201);
+  const taskB = z.object({ task: z.object({ threadId: z.string() }) }).parse(await created.json()).task.threadId;
+  expect(taskB, "the fixture must actually move off the parked thread").not.toBe(taskA);
+
+  // Reconnect. The sweep must recover the parked record as a lookup, pin it to
+  // the thread it was accepted for, and fold it there.
+  await page.reload();
+  await expect(composer).toBeVisible();
+  // Never the conflict the two halves used to produce.
+  await expect(page.getByText(/already accepted with different content/i)).toHaveCount(0);
+  await expect(page.getByText(/Checking delivery — /)).toHaveCount(0);
+  // And the words did NOT land in the task the user moved to.
+  const threadWindow = z.object({ messages: z.array(z.object({ text: z.string().optional() })) });
+  const inTaskB = threadWindow.parse(await (await page.request.get(`${harness.desktopUrl}/api/threads/${taskB}/messages?limit=100`)).json());
+  const moved = (inTaskB.messages ?? []).filter((m) => m.text === message).length;
+  expect(moved, "the words were re-sent into the new task").toBe(0);
+
+  // Switch back to the original task: the words are there exactly once.
+  //
+  // Deliberately NOT asserting a "sent" chip. The fold follows the receipt to
+  // task A, and task A is not on screen at that moment, so there is nothing to
+  // mark; the record is retired and switching back hydrates the row from the
+  // server. An earlier version of this test asserted the chip and failed —
+  // asserting a chip the product is right not to draw on this path.
+  await page.request.post(`${harness.desktopUrl}/api/bots/${bots.bots[0]!.id}/tasks/${taskA}`, { data: {} });
+  await page.reload();
+  const userRow = page.locator("[data-mid]").filter({ hasText: message });
+  await expect(userRow).toHaveCount(1);
+  // One transcript row on the server: recovery, not a resend.
+  const transcript = transcriptSchema.parse(await (await page.request.get(`${harness.desktopUrl}/api/bots?messages=50`)).json());
+  const count = transcript.bots[0]!.messages!.filter((m) => m.text === message).length;
+  expect(count, "the words were re-sent rather than recovered").toBe(1);
+});
