@@ -52,3 +52,7 @@ commit-audit-fixes.sh
 .mimosa/
 .v2c/
 .video_agent/
+
+# SwiftPM build output for the native Mac prototype (M0)
+macos/.build/
+macos/.swiftpm/
