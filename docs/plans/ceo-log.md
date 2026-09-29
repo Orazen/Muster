@@ -9527,3 +9527,39 @@ The decision moved to a pure tested module (`src/lib/browser-status.ts`), which 
 12 cases, 2 mutations caught: deciding from `available` instead of the bot's own `effective` kills four, and defaulting a missing row to "ready" kills the case written for it. `vite build` clean — the JSX is not covered by tests, so the build is the evidence that it parses.
 
 Suites: A5 448 files / 6551 passed; card 449 files / 6563 passed; 8 skipped, 0 failed on both. Typecheck and oxlint clean on both.
+## Loop211 (2026-09-29) — A6 and A7: the installation consumer's two P1s
+
+GATE: with the CI flake assigned to the other agent, take the audit's remaining installation P1s.
+CHECK: A6 and A7 reproduced as described, fixed, mutation-checked; A6/A7 both before the consumer is wired into the runtime, as the audit said they must be.
+EXPECT: a machine that cannot be locked out of its own standing by a stale answer, and one that cannot hand its credential to a different server.
+
+### A6 landed — d73caf6, CI success
+
+`heartbeat` read `this.state.credential` when building the request and, on a 401, cleared whatever was in state when the response landed. Not the same value if anything refreshed in between. A refresh that completed while the heartbeat was in flight was erased by the heartbeat's older 401: the machine reported "unregistered" while holding a working new secret, and only a restart or a manual re-attach recovered it.
+
+A 401 is a statement about the credential that was SENT. The request now captures it before the await and the response may only clear that exact credential; a stale answer is dropped and the report is derived from the credential actually held, the same derivation a successful heartbeat uses. A companion case pins that a 401 which does answer for the credential in state still unregisters — the fence must not become a way to keep a dead credential.
+
+One real mutation (removing the fence). I have corrected the count: I initially wrote "two mutations" and the second only added a comment, changing nothing observable.
+
+### A7 landed — 40c6bfa, CI success
+
+The persisted file recorded a client key, an installation id and a credential, but not which server minted any of it, and `baseUrl` was plain constructor state — so the same data directory pointed at a different base URL sent the old bearer to the replacement. The audit's diagnostic stubbed the fetch, so no secret actually left; the defect was that the machine was willing to send it.
+
+Persisted state is version 2 and carries its authority, and `loadPersistedInstallation` REQUIRES it. Requiring it is the load-bearing decision: an optional authority would be a way to read a credential without saying where it was going, which is the entire thing being prevented. Mismatch returns the same file with the credential and installation id cleared and the client key intact, so the machine knows who it is and re-attaches explicitly and idempotently. A v1 file is unbound by construction and fails closed the same way rather than being trusted or silently upgraded.
+
+Compared on the ORIGIN, normalised inside the loader as well as at the write site. Normalising only in the constructor made the answer depend on which caller asked, so the same origin with a trailing slash or an explicit :443 read as a different server and locked a healthy machine out of its own credential. The test for that was written before the fix existed and failed, which is how the inconsistency surfaced.
+
+Four mutations, all caught: no fence on mismatch (kills two), trusting a legacy file, raw-string comparison, and regenerating the client key on mismatch (which would break the idempotent re-attach the binding exists to enable).
+
+Suites: A6 452 files / 6754 passed; A7 452 files / 6757 passed; 8 skipped, 0 failed on both. Typecheck and oxlint clean on both.
+
+### What the other agent landed, and what it supersedes
+
+Reviewed rather than assumed, and one of their commits answers a question I had raised:
+
+- `5a4df57` "Isolate browser fixtures from host container runtimes" fixes the EACCES flake I diagnosed. It addresses the CAUSE rather than the symptom: a test-child preload that makes docker/podman/container unavailable to fixture children, so the storage overlay under the temp HOME is never created. browser-tests has been green on all four CI runs since.
+- `65b8982` "Add bounded follow-up proposal policy" lands I0 — 156 tests, CI green. It resolves the case-7 injection question I flagged as needing an owner decision, and chose the answer I proposed: bound-and-mark-untrusted, not reject. Its test at line 1408 is "keeps a 228-character title as an explicitly truncated untrusted excerpt" — the exact 228-char fixture that failed in my worktree. My held-back I0 work is superseded; nothing of mine is on main for it.
+- `501dbbe` "fix: preserve send recovery and original task destinations" is the CLIENT half of A3 — it touches no server route, so it is complementary to the server half in b0e64c0 rather than a duplicate. Worth an integration test that the two halves agree; not done.
+- `41a4147` / `8f1b55d` scope webhooks to their owning account across management, history and live events. Not independently reviewed this session; both CI green.
+
+Still open, not started: B1 (benchmark history — the workflow swallows a 403 on push and later runs do not load prior artifacts), the user's Mac black screen (needs Cmd+Option+I console output), and the audit's remaining non-P1 items.
