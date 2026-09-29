@@ -339,7 +339,7 @@ import { clampGeneratedTitle, generatedTitlePrompt } from "./generated-titles.ts
 import { UsageAllowance } from "./usage-allowance.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { memberTurnSelection } from "./member-turn.ts";
-import { WebhookManager } from "./webhooks.ts";
+import { WebhookManager, type WebhookViewer } from "./webhooks.ts";
 import { VaultManager } from "./vault-manager.ts";
 import { buildBriefing } from "./briefing.ts";
 import { buildReceipt, receiptFinishedAt, renderReceiptText } from "./receipts.ts";
@@ -1206,6 +1206,24 @@ function frameOwnerIds(
  * the client, so everything flows as before. */
 function visibleToClient(client: SseClient, payload: FrameIdentity): boolean {
   if (!client.userId) return true;
+  // Webhook frames are owner-stamped by the webhook manager itself (the
+  // ownership lives on the webhook row, not on a bot/group record the
+  // generic scanner could resolve). An ownerless webhook frame is legacy
+  // deployment-wide traffic; a stamped one goes to its owner only — the
+  // fail-safe direction used everywhere else in this filter.
+  if (payload.kind === "webhook" || payload.kind === "webhook.attempt" || payload.kind === "webhook.deleted") {
+    // SAFETY: webhook frames are assembled by the webhook manager with the
+    // owner on the shape shown; the guards below re-derive it as unknown.
+    const wide = payload as { owner?: unknown; attempt?: { owner?: unknown }; webhook?: { owner?: unknown } };
+    const owner = isText(wide.owner)
+      ? wide.owner
+      : isText(wide.attempt?.owner)
+        ? wide.attempt.owner
+        : isText(wide.webhook?.owner)
+          ? wide.webhook.owner
+          : undefined;
+    return owner ? owner === client.userId : true;
+  }
   // Social frames are the one kind whose audience is decided by the payload
   // itself: the manager stamps exactly the owner ids allowed to see it (a
   // request belongs to both humans, a profile only to its owner). Anything
@@ -3725,6 +3743,16 @@ const webhooks = new WebhookManager({
   botState: (botId) => {
     const bot = store.bot(botId);
     return !bot ? "missing" : bot.busy ? "busy" : "ready";
+  },
+  // Bot (re)assignment must stay inside the viewer's own account. The
+  // desktop viewer (kind "all") owns everything; an account viewer is
+  // bound by the same rule the route gate applies to bots — unowned
+  // legacy records belong to the operator only.
+  botOwned: (viewer, botId) => {
+    if (viewer.kind === "all") return true;
+    const bot = store.bot(botId);
+    if (!bot) return false;
+    return bot.ownerId ? bot.ownerId === viewer.owner : viewer.owner === (primaryUserId() ?? "");
   },
   enqueue: (input) => routines!.enqueueWebhook(input),
   cancelQueued: (webhookId, message) => routines!.cancelQueuedWebhook(webhookId, message),
@@ -7335,11 +7363,17 @@ let requestUserEmail = "";
       return json(res, 200, result);
     }
 
+    // Webhook viewer for this request: scoped to the signed-in account on
+    // hosted deployments; the unrestricted desktop viewer otherwise.
+    // Mirrors messageSessionOwner — a defined requestUserId maps onto
+    // exactly the rows that session may see.
+    const webhookViewer = (): WebhookViewer =>
+      requestUserId ? { kind: "account", owner: requestUserId } : { kind: "all" };
     if (path === "/api/webhooks" && method === "GET") {
-      return json(res, 200, { webhooks: webhooks.list(), attempts: webhooks.listAttempts(), ingress: webhookIngressStatus() });
+      return json(res, 200, { webhooks: webhooks.list(webhookViewer()), attempts: webhooks.listAttempts(webhookViewer()), ingress: webhookIngressStatus() });
     }
     if (path === "/api/webhooks" && method === "POST") {
-      const created = webhooks.create(await readBody(req));
+      const created = webhooks.create(webhookViewer(), await readBody(req));
       const ingress = webhookIngressStatus();
       return json(res, 201, {
         webhook: created.webhook,
@@ -7350,10 +7384,10 @@ let requestUserEmail = "";
     let webhookMatch = path.match(/^\/api\/webhooks\/([\w-]+)\/(rotate|test)$/);
     if (webhookMatch && method === "POST") {
       if (webhookMatch[2] === "test") {
-        const result = webhooks.test(webhookMatch[1], await readBody(req));
+        const result = webhooks.test(webhookViewer(), webhookMatch[1], await readBody(req));
         return result ? json(res, 202, result) : json(res, 404, { error: "no such webhook" });
       }
-      const rotated = webhooks.rotateSecret(webhookMatch[1]);
+      const rotated = webhooks.rotateSecret(webhookViewer(), webhookMatch[1]);
       if (!rotated) return json(res, 404, { error: "no such webhook" });
       const ingress = webhookIngressStatus();
       return json(res, 200, {
@@ -7364,11 +7398,11 @@ let requestUserEmail = "";
     }
     webhookMatch = path.match(/^\/api\/webhooks\/([\w-]+)$/);
     if (webhookMatch && method === "PATCH") {
-      const webhook = webhooks.update(webhookMatch[1], await readBody(req));
+      const webhook = webhooks.update(webhookViewer(), webhookMatch[1], await readBody(req));
       return webhook ? json(res, 200, { webhook }) : json(res, 404, { error: "no such webhook" });
     }
     if (webhookMatch && method === "DELETE") {
-      return webhooks.remove(webhookMatch[1])
+      return webhooks.remove(webhookViewer(), webhookMatch[1])
         ? json(res, 200, { ok: true })
         : json(res, 404, { error: "no such webhook" });
     }

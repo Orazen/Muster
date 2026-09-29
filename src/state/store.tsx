@@ -2006,9 +2006,15 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
           rawDispatch({ type: "socialRefresh" });
           break;
         case "webhook":
+          // Webhooks are owner-scoped server-side; a scoped client filters
+          // foreign frames here so another account's hook never folds into
+          // this session's settings. Frames without an owner are legacy
+          // desktop/desktop-unrestricted traffic and stay unconditional.
+          if (frame.webhook.owner && accountId && frame.webhook.owner !== accountId) break;
           rawDispatch({ type: "webhookPatched", webhook: frame.webhook });
           break;
         case "webhook.attempt":
+          if (frame.attempt.owner && accountId && frame.attempt.owner !== accountId) break;
           rawDispatch({ type: "webhookAttempted", attempt: frame.attempt });
           break;
         case "webhook.deleted":

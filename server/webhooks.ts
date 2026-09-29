@@ -27,6 +27,10 @@ export interface WebhookTrigger {
   verificationSample?: WebhookVerificationSample;
   /** Optional event-name allowlist. Empty means every event type. */
   eventTypes?: string[];
+  /** Owning account (absent = legacy unowned row, operator-visible only).
+   * Also carried on webhook SSE frames so scoped clients can fold only
+   * their own hooks. */
+  owner?: string;
 }
 
 export interface WebhookTriggerInput {
@@ -72,6 +76,9 @@ export interface WebhookAttempt {
   deliveryId?: string;
   runId?: string;
   reason?: string;
+  /** Owning account of the webhook this attempt belongs to (absent =
+   * legacy row). Carried so scoped SSE clients can filter foreign frames. */
+  owner?: string;
 }
 
 interface StoredWebhookTrigger extends WebhookTrigger {
@@ -117,6 +124,10 @@ export interface WebhookManagerOptions {
   now?: () => number;
   emit?: (event: WebhookManagerEvent) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
+  /** Does `viewer`'s account own this bot? Gates bot (re)assignment so a
+   * webhook can never be pointed at — or re-pointed to — another account's
+   * AGENT. Desktop passes a constant true. */
+  botOwned: (viewer: WebhookViewer, botId: string) => boolean;
   enqueue: (input: {
     webhookId: string;
     webhookName: string;
@@ -132,7 +143,7 @@ export interface WebhookManagerOptions {
 
 export type WebhookManagerEvent =
   | { kind: "webhook"; webhook: WebhookTrigger }
-  | { kind: "webhook.deleted"; webhookId: string }
+  | { kind: "webhook.deleted"; webhookId: string; owner?: string }
   | { kind: "webhook.attempt"; attempt: WebhookAttempt };
 
 const MAX_DELIVERIES = 2_000;
@@ -144,6 +155,19 @@ const MAX_PENDING_RUNS = 3;
 
 const runOnSchema = z.enum(["agent", "cloud", "opensandbox"]);
 const eventTypesSchema = z.array(z.string()).max(20).optional();
+/** Scope key for one viewer: "all" sees every webhook (desktop/no-session
+ * compatibility); anything else restricts to rows whose owner matches, with
+ * unowned legacy rows reserved to the operator ("local"). */
+export type WebhookViewer = { kind: "all" } | { kind: "account"; owner: string };
+
+const OWNERLESS_IS_LOCAL = "local";
+
+/** True when `viewer` may see a row stored under `owner`. */
+function ownerVisible(viewer: WebhookViewer, owner: string | undefined): boolean {
+  if (viewer.kind === "all") return true;
+  if (owner === undefined) return viewer.owner === OWNERLESS_IS_LOCAL;
+  return owner === viewer.owner;
+}
 const triggerInputSchema = z.object({
   name: z.string(),
   prompt: z.string(),
@@ -178,6 +202,11 @@ const storedWebhookSchema = z.object({
   verificationSample: verificationSampleSchema.optional(),
   eventTypes: eventTypesSchema,
   secretHash: z.string().regex(/^[a-f0-9]{64}$/),
+  /** Owning account (W0 owner space: session id hosted, "local" desktop).
+   * Absent on rows written before ownership existed; such rows are visible
+   * to the operator (primary account) only, exactly like the unowned-record
+   * rule the route gate already applies to bots and groups. */
+  owner: z.string().min(1).optional(),
 });
 const deliveryReceiptSchema = z.object({
   key: z.string().min(1),
@@ -357,17 +386,42 @@ export class WebhookManager {
     }
   }
 
-  list(): WebhookTrigger[] {
-    return this.webhooks.map(publicTrigger);
+  /** Owner-scoped list: an account sees only its own hooks (unowned legacy
+   * rows are the operator's); the desktop viewer sees everything. */
+  list(viewer: WebhookViewer): WebhookTrigger[] {
+    return this.webhooks
+      .filter((trigger) => ownerVisible(viewer, trigger.owner))
+      .map(publicTrigger);
   }
 
-  listAttempts(): WebhookAttempt[] {
-    return this.attempts.map((attempt) => ({ ...attempt }));
+  /** Delivery/attempt history, scoped exactly like list(): an account must
+   * not learn that another account's webhook received an event, let alone
+   * its payload preview or run id. */
+  listAttempts(viewer: WebhookViewer): WebhookAttempt[] {
+    const mine = new Set(
+      this.webhooks.filter((trigger) => ownerVisible(viewer, trigger.owner)).map((trigger) => trigger.id),
+    );
+    return this.attempts.filter((attempt) => mine.has(attempt.webhookId)).map((attempt) => ({ ...attempt }));
   }
 
-  create(input: JsonValue): CreatedWebhook {
+  /** Resolve a row for `viewer` or null: foreign and unknown ids are the
+   * same null, so a scoped caller can answer a blank 404 either way. */
+  private findFor(viewer: WebhookViewer, id: string): StoredWebhookTrigger | undefined {
+    const trigger = this.webhooks.find((candidate) => candidate.id === id);
+    return trigger && ownerVisible(viewer, trigger.owner) ? trigger : undefined;
+  }
+
+  /** Refuse pointing a webhook at a bot outside the viewer's account — on
+   * create and on every reassignment (the patch path). The bot may exist;
+   * that is exactly why this check exists. */
+  private requireBotOwned(viewer: WebhookViewer, botId: string): void {
+    if (this.options.botState(botId) === "missing") fail(400, "That AGENT no longer exists");
+    if (!this.options.botOwned(viewer, botId)) fail(403, "Choose one of your own AGENTs for this webhook");
+  }
+
+  create(viewer: WebhookViewer, input: JsonValue): CreatedWebhook {
     const clean = cleanInput(parseTriggerInput(input));
-    if (this.options.botState(clean.botId) === "missing") fail(400, "That AGENT no longer exists");
+    this.requireBotOwned(viewer, clean.botId);
     const now = this.now();
     const secret = newSecret();
     const trigger: StoredWebhookTrigger = {
@@ -378,6 +432,7 @@ export class WebhookManager {
       createdAt: now,
       updatedAt: now,
       deliveryCount: 0,
+      owner: viewer.kind === "account" ? viewer.owner : OWNERLESS_IS_LOCAL,
     };
     this.webhooks.unshift(trigger);
     this.save();
@@ -385,8 +440,8 @@ export class WebhookManager {
     return { webhook: publicTrigger(trigger), secret };
   }
 
-  update(id: string, value: JsonValue): WebhookTrigger | null {
-    const trigger = this.webhooks.find((candidate) => candidate.id === id);
+  update(viewer: WebhookViewer, id: string, value: JsonValue): WebhookTrigger | null {
+    const trigger = this.findFor(viewer, id);
     if (!trigger) return null;
     const patch = parseTriggerPatch(value);
     const clean = cleanInput({
@@ -398,7 +453,9 @@ export class WebhookManager {
       verificationPending: patch.verificationPending ?? trigger.verificationPending,
       eventTypes: patch.eventTypes ?? trigger.eventTypes,
     });
-    if (this.options.botState(clean.botId) === "missing") fail(400, "That AGENT no longer exists");
+    // Reassignment is the interesting case: the target bot must belong to
+    // the same account as the webhook, not merely exist.
+    this.requireBotOwned(viewer, clean.botId);
     Object.assign(trigger, clean, { updatedAt: this.now() });
     if (!clean.eventTypes?.length) delete trigger.eventTypes;
     if (patch.enabled === false) {
@@ -409,21 +466,22 @@ export class WebhookManager {
     return publicTrigger(trigger);
   }
 
-  remove(id: string): boolean {
-    const at = this.webhooks.findIndex((candidate) => candidate.id === id);
-    if (at === -1) return false;
-    const [trigger] = this.webhooks.splice(at, 1);
+  remove(viewer: WebhookViewer, id: string): boolean {
+    const trigger = this.findFor(viewer, id);
+    if (!trigger) return false;
+    const at = this.webhooks.indexOf(trigger);
+    this.webhooks.splice(at, 1);
     this.deliveries = this.deliveries.filter((delivery) => !delivery.key.startsWith(`${trigger.endpointId}:`));
     this.attempts = this.attempts.filter((attempt) => attempt.webhookId !== trigger.id);
     this.rate.delete(trigger.endpointId);
     this.options.cancelQueued?.(trigger.id, "The webhook was deleted before this delivery started");
     this.save();
-    this.options.emit?.({ kind: "webhook.deleted", webhookId: id });
+    this.options.emit?.({ kind: "webhook.deleted", webhookId: id, owner: trigger.owner });
     return true;
   }
 
-  rotateSecret(id: string): { webhook: WebhookTrigger; secret: string } | null {
-    const trigger = this.webhooks.find((candidate) => candidate.id === id);
+  rotateSecret(viewer: WebhookViewer, id: string): { webhook: WebhookTrigger; secret: string } | null {
+    const trigger = this.findFor(viewer, id);
     if (!trigger) return null;
     const secret = newSecret();
     trigger.secretHash = hashSecret(secret);
@@ -465,8 +523,8 @@ export class WebhookManager {
     }
   }
 
-  test(id: string, payload: JsonValue = { event: "muster.test", message: "Test webhook delivery" }): WebhookReceiveResult | null {
-    const trigger = this.webhooks.find((candidate) => candidate.id === id);
+  test(viewer: WebhookViewer, id: string, payload: JsonValue = { event: "muster.test", message: "Test webhook delivery" }): WebhookReceiveResult | null {
+    const trigger = this.findFor(viewer, id);
     if (!trigger) return null;
     const eventName = trigger.eventTypes?.[0] ?? "muster.test";
     return this.dispatch(trigger, {
@@ -614,12 +672,18 @@ export class WebhookManager {
     if (details.reason) attempt.reason = details.reason;
     this.attempts.push(attempt);
     if (this.attempts.length > MAX_ATTEMPTS) this.attempts.splice(0, this.attempts.length - MAX_ATTEMPTS);
-    this.options.emit?.({ kind: "webhook.attempt", attempt: { ...attempt } });
+    this.emitAttempt(trigger, attempt);
     return attempt;
   }
 
   private emit(trigger: StoredWebhookTrigger): void {
     this.options.emit?.({ kind: "webhook", webhook: publicTrigger(trigger) });
+  }
+
+  /** Attempts are emitted with their webhook's owner so a scoped SSE client
+   * can drop another account's delivery activity without learning it. */
+  private emitAttempt(trigger: StoredWebhookTrigger, attempt: WebhookAttempt): void {
+    this.options.emit?.({ kind: "webhook.attempt", attempt: { ...attempt, owner: trigger.owner } });
   }
 
   private save(): void {

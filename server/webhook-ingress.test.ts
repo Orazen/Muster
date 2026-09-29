@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { listenWebhookIngress, MAX_WEBHOOK_BODY_BYTES, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
-import { WebhookManager, type WebhookManagerOptions } from "./webhooks.ts";
+import { WebhookManager, type WebhookManagerOptions, type WebhookViewer } from "./webhooks.ts";
+const ALL: WebhookViewer = { kind: "all" };
 
 let dir: string;
 let ingress: WebhookIngress;
@@ -18,12 +19,13 @@ beforeAll(async () => {
   manager = new WebhookManager({
     file: join(dir, "webhooks.json"),
     botState: () => "ready",
+    botOwned: () => true,
     enqueue: (input) => {
       queued.push(input);
       return { id: `run-${queued.length}` };
     },
   });
-  const created = manager.create({ name: "Build event", prompt: "Review the build", botId: "agent-1" });
+  const created = manager.create(ALL, { name: "Build event", prompt: "Review the build", botId: "agent-1" });
   endpointId = created.webhook.endpointId;
   secret = created.secret;
   ingress = await listenWebhookIngress(manager, { port: 0 });
@@ -83,7 +85,7 @@ describe("webhook-only ingress", () => {
   });
 
   it("captures a verification event without queueing work", async () => {
-    const created = manager.create({ name: "Verify", prompt: "", botId: "agent-1", enabled: false, verificationPending: true });
+    const created = manager.create(ALL, { name: "Verify", prompt: "", botId: "agent-1", enabled: false, verificationPending: true });
     const before = queued.length;
     const response = await fetch(webhookCredential(ingress.baseUrl, created.webhook.endpointId, created.secret).url, {
       method: "POST",
@@ -93,7 +95,7 @@ describe("webhook-only ingress", () => {
     expect(response.status).toBe(202);
     expect(await response.json()).toMatchObject({ accepted: true, captured: true });
     expect(queued).toHaveLength(before);
-    expect(manager.list().find((webhook) => webhook.id === created.webhook.id)).toMatchObject({ verificationPending: false, enabled: false });
+    expect(manager.list(ALL).find((webhook) => webhook.id === created.webhook.id)).toMatchObject({ verificationPending: false, enabled: false });
   });
 
   it("rejects invalid credentials, malformed JSON and oversized bodies", async () => {
@@ -113,6 +115,6 @@ describe("webhook-only ingress", () => {
       body: "x".repeat(MAX_WEBHOOK_BODY_BYTES + 1),
     });
     expect(oversized.status).toBe(413);
-    expect(manager.listAttempts().filter((attempt) => attempt.webhookId === manager.list().find((webhook) => webhook.endpointId === endpointId)?.id && attempt.outcome === "rejected").length).toBeGreaterThanOrEqual(3);
+    expect(manager.listAttempts(ALL).filter((attempt) => attempt.webhookId === manager.list(ALL).find((webhook) => webhook.endpointId === endpointId)?.id && attempt.outcome === "rejected").length).toBeGreaterThanOrEqual(3);
   });
 });

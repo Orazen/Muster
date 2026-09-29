@@ -7,6 +7,7 @@ import {
   WebhookManager,
   type WebhookManagerOptions,
   type WebhookTrigger,
+  type WebhookViewer,
 } from "./webhooks.ts";
 
 const dirs: string[] = [];
@@ -27,6 +28,10 @@ function harness() {
     now: () => now,
     emit: (event) => emitted.push(event),
     botState: () => bot,
+    // The unit harness models a desktop-like single owner: every bot
+    // belongs to whichever viewer asks. Isolation is proven per-account in
+    // webhooks-isolation-harness.test.ts.
+    botOwned: () => true,
     enqueue: (input) => {
       queued.push(input);
       return { id: `run-${++run}` };
@@ -34,6 +39,7 @@ function harness() {
     cancelQueued: (id, message) => cancelled.push({ id, message }),
     pendingRuns: () => pending,
   };
+  const ALL: WebhookViewer = { kind: "all" };
   const manager = new WebhookManager(options);
   return {
     manager,
@@ -42,14 +48,15 @@ function harness() {
     queued,
     cancelled,
     emitted,
+    ALL,
     setNow: (value: number) => (now = value),
     setBot: (value: typeof bot) => (bot = value),
     setPending: (value: number) => (pending = value),
   };
 }
 
-function create(manager: WebhookManager) {
-  return manager.create({
+function create(manager: WebhookManager, viewer: WebhookViewer = { kind: "all" }) {
+  return manager.create(viewer, {
     name: "New lead",
     prompt: "Qualify the incoming lead and prepare a response",
     botId: "agent-sales",
@@ -64,18 +71,18 @@ afterEach(() => {
 describe("WebhookManager", () => {
   it("rejects malformed management input before it reaches stored state", () => {
     const h = harness();
-    expect(() => h.manager.create({ name: 42, prompt: "Review it", botId: "agent-1" })).toThrow("name");
+    expect(() => h.manager.create(h.ALL, { name: 42, prompt: "Review it", botId: "agent-1" })).toThrow("name");
     const created = create(h.manager);
-    expect(() => h.manager.update(created.webhook.id, { enabled: "yes" })).toThrow("enabled");
-    expect(h.manager.list()).toHaveLength(1);
+    expect(() => h.manager.update(h.ALL, created.webhook.id, { enabled: "yes" })).toThrow("enabled");
+    expect(h.manager.list(h.ALL)).toHaveLength(1);
   });
 
   it("does not trust malformed webhook records loaded from disk", () => {
     const h = harness();
     writeFileSync(h.file, JSON.stringify({ version: 1, webhooks: [{ id: "unsafe" }], deliveries: [] }));
     const reloaded = new WebhookManager(h.options);
-    expect(reloaded.list()).toEqual([]);
-    expect(reloaded.listAttempts()).toEqual([]);
+    expect(reloaded.list(h.ALL)).toEqual([]);
+    expect(reloaded.listAttempts(h.ALL)).toEqual([]);
   });
 
   it("stores only a secret digest and exposes the secret once", () => {
@@ -86,7 +93,7 @@ describe("WebhookManager", () => {
     expect(created.webhook).toMatchObject({ name: "New lead", runOn: "cloud", deliveryCount: 0 });
     expect(created.webhook).not.toHaveProperty("durationMinutes");
     expect(JSON.stringify(created.webhook)).not.toContain(created.secret);
-    expect(JSON.stringify(h.manager.list())).not.toContain("secretHash");
+    expect(JSON.stringify(h.manager.list(h.ALL))).not.toContain("secretHash");
     expect(readFileSync(h.file, "utf8")).not.toContain(created.secret);
     if (process.platform !== "win32") expect(statSync(h.file).mode & 0o777).toBe(0o600);
   });
@@ -104,7 +111,7 @@ describe("WebhookManager", () => {
     writeFileSync(h.file, JSON.stringify(disk));
 
     const reloaded = new WebhookManager(h.options);
-    expect(reloaded.list()[0]).not.toHaveProperty("durationMinutes");
+    expect(reloaded.list(h.ALL)[0]).not.toHaveProperty("durationMinutes");
   });
 
   it("turns an authenticated delivery into a queued, untrusted-data task", () => {
@@ -130,12 +137,12 @@ describe("WebhookManager", () => {
     expect(h.queued[0]?.prompt).toContain("[USER-CONFIGURED WEBHOOK INSTRUCTIONS]");
     expect(h.queued[0]?.prompt).toContain("[UNTRUSTED WEBHOOK EVENT DATA]");
     expect(h.queued[0]?.prompt).toContain('"lead": "Ada"');
-    expect(h.manager.list()[0]).toMatchObject({ lastRunId: "run-1", deliveryCount: 1 });
+    expect(h.manager.list(h.ALL)[0]).toMatchObject({ lastRunId: "run-1", deliveryCount: 1 });
   });
 
   it("uses an authenticated task from the payload when default instructions are empty", () => {
     const h = harness();
-    const { webhook, secret } = h.manager.create({ name: "Direct tasks", prompt: "", botId: "agent-1" });
+    const { webhook, secret } = h.manager.create(h.ALL, { name: "Direct tasks", prompt: "", botId: "agent-1" });
     h.manager.receive(webhook.endpointId, secret, { payload: { task: "Check the failed checkout test", error: "500" } });
 
     expect(h.queued[0]?.prompt).toContain("[AUTHENTICATED WEBHOOK TASK]");
@@ -145,7 +152,7 @@ describe("WebhookManager", () => {
 
   it("captures the first real request for verification without starting a task", () => {
     const h = harness();
-    const { webhook, secret } = h.manager.create({
+    const { webhook, secret } = h.manager.create(h.ALL, {
       name: "Verify me",
       prompt: "",
       botId: "agent-1",
@@ -156,8 +163,8 @@ describe("WebhookManager", () => {
 
     expect(result).toMatchObject({ captured: true, duplicate: false });
     expect(h.queued).toHaveLength(0);
-    expect(h.manager.list()[0]).toMatchObject({ enabled: false, verificationPending: false, verifiedAt: expect.any(Number) });
-    expect(h.manager.listAttempts().at(-1)).toMatchObject({ outcome: "captured", eventName: "demo" });
+    expect(h.manager.list(h.ALL)[0]).toMatchObject({ enabled: false, verificationPending: false, verifiedAt: expect.any(Number) });
+    expect(h.manager.listAttempts(h.ALL).at(-1)).toMatchObject({ outcome: "captured", eventName: "demo" });
   });
 
   it("deduplicates retries by delivery id, including after a restart", () => {
@@ -171,29 +178,29 @@ describe("WebhookManager", () => {
     const retry = reloaded.receive(webhook.endpointId, secret, event);
     expect(retry).toEqual({ runId: "run-1", deliveryId: "same-event", duplicate: true });
     expect(h.queued).toHaveLength(1);
-    expect(reloaded.list()[0]?.deliveryCount).toBe(1);
+    expect(reloaded.list(h.ALL)[0]?.deliveryCount).toBe(1);
   });
 
   it("invalidates the previous secret on rotation and honours pause/delete", () => {
     const h = harness();
     const { webhook, secret } = create(h.manager);
-    const rotated = h.manager.rotateSecret(webhook.id)!;
+    const rotated = h.manager.rotateSecret(h.ALL, webhook.id)!;
 
     expect(() => h.manager.receive(webhook.endpointId, secret, { payload: {} })).toThrow("Invalid webhook");
     expect(h.manager.receive(webhook.endpointId, rotated.secret, { payload: {} }).runId).toBe("run-1");
 
-    h.manager.update(webhook.id, { enabled: false });
+    h.manager.update(h.ALL, webhook.id, { enabled: false });
     expect(() => h.manager.receive(webhook.endpointId, rotated.secret, { payload: {} })).toThrow("paused");
     expect(h.cancelled.at(-1)?.id).toBe(webhook.id);
-    expect(h.manager.listAttempts().at(-1)).toMatchObject({ outcome: "rejected", statusCode: 409 });
+    expect(h.manager.listAttempts(h.ALL).at(-1)).toMatchObject({ outcome: "rejected", statusCode: 409 });
 
-    expect(h.manager.remove(webhook.id)).toBe(true);
-    expect(h.manager.list()).toHaveLength(0);
+    expect(h.manager.remove(h.ALL, webhook.id)).toBe(true);
+    expect(h.manager.list(h.ALL)).toHaveLength(0);
   });
 
   it("filters event types, caps unfinished work, and rate-limits a noisy endpoint", () => {
     const h = harness();
-    const { webhook, secret } = h.manager.create({ name: "Builds", prompt: "Review it", botId: "agent-1", eventTypes: ["push"] });
+    const { webhook, secret } = h.manager.create(h.ALL, { name: "Builds", prompt: "Review it", botId: "agent-1", eventTypes: ["push"] });
     expect(h.manager.receive(webhook.endpointId, secret, { payload: {}, eventName: "issues" })).toMatchObject({ ignored: true });
     expect(h.queued).toHaveLength(0);
 
