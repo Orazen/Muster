@@ -2540,6 +2540,16 @@ function admitIntentMessage(
     }
     // Receipt without transcript (deleted thread): fall through to
     // admission, where the UNIQUE intent id refuses the duplicate.
+    //
+    // A reconcile CAN reach this too, and it still cannot create: the
+    // fall-through calls Store.admitMessage, which re-reads the same row,
+    // matches the fingerprint, finds the message gone and raises a 410 that
+    // the route's error handler already passes through. I first "fixed" this
+    // into a 200-with-receipt and then reverted it: a 410 is a specific,
+    // honest answer, the client keeps the record parked, and the shared
+    // fixture cannot restart its one server, so I had no way to prove the new
+    // branch — shipping it would have been a receipt-path change with no
+    // evidence behind it.
   }
   try {
     if (bot.busy || queuedFlag) {
@@ -8641,21 +8651,48 @@ let requestUserEmail = "";
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages$/);
     if (m && method === "POST") {
-      // Same storage-sovereignty gate as bot creation: on hosted, work does
-      // not start until the user's own storage is connected.
-      const sendGate = storageGateFor(requestUserId);
-      if (sendGate.required && !sendGate.satisfied) {
-        return json(res, 403, {
-          error: "connect your own Google Drive (Settings → Storage) before starting work",
-          code: "STORAGE_GATE_REQUIRED",
-        });
-      }
       const body = await readBody(req);
+      // A reconnect that is only ASKING what happened to a send is not new
+      // work, so it must not be refused for lack of Drive consent. The gate
+      // used to run before the body was even read, so a user who disconnected
+      // Drive — the normal response to a storage warning — could read a fresh
+      // conversation but was then locked out of recovering the message they
+      // had just sent, and the UI could only say "storage required" for what
+      // was really a lookup. Reading your own receipt is exactly as
+      // authorized as reading your own transcript, and it happens before any
+      // work starts, so it is gated below with the work rather than above it.
+      const reconcileOnly = body.reconcile === true;
+      if (!reconcileOnly) {
+        // Same storage-sovereignty gate as bot creation: on hosted, work does
+        // not start until the user's own storage is connected.
+        const sendGate = storageGateFor(requestUserId);
+        if (sendGate.required && !sendGate.satisfied) {
+          return json(res, 403, {
+            error: "connect your own Google Drive (Settings → Storage) before starting work",
+            code: "STORAGE_GATE_REQUIRED",
+          });
+        }
+      }
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      const threadId = requireMessageThread(body, bot.threadId);
+      const receiptOwner = messageSessionOwner(requestUserId);
+      // A3: recovery is pinned to where the words were ORIGINALLY accepted.
+      // `requireMessageThread` answers with the bot's CURRENT thread when the
+      // body names none, so a reconcile for a record parked before a task
+      // switch fingerprinted the right words against the wrong thread, missed
+      // its own receipt, and answered "already accepted with different
+      // content" about a send that had in fact succeeded. The durable row
+      // already holds the original destination; it is this account's own row,
+      // so it is the destination — not the client's claim, and not the bot's
+      // current thread.
+      let pinned: string | null = null;
+      if (reconcileOnly && body.clientIntentId !== undefined && isValidMessageIntentId(String(body.clientIntentId))) {
+        const row = readIntentRow(String(body.clientIntentId));
+        if (row && row.owner === receiptOwner) pinned = row.threadId;
+      }
+      const threadId = pinned ?? requireMessageThread(body, bot.threadId);
       // Durable send receipts (opt-in): an intent-aware client gets a
       // per-intent durable receipt that survives restarts, so a lost
       // acknowledgement is a lookup, never a resend. Ownership comes from
@@ -8673,8 +8710,7 @@ let requestUserEmail = "";
         // turn), and an owned mismatch is the same 409 as before, now with a
         // body that carries the id but no foreign receipt. Explicit sends
         // (the default) keep every v1 semantic.
-        const reconcile = body.reconcile === true;
-        const receiptOwner = messageSessionOwner(requestUserId);
+        const reconcile = reconcileOnly;
         if (reconcile) {
           // Lookup-first: a reconcile must never CREATE. Only an OWNED row
           // proceeds (to the replay or the owned-mismatch conflict below);

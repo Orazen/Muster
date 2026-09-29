@@ -64,6 +64,15 @@ describe.skipIf(process.platform === "win32")("durable send intents across a dis
 
   /** One account's transcript, via the same wire shape the client hydrates
    * (the roster list with a bounded message page). */
+  /** Messages in ONE thread, by id — the bot-scoped helper only ever answers
+   * for the bot's current thread, which is the very thing A3 moves. */
+  const threadWords = async (account: Account, threadId: string, text: string): Promise<number> => {
+    const res = await request(`/api/threads/${threadId}/messages`, "GET", undefined, account);
+    expect(res.status).toBe(200);
+    const body = z.object({ messages: z.array(z.object({ role: z.string(), text: z.string().optional() })) }).parse(await res.json());
+    return body.messages.filter((m) => m.text === text).length;
+  };
+
   const transcriptOf = async (account: Account): Promise<{ messages: Array<{ role: string; text?: string; tool?: { name?: string } }> }> => {
     const res = await request("/api/bots?messages=50", "GET", undefined, account);
     expect(res.status).toBe(200);
@@ -280,6 +289,92 @@ describe.skipIf(process.platform === "win32")("durable send intents across a dis
     const replay = await send(alice, { text: "Held for review", clientIntentId: intentId });
     const lookup = z.object({ intent: intentSchema }).parse(await replay.json());
     expect(lookup.intent.state).not.toBe("dispatched");
+  });
+
+  it("recovers a send that was parked BEFORE a task switch, into the thread it was accepted for", async () => {
+    // A3. The words are sent into task A, the request never gets its
+    // acknowledgement, and the user starts task B. On reconnect the client
+    // asks about the parked record — and the ONLY destination information it
+    // sends is the bot id, because `parkSend` stored the thread but the
+    // reconcile body never carried it. The server therefore fingerprinted the
+    // right words against the bot's CURRENT thread, missed the receipt it was
+    // literally holding, and answered "already accepted with different
+    // content" — telling a user their successful send was a conflict, over a
+    // message the server already had.
+    const intentId = `snd-${randomBytes(16).toString("hex")}`;
+    const parkedThread = alice.threadId;
+    const mine = await send(alice, { text: "Words sent into task A", clientIntentId: intentId });
+    expect(mine.status).toBe(202);
+    const original = z.object({ intent: intentSchema }).parse(await mine.json());
+    expect(original.intent.threadId).toBe(parkedThread);
+
+    // The real product route for "start another task", not a fixture poke: the
+    // composer's current thread genuinely moves.
+    const created = await request(`/api/bots/${alice.botId}/tasks`, "POST", { title: "Task B" }, alice);
+    expect(created.status).toBe(201);
+    const moved = z.object({ bot: botSchema, task: z.object({ threadId: z.string() }) }).parse(await created.json());
+    expect(moved.bot.threadId, "the fixture must actually move the composer off the parked thread").not.toBe(parkedThread);
+
+    // Exactly what src/state/store.tsx sends on reconnect.
+    const looked = await send(alice, { text: "Words sent into task A", clientIntentId: intentId, reconcile: true });
+    expect(looked.status).not.toBe(409);
+    const recovered = z.object({ intent: intentSchema }).parse(await looked.json());
+    // The receipt is the ORIGINAL one: same message, same thread. Recovery
+    // pins the destination the send was accepted for — it never re-binds a
+    // delivered message to whatever thread the bot happens to be on.
+    expect(recovered.intent.messageId).toBe(original.intent.messageId);
+    expect(recovered.intent.threadId).toBe(parkedThread);
+    // And the words were not re-sent into the new thread, nor duplicated in
+    // the old one.
+    expect(await threadWords(alice, moved.bot.threadId, "Words sent into task A")).toBe(0);
+    expect(await threadWords(alice, parkedThread, "Words sent into task A")).toBe(1);
+
+    // Put the composer back so the shared fixture is left as found.
+    await request(`/api/bots/${alice.botId}/tasks/${parkedThread}`, "POST", {}, alice);
+  });
+
+  it("a reconnect lookup survives a Drive disconnect, while a genuinely new send still does not", async () => {
+    // A4. The case above already covered the GET receipt route, which was
+    // never gated — so it proved the claim for a path the client does not
+    // use. The client reconciles with a POST carrying reconcile:true, and THAT
+    // ran behind the storage-sovereignty gate: a user who disconnected Drive
+    // (the ordinary response to a storage warning) could read the
+    // conversation but was then refused recovery of the message they had just
+    // sent, with a "connect your own Google Drive" error for what was really
+    // a lookup. Reading your own receipt is exactly as authorized as reading
+    // your own transcript, and no work starts.
+    const intentId = `snd-${randomBytes(16).toString("hex")}`;
+    const mine = await send(alice, { text: "Sent before the disconnect", clientIntentId: intentId });
+    expect(mine.status).toBe(202);
+    const original = z.object({ intent: intentSchema }).parse(await mine.json());
+
+    const db = new DatabaseSync(join(directory, "data", "auth.db"));
+    try {
+      db.prepare("DELETE FROM drive_grants WHERE userId = ?").run(alice.id);
+      db.prepare("DELETE FROM account WHERE userId = ? AND providerId = 'google'").run(alice.id);
+    } finally {
+      db.close();
+    }
+
+    // The lookup the client actually performs is not refused.
+    try {
+      // 202, not 403: the lookup is answered, not refused.
+      const looked = await send(alice, { text: "Sent before the disconnect", clientIntentId: intentId, reconcile: true });
+      expect(looked.status).toBe(202);
+      const recovered = z.object({ intent: intentSchema }).parse(await looked.json());
+      expect(recovered.intent.messageId).toBe(original.intent.messageId);
+
+      // ...but NEW work is still gated. Loosening the gate for reads must not
+      // become loosening the gate.
+      const fresh = await send(alice, { text: "Brand new work after the disconnect" });
+      expect(fresh.status).toBe(403);
+      expect(await fresh.json()).toMatchObject({ code: "STORAGE_GATE_REQUIRED" });
+    } finally {
+      // Restore in a finally: this fixture is SHARED, and an assertion above
+      // throwing used to leave every later case running against a disconnected
+      // account and failing for the wrong reason.
+      seedConnectedGoogleRow(join(directory, "data"), alice.id);
+    }
   });
 
   it("an accepted receipt stays readable after the account's Drive consent is disconnected", async () => {

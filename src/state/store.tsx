@@ -1788,8 +1788,15 @@ export function StoreProvider({ accountId, readSelectedMessages = true, children
           messageId: item.receipt.messageId,
         });
       };
+      // Every parked record is reconciled, including ones whose thread is not
+      // currently mounted. Skipping them meant the words a user sent into a
+      // task they have since switched away from were never once asked about:
+      // the record sat in the ledger indefinitely and the only visible sign
+      // was a "checking delivery" row on a thread nobody was looking at. The
+      // mount check that matters is inside foldReceipt, which declines to fold
+      // into a thread that is not on screen — the server is still asked, and
+      // an unmounted thread hydrates its own transcript when it is opened.
       for (const pending of parked) {
-        if (!botByThread.has(pending.threadId)) continue; // thread not mounted yet: try again next hydrate
         void reconcileThread(intentStore, pending.threadId, (record, lookup) =>
           api(`/api/bots/${record.botId}/messages`, {
             method: "POST",
