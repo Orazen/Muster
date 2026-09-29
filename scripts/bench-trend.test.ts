@@ -4,7 +4,7 @@ import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { projectScorecard, readTrend, renderTrend } from "./bench-trend.ts";
+import { projectScorecard, readTrend, renderTrend, mergeTrends, type TrendRecord } from "./bench-trend.ts";
 
 const scorecard = (overrides = {}) => ({
   version: 1,
@@ -116,3 +116,78 @@ describe("renderTrend", () => {
 function appendLine(file, record) {
   appendFileSync(file, `${JSON.stringify(record)}\n`);
 }
+
+// B1: the workflow kept only today's record, so nothing accumulated. Merging
+// retained history needs an identity first — without one, a rerun's record and
+// the re-downloaded copy of it are indistinguishable and history double-counts.
+describe("mergeTrends", () => {
+  const record = (over: Partial<TrendRecord> = {}): TrendRecord => ({
+    recordedAt: "2026-09-29T03:17:00.000Z",
+    source: "simulated",
+    label: "nightly",
+    status: "passed",
+    scenarios: 3,
+    roles: {},
+    ...over,
+  } as TrendRecord);
+
+  it("concatenates distinct runs", () => {
+    const merged = mergeTrends([
+      [record({ runId: "1001", recordedAt: "2026-09-28T03:17:00.000Z" })],
+      [record({ runId: "1002", recordedAt: "2026-09-29T03:17:00.000Z" })],
+    ]);
+    expect(merged.map((r) => r.runId)).toEqual(["1001", "1002"]);
+  });
+
+  it("a rerun REPLACES its own earlier record rather than duplicating it", () => {
+    const merged = mergeTrends([
+      [record({ runId: "1001", status: "failed" })],
+      [record({ runId: "1001", status: "passed" })],
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.status, "the later capture of the same run must win").toBe("passed");
+  });
+
+  it("deduplicates the same record found in two history files", () => {
+    // The exact shape of the bug: today's file and yesterday's artifact both
+    // hold the record, because the artifact was re-downloaded.
+    const shared = record({ runId: "1001" });
+    const merged = mergeTrends([[shared], [shared], [record({ runId: "1002" })]]);
+    expect(merged).toHaveLength(2);
+  });
+
+  it("orders the result oldest-first regardless of input order", () => {
+    const merged = mergeTrends([
+      [record({ runId: "b", recordedAt: "2026-09-30T00:00:00.000Z" })],
+      [record({ runId: "a", recordedAt: "2026-09-28T00:00:00.000Z" })],
+    ]);
+    expect(merged.map((r) => r.recordedAt)).toEqual([
+      "2026-09-28T00:00:00.000Z",
+      "2026-09-30T00:00:00.000Z",
+    ]);
+  });
+
+  it("falls back to label+time when a local capture has no run id", () => {
+    const local = record({ recordedAt: "2026-09-29T10:00:00.000Z" });
+    const merged = mergeTrends([[local], [{ ...local }]]);
+    expect(merged).toHaveLength(1);
+    // Two genuinely different local captures are both kept.
+    const other = record({ recordedAt: "2026-09-29T11:00:00.000Z" });
+    expect(mergeTrends([[local], [other]])).toHaveLength(2);
+  });
+
+  it("treats a blank runId as absent rather than as an identity", () => {
+    // Two records identical in every respect except the runId field, where one
+    // is whitespace and one is empty. If a blank id were accepted as an
+    // identity they'd be two DIFFERENT runs ("run:  " and "run:"), so a failed
+    // interpolation would inflate history; treated as absent they fall back to
+    // the same label+time key and collapse to one record, which is the honest
+    // reading of "we do not know which run this was".
+    //
+    // The first version of this case gave the two records different timestamps,
+    // which made them distinct under BOTH readings — it asserted nothing about
+    // blank handling and survived the mutation that broke it.
+    const blank = [record({ runId: "  " }), record({ runId: "" })];
+    expect(mergeTrends([blank])).toHaveLength(1);
+  });
+});

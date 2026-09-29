@@ -11,7 +11,7 @@
 // The record is a projection, not a copy: per-role status plus the numeric
 // evidence a trend can act on (elapsed, tokens, cost). Labels and sources
 // are preserved verbatim so a trend can distinguish live from simulated.
-import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -45,6 +45,11 @@ export interface RoleTrend {
 }
 export interface TrendRecord {
   recordedAt: string;
+  /** Identity of the capture that produced this record. Two records with the
+   *  same runId are the same run seen twice, not two runs. Supplied by the
+   *  workflow from GITHUB_RUN_ID; absent for local captures, which fall back
+   *  to a timestamp+label key. */
+  runId?: string;
   label: string;
   source: string;
   status: string;
@@ -115,6 +120,33 @@ export function readTrend(trendPath: string): TrendRecord[] {
   return records;
 }
 
+/** Stable identity for deduplication.
+ *
+ *  A workflow rerun of the same run re-captures the same record, and a
+ *  re-downloaded history contains that record once already. Without a key there
+ *  is no way to tell "the same run, twice" from "two runs", so history silently
+ *  double-counts. A runId is authoritative when present; local captures have
+ *  none, so they fall back to a label+timestamp key that is stable for a given
+ *  file. */
+export function trendRecordKey(record: TrendRecord): string {
+  return record.runId && record.runId.trim() ? `run:${record.runId.trim()}` : `at:${record.recordedAt}|${record.label}`;
+}
+
+/** Merge trend files in order; a later group replaces an earlier record with
+ *  the same identity, and the result is oldest-first by recordedAt.
+ *
+ *  Order matters and is the point: a rerun must be able to correct its own
+ *  earlier record, so "first wins" would be wrong. Corrupt input is not
+ *  swallowed here — readTrend throws with a line number, and a history that
+ *  cannot be parsed must not be silently replaced by a shorter one. */
+export function mergeTrends(groups: readonly (readonly TrendRecord[])[]): TrendRecord[] {
+  const byKey = new Map<string, TrendRecord>();
+  for (const group of groups) {
+    for (const record of group) byKey.set(trendRecordKey(record), record);
+  }
+  return [...byKey.values()].sort((a, b) => (a.recordedAt < b.recordedAt ? -1 : a.recordedAt > b.recordedAt ? 1 : 0));
+}
+
 /** One human-readable trend line per record, oldest first. */
 export function renderTrend(records: TrendRecord[]): string {
   if (records.length === 0) return "no trend records yet";
@@ -160,6 +192,26 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       const record = projectScorecard(JSON.parse(readFileSync(input, "utf8")) as ScorecardInput);
       appendFileSync(trendPath(), `${JSON.stringify(record)}\n`, { mode: 0o600 });
       console.log(JSON.stringify({ recorded: record.recordedAt, status: record.status }));
+    } else if (mode === "merge") {
+      // Accumulate history across runs. The workflow downloads the retained
+      // artifacts into a directory and points this at every *.jsonl in it, so a
+      // later run renders the whole series instead of only today's record.
+      const out = trendPath();
+      // Skip every flag AND its value. Filtering on a leading "--" alone let
+      // the --file destination be read back as if it were an input, so the
+      // first merge reported one more input than it was given and a second run
+      // would have read its own output.
+      const argv = process.argv.slice(3);
+      const inputs: string[] = [];
+      for (let index = 0; index < argv.length; index += 1) {
+        if (argv[index]!.startsWith("--")) { index += 1; continue; }
+        inputs.push(argv[index]!);
+      }
+      if (inputs.length === 0) throw new Error("Usage: bench-trend.ts merge <file.jsonl...> [--file out.jsonl]");
+      const groups = inputs.map((file) => readTrend(resolve(file)));
+      const merged = mergeTrends(groups);
+      writeFileSync(out, merged.map((record) => `${JSON.stringify(record)}\n`).join(""), { mode: 0o600 });
+      console.log(JSON.stringify({ out, inputs: inputs.length, records: merged.length }));
     } else if (mode === "report") {
       const jsonFlag = process.argv.includes("--json");
       const records = readTrend(trendPath());

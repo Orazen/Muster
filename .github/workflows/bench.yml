@@ -13,6 +13,10 @@ on:
 
 permissions:
   contents: read
+  # Read-only access to this workflow's own artifacts, which is where the
+  # history lives. This is the narrowest grant that lets a later run load what
+  # earlier runs retained; it is not a PAT, and branch protection is untouched.
+  actions: read
 
 jobs:
   role-eval:
@@ -36,25 +40,63 @@ jobs:
         env:
           BENCH_TREND_FILE: ${{ github.workspace }}/role-eval-trend.jsonl
         run: pnpm bench:roles
-      - name: Render the trend report
+      - name: Download the retained trend history
+        # The history is the accumulated artifact chain, not a file on main.
+        # Earlier versions pushed to main from a `contents: read` token, which
+        # can never succeed on a protected branch; the failure was swallowed
+        # with `|| echo`, so every run reported success having persisted
+        # nothing, and no later run ever loaded what the artifact held.
+        uses: actions/download-artifact@v7
+        with:
+          pattern: role-eval-trend-*
+          path: history
+          merge-multiple: false
+      - name: Merge this run's record into the accumulated history
+        id: merge
         if: always()
-        run: node --experimental-strip-types scripts/bench-trend.ts report --file role-eval-trend.jsonl || true
-      - name: Upload trend record
-        if: always()
+        run: |
+          set -euo pipefail
+          produced=0
+          if [ -f role-eval-trend.jsonl ]; then produced=1; else echo "::warning::this run produced no trend record"; fi
+          # Find the newest .jsonl per artifact directory; the capture writes one.
+          mapfile -t prior < <(find history -name '*.jsonl' -type f 2>/dev/null | sort)
+          inputs=("${prior[@]}")
+          if [ "$produced" = "1" ]; then inputs+=("role-eval-trend.jsonl"); fi
+          if [ "${#inputs[@]}" = "0" ]; then
+            echo "::error::no trend history at all: capture produced nothing and no prior artifact exists"
+            echo "captured=false" >> "$GITHUB_OUTPUT"
+            echo "persisted=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          node --experimental-strip-types scripts/bench-trend.ts merge "${inputs[@]}" --file role-eval-trend.jsonl
+          echo "captured=${produced}" >> "$GITHUB_OUTPUT"
+          echo "persisted=true" >> "$GITHUB_OUTPUT"
+      - name: Render the accumulated trend report
+        # The whole series, not just today's record — the report previously read
+        # only the temporary file this run produced.
+        if: always() && steps.merge.outputs.captured == 'true'
+        run: node --experimental-strip-types scripts/bench-trend.ts report --file role-eval-trend.jsonl | tee bench-trend-report.txt
+      - name: Upload the accumulated history
+        # This artifact is the next run's input, so retention is explicit rather
+        # than whatever the repository default happens to be.
+        if: always() && steps.merge.outputs.captured == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: role-eval-trend-${{ github.run_id }}
-          path: role-eval-trend.jsonl
-          if-no-files-found: ignore
-      - name: Append to the committed trend on main
-        if: success() && github.ref == 'refs/heads/main'
+          path: |
+            role-eval-trend.jsonl
+            bench-trend-report.txt
+          if-no-files-found: error
+          retention-days: 90
+      - name: State capture and persistence separately
+        # A run that captured nothing is not a run that persisted a history, and
+        # one that did not persist is not silently a full success.
+        if: always()
         run: |
-          set -euo pipefail
-          if [ ! -f role-eval-trend.jsonl ]; then echo "no trend record produced" >&2; exit 0; fi
-          mkdir -p docs/benchmarks
-          cat role-eval-trend.jsonl >> docs/benchmarks/role-eval-trend.jsonl
-          git config user.name "muster-bench-bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add docs/benchmarks/role-eval-trend.jsonl
-          git commit -m "chore(bench): nightly role-eval trend record" || echo "nothing to commit"
-          git push origin HEAD:main || echo "refused push (protected main) — record kept as artifact"
+          {
+            echo "## role-eval benchmark"
+            echo ""
+            echo "- captured this run: ${{ steps.merge.outputs.captured }}"
+            echo "- history persisted: ${{ steps.merge.outputs.persisted }}"
+            echo "- retention: 90 days (artifact chain, not a file on main)"
+          } >> "$GITHUB_STEP_SUMMARY"
