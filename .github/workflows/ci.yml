@@ -161,9 +161,31 @@ jobs:
       - name: Run the core tests
         run: swift test --package-path ios
 
+  # Native Mac prototype package (MusterMacCore + app). Lives in CI for the
+  # same reason ios does: the suite is the only executable spec for the live
+  # transport/session code, and prototype code without a gate rots silently.
+  # The live transport tests boot the real harness server (node + installed
+  # dependencies), so the JS toolchain is set up exactly as in the Linux jobs.
+  macos-tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Install dependencies for the harness-server tests
+        run: pnpm install --frozen-lockfile
+      - name: Show the toolchain
+        run: swift --version
+      - name: Build the native Mac package
+        run: swift build --package-path macos
+      - name: Run the native Mac package tests
+        run: swift test --package-path macos
+
   build:
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, e2e-typecheck, browser-tests, test-shard, test-integrations, swift-tests]
+    needs: [lint, typecheck, e2e-typecheck, browser-tests, test-shard, test-integrations, swift-tests, macos-tests]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
