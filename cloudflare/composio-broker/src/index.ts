@@ -47,17 +47,37 @@ async function sha256(value: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function trustedComposioUrl(value: string, kind: "MCP" | "authorization"): string {
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new Error(`Composio returned an untrusted ${kind} URL`); }
+  if (url.protocol !== "https:" || url.username || url.password || url.port
+    || (url.hostname !== "composio.dev" && !url.hostname.endsWith(".composio.dev"))) {
+    throw new Error(`Composio returned an untrusted ${kind} URL`);
+  }
+  return url.toString();
+}
+
+async function composioJson(response: Response): Promise<JsonValue> {
+  try {
+    // SAFETY: Response.json produces only JSON values. Required session/link
+    // fields are validated separately before use; no envelope is asserted here.
+    return await response.json() as JsonValue;
+  }
+  catch (error) {
+    if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) throw error;
+    throw new Error("Composio returned an invalid response");
+  }
+}
+
 function parseSession(value: JsonValue): ComposioSession {
   if (!isJsonRecord(value)) throw new Error("Composio returned an invalid session");
   const sessionId = jsonString(value.session_id);
   const mcp = isJsonRecord(value.mcp) ? value.mcp : null;
-  if (sessionId === null || mcp === null) throw new Error("Composio returned an invalid session");
+  if (sessionId === null || sessionId.trim().length === 0 || mcp === null) throw new Error("Composio returned an invalid session");
   const rawUrl = jsonString(mcp.url);
   if (rawUrl === null) throw new Error("Composio returned no MCP URL");
-  const url = new URL(rawUrl);
-  if (url.protocol !== "https:" || (url.hostname !== "composio.dev" && !url.hostname.endsWith(".composio.dev"))) {
-    throw new Error("Composio returned an untrusted MCP URL");
-  }
+  const url = trustedComposioUrl(rawUrl, "MCP");
   const headers: Record<string, string> = {};
   if (isJsonRecord(mcp.headers)) {
     for (const [name, header] of Object.entries(mcp.headers)) {
@@ -66,7 +86,7 @@ function parseSession(value: JsonValue): ComposioSession {
       headers[name] = text;
     }
   }
-  return { sessionId, url: url.toString(), headers };
+  return { sessionId, url, headers };
 }
 
 async function upstreamError(response: Response, fallback: string) {
@@ -84,6 +104,7 @@ async function upstreamError(response: Response, fallback: string) {
 function composioRequest(env: Env, path: string, init?: RequestInit) {
   return fetch(`${env.COMPOSIO_API_BASE}${path}`, {
     ...init,
+    redirect: "error",
     headers: Object.assign(
       {
         accept: "application/json",
@@ -100,7 +121,7 @@ async function getSession(env: Env, sessionId: string) {
   const response = await composioRequest(env, `/tool_router/session/${encodeURIComponent(sessionId)}`);
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(await upstreamError(response, `Session lookup failed (${response.status})`));
-  return parseSession(await response.json());
+  return parseSession(await composioJson(response));
 }
 
 async function createSession(env: Env, userId: string) {
@@ -116,7 +137,7 @@ async function createSession(env: Env, userId: string) {
     }),
   });
   if (!response.ok) throw new Error(await upstreamError(response, `Session creation failed (${response.status})`));
-  return parseSession(await response.json());
+  return parseSession(await composioJson(response));
 }
 
 async function ensureSession(installation: InstallationRow, env: Env, ctx: ExecutionContext) {
@@ -172,16 +193,13 @@ async function proxyMcp(request: Request, installation: InstallationRow, env: En
   if (body.byteLength > MAX_MCP_BODY) return json({ error: "MCP request is too large" }, 413);
   const session = await ensureSession(installation, env, ctx);
   const mcpSessionId = request.headers.get("mcp-session-id");
-  const requestHeaders = Object.assign(
-    { ...session.headers },
-    {
-      "x-api-key": env.COMPOSIO_API_KEY,
-      "content-type": request.headers.get("content-type") ?? "application/json",
-      accept: "application/json, text/event-stream",
-    },
-    mcpSessionId && { "mcp-session-id": mcpSessionId },
-  );
+  const requestHeaders = new Headers(session.headers);
+  requestHeaders.set("x-api-key", env.COMPOSIO_API_KEY);
+  requestHeaders.set("content-type", request.headers.get("content-type") ?? "application/json");
+  requestHeaders.set("accept", "application/json, text/event-stream");
+  if (mcpSessionId) requestHeaders.set("mcp-session-id", mcpSessionId);
   const response = await fetch(session.url, {
+    redirect: "error",
     method: "POST",
     headers: requestHeaders,
     body,
@@ -198,6 +216,7 @@ async function proxyMcp(request: Request, installation: InstallationRow, env: En
 
 async function catalog(env: Env) {
   const response = await fetch(`${env.COMPOSIO_TOOLKIT_BASE}/toolkits?limit=500&sort_by=usage`, {
+    redirect: "error",
     headers: { accept: "application/json", "x-api-key": env.COMPOSIO_API_KEY },
     signal: AbortSignal.timeout(20_000),
   });
@@ -232,14 +251,12 @@ async function authorize(slug: string, installation: InstallationRow, env: Env, 
     body: JSON.stringify({ toolkit: slug }),
   });
   if (!response.ok) return json({ error: await upstreamError(response, "Authorization unavailable") }, 502);
-  // SAFETY: Composio link payload; redirect_url is validated below before use.
-  const body = (await response.json()) as { redirect_url?: string };
-  if (!body.redirect_url) return json({ error: "Composio returned no authorization link" }, 502);
-  const redirect = new URL(body.redirect_url);
-  if (redirect.protocol !== "https:" || (redirect.hostname !== "composio.dev" && !redirect.hostname.endsWith(".composio.dev"))) {
-    return json({ error: "Composio returned an untrusted authorization link" }, 502);
-  }
-  return json({ url: redirect.toString() });
+  const value = await composioJson(response);
+  const body = isJsonRecord(value) ? value : null;
+  const rawUrl = body === null ? null : jsonString(body.redirect_url);
+  if (!rawUrl) return json({ error: "Composio returned no authorization link" }, 502);
+  try { return json({ url: trustedComposioUrl(rawUrl, "authorization") }); }
+  catch { return json({ error: "Composio returned an untrusted authorization link" }, 502); }
 }
 
 async function disconnect(slug: string, installation: InstallationRow, env: Env, ctx: ExecutionContext) {

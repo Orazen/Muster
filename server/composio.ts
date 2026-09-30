@@ -21,8 +21,46 @@ function toolkitBase() {
 
 interface SessionResponse {
   session_id: string;
-  mcp: { type: "http" | "sse"; url: string };
+  mcp: { url: string };
   config?: { user_id?: string };
+}
+
+const nonemptySessionText = z.string().refine((value) => value.trim().length > 0);
+const sessionResponseSchema = z.object({
+  session_id: nonemptySessionText,
+  mcp: z.object({ url: z.string() }),
+  config: z.object({ user_id: nonemptySessionText.optional() }).optional(),
+});
+
+/** Validate the returned destination without changing the existing Composio
+ * cross-subdomain contract. Operator-configured API bases are separate. */
+function trustedComposioUrl(value: string, kind: "MCP" | "authorization"): string {
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new Error(`Connected-apps service returned an untrusted ${kind} URL`); }
+  if (url.protocol !== "https:" || url.username || url.password || url.port
+    || (url.hostname !== "composio.dev" && !url.hostname.endsWith(".composio.dev"))) {
+    throw new Error(`Connected-apps service returned an untrusted ${kind} URL`);
+  }
+  return url.toString();
+}
+
+function parseProjectSession(value: JsonValue): SessionResponse {
+  const result = sessionResponseSchema.safeParse(value);
+  if (!result.success) throw new Error("Composio returned an invalid session");
+  return { ...result.data, mcp: { url: trustedComposioUrl(result.data.mcp.url, "MCP") } };
+}
+
+async function composioJson(response: Response): Promise<JsonValue> {
+  try {
+    // SAFETY: Response.json produces only JSON values. Required session/link
+    // fields are validated separately before use; no envelope is asserted here.
+    return await response.json() as JsonValue;
+  }
+  catch (error) {
+    if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) throw error;
+    throw new Error("Connected-apps service returned an invalid response");
+  }
 }
 
 export interface ComposioMcpIntegration {
@@ -65,6 +103,7 @@ async function brokerRequest(path: string, init?: RequestInit): Promise<Response
   if (init?.body) headers.set("content-type", "application/json");
   return fetch(`${broker.url}${path}`, {
     ...init,
+    redirect: "error",
     headers: { ...Object.fromEntries(headers), ...init?.headers },
     signal: init?.signal ?? AbortSignal.timeout(30_000),
   });
@@ -88,22 +127,18 @@ async function responseError(res: Response, fallback: string) {
 
 function trustedAuthUrl(value: string | undefined, slug: string): string {
   if (value === undefined) throw new Error(`Connected-apps service returned no authorization link for ${slug}`);
-  const url = new URL(value);
-  if (url.protocol !== "https:" || (url.hostname !== "composio.dev" && !url.hostname.endsWith(".composio.dev"))) {
-    throw new Error("Connected-apps service returned an untrusted authorization link");
-  }
-  return url.toString();
+  return trustedComposioUrl(value, "authorization");
 }
 
 async function getProjectSession(apiKey: string, sessionId: string): Promise<SessionResponse | null> {
   const res = await fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(sessionId)}`, {
+    redirect: "error",
     headers: projectHeaders(apiKey),
     signal: AbortSignal.timeout(15_000),
   });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await responseError(res, `Composio session: HTTP ${res.status}`));
-  // SAFETY: tool_router/session GET replies with the SessionResponse envelope; only session_id/mcp/config are read
-  return (await res.json()) as SessionResponse;
+  return parseProjectSession(await composioJson(res));
 }
 
 /** Validate a project key and return one reusable Session for this install. */
@@ -128,6 +163,7 @@ export async function prepareProjectSession(
 
   const userId = current?.userId ?? `muster_${randomUUID()}`;
   const res = await fetch(`${apiBase()}/tool_router/session`, {
+    redirect: "error",
     method: "POST",
     headers: projectHeaders(trimmed, true),
     body: JSON.stringify({
@@ -141,9 +177,7 @@ export async function prepareProjectSession(
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(await responseError(res, `Composio rejected this key (HTTP ${res.status})`));
-  // SAFETY: session-create POST replies with the SessionResponse envelope; only session_id/mcp.url are read
-  const session = (await res.json()) as SessionResponse;
-  if (!session.session_id || !session.mcp?.url) throw new Error("Composio created an incomplete Session");
+  const session = parseProjectSession(await composioJson(res));
   return { apiKey: trimmed, userId, sessionId: session.session_id };
 }
 
@@ -157,11 +191,11 @@ async function ensureProjectSession(cfg: AppConfig): Promise<SessionResponse> {
   // A missing/deleted session is recreated and its non-secret identifiers are
   // persisted so an edited config/env setup does not recreate it every launch.
   const prepared = await prepareProjectSession(composio.apiKey, composio);
-  composio.userId = prepared.userId;
-  composio.sessionId = prepared.sessionId;
-  saveConfig({ composio: { userId: prepared.userId, sessionId: prepared.sessionId } });
   const created = await getProjectSession(composio.apiKey, prepared.sessionId);
   if (!created) throw new Error("Composio Session disappeared after creation");
+  saveConfig({ composio: { userId: prepared.userId, sessionId: prepared.sessionId } });
+  composio.userId = prepared.userId;
+  composio.sessionId = prepared.sessionId;
   return created;
 }
 
@@ -210,6 +244,7 @@ export async function relayMcp(
     headers.set("x-api-key", cfg.composio.apiKey);
   }
   const response = await fetch(url, {
+    redirect: "error",
     method: "POST",
     headers,
     body: JSON.stringify(payload),
@@ -242,6 +277,7 @@ export async function connectionStatus(cfg: AppConfig, slugs: string[]) {
   const userId = session.config?.user_id ?? cfg.composio.userId;
   const [res, accounts] = await Promise.all([
     fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(session.session_id)}/toolkits?${params}`, {
+      redirect: "error",
       headers: projectHeaders(cfg.composio.apiKey),
       signal: AbortSignal.timeout(15_000),
     }),
@@ -253,7 +289,7 @@ export async function connectionStatus(cfg: AppConfig, slugs: string[]) {
     userId
       ? fetch(
           `${apiBase()}/connected_accounts?${new URLSearchParams({ limit: "50", user_ids: userId })}`,
-          { headers: projectHeaders(cfg.composio.apiKey), signal: AbortSignal.timeout(15_000) },
+          { redirect: "error", headers: projectHeaders(cfg.composio.apiKey), signal: AbortSignal.timeout(15_000) },
         )
           .then(async (accountRes) => {
             if (!accountRes.ok) return [];
@@ -312,7 +348,7 @@ export async function removeService(cfg: AppConfig, slug: string) {
   const params = new URLSearchParams({ limit: "50", toolkits: slug });
   const list = await fetch(
     `${apiBase()}/tool_router/session/${encodeURIComponent(session.session_id)}/toolkits?${params}`,
-    { headers: projectHeaders(cfg.composio.apiKey), signal: AbortSignal.timeout(15_000) },
+    { redirect: "error", headers: projectHeaders(cfg.composio.apiKey), signal: AbortSignal.timeout(15_000) },
   );
   if (!list.ok) throw new Error(await responseError(list, `Composio toolkits: HTTP ${list.status}`));
   // SAFETY: session toolkits reply with an items array; only slug and connected_account.id are read
@@ -321,7 +357,7 @@ export async function removeService(cfg: AppConfig, slug: string) {
   if (!id) return { removed: 0 };
   const removed = await fetch(
     `${apiBase()}/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`,
-    { method: "DELETE", headers: projectHeaders(cfg.composio.apiKey), signal: AbortSignal.timeout(30_000) },
+    { redirect: "error", method: "DELETE", headers: projectHeaders(cfg.composio.apiKey), signal: AbortSignal.timeout(30_000) },
   );
   if (!removed.ok) throw new Error(await responseError(removed, `Composio disconnect: HTTP ${removed.status}`));
   return { removed: 1 };
@@ -332,21 +368,20 @@ export async function authorizeService(cfg: AppConfig, slug: string) {
   if (brokerAccess() || !cfg.composio?.apiKey) {
     const response = await brokerRequest(`/v1/connectors/${encodeURIComponent(slug)}/authorize`, { method: "POST" });
     if (!response.ok) throw new Error(await responseError(response, `Connected apps: HTTP ${response.status}`));
-    // SAFETY: authorize endpoint replies with {url} — the only field read before trust-checking the link
-    const body = (await response.json()) as { url?: string };
-    return { url: trustedAuthUrl(wireText.parse(body.url), slug) };
+    const body = z.object({ url: wireText }).safeParse(await composioJson(response));
+    return { url: trustedAuthUrl(body.success ? body.data.url : undefined, slug) };
   }
   const session = await ensureProjectSession(cfg);
   const res = await fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(session.session_id)}/link`, {
+    redirect: "error",
     method: "POST",
     headers: projectHeaders(cfg.composio.apiKey, true),
     body: JSON.stringify({ toolkit: slug }),
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(await responseError(res, `Composio authorization: HTTP ${res.status}`));
-  // SAFETY: session link endpoint replies with {redirect_url} — the only field read before trust-checking the link
-  const body = (await res.json()) as { redirect_url?: string };
-  return { url: trustedAuthUrl(wireText.parse(body.redirect_url), slug) };
+  const body = z.object({ redirect_url: wireText }).safeParse(await composioJson(res));
+  return { url: trustedAuthUrl(body.success ? body.data.redirect_url : undefined, slug) };
 }
 
 // ── marketplace catalog ────────────────────────────────────────────────
@@ -404,6 +439,7 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
     try {
       const res = backendKey
         ? await fetch(`${toolkitBase()}/toolkits?limit=500&sort_by=usage`, {
+            redirect: "error",
             headers: { "x-api-key": backendKey },
             signal: AbortSignal.timeout(15_000),
           })
