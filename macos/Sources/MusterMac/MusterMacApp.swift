@@ -17,9 +17,6 @@ struct MusterMacApp: App {
     init() {
         _live = StateObject(wrappedValue: LiveSessionModel())
         _demo = StateObject(wrappedValue: PrototypeModel.fixture())
-        if let saved = SessionKeychain.load() {
-            _live.wrappedValue.connect(account: saved)
-        }
     }
 
     var body: some Scene {
@@ -29,6 +26,12 @@ struct MusterMacApp: App {
                 .environmentObject(demo)
                 .frame(minWidth: 1040, minHeight: 640)
                 .preferredColorScheme(live.appearance.colorScheme)
+                .task {
+                    guard live.state == .signedOut else { return }
+                    if let saved = SessionKeychain.load() {
+                        live.connect(account: saved)
+                    }
+                }
         }
         .windowToolbarStyle(.unified)
     }
