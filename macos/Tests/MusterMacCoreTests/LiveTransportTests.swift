@@ -12,6 +12,7 @@
 // cannot start, never silently.
 
 import CompanionCore
+import Darwin
 import MusterMacCore
 import XCTest
 
@@ -95,11 +96,22 @@ final class LiveTransportTests: XCTestCase {
                 directory: directory)
         }
 
+        /// Shutdown must be provable: SIGTERM (the harness stops the server
+        /// and removes its fixture), a bounded wait, SIGKILL escalation for a
+        /// hung script, another bounded wait — and the facts directory is
+        /// only removed once the process is proven gone. A QA audit found
+        /// the previous version sending terminate() twice and deleting files
+        /// without proving exit, leaving helpers behind.
         func stop() {
             if process.isRunning { process.terminate() }
             let deadline = Date().addingTimeInterval(5)
             while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
-            if process.isRunning { process.terminate() }
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+                let killDeadline = Date().addingTimeInterval(5)
+                while process.isRunning && Date() < killDeadline { Thread.sleep(forTimeInterval: 0.1) }
+            }
+            guard !process.isRunning else { return }
             try? FileManager.default.removeItem(atPath: directory)
         }
     }

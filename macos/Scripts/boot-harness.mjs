@@ -14,9 +14,8 @@
 //
 // This process STAYS ALIVE: it owns the server child's lifecycle, so the
 // Swift test harness must terminate it when the test finishes. Terminating
-// this process stops the server and removes nothing — the temp directory is
-// removed by the server's own exit path only when it is SIGTERMed cleanly,
-// which is exactly what terminate() sends.
+// this process stops the server (bounded wait, SIGKILL escalation) and only
+// then removes the temp directory — shutdown is provable, never assumed.
 
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -84,15 +83,37 @@ const created = await fetch(`${url}/api/bots`, {
 if (created.status !== 201) throw new Error(`bot create failed: ${created.status}`);
 const { bot } = await created.json();
 
-const stop = () => {
+// Shutdown must be provable: SIGTERM stops the server child, waits (bounded)
+// for its exit, escalates to SIGKILL if it hangs, and only then removes the
+// fixture files — a QA audit found this handler leaving the helper process
+// alive because the keep-alive interval held the event loop open, and the
+// temp directory being deleted while the server was still running.
+const keepAlive = setInterval(() => {}, 60_000);
+let stopping = false;
+const stop = async () => {
+  if (stopping) return;
+  stopping = true;
+  clearInterval(keepAlive);
   try { server.kill("SIGTERM"); } catch {}
+  const deadline = Date.now() + 10_000;
+  while (server.exitCode === null && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (server.exitCode === null) {
+    try { server.kill("SIGKILL"); } catch {}
+    const killDeadline = Date.now() + 5_000;
+    while (server.exitCode === null && Date.now() < killDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
   try { rmSync(directory, { recursive: true, force: true }); } catch {}
+  process.exit(0);
 };
-process.on("SIGTERM", stop);
-process.on("SIGINT", stop);
+process.on("SIGTERM", () => { void stop(); });
+process.on("SIGINT", () => { void stop(); });
 console.log(`origin=${url}`);
 console.log(`cookieName=${cookieName}`);
 console.log(`cookieValue=${cookieValue}`);
 console.log(`botId=${bot.id}`);
-// Stay alive: the tests own this process's lifetime.
-setInterval(() => {}, 60_000);
+// Stay alive: the tests own this process's lifetime. stop() exits explicitly,
+// so the interval never lingers past shutdown.
