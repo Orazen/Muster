@@ -812,7 +812,7 @@ jobs:
     needs: [prepare, publish]
     if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.dry_run == 'false' && needs.publish.result == 'success' && needs.publish.outputs.published == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       contents: read
     env:

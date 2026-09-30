@@ -201,6 +201,49 @@ mirror, not assumed from local fixtures.
   The native Swift Mac prototype and iOS/Watch distribution have separate
   acceptance; they are not this Electron installer.
 
+- 2026-09-30 (v1.23.1, run 36650857895): the source, four platform builds
+  and publication passed (**6 jobs**). The mirror job was **cancelled at its
+  30-minute deadline** after transferring 1,881,769,133 bytes. Actual remote
+  promotion completed despite that runner result; no retry or manual
+  promotion was performed. Do not report this historical workflow as 7/7.
+  Published source: `f591192f62392b3421ac13730293be841b903d55`;
+  publication timestamp: `2026-09-30T00:55:25Z`. Independently verified
+  generation: `release-1.23.1-e724352c16734fdbb89f10551b67a486`, with
+  21 matching manifest/state records and **8/8** public metadata/updater
+  GETs across both domains. A narrowly pinned acceptance verifier required
+  the six exact successful jobs, the explicit timeout annotation, the
+  observed generation and fresh matching feed hashes. All artifact,
+  signature and runtime checks remained required.
+
+  Actual downloaded arm64 installer acceptance passed **54/54** checks,
+  including **14/14** native/runtime checks, strict signing, stapling and
+  Gatekeeper (Electron 44.4.5 / Node 24.21.0). DMG: 186,181,302 bytes,
+  SHA-256 `ad59e00a49a72162da1f2cbe5ea986fcb1a4f8494f931e4311fe5253005f711b`.
+  Updater ZIP: 185,950,011 bytes,
+  SHA-256 `2fac44d41579824633456b115398fbfed9619c6882bd456ba5c0c0ae4ad7cff8`.
+  Published sizes, SHA-256 and updater SHA-512 hashes matched both files.
+
+  Two signed-app renderer journeys passed **12/12 each**: an empty saved
+  selection stayed empty, and an explicitly saved synthetic engine/model
+  pair remained unchanged. The fixtures omitted display/model fields from
+  the bot-list response to reproduce incomplete metadata; the workspace,
+  transcript, model picker and settings still rendered, with 0 page errors
+  and no task or provider requests. This proves recovery and preservation,
+  not real model readiness or Google sign-in. Separately, the actual
+  packaged server passed **11/11** hosted-mode checks with two synthetic
+  accounts, including real account guards, disjoint status/names/counts and
+  unchanged saved bytes. Its synthetic Drive grant rows are fixture data,
+  not consent, backup or sync acceptance. A harness assumption about the
+  intentionally omitted public owner field was corrected and its failed
+  receipt retained. No installed app or real user data was changed.
+
+  Exact-source CI passed **11/11 jobs**, including browser **139/139** and
+  Swift **562/562**. Source units passed **462 files / 7,029 passed /
+  8 skipped** on Mac, **7,028 passed / 9 skipped** on Linux. Windows remains
+  unsigned; physical-device and installed-upgrade acceptance are separate.
+  Later build-tool dependency, test-fixture and timeout changes on main
+  are not silently attributed to these immutable installer bytes.
+
 For checksum text files such as `SHA256SUMS-macos-arm64.txt`, use the
 published release assets. They are not mirror URLs. The mirror exposes
 stable-file SHA-256 checksums in `latest.json` and updater-target SHA-512
@@ -219,7 +262,7 @@ installer, signing and platform acceptance gates remain separate. The mirror
 does not yet copy uploaded blockmaps, so full-download fallback is expected;
 successful differential updating has not been verified. CLI build/verification
 runs in the source release workflow. The latest mirror receipt recorded here
-is 1.23.0; later source commits are not evidence of a newer published installer.
+is 1.23.1; later source commits are not evidence of a newer published installer.
 A source version bump or locally built candidate still does not publish an
 installer.
 

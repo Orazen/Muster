@@ -7,6 +7,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +32,50 @@ interface Booted {
   cookie: string;
   userId: string;
 }
+
+async function storageGatePorts(from = 47000, span = 9000) {
+  // Each boot opens its API plus the next port for webhooks. Probe the whole
+  // layout once so the three pairs cannot reuse ports before any child binds.
+  // Like freePortBlock itself, this probes availability rather than reserving it.
+  const base = await freePortBlock([0, 1, 2, 3, 4, 5], from, span);
+  return { hostedPort: base, localPort: base + 2, operatorPort: base + 4 };
+}
+
+describe("storage fixture port layout", () => {
+  it("allocates three disjoint API/webhook pairs that can all listen", async () => {
+    const base = await freePortBlock([0, 1, 2, 3, 4, 5], 47000, 9000);
+    const ports = Object.values(await storageGatePorts(base, 1)).flatMap((port) => [port, port + 1]);
+    expect(new Set(ports).size).toBe(6);
+    const listeners: ReturnType<typeof createServer>[] = [];
+    try {
+      for (const port of ports) {
+        const listener = createServer();
+        listeners.push(listener);
+        await new Promise<void>((resolve, reject) => {
+          listener.once("error", reject);
+          listener.listen(port, "127.0.0.1", resolve);
+        });
+      }
+      expect(listeners.every((listener) => listener.listening)).toBe(true);
+    } finally {
+      await Promise.all(listeners.map((listener) => new Promise<void>((resolve) => listener.close(() => resolve()))));
+    }
+  });
+
+  it.each([0, 1, 2, 3, 4, 5])("rejects an occupied actual listener at offset %i", async (offset) => {
+    const base = await freePortBlock([0, 1, 2, 3, 4, 5], 47000, 9000);
+    const listener = createServer();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        listener.once("error", reject);
+        listener.listen(base + offset, "127.0.0.1", resolve);
+      });
+      await expect(storageGatePorts(base, 1)).rejects.toThrow("no free port block");
+    } finally {
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+    }
+  });
+});
 
 describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => {
   let rootDirectory = "";
@@ -140,9 +185,7 @@ describe.skipIf(process.platform === "win32")("storage sovereignty gate", () => 
   beforeAll(async () => {
     rootDirectory = mkdtempSync(join(tmpdir(), "muster-storage-gate-"));
     transport = createWorkspaceDriveFixture(join(rootDirectory, "google"));
-    const hostedPort = await freePortBlock([0], 47000, 9000);
-    const localPort = await freePortBlock([1], 47000, 9000);
-    const operatorPort = await freePortBlock([2], 47000, 9000);
+    const { hostedPort, localPort, operatorPort } = await storageGatePorts();
     hosted = await boot("hosted", hostedPort, true);
     local = await boot("local", localPort, false);
     // Same deployment, but the operator has already bound a Telegram
