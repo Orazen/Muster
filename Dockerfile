@@ -3,7 +3,11 @@
 # ── build stage: compile the web UI (dist/) and the self-contained server
 #    bundle (dist-server/). Electron is a devDependency and is discarded here —
 #    only the web client and the bundled Node server reach the final image.
-FROM node:22-slim AS build
+# Node 24: package.json declares engines >=23.4, and the vendored
+# better-sqlite3 in dist-server/_native is compiled against THIS stage's ABI —
+# build and runtime must match. Dockerfile.cloud and every local/receipt
+# toolchain already run Node 24 (ABI 137).
+FROM node:24-slim AS build
 WORKDIR /app
 
 # better-sqlite3 rebuilds from source via node-gyp when its prebuilt
@@ -55,7 +59,9 @@ RUN --mount=type=bind,source=.,target=/muster-source,readonly \
   && MUSTER_SOURCE_CONTEXT=/muster-source pnpm build:server
 
 # ── runtime stage: slim Node image with just the built artifacts.
-FROM node:22-slim AS runtime
+# Must match the build stage: the vendored better-sqlite3 binary is ABI-bound
+# to the Node that compiled it.
+FROM node:24-slim AS runtime
 WORKDIR /app
 
 # Chromium powers the per-bot browser panel (server/browser-panel.ts). It

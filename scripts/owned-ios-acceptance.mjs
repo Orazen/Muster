@@ -100,6 +100,10 @@ const start = (label, argv, env) => {
 };
 
 const waitFor = async (url, label, child) => {
+  // `child` is the raw process from start(); its captured stderr lives on the
+  // matching children[] entry. An earlier version called child.err() directly,
+  // which threw "child.err is not a function" and masked the real boot error.
+  const errText = () => children.find((e) => e.child === child)?.err() ?? "(no stderr captured)";
   const deadline = Date.now() + 45_000;
   for (;;) {
     try {
@@ -107,8 +111,8 @@ const waitFor = async (url, label, child) => {
     } catch {
       /* not up yet */
     }
-    if (child.exitCode !== null) throw new Error(`${label} exited ${child.exitCode}:\n${child.err()}`);
-    if (Date.now() > deadline) throw new Error(`${label} never came up:\n${child.err()}`);
+    if (child.exitCode !== null) throw new Error(`${label} exited ${child.exitCode}:\n${errText()}`);
+    if (Date.now() > deadline) throw new Error(`${label} never came up:\n${errText()}`);
     await sleep(200);
   }
 };
