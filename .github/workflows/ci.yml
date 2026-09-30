@@ -111,6 +111,7 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm broker:test
+      - run: pnpm test:native-load
       - run: pnpm test:updater
       - run: pnpm test:desktop-lifecycle
       - run: pnpm test:packaged-server

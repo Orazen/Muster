@@ -139,6 +139,9 @@ jobs:
       - name: Test the connection broker
         id: broker
         run: pnpm broker:test
+      - name: Verify the native load guard against the real package
+        id: native-load
+        run: pnpm test:native-load
       - name: Verify updater behavior
         id: updater
         run: pnpm test:updater

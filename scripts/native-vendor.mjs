@@ -23,12 +23,16 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 
-// Returns the probe script source. Self-contained: the child imports the
-// package resolved from its cwd and prints a machine-readable success marker;
-// anything else (nonzero exit, ERR_DLOPEN_FAILED in stderr, missing marker)
-// is a failure. Resolving through cwd/package.json anchors the load to the
+// This guard supports better-sqlite3 only. Requiring its JS entry is lazy:
+// the child must open, query and close a database before reporting success;
+// success requires both a zero exit status and the completion marker.
+// This proves operation under process.execPath, not a different packaged
+// runtime such as Electron. Resolving through cwd/package.json anchors the load to the
 // exact tree being shipped, never the bundler's own working copy.
-export function loadProbeSource() {
+export function loadProbeSource(packageName = "better-sqlite3") {
+  if (packageName !== "better-sqlite3") {
+    throw new Error(`No native load probe is defined for ${packageName}`);
+  }
   return [
     "import { createRequire } from \"node:module\";",
     "import { readFileSync } from \"node:fs\";",
@@ -38,16 +42,21 @@ export function loadProbeSource() {
     // node_modules walk and could load a DIFFERENT copy of the package; the
     // verification must dlopen this exact tree.
     "const req = createRequire(join(process.cwd(), \"package.json\"));",
-    "req(resolve(process.cwd(), pkg.main));",
+    "if (pkg.name !== \"better-sqlite3\") throw new Error(\"The package does not match the better-sqlite3 probe\");",
+    "const Database = req(resolve(process.cwd(), pkg.main));",
+    "const db = new Database(\":memory:\");",
+    "try {",
+    "  if (db.prepare(\"SELECT 1 AS value\").get().value !== 1) throw new Error(\"Native database query failed\");",
+    "} finally { db.close(); }",
     "console.log(\"NATIVE_LOAD_PROBE_OK\");",
     "",
   ].join("\n");
 }
 
-function runLoadProbe(pkgDir, { timeoutMs = 30_000 } = {}) {
+function runLoadProbe(pkgDir, packageName, { timeoutMs = 30_000 } = {}) {
   const probeFile = join(mkdtempSync(join(tmpdir(), "native-probe-")), "probe.mjs");
   try {
-    writeFileSync(probeFile, loadProbeSource(), "utf8");
+    writeFileSync(probeFile, loadProbeSource(packageName), "utf8");
     const result = spawnSync(process.execPath, [probeFile], {
       cwd: pkgDir,
       encoding: "utf8",
@@ -70,10 +79,13 @@ function runLoadProbe(pkgDir, { timeoutMs = 30_000 } = {}) {
 // runs with cwd = pkgDir, so Node resolves THIS copy of the package — the
 // verification is anchored to the shipped tree, not the bundler's imports.
 export function ensureLoadableNativeModule(pkgDir, packageName, { timeoutMs } = {}) {
+  if (packageName !== "better-sqlite3") {
+    return { ok: false, error: `No native load probe is defined for ${packageName}` };
+  }
   if (!existsSync(join(pkgDir, "package.json"))) {
     return { ok: false, error: `${packageName}: no package.json at ${pkgDir}` };
   }
-  return runLoadProbe(pkgDir, { timeoutMs });
+  return runLoadProbe(pkgDir, packageName, { timeoutMs });
 }
 
 // Walk up from fromDir looking for node_modules/.pnpm/<packageName>@<ver>/
@@ -124,6 +136,9 @@ function runRecoveryCommand(command, args, cwd, log) {
 //   log          (optional) array; gets human-readable step lines
 // Throws when the final package cannot be load-verified — never ships silently.
 export function vendorNativeExternals({ packageName, sourceDir, outDir, helpers = [], stubDir, recovery = "auto", log = [] }) {
+  // Refuse unsupported packages before deleting or staging any output. A new
+  // external needs its own operation that actually initializes its native code.
+  loadProbeSource(packageName);
   stubDir = stubDir ?? process.env.OMB_NATIVE_STUB_DIR;
   const vendorDir = join(outDir, "_native");
   const dest = join(vendorDir, packageName);
