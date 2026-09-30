@@ -1,0 +1,54 @@
+rules:
+  # Swift audit ruleset — establishes semantic (non-secret) scanning coverage
+  # for the companion Swift packages (ios/, macos/). Gitleaks owns secrets;
+  # this file owns code-level Swift patterns the registry packs do not cover.
+  # Kept audit-level on purpose: matches are findings to review, not proof.
+  # All rules are pattern-regex on purpose: metavariable rules produced
+  # match-engine errors on real Swift source (1.178.0), regex does not.
+  # Values are single-quoted because patterns containing ': ' or a trailing
+  # colon break YAML plain scalars.
+  - id: swift.hardcoded-credential-literal
+    message: 'Credential-looking string literal assigned to a credential-named symbol; confirm it is a non-secret placeholder or move it to configuration.'
+    severity: WARNING
+    languages: [swift]
+    paths:
+      include:
+        - '*.swift'
+    pattern-regex: '(?i)\b(static\s+)?(let|var)\s+\w*(password|passwd|secret|apikey|api_key|token|credential)\w*\s*=\s*"[^"]{8,}"'
+
+  - id: swift.print-logging-credential-var
+    message: 'print()/debugPrint() of a credential-named value can leak secrets into device logs; use the redaction-aware logger.'
+    severity: WARNING
+    languages: [swift]
+    paths:
+      include:
+        - '*.swift'
+    pattern-regex: '(?i)\b(print|debugPrint)\(\s*(token|password|secret|apikey|api_key|credential|jwt|authheader)\b'
+
+  - id: swift.userdefaults-sensitive-store
+    message: 'Sensitive-looking value stored in UserDefaults (unencrypted plist on disk); prefer the Keychain.'
+    severity: WARNING
+    languages: [swift]
+    paths:
+      include:
+        - '*.swift'
+    pattern-regex: '(?i)UserDefaults\.standard\.set\([^)]*?(token|password|secret|credential|apikey|api_key)[^)]*?,\s*forKey:'
+
+  - id: swift.nsallowsarbitraryloads
+    message: 'NSAllowsArbitraryLoads disables App Transport Security for all connections; scope the exception instead.'
+    severity: WARNING
+    languages: [swift]
+    paths:
+      include:
+        - '*.plist'
+        - '*.swift'
+    pattern-regex: 'NSAllowsArbitraryLoads'
+
+  - id: swift.urlsession-usecredential-unvalidated
+    message: 'URL session delegate completing authentication with a trust credential bypasses certificate validation review; confirm SecTrust evaluation precedes it.'
+    severity: ERROR
+    languages: [swift]
+    paths:
+      include:
+        - '*.swift'
+    pattern-regex: '\.useCredential\s*,\s*URLCredential\s*\(\s*trust:'
