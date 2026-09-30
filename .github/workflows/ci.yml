@@ -162,6 +162,42 @@ jobs:
       - name: Run the core tests
         run: swift test --package-path ios
 
+  # Standalone secret scan: no pnpm, no node, no dependencies to install —
+  # just the pinned gitleaks binary and the checkout.
+  #
+  # Two passes, both with a committed .gitleaksignore baseline:
+  #  1. `git` mode over full history — answers "did any commit ever contain a
+  #     secret?" and inherently covers every pull-request diff, since PR
+  #     commits are part of the history being scanned.
+  #  2. `dir` mode over the tracked tree — answers "does the tree as checked
+  #     out contain a secret right now?", which catches secrets that arrive
+  #     with their ignore entry (a history scan alone would accept them).
+  #
+  # The baseline holds fingerprints of reviewed-benign findings (test
+  # fixtures in server/*.test.ts and the write-only public PostHog key in
+  # src/lib/analytics.ts). A NEW secret produces a fingerprint that is not in
+  # the baseline and fails the job; see the policy comment in
+  # .gitleaksignore. The binary is checksum-verified at the pinned version
+  # rather than fetched through a pipe-to-shell installer, so the supply
+  # chain is the upstream tarball hash, not whatever master serves today.
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks v8.30.1 (checksum-verified)
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz' | sha256sum --check -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp
+          /tmp/gitleaks version
+      - name: Scan full git history (covers every PR diff)
+        run: /tmp/gitleaks git . --no-banner --redact
+      - name: Scan the tracked tree at HEAD
+        run: /tmp/gitleaks dir . --no-banner --redact
+
   # Native Mac prototype package (MusterMacCore + app). Lives in CI for the
   # same reason ios does: the suite is the only executable spec for the live
   # transport/session code, and prototype code without a gate rots silently.

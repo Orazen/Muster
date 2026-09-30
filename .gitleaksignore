@@ -1,0 +1,58 @@
+# Baseline for the CI gitleaks job (.github/workflows/ci.yml).
+#
+# Each line is a gitleaks fingerprint that was reviewed and judged benign.
+# Two formats appear here, one per scan mode the CI job runs:
+#
+#   git mode  (full-history pass): <commit-sha>:<path>:<rule-id>:<line>
+#   dir mode  (tracked-tree pass): <path>:<rule-id>:<line>
+#
+# Everything in this file falls into two reviewed categories:
+#   1. Test fixtures — server/*.test.ts entries are fake placeholder values
+#      in test code (jwt / private-key / curl-auth-header / generic-api-key
+#      rules firing on mock data), not credentials.
+#   2. src/lib/analytics.ts — the PostHog project token is a write-only
+#      public ingest key by design; see the comment above it in that file.
+#
+# Policy for maintaining this file:
+#   - A NEW finding (new path, new line, new rule) fails the CI job with a
+#     fingerprint not listed here. Investigate it first: if it is a real
+#     secret, revoke and rotate it before touching this file; never hide a
+#     live credential by adding its fingerprint.
+#   - Editing one of the baseline files shifts line numbers, so the job
+#     re-fails with a fresh fingerprint. Re-adding it is a conscious act:
+#     confirm the finding is still a fake fixture (or the public analytics
+#     key) before adding the new line, and remove the stale one.
+#   - Deleting an entry to make CI green without the review above defeats
+#     the whole job.
+#
+# --- git-mode fingerprints (full history as of the job's introduction) ---
+0eaaa07fdc8b0a6410a249c362aacc5228c428ba:server/workspace-backup-telegram-v2.test.ts:generic-api-key:154
+1a65b80a1147cf841f41602b99d4a5f6161d9c95:server/signup-gate.test.ts:generic-api-key:34
+28f803ff99ceca9694b0a017b7d9e569604e4daa:server/workspace-backup-telegram-v2.test.ts:generic-api-key:154
+2bb3bbbb854ca99cdd30499c7dd08c00fc29f615:server/user-keys.test.ts:generic-api-key:6
+307d9aa3b83378000dfa0d164475225e369cc82b:server/organization.test.ts:generic-api-key:108
+307d9aa3b83378000dfa0d164475225e369cc82b:server/organization.test.ts:generic-api-key:40
+56c941601bec05fa48fb77618cb9a251ff4c2ca2:server/organization.test.ts:generic-api-key:28
+56c941601bec05fa48fb77618cb9a251ff4c2ca2:server/signup-gate.test.ts:generic-api-key:34
+6dc0fabda63a2bde98e8d394176cf0f937941805:server/redact.test.ts:curl-auth-header:139
+6dc0fabda63a2bde98e8d394176cf0f937941805:server/redact.test.ts:curl-auth-header:164
+6dc0fabda63a2bde98e8d394176cf0f937941805:server/redact.test.ts:generic-api-key:144
+6dc0fabda63a2bde98e8d394176cf0f937941805:server/redact.test.ts:generic-api-key:146
+6dc0fabda63a2bde98e8d394176cf0f937941805:server/redact.test.ts:jwt:133
+6dc0fabda63a2bde98e8d394176cf0f937941805:server/redact.test.ts:private-key:135
+6dc0fabda63a2bde98e8d394176cf0f937941805:src/lib/analytics.ts:generic-api-key:10
+aa8433ca5c51be3ec1beaf91e05f4aa4d80e3066:server/signup-gate.test.ts:generic-api-key:34
+c8d5b4b3ef64fddda7fcc0c7587d8c2c674d0d23:server/workspace-backup-snapshots.test.ts:generic-api-key:203
+# --- dir-mode fingerprints (tracked tree at HEAD) ---
+server/organization.test.ts:generic-api-key:28
+server/redact.test.ts:curl-auth-header:141
+server/redact.test.ts:curl-auth-header:167
+server/redact.test.ts:generic-api-key:146
+server/redact.test.ts:generic-api-key:148
+server/redact.test.ts:jwt:135
+server/redact.test.ts:private-key:137
+server/signup-gate.test.ts:generic-api-key:34
+server/user-keys.test.ts:generic-api-key:7
+server/workspace-backup-snapshots.test.ts:generic-api-key:203
+server/workspace-backup-telegram-v2.test.ts:generic-api-key:154
+src/lib/analytics.ts:generic-api-key:11
