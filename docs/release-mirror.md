@@ -176,6 +176,31 @@ mirror, not assumed from local fixtures.
   and browser-based Mac CPU guessing still require correction. Hosted web
   and backend report 1.22.1; hosted source revision is still unattested.
 
+- 2026-09-30 (v1.23.0, run 36644614177): all **7/7** release jobs passed,
+  including both macOS notarizations and mirror promotion. Published source:
+  `d9eea99d1df2105f6b203b03d44d1add9e24a440`; publication timestamp:
+  `2026-09-29T23:42:39Z`. Both domains passed **8/8** metadata/updater GETs.
+  Downloaded arm64 DMG and updater ZIP matched size, SHA-256 and feed SHA-512
+  hashes. DMG SHA-256:
+  `fe7d496054931c96142ca4512c9abd6fc03eb81ac9f551993ec460dea723a008`;
+  ZIP SHA-256:
+  `c819b85e1d7901b4b3bfc1155baa426fa8913a3444c458f9727cc33123610dd7`.
+  Downloaded installer acceptance passed **52/52** checks, including strict
+  signing, notarization/Gatekeeper and the **14/14** packaged native/runtime
+  checks (Electron 44.4.5 / Node 24.21.0). A separate actual packaged GUI
+  journey passed **12/12** checks for incomplete-bot rendering, composer,
+  transcript, model picker, bot settings, app settings and preserved stored
+  records. That GUI journey used an isolated synthetic account and an
+  explicitly selected, owned loopback provider fixture; **0** tasks or model
+  requests were sent. It does not prove real Google sign-in, an installed
+  upgrade or a real model turn. A separate empty-selection settings journey
+  found a status-read side effect; the configured-provider pass does not
+  waive that finding. The source unit gate was **461 files / 7,012 passed /
+  8 skipped / 0 failed** on Mac and **461 / 7,011 / 9 / 0** on Linux (the
+  additional skip is the macOS Keychain test). Windows remains unsigned.
+  The native Swift Mac prototype and iOS/Watch distribution have separate
+  acceptance; they are not this Electron installer.
+
 For checksum text files such as `SHA256SUMS-macos-arm64.txt`, use the
 published release assets. They are not mirror URLs. The mirror exposes
 stable-file SHA-256 checksums in `latest.json` and updater-target SHA-512
@@ -194,7 +219,7 @@ installer, signing and platform acceptance gates remain separate. The mirror
 does not yet copy uploaded blockmaps, so full-download fallback is expected;
 successful differential updating has not been verified. CLI build/verification
 runs in the source release workflow. The latest mirror receipt recorded here
-is 1.22.1; later source commits are not evidence of a newer published installer.
+is 1.23.0; later source commits are not evidence of a newer published installer.
 A source version bump or locally built candidate still does not publish an
 installer.
 

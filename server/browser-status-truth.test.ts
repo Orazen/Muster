@@ -23,6 +23,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { pairingServerEnvironment, waitForOwnedServer } from "../e2e/pairing-harness.ts";
+import { seedConnectedGoogleRow } from "./testing/storage-gate.ts";
+import type { JsonValue } from "./schema.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
@@ -31,6 +35,7 @@ const posixOnly = describe.skipIf(process.platform === "win32");
 
 let child: ChildProcess;
 let home: string;
+let data: string;
 let base: string;
 let cookie = "";
 let stderr = "";
@@ -56,6 +61,26 @@ function driverWithoutCustomMcp(): string | null {
   }
   return null;
 }
+
+
+/** Ready offline adapter: status reads must never call this provider. */
+const readyInstance = () => ({
+  driver: "openai",
+  environment: { OPENAI_API_KEY: "owned-browser-status-fixture" },
+  config: { url: "http://127.0.0.1:1/v1" },
+});
+
+function outboundBlocker(directory: string): string {
+  const path = join(directory, "block-outbound.mjs");
+  writeFileSync(path, `import { Socket } from "node:net";
+const blocked = () => { throw new Error("Browser status fixture forbids outbound traffic"); };
+globalThis.fetch = blocked; Socket.prototype.connect = blocked;
+`);
+  return path;
+}
+
+const botSelection = z.object({ id: z.string(), modelSelection: z.object({ instanceId: z.string(), model: z.string() }).passthrough() });
+const botList = z.object({ bots: z.array(botSelection) });
 
 type BotStatus = {
   id: string;
@@ -87,7 +112,7 @@ async function get(path: string): Promise<BrowserStatus> {
 posixOnly("browser status tells the truth about each bot", () => {
   beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), "muster-browser-status-"));
-    const data = join(home, "data");
+    data = join(home, "data");
     mkdirSync(data, { recursive: true });
     // A `config.json` of `{}` sends the server looking for an engine at boot
     // over the network. Declaring a dummy instance keeps the fixture offline.
@@ -104,13 +129,19 @@ posixOnly("browser status tells the truth about each bot", () => {
     dummyDriver = withoutMcp;
     writeFileSync(
       join(data, "config.json"),
-      JSON.stringify({ instances: { dummy: { driver: withoutMcp, displayName: "Dummy" } } }),
+      JSON.stringify({ instances: { dummy: { driver: withoutMcp, displayName: "Dummy" }, ready: readyInstance() } }),
     );
+    mkdirSync(join(data, "bin"), { recursive: true });
+    writeFileSync(join(data, "bin", "obscura"), "#!/bin/sh\nexit 99\n", { mode: 0o700 });
+    const preload = outboundBlocker(home);
     const port = await freePortBlock([0, 1]);
     base = `http://127.0.0.1:${port}`;
-    child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "server/index.ts")], {
+    child = spawn(process.execPath, ["--import", preload, "--experimental-strip-types", join(ROOT, "server/index.ts")], {
       cwd: ROOT,
       env: {
+        PATH: "/usr/bin:/bin",
+        VITEST: "true",
+        NODE_OPTIONS: `--import=${new URL("../e2e/no-host-containers.mjs", import.meta.url).href}`,
         HOME: home,
         USERPROFILE: home,
         OMB_DATA_DIR: data,
@@ -172,7 +203,7 @@ posixOnly("browser status tells the truth about each bot", () => {
     // SAFETY: the status assertion above throws first, so the body is the
     // created bot and `id` is present.
     const bot = ((await created.json()) as { bot: { id: string } }).bot;
-    if (instanceId) {
+    if (instanceId !== undefined) {
       const pinned = await fetch(`${base}/api/bots/${bot.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json", cookie, origin: base },
@@ -240,4 +271,195 @@ posixOnly("browser status tells the truth about each bot", () => {
     expect(status.tools).toEqual(expect.any(Number));
     expect(status.available).toEqual(expect.any(Boolean));
   });
+
+  it.each([false, true])("does not select an engine or write bot state during status reads (browser=%s)", async (browser) => {
+    const id = await createBot("Unselected", browser, "");
+    const before = readFileSync(join(data, "bots.json"), "utf8");
+    for (let read = 0; read < 2; read++) {
+      const status = await get("/api/browser-status");
+      expect(status.status.find((entry) => entry.id === id)).toMatchObject({
+        engineId: "", engineSupportsBrowser: false, effective: false,
+        reason: browser ? "engine-unsupported" : "off",
+      });
+    }
+    expect(readFileSync(join(data, "bots.json"), "utf8")).toBe(before);
+    const response = await fetch(`${base}/api/bots`, { headers: { origin: base } });
+    expect(botList.parse(await response.json()).bots.find((bot) => bot.id === id)?.modelSelection.instanceId).toBe("");
+  });
+
+  it("reports the selected capable engine without requiring a desktop account", async () => {
+    const id = await createBot("SelectedEngine", true, "ready");
+    const status = await get("/api/browser-status");
+    expect(status.status.find((entry) => entry.id === id)).toMatchObject({
+      engineId: "ready", engineSupportsBrowser: true, effective: true, reason: null,
+    });
+  });
+
+  it("keeps an explicitly removed engine selected instead of substituting an available one", async () => {
+    const id = await createBot("RemovedEngine", true, "removed-engine");
+    const before = readFileSync(join(data, "bots.json"), "utf8");
+    const status = await get("/api/browser-status");
+    expect(status.status.find((entry) => entry.id === id)).toMatchObject({
+      engineId: "removed-engine", engineSupportsBrowser: false, effective: false, reason: "engine-unsupported",
+    });
+    expect(readFileSync(join(data, "bots.json"), "utf8")).toBe(before);
+  });
+
+});
+
+
+posixOnly("browser status respects hosted account authority", () => {
+  let directory = "";
+  let hostedData = "";
+  let hostedBase = "";
+  let hostedChild: ChildProcess;
+  let env: NodeJS.ProcessEnv;
+  let preload = "";
+  let alice: { id: string; cookie: string };
+  let bob: { id: string; cookie: string };
+  let aliceBot = "", bobBot = "", hiddenBot = "";
+
+  const request = (path: string, account?: { cookie: string }, method = "GET", body?: JsonValue) => {
+    const headers = new Headers({ origin: hostedBase, "content-type": "application/json" });
+    if (account) headers.set("cookie", account.cookie);
+    const init: RequestInit = { method, headers, redirect: "error", signal: AbortSignal.timeout(15_000) };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    return fetch(`${hostedBase}${path}`, init);
+  };
+
+  async function boot() {
+    hostedChild = spawn(process.execPath, ["--import", preload, "--experimental-strip-types", join(ROOT, "server/index.ts")], {
+      cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"],
+    });
+    hostedChild.stdout?.on("data", () => {});
+    hostedChild.stderr?.on("data", () => {});
+    await waitForOwnedServer(hostedChild, hostedBase);
+  }
+
+  async function signup(name: string) {
+    const response = await request("/api/auth/sign-up/email", undefined, "POST", {
+      email: `${name}@example.test`, name, password: randomBytes(24).toString("base64url"),
+    });
+    expect(response.status).toBe(200);
+    const { user } = z.object({ user: z.object({ id: z.string() }) }).parse(await response.json());
+    const session = response.headers.getSetCookie().find((header) => header.startsWith("better-auth.session_token="));
+    if (!session) throw new Error("Owned hosted signup did not return a session");
+    seedConnectedGoogleRow(hostedData, user.id);
+    return { id: user.id, cookie: session.split(";")[0]! };
+  }
+
+  async function makeBot(account: { cookie: string }, name: string, hidden = false) {
+    const response = await request("/api/bots", account, "POST", {});
+    expect(response.status).toBe(201);
+    const { bot } = z.object({ bot: z.object({ id: z.string() }) }).parse(await response.json());
+    expect((await request(`/api/bots/${bot.id}`, account, "PATCH", {
+      name, hidden, browser: true, modelSelection: { instanceId: "dummy", model: "" },
+    })).status).toBe(200);
+    return bot.id;
+  }
+
+  async function status(account: { cookie: string }): Promise<BrowserStatus> {
+    const response = await request("/api/browser-status", account);
+    expect(response.status).toBe(200);
+    // SAFETY: the real wire fields are checked by each owner/count assertion.
+    return await response.json() as BrowserStatus;
+  }
+
+  beforeAll(async () => {
+    directory = mkdtempSync(join(tmpdir(), "muster-browser-owner-"));
+    hostedData = join(directory, "data");
+    const hostedHome = join(directory, "home"), companion = join(directory, "companion"), ui = join(directory, "ui");
+    for (const path of [hostedData, hostedHome, companion, ui, join(hostedData, "bin")]) mkdirSync(path, { recursive: true });
+    const driver = driverWithoutCustomMcp();
+    if (!driver) throw new Error("This fixture needs an unsupported adapter");
+    const instances = { dummy: { driver }, ready: readyInstance() };
+    writeFileSync(join(hostedData, "config.json"), JSON.stringify({ instances }));
+    writeFileSync(join(hostedData, "bin", "obscura"), "#!/bin/sh\nexit 99\n", { mode: 0o700 });
+    preload = outboundBlocker(directory);
+    const port = await freePortBlock([0, 1]);
+    hostedBase = `http://127.0.0.1:${port}`;
+    env = pairingServerEnvironment({ home: hostedHome, dataDirectory: hostedData, companionDirectory: companion, staticDir: ui, port, webhookPort: port + 1, secret: randomBytes(32).toString("hex") });
+    Object.assign(env, { OMB_PUBLIC_HOST: `127.0.0.1:${port}`, OMB_ALLOW_SIGNUPS: "true" });
+    await boot();
+    alice = await signup("alice-browser-owner");
+    bob = await signup("bob-browser-owner");
+    aliceBot = await makeBot(alice, "Alice private browser marker");
+    bobBot = await makeBot(bob, "Bob private browser marker");
+    hiddenBot = await makeBot(alice, "Hidden browser marker", true);
+    await waitForExit(hostedChild, { signal: "SIGTERM" });
+    // A real account-scoped namespace, with offline adapters and synthetic
+    // credentials. Only this owned server is stopped/restarted.
+    writeFileSync(join(hostedData, "config.json"), JSON.stringify({ instances: {
+      ...instances, [`fixtureApi:${alice.id}`]: readyInstance(), [`fixtureApi:${bob.id}`]: readyInstance(),
+    } }));
+    await boot();
+  }, 60_000);
+
+  afterAll(async () => {
+    if (hostedChild) await waitForExit(hostedChild, { signal: "SIGTERM" });
+    if (directory) await removeTempDir(directory);
+  });
+
+  it("requires a hosted account before reporting browser status", async () => {
+    expect((await request("/api/browser-status")).status).toBe(401);
+  });
+
+  it.each(["alice", "bob"])("returns only %s's visible bots in both lists and blocked count", async (owner) => {
+    const own = owner === "alice" ? alice : bob;
+    const ownId = owner === "alice" ? aliceBot : bobBot;
+    const foreignId = owner === "alice" ? bobBot : aliceBot;
+    const result = await status(own);
+    expect(result.status.map((bot) => bot.id)).toEqual([ownId]);
+    expect(result.bots.map((bot) => bot.id)).toEqual([ownId]);
+    expect(result.blockedCount).toBe(1);
+    expect(JSON.stringify(result)).not.toContain(foreignId);
+    expect(JSON.stringify(result)).not.toContain(hiddenBot);
+  });
+
+  it.each(["operator-global", "foreign-vault"])("does not advertise or adopt %s credentials for another account", async (kind) => {
+    const selection = { instanceId: kind === "operator-global" ? "ready" : `fixtureApi:${alice.id}`, model: "saved-model" };
+    expect((await request(`/api/bots/${bobBot}`, bob, "PATCH", { modelSelection: selection })).status).toBe(200);
+    const before = readFileSync(join(hostedData, "bots.json"), "utf8");
+    const result = await status(bob);
+    expect(result.status.find((bot) => bot.id === bobBot)).toMatchObject({
+      engineId: null, engineSupportsBrowser: false, effective: false, reason: "engine-unsupported",
+    });
+    expect(readFileSync(join(hostedData, "bots.json"), "utf8")).toBe(before);
+    const saved = botList.parse(await (await request("/api/bots", bob)).json()).bots.find((bot) => bot.id === bobBot);
+    expect(saved?.modelSelection).toMatchObject(selection);
+  });
+
+  it("reports the account's saved capable engine without changing another bot", async () => {
+    const instanceId = `fixtureApi:${bob.id}`;
+    expect((await request(`/api/bots/${bobBot}`, bob, "PATCH", { modelSelection: { instanceId, model: "saved-model" } })).status).toBe(200);
+    const before = readFileSync(join(hostedData, "bots.json"), "utf8");
+    const result = await status(bob);
+    expect(result.status).toEqual([expect.objectContaining({ id: bobBot, engineId: instanceId, engineSupportsBrowser: true, effective: true, reason: null })]);
+    expect(result.blockedCount).toBe(0);
+    expect(readFileSync(join(hostedData, "bots.json"), "utf8")).toBe(before);
+  });
+
+  it("does not expose another account's vault engine even to the operator's bot", async () => {
+    const selectedId = `fixtureApi:${bob.id}`;
+    expect((await request(`/api/bots/${aliceBot}`, alice, "PATCH", { modelSelection: { instanceId: selectedId, model: "saved-model" } })).status).toBe(200);
+    const before = readFileSync(join(hostedData, "bots.json"), "utf8");
+    const result = await status(alice);
+    expect(result.status.find((bot) => bot.id === aliceBot)).toMatchObject({
+      engineId: null, engineSupportsBrowser: false, effective: false, reason: "engine-unsupported",
+    });
+    expect(JSON.stringify(result)).not.toContain(selectedId);
+    expect(readFileSync(join(hostedData, "bots.json"), "utf8")).toBe(before);
+  });
+
+  it("preserves an unavailable engine belonging to the account instead of adopting its ready one", async () => {
+    const selectedId = `missingApi:${bob.id}`;
+    expect((await request(`/api/bots/${bobBot}`, bob, "PATCH", { modelSelection: { instanceId: selectedId, model: "keep-this-model" } })).status).toBe(200);
+    const before = readFileSync(join(hostedData, "bots.json"), "utf8");
+    const result = await status(bob);
+    expect(result.status.find((bot) => bot.id === bobBot)).toMatchObject({
+      engineId: selectedId, engineSupportsBrowser: false, effective: false, reason: "engine-unsupported",
+    });
+    expect(readFileSync(join(hostedData, "bots.json"), "utf8")).toBe(before);
+  });
+
 });

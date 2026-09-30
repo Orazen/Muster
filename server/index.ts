@@ -9879,31 +9879,38 @@ let requestUserEmail = "";
       // actually get the tools? The three reasons are named separately so the
       // fix is different for each — install the binary, pick a supporting
       // engine, or turn the toggle on — and none of them is "retry".
-      const bots = store.bots.filter((b) => !b.hidden).map((b) => ({ bot: b, on: b.browser === true }));
-      const resolved = await Promise.all(
-        bots.map(async ({ bot, on }) => {
-          const instance = await resolveInstanceForBot(bot);
-          const engineSupports = instance?.adapter.capabilities.customMcp === true;
-          const engineId = instance?.instanceId ?? bot.modelSelection.instanceId ?? null;
-          const effective = on && Boolean(mount) && engineSupports;
-          const reason = !on
-            ? "off"
-            : !mount
-              ? "not-installed"
-              : !engineSupports
-                ? "engine-unsupported"
-                : null;
-          return {
-            id: bot.id,
-            name: bot.name,
-            enabled: on,
-            engineId,
-            engineSupportsBrowser: engineSupports,
-            effective,
-            reason,
-          };
-        }),
-      );
+      const bots = store.bots.filter((bot) => !bot.hidden && ownsRecord(bot));
+      const resolved = bots.map((bot) => {
+        const on = bot.browser === true;
+        // Status observes the saved choice; only an explicit work request
+        // may invoke resolveInstanceForBot's provider-selection repair.
+        // Apply both execution owner rules before describing capabilities
+        // or echoing an instance id from a stale foreign selection.
+        const selectedId = bot.modelSelection.instanceId;
+        const engineOwner = userInstanceOwner(selectedId);
+        const engineAllowed = (engineOwner === null || engineOwner === bot.ownerId)
+          && (!SELF_HOSTED || !bot.ownerId || bot.ownerId === primaryUserId() || engineOwner === bot.ownerId);
+        const instance = engineAllowed ? registry.get(selectedId) : null;
+        const engineSupports = instance?.adapter.capabilities.customMcp === true;
+        const engineId = engineAllowed ? selectedId : null;
+        const effective = on && Boolean(mount) && engineSupports;
+        const reason = !on
+          ? "off"
+          : !mount
+            ? "not-installed"
+            : !engineSupports
+              ? "engine-unsupported"
+              : null;
+        return {
+          id: bot.id,
+          name: bot.name,
+          enabled: on,
+          engineId,
+          engineSupportsBrowser: engineSupports,
+          effective,
+          reason,
+        };
+      });
       const botsWithBrowser = resolved.filter((entry) => entry.enabled);
       return json(res, 200, {
         available: Boolean(mount),
