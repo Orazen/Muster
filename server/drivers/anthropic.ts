@@ -14,6 +14,7 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import type { JsonObject, JsonValue } from "../schema.ts";
 import { appendNative } from "./native.ts";
+import { providerFetch } from "../provider-fetch.ts";
 
 const DRIVER_KIND = "anthropic";
 const DEFAULT_URL = "https://api.anthropic.com/v1";
@@ -100,7 +101,7 @@ export const AnthropicDriver: ProviderDriver<AnthropicConfig> = {
       model: string,
       opts: { stream: boolean; signal?: AbortSignal; onDelta?: (d: string) => void },
     ): Promise<{ text: string; usage: { input: number; output: number } | null }> => {
-      const res = await fetch(`${config.url}/messages`, {
+      const res = await providerFetch(`${config.url}/messages`, {
         method: "POST",
         headers: {
           "x-api-key": apiKey,
@@ -117,7 +118,7 @@ export const AnthropicDriver: ProviderDriver<AnthropicConfig> = {
           stream: opts.stream,
         }),
         signal: opts.signal ?? AbortSignal.timeout(120_000),
-      });
+      }, instanceId.startsWith("custom-"));
       if (!res.ok) {
         const body = await res.text().catch(() => "");
         throw new Error(`Anthropic HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);

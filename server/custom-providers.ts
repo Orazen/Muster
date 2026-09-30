@@ -13,13 +13,14 @@
 //
 // SSRF posture: the BASE URL is user-supplied and the server turns it into
 // outbound requests (model-list fetches, chat turns). Scheme is always
-// http/https. Self-hosted multi-tenant deployments reject loopback,
-// private, and reserved hosts outright — one account must not probe the
-   // deployment's internal network through a "provider". Desktop
+// http/https. Static validation catches invalid URLs and literal local
+// addresses; providerFetch also checks and pins DNS answers at connection
+// time for hosted custom endpoints. Desktop
 // single-user installs keep loopback allowed: pointing at Ollama or LM
 // Studio on 127.0.0.1 is the headline local-models use case, and the only
 // person reachable is the operator.
 import { z } from "zod";
+import { providerFetch } from "./provider-fetch.ts";
 
 import type { InstanceConfigMap } from "./contracts.ts";
 import {
@@ -81,9 +82,8 @@ function normalizeHost(raw: string): string {
   return raw.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.+$/, "");
 }
 
-/** Loopback or link-local host? Hostnames (api.example.com) never match —
- * only literal IPs and the localhost names do, mirroring what a DNS
- * lookup of a public name cannot resolve to without rebinding. */
+/** Fast literal-IP/localhost check. Other hostnames need providerFetch's
+ * connection-time DNS policy; this check alone cannot establish their scope. */
 function isLoopbackHost(host: string): boolean {
   const h = normalizeHost(host);
   if (h === "localhost" || h.endsWith(".localhost")) return true;
@@ -94,10 +94,10 @@ function isLoopbackHost(host: string): boolean {
 
 export type BaseUrlCheck = { ok: true; url: URL } | { ok: false; reason: string };
 
-/** Validate a user-supplied provider base URL before the server ever
- * fetches it. http/https only; scheme+host required. Self-hosted
- * multi-tenant deployments reject loopback/private/reserved targets —
- * see the module header. Desktop keeps local endpoints (Ollama). */
+/** Validate URL syntax and literal addresses before saving or fetching.
+ * Hostname resolution is checked by providerFetch at connection time;
+ * passing this fast check does not authorize an arbitrary DNS answer.
+ * Desktop keeps local endpoints (Ollama). */
 export function validateProviderBaseUrl(raw: string, selfHosted: boolean): BaseUrlCheck {
   let url: URL;
   try {
@@ -204,7 +204,7 @@ export async function fetchProviderModelIds(
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/models`;
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await providerFetch(url, {
       headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
       redirect: "error",
       signal: AbortSignal.timeout(timeoutMs),

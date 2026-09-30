@@ -17,6 +17,7 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import type { McpClient } from "../mcp-client.ts";
 import { appendNative } from "./native.ts";
+import { providerFetch } from "../provider-fetch.ts";
 import {
   closeAll,
   connectIntegrations,
@@ -185,6 +186,7 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
 
     async create(input: DriverCreateInput<OpenAICompatibleConfig>): Promise<ProviderInstance> {
       const { instanceId, config } = input;
+      const customEndpoint = driverKind === "customOpenai" || instanceId.startsWith("custom-");
       const apiKey = input.environment[config.apiKeyEnv] ?? process.env[config.apiKeyEnv] ?? "";
       // Keyless local servers (Ollama, LM Studio, vLLM) ignore the value but
       // some HTTP stacks reject a request with no authorization header at
@@ -206,10 +208,10 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
       let quickModel = configModels?.default ?? specQuickModel;
       const fetchModelCatalog = async (): Promise<boolean> => {
         try {
-          const res = await fetch(`${config.url}/models`, {
+          const res = await providerFetch(`${config.url}/models`, {
             headers: { authorization: `Bearer ${bearer}` },
             signal: AbortSignal.timeout(4_000),
-          });
+          }, customEndpoint);
           if (!res.ok) return false;
           // SAFETY: res.json() returns `any` by platform contract; the
           // payload is only handled as JsonValue from here on.
@@ -242,12 +244,12 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
         model: string,
         opts: { stream: boolean; signal?: AbortSignal; onDelta?: (d: string) => void },
       ): Promise<{ text: string; usage: { input: number; output: number } | null }> => {
-        const res = await fetch(`${config.url}/chat/completions`, {
+        const res = await providerFetch(`${config.url}/chat/completions`, {
           method: "POST",
           headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
           body: JSON.stringify({ model, messages, stream: opts.stream }),
           signal: opts.signal ?? AbortSignal.timeout(120_000),
-        });
+        }, customEndpoint);
         if (!res.ok) {
           const body = await res.text().catch(() => "");
           throw new Error(`${displayName} HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
@@ -324,12 +326,12 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
         tools: OpenAiTool[],
         signal?: AbortSignal,
       ): Promise<ReturnType<typeof parseChatToolResponse>> => {
-        const res = await fetch(`${config.url}/chat/completions`, {
+        const res = await providerFetch(`${config.url}/chat/completions`, {
           method: "POST",
           headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
           body: JSON.stringify({ model, messages, tools, tool_choice: "auto", stream: false }),
           signal: signal ?? AbortSignal.timeout(120_000),
-        });
+        }, customEndpoint);
         if (!res.ok) {
           const body = await res.text().catch(() => "");
           throw new Error(`${displayName} HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
@@ -438,10 +440,10 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
         // a reason, not as a ready engine that fails on first send.
         if (pingSnapshot) {
           try {
-            const res = await fetch(`${config.url}/models`, {
+            const res = await providerFetch(`${config.url}/models`, {
               headers: { authorization: `Bearer ${bearer}` },
               signal: AbortSignal.timeout(3_000),
-            });
+            }, customEndpoint);
             if (!res.ok) {
               return { state: "unavailable", reason: `${displayName} answered HTTP ${res.status} at ${config.url}` };
             }

@@ -84,6 +84,9 @@ importers:
       tailwind-merge:
         specifier: ^3.7.0
         version: 3.7.0
+      undici:
+        specifier: 7.30.0
+        version: 7.30.0
       vaultgram:
         specifier: github:tharunramagiri/vaultgram
         version: https://codeload.github.com/tharunramagiri/vaultgram/tar.gz/b2dcc87c4df3a722a7cbd88da59a4cd2da2f49ac
