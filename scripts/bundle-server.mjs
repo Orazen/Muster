@@ -19,8 +19,9 @@
 // that lookup is unaffected.
 import { build } from "esbuild";
 import { assertProvenanceClaimed, createBuildMetadata, writeBuildIdentity } from "./build-identity.mjs";
+import { vendorNativeExternals } from "./native-vendor.mjs";
 import { fileURLToPath } from "node:url";
-import childProcess from "node:child_process";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -78,9 +79,15 @@ await build({
 
 
 // Copy each native external's real package directory (pnpm layout included)
-// into dist-server/node_modules so the externalized import still resolves in
-// the packaged tree, where no other node_modules exist.
-import { cpSync, mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+// into dist-server/_native so the externalized import still resolves in the
+// packaged tree, where no other node_modules exist. Vendoring is done by
+// scripts/native-vendor.mjs, which (a) replaces — never merges into — the
+// destination, and (b) load-verifies the shipped package in a child Node
+// process anchored at the vendored tree, refusing to ship a binary that fails
+// dlopen (wrong ABI, corrupt, missing). Both behaviors came from the 1.23.1
+// packaging run: a stale better_sqlite3.node survived a repackage via merge
+// semantics because the old existence-only guard never noticed, and shipped
+// silently — the packaged app died at boot with ERR_DLOPEN_FAILED.
 import { createRequire } from "node:module";
 
 function reqResolveVaultgram() {
@@ -95,76 +102,28 @@ const req = createRequire(reqResolveVaultgram());
 // silently dropped from extraResources), then rewrite the bare specifier in
 // the emitted bundle to the vendored relative path.
 const VENDOR_DIR = "_native";
-mkdirSync(join(root, "dist-server", VENDOR_DIR), { recursive: true });
 for (const name of NATIVE_EXTERNALS) {
-  const resolved = req.resolve(`${name}/package.json`);
-  const srcDir = dirname(resolved);
-  const dest = join(root, "dist-server", VENDOR_DIR, name);
-  // dereference: pnpm installs are symlink farms — links would dangle in app bundles
-  cpSync(srcDir, dest, { recursive: true, dereference: true });
-  // better-sqlite3 resolves its helpers via plain node_modules lookup — give
-  // the vendored copy its own nested node_modules with real files.
+  const srcDir = dirname(req.resolve(`${name}/package.json`));
+  // better-sqlite3 resolves its helpers via plain node_modules lookup —
+  // give the vendored copy its own nested node_modules with real files.
+  // Helper resolution happens HERE (this module owns the resolver context);
+  // failures are logged and skipped exactly as before.
+  const helpers = [];
   if (name === "better-sqlite3") {
-    const nested = join(dest, "node_modules");
-    mkdirSync(nested, { recursive: true });
     for (const helper of ["bindings", "file-uri-to-path"]) {
       try {
-        const helperSrc = dirname(req.resolve(`${helper}/package.json`));
-        cpSync(helperSrc, join(nested, helper), { recursive: true, dereference: true });
+        helpers.push({ name: helper, sourceDir: dirname(req.resolve(`${helper}/package.json`)) });
       } catch {
         console.log(`helper ${helper} not resolvable from vaultgram context — skipped`);
       }
     }
   }
-  // pnpm (and CI npm config) often skips install scripts, leaving no
-  // better_sqlite3.node. Fetch the prebuilt binary; fall back to source build.
-  // `npx --yes prebuild-install` used to resolve through a global npx cache
-  // path that doesn't exist under pnpm's layout in CI (Cannot find module
-  // .../prebuild-install/bin.js), and its failure fell back to a source
-  // build whose binary the health gate still couldn't serve. Invoke the
-  // package's own bin directly from the pnpm store where it actually
-  // lives — with cwd = the vendored copy so the prebuilt download matches
-  // this exact better-sqlite3 version.
-  const { execSync } = childProcess;
-  if (!existsSync(join(dest, "build", "Release", "better_sqlite3.node")) &&
-      !existsSync(join(dest, "prebuilds"))) {
-    try {
-      const prebuildBin = findUpBin("prebuild-install", "bin.js");
-      if (prebuildBin) {
-        execSync(`"${process.execPath}" "${prebuildBin}"`, { cwd: dest, stdio: "inherit" });
-      } else {
-        execSync("npx --yes prebuild-install@7.1.3", { cwd: dest, stdio: "inherit" });
-      }
-      console.log(`prebuilt binary fetched for ${name}`);
-    } catch {
-      console.log(`prebuild-install failed for ${name} — building from source`);
-      execSync("npx --yes node-gyp rebuild", { cwd: dest, stdio: "inherit" });
-    }
-  }
-  console.log(`bundled native dep: ${name} -> ${dest}`);
-}
-
-/** Walk up from cwd looking for node_modules/.pnpm/prebuild-install@<ver>
- * /node_modules/prebuild-install/bin.js — the only place pnpm reliably
- * puts it. Returns undefined when nothing is found; callers fall back to
- * npx. */
-function findUpBin(packageName, binName) {
-  let dir = process.cwd();
-  for (;;) {
-    try {
-      const pnpmDir = join(dir, "node_modules", ".pnpm");
-      for (const entry of readdirSync(pnpmDir)) {
-        if (!entry.startsWith(`${packageName}@`)) continue;
-        const candidate = join(pnpmDir, entry, "node_modules", packageName, binName);
-        if (existsSync(candidate)) return candidate;
-      }
-    } catch {
-      /* no node_modules/.pnpm here — keep walking */
-    }
-    const parent = join(dir, "..");
-    if (parent === dir) return undefined;
-    dir = parent;
-  }
+  vendorNativeExternals({
+    packageName: name,
+    sourceDir: srcDir,
+    outDir: join(root, "dist-server"),
+    helpers,
+  });
 }
 
 // Rewrite every remaining bare "better-sqlite3" specifier in dist-server/**/*.js
