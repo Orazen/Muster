@@ -62,7 +62,8 @@
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
@@ -123,7 +124,18 @@ const result = <I, R>(id: I, res: R) => out({ jsonrpc: "2.0", id, result: res })
 const rpcMethods: string[] = [];
 const recordMethod = (method: string) => {
   rpcMethods.push(method);
-  if (process.env.FAKE_ACP_RPC_DUMP) writeFileSync(process.env.FAKE_ACP_RPC_DUMP, JSON.stringify(rpcMethods));
+  const destination = process.env.FAKE_ACP_RPC_DUMP;
+  if (!destination) return;
+  // The parent polls this receipt while the child records more RPCs. Rewriting
+  // the published file exposes an empty/truncated JSON window. A same-directory
+  // rename publishes only a complete snapshot, including the first one.
+  const staging = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(staging, JSON.stringify(rpcMethods), { mode: 0o600, flag: "wx" });
+    renameSync(staging, destination);
+  } finally {
+    rmSync(staging, { force: true });
+  }
 };
 
 // session/set_mode + session/set_model calls seen this run
