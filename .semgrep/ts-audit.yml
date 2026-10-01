@@ -1,0 +1,127 @@
+rules:
+  # TypeScript/React audit ruleset — semantic (non-secret) coverage for the
+  # server (server/) and client (src/) trees. Gitleaks owns secrets; this file
+  # owns code-level TS patterns the registry packs do not cover (p/typescript
+  # contributes exactly 1 rule over this repo today). Audit-level on purpose:
+  # matches are findings to review, not proof of vulnerability. All rules are
+  # pattern-regex on purpose: metavariable/ellipsis rules produced match-engine
+  # errors on real source (semgrep 1.178.0); plain regex does not. Values are
+  # single-quoted because patterns containing ': ' or a trailing colon break
+  # YAML plain scalars.
+  - id: ts.sql-template-interpolation
+    message: 'SQL built from a template-literal interpolation; confirm the interpolated value is validated or the statement is a static DDL/PRAGMA constant, not request data.'
+    severity: WARNING
+    languages: [typescript]
+    paths:
+      include:
+        - '*.ts'
+        - '*.tsx'
+    pattern-regex: '\.(prepare|exec)\(`[^`]*\$\{[^}]*\}[^`]*`'
+
+  - id: ts.child-process-spawn-usage
+    message: 'child_process spawn/exec call; confirm the command is resolved from an allowlist (env-path resolution), not composed from request data, and stays shell:false.'
+    severity: WARNING
+    languages: [typescript]
+    paths:
+      include:
+        - '*.ts'
+        - '*.tsx'
+    pattern-regex: '(?<![.\w])(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\s*\('
+
+  - id: ts.dangerous-html
+    message: 'dangerouslySetInnerHTML renders raw HTML into the DOM; confirm the sink content is generated/escaped by a trusted transformer (Shiki), never model or network text.'
+    severity: WARNING
+    languages: [typescript]
+    paths:
+      include:
+        - '*.tsx'
+        - '*.ts'
+    pattern-regex: 'dangerouslySetInnerHTML'
+
+  - id: ts.weak-hash
+    message: 'Weak hash (MD5/SHA-1) via node:crypto; confirm the use is non-security (cache keys, checksums) or move to SHA-256.'
+    severity: WARNING
+    languages: [typescript]
+    paths:
+      include:
+        - '*.ts'
+        - '*.tsx'
+    pattern-regex: 'createHash\(\s*[''"](md5|sha1)[''"]'
+
+  - id: ts.tls-reject-unauthorized
+    message: 'TLS certificate validation override (rejectUnauthorized false / NODE_TLS_REJECT_UNAUTHORIZED); removes server identity verification. Confirm an explicit, documented exception.'
+    severity: ERROR
+    languages: [typescript]
+    paths:
+      include:
+        - '*.ts'
+        - '*.tsx'
+    pattern-regex: '(?i)(rejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*[''"]?0)'
+
+  - id: ts.dangerous-eval
+    message: 'eval()/new Function() executes dynamic strings as code; confirm no request or model data can reach this call.'
+    severity: ERROR
+    languages: [typescript]
+    paths:
+      include:
+        - '*.ts'
+        - '*.tsx'
+    pattern-regex: '(?<![\w.$])eval\s*\(|new\s+Function\s*\('
+
+  - id: ts.cors-wildcard-origin
+    message: 'CORS Access-Control-Allow-Origin set to *; confirm the endpoint serves no credentialed or sensitive responses.'
+    severity: WARNING
+    languages: [typescript]
+    paths:
+      include:
+        - '*.ts'
+    pattern-regex: 'Access-Control-Allow-Origin[''"]?\s*[:,]\s*[''"]\*[''"]'
+
+  - id: ts.cookie-missing-flags
+    message: 'Set-Cookie for a session-named cookie without HttpOnly/SameSite in the same statement; confirm flag handling (bridgedSessionCookie centralizes flags).'
+    severity: WARNING
+    languages: [typescript]
+    paths:
+      include:
+        - '*.ts'
+    pattern-regex: 'Set-Cookie[''"]\s*,[ \t]*(?!bridgedSessionCookie)(?![^)]*\b(HttpOnly|SameSite)\b)[^)]*\b(token|session|sid|auth)\w*'
+
+  - id: ts.hardcoded-credential-literal
+    message: 'Credential-looking literal assigned to a credential-named symbol (variable or default parameter); confirm it is a non-secret placeholder or move it to configuration.'
+    severity: WARNING
+    languages: [typescript]
+    paths:
+      include:
+        - '*.ts'
+        - '*.tsx'
+    pattern-regex: '(?i)(?:\b(?:const|let|var)\s+\w*(?:password|passwd|secret|apikey|api_key|credential)[^=\n]*=\s*[''"](?!/)[^''"\n]{8,}[''"])|(?:\b(?:password|passwd|secret|apikey|api_key|credential)\w*\s*=\s*[''"][A-Za-z0-9_=-]{8,}[''"])'
+
+  - id: ts.insecure-random-token
+    message: 'Token-like value generated with Math.random(); Math.random is not cryptographically secure. Use node:crypto (randomUUID/randomBytes) for tokens and secrets.'
+    severity: WARNING
+    languages: [typescript]
+    paths:
+      include:
+        - '*.ts'
+        - '*.tsx'
+    pattern-regex: '(?i)\bMath\.random\s*\(\s*\)\s*\.toString\(\s*(36|16)\s*\)[^\n]{0,80}\b(token|secret|password|key|id)\b'
+
+  - id: ts.webview-postmessage-wildcard
+    message: 'postMessage to a wildcard target origin (''*'') leaks message content to any window; confirm the receiver is sandboxed content, not a remote page.'
+    severity: WARNING
+    languages: [typescript]
+    paths:
+      include:
+        - '*.ts'
+        - '*.tsx'
+    pattern-regex: 'postMessage\s*\([^)]*,\s*[''"]\*[''"]'
+
+  - id: ts.localstorage-secret-store
+    message: 'Secret-named key written to localStorage/sessionStorage (unencrypted, persistent, XSS-readable); confirm the value is a non-secret preference.'
+    severity: WARNING
+    languages: [typescript]
+    paths:
+      include:
+        - '*.ts'
+        - '*.tsx'
+    pattern-regex: '(?i)\b(session|local)Storage\.setItem\(\s*[''"][^''"]*\b(token|secret|password|credential|apikey|api_key|jwt)[^''"]*[''"]'
