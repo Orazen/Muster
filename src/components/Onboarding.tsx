@@ -1118,7 +1118,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
             <div className="flex items-start gap-3">
               <Mic size={18} className="mt-0.5 shrink-0 text-ink-secondary" />
               <div>
-                <div className="text-[14px] font-medium text-ink">Microphone & speech</div>
+                <div className="text-[14px] font-medium text-ink">Microphone &amp; speech</div>
                 <div className="mt-0.5 text-[12.5px] text-ink-secondary">
                   {isDesktop
                     ? "Voice dictation into the composer, transcribed on-device."
