@@ -77,9 +77,14 @@ function sealWith(key: Buffer, plaintext: string): string {
 function openWith(key: Buffer, sealed: string): string | null {
   const [ivB64, dataB64, tagB64] = sealed.split(":");
   if (!ivB64 || !dataB64 || !tagB64) return null;
+  const tag = Buffer.from(tagB64, "base64");
+  // Policy: our seal path always writes a full 16-byte GCM tag. Shorter
+  // tags are still legal GCM lengths, so Node would happily MAC with one —
+  // reject them structurally instead of trusting library defaults.
+  if (tag.byteLength !== 16) return null;
   try {
     const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(ivB64, "base64"));
-    decipher.setAuthTag(Buffer.from(tagB64, "base64"));
+    decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(Buffer.from(dataB64, "base64")), decipher.final()]).toString("utf8");
   } catch {
     return null; // wrong key or tampered — treat as absent, never throw

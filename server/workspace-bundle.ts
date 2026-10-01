@@ -159,6 +159,10 @@ export function decryptBundle(payload: string, passphrase: string, secret: strin
   const iv = Buffer.from(parts[3], "base64");
   const authTag = Buffer.from(parts[4], "base64");
   const ciphertext = Buffer.from(parts[5], "base64");
+  // Policy: encryptBundle always writes a full 16-byte GCM tag. Shorter
+  // tags are still legal GCM lengths, so Node would attempt MAC with one —
+  // reject structurally with the standard wrong-passphrase error.
+  if (authTag.byteLength !== 16) throw new Error("wrong passphrase — the bundle could not be decrypted");
   let key: Buffer;
   try {
     key = deriveKey(passphrase, salt, secret);

@@ -46,6 +46,15 @@ describe("seal/open", () => {
     const [iv, , tag] = sealed.split(":");
     expect(open(`${iv}:${Buffer.from("tampered").toString("base64")}:${tag}`)).toBeNull();
   });
+
+  it("fails closed on a truncated auth tag (short-tag forgery attempt)", () => {
+    const sealed = seal("secret");
+    const [iv, data] = sealed.split(":");
+    // 15-byte tag is a legal GCM length Node would MAC with — policy is to
+    // reject any tag shorter than the 16 bytes our seal path always writes.
+    const shortTag = Buffer.from(sealed.split(":")[2]!, "base64").subarray(0, 15).toString("base64");
+    expect(open(`${iv}:${data}:${shortTag}`)).toBeNull();
+  });
 });
 
 describe("per-file salt", () => {
