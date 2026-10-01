@@ -43,6 +43,14 @@
 6dc0fabda63a2bde98e8d394176cf0f937941805:src/lib/analytics.ts:generic-api-key:10
 aa8433ca5c51be3ec1beaf91e05f4aa4d80e3066:server/signup-gate.test.ts:generic-api-key:34
 c8d5b4b3ef64fddda7fcc0c7587d8c2c674d0d23:server/workspace-backup-snapshots.test.ts:generic-api-key:203
+
+# workspace-bundle-crypto.test.ts:27 — same reviewed fixture string as
+# server/user-keys.test.ts ("test-secret-at-least-32-chars-long-ok"), reused
+# as the deriveKey secret in the v1 bundle crypto tests. Not a credential;
+# entered in affee758 (GCM tag-length hardening). Investigated before
+# baselining per policy: no rotation needed.
+affee758027538ddbb239abc0b83083d77305f05:server/workspace-bundle-crypto.test.ts:generic-api-key:27
+
 # --- dir-mode fingerprints (tracked tree at HEAD) ---
 server/organization.test.ts:generic-api-key:28
 server/redact.test.ts:curl-auth-header:141
@@ -55,4 +63,5 @@ server/signup-gate.test.ts:generic-api-key:34
 server/user-keys.test.ts:generic-api-key:7
 server/workspace-backup-snapshots.test.ts:generic-api-key:203
 server/workspace-backup-telegram-v2.test.ts:generic-api-key:154
+server/workspace-bundle-crypto.test.ts:generic-api-key:27
 src/lib/analytics.ts:generic-api-key:11
