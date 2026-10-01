@@ -98,10 +98,28 @@ describe("conversation visibility and unread replies", () => {
   });
 
   it("does not acknowledge another bot or repeat acknowledgement of an already-read announcement", () => {
-    const reading = { readSelectedMessages: true, selectedId: bot.id };
+    const reading = { readSelectedMessages: true, selectedId: bot.id, activeView: "chat" as const };
     const other = { id: "another-bot", unread: true };
     expect(prepareUnreadAnnouncement(reading, other)).toEqual({ record: other, markRead: false });
     expect(prepareUnreadAnnouncement(reading, { id: bot.id, unread: false }).markRead).toBe(false);
+  });
+
+  it("Today preserves the selected conversation and leaves new replies unread until it is opened", () => {
+    const loaded = reducer(initialState, { type: "hydrate", bots: [bot], groups: [group] });
+    const today = reducer(loaded, { type: "showToday" });
+    expect(today.activeView).toBe("today");
+    expect(today.selectedId).toBe(loaded.selectedId);
+    expect(today.bots).toBe(loaded.bots);
+    expect(today.groups).toBe(loaded.groups);
+    const prepared = prepareUnreadAnnouncement(today, { ...bot, unread: true });
+    expect(prepared.markRead).toBe(false);
+    expect(prepared.record.unread).toBe(true);
+    const announced = reducer(today, { type: "botPatched", bot: prepared.record });
+    expect(announced.bots[0].unread).toBe(true);
+    const opened = reducer(announced, { type: "select", id: bot.id });
+    expect(opened.activeView).toBe("chat");
+    expect(opened.bots[0].unread).toBe(false);
+    expect(opened.bots[0].messages).toEqual(bot.messages);
   });
 });
 

@@ -426,7 +426,7 @@ export interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines" | "social";
+  activeView: "chat" | "today" | "routines" | "social";
   routines: Routine[];
   goals: Goal[];
   routineRuns: RoutineRun[];
@@ -474,10 +474,10 @@ interface PreparedUnreadAnnouncement<T> {
 /** Decide whether a live unread announcement represents a visible chat.
  * Return an acknowledgement only for that case; never mutate SSE records. */
 export function prepareUnreadAnnouncement<T extends { id: string; unread?: boolean }>(
-  state: Pick<AppState, "readSelectedMessages" | "selectedId">,
+  state: Pick<AppState, "readSelectedMessages" | "selectedId" | "activeView">,
   record: T,
 ): PreparedUnreadAnnouncement<T> {
-  const markRead = state.readSelectedMessages && record.id === state.selectedId && Boolean(record.unread);
+  const markRead = state.readSelectedMessages && state.activeView === "chat" && record.id === state.selectedId && Boolean(record.unread);
   return { record: markRead ? { ...record, unread: false } : record, markRead };
 }
 
@@ -519,6 +519,7 @@ type BotPatch = Partial<
 
 export type Action =
   | { type: "hydrate"; bots: Bot[]; groups: Group[] }
+  | { type: "showToday" }
   | { type: "showRoutines" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinePatched"; routine: Routine }
@@ -658,10 +659,11 @@ export function reducer(state: AppState, action: Action): AppState {
       const selectedId = resolveChatSelection(state.selectedId, bots, groups);
       return { ...state, bots, groups, selectedId, rosterHydrated: true };
     }
+    case "showToday":
     case "showRoutines":
       return {
         ...state,
-        activeView: "routines",
+        activeView: action.type === "showToday" ? "today" : "routines",
         settingsOpen: false,
         computerOpen: false,
         desktopCanvasOpen: false,

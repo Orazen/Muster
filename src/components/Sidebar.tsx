@@ -26,6 +26,7 @@ import {
   Search,
   Settings,
   Sparkles,
+  Sun,
   Puzzle,
   Trash2,
   Users,
@@ -45,7 +46,7 @@ import {
 
 import { AgentAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
-import { MusterBotMark } from "@/lib/musterbot/MusterBotMark";
+import { WorkspaceBrandMark } from "./WorkspaceBrandMark";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 import {
@@ -1420,7 +1421,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     <aside
       data-tour="roster"
       className={cn(
-        "glass-shell-sidebar flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel transition-[width] duration-200 ease-[cubic-bezier(.24,1,.4,1)]",
+        "workspace-sidebar glass-shell-sidebar flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel transition-[width] duration-200 ease-[cubic-bezier(.24,1,.4,1)]",
         DENSITY_WIDTH[density],
         // Below md only: the sidebar leaves the flow and slides in over the chat.
         // Scoped with max-md: rather than cancelled with md: on purpose — Tailwind
@@ -1436,7 +1437,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     >
       {/* macOS owns inset traffic lights; the browser wears the brand. */}
       <div
-        className={cn("flex items-center justify-between px-4 pt-3.5 pb-1", density === "icons" && "flex-col gap-2 px-2")}
+        className={cn("workspace-brand flex items-center justify-between px-4 pt-3.5 pb-1", density === "icons" && "flex-col gap-2 px-2")}
         // SAFETY: Electron honors the non-standard -webkit-app-region drag
         // style, which React's CSSProperties does not declare.
         style={macInset ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined}
@@ -1456,7 +1457,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 className="size-[22px] rounded object-contain"
               />
             ) : (
-              <MusterBotMark size={22} label="Muster" />
+              <WorkspaceBrandMark size={28} label="Muster" />
             )}
             {density !== "icons" && (
               <span className="text-[15px] font-semibold tracking-tight text-ink">
@@ -1585,6 +1586,19 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           )}
         </div>
       </div>
+
+      <nav className="px-2 pt-3 pb-1" aria-label="Workspace">
+        <button
+          onClick={() => { dispatch({ type: "showToday" }); onClose?.(); }}
+          aria-label="Today"
+          aria-current={state.activeView === "today" ? "page" : undefined}
+          title={density === "icons" ? "Today" : undefined}
+          className={cn("workspace-nav-item flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[14px] text-ink-secondary hover:bg-raised hover:text-ink", state.activeView === "today" && "bg-raised text-ink", density === "icons" && "justify-center px-1")}
+        >
+          <Sun size={18} aria-hidden="true" />
+          {density !== "icons" && <span>Today</span>}
+        </button>
+      </nav>
 
       {/* Search — the rail has no room for it; ⌘K and the mobile drawer
           keep the full search. */}

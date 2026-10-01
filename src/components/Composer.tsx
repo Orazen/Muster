@@ -503,7 +503,7 @@ export function Composer({
   };
 
   return (
-    <div className="px-5 pb-5 pt-2">
+    <div className="workspace-composer px-5 pb-5 pt-2">
       {speechError && (
         <div className="mx-auto mb-2 max-w-[900px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           {speechError}
@@ -627,7 +627,7 @@ export function Composer({
             circular toolbar buttons below — context controls left, send
             right. All Muster behavior (drafts, mentions, goal mode, dictation)
             is unchanged; see chat/message-bubble.css for the bubble tokens. */}
-        <div className="muster-composer px-1 pt-1 pb-2" data-tour="composer">
+        <div className="workspace-composer-input muster-composer px-1 pt-1 pb-2" data-tour="composer">
           <textarea
             ref={inputRef}
             rows={1}

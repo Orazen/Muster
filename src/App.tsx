@@ -21,6 +21,7 @@ const RoutinesPage = lazy(() => import("@/components/RoutinesPage").then((m) => 
 const SocialView = lazy(() => import("@/components/SocialView").then((m) => ({ default: m.SocialView })));
 const Onboarding = lazy(() => import("@/components/Onboarding").then((m) => ({ default: m.Onboarding })));
 const StorageGate = lazy(() => import("@/components/StorageGate").then((m) => ({ default: m.StorageGate })));
+const WorkspaceToday = lazy(() => import("@/components/WorkspaceToday").then((m) => ({ default: m.WorkspaceToday })));
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { hostBuild } from "@/lib/host-build";
@@ -204,7 +205,7 @@ function Shell() {
   const classicWizardActive = setup === "wizard";
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="muster-workspace flex h-full flex-col">
       {/* ambient wash under everything — what the glass panels refract */}
       <div className="glass-ambient" aria-hidden="true" />
       <UpdateBanner />
@@ -233,7 +234,14 @@ function Shell() {
           menuButtonRef.current?.focus();
         }}
       />
-      {state.activeView === "routines" ? (
+      {state.activeView === "today" ? (
+        <Suspense fallback={<main className="flex min-w-0 flex-1 items-center justify-center text-ink-secondary" role="status">Opening Today…</main>}>
+          <WorkspaceToday
+            onOpenCalendar={() => dispatch({ type: "togglePlugins", open: true })}
+            onOpenDevices={() => dispatch({ type: "toggleAppSettings", open: true, section: "remoteAccess" })}
+          />
+        </Suspense>
+      ) : state.activeView === "routines" ? (
         <Suspense fallback={null}><RoutinesPage /></Suspense>
       ) : state.activeView === "social" ? (
         /* Social works without engines on purpose: profiles and friendships

@@ -6,6 +6,7 @@ import { restoreTheme } from "./lib/skins";
 import "./styles.css";
 import "./styles/fleet-orb.css";
 import "./styles/glass.css";
+import "./styles/workspace-gaia.css";
 
 restoreTheme();
 

@@ -244,9 +244,9 @@ test("an unconfirmed send stays visibly parked across reload without reaching th
   await expect(checking).toBeVisible();
   expect(await checking.evaluate((element) => element.closest("button, a, input, textarea, select, [tabindex]:not([tabindex='-1'])"))).toBeNull();
   await page.emulateMedia({ reducedMotion: "reduce" });
-  // The app's reduced-motion contract: the spinner becomes a calm opacity
-  // pulse (styles.css .animate-spin override), never a rotating wheel.
-  expect(await checking.evaluate((element) => getComputedStyle(element.querySelector(".animate-spin")!).animationName)).toBe("reduced-loader-pulse");
+  // The approved workspace keeps indicators still under reduced motion;
+  // delivery status remains explicit in the text without rotating or pulsing.
+  expect(await checking.evaluate((element) => getComputedStyle(element.querySelector(".animate-spin")!).animationName)).toBe("none");
   await page.setViewportSize({ width: 320, height: 740 });
   await expect(checking).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
