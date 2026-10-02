@@ -13,6 +13,7 @@ import SwiftUI
 struct MusterMacApp: App {
     @StateObject private var live: LiveSessionModel
     @StateObject private var demo: PrototypeModel
+    @State private var sessionRestoreError: String?
 
     init() {
         _live = StateObject(wrappedValue: LiveSessionModel())
@@ -30,9 +31,21 @@ struct MusterMacApp: App {
                 .background(MusterAppearance.canvas)
                 .task {
                     guard live.state == .signedOut else { return }
-                    if let saved = SessionKeychain.load() {
-                        live.connect(account: saved)
+                    do {
+                        if let saved = try SessionKeychain.load() {
+                            live.connect(account: saved)
+                        }
+                    } catch {
+                        sessionRestoreError = error.localizedDescription
                     }
+                }
+                .alert("Could not restore sign-in", isPresented: Binding(
+                    get: { sessionRestoreError != nil },
+                    set: { if !$0 { sessionRestoreError = nil } }
+                )) {
+                    Button("OK", role: .cancel) { sessionRestoreError = nil }
+                } message: {
+                    Text(sessionRestoreError ?? "")
                 }
         }
         .windowToolbarStyle(.unified)
@@ -127,8 +140,10 @@ struct SignInView: View {
         Task {
             do {
                 let account = try await MusterTransport.signIn(originText: originText, email: email, password: password, mode: mode)
-                SessionKeychain.save(account)
+                try SessionKeychain.save(account)
                 live.connect(account: account)
+            } catch let storageError as SessionKeychainError {
+                error = storageError.localizedDescription
             } catch let transportError as MusterTransportError {
                 error = describe(transportError)
             } catch {
@@ -194,6 +209,7 @@ struct LiveShellView: View {
 struct FleetSidebar: View {
     @EnvironmentObject private var live: LiveSessionModel
     @State private var query = ""
+    @State private var signOutError: String?
 
     private var bots: [Bot] {
         let filtered = query.isEmpty ? live.fleet.bots : live.fleet.bots.filter {
@@ -260,8 +276,7 @@ struct FleetSidebar: View {
                 Spacer()
                 Menu {
                     Button("Sign out") {
-                        SessionKeychain.clear()
-                        live.disconnect()
+                        signOut()
                     }
                 } label: {
                     Image(systemName: "person.crop.circle")
@@ -274,6 +289,24 @@ struct FleetSidebar: View {
             .background(MusterAppearance.sidebar)
         }
         .searchable(text: $query, placement: .sidebar, prompt: "Search fleet")
+        .alert("Could not sign out", isPresented: Binding(
+            get: { signOutError != nil },
+            set: { if !$0 { signOutError = nil } }
+        )) {
+            Button("OK", role: .cancel) { signOutError = nil }
+        } message: {
+            Text("\(signOutError ?? "") You are still signed in, and this Mac can reconnect when you reopen Muster. Check Keychain access, then choose Sign out again from the account menu.")
+        }
+    }
+
+    private func signOut() {
+        do {
+            try SessionKeychain.clear()
+            signOutError = nil
+            live.disconnect()
+        } catch {
+            signOutError = error.localizedDescription
+        }
     }
 
     private var connectionColor: Color {
