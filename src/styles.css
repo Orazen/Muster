@@ -235,23 +235,34 @@ body {
   overflow: hidden;
 }
 
-/* Keep focus visible after components clear the browser outline. These
-   unlayered rules outrank Tailwind utilities without needing !important.
-   Text inputs may also match :focus-visible after a pointer click; the
-   neutral token keeps both input methods free of a blue outline. */
+/* Keep keyboard focus visible without framing controls. These unlayered
+   rules also replace Tailwind focus rings. Editable fields may match
+   :focus-visible after a click, so their cue remains a quiet underline. */
 :focus-visible {
-  outline: 1.5px solid var(--color-focus);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: inset 0 -2px 0 var(--color-focus);
 }
 
-/* Replace the browser focus treatment with the neutral cue below. */
 :is(input, textarea, select):focus {
   outline: none;
 }
 
 :is(input, textarea, select):focus-visible {
-  outline: 1.5px solid var(--color-focus);
-  outline-offset: -2px;
+  box-shadow: inset 0 -2px 0 var(--color-focus);
+}
+
+/* Forced colors suppresses shadows. The system outline must win over
+   component focus resets and user-agent form-control styling. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid CanvasText !important;
+    outline-offset: 2px;
+    box-shadow: none !important;
+  }
+
+  :is(input, textarea, select):focus-visible {
+    outline-offset: -2px;
+  }
 }
 
 /* Selection: a calm raised-surface wash, NOT the brand accent. 45% bright
@@ -1010,7 +1021,7 @@ body {
 .onboarding-shell[data-window-drag="true"] .onboarding-stage-title { -webkit-app-region: no-drag; }
 .onboarding-stage-count { margin: 0; color: var(--color-ink-secondary); font-size: 11.5px; letter-spacing: .06em; }
 .onboarding-stage-title { width: fit-content; max-width: 100%; margin: 4px auto 0; color: var(--color-ink); font-size: 21px; font-weight: 650; letter-spacing: -.03em; line-height: 1.25; }
-.onboarding-stage-title:focus-visible, .onboarding-error:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 5px; border-radius: 2px; }
+.onboarding-stage-title:focus-visible, .onboarding-error:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--color-focus); border-radius: 2px; }
 .onboarding-stage-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 10px 36px 30px; overflow-wrap: anywhere; scrollbar-width: thin; }
 
 @media (prefers-reduced-motion: no-preference) {

@@ -155,7 +155,7 @@
 .os-team-member strong { font-size: 12px; font-weight: 550; overflow-wrap: anywhere; }
 .os-team-member small { font-size: 10px; color: var(--color-ink-secondary); overflow-wrap: anywhere; }
 .os-team-member > svg { color: var(--color-ink-secondary); flex-shrink: 0; }
-.os-workspace button:focus-visible, .os-mark:focus-visible, .os-console-trigger:focus-visible, .os-chat-link:focus-visible, .os-halt:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
+.os-workspace button:focus-visible, .os-mark:focus-visible, .os-console-trigger:focus-visible, .os-chat-link:focus-visible, .os-halt:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--color-focus); }
 
 /* ── dock ────────────────────────────────────────────────────────────── */
 
@@ -455,14 +455,13 @@
   filter: brightness(1.1);
 }
 
-/* focus ring matches the app's keyboard ring */
+/* Match the shared keyboard underline without framing the controls. */
 .os-dock-item:focus-visible,
 .os-open-chat:focus-visible,
 .os-window-close:focus-visible,
 .os-window-min:focus-visible,
 .os-exit:focus-visible {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
+  outline: none; box-shadow: inset 0 -2px 0 var(--color-focus);
 }
 
 /* ── ambient presence (waiting-on-you) ───────────────────────────────── */

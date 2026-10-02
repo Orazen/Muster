@@ -266,7 +266,7 @@ function WorkspaceSyncSession() {
         <button type="button" disabled={busy || !workspaceAllowed} onClick={() => void exportLocal()} className={button}>
           <Download size={13} /> Export file
         </button>
-        <label aria-disabled={busy || !workspaceAllowed} className={cn(button, "focus-within:ring-2 focus-within:ring-focus", busy || !workspaceAllowed ? "opacity-40" : "cursor-pointer")}>
+        <label aria-disabled={busy || !workspaceAllowed} className={cn(button, "focus-within:shadow-[inset_0_-2px_0_var(--color-focus)] forced-colors:focus-within:outline-2 forced-colors:focus-within:outline-solid forced-colors:focus-within:outline-[CanvasText] forced-colors:focus-within:outline-offset-2", busy || !workspaceAllowed ? "opacity-40" : "cursor-pointer")}>
           <Upload size={13} /> Restore file…
           <input
             type="file"

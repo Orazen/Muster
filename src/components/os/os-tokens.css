@@ -42,7 +42,7 @@
 .os-desktop .os-workspace-heading { gap: 24px; }
 .os-desktop .os-window { border-radius: 20px; box-shadow: 0 16px 48px #0002; }
 .os-desktop .os-secondary-action { border-radius: 12px; }
-.os-desktop button:focus-visible, .os-desktop a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
+.os-desktop button:focus-visible, .os-desktop a:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--color-focus); }
 @media (max-width: 600px) {
   .os-desktop .os-workspace-inner { padding: 28px 18px; }
   .os-desktop input, .os-desktop textarea, .os-desktop select { font-size: 16px; }

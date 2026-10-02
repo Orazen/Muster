@@ -35,7 +35,7 @@
 .auth-shell--welcome .auth-fields { margin-top: 28px; }
 .auth-shell--welcome .auth-input { background: var(--auth-control); border-color: var(--auth-border); border-radius: 12px; min-height: 48px; }
 .auth-shell--welcome .auth-input::placeholder { color: var(--auth-muted); }
-.auth-shell--welcome .auth-input:focus { border-color: var(--color-focus); outline-color: var(--color-focus); }
+.auth-shell--welcome .auth-input:focus { border-color: var(--color-focus); }
 .auth-shell--welcome .auth-label { color: var(--auth-ink); }
 .auth-shell--welcome .auth-divider { color: var(--auth-muted); }
 .auth-shell--welcome .auth-divider::before, .auth-shell--welcome .auth-divider::after { background: var(--auth-border); }
@@ -52,7 +52,7 @@
 .auth-shell--welcome .auth-bottom a { color: var(--auth-muted); min-height: 32px; }
 .auth-shell--welcome .auth-bottom a:hover { color: var(--auth-accent); }
 .auth-shell--welcome .auth-form-panel:focus { outline: none; }
-.auth-shell--welcome .auth-form-panel:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 5px; }
+.auth-shell--welcome .auth-form-panel:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--color-focus); }
 .auth-shell--welcome .auth-skip { background: var(--auth-surface); color: var(--auth-ink); }
 @media (max-width: 600px) {
   .auth-shell--welcome { padding: 0 16px 16px; }

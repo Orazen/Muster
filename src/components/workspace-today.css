@@ -78,16 +78,13 @@
 .workspace-today .wt-calendar-planner { margin-top: 0; border-top: 0; padding-top: 0; }
 .workspace-today .wt-calendar-planner button { min-height: 40px; font-size: 13px; }
 .workspace-today .wt-planning-prepare { width: 100%; background: var(--workspace-send, var(--color-accent)); color: var(--workspace-send-ink, #fff); }
-.workspace-today .wt-agenda input:focus-visible, .workspace-today .wt-agenda summary:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
+.workspace-today .wt-agenda input:focus-visible, .workspace-today .wt-agenda summary:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--color-focus); }
 .workspace-today .wt-connection { display: flex; align-items: baseline; gap: 7px; margin-top: auto; font-size: 12px; line-height: 1.7; color: var(--color-ink-secondary); }
 .workspace-today .wt-connection-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--color-ink-secondary); }
 .workspace-today .wt-connected { background: var(--color-success); }
 .workspace-today button:disabled { opacity: .5; cursor: not-allowed; }
-.workspace-today button:focus-visible, .workspace-today select:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
-.workspace-today textarea:focus-visible { outline: none; box-shadow: inset 0 -1px 0 var(--color-focus); }
-@media (forced-colors: active) {
-  .workspace-today textarea:focus-visible { outline: 2px solid CanvasText; outline-offset: -2px; box-shadow: none; }
-}
+.workspace-today button:focus-visible, .workspace-today select:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--color-focus); }
+.workspace-today textarea:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--color-focus); }
 @container (max-width: 900px) {
   .workspace-today .wt-grid { grid-template-columns: minmax(0, 1fr); }
   .workspace-today .wt-main { max-width: 770px; }
