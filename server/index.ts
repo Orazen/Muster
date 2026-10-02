@@ -165,7 +165,7 @@ import { desktopElementsFor, groundDesktopSuggestions, suggestionCardPatch } fro
 import { DESKTOP_ACTION_BUDGET, DesktopActionBudget, budgetStop, isDesktopActionTool } from "./desktop-guardrails.ts";
 import { approvalHistory } from "./approval-history.ts";
 import { EventBus } from "./harness/bus.ts";
-import { ProviderRegistry } from "./harness/registry.ts";
+import { ProviderRegistry, ProviderRetirementError } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import {
   AGENT_CHARACTERS,
@@ -527,6 +527,19 @@ void syncEngine.flush();
 
 const bus = new EventBus();
 bus.attach(registry.instances());
+// Settings, repair and account merge all mutate the same registry. Read
+// each user's latest persisted configs inside this queue, never before a
+// slower earlier create() can overwrite a newer key deletion.
+let providerReloadQueue: Promise<void> = Promise.resolve();
+// The authorization namespace does not imply registration ownership:
+// config.json may explicitly declare an account-scoped instance too.
+const managedUserInstanceIds = new Set<string>();
+const reloadingUserInstanceIds = new Set<string>();
+function serializeProviderReload(work: () => Promise<void>): Promise<void> {
+  const next = providerReloadQueue.then(work);
+  providerReloadQueue = next.catch(() => {});
+  return next;
+}
 
 // ── peer-agent comms wiring ────────────────────────────────────────────
 // Connector authority cannot authorize peer operations. Peer credentials are
@@ -907,7 +920,7 @@ else if (process.env.OMB_ALLOW_SIGNUPS !== "true" && primaryUserId()) {
 // device the account signs in from — configured once, everywhere.
 // Awaited, not fire-and-forget: an early /api/instances or first turn must
 // never observe a registry that hasn't loaded the vault engines yet.
-await reloadUserInstancesAll();
+await reloadUserInstancesAll(true);
 
 // Boot migration for the multi-tenant guard: records that predate per-user
 // ownership belong to the deployment's first account (the operator). Without
@@ -2637,6 +2650,9 @@ async function startTurn(
   const savedBot = store.bot(botId);
   const bot: typeof savedBot = savedBot && opts?.fallbackSelection ? { ...savedBot, modelSelection: opts.fallbackSelection } : savedBot;
   if (!bot) throw Object.assign(new Error("no such bot"), { status: 404 });
+  if (reloadingUserInstanceIds.has(bot.modelSelection.instanceId)) {
+    throw Object.assign(new Error("this provider is being updated — try again shortly"), { status: 409 });
+  }
   if (opts?.peerGuard && !opts.peerGuard()) throw Object.assign(new Error("peer exchange is no longer authorized"), { status: 403 });
   // ── admission: the slot ledger decides, not the busy flag ──
   // The busy flag is ONE boolean per bot, so testing it refused every second
@@ -3330,6 +3346,7 @@ async function startTurn(
       }
 
       requireDispatch();
+      if (registry.get(instanceId) !== instance) throw new Error("provider changed before this turn could start — send again");
       if (connectorLease && !connectorLeaseValid(connectorLease)) throw new Error("connected apps are no longer authorized");
       const peerToken = peerCapabilities.activate(lease, instanceId, canUsePeers);
       if (peerToken) integrations.agents = agentsIntegration(lease, peerToken);
@@ -3940,7 +3957,7 @@ async function runGroupMemberTurn(
   // could run its 1:1 turn and a room turn concurrently — two provider
   // processes, interleaved token spend, and an interrupt that only ever
   // reached one of them.
-  if (bot.busy) {
+  if (bot.busy || reloadingUserInstanceIds.has(bot.modelSelection.instanceId)) {
     store.appendMessage(
       group.threadId,
       {
@@ -3992,7 +4009,8 @@ async function runGroupMemberTurn(
   // Connector setup yields. Re-read before using the roster or dispatching a
   // cached responder; an edit/deletion must not bypass the initial check.
   const currentGroup = store.group(groupId);
-  if (!currentGroup || (SELF_HOSTED && (!currentGroup.memberIds.includes(botId) || !roomMembersAvailable(currentGroup))) ||
+  if (!currentGroup || registry.get(instance.instanceId) !== instance || reloadingUserInstanceIds.has(instance.instanceId) ||
+    (SELF_HOSTED && (!currentGroup.memberIds.includes(botId) || !roomMembersAvailable(currentGroup))) ||
     (connectorLease && !connectorLeaseValid(connectorLease)) || (connectorGuard && !connectorGuard())) {
     if (connectorLease) connectorCapabilities.revoke(connectorLease);
     store.setActivity(bot.id, "idle");
@@ -4581,42 +4599,111 @@ function configStatus(userId?: string, userName?: string, userEmail?: string) {
   };
 }
 
-/** Rebuild the provider fleet after a config change so new keys take
- * effect without a server restart (kills any in-flight turns). */
-/** Register (or refresh) one user's vault instances into the shared
- * registry. Per-user instance ids (`deepseekApi:<userId>`) keep engines
- * isolated: turn-start refuses an instance whose owner suffix does not
- * match the bot's owner. */
-async function reloadUserInstances(userId: string): Promise<void> {
-  const userConfigs = {
-    ...userInstanceConfigs(DATA_DIR, userId, PROVIDER_DRIVER_ENV),
-    ...userCustomInstanceConfigs(DATA_DIR, userId, (vid) => resolveUserProviderKey(DATA_DIR, userId, vid) ?? undefined),
-  };
-  for (const bot of store.bots) {
-    if (bot.modelSelection.instanceId.endsWith(`:${userId}`)) {
-      stopCleanups.invalidate(bot.id);
-      stopPeerDispatch(bot.id);
+type RetiringProviderTurn = Pick<RuntimeEvent, "provider" | "providerInstanceId" | "threadId" | "turnId">;
+
+function captureRetiringProviderTurns(predecessors: ReturnType<ProviderRegistry["instances"]>): RetiringProviderTurn[] {
+  const terminals: RetiringProviderTurn[] = [];
+  // Setup-only work keeps its slot until requireDispatch rejects its revoked
+  // lease. Its late catch must not release a replacement turn's slot.
+  for (const turn of watchdog.snapshot()) {
+    const bot = store.bot(turn.botId);
+    const instanceId = turnProvenance.get(turn.threadId)?.instanceId ?? bot?.modelSelection.instanceId;
+    const previous = predecessors.find(instance => instance.instanceId === instanceId);
+    if (previous && (turn.turnId || previous.adapter.hasSession(turn.threadId))) {
+      terminals.push({ provider: previous.driverKind, providerInstanceId: previous.instanceId,
+        threadId: turn.threadId, turnId: turn.turnId });
     }
   }
-  await registry.load(userConfigs);
+  return terminals;
 }
 
-/** Register every user's vault instances (boot path). */
-async function reloadUserInstancesAll(): Promise<void> {
-  try {
-    const configs = {
-      ...allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV),
-      ...allUserCustomInstanceConfigs(DATA_DIR, [...loadVaultUsers(), ...userCustomProviderUsers(DATA_DIR)], (uid, vid) =>
-        resolveUserProviderKey(DATA_DIR, uid, vid) ?? undefined,
-      ),
-    };
-    await registry.load(configs);
-    console.log(
-      `[instances] vault engines registered: ${Object.keys(configs).length} across ${Object.keys(loadVaultUsers()).length} users`,
-    );
-  } catch (e) {
-    console.error("vault instance registration failed:", e instanceof Error ? e.message : e);
+function settleRetiringProviderTurns(terminals: RetiringProviderTurn[], retirementError?: ProviderRetirementError) {
+  // Normal folds handle slots, usage, group speakers, watchdog, leases and
+  // queued sends. The registry must already contain the replacement or an
+  // unavailable shadow: terminal events can synchronously drain queued work.
+  for (const terminal of terminals) {
+    const base = { ...terminal, createdAt: new Date().toISOString() };
+    bus.publish({ ...base, eventId: randomUUID(), type: "runtime.error", message: retirementError?.message ?? "turn interrupted — provider settings changed" });
+    bus.publish({ ...base, eventId: randomUUID(), type: "turn.completed", ok: false, stopReason: retirementError ? "error" : "interrupted", cost: null });
   }
+}
+
+/** Called under the fleet mutation queue, only after runtime boot. */
+async function replaceUserInstances(userId: string): Promise<void> {
+  const userConfigs = unconfiguredUserInstances({
+    ...userInstanceConfigs(DATA_DIR, userId, PROVIDER_DRIVER_ENV),
+    ...userCustomInstanceConfigs(DATA_DIR, userId, (vid) => resolveUserProviderKey(DATA_DIR, userId, vid) ?? undefined),
+  });
+  const scope = new Set([...managedUserInstanceIds].filter(id => userInstanceOwner(id) === userId));
+  for (const id of Object.keys(userConfigs)) scope.add(id);
+  const owns = (instanceId: string) => scope.has(instanceId);
+  const terminals: RetiringProviderTurn[] = [];
+  let retirementError: ProviderRetirementError | undefined;
+  for (const id of scope) reloadingUserInstanceIds.add(id);
+  try {
+    await registry.replaceScope(userConfigs, owns, { beforeDispose: (predecessors) => {
+      terminals.push(...captureRetiringProviderTurns(predecessors));
+      for (const bot of store.bots) {
+        if (!owns(bot.modelSelection.instanceId) && !runningThreads(bot.id).some(threadId => owns(turnProvenance.get(threadId)?.instanceId ?? ""))) continue;
+        stopCleanups.invalidate(bot.id);
+        stopPeerDispatch(bot.id);
+      }
+      // dispose() can clear listeners before its abort completion resolves.
+      // Own the old turn's terminal event instead of depending on that race.
+      bus.detach(predecessors);
+    } });
+    for (const id of scope) managedUserInstanceIds.delete(id);
+    for (const id of Object.keys(userConfigs)) managedUserInstanceIds.add(id);
+  } catch (error) {
+    if (!(error instanceof ProviderRetirementError)) throw error;
+    // Keep quarantined predecessors discoverable even after their live
+    // registry entries disappear. A subsequent deletion must retry cleanup.
+    for (const id of scope) managedUserInstanceIds.add(id);
+    retirementError = error;
+  } finally {
+    // Idempotent attach preserves siblings. Staging failures leave the old
+    // scope intact; retirement failures leave it explicitly unavailable.
+    bus.attach(registry.instances());
+    for (const id of scope) reloadingUserInstanceIds.delete(id);
+  }
+  settleRetiringProviderTurns(terminals, retirementError);
+  if (retirementError) throw retirementError;
+}
+
+function reloadUserInstances(userId: string): Promise<void> {
+  return serializeProviderReload(() => replaceUserInstances(userId));
+}
+
+/** Explicit config takes precedence, as in the global fleet rebuild. A
+ * tolerated on-disk collision must never transfer that instance's lifetime
+ * to the vault loader or make deleting a user key delete the configured one. */
+function unconfiguredUserInstances(configs: ReturnType<typeof userCustomInstanceConfigs>) {
+  const configured = instanceConfigs(cfg);
+  return Object.fromEntries(Object.entries(configs).filter(([id]) => !Object.hasOwn(configured, id)));
+}
+
+/** Repair/merge also removes engines for owners no longer in the vault. */
+function reloadUserInstancesAll(boot = false): Promise<void> {
+  return serializeProviderReload(async () => {
+    if (boot) {
+      // Runtime state is declared later. Preserve boot's unavailable-shadow
+      // contract and parallel creation without invoking any settlement fold.
+      const configs = unconfiguredUserInstances({ ...allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV),
+        ...allUserCustomInstanceConfigs(DATA_DIR, [...loadVaultUsers(), ...userCustomProviderUsers(DATA_DIR)], (uid, vid) =>
+          resolveUserProviderKey(DATA_DIR, uid, vid) ?? undefined) });
+      const ids = new Set(Object.keys(configs));
+      await registry.replaceScope(configs, id => ids.has(id), { allowUnavailable: true });
+      for (const id of ids) managedUserInstanceIds.add(id);
+      bus.attach(registry.instances());
+      return;
+    }
+    const owners = new Set([...loadVaultUsers(), ...userCustomProviderUsers(DATA_DIR),
+      ...[...managedUserInstanceIds].flatMap(id => {
+        const owner = userInstanceOwner(id);
+        return owner === null ? [] : [owner];
+      })]);
+    for (const owner of owners) await replaceUserInstances(owner);
+  });
 }
 
 /** User ids present in the vault — for the boot log line only. */
@@ -4634,7 +4721,12 @@ function loadVaultUsers(): string[] {
   }
 }
 
-async function reloadProviders() {
+function reloadProviders(): Promise<void> {
+  return serializeProviderReload(reloadProvidersNow);
+}
+
+async function reloadProvidersNow() {
+  const retiringTurns = captureRetiringProviderTurns(registry.instances());
   // Settle accepted handoff receipts before setup/disposal awaits can race the
   // generic dispatch-failure path. The finalizer consumes each watch once.
   for (const threadId of Array.from(delegationWatch.keys())) {
@@ -4653,8 +4745,23 @@ async function reloadProviders() {
   // honest "provider settings changed" chip.
   reaper.suspend();
   try {
-    await registry.disposeAll();
-    await registry.load({ ...allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV), ...instanceConfigs(cfg) });
+    try {
+      await registry.disposeAll();
+    } catch (error) {
+      if (error instanceof ProviderRetirementError) {
+        // Quarantine prevented publication of a replacement. The detached
+        // old adapters cannot deliver terminal events; settle their runtime
+        // state with the explicit uncertainty before reporting HTTP failure.
+        settleRetiringProviderTurns(retiringTurns, error);
+      }
+      throw error;
+    }
+    const userConfigs = unconfiguredUserInstances({ ...allUserInstanceConfigs(DATA_DIR, PROVIDER_DRIVER_ENV),
+      ...allUserCustomInstanceConfigs(DATA_DIR, [...loadVaultUsers(), ...userCustomProviderUsers(DATA_DIR)], (uid, vid) =>
+        resolveUserProviderKey(DATA_DIR, uid, vid) ?? undefined) });
+    await registry.load({ ...userConfigs, ...instanceConfigs(cfg) });
+    managedUserInstanceIds.clear();
+    for (const id of Object.keys(userConfigs)) managedUserInstanceIds.add(id);
     bus.attach(registry.instances());
     // Otherwise bootSelection stays whatever it was at process boot forever —
     // any bot created after this reload (e.g. right after saving the very
@@ -9464,6 +9571,9 @@ let requestUserEmail = "";
         const known = PROVIDERS.some((p) => p.configKey === providerId);
         if (!known) return json(res, 400, { error: "unknown provider" });
         if (!apiKey) return json(res, 400, { error: "apiKey is required" });
+        if (Object.hasOwn(instanceConfigs(cfg), userInstanceId(providerId, requestUserId))) {
+          return json(res, 409, { error: "This provider instance is managed by the deployment configuration. Update that configuration before saving a personal key." });
+        }
         setUserProviderKey(DATA_DIR, requestUserId, providerId, apiKey);
         await reloadUserInstances(requestUserId);
         // Return the SAME configStatus shape /api/config PUT returns — the
@@ -10333,6 +10443,14 @@ let requestUserEmail = "";
         // NOT providerConfigBusy/reloadProviders — those are the global
         // fleet's machinery; this write touches only this user's engines
         // (reloadUserInstances settles just their bots).
+        const existing = listUserCustomProviders(DATA_DIR, requestUserId);
+        const base = sanitizeCustomProviderId(input.name);
+        let id = base;
+        let n = 2;
+        while (existing.some(provider => provider.id === id)) id = `${base}-${n++}`;
+        if (Object.hasOwn(instanceConfigs(cfg), userInstanceId(`custom-${id}`, requestUserId))) {
+          return json(res, 409, { error: "This provider instance is managed by the deployment configuration. Choose another provider name or update that configuration." });
+        }
         const provider = addUserCustomProvider(DATA_DIR, requestUserId, input);
         if (!provider) {
           return json(res, 400, { error: `At most ${CUSTOM_PROVIDER_MAX} custom providers` });

@@ -130,4 +130,27 @@ describe("EventBus", () => {
     emit(testEvent());
     expect(seenAfterDetach).toHaveLength(0);
   });
+
+  it("attaches each instance once and detaches only the exact predecessor", async () => {
+    const old = await liveInstance();
+    const replacement = await liveInstance();
+    const bus = new EventBus();
+    const seen: RuntimeEvent[] = [];
+    bus.subscribe(event => seen.push(event));
+    bus.attach([old.instance]);
+    bus.attach([old.instance]);
+    old.emit(testEvent());
+    expect(seen).toHaveLength(1);
+    bus.attach([replacement.instance]);
+    old.emit(testEvent());
+    replacement.emit(testEvent());
+    expect(seen).toHaveLength(2);
+    // A delayed retirement of the old object must not detach its replacement.
+    bus.detach([old.instance]);
+    replacement.emit(testEvent());
+    expect(seen).toHaveLength(3);
+    bus.detach([replacement.instance]);
+    replacement.emit(testEvent());
+    expect(seen).toHaveLength(3);
+  });
 });

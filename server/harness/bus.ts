@@ -13,11 +13,15 @@ import type { ProviderInstance, RuntimeEvent, RuntimeEventListener } from "../co
 
 export class EventBus {
   private listeners = new Set<RuntimeEventListener>();
-  private unsubscribes: Array<() => void> = [];
+  private attached = new Map<string, { instance: ProviderInstance; unsubscribe: () => void }>();
 
   attach(instances: ProviderInstance[]) {
     for (const instance of instances) {
+      const previous = this.attached.get(instance.instanceId);
+      if (previous?.instance === instance) continue;
+      previous?.unsubscribe();
       const unsub = instance.adapter.onEvent((event) => {
+        if (this.attached.get(instance.instanceId)?.instance !== instance) return;
         // hard invariant borrowed from correlateRuntimeEventWithInstance:
         // an adapter may only emit events for its own driver kind
         if (event.provider !== instance.driverKind) {
@@ -26,7 +30,7 @@ export class EventBus {
         }
         this.publish({ ...event, providerInstanceId: instance.instanceId });
       });
-      this.unsubscribes.push(unsub);
+      this.attached.set(instance.instanceId, { instance, unsubscribe: unsub });
     }
   }
 
@@ -58,6 +62,17 @@ export class EventBus {
   }
 
   detachAll() {
-    for (const unsub of this.unsubscribes.splice(0)) unsub();
+    for (const { unsubscribe } of this.attached.values()) unsubscribe();
+    this.attached.clear();
+  }
+
+  /** An old object's delayed cleanup cannot unsubscribe its replacement. */
+  detach(instances: ProviderInstance[]) {
+    for (const instance of instances) {
+      const current = this.attached.get(instance.instanceId);
+      if (current?.instance !== instance) continue;
+      current.unsubscribe();
+      this.attached.delete(instance.instanceId);
+    }
   }
 }

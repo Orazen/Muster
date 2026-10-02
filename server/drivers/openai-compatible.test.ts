@@ -95,6 +95,204 @@ describe("createOpenAICompatibleDriver (generic factory)", () => {
     expect(new Headers(call[1]?.headers).get("authorization")).toBe("Bearer key-123");
   });
 
+  it.each(["headers", "body"])("times out a stalled %s without losing partial text or retrying the request", async (stallAt) => {
+    const nativeTimeout = AbortSignal.timeout;
+    const deadline = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => nativeTimeout(40));
+    vi.mocked(global.fetch).mockImplementation(async (_url, init) => {
+      const signal = init?.signal;
+      if (!signal) throw new Error("the fixture requires a request signal");
+      if (stallAt === "headers") {
+        return new Promise<Response>((_resolve, reject) => {
+          if (signal.aborted) reject(signal.reason);
+          else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(sseChunk("partial answer")));
+          if (signal.aborted) controller.error(signal.reason);
+          else signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+        },
+      }), { headers: { "content-type": "text/event-stream" } });
+    });
+    const instance = await testDriver.create({ instanceId: "deadline", displayName: undefined, enabled: true,
+      environment: { TEST_PROVIDER_API_KEY: "fixture-only" }, config: testDriver.decodeConfig({}) });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent(event => events.push(event));
+    try {
+      await instance.adapter.sendTurn({ threadId: "deadline-turn", text: "fixture" });
+      await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({
+        type: "turn.completed", ok: false, stopReason: "error",
+      })), { timeout: 750 });
+      expect(deadline).toHaveBeenCalledWith(120_000);
+      expect(events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: expect.stringMatching(/timeout/iu) }));
+      expect(events.filter(event => event.type === "content.delta")).toHaveLength(stallAt === "body" ? 1 : 0);
+      if (stallAt === "body") expect(events).toContainEqual(expect.objectContaining({ type: "content.delta", delta: "partial answer" }));
+      expect(events.filter(event => event.type === "turn.completed")).toHaveLength(1);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(instance.adapter.hasSession("deadline-turn")).toBe(false);
+      // A timed-out request releases its slot, but only a new explicit send
+      // starts another request. The driver must never replay a tool turn.
+      vi.mocked(global.fetch).mockResolvedValueOnce(streamResponse([sseChunk("new answer")]));
+      await instance.adapter.sendTurn({ threadId: "deadline-turn", text: "explicit follow-up" });
+      await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: "turn.completed", ok: true })));
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      await instance.adapter.interruptTurn("deadline-turn");
+      await instance.dispose();
+    }
+  });
+
+  it("keeps manual cancellation distinct from a request deadline", async () => {
+    vi.mocked(global.fetch).mockImplementation(async (_url, init) => {
+      const signal = init?.signal;
+      if (!signal) throw new Error("the fixture requires a request signal");
+      return new Promise<Response>((_resolve, reject) => {
+        if (signal.aborted) reject(signal.reason);
+        else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    const instance = await testDriver.create({ instanceId: "cancel", displayName: undefined, enabled: true,
+      environment: { TEST_PROVIDER_API_KEY: "fixture-only" }, config: testDriver.decodeConfig({}) });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent(event => events.push(event));
+    try {
+      await instance.adapter.sendTurn({ threadId: "cancel-turn", text: "fixture" });
+      await vi.waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      await instance.adapter.interruptTurn("cancel-turn");
+      await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({
+        type: "turn.completed", ok: false, stopReason: "interrupted",
+      })));
+      expect(events.filter(event => event.type === "runtime.error")).toHaveLength(0);
+      expect(events.filter(event => event.type === "turn.completed")).toHaveLength(1);
+      expect(instance.adapter.hasSession("cancel-turn")).toBe(false);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
+  it("finishes at a split SSE DONE marker without waiting for EOF, keeping prior text and usage", async () => {
+    const cancelled = vi.fn();
+    vi.mocked(global.fetch).mockImplementation(async (_url, init) => {
+      const signal = init?.signal;
+      if (!signal) throw new Error("the fixture requires a request signal");
+      let abort: (() => void) | undefined;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode(sseChunk("finished answer")));
+          controller.enqueue(encoder.encode('data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\ndata: [DO'));
+          controller.enqueue(encoder.encode(`NE]\n\n${sseChunk("must not be emitted")}`));
+          // Deliberately no close(): completion belongs to the protocol,
+          // not to a gateway eventually closing its transport connection.
+          abort = () => controller.error(signal.reason);
+          signal.addEventListener("abort", abort, { once: true });
+        },
+        cancel() {
+          if (abort) signal.removeEventListener("abort", abort);
+          cancelled();
+        },
+      }), { headers: { "content-type": "text/event-stream" } });
+    });
+    const instance = await testDriver.create({ instanceId: "done", displayName: undefined, enabled: true,
+      environment: { TEST_PROVIDER_API_KEY: "fixture-only" }, config: testDriver.decodeConfig({}) });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent(event => events.push(event));
+    try {
+      await instance.adapter.sendTurn({ threadId: "done-turn", text: "fixture" });
+      await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: "turn.completed", ok: true })), { timeout: 750 });
+      expect(cancelled).toHaveBeenCalledTimes(1);
+      expect(events.filter(event => event.type === "content.delta")).toEqual([
+        expect.objectContaining({ delta: "finished answer" }),
+      ]);
+      expect(events).toContainEqual(expect.objectContaining({ type: "item.completed", text: "finished answer" }));
+      expect(events).toContainEqual(expect.objectContaining({ type: "thread.token-usage.updated", input: 3, output: 2 }));
+      expect(events.filter(event => event.type === "turn.completed")).toHaveLength(1);
+      expect(instance.adapter.hasSession("done-turn")).toBe(false);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      await instance.adapter.interruptTurn("done-turn");
+      await instance.dispose();
+    }
+  });
+
+  it("retains an HTTP error message and never retries a refused request", async () => {
+    vi.mocked(global.fetch).mockResolvedValue(new Response("owned fixture overload", { status: 503 }));
+    const instance = await testDriver.create({ instanceId: "refused", displayName: undefined, enabled: true,
+      environment: { TEST_PROVIDER_API_KEY: "fixture-only" }, config: testDriver.decodeConfig({}) });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent(event => events.push(event));
+    try {
+      await instance.adapter.sendTurn({ threadId: "refused-turn", text: "fixture" });
+      await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: "turn.completed", ok: false, stopReason: "error" })));
+      expect(events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: "Test Provider HTTP 503: owned fixture overload" }));
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
+  it("times out a non-streaming tool request before any tool executes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "muster-tool-deadline-"));
+    const fixture = join(directory, "tools.mjs");
+    const called = join(directory, "unexpected-tool-call");
+    const exited = join(directory, "exited");
+    writeFileSync(fixture, `
+      import { createInterface } from "node:readline";
+      import { writeFileSync } from "node:fs";
+      process.on("SIGTERM", () => process.exit(0));
+      process.on("exit", () => writeFileSync(${JSON.stringify(exited)}, "exited"));
+      createInterface({ input: process.stdin }).on("line", line => {
+        const message = JSON.parse(line);
+        if (message.id === undefined) return;
+        let result;
+        if (message.method === "initialize") result = { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "owned-deadline", version: "1" } };
+        else if (message.method === "tools/list") result = { tools: [{ name: "write", inputSchema: { type: "object", properties: {} } }] };
+        else if (message.method === "tools/call") {
+          writeFileSync(${JSON.stringify(called)}, "called");
+          result = { content: [{ type: "text", text: "unexpected" }] };
+        }
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }) + "\\n");
+      });
+    `);
+    const nativeTimeout = AbortSignal.timeout;
+    const deadline = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => nativeTimeout(40));
+    vi.mocked(global.fetch).mockImplementation(async (_url, init) => {
+      const signal = init?.signal;
+      if (!signal) throw new Error("the fixture requires a request signal");
+      return new Promise<Response>((_resolve, reject) => {
+        if (signal.aborted) reject(signal.reason);
+        else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    const instance = await testDriver.create({ instanceId: "tool-deadline", displayName: undefined, enabled: true,
+      environment: { TEST_PROVIDER_API_KEY: "fixture-only" }, config: testDriver.decodeConfig({}) });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent(event => events.push(event));
+    try {
+      await instance.adapter.sendTurn({ threadId: "tool-deadline-turn", text: "fixture", integrations: {
+        custom: [{ name: "owned", command: process.execPath, args: [fixture], env: { HOME: directory, TMPDIR: directory } }],
+      } });
+      await vi.waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))).toMatchObject({
+        stream: false, tools: [{ function: { name: "owned__write" } }],
+      });
+      await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({
+        type: "turn.completed", ok: false, stopReason: "error",
+      })), { timeout: 750 });
+      expect(deadline).toHaveBeenCalledWith(120_000);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(existsSync(called)).toBe(false);
+      expect(instance.adapter.hasSession("tool-deadline-turn")).toBe(false);
+    } finally {
+      await instance.adapter.interruptTurn("tool-deadline-turn");
+      await vi.waitFor(() => expect(existsSync(exited)).toBe(true));
+      await instance.dispose();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("admits an OpenRouter browser mount, executes its MCP navigation and answers from the result", async () => {
     const directory = mkdtempSync(join(tmpdir(), "muster-browser-tools-"));
     const fixture = join(directory, "browser.mjs");

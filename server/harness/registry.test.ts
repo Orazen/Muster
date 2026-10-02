@@ -133,4 +133,104 @@ describe("ProviderRegistry", () => {
     expect(registry.entries()).toHaveLength(0);
     expect(registry.get("a")).toBeNull();
   });
+
+  it("replaces and removes only the selected scope, disposing predecessors before publication", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" }, removed: { driver: "fake" }, b: { driver: "fake" } });
+    const old = registry.get("a");
+    const sibling = registry.get("b");
+    const retired: string[] = [];
+    await registry.replaceScope({ a: { driver: "fake", displayName: "replacement" } }, id => id !== "b", { beforeDispose: instances => {
+      expect(registry.get("a")).toBe(old);
+      retired.push(...instances.map(instance => instance.instanceId));
+    } });
+    expect(retired.sort()).toEqual(["a", "removed"]);
+    expect(fake.disposed.sort()).toEqual(["a", "removed"]);
+    expect(registry.get("a")).not.toBe(old);
+    expect(registry.get("b")).toBe(sibling);
+    expect(registry.get("removed")).toBeNull();
+  });
+
+  it("preserves the entire old scope and reports a staged creation failure", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" }, b: { driver: "fake" } });
+    const old = registry.get("a");
+    const sibling = registry.get("b");
+    let retired = false;
+    await expect(registry.replaceScope({ a: { driver: "fake", config: { bad: true } }, next: { driver: "fake" } },
+      id => id !== "b", { beforeDispose: () => { retired = true; } })).rejects.toThrow(/bad config/);
+    expect(retired).toBe(false);
+    expect(registry.get("a")).toBe(old);
+    expect(registry.get("b")).toBe(sibling);
+    expect(registry.get("next")).toBeNull();
+    expect(fake.disposed).toEqual(["next"]);
+  });
+
+  it("refuses configs outside the replacement scope before creating them", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await expect(registry.replaceScope({ foreign: { driver: "fake" } }, id => id === "own")).rejects.toThrow(/outside/);
+    expect(fake.created.size).toBe(0);
+  });
+
+  it("keeps unavailable shadow entries during boot reconciliation", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.replaceScope({ good: { driver: "fake" }, broken: { driver: "fake", config: { bad: true } } },
+      () => true, { allowUnavailable: true });
+    expect(registry.get("good")).not.toBeNull();
+    expect(registry.entries().find(entry => entry.instanceId === "broken")?.shadow?.reason).toContain("bad config");
+  });
+
+  it("keeps the predecessor addressable until asynchronous disposal completes", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    const old = registry.get("a")!;
+    let release = () => {};
+    let begin = () => {};
+    const begun = new Promise<void>(resolve => { begin = resolve; });
+    const disposal = new Promise<void>(resolve => { release = resolve; });
+    old.dispose = async () => { begin(); await disposal; };
+    const replacing = registry.replaceScope({ a: { driver: "fake" } }, id => id === "a");
+    await begun;
+    expect(registry.get("a")).toBe(old);
+    release();
+    await replacing;
+    expect(registry.get("a")).not.toBe(old);
+  });
+
+  it("quarantines a partially retired scope, reports failure and retries its failed disposer before recovery", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" }, retired: { driver: "fake" }, sibling: { driver: "fake" } });
+    const sibling = registry.get("sibling");
+    let attempts = 0;
+    registry.get("a")!.dispose = async () => { if (++attempts === 1) throw new Error("synthetic cleanup failure"); };
+    await expect(registry.replaceScope({ a: { driver: "fake" } }, id => id !== "sibling")).rejects.toThrow(/cleanup failed/);
+    expect(registry.get("a")).toBeNull();
+    expect(registry.get("retired")).toBeNull();
+    expect(registry.get("sibling")).toBe(sibling);
+    expect(registry.entries().find(entry => entry.instanceId === "a")?.shadow?.reason).toContain("previous work may still be running");
+    await registry.replaceScope({ a: { driver: "fake" } }, id => id !== "sibling");
+    expect(attempts).toBe(2);
+    expect(registry.get("a")).not.toBeNull();
+    expect(registry.entries().some(entry => entry.instanceId === "retired")).toBe(false);
+    expect(registry.get("sibling")).toBe(sibling);
+  });
+
+  it("does not lose failed cleanup handles during whole-fleet disposal", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    let attempts = 0;
+    registry.get("a")!.dispose = async () => { if (++attempts === 1) throw new Error("synthetic cleanup failure"); };
+    await expect(registry.disposeAll()).rejects.toThrow(/cleanup failed/);
+    expect(registry.get("a")).toBeNull();
+    await registry.disposeAll();
+    expect(attempts).toBe(2);
+    expect(registry.entries()).toEqual([]);
+  });
 });

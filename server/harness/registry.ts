@@ -28,6 +28,10 @@ export type RegistryEntry =
   | { instanceId: InstanceId; live: ProviderInstance; shadow?: undefined }
   | { instanceId: InstanceId; live?: undefined; shadow: ShadowInstance };
 
+/** Cleanup could not prove the predecessor stopped. No replacement may
+ * accept work until a later reconciliation successfully retires it. */
+export class ProviderRetirementError extends Error {}
+
 /** True only for primitive strings — what JSON decoding yields for text fields. */
 const isText = <T>(value: T): value is T & string => String(value) === value;
 
@@ -55,6 +59,7 @@ function cliOfRaw(entry: { config?: unknown }): string | undefined {
 
 export class ProviderRegistry {
   private byId = new Map<InstanceId, RegistryEntry>();
+  private retiring = new Map<InstanceId, ProviderInstance>();
   /** decoded per-instance `cli` overrides, for describe() — drivers spawn
    * from their own config; this map only reports what was configured */
   private cliByInstance = new Map<InstanceId, string>();
@@ -139,6 +144,57 @@ export class ProviderRegistry {
     });
   }
 
+  /** Runtime reconciliation is transactional through creation: a bad new
+   * config must not erase a working adapter. The caller serializes fleet
+   * mutations and fences dispatch while predecessors are being retired. */
+  async replaceScope(
+    configs: InstanceConfigMap,
+    owns: (instanceId: InstanceId) => boolean,
+    options: { beforeDispose?: (instances: ProviderInstance[]) => void; allowUnavailable?: boolean } = {},
+  ): Promise<void> {
+    if (Object.keys(configs).some(id => !owns(id))) throw new Error("provider config is outside its replacement scope");
+    const staged = new ProviderRegistry([...this.driversByKind.values()]);
+    await staged.load(configs);
+    const failed = staged.entries().find(entry => entry.shadow);
+    if (failed?.shadow && !options.allowUnavailable) {
+      await staged.disposeAll();
+      throw new Error(`provider reload failed: ${failed.shadow.reason}`);
+    }
+    const predecessors = [...this.instances(), ...this.retiring.values()].filter(instance => owns(instance.instanceId));
+    try {
+      options.beforeDispose?.(predecessors);
+      const disposed = await Promise.allSettled(predecessors.map(instance => instance.dispose()));
+      if (disposed.some(result => result.status === "rejected")) {
+        // Disposal is irreversible: some siblings may already be dead. Do
+        // not pretend the old scope was restored or admit another instance
+        // alongside a predecessor whose shutdown could not be confirmed.
+        for (const [index, instance] of predecessors.entries()) {
+          if (disposed[index]?.status === "rejected") this.retiring.set(instance.instanceId, instance);
+          else this.retiring.delete(instance.instanceId);
+          this.byId.set(instance.instanceId, { instanceId: instance.instanceId, shadow: {
+            instanceId: instance.instanceId, driverKind: instance.driverKind,
+            displayName: instance.displayName, cli: this.cliByInstance.get(instance.instanceId), shadow: true,
+            reason: "Provider cleanup failed; previous work may still be running. Retry provider settings before sending again.",
+          } });
+        }
+        throw new ProviderRetirementError("Provider cleanup failed; previous work may still be running. Retry provider settings before sending again.");
+      }
+    } catch (error) {
+      await staged.disposeAll();
+      throw error;
+    }
+    // No await between removal and publication: readers see the complete
+    // replacement, including removal of configs no longer in the vault.
+    for (const id of this.byId.keys()) {
+      if (!owns(id)) continue;
+      this.byId.delete(id);
+      this.cliByInstance.delete(id);
+      this.retiring.delete(id);
+    }
+    for (const [id, entry] of staged.byId) this.byId.set(id, entry);
+    for (const [id, cli] of staged.cliByInstance) this.cliByInstance.set(id, cli);
+  }
+
   get(instanceId: InstanceId): ProviderInstance | null {
     return this.byId.get(instanceId)?.live ?? null;
   }
@@ -220,8 +276,6 @@ export class ProviderRegistry {
   }
 
   async disposeAll() {
-    await Promise.allSettled(this.instances().map((i) => i.dispose()));
-    this.byId.clear();
-    this.cliByInstance.clear();
+    await this.replaceScope({}, () => true);
   }
 }

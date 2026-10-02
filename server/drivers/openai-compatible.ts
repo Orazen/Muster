@@ -57,6 +57,14 @@ function userContent(turn: SendTurnInput): ChatMessage["content"] {
 // representation test would.
 const isText = (v: JsonValue): v is string => Object.is(String(v), v);
 
+/** A user's cancellation and the provider deadline both remain active,
+ * including while reading a response body. Supplying a turn signal must not
+ * replace the HTTP deadline and leave a stalled request running indefinitely. */
+function requestSignal(signal?: AbortSignal): AbortSignal {
+  const deadline = AbortSignal.timeout(120_000);
+  return signal ? AbortSignal.any([signal, deadline]) : deadline;
+}
+
 /** Extract the model id list from a /v1/models payload. The wire shape is
  * `{ data: [{ id: "…" }] }` across Ollama, LM Studio and vLLM; anything
  * else decodes to an empty list, which the caller treats as "keep what we
@@ -248,7 +256,7 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
           method: "POST",
           headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
           body: JSON.stringify({ model, messages, stream: opts.stream }),
-          signal: opts.signal ?? AbortSignal.timeout(120_000),
+          signal: requestSignal(opts.signal),
         }, customEndpoint);
         if (!res.ok) {
           const body = await res.text().catch(() => "");
@@ -284,34 +292,43 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
         const reader = res.body!.getReader();
         const decoder = new TextDecoder();
         let buf = "";
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          let nl;
-          while ((nl = buf.indexOf("\n")) !== -1) {
-            const line = buf.slice(0, nl).trim();
-            buf = buf.slice(nl + 1);
-            if (!line.startsWith("data:")) continue;
-            const data = line.slice(5).trim();
-            if (data === "[DONE]") continue;
-            let chunk: any;
-            try {
-              chunk = JSON.parse(data);
-            } catch {
-              continue;
-            }
-            const delta = chunk.choices?.[0]?.delta?.content;
-            if (delta) {
-              text += delta;
-              opts.onDelta?.(delta);
-            }
-            if (chunk.usage) {
-              usage = { input: chunk.usage.prompt_tokens ?? 0, output: chunk.usage.completion_tokens ?? 0 };
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            let nl;
+            while ((nl = buf.indexOf("\n")) !== -1) {
+              const line = buf.slice(0, nl).trim();
+              buf = buf.slice(nl + 1);
+              if (!line.startsWith("data:")) continue;
+              const data = line.slice(5).trim();
+              if (data === "[DONE]") {
+                // A gateway may keep the socket open after the protocol ends.
+                // Release it without making completion wait for its teardown.
+                void reader.cancel().catch(() => {});
+                return { text, usage };
+              }
+              let chunk: any;
+              try {
+                chunk = JSON.parse(data);
+              } catch {
+                continue;
+              }
+              const delta = chunk.choices?.[0]?.delta?.content;
+              if (delta) {
+                text += delta;
+                opts.onDelta?.(delta);
+              }
+              if (chunk.usage) {
+                usage = { input: chunk.usage.prompt_tokens ?? 0, output: chunk.usage.completion_tokens ?? 0 };
+              }
             }
           }
+          return { text, usage };
+        } finally {
+          reader.releaseLock();
         }
-        return { text, usage };
       };
 
       /** Same request shape as complete(), but non-streamed and carrying the
@@ -330,7 +347,7 @@ export function createOpenAICompatibleDriver(spec: OpenAICompatibleSpec): Provid
           method: "POST",
           headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
           body: JSON.stringify({ model, messages, tools, tool_choice: "auto", stream: false }),
-          signal: signal ?? AbortSignal.timeout(120_000),
+          signal: requestSignal(signal),
         }, customEndpoint);
         if (!res.ok) {
           const body = await res.text().catch(() => "");
