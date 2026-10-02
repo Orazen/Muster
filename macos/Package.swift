@@ -40,5 +40,21 @@ let package = Package(
                 .product(name: "CompanionCore", package: "ios"),
             ]
         ),
+        // View-level lifecycle coverage that CI can actually pin. This target
+        // depends on the executable target on purpose: SwiftPM allows a test
+        // target to link the app module, so the real `SignInView` can be hosted
+        // and inspected directly — no source duplication and no `@main` removal,
+        // which is what an out-of-repo harness was previously forced to do.
+        //
+        // Headless render only. It does NOT prove physical multi-window behaviour
+        // on real hardware; the human Mac pass remains a separate open gate.
+        .testTarget(
+            name: "MusterMacUITests",
+            dependencies: [
+                "MusterMac",
+                "MusterMacCore",
+                .product(name: "CompanionCore", package: "ios"),
+            ]
+        ),
     ]
 )
