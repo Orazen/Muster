@@ -42,13 +42,15 @@ struct MusterMacApp: App {
                 .tint(MusterAppearance.accent)
                 .background(MusterAppearance.canvas)
                 .task {
-                    guard live.state == .signedOut else { return }
-                    do {
-                        if let saved = try SessionKeychain.load() {
-                            live.connect(account: saved)
-                        }
-                    } catch {
-                        sessionRestoreError = error.localizedDescription
+                    // Extracted verbatim from this `.task` body so it can be
+                    // exercised without hosting the App scene. Behaviour is
+                    // unchanged: same guard, same load, same connect, same error
+                    // surfaced to the same alert.
+                    if case let .failed(message) = StartupSessionRestore.run(
+                        live: live,
+                        load: { try SessionKeychain.load() }
+                    ) {
+                        sessionRestoreError = message
                     }
                 }
                 .alert("Could not restore sign-in", isPresented: Binding(
@@ -61,6 +63,40 @@ struct MusterMacApp: App {
                 }
         }
         .windowToolbarStyle(.unified)
+    }
+}
+
+/// The startup session restore, extracted so it can be tested without hosting the
+/// window scene. This is a MOVE, not a redesign: the guard, the load, the connect
+/// and the error surface are the same operations in the same order as the `.task`
+/// body they came from.
+///
+/// `load` is injected so tests can supply a fake; production passes the real
+/// `SessionKeychain.load()`. No Keychain or network access happens here beyond
+/// whatever the injected closure does.
+@MainActor
+enum StartupSessionRestore {
+    enum Outcome: Equatable {
+        /// Nothing was stored, so there is nothing to restore.
+        case nothingStored
+        /// A session already exists; restore is skipped rather than replacing it.
+        case skippedAlreadyActive
+        case restored(HarnessAccount)
+        /// The stored session could not be read. The reason is surfaced, not swallowed.
+        case failed(String)
+    }
+
+    @discardableResult
+    static func run(live: LiveSessionModel,
+                    load: () throws -> HarnessAccount?) -> Outcome {
+        guard live.state == .signedOut else { return .skippedAlreadyActive }
+        do {
+            guard let saved = try load() else { return .nothingStored }
+            live.connect(account: saved)
+            return .restored(saved)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
     }
 }
 
