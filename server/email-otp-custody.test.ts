@@ -841,18 +841,29 @@ describe.skipIf(process.platform === "win32")("verified continuity and partial-c
     const email = `verified-${randomBytes(5).toString("hex")}@example.test`;
     const password = randomBytes(24).toString("base64url");
 
-    // 1. Sign up (unverified), then prove the inbox through the
-    //    email-VERIFICATION purpose — a route that never runs the
-    //    unproven-access revocation.
+    // 1. Sign up (creates a real scrypt credential), then mark the account
+    //    verified DIRECTLY in the auth DB: this represents an account that
+    //    was verified BEFORE the OTP sign-in under examination — an earlier
+    //    verification pass, an operator import, or the pre-custody era. Its
+    //    password is INTENDED, not unproven residue. (Under the custody
+    //    contract, proving a still-unverified account through verify-email
+    //    now revokes the pre-proof credential — see the verify-email suite
+    //    — so that path cannot model "previously verified".)
     const signup = await api(SIGN_UP_PATH, "POST", { email, password, name: "Verified Member" }, "");
     expect(signup.status).toBe(200);
     const standingCookie = sessionCookie(signup);
     expect(standingCookie).not.toBe("");
-    const since = harness.output.length;
-    expect((await sendCode(email, "email-verification")).status).toBe(200);
-    const verificationOtp = await harvestCode(email, since);
-    const verified = await api("/api/auth/email-otp/verify-email", "POST", { email, otp: verificationOtp });
-    expect(verified.status).toBe(200);
+    const seeded = authDb();
+    try {
+      expect(
+        Number(
+          seeded.prepare('UPDATE "user" SET "emailVerified" = 1 WHERE "email" = ? AND "emailVerified" = 0').run(email)
+            .changes,
+        ),
+      ).toBe(1);
+    } finally {
+      seeded.close();
+    }
 
     // 2. The legitimate login method keeps working: password sign-in, and
     //    the standing sessions minted along the way stay live.
